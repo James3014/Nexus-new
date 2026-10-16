@@ -1899,15 +1899,26 @@ class Nightly:
         out = eia_service.stop(launchctl_runner=self.launchctl)
         bootout_ok = out.returncode == 0 or "Could not find service" in f"{out.stdout}{out.stderr}"
         for entry in self._entries(night, "ARMED") + self._entries(night, "ARMING"):
-            entry["status"] = "HARD_STOPPED"
+            entry.update(status="HARD_STOPPING", disarm_pending=True)
             if entry["attempts"]:
                 entry["attempts"][-1].update(
                     result="infra", reason="HARD_STOP", finished_at=self._iso()
                 )
+        # HARD_STOPPED only once the daemon label is confirmed gone; retried every tick.
+        for entry in self._entries(night, "HARD_STOPPING"):
             try:
                 self._labels(entry["issue"], remove=[L_EIA])
             except NightlyError as exc:
                 entry["disarm_error"] = _one_line(exc, 200)
+                continue
+            entry.update(status="HARD_STOPPED", disarm_pending=False)
+            entry.pop("disarm_error", None)
+        disarm_pending = bool(self._entries(night, "HARD_STOPPING"))
+        if disarm_pending:
+            self._event(night, "disarm_pending")
+        if bootout_ok and disarm_pending:  # never FINISHED with a daemon label left on
+            night["status"] = "DISARM_PENDING"
+            return
         if not bootout_ok:  # stay unfinalized: dispatch and the 09:05 stop retry
             night["status"] = "BOOTOUT_FAILED"
             night["bootout_failures"] = int(night.get("bootout_failures") or 0) + 1

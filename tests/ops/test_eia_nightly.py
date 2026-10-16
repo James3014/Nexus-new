@@ -1574,3 +1574,29 @@ def test_missing_candidate_commit_is_infra_never_substituted(env) -> None:
     assert entry["attempts"][0]["reason"] == "CANDIDATE_COMMIT_MISSING"
     assert entry["status"] == "ARMED" and len(entry["attempts"]) == 2
     assert not [b for b in env["gh"].remote if b.startswith("eia/")]
+
+
+def test_failed_disarm_at_hard_stop_is_retried_before_finishing(env) -> None:
+    env["app"].issue_cap_min = 300
+    _started(env)
+    _dispatch(env, "2026-10-17T05:00:00")
+    real = env["gh"].__call__
+    failing = {"left": 1}
+
+    def flaky(argv):
+        if "--remove-label" in argv and "nexus:external-intelligence" in argv and failing["left"]:
+            failing["left"] -= 1
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = flaky
+    night = _dispatch(env, "2026-10-17T09:00:00")
+    entry = night["issues"]["11"]
+    assert night["status"] == "DISARM_PENDING" and not night.get("finalized")
+    assert entry["status"] == "HARD_STOPPING" and entry["disarm_pending"] is True
+    assert "nexus:external-intelligence" in env["gh"].issues[11]["labels"]
+    night = _dispatch(env, "2026-10-17T09:05:00")
+    entry = night["issues"]["11"]
+    assert night["status"] == "FINISHED"
+    assert entry["status"] == "HARD_STOPPED" and entry["disarm_pending"] is False
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]

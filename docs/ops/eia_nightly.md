@@ -157,8 +157,10 @@ is left alone, because the daemon resumes it by itself.
 Every launchd call goes through `external_intelligence_service`. Each call
 is bounded by that module's 20 s timeout; a timeout or OS error becomes exit 124, and the
 next tick retries. `start` records `BOOTSTRAP_FAILED` or `KICKSTART_FAILED`, depending on
-which step failed. On a failed or timed-out bootout, `stop` still disarms in-flight Issues
-(HARD_STOPPED), records `BOOTOUT_FAILED`, and retries.
+which step failed. On a failed or timed-out bootout, `stop` still disarms in-flight Issues,
+records `BOOTOUT_FAILED`, and retries. An in-flight Issue stays `HARD_STOPPING`
+(`disarm_pending`) until removal of `nexus:external-intelligence` is confirmed. Every tick
+retries it, and the night is never `FINISHED` while any disarm is pending.
 
 ## Install (operator only)
 
