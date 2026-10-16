@@ -1,6 +1,3 @@
-# pyright: reportOptionalMemberAccess=false, reportOptionalSubscript=false, reportArgumentType=false
-# (file-level so the moved method lines stay byte-identical: these 7 findings already
-# existed in unified_mcp_gateway.py before the G4 move)
 """Probe-evidence, job-storage and decode helpers of ``UnifiedMCPGateway``.
 
 Big-file split G4 (Issue #2445). The 19 methods of ``_AssistProbeMixin`` were moved out
@@ -468,9 +465,9 @@ class _AssistProbeMixin:
                 if event.get("type") != "item.completed":
                     continue
                 item = event.get("item") if isinstance(event.get("item"), Mapping) else event
-                if item.get("type") != "agent_message" or not isinstance(item.get("text"), str):
+                if item.get("type") != "agent_message" or not isinstance(item.get("text"), str):  # pyright: ignore[reportOptionalMemberAccess]
                     continue
-                payload = decode_document(item["text"])
+                payload = decode_document(item["text"])  # pyright: ignore[reportOptionalSubscript]
                 if payload is not None:
                     return payload, "codex_jsonl_sequence"
             return None, None
@@ -491,8 +488,8 @@ class _AssistProbeMixin:
                     continue
                 model = event.get("model") if isinstance(event.get("model"), Mapping) else {}
                 if (
-                    str(model.get("provider") or "") != "cline"
-                    or str(model.get("id") or "") != resolved_model
+                    str(model.get("provider") or "") != "cline"  # pyright: ignore[reportOptionalMemberAccess]
+                    or str(model.get("id") or "") != resolved_model  # pyright: ignore[reportOptionalMemberAccess]
                     or not isinstance(event.get("text"), str)
                 ):
                     continue
@@ -620,13 +617,13 @@ class _AssistProbeMixin:
                 if missing:
                     return "output_schema_missing:" + ",".join(f"{path}.{field}" for field in missing)
                 properties = shape.get("properties") if isinstance(shape.get("properties"), Mapping) else {}
-                for key, child in properties.items():
+                for key, child in properties.items():  # pyright: ignore[reportOptionalMemberAccess]
                     if key in current and isinstance(child, Mapping):
                         error = validate(current[key], child, f"{path}.{key}")
                         if error:
                             return error
                 if shape.get("additionalProperties") is False:
-                    extras = sorted(set(current) - set(properties))
+                    extras = sorted(set(current) - set(properties))  # pyright: ignore[reportArgumentType]
                     if extras:
                         return f"output_schema_additional:{path}:{','.join(map(str, extras))}"
             if isinstance(current, list) and isinstance(shape.get("items"), Mapping):
