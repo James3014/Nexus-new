@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -43,6 +44,14 @@ HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
+
+_EXECUTORS_RUNTIME_PATHS = (
+    "nexus/executors/__init__.py",
+    "nexus/executors/agy_dispatch_boundary.py",
+    "nexus/executors/cli_worker.py",
+    "nexus/executors/agy_write_admission.py",
+    "nexus/executors/exec_policy.py",
+)
 
 
 def _run(
@@ -147,6 +156,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
             ROOT / "nexus/services/workflow_doctor.py",
             "nexus/services/workflow_doctor.py",
         ),
+        *[(ROOT / rel, rel) for rel in _EXECUTORS_RUNTIME_PATHS],
         (
             CANONICAL_SOURCE_ROOT,
             "nexus/orchestrator/canonical_source_root.py",
@@ -1314,3 +1324,136 @@ def test_sync_reexec_failure_is_fail_closed_and_keeps_switched_release(
     # The new generation stays switched (no automatic rollback).
     current = json.loads((runtime_root / "current" / "host-generation.json").read_text())
     assert current["source_revision"] == rev_c
+
+
+# --- #2379: host snapshot must carry the Agy write-boundary import closure ---
+
+# Packages the host snapshot deliberately ships as PEP 420 namespace packages
+# (their __init__.py pulls in heavy modules and is intentionally not installed).
+_SNAPSHOT_NAMESPACE_PACKAGES = frozenset({"nexus", "nexus.services", "nexus.orchestrator"})
+
+
+def _manifest_runtime_paths() -> set[str]:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    return {entry["path"] for entry in manifest["runtime_files"]}
+
+
+def _module_file(name: str) -> str | None:
+    base = Path(*name.split("."))
+    if (ROOT / base / "__init__.py").is_file():
+        return (base / "__init__.py").as_posix()
+    if (ROOT / base).with_suffix(".py").is_file():
+        return base.with_suffix(".py").as_posix()
+    return None
+
+
+def _nexus_imports(tree: ast.AST) -> set[str]:
+    """nexus.* modules imported by ``tree``, including function-level imports and
+    ``import_module("nexus....")`` literals. Imports inside a ``try`` whose handler
+    catches ``Exception`` (best-effort, failure swallowed) are optional and skipped."""
+    found: set[str] = set()
+
+    def visit(node: ast.AST, optional: bool) -> None:
+        if isinstance(node, ast.Try):
+            swallows = any(
+                isinstance(h.type, ast.Name) and h.type.id in {"Exception", "BaseException"}
+                for h in node.handlers
+            )
+            for child in node.body:
+                visit(child, optional or swallows)
+            for child in [*node.handlers, *node.orelse, *node.finalbody]:
+                visit(child, optional)
+            return
+        if not optional:
+            if isinstance(node, ast.Import):
+                found.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                found.add(node.module)
+                found.update(f"{node.module}.{a.name}" for a in node.names)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, (ast.Name, ast.Attribute))
+                and getattr(node.func, "id", getattr(node.func, "attr", "")) == "import_module"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                found.add(node.args[0].value)
+        for child in ast.iter_child_nodes(node):
+            visit(child, optional)
+
+    visit(tree, False)
+    return {m for m in found if m == "nexus" or m.startswith("nexus.")}
+
+
+def _static_nexus_closure(entry: Path) -> set[str]:
+    files: set[str] = set()
+    pending = [entry]
+    while pending:
+        tree = ast.parse(pending.pop().read_text(encoding="utf-8"))
+        for module in _nexus_imports(tree):
+            parts = module.split(".")
+            for i in range(1, len(parts) + 1):
+                name = ".".join(parts[:i])
+                if name in _SNAPSHOT_NAMESPACE_PACKAGES:
+                    continue
+                rel = _module_file(name)
+                if rel is not None and rel not in files:
+                    files.add(rel)
+                    pending.append(ROOT / rel)
+    return files
+
+
+def test_manifest_covers_agy_dispatch_nexus_import_closure() -> None:
+    closure = _static_nexus_closure(DISPATCH)
+    assert set(_EXECUTORS_RUNTIME_PATHS) <= closure
+    missing = sorted(closure - _manifest_runtime_paths())
+    assert missing == []
+
+
+def test_manifest_requires_executors_runtime_paths(tmp_path: Path) -> None:
+    for omitted in _EXECUTORS_RUNTIME_PATHS:
+        case_dir = tmp_path / omitted.replace("/", "_")
+        case_dir.mkdir()
+        source_repo = _make_source_repo(case_dir)
+        manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["runtime_files"] = [
+            entry for entry in manifest["runtime_files"] if entry["path"] != omitted
+        ]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+        _git(source_repo, "commit", "-m", f"omit {omitted}")
+        revision = _git(source_repo, "rev-parse", "HEAD")
+        manager_python = case_dir / "manager-python"
+        _write_fake_manager(manager_python)
+        proc = _invoke(
+            source_repo,
+            case_dir / "runtime",
+            manager_python,
+            case_dir / "bin" / "nexus-agy-dispatch",
+            case_dir / "bin" / "nexus-host-sync",
+            "desired",
+            revision=revision,
+        )
+        assert proc.returncode == 2, omitted
+        payload = json.loads(proc.stdout)
+        assert payload["error"] == "HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING", omitted
+
+
+def test_manifest_only_snapshot_imports_agy_dispatch_boundary(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    for rel in _manifest_runtime_paths():
+        if not rel.endswith(".py") or not rel.startswith("nexus/"):
+            continue
+        target = snapshot / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, target)
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1])\n"
+        "import nexus.executors.agy_dispatch_boundary as b\n"
+        "assert b.__file__.startswith(sys.argv[1]), b.__file__\n"
+        "assert callable(b.boundary_available)\n"
+    )
+    proc = _run([sys.executable, "-I", "-S", "-c", code, str(snapshot)])
+    assert proc.returncode == 0, proc.stderr
