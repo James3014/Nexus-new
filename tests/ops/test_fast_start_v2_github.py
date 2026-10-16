@@ -301,3 +301,138 @@ def test_committed_fast_start_workflow_uses_bounded_github_transport() -> None:
     assert "from scripts.ops.fast_start_v2_github import (" in workflow
     assert "FAST_START_POST_WRITE_READBACK_RATE_LIMIT_EXHAUSTED" in workflow
     assert "GitHubMetadataClient(TOKEN, repository=REPOSITORY)" in workflow
+
+
+_ISSUE_PATH = "/repos/James3014/Nexus-new/issues/419"
+
+
+def _scripted_client(monkeypatch: pytest.MonkeyPatch, script: list[object]):
+    """Client whose urlopen replays `script` (exceptions raised, others returned)."""
+    attempts: list[int] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(_request, timeout):
+        attempts.append(1)
+        step = script[min(len(attempts), len(script)) - 1]
+        if isinstance(step, BaseException):
+            raise step
+        return _Response(step)
+
+    monkeypatch.setattr(gh.urllib.request, "urlopen", fake_urlopen)
+    client = gh.GitHubMetadataClient("token", repository="James3014/Nexus-new", sleep=sleeps.append)
+    return client, attempts, sleeps
+
+
+def test_get_server_error_retries_once_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, attempts, sleeps = _scripted_client(
+        monkeypatch, [_http_error(code=500, body="oops"), {"number": 419}]
+    )
+
+    assert client.request(_ISSUE_PATH) == {"number": 419}
+    assert len(attempts) == 2
+    assert sleeps == [2.0]
+
+
+def test_get_server_error_honours_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, attempts, sleeps = _scripted_client(
+        monkeypatch,
+        [_http_error(code=503, body="", headers={"Retry-After": "1"}), {"number": 419}],
+    )
+
+    assert client.request(_ISSUE_PATH) == {"number": 419}
+    assert len(attempts) == 2
+    assert sleeps == [1.0]
+
+
+def test_get_server_error_exhaustion_keeps_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, attempts, sleeps = _scripted_client(monkeypatch, [_http_error(code=500, body="oops")])
+
+    with pytest.raises(gh.GitHubTransportError) as raised:
+        client.request(_ISSUE_PATH)
+
+    assert str(raised.value) == f"GITHUB_GET_FAILED:HTTP_500:{_ISSUE_PATH}"
+    assert len(attempts) == 3
+    assert sleeps == [2.0, 5.0]
+
+
+def test_get_transport_error_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, attempts, sleeps = _scripted_client(
+        monkeypatch, [urllib.error.URLError("reset"), {"number": 419}]
+    )
+
+    assert client.request(_ISSUE_PATH) == {"number": 419}
+    assert len(attempts) == 2
+    assert sleeps == [2.0]
+
+
+def test_get_transport_error_exhaustion_keeps_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, attempts, sleeps = _scripted_client(monkeypatch, [TimeoutError("slow")])
+
+    with pytest.raises(gh.GitHubTransportError, match="GITHUB_GET_TRANSPORT_FAILED:"):
+        client.request(_ISSUE_PATH)
+
+    assert len(attempts) == 3
+    assert sleeps == [2.0, 5.0]
+
+
+def test_patch_server_error_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, attempts, sleeps = _scripted_client(monkeypatch, [_http_error(code=500, body="oops")])
+
+    with pytest.raises(gh.GitHubTransportError, match="GITHUB_PATCH_FAILED:HTTP_500"):
+        client.request(_ISSUE_PATH, method="PATCH", payload={"state": "closed"})
+
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_get_not_found_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, attempts, sleeps = _scripted_client(monkeypatch, [_http_error(code=404, body="no")])
+
+    with pytest.raises(gh.GitHubTransportError, match="GITHUB_GET_FAILED:HTTP_404"):
+        client.request(_ISSUE_PATH)
+
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_get_mixed_rate_limit_then_server_error_then_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limited = _http_error(
+        body='{"message":"API rate limit exceeded"}',
+        headers={"X-RateLimit-Remaining": "0", "Retry-After": "0"},
+    )
+    client, attempts, sleeps = _scripted_client(
+        monkeypatch, [limited, _http_error(code=502, body=""), {"number": 419}]
+    )
+
+    assert client.request(_ISSUE_PATH) == {"number": 419}
+    assert len(attempts) == 3
+    assert sleeps == [0.0, 2.0]
+
+
+def test_get_mixed_failures_stay_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    def limited():
+        return _http_error(
+            body='{"message":"API rate limit exceeded"}',
+            headers={"X-RateLimit-Remaining": "0", "Retry-After": "0"},
+        )
+
+    script = [
+        limited(),
+        _http_error(code=500, body=""),
+        limited(),
+        _http_error(code=500, body=""),
+        _http_error(code=500, body=""),
+        {"never": "reached"},
+    ]
+    client, attempts, _sleeps = _scripted_client(monkeypatch, script)
+
+    with pytest.raises(gh.GitHubTransportError):
+        client.request(_ISSUE_PATH)
+
+    assert len(attempts) <= gh.RATE_LIMIT_RETRIES + gh.SERVER_ERROR_RETRIES + 1
