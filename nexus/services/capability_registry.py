@@ -10,6 +10,7 @@ Contract:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -1435,19 +1436,55 @@ EXECUTOR_RESOLUTION_RESOLVED = "resolved"
 EXECUTOR_RESOLUTION_MISSING = "missing"
 EXECUTOR_RESOLUTION_ERROR = "error"
 HOST_EXECUTOR_RESOLVER_ORIGIN = "nexus.core.capability_executor_registry.get_executor"
-_EXECUTOR_ERROR_MESSAGE_MAX = 200
-_UNSAFE_LOG_CHARS = re.compile(r"[^\x20-\x7e]")
 _executor_resolution_errors: dict[str, dict[str, str]] = {}
-_executor_resolution_warned: set[tuple[str, str]] = set()
+_executor_resolution_warned: set[tuple[str, str, str]] = set()
 _executor_resolution_lock = threading.Lock()
 
 
-def _sanitize_resolution_text(value: Any, limit: int = _EXECUTOR_ERROR_MESSAGE_MAX) -> str:
-    """Printable ASCII only (no newlines, escapes or control chars), truncated."""
-    text = _UNSAFE_LOG_CHARS.sub("?", str(value))
+# --- resolution-text sanitizer (keep identical in capability_registry.py and
+# executor_self_check.py; the self-check stays self-contained) ---
+_RESOLUTION_TEXT_MAX = 200
+_RESOLUTION_REDACTED = "[REDACTED]"
+_RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
+_RESOLUTION_URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
+_RESOLUTION_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b([a-z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|authorization|bearer"
+    r"|cookie)[a-z0-9_.-]*[\"']?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|(?:bearer\s+|basic\s+)?[^\s,;]+)"
+)
+_RESOLUTION_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
+_RESOLUTION_TOKEN_PREFIXES = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|A[KS]IA[0-9A-Z]{16}|ya29\.[A-Za-z0-9_-]+"
+    r"|AIza[0-9A-Za-z_-]{20,})"
+)
+_RESOLUTION_HEX_BLOB = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+_RESOLUTION_B64_BLOB = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[A-Za-z])"
+    r"[A-Za-z0-9+/_-]{32,}={0,2}"
+)
+
+
+def _redact_resolution_secrets(text: str) -> str:
+    """Replace credentials and token-like blobs with ``[REDACTED]``."""
+    text = _RESOLUTION_URL_CREDENTIALS.sub(r"\1" + _RESOLUTION_REDACTED + "@", text)
+    text = _RESOLUTION_SECRET_ASSIGNMENT.sub(r"\1" + _RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_BEARER.sub(r"\1 " + _RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_TOKEN_PREFIXES.sub(_RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_HEX_BLOB.sub(_RESOLUTION_REDACTED, text)
+    return _RESOLUTION_B64_BLOB.sub(_RESOLUTION_REDACTED, text)
+
+
+def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
+    """Printable ASCII, secrets redacted, CI commands neutralised, then truncated."""
+    text = _redact_resolution_secrets(_RESOLUTION_UNSAFE_CHARS.sub("?", str(value)))
+    # Neutralise CI workflow commands (``::error::``, ``::add-mask::``, ``##[group]``).
+    text = text.replace("::", ": :").replace("##[", "# #[")
     if len(text) > limit:
         text = text[: max(0, limit - 3)] + "..."
     return text
+
+
+# --- end resolution-text sanitizer ---
 
 
 def record_executor_resolution_error(
@@ -1457,7 +1494,7 @@ def record_executor_resolution_error(
     origin: str,
     registry_key: str | None = None,
 ) -> dict[str, str]:
-    """Record that resolving ``name`` raised; WARNING once per (name, exception type)."""
+    """Record that resolving ``name`` raised; WARNING once per (name, type, message)."""
     capability = _sanitize_resolution_text(str(name or "").strip(), 120)
     key = _sanitize_resolution_text(
         registry_key if registry_key is not None else _resolve_executor_registry_key(capability),
@@ -1470,7 +1507,8 @@ def record_executor_resolution_error(
         "error_message": _sanitize_resolution_text(exc),
         "resolver_origin": _sanitize_resolution_text(origin, 200),
     }
-    warn_key = (capability, reason["error_type"])
+    message_digest = hashlib.sha256(reason["error_message"].encode()).hexdigest()[:12]
+    warn_key = (capability, reason["error_type"], message_digest)
     with _executor_resolution_lock:
         _executor_resolution_errors[capability] = reason
         first = warn_key not in _executor_resolution_warned
@@ -1508,8 +1546,36 @@ def clear_executor_resolution_errors() -> None:
 
 
 def _clear_resolution_error(name: str) -> None:
+    """Forget ``name``'s error and its warned keys, so a later failure warns again."""
     with _executor_resolution_lock:
         _executor_resolution_errors.pop(name, None)
+        for warn_key in [k for k in _executor_resolution_warned if k[0] == name]:
+            _executor_resolution_warned.discard(warn_key)
+
+
+def _capabilities_for_registry_key(registry_key: str) -> list[str]:
+    """Capability names that resolve to ``registry_key`` (aliases first, then the key)."""
+    key = str(registry_key or "").strip()
+    names = [name for name, target in EXECUTOR_REGISTRY_ALIASES.items() if target == key]
+    if key not in names:
+        names.append(key)
+    return names
+
+
+def record_executor_resolution_error_for_key(
+    registry_key: str, exc: BaseException, *, origin: str
+) -> list[dict[str, str]]:
+    """Record a raising resolver under every capability name that maps to ``registry_key``."""
+    return [
+        record_executor_resolution_error(name, exc, origin=origin, registry_key=registry_key)
+        for name in _capabilities_for_registry_key(registry_key)
+    ]
+
+
+def clear_executor_resolution_errors_for_key(registry_key: str) -> None:
+    """Forget recorded errors for every capability name that maps to ``registry_key``."""
+    for name in _capabilities_for_registry_key(registry_key):
+        _clear_resolution_error(name)
 
 
 def executor_resolution_status(name: str) -> dict[str, Any]:
@@ -1519,16 +1585,25 @@ def executor_resolution_status(name: str) -> dict[str, Any]:
     message, resolver origin); it is also recorded in ``last_executor_resolution_errors``.
     """
     capability = str(name or "").strip()
-    registry_key = _resolve_executor_registry_key(capability)
+    registry_key = capability
     base: dict[str, Any] = {
         "capability": capability,
         "registry_key": registry_key,
         "resolver_origin": HOST_EXECUTOR_RESOLVER_ORIGIN,
     }
     try:
+        registry_key = _resolve_executor_registry_key(capability)
+        base["registry_key"] = registry_key
         from nexus.core.capability_executor_registry import get_executor
 
         executor = get_executor(registry_key)
+        executor_name = (
+            None
+            if executor is None
+            else _sanitize_resolution_text(
+                getattr(executor, "__qualname__", None) or type(executor).__qualname__
+            )
+        )
     except Exception as exc:
         reason = record_executor_resolution_error(
             capability, exc, origin=HOST_EXECUTOR_RESOLVER_ORIGIN, registry_key=registry_key
@@ -1537,13 +1612,7 @@ def executor_resolution_status(name: str) -> dict[str, Any]:
     _clear_resolution_error(capability)
     if executor is None:
         return {**base, "status": EXECUTOR_RESOLUTION_MISSING}
-    return {
-        **base,
-        "status": EXECUTOR_RESOLUTION_RESOLVED,
-        "executor": _sanitize_resolution_text(
-            getattr(executor, "__qualname__", None) or type(executor).__qualname__, 200
-        ),
-    }
+    return {**base, "status": EXECUTOR_RESOLUTION_RESOLVED, "executor": executor_name}
 
 
 def _has_physical_executor(name: str) -> bool:

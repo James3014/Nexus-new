@@ -7,6 +7,7 @@ depend on either, so the provider and cache are replaced by a deterministic offl
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import pytest
@@ -33,3 +34,18 @@ def _hermetic_research_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(ResearchPhaseHandler, "_run_external_research", offline_provider)
     monkeypatch.setattr(ResearchPhaseHandler, "_get_lancedb", lambda self: None)
+
+
+def _clear_recorded_executor_resolution_errors() -> None:
+    module = sys.modules.get("nexus.services.capability_registry")
+    clear = getattr(module, "clear_executor_resolution_errors", None)
+    if callable(clear):
+        clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_executor_resolution_errors():
+    """Per-process executor resolution errors (PR-5e) never leak between tests."""
+    _clear_recorded_executor_resolution_errors()
+    yield
+    _clear_recorded_executor_resolution_errors()

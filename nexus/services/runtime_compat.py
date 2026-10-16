@@ -19,7 +19,8 @@ from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
 from nexus.core.repo_root import REPO_ROOT
 from nexus.services.capability_registry import (
     build_real_executor_invoker,
-    record_executor_resolution_error,
+    clear_executor_resolution_errors_for_key,
+    record_executor_resolution_error_for_key,
 )
 from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
 from nexus.services.local_heal.memory_retrieval_adapter import (
@@ -92,14 +93,16 @@ def _resolve_physical_executor(key: str) -> Any | None:
     try:
         from nexus.core.capability_executor_registry import get_executor
 
-        return get_executor(key)
+        executor = get_executor(key)
     except Exception as exc:
-        # The runtime's ``_has_physical_executor`` turns a raise into False; record the
-        # reason first so it is observable, then keep the runtime's contract (re-raise).
-        record_executor_resolution_error(
-            key, exc, origin=RUNTIME_SEAM_RESOLVER_ORIGIN, registry_key=key
-        )
+        # The runtime's ``_has_physical_executor`` turns a raise into False, and its
+        # invoker build lets it abort the run.  Record the reason first (under the
+        # capability names, not only the registry key) so it is observable, then keep
+        # the runtime's contract (re-raise).
+        record_executor_resolution_error_for_key(key, exc, origin=RUNTIME_SEAM_RESOLVER_ORIGIN)
         raise
+    clear_executor_resolution_errors_for_key(key)
+    return executor
 
 
 def register_executor_resolver_if_available() -> bool:

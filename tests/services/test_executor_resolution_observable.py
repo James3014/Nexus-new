@@ -179,3 +179,197 @@ def test_runtime_compat_module_entry_runs_self_check():
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert '"schema": "nexus.executor_self_check.v1"' in proc.stdout
+
+
+_GHP = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+_URL_PASSWORD = "hunter2-very-secret"
+_HOSTILE_SECRET = (
+    f"clone failed token={_GHP} remote https://deploy:{_URL_PASSWORD}@git.example.com/r.git"
+)
+
+
+def test_secrets_are_redacted_from_log_receipt_and_self_check(monkeypatch, caplog, capsys):
+    monkeypatch.setattr(
+        executor_registry, "get_executor", _raise_on("ultra_review", _HOSTILE_SECRET)
+    )
+    with caplog.at_level(logging.WARNING, logger=registry.__name__):
+        reason = registry.executor_resolution_status("ultra_review")["error"]
+        invokers = registry.build_default_mainchain_invokers(include_postflight_gates=False)
+        receipt = invokers["ultra_review"]({"task_id": "t1", "escalate_triggered": True})
+    assert executor_self_check.main(["--check-executors"]) == 1
+    text_out = capsys.readouterr().out
+    assert executor_self_check.main(["--json"]) == 1
+    json_out = capsys.readouterr().out
+    surfaces = {
+        "reason": reason["error_message"],
+        "receipt": repr(receipt),
+        "log": "\n".join(r.getMessage() for r in caplog.records),
+        "text": text_out,
+        "json": json_out,
+    }
+    assert "[REDACTED]" in reason["error_message"]
+    assert "executor_resolution_error" in receipt
+    for where, value in surfaces.items():
+        assert _GHP not in value, where
+        assert _URL_PASSWORD not in value, where
+        assert "ghp_" not in value, where
+
+
+def test_self_check_sanitizer_matches_registry_sanitizer():
+    samples = [
+        _HOSTILE_SECRET,
+        "Authorization: Bearer abcdefgh.ijklmnop.qrstuvwx",
+        "password: 'p a s s' api_key=XYZ123 " + "AK" + "IAABCDEFGHIJKLMNOP",
+        "No module named nexus.core.capability_executor_registry",
+        "line\nbreak\x1b[0m" + "y" * 300,
+    ]
+    for sample in samples:
+        assert executor_self_check._sanitize_resolution_text(
+            sample
+        ) == registry._sanitize_resolution_text(sample)
+    assert "[REDACTED]" in executor_self_check._sanitize_resolution_text(samples[1])
+    assert "abcdefgh" not in executor_self_check._sanitize_resolution_text(samples[1])
+    plain = executor_self_check._sanitize_resolution_text(samples[3])
+    assert plain == samples[3]
+
+
+def test_self_check_raising_non_required_resolver_fails(monkeypatch, capsys):
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("xray"))
+    report = executor_self_check.collect()
+    assert report["unresolved_required"] == []
+    assert report["error_capabilities"] == ["xray"]
+    assert report["ok"] is False
+    assert report["exit_code"] == 1
+    assert executor_self_check.main([]) == 1
+    assert "FAIL: resolver raised for: xray" in capsys.readouterr().out
+
+
+def test_self_check_internal_failure_after_bootstrap_exits_2(monkeypatch, capsys):
+    from nexus_runtime.support.services import capability_registry as runtime_registry
+
+    def broken() -> Any:
+        raise LookupError("planner node table unreadable")
+
+    monkeypatch.setattr(runtime_registry, "list_planner_capability_names", broken)
+    report = executor_self_check.collect()
+    assert report["exit_code"] == 2
+    assert report["ok"] is False
+    assert report["internal_error"]["error_type"] == "LookupError"
+    assert executor_self_check.main([]) == 2
+    out = capsys.readouterr().out
+    assert out.startswith(
+        executor_self_check.TEXT_LINE_PREFIX
+        + "INTERNAL_FAILED LookupError: planner node table unreadable"
+    )
+    assert "Traceback" not in out
+
+
+def test_self_check_missing_runtime_seam_fails(monkeypatch):
+    real_import = executor_self_check.importlib.import_module
+
+    def no_seam(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == executor_self_check.BINDING_MODULE:
+            raise ImportError("runtime predates executor_binding")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(executor_self_check.importlib, "import_module", no_seam)
+    report = executor_self_check.collect()
+    assert report["seam_available"] is False
+    assert report["resolver_registered"] is False
+    assert report["ok"] is False
+    assert report["exit_code"] == 1
+    assert any("seam unavailable" in failure for failure in report["failures"])
+    # Rows still come from the host registry for reference.
+    assert report["status_counts"]["resolved"] > 0
+
+
+def test_self_check_unregistered_resolver_fails(monkeypatch):
+    from nexus_runtime.support.services import executor_binding
+
+    monkeypatch.setattr(executor_binding, "_resolver", None)
+    report = executor_self_check.collect()
+    assert report["resolver_registered"] is False
+    assert report["exit_code"] == 1
+    assert "no resolver registered with the runtime executor seam" in report["failures"]
+
+
+def test_runtime_seam_records_under_alias_names_and_clears_on_success(monkeypatch):
+    from nexus.services import runtime_compat
+
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("sandbox_runner"))
+    with pytest.raises(_ResolverBoom):
+        runtime_compat._resolve_physical_executor("sandbox_runner")
+    reason = registry.executor_resolution_error("sandbox")
+    assert reason is not None
+    assert reason["registry_key"] == "sandbox_runner"
+    assert reason["resolver_origin"] == runtime_compat.RUNTIME_SEAM_RESOLVER_ORIGIN
+    monkeypatch.undo()
+    assert runtime_compat._resolve_physical_executor("sandbox_runner") is not None
+    assert registry.executor_resolution_error("sandbox") is None
+    assert "sandbox_runner" not in registry.last_executor_resolution_errors()
+
+
+def test_status_never_raises_when_key_mapping_fails(monkeypatch):
+    def broken_key(name: str) -> str:
+        raise KeyError(name)
+
+    monkeypatch.setattr(registry, "_resolve_executor_registry_key", broken_key)
+    status = registry.executor_resolution_status("pregate")
+    assert status["status"] == "error"
+    assert status["error"]["error_type"] == "KeyError"
+    assert registry._has_physical_executor("pregate") is False
+
+
+class _HostileExecutorProxy:
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(f"proxy refuses {name}")
+
+
+def test_executor_whose_getattr_raises_is_error_not_exception(monkeypatch):
+    monkeypatch.setattr(executor_registry, "get_executor", lambda key: _HostileExecutorProxy())
+    status = registry.executor_resolution_status("pregate")
+    assert status["status"] == "error"
+    assert status["error"]["error_type"] == "RuntimeError"
+    assert registry._has_physical_executor("pregate") is False
+    report = executor_self_check.collect(("pregate",))
+    row = next(r for r in report["capabilities"] if r["capability"] == "pregate")
+    assert row["status"] == "error"
+    assert report["exit_code"] == 1
+
+
+def test_ci_workflow_commands_never_begin_an_output_line(monkeypatch, capsys, caplog):
+    message = "::error title=x::boom ::add-mask::abc ##[group]g"
+    monkeypatch.setattr(executor_registry, "get_executor", _raise_on("pregate", message))
+    with caplog.at_level(logging.WARNING, logger=registry.__name__):
+        reason = registry.executor_resolution_status("pregate")["error"]
+    assert "::" not in reason["error_message"]
+    assert "##[" not in reason["error_message"]
+    assert executor_self_check.main([]) == 1
+    out = capsys.readouterr().out
+    for line in out.splitlines():
+        assert line.startswith(executor_self_check.TEXT_LINE_PREFIX), line
+        assert not line.lstrip().startswith(("::", "##["))
+    assert "::error" not in out and "::add-mask" not in out and "##[" not in out
+    for record in caplog.records:
+        assert "::" not in record.getMessage()
+
+
+def test_warning_dedupe_resets_on_recovery_and_keys_on_message(monkeypatch, caplog):
+    def warnings() -> list[logging.LogRecord]:
+        return [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    with caplog.at_level(logging.WARNING, logger=registry.__name__):
+        monkeypatch.setattr(executor_registry, "get_executor", _raise_on("pregate", "first"))
+        registry.executor_resolution_status("pregate")
+        registry.executor_resolution_status("pregate")
+        assert len(warnings()) == 1
+        # Same type, different message: logged.
+        monkeypatch.setattr(executor_registry, "get_executor", _raise_on("pregate", "second"))
+        registry.executor_resolution_status("pregate")
+        assert len(warnings()) == 2
+        # Recovery, then the first failure again: logged again.
+        monkeypatch.undo()
+        assert registry.executor_resolution_status("pregate")["status"] == "resolved"
+        monkeypatch.setattr(executor_registry, "get_executor", _raise_on("pregate", "first"))
+        registry.executor_resolution_status("pregate")
+        assert len(warnings()) == 3

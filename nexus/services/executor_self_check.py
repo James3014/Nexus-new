@@ -11,9 +11,19 @@ Usage (in the Gateway's own venv, from its source tree)::
     python -m nexus.services.runtime_compat --check-executors [--json]
     python -m nexus.services.executor_self_check [--json] [--require NAME ...]
 
-Exit 0 only when the seam has a resolver and every required capability (the
-governance gates plus the seam capabilities by default) resolves; 1 when one
-does not; 2 when the bootstrap itself fails.  Nothing is written anywhere.
+Exit codes:
+
+* 0 -- the runtime seam is importable, a resolver is registered with it, no
+  capability's resolver raised, and every required capability (the governance
+  gates plus the seam capabilities by default) resolves.
+* 1 -- the check failed: seam missing (runtime predates it), no resolver
+  registered, any capability (required or not) whose resolver raised, or a
+  required capability that is missing.  ``failures`` lists each reason.
+* 2 -- the bootstrap or the self-check itself failed (``bootstrap_error`` /
+  ``internal_error`` carry a one-line reason).
+
+Error text is sanitized (printable ASCII, credentials and token-like blobs
+redacted, truncated).  Nothing is written anywhere.
 """
 
 from __future__ import annotations
@@ -31,12 +41,50 @@ from typing import Any
 EXECUTOR_RESOLUTION_RESOLVED = "resolved"
 EXECUTOR_RESOLUTION_MISSING = "missing"
 EXECUTOR_RESOLUTION_ERROR = "error"
-_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
+# --- resolution-text sanitizer (keep identical in capability_registry.py and
+# executor_self_check.py; the self-check stays self-contained) ---
+_RESOLUTION_TEXT_MAX = 200
+_RESOLUTION_REDACTED = "[REDACTED]"
+_RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
+_RESOLUTION_URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
+_RESOLUTION_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b([a-z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|authorization|bearer"
+    r"|cookie)[a-z0-9_.-]*[\"']?\s*[:=]\s*)(\"[^\"]*\"?|'[^']*'?|(?:bearer\s+|basic\s+)?[^\s,;]+)"
+)
+_RESOLUTION_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
+_RESOLUTION_TOKEN_PREFIXES = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|A[KS]IA[0-9A-Z]{16}|ya29\.[A-Za-z0-9_-]+"
+    r"|AIza[0-9A-Za-z_-]{20,})"
+)
+_RESOLUTION_HEX_BLOB = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+_RESOLUTION_B64_BLOB = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[A-Za-z])"
+    r"[A-Za-z0-9+/_-]{32,}={0,2}"
+)
 
 
-def _sanitize_resolution_text(value: Any, limit: int = 200) -> str:
-    text = _UNSAFE_CHARS.sub("?", str(value))
-    return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
+def _redact_resolution_secrets(text: str) -> str:
+    """Replace credentials and token-like blobs with ``[REDACTED]``."""
+    text = _RESOLUTION_URL_CREDENTIALS.sub(r"\1" + _RESOLUTION_REDACTED + "@", text)
+    text = _RESOLUTION_SECRET_ASSIGNMENT.sub(r"\1" + _RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_BEARER.sub(r"\1 " + _RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_TOKEN_PREFIXES.sub(_RESOLUTION_REDACTED, text)
+    text = _RESOLUTION_HEX_BLOB.sub(_RESOLUTION_REDACTED, text)
+    return _RESOLUTION_B64_BLOB.sub(_RESOLUTION_REDACTED, text)
+
+
+def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
+    """Printable ASCII, secrets redacted, CI commands neutralised, then truncated."""
+    text = _redact_resolution_secrets(_RESOLUTION_UNSAFE_CHARS.sub("?", str(value)))
+    # Neutralise CI workflow commands (``::error::``, ``::add-mask::``, ``##[group]``).
+    text = text.replace("::", ": :").replace("##[", "# #[")
+    if len(text) > limit:
+        text = text[: max(0, limit - 3)] + "..."
+    return text
+
+
+# --- end resolution-text sanitizer ---
 
 
 def _recorded_resolution_errors() -> dict[str, Any] | None:
@@ -70,8 +118,11 @@ SEAM_CAPABILITIES: tuple[str, ...] = ("sandbox", "ultra_review", "file_lock")
 DEFAULT_REQUIRED: tuple[str, ...] = GOVERNANCE_GATES + SEAM_CAPABILITIES
 
 EXIT_OK = 0
-EXIT_REQUIRED_UNRESOLVED = 1
+EXIT_CHECK_FAILED = 1
+EXIT_REQUIRED_UNRESOLVED = EXIT_CHECK_FAILED  # kept name
 EXIT_BOOTSTRAP_FAILED = 2
+EXIT_INTERNAL_FAILED = 2
+SELF_CHECK_ORIGIN = "nexus.services.executor_self_check"
 
 
 def _error_reason(name: str, key: str, exc: BaseException, origin: str) -> dict[str, str]:
@@ -130,16 +181,27 @@ def collect(required: Sequence[str] = DEFAULT_REQUIRED) -> dict[str, Any]:
             bootstrap_error=_error_reason(BOOTSTRAP_MODULE, "", exc, BOOTSTRAP_MODULE),
         )
         return report
+    try:
+        _resolve_all(report, required)
+    except Exception as exc:
+        # Listing names or mapping keys failed: an internal failure, not "unresolved".
+        report.update(
+            ok=False,
+            exit_code=EXIT_INTERNAL_FAILED,
+            internal_error=_error_reason(SELF_CHECK_ORIGIN, "", exc, SELF_CHECK_ORIGIN),
+        )
+    return report
 
+
+def _resolve_all(report: dict[str, Any], required: Sequence[str]) -> None:
     binding: Any | None
     try:
         binding = importlib.import_module(BINDING_MODULE)
         registry: Any = importlib.import_module(RUNTIME_REGISTRY_MODULE)
     except ImportError:
         binding, registry = None, None
-    resolver_registered = (
-        getattr(binding, "_resolver", None) is not None if binding is not None else None
-    )
+    seam_available = binding is not None
+    resolver_registered = seam_available and getattr(binding, "_resolver", None) is not None
     origin, resolve, key_of, names = _seam(binding, registry)
 
     rows: list[dict[str, Any]] = []
@@ -148,6 +210,13 @@ def collect(required: Sequence[str] = DEFAULT_REQUIRED) -> dict[str, Any]:
         row: dict[str, Any] = {"capability": name, "registry_key": key}
         try:
             executor = resolve(key)
+            executor_name = (
+                None
+                if executor is None
+                else _sanitize_resolution_text(
+                    getattr(executor, "__qualname__", None) or type(executor).__qualname__
+                )
+            )
         except Exception as exc:
             row["status"] = EXECUTOR_RESOLUTION_ERROR
             row["error"] = _error_reason(name, key, exc, origin)
@@ -156,9 +225,7 @@ def collect(required: Sequence[str] = DEFAULT_REQUIRED) -> dict[str, Any]:
                 row["status"] = EXECUTOR_RESOLUTION_MISSING
             else:
                 row["status"] = EXECUTOR_RESOLUTION_RESOLVED
-                row["executor"] = _sanitize_resolution_text(
-                    getattr(executor, "__qualname__", None) or type(executor).__qualname__
-                )
+                row["executor"] = executor_name
         row["planner_node"] = name in names
         row["required"] = name in required
         rows.append(row)
@@ -176,31 +243,61 @@ def collect(required: Sequence[str] = DEFAULT_REQUIRED) -> dict[str, Any]:
         for row in rows
         if row["required"] and row["status"] != EXECUTOR_RESOLUTION_RESOLVED
     ]
-    ok = resolver_registered is not False and not unresolved_required
+    error_capabilities = [
+        row["capability"] for row in rows if row["status"] == EXECUTOR_RESOLUTION_ERROR
+    ]
+    failures: list[str] = []
+    if not seam_available:
+        failures.append(
+            f"runtime executor seam unavailable ({BINDING_MODULE} not importable);"
+            " rows come from the host registry for reference only"
+        )
+    elif not resolver_registered:
+        failures.append("no resolver registered with the runtime executor seam")
+    if error_capabilities:
+        failures.append("resolver raised for: " + ",".join(error_capabilities))
+    if unresolved_required:
+        failures.append("required capabilities unresolved: " + ",".join(unresolved_required))
+    ok = not failures
     import nexus
 
     report.update(
         ok=ok,
-        exit_code=EXIT_OK if ok else EXIT_REQUIRED_UNRESOLVED,
+        exit_code=EXIT_OK if ok else EXIT_CHECK_FAILED,
+        failures=failures,
         resolver_origin=origin,
+        seam_available=seam_available,
         resolver_registered=resolver_registered,
         nexus_package=str(getattr(nexus, "__file__", "") or ""),
         nexus_runtime_commit=_runtime_commit(),
         capability_count=len(rows),
         status_counts=counts,
         unresolved_required=unresolved_required,
+        error_capabilities=error_capabilities,
         recorded_resolution_errors=_recorded_resolution_errors(),
         capabilities=rows,
     )
-    return report
+
+
+TEXT_LINE_PREFIX = "executor-self-check| "
 
 
 def _render_text(report: dict[str, Any]) -> str:
-    if "bootstrap_error" in report:
-        err = report["bootstrap_error"]
-        return f"BOOTSTRAP_FAILED {err['error_type']}: {err['error_message']}"
+    """Every line starts with ``TEXT_LINE_PREFIX`` so no value can begin a CI command line."""
+    return "\n".join(TEXT_LINE_PREFIX + line for line in _text_lines(report))
+
+
+def _text_lines(report: dict[str, Any]) -> list[str]:
+    for failure_key, label in (
+        ("bootstrap_error", "BOOTSTRAP_FAILED"),
+        ("internal_error", "INTERNAL_FAILED"),
+    ):
+        if failure_key in report:
+            err = report[failure_key]
+            return [f"{label} {err['error_type']}: {err['error_message']}"]
     lines = [
-        f"ok={report['ok']} resolver_registered={report['resolver_registered']}"
+        f"ok={report['ok']} seam_available={report['seam_available']}"
+        f" resolver_registered={report['resolver_registered']}"
         f" origin={report['resolver_origin']}",
         f"nexus_runtime_commit={report['nexus_runtime_commit'] or 'unknown'}"
         f" nexus_package={report['nexus_package']}",
@@ -218,9 +315,8 @@ def _render_text(report: dict[str, Any]) -> str:
         lines.append(
             f"  {mark}{row['capability']} ({row['registry_key']}): {row['status']}{detail}"
         )
-    if report["unresolved_required"]:
-        lines.append("unresolved_required=" + ",".join(report["unresolved_required"]))
-    return "\n".join(lines)
+    lines.extend(f"FAIL: {failure}" for failure in report["failures"])
+    return lines
 
 
 def main(argv: Sequence[str] | None = None) -> int:
