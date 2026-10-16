@@ -19,6 +19,7 @@ CHANGED = (
     "lint.yml",
     "nexus-core-effectiveness-g1.yml",
     "policy-lane-gate.yml",
+    "pr-bindings-preflight.yml",
     "pytest.yml",
     "security.yml",
     "trusted-deletion-anchor.yml",
