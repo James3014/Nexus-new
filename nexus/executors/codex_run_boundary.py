@@ -20,7 +20,11 @@ import shutil
 from pathlib import Path
 from typing import Mapping, Optional
 
-from nexus.executors.agy_write_admission import escaping_symlinks, target_git_entry_state
+from nexus.executors.agy_write_admission import (
+    escaping_symlinks,
+    path_inside,
+    target_git_entry_state,
+)
 
 CODEX_RUN_HOME_COPIED_FILES = (Path(".codex") / "auth.json",)
 CODEX_ENV_ALLOWLIST = frozenset({"PATH", "LANG", "TERM", "USER", "LOGNAME", "SHELL"})
@@ -81,7 +85,7 @@ def codex_child_env(
         if key in CODEX_ENV_ALLOWLIST
         or key in CODEX_ENV_PROXY_KEYS
         or key in extra
-        or str(key).startswith("LC_")
+        or (str(key).startswith("LC_") and not _credential_shaped(str(key)))
     }
     env["HOME"] = str(home)
     env["CODEX_HOME"] = str(home / ".codex")
@@ -134,10 +138,38 @@ def _unreadable_directories(target: Path) -> list[str]:
     return sorted(found)
 
 
+def _nested_git_escapes(target: Path) -> dict[str, str]:
+    """Escaping symlinks the shared walker prunes: it drops every directory named
+    ``.git`` at any depth, so ``sub/.git -> /elsewhere`` or a ``sub/.git/`` tree
+    holding escaping links would be invisible.  Only the root ``.git`` entry is
+    exempt here (it is covered by ``target_git_entry_state``)."""
+    real_target = Path(os.path.realpath(target))
+    found: dict[str, str] = {}
+    for directory, dirnames, filenames in os.walk(real_target, onerror=lambda _error: None):
+        if Path(directory) == real_target and ".git" in dirnames:
+            dirnames.remove(".git")
+        for name in [*dirnames, *filenames]:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                continue
+            if Path(directory) == real_target and name == ".git":
+                continue
+            if (
+                Path(directory) != real_target
+                and name != ".git"
+                and ".git" not in path.relative_to(real_target).parts
+            ):
+                continue  # already reported by escaping_symlinks
+            if not path_inside(Path(os.path.realpath(path)), real_target):
+                found[path.relative_to(real_target).as_posix()] = os.readlink(path)
+    return found
+
+
 def target_integrity_snapshot(target: Path) -> dict[str, object]:
     """Escaping symlinks, unreadable directories and ``.git`` entry state of ``target``."""
     return {
         "escaping": escaping_symlinks(target),
+        "nested_git": _nested_git_escapes(target),
         "unreadable": _unreadable_directories(target),
         "git": target_git_entry_state(target),
     }
@@ -152,6 +184,8 @@ def target_integrity_failure(
     Escaping symlinks already committed in the base tree (the Nexus tree has a
     few) are the baseline; only a difference is an escape.
     """
-    if any(after.get(key) != before.get(key) for key in ("escaping", "unreadable", "git")):
+    if any(
+        after.get(key) != before.get(key) for key in ("escaping", "nested_git", "unreadable", "git")
+    ):
         return CODEX_TARGET_ESCAPE
     return None

@@ -37,6 +37,8 @@ case "$FAKE_CODEX_MODE" in
   filelink) ln -s "$FAKE_ESCAPE_DIR/secret.txt" "$work/escape-file" ;;
   gitptr) echo "gitdir: $FAKE_ESCAPE_DIR" > "$work/.git" ;;
   hidden) mkdir "$work/locked"; ln -s "$FAKE_ESCAPE_DIR" "$work/locked/escape"; chmod 000 "$work/locked" ;;
+  nestedgit) mkdir "$work/sub"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git" ;;
+  nestedgitdir) mkdir -p "$work/sub/.git"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git/leak" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
 echo '{"type":"turn.completed"}'
@@ -233,3 +235,28 @@ def test_codex_env_passthrough_refuses_injection_and_credential_names():
     assert env["SAFE_VALUE"] == "ok"
     for name in list(source)[2:-1]:
         assert name not in env
+
+
+def test_codex_run_fails_on_an_escaping_symlink_named_dot_git_in_a_subdirectory(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedgit")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_run_fails_on_an_escaping_symlink_inside_a_nested_dot_git_directory(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedgitdir")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_env_lc_prefix_does_not_pass_credential_shaped_names():
+    from nexus.executors.codex_run_boundary import codex_child_env
+
+    env = codex_child_env(
+        {"LC_ALL": "C", "LC_GITHUB_TOKEN": "x", "LC_AUTH_SOCK": "x"},
+        home=Path("/h"),
+        tmpdir=Path("/h/tmp"),
+    )
+
+    assert env["LC_ALL"] == "C"
+    assert "LC_GITHUB_TOKEN" not in env and "LC_AUTH_SOCK" not in env
