@@ -1,0 +1,54 @@
+{
+  "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+  "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+  "external_intelligence_refs": [
+    "c5913c8988bf9d561e6f321b23c0caf0971d49cc0379228ac285ee0435b460f3"
+  ],
+  "integrity_checks": {
+    "base_sha": "bcd85005b556d0b05c31532919212188cf87cc6e",
+    "units": {
+      "eia-open-swe-canary-20261014-u2": [
+        "nexus.integrity.diff-check",
+        "nexus.integrity.deletions",
+        "nexus.integrity.scope"
+      ]
+    },
+    "whole_task": [
+      "nexus.integrity.diff-check",
+      "nexus.integrity.deletions",
+      "nexus.integrity.scope"
+    ]
+  },
+  "packet_id": "e8d0b425635b876919be3a521f0e8f7b7a7191de72311ae6a37cc1b1c46de732",
+  "schema": "external_intelligence_acceptance_packet.v1",
+  "task_candidate": {
+    "base_sha": "bcd85005b556d0b05c31532919212188cf87cc6e",
+    "candidate_commit": "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+    "candidate_diff_sha256": "961ce381089a94044041c4328e9c4ab21378fe0893d8cb4aa3fac99867c5a09b",
+    "candidate_tree": "6e272db4f150e2e8b2c032df85401df4aca6403c",
+    "changed_paths": [
+      "tests/ops/test_external_intelligence_open_swe_canary_20261014.py"
+    ],
+    "composition_order": [
+      "eia-open-swe-canary-20261014-u2"
+    ],
+    "deleted_paths": [],
+    "task_candidate_id": "737ee165b7d4c640e3924a10fd33718f4d43cf4bb983bb0fd399dc447fd544d3"
+  },
+  "task_card_hash": "8cfd9ec503d9ad5b4a56aca1378f495d9b34096eaccc578173a04a6925fd1c32",
+  "task_card_ref": "tasks/external-intelligence-open-swe-canary-20261014/00-open-swe-unattended-canary.md",
+  "task_id": "eia-open-swe-canary-20261014",
+  "unit_lineage": [
+    {
+      "candidate_commit": "7a5c63f7ca4ddfcc7875f5ede7280f193fab6d55",
+      "candidate_tree": "6e272db4f150e2e8b2c032df85401df4aca6403c",
+      "session_id": "ses_open_swe_3b9e7e91fd2870b2e07c",
+      "unit_id": "eia-open-swe-canary-20261014-u2",
+      "unit_verification_id": "e9f2b1b14b2c030763929efc2db7cb3dcda27213d1c592ab7f75d1a80df0638d",
+      "worker_receipt_id": "db8b968985f2692b40304e17bc7bc0187003fd89f9d6a25dceff599503581bae",
+      "workspace_id": "ei-eia-open-swe-canary-20261014-eia-open-swe-canary-20261014-u2-7babe57d750f"
+    }
+  ],
+  "whole_task_status": "PASS",
+  "whole_task_verification_id": "0ddf14d725ad3b7b1167e5a29632e58401248d2cd4d4f57e1ae57366494bdd53"
+}
