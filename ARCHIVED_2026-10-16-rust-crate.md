@@ -11,10 +11,10 @@
 | `nexus-core-rs/` | 10 | 1,310 | <ul><li>No workflow, Taskfile target or deploy builds it. The Taskfile cargo targets build `packages/core`.</li><li>The Mac mini deploy tree has no `nexus-core-rs/target`.</li><li>The only live caller was the `nexus/engine/governance_bridge.py` binary lookup. That lookup never found a binary, so `GovernanceBridge` always took its Python contract path.</li></ul> |
 | `nexus/bridge/rust_kernel.py` | 1 | 42 | Imported only by `cutover_manager.py` and `tests/integration/test_rust_wave3_cutover.py`. |
 | `nexus/bridge/cutover_manager.py` | 1 | 79 | Imported only by `tests/integration/test_capability_existence_155.py`, an existence list. Its `USE_RUST_*` flags defaulted to `"0"`. |
-| `generate_full_matrix_report.py` | 1 | 140 | A June Python-vs-Rust parity report script with no caller. Without the binary it can only print "Rust unavailable". |
-| `generate_rollback_drill_report.py` | 1 | 177 | Same as above, for the Rust rollback drill report. |
 | `scripts/generate-prod-package.sh` | 1 | 39 | Already dead: it copied from a nonexistent `nexus-swarm/`. Flagged LOW in the #2337 review. |
-| **Total** | **15** | **1,787** | |
+| **Total** | **13** | **1,470** | |
+
+The two root Rust parity report scripts (`generate_full_matrix_report.py`, `generate_rollback_drill_report.py`) were first deleted here; main then moved them to `docs/archive/root-2026-10/` (root-hygiene archive move), so on merge they keep main's archive location and are not deleted by this change.
 
 ## Retired policies (removed from the manifests)
 
