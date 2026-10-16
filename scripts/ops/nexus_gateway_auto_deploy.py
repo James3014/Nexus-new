@@ -121,6 +121,9 @@ REQUIRED_CHECKS = {
     "Full published Git history secret audit": ".github/workflows/git-history-secret-audit.yml",
     "Deletion guard": ".github/workflows/deletion-guard.yml",
     "Exact-base impact gate": ".github/workflows/pytest.yml",
+    # Required on main since 2026-10-16 (#1754 A); pull_request_target only, so it
+    # binds through the merged PR head like Deletion guard (#2364).
+    "Trusted impact gate (default branch)": ".github/workflows/trusted-impact-gate.yml",
     "Trusted dependency contract (default branch)": (
         ".github/workflows/trusted-dependency-contract.yml"
     ),
