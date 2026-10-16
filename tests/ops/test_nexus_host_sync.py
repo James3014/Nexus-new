@@ -166,6 +166,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "nexus/services/external_worker_runtime.py",
         ),
         (
+            ROOT / "nexus/services/claude_account_pool.py",
+            "nexus/services/claude_account_pool.py",
+        ),
+        (
             ROOT / "nexus/services/grok_account_pool.py",
             "nexus/services/grok_account_pool.py",
         ),
@@ -1457,3 +1461,13 @@ def test_manifest_only_snapshot_imports_agy_dispatch_boundary(tmp_path: Path) ->
     )
     proc = _run([sys.executable, "-I", "-S", "-c", code, str(snapshot)])
     assert proc.returncode == 0, proc.stderr
+
+
+def test_manifest_covers_external_worker_dispatch_nexus_import_closure() -> None:
+    # The host-installed external dispatcher imports provider pools lazily
+    # (e.g. nexus.services.claude_account_pool, #2127); a lazy import missing
+    # from the snapshot fails only when that provider is first used.
+    closure = _static_nexus_closure(ROOT / "scripts/ops/nexus-external-worker-dispatch")
+    assert "nexus/services/claude_account_pool.py" in closure
+    missing = sorted(closure - _manifest_runtime_paths())
+    assert missing == []

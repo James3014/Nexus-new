@@ -926,8 +926,16 @@ def _build_baseline_patch(
     test_source: str = "",
     target_file: str = "",
     test_file: str = "",
+    model_configured: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     source_label = "local"
+    if model_configured and not llm_baseline:
+        # #2339 follow-up: a run with a model never delivers the local answer table, even when
+        # the model baseline is skipped (route-cost skip_llm_baseline); the flow escalates instead.
+        meta = local_baseline_meta()
+        meta["source"] = "model_baseline_skipped"
+        meta["baseline_source_policy"] = "model_run_no_local_baseline"
+        return original_code, "model_baseline_skipped", meta
 
     symmetric_prompt = _symmetric_prompt_mode()
     # [NEW: X-2] Prior-Art from Claims
@@ -1198,7 +1206,9 @@ def run_auto_flow(
             # held by another task refuses the whole delivery.
             companions = (
                 {}
-                if symmetric_prompt
+                # A model patch is delivered alone: fixture-keyed local companion edits are
+                # only for the no-model local mode (#2339 follow-up).
+                if symmetric_prompt or not str(source).startswith("local")
                 else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
             )
             release = _post_candidate_seam.hold_target_lock(
@@ -1224,6 +1234,7 @@ def run_auto_flow(
                 test_source=visible_test_source,
                 target_file=str(target_file),
                 test_file=str(test_file),
+                model_configured=bool(llm_mode),
             )
             if patched != original_code:
                 # PR-2 seam: lock the target before the candidate is written (runtime-selected only).
@@ -1322,7 +1333,9 @@ def run_auto_flow(
             # held by another task refuses the whole delivery.
             companions = (
                 {}
-                if symmetric_prompt
+                # A model patch is delivered alone: fixture-keyed local companion edits are
+                # only for the no-model local mode (#2339 follow-up).
+                if symmetric_prompt or not str(source).startswith("local")
                 else generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
             )
             release = _post_candidate_seam.hold_target_lock(
@@ -1348,6 +1361,7 @@ def run_auto_flow(
                 test_source=visible_test_source,
                 target_file=str(target_file),
                 test_file=str(test_file),
+                model_configured=bool(llm_mode),
             )
             probe_pre: list[dict[str, Any]] = []
             if patched != original_code:
@@ -1544,8 +1558,7 @@ def run_auto_flow(
         if (
             force_flow is None
             and llm_mode
-            and llm_baseline
-            and baseline_model_attempted
+            and ((llm_baseline and baseline_model_attempted) or not llm_baseline)
             and result.get("status") != "SUCCESS"
             and not symmetric_prompt
         ):

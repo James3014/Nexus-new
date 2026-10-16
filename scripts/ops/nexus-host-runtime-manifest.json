@@ -84,6 +84,10 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/services/claude_account_pool.py",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/ops/nexus-grok-accounts",
       "mode": "0755"
     },

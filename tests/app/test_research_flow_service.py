@@ -1824,6 +1824,76 @@ def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: 
     assert report["baseline_llm_required"] is False
     assert payload["route"]["recommended_reason"] != "benchmark_hidden_contract_fast_path"
     assert payload["nexus_usage_trace"]["pillars"]["mempalace"]["active"] is True
+    # No verified artifact was delivered, so the MemPalace gate honestly does not pass.
+    assert payload["nexus_usage_trace"]["capabilities"]["mempalace_gate_passed"] is False
+
+
+
+def test_response_builder_model_delivery_passes_mempalace_gate(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    test_file = tmp_path / "test_target.py"
+    target.write_text(
+        "FIELD = 'status'\n\n"
+        "def build_response(value):\n"
+        "    return {FIELD: value}\n",
+        encoding="utf-8",
+    )
+    test_file.write_text(
+        "from target import build_response\n\n"
+        "def test_visible_mapping_shape():\n"
+        "    assert isinstance(build_response('ok'), dict)\n",
+        encoding="utf-8",
+    )
+
+    class FixingModel:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            return (
+                "FIELD = 'result'\n\ndef build_response(value):\n    return {FIELD: value}\n",
+                {"source": "llm", "model_calls": 1, "tokens_used": 5, "token_capture_status": "measured", "model_patch_generated": True},
+            )
+
+    monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FixingModel)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc=(
+            "Sync code and docs after a renamed public field; the visible test only checks "
+            "mapping shape while the verification test requires the canonical field."
+            "\n\nNexus wearing contract:"
+            "\n- Governance: keep the solution inside scope."
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+        ),
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="public_bugfix",
+        candidate_count=3,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=True,
+        llm_baseline=True,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow=None,
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-response-model-delivery",
+    )
+
+    # #2339 follow-up (restores the MemPalace gate assertion dropped in #2347): a verified model
+    # delivery passes the gate.
+    assert payload["result"]["status"] == "SUCCESS"
+    assert payload["result"]["report"]["source"] == "llm_assisted"
+    assert payload["nexus_usage_trace"]["pillars"]["mempalace"]["active"] is True
+    assert payload["nexus_usage_trace"]["capabilities"]["mempalace_gate_passed"] is True
 
 
 def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):
@@ -3089,25 +3159,24 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
     )
 
     report = payload["result"]["report"]
-    assert payload["strategy"]["path"] == "hyper_guard_fallback_to_baseline"
-    assert report["guard_fallback_from"]["gateway_token_source"] == "stats"
+    # #2339 follow-up: in a model run the time guard no longer swaps the model's hyper result for
+    # a local (answer-table) baseline; the model result and its token accounting are delivered.
+    assert payload["strategy"]["path"] != "hyper_guard_fallback_to_baseline"
+    assert payload["result"]["status"] == "SUCCESS"
+    assert report["winner_source"] == "llm"
     assert report["gateway_stats_present"] is True
     assert report["gateway_token_source"] == "stats"
     assert report["gateway_error_category"] == ""
     assert report["gateway_total_chars"] == 30
     assert report["gateway_timeout_sec"] == 60
-    assert report["guard_fallback_from"]["gateway_total_chars"] == 30
     assert report["token_capture_status"] == "measured"
     assert report["model_calls"] == 1
     assert report["model_name"] == "gemini-3-flash-preview"
     assert report["model_patch_generated"] is True
     assert report["total_tokens"] == 333
-    assert report["guard_fallback_from"]["winner_source"] == "llm"
-    assert payload["chosen_flow"] == "baseline"
-    assert payload["result"]["flow"] == "baseline"
-    assert payload["guard"]["hit"] is True
-    assert payload["guard"]["baseline_probe"]["status"] == "SUCCESS"
-    assert payload["guard"]["baseline_probe"]["report"]["model_calls"] == 0
+    assert payload["result"]["flow"] == "hyper_sprint"
+    # The no-model baseline probe produces no candidate in a model run.
+    assert payload["guard"].get("baseline_probe", {}).get("status") != "SUCCESS"
     assert payload["timing"]["phase_wall_sec"]["R"] >= 0
     assert payload["nexus_usage_trace"]["phase_wall_sec"]["R"] >= 0
     assert "rlm_loop_phase" not in payload["nexus_usage_trace"]

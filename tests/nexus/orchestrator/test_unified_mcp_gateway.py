@@ -6256,3 +6256,53 @@ def test_gateway_convergence_tool_surfaces_same_effect_reconciliation(monkeypatc
     assert payload["idempotency_fence"] == "fence-original"
     assert payload["retry_authorized"] is False
     assert payload["host_effect_performed"] is False
+
+
+def _worker_candidate_f2p_arguments(task_id: str, **extra):
+    return {
+        "task_id": task_id,
+        "what": "repair bounded change",
+        "why": "prove the fail-to-pass declaration seam",
+        "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"],
+        "owner_confirmation": True,
+        **_task_card_evidence(task_id),
+        **extra,
+    }
+
+
+def test_worker_candidate_fail_to_pass_required_rejects_non_bool(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
+    ))
+    for bad in ("yes", 1, "true", None):
+        arguments = _worker_candidate_f2p_arguments("worker-candidate-f2p-bad", fail_to_pass_required=bad)
+        response = gateway.handle({"jsonrpc": "2.0", "id": 61, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+        assert response is not None
+        assert "FAIL_TO_PASS_REQUIRED_INVALID" in json.dumps(response)
+    assert service.submitted == []
+
+
+def test_worker_candidate_fail_to_pass_required_is_forwarded_and_bound(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
+    ))
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_worker_candidate")
+    assert spec["inputSchema"]["properties"]["fail_to_pass_required"] == {"type": "boolean", "default": False}
+
+    hashes = {}
+    for flag in (False, True):
+        service.submitted.clear()
+        arguments = _worker_candidate_f2p_arguments("worker-candidate-f2p-ok", fail_to_pass_required=flag)
+        response = gateway.handle({"jsonrpc": "2.0", "id": 62, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+        assert response is not None
+        assert len(service.submitted) == 1
+        request = service.submitted[0]
+        assert request.get("fail_to_pass_required", False) is flag
+        assert request["bound_action_request"].get("fail_to_pass_required", False) is flag
+        hashes[flag] = request["request_hash"]
+    assert hashes[False] != hashes[True]
