@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -21,6 +22,7 @@ from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
@@ -81,6 +83,7 @@ from nexus.engine.canonical_task_seam import (
 )
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
+from nexus.executors.cli_worker import CliWorkerStatus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     AttemptResolutionVerdict,
@@ -301,6 +304,16 @@ def _validate_existing_autonomy_binding(
         raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
     if not project_autonomy_submission(state).get("eligible"):
         raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+
+
+FAIL_TO_PASS_EVIDENCE_TOKEN = "fail_to_pass_base_verifier"
+FAIL_TO_PASS_PROBE_SCHEMA = "nexus.fail_to_pass_probe.v1"
+_FAIL_TO_PASS_BLOCKED_STATUSES = frozenset({"BASE_ALREADY_PASS", "BASE_NOT_PHYSICAL_FAIL"})
+
+
+def _fail_to_pass_blocked(state: Mapping[str, Any]) -> bool:
+    probe = state.get("fail_to_pass") if isinstance(state, Mapping) else None
+    return isinstance(probe, Mapping) and probe.get("status") in _FAIL_TO_PASS_BLOCKED_STATUSES
 
 
 def _utc_now() -> str:
@@ -3813,6 +3826,14 @@ class SelfHostedTaskService:
             except Exception as exc:
                 raise ValueError("COLLABORATION_REALM_INVALID") from exc
 
+        fail_to_pass_required = request.get("fail_to_pass_required", False)
+        if not isinstance(fail_to_pass_required, bool):
+            raise ValueError("FAIL_TO_PASS_REQUIRED_INVALID")
+        required_evidence = ["candidate_state_hash", "controller_unchanged", "verified_candidate_receipt"]
+        if fail_to_pass_required:
+            # Bound into the contract hash through required_evidence (#2274).
+            required_evidence.append(FAIL_TO_PASS_EVIDENCE_TOKEN)
+
         return ArchitectTaskContract(
             task_id=task_id,
             objective=what,
@@ -3822,7 +3843,7 @@ class SelfHostedTaskService:
                 verifier_commands=verifier_commands,
                 protected_contracts=protected_contracts,
                 authorized_deletions=authorized_deletions,
-                required_evidence=["candidate_state_hash", "controller_unchanged", "verified_candidate_receipt"],
+                required_evidence=required_evidence,
             ),
             human_approval_policy=HumanApprovalPolicy(
                 approver_roles=list(request.get("approver_roles", ["James"])),
@@ -4804,6 +4825,80 @@ class SelfHostedTaskService:
                 "error_type": type(exc).__name__,
             }
 
+    @staticmethod
+    def _run_fail_to_pass_probe(manager, contract) -> dict[str, Any]:
+        """Run the contract verifiers on a clean detached checkout of the base.
+
+        A repair task must fail its verifiers on ``target_base_revision`` and
+        pass them on the candidate.  The checkout is a fresh temporary git
+        worktree (never the candidate Target nor the Controller working tree)
+        and is always removed.  Any infrastructure problem fails closed as
+        BASE_NOT_PHYSICAL_FAIL.  The code_integrity_v1 internal check inspects
+        the candidate diff and has no base meaning, so it is not re-run.
+        """
+        base_revision = str(contract.target_base_revision)
+        probe: dict[str, Any] = {
+            "schema": FAIL_TO_PASS_PROBE_SCHEMA,
+            "status": "BASE_NOT_PHYSICAL_FAIL",
+            "base_revision": base_revision,
+            "base_exit_codes": [],
+            "required": True,
+        }
+        scratch = Path(tempfile.mkdtemp(prefix="nexus-f2p-base-"))
+        checkout = scratch / "base"
+        added = False
+        try:
+            commands = [
+                command
+                for command in contract.verifier_commands
+                if isinstance(command, str) and command.strip() and command != "code_integrity_v1"
+            ]
+            if not commands:
+                return probe
+            controller_root = str(Path(contract.controller_repo_root).resolve())
+            manager._run_git(
+                ["worktree", "add", "--detach", str(checkout), base_revision],
+                cwd=controller_root,
+            )
+            added = True
+            passed, evidence, failures = CandidateVerifier._run_verifiers(
+                SimpleNamespace(verifier_commands=commands), str(checkout), None
+            )
+            exit_codes = [item.exit_code for item in evidence]
+            probe["base_exit_codes"] = exit_codes
+            normal = all(item.status == CliWorkerStatus.COMPLETED.value for item in evidence)
+            if passed and evidence:
+                probe["status"] = "BASE_ALREADY_PASS"
+            elif any(
+                item.status == CliWorkerStatus.COMPLETED.value and item.exit_code not in (0, None)
+                for item in evidence
+            ) and not any(f.startswith(("verifier_invalid", "verifier_evidence_inconsistent")) for f in failures):
+                probe["status"] = "VERIFIED"
+            elif not normal or not evidence:
+                probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+        except Exception as exc:  # noqa: BLE001 - infrastructure errors fail closed
+            probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+            probe["error"] = str(exc)[:500]
+        finally:
+            if added:
+                try:
+                    manager._run_git(
+                        ["worktree", "remove", "--force", str(checkout)],
+                        cwd=str(Path(contract.controller_repo_root).resolve()),
+                    )
+                except Exception:  # noqa: BLE001 - fall through to directory removal
+                    pass
+            shutil.rmtree(scratch, ignore_errors=True)
+            if added:
+                try:
+                    manager._run_git(
+                        ["worktree", "prune"],
+                        cwd=str(Path(contract.controller_repo_root).resolve()),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        return probe
+
     def _finalize_runtime_candidate(
         self, contract, request, lease, state, attempts, update, *, execution, status
     ):
@@ -4861,13 +4956,23 @@ class SelfHostedTaskService:
             execution=latest_execution,
         )
 
-        update(
-            "VERIFIED",
-            {
-                "verified_receipt": verified,
-                "attempt_resolution": resolution,
-            },
+        acceptance_profile = getattr(contract, "acceptance_profile", None)
+        fail_to_pass_required = FAIL_TO_PASS_EVIDENCE_TOKEN in tuple(
+            getattr(acceptance_profile, "required_evidence", ()) or ()
         )
+        verified_values: dict[str, Any] = {
+            "verified_receipt": verified,
+            "attempt_resolution": resolution,
+        }
+        if not fail_to_pass_required:
+            # Visibility only: a general task never proved fail-to-pass (#2274).
+            verified_values["fail_to_pass"] = {
+                "schema": FAIL_TO_PASS_PROBE_SCHEMA,
+                "status": "UNPROVEN",
+                "reason": "fail_to_pass_unproven",
+                "required": False,
+            }
+        update("VERIFIED", verified_values)
 
         if resolution.verdict != AttemptResolutionVerdict.PROVEN.value:
             reasons = ", ".join(resolution.failure_reasons) or f"verdict is {resolution.verdict}"
@@ -4924,6 +5029,18 @@ class SelfHostedTaskService:
                 "terminal_status": terminal_status,
                 "error": authority_error,
             }
+
+        if fail_to_pass_required:
+            probe = self._run_fail_to_pass_probe(manager, contract)
+            update("VERIFIED", {"fail_to_pass": probe})
+            if probe["status"] != "VERIFIED":
+                # Raised after the probe is persisted; _finalize_runtime_failure
+                # treats a blocked probe as an unverified candidate, so the
+                # verified-recovery route cannot commit it.
+                raise RuntimeError(
+                    f"fail_to_pass gate failed: {probe['status']} "
+                    f"(base exit codes {probe['base_exit_codes']})"
+                )
 
         commit_started = time.perf_counter()
         packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
@@ -5000,6 +5117,10 @@ class SelfHostedTaskService:
         verified_rcpt = current.get("verified_receipt") or {}
         attempt_res = current.get("attempt_resolution") or {}
         is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
+        if is_verified and _fail_to_pass_blocked(current):
+            # A candidate that failed the fail-to-pass gate is not a recoverable
+            # verified candidate (#2274).
+            is_verified = False
 
         if is_verified:
             self._checkpoint(
@@ -10470,6 +10591,9 @@ class SelfHostedTaskService:
         status = state.get("status")
         if status not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
             raise RuntimeError(f"task status '{status}' is not eligible for uncommitted recovery; status must be RETAINED_FOR_REVIEW or FINAL_BLOCK")
+
+        if _fail_to_pass_blocked(state):
+            raise RuntimeError("FAIL_TO_PASS_GATE_BLOCKED: candidate failed the fail-to-pass gate")
 
         verified_receipt = state.get("verified_receipt") or {}
         if not verified_receipt.get("verified"):
