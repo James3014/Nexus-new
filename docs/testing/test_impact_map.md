@@ -401,4 +401,5 @@
 | scripts/ops/com.nexus.eia-nightly-stop.plist.template | tests/ops/test_eia_nightly.py | active | low | eia_nightly_launchd_template |
 | docs/ops/eia_nightly.md | tests/ops/test_eia_nightly.py | active | low | eia_nightly_runbook |
 | tasks/eia-nightly | tests/ops/test_eia_nightly.py | active | low | eia_nightly_task_cards |
+| tests/ops/fixtures/eia_nightly_real | tests/ops/test_eia_nightly.py | active | low | eia_nightly_real_record_fixture |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
