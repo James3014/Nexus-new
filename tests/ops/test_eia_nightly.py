@@ -1761,3 +1761,93 @@ def test_gate_checks_pause_and_cutoff(env, reason, setup) -> None:
     )
     night = env["app"].load("20261017")
     assert env["app"]._arm_gate(night, night["issues"]["12"]) == reason
+
+
+# --------------------------------------------------------------- ARMING reconciliation
+
+
+def _crash_after_label(env) -> dict[str, Any]:
+    """Arm #11 fully, then rewind the saved state to ARMING (a crash after the label)."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    assert "nexus:external-intelligence" in env["gh"].issues[11]["labels"]
+    night["issues"]["11"]["status"] = "ARMING"
+    env["app"].save(night)
+    return night
+
+
+@pytest.mark.parametrize("at", ["2026-10-17T00:35:00", "2026-10-17T06:30:00"])
+def test_arming_with_label_on_is_promoted_and_monitored(env, at) -> None:
+    env["app"].issue_cap_min = 600  # isolate recovery from the per-Issue cap
+    _crash_after_label(env)  # also after the cutoff: the Issue is live, harvest it
+    night = _dispatch(env, at)
+    entry = night["issues"]["11"]
+    assert entry["status"] == "ARMED" and len(entry["attempts"]) == 1
+    assert any(e["event"] == "arming_recovered" for e in night["events"])
+    att = entry["attempts"][-1]
+    _write_daemon_state(env, 11, att["identity_hash"], state="UNIT_REPAIR_REQUIRED")
+    night = _dispatch(env, at.replace(":35:", ":40:").replace(":30:", ":45:"))
+    assert night["issues"]["11"]["status"] == "ESCALATED"  # harvested normally
+
+
+def test_arming_recovery_with_older_night_pending_still_monitors(env) -> None:
+    _crash_after_label(env)
+    old = {
+        "schema": en.STATE_SCHEMA,
+        "night": "20261015",
+        "issues": {"9": {"issue": 9, "status": "HARD_STOPPING", "disarm_pending": True}},
+        "order": [9],
+        "started": {"ok": True},
+    }
+    env["app"].save(old)
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "ARMED"
+
+
+def test_arming_with_label_on_but_body_changed_is_disarmed_and_escalated(env) -> None:
+    _crash_after_label(env)
+    env["gh"].issues[11]["body"] += "\nedited"
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "ESCALATED"
+    assert "ARMING_RECOVERY_REFUSED" in entry["escalation"]["reason"]
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_arming_with_label_on_but_untrusted_edit_is_refused(env) -> None:
+    _crash_after_label(env)
+    env["gh"].issues[11]["edits"].append({
+        "editedAt": "2026-10-16T23:59:00Z",
+        "editor": {"login": "mallory", "__typename": "User"},
+    })
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_arming_with_label_on_and_queue_withdrawn(env) -> None:
+    _crash_after_label(env)
+    env["gh"].issues[11]["labels"].discard("eia:queue")
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "WITHDRAWN"
+    assert env["gh"].issues[11]["labels"] == set()
+
+
+def test_arming_without_label_after_cutoff_is_deferred_not_left_arming(env) -> None:
+    _started(env)
+    real = env["gh"].__call__
+
+    def no_label(argv):
+        if "--add-label" in argv and "nexus:external-intelligence" in argv:
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = no_label
+    _dispatch(env, "2026-10-17T05:55:00")
+    assert env["app"].load(NIGHT)["issues"]["11"]["status"] == "ARMING"
+    env["sys"].gh = real
+    night = _dispatch(env, "2026-10-17T06:05:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "RETRY_PENDING"
+    assert entry["attempts"][-1]["reason"] == "GATE:AFTER_CUTOFF"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]

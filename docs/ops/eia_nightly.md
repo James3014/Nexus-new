@@ -178,6 +178,19 @@ interrupted ARMING entry. The gate refuses to arm when any of these holds:
 The blocking reason is recorded once as an `arm_blocked` event, kept in the night state, and
 shown by `status` and in the morning report.
 
+An interrupted arming (state `ARMING`) is reconciled on every tick before the gate:
+
+- **Daemon label already on**, Issue bytes as written, and the trust check passes: the entry
+  is promoted to `ARMED` (`arming_recovered`), then watched and harvested normally, even
+  after the cutoff.
+- **Label on but the Issue changed or trust fails**: the label is removed and the entry is
+  escalated.
+- **Label on but `eia:queue` withdrawn**: only the label is removed (`WITHDRAWN`).
+- **Label off**: arming resumes if the gate allows; otherwise the entry becomes
+  `RETRY_PENDING`.
+
+An entry is never left in `ARMING`.
+
 ## Install (operator only)
 
 Fill in the four templates `scripts/ops/com.nexus.eia-nightly-{prepare,start,dispatch,stop}.plist.template`.

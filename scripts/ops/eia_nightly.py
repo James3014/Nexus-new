@@ -1443,8 +1443,8 @@ class Nightly:
             return night
         try:
             stopping = self._stop_requested(night)
-            for entry in self._entries(night, "ARMING"):  # resume an interrupted arming
-                self._guarded(night, entry, self._gated_arm)
+            for entry in self._entries(night, "ARMING"):  # never left in ARMING
+                self._guarded(night, entry, self._reconcile_arming)
             for entry in self._entries(night, "ARMED"):
                 self._guarded(night, entry, self._harvest)
                 self.save(night)
@@ -1482,6 +1482,48 @@ class Nightly:
         if self._foreign_in_flight(night, own=int(entry["issue"])):
             return "FOREIGN_IN_FLIGHT"
         return ""
+
+    def _reconcile_arming(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
+        """An interrupted arming, reconciled before the gate on every tick:
+
+        * daemon label already on, Issue bytes as written, trust intact -> ARMED (the Issue
+          is live, so it is monitored and harvested even after the cutoff);
+        * label on but the Issue changed, or trust fails -> remove the label, escalate;
+        * label off -> resume arming if the gate allows, otherwise RETRY_PENDING.
+        """
+        issue = _issue_number(entry["issue"])
+        if not entry.get("attempts"):
+            entry["status"] = "PREPARED"
+            return
+        att = entry["attempts"][-1]
+        view = self._view_issue(issue)
+        if L_EIA in view["label_names"]:
+            if L_QUEUE not in view["label_names"]:
+                self._labels(issue, remove=[L_EIA])
+                att.update(
+                    result="withdrawn", reason="QUEUE_LABEL_REMOVED", finished_at=self._iso()
+                )
+                entry["status"] = "WITHDRAWN"
+                self._event(night, "withdrawn", issue=issue)
+                return
+            trusted, why = self._queue_trusted(issue)
+            same = self._issue_matches(view, att) and self._body_identity(issue, view) == att.get(
+                "identity_hash"
+            )
+            if same and trusted:
+                entry["status"] = "ARMED"
+                self._event(night, "arming_recovered", issue=issue, attempt=att.get("attempt"))
+                return
+            return self._escalate(
+                night, entry, "model", f"ARMING_RECOVERY_REFUSED:{why or 'ISSUE_CHANGED'}"
+            )
+        reason = self._arm_gate(night, entry)
+        if reason:
+            att.update(result="not_armed", reason=f"GATE:{reason}", finished_at=self._iso())
+            entry["status"] = "RETRY_PENDING"
+            self._event(night, "arming_deferred", issue=issue, reason=reason)
+            return
+        self._arm(night, entry)
 
     def _gated_arm(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
         reason = self._arm_gate(night, entry)
