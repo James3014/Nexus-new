@@ -540,3 +540,23 @@ def test_cache_cleanup_failure_after_write_failure_is_best_effort(
     monkeypatch.setattr(daemon.Path, "unlink", unlink_boom)
     assert daemon._cached_comments(tmp_path, REPO, _issue(), now=T0) == [{"body": "fetch-1"}]
     assert not _cache_file(tmp_path).exists()
+
+
+@pytest.mark.parametrize("rows", [[None], [{"body": "ok"}, "text"], [[]]])
+def test_cached_non_dict_comment_rows_refetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: list[Any]
+) -> None:
+    fetch = _Fetcher(monkeypatch)
+    path = _cache_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({
+            "updated_at": UPDATED,
+            "fetched_at": "2026-10-15T12:00:00Z",
+            "comment_count": 1,
+            "comments": rows,
+        }),
+        encoding="utf-8",
+    )
+    assert daemon._cached_comments(tmp_path, REPO, _issue(), now=T0) == [{"body": "fetch-1"}]
+    assert len(fetch.calls) == 1

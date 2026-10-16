@@ -183,6 +183,7 @@ def _cached_comments(
             and cached.get("comment_count") == listed_count
             and 0 <= (now - fetched_at).total_seconds() < COMMENT_CACHE_TTL_SECONDS
             and isinstance(cached.get("comments"), list)
+            and all(isinstance(item, dict) for item in cached["comments"])
         ):
             return cached["comments"]
     except (OSError, ValueError, KeyError, TypeError):
