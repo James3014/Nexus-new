@@ -40,81 +40,106 @@ MODEL_OUTPUT_KEYS = frozenset({"response", "generated_text"})
 
 # Call sites that match the model-output heuristic but parse something that is
 # NOT model text. Key: (path, enclosing qualname, unparsed json.load(s) argument).
-# Each entry must still match a real call site (stale entries fail the test).
+# Value: the site-specific reason. Each entry must still match a real call site (stale
+# entries fail the test) and carry a specific reason (test_allowlist_entries_are_real_and_justified).
 NON_MODEL_JSON_PARSE_ALLOWLIST = {
-    # HTTP envelope: Gemini generateContent body; model text is then read from candidates[].parts[].text.
-    ("nexus/pilot_cli/gemini_client.py", "compress_long_gemini_answer", "response.text"),
-    ("nexus/pilot_cli/gemini_client.py", "chat_via_gemini_api", "response.text"),
-    # HTTP envelope: Ollama /api/embeddings body (embedding vector only).
-    ("nexus/services/memory_repository.py", "OllamaEmbeddingProvider.embed", "response.read()"),
-    # HTTP envelope: Ollama /api/generate body; result["response"] is used as plain text, never json-parsed.
-    ("nexus/services/memory_repository.py", "MemoryRepository.compress_to_aaak", "response.read()"),
-    # HTTP envelope: Ollama /api/embeddings body (embedding vector only).
-    ("nexus/core/vector_rag.py", "VectorRAG._get_embedding", "response.read()"),
-    # HTTP envelope: localhost JSON POST helper used for the embedding server.
+    ("nexus/pilot_cli/gemini_client.py", "compress_long_gemini_answer", "response.text"): (
+        "HTTP envelope: Gemini generateContent body; model text is then read from candidates[].parts[].text."
+    ),
+    ("nexus/pilot_cli/gemini_client.py", "chat_via_gemini_api", "response.text"): (
+        "HTTP envelope: Gemini generateContent body; model text is then read from candidates[].parts[].text."
+    ),
+    ("nexus/services/memory_repository.py", "OllamaEmbeddingProvider.embed", "response.read()"): (
+        "HTTP envelope: Ollama /api/embeddings body (embedding vector only)."
+    ),
+    (
+        "nexus/services/memory_repository.py",
+        "MemoryRepository.compress_to_aaak",
+        "response.read()",
+    ): (
+        'HTTP envelope: Ollama /api/generate body; result["response"] is used as plain text, never json-parsed.'
+    ),
+    ("nexus/core/vector_rag.py", "VectorRAG._get_embedding", "response.read()"): (
+        "HTTP envelope: Ollama /api/embeddings body (embedding vector only)."
+    ),
     (
         "nexus/services/local_heal/lesson_embedding.py",
         "post_local_json",
         "response.read().decode('utf-8')",
-    ),
-    # HTTP envelope: Ollama /api/tags inventory probe (model names only).
+    ): ("HTTP envelope: localhost JSON POST helper used for the embedding server."),
     (
         "nexus/services/local_heal/targeted_fallback.py",
         "TargetedFallbackGate.should_fallback",
         "response.read().decode('utf-8')",
+    ): ("HTTP envelope: Ollama /api/tags inventory probe (model names only)."),
+    ("nexus/engine/llm_judge_providers.py", "OllamaJudgeProvider._chat", "raw"): (
+        "HTTP envelope: Ollama /api/chat body (#1985); the model text in message.content is parsed separately by _parse_json_object."
     ),
-    # HTTP envelope: Ollama /api/chat body (#1985); the model text in message.content
-    # is parsed separately by _parse_json_object.
-    ("nexus/engine/llm_judge_providers.py", "OllamaJudgeProvider._chat", "raw"),
-    # Deep copy of the Core verifier's coverage block (#2247): a json round-trip of a
-    # Mapping from the Core host response, not model output.
-    ("nexus/orchestrator/ambient_core.py", "build_core_verdict", "json.dumps(raw_coverage)"),
-    # HTTP envelope: JEV structured-answer API body (answers/usage), schema-checked field by field below.
-    ("nexus/research/hybrid_replication_live.py", "_jev_request", "response.read()"),
-    # File read: local_assist response.json receipt written by the executor, not raw model text.
+    ("nexus/orchestrator/ambient_core.py", "build_core_verdict", "json.dumps(raw_coverage)"): (
+        "Deep copy of the Core verifier's coverage block (#2247): a json round-trip of a Mapping from the Core host response, not model output."
+    ),
+    ("nexus/research/hybrid_replication_live.py", "_jev_request", "response.read()"): (
+        "HTTP envelope: JEV structured-answer API body (answers/usage), schema-checked field by field below."
+    ),
     (
         "nexus/services/product_capability_canary_runner.py",
         "run_production_canary",
         "response_path.read_text(encoding='utf-8')",
+    ): (
+        "File read: local_assist response.json receipt written by the executor, not raw model text."
     ),
-    # File read: execution receipt JSON written by LocalAssistService (receipt_path), not raw model text.
     (
         "nexus/services/local_assist_advisor_canary.py",
         "run_advisor_canary",
         "Path(response.receipt_path).read_text(encoding='utf-8')",
+    ): (
+        "File read: execution receipt JSON written by LocalAssistService (receipt_path), not raw model text."
     ),
-    # Measurement: the Apple FM structured-JSON probe scores whether the model emits strict JSON;
-    # a bare json.loads is the measurement itself (a sanctioned lenient parse would hide failures).
     (
         "nexus/calibration/provider_adoption/apple_fm_adapter.py",
         "AppleFMCandidateAdapter._run_structured_json_probe.semantic_validator",
         "output_text",
+    ): (
+        "Measurement: the Apple FM structured-JSON probe scores whether the model emits strict JSON; a bare json.loads is the measurement itself (a sanctioned lenient parse would hide failures)."
     ),
-    # File read: pending-manifest JSON this service wrote itself (lock-file bytes under flock); no model text.
     (
         "nexus/app/nightshift_runner_service.py",
         "AutoResearchNightShift._append_to_pending_manifest",
         "content",
+    ): (
+        "File read: pending-manifest JSON this service wrote itself (lock-file bytes under flock); no model text."
     ),
-    # State round-trip: json_str is the output of MentalSnapshot.serialize() (json.dumps of self.mind); no model text.
-    ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str"),
-    # File read: research report JSON written by the research subprocess to report_path; no model text.
-    ("nexus/engine/pipeline_research.py", "PipelineResearchMixin._load_research_report", "content"),
-    # File read: on-disk embedding cache (vectors plus _model_version) written by EmbeddingCache itself.
-    ("nexus/learning/embedding_cache.py", "EmbeddingCache._load", "content"),
-    # File read: JSON evidence block inside a stored SKILL.md under skills_dir (written by the skill store), not a model response.
-    ("nexus/learning/knowledge_index.py", "KnowledgeIndex.load_evidence", "json_str"),
-    # HTTP body: lessons JSON downloaded from the Arweave gateway by tx id (data this system uploaded); not model text.
-    ("nexus/services/arweave_uploader.py", "download_lessons_from_arweave", "content"),
-    # CLI envelope: `gemini --output-format json` stdout; the model text is read from its output/response
-    # field below, and raw_stdout is only the fallback text when the envelope does not parse.
-    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_cli", "raw_stdout"),
-    # HTTP envelope: Ollama /api/chat|/api/generate body; model text is output_text, parsed later by _parse_json_result.
-    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_ollama", "raw_body"),
-    # HTTP envelope: Ollama /api/generate body; the model text from payload["response"] goes through robust_json_parse.
-    ("nexus/services/s2t_strict.py", "S2T3BAdvisor._advise_via_ollama", "raw_body"),
-    # MCP JSON-RPC envelope: Serena tool-result text read via read_response(); a tool result, not model text.
-    ("nexus/services/mcp_delegator.py", "MCPDelegator.delegate_mcp", "text"),
+    ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str"): (
+        "State round-trip: json_str is the output of MentalSnapshot.serialize() (json.dumps of self.mind); no model text."
+    ),
+    (
+        "nexus/engine/pipeline_research.py",
+        "PipelineResearchMixin._load_research_report",
+        "content",
+    ): (
+        "File read: research report JSON written by the research subprocess to report_path; no model text."
+    ),
+    ("nexus/learning/embedding_cache.py", "EmbeddingCache._load", "content"): (
+        "File read: on-disk embedding cache (vectors plus _model_version) written by EmbeddingCache itself."
+    ),
+    ("nexus/learning/knowledge_index.py", "KnowledgeIndex.load_evidence", "json_str"): (
+        "File read: JSON evidence block inside a stored SKILL.md under skills_dir (written by the skill store), not a model response."
+    ),
+    ("nexus/services/arweave_uploader.py", "download_lessons_from_arweave", "content"): (
+        "HTTP body: lessons JSON downloaded from the Arweave gateway by tx id (data this system uploaded); not model text."
+    ),
+    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_cli", "raw_stdout"): (
+        "CLI envelope: `gemini --output-format json` stdout; the model text is read from its output/response field below, and raw_stdout is only the fallback text when the envelope does not parse."
+    ),
+    ("nexus/services/gateway.py", "BattlesuitGateway._ask_via_ollama", "raw_body"): (
+        "HTTP envelope: Ollama /api/chat|/api/generate body; model text is output_text, parsed later by _parse_json_result."
+    ),
+    ("nexus/services/s2t_strict.py", "S2T3BAdvisor._advise_via_ollama", "raw_body"): (
+        'HTTP envelope: Ollama /api/generate body; the model text from payload["response"] goes through robust_json_parse.'
+    ),
+    ("nexus/services/mcp_delegator.py", "MCPDelegator.delegate_mcp", "text"): (
+        "MCP JSON-RPC envelope: Serena tool-result text read via read_response(); a tool result, not model text."
+    ),
 }
 
 
@@ -241,6 +266,28 @@ def find_model_output_json_parses(source: str, rel_path: str) -> list[tuple[str,
     return findings
 
 
+MIN_REASON_CHARS = 20
+
+
+def validate_allowlist(allowlist) -> list[str]:
+    """Problems with allowlist entries: weak reason, missing file/function, or no parse of the argument."""
+    problems: list[str] = []
+    for (path, qualname, argument), reason in allowlist.items():
+        label = f"{path}::{qualname}::{argument}"
+        if not isinstance(reason, str) or len(reason.strip()) < MIN_REASON_CHARS:
+            problems.append(f"{label}: reason missing or shorter than {MIN_REASON_CHARS} chars")
+        file_path = REPO_ROOT / path
+        if not file_path.exists():
+            problems.append(f"{label}: file does not exist")
+            continue
+        found = find_model_output_json_parses(file_path.read_text(encoding="utf-8"), path)
+        if not any(hit[1] == qualname for hit in found):
+            problems.append(f"{label}: no flagged json parse inside that function")
+        elif not any(hit[1] == qualname and hit[2] == argument for hit in found):
+            problems.append(f"{label}: no json parse of that argument inside the function")
+    return problems
+
+
 class TestLegacyPathBlocked(unittest.TestCase):
     """
     [NEXUS v26] TDD Phase B: Legacy Path Blocked Tests
@@ -288,7 +335,7 @@ class TestLegacyPathBlocked(unittest.TestCase):
             [],
             f"Legacy path detected: {violations}. Use nexus.contracts.model_output_json (SemanticAdapter.parse_json_object) instead.",
         )
-        stale = NON_MODEL_JSON_PARSE_ALLOWLIST - {f[:3] for f in found}
+        stale = set(NON_MODEL_JSON_PARSE_ALLOWLIST) - {f[:3] for f in found}
         self.assertEqual(
             stale, set(), f"Stale allowlist entries (call site moved or removed): {sorted(stale)}"
         )
@@ -318,24 +365,21 @@ class TestLegacyPathBlocked(unittest.TestCase):
             with self.subTest(quiet=quiet):
                 self.assertEqual(find_model_output_json_parses(source, "synthetic/q.py"), [])
 
-    def test_allowlist_is_exact_per_site(self):
-        """#2174: an allowlisted site is matched by (path, qualname, argument), nothing broader."""
-        source = "import json\ndef f(content):\n    return json.loads(content)\n"
-        (hit,) = find_model_output_json_parses(source, "synthetic/site.py")
-        allow = {hit[:3]}
-        self.assertIn(hit[:3], allow)
-        # Same variable in another function, another file, or another argument is not covered.
-        other_func = "import json\ndef g(content):\n    return json.loads(content)\n"
-        (other,) = find_model_output_json_parses(other_func, "synthetic/site.py")
-        self.assertNotIn(other[:3], allow)
-        (moved,) = find_model_output_json_parses(source, "synthetic/elsewhere.py")
-        self.assertNotIn(moved[:3], allow)
-        # Every real entry names a file that still exists and carries a non-empty reason in source.
-        text = Path(__file__).read_text(encoding="utf-8")
-        for path, qualname, argument in NON_MODEL_JSON_PARSE_ALLOWLIST:
-            with self.subTest(entry=(path, qualname, argument)):
-                self.assertTrue((REPO_ROOT / path).exists(), path)
-                self.assertIn(f'"{qualname}"', text)
+    def test_allowlist_entries_are_real_and_justified(self):
+        """#2174: every entry has a specific reason, names a real function, and a json parse on its argument."""
+        problems = validate_allowlist(NON_MODEL_JSON_PARSE_ALLOWLIST)
+        self.assertEqual(problems, [])
+
+    def test_allowlist_validator_rejects_bad_entries(self):
+        """Mutants of a real entry (empty reason, wrong qualname, wrong argument, wrong file) must fail."""
+        key = ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str")
+        good = "State round-trip of MentalSnapshot.serialize(), not model text."
+        self.assertEqual(validate_allowlist({key: good}), [])
+        self.assertTrue(validate_allowlist({key: ""}))
+        self.assertTrue(validate_allowlist({key: "too short"}))
+        self.assertTrue(validate_allowlist({(key[0], "MentalSnapshot.nope", key[2]): good}))
+        self.assertTrue(validate_allowlist({(key[0], key[1], "other_arg"): good}))
+        self.assertTrue(validate_allowlist({("nexus/core/missing_file.py", key[1], key[2]): good}))
 
     def test_no_manual_state_mutation(self):
         """禁止在 Python 中手動修改 flow_state (應經由 Rust TransitionGuard)"""

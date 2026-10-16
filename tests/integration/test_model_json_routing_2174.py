@@ -118,8 +118,21 @@ def test_direct_gemini_valid_forms(output_text):
 
 
 @pytest.mark.parametrize(
-    "output_text", ["no json at all", "{broken", "[1, 2]", '"s"', "null", "{'a': 1}"]
+    "output_text", ["no json at all", "{broken", "[1, 2]", '"s"', "null", "{'a': 1}", "} {"]
 )
 def test_direct_gemini_bad_input_raises(output_text):
-    with pytest.raises(Exception):  # noqa: B017 - caller catches Exception; type may differ
+    # The pre-routing code raised JSONDecodeError (a ValueError) for unparseable text and
+    # TypeError for valid non-object JSON (item assignment on a list/str/None).
+    with pytest.raises((ValueError, TypeError)):
         _direct_gemini(output_text)
+
+
+def test_reversed_braces_fail_closed_in_all_slice_parsers():
+    """Text with a closing brace before the opening one (start > end) yields an empty slice."""
+    raw = "} {"
+    assert _parse_automem_response(raw) == []
+    assert _parse_verifier_response(raw) == ("fail", 0.0)
+    assert _parse_advisor_response(raw) == raw
+    data, returned_raw = _parse(raw)
+    assert returned_raw == raw
+    assert "Parse Error" in str(data)
