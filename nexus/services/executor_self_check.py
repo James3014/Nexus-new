@@ -50,14 +50,19 @@ EXECUTOR_RESOLUTION_ERROR = "error"
 # anchored, bounded patterns (linear time).  Credentials after a sensitive key,
 # auth schemes, known token prefixes, URL userinfo, PEM bodies and long
 # base64/hex-like tokens become ``[REDACTED]``; a long path or SHA can be
-# redacted too, which is accepted.  Then control characters are replaced, CI
-# workflow commands neutralised, and the result truncated.
+# redacted too, which is accepted.  URLs are split on ``/ ? & #`` and every
+# piece goes through the same rules.  A token cut by the raw cap is dropped.
+# Then control characters are replaced, CI workflow commands neutralised, and
+# the result truncated.  Identifier fields (exception type, capability name,
+# registry key, executor qualname) use ``_sanitize_identifier`` instead: no
+# secret rules, so ``OAuth2AuthenticationError`` stays readable.
 _RESOLUTION_RAW_MAX = 2000
 _RESOLUTION_TEXT_MAX = 200
 _RESOLUTION_REDACTED = "[REDACTED]"
 _RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
-_RESOLUTION_SPLIT = re.compile(r"(\s+|[\"'{}\[\],;\\])")
-_RESOLUTION_SEPARATOR = re.compile(r"\s+|[\"'{}\[\],;\\]")
+_RESOLUTION_SPLIT = re.compile(r"(\s+|[\"'{}\[\](),;<>\\])")
+_RESOLUTION_SEPARATOR = re.compile(r"\s+|[\"'{}\[\](),;<>\\]")
+_RESOLUTION_URL_SPLIT = re.compile(r"([/?&#])")
 _RESOLUTION_SENSITIVE_KEY = re.compile(
     r"(?i)token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key"
     r"|authorization|bearer|cookie|credential"
@@ -96,9 +101,17 @@ def _redact_resolution_token(token: str) -> tuple[str, int, bool]:
         start = scheme_end + 3
         at = token.find("@", start)
         slash = token.find("/", start)
+        rest = token[start:]
         if at > start and (slash == -1 or at < slash):
-            return token[:start] + _RESOLUTION_REDACTED + token[at:], 0, False
-        return token, 0, False
+            rest = _RESOLUTION_REDACTED + token[at:]
+        pieces = _RESOLUTION_URL_SPLIT.split(rest)
+        cleaned = [
+            piece
+            if not piece or piece in "/?&#" or piece.startswith(_RESOLUTION_REDACTED)
+            else _redact_resolution_token(piece)[0]
+            for piece in pieces
+        ]
+        return token[:start] + "".join(cleaned), 0, False
     if _resolution_secret_value(token) and not _resolution_sensitive_key(token):
         return _RESOLUTION_REDACTED, 0, False
     seps = [i for i in (token.find("="), token.find(":")) if i > 0]
@@ -168,15 +181,29 @@ def _redact_resolution_secrets(text: str) -> str:
     return "".join(out)
 
 
-def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
-    """Redacted gist: raw cap, per-token redaction, printable ASCII, CI-safe, truncated."""
-    text = _redact_resolution_secrets(str(value)[:_RESOLUTION_RAW_MAX])
+def _resolution_ci_safe(text: str, limit: int) -> str:
     text = _RESOLUTION_UNSAFE_CHARS.sub("?", text)
     # Neutralise CI workflow commands (``::error::``, ``::add-mask::``, ``##[group]``).
     text = text.replace("::", ": :").replace("##[", "# #[")
     if len(text) > limit:
         text = text[: max(0, limit - 3)] + "..."
     return text
+
+
+def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> str:
+    """Redacted gist: raw cap, per-token redaction, printable ASCII, CI-safe, truncated."""
+    raw = str(value)
+    if len(raw) > _RESOLUTION_RAW_MAX:
+        raw = raw[:_RESOLUTION_RAW_MAX]
+        # Drop the token the cap cut through: its remainder could escape every rule.
+        cut = max((m.end() for m in _RESOLUTION_SEPARATOR.finditer(raw)), default=0)
+        raw = raw[:cut] + "..."
+    return _resolution_ci_safe(_redact_resolution_secrets(raw), limit)
+
+
+def _sanitize_identifier(value: Any, limit: int = 120) -> str:
+    """Identifier fields: printable ASCII, CI-safe, bounded; never secret-redacted."""
+    return _resolution_ci_safe(str(value)[:_RESOLUTION_RAW_MAX], limit)
 
 
 # --- end resolution-text sanitizer ---
@@ -222,9 +249,9 @@ SELF_CHECK_ORIGIN = "nexus.services.executor_self_check"
 
 def _error_reason(name: str, key: str, exc: BaseException, origin: str) -> dict[str, str]:
     return {
-        "capability": _sanitize_resolution_text(name, 120),
-        "registry_key": _sanitize_resolution_text(key, 120),
-        "error_type": _sanitize_resolution_text(type(exc).__qualname__, 120),
+        "capability": _sanitize_identifier(name),
+        "registry_key": _sanitize_identifier(key),
+        "error_type": _sanitize_identifier(type(exc).__qualname__),
         "error_message": _sanitize_resolution_text(exc),
         "resolver_origin": origin,
     }
@@ -308,8 +335,8 @@ def _resolve_all(report: dict[str, Any], required: Sequence[str]) -> None:
             executor_name = (
                 None
                 if executor is None
-                else _sanitize_resolution_text(
-                    getattr(executor, "__qualname__", None) or type(executor).__qualname__
+                else _sanitize_identifier(
+                    getattr(executor, "__qualname__", None) or type(executor).__qualname__, 200
                 )
             )
         except Exception as exc:

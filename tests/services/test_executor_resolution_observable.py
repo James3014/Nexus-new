@@ -557,3 +557,105 @@ def test_warnings_capped_per_capability_and_type(monkeypatch, caplog):
             registry.executor_resolution_status("pregate")
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == registry._EXECUTOR_RESOLUTION_WARN_MAX
+
+
+_ROUND3_CASES = [
+    (
+        "url query token",
+        f"GET https://example.com/api?token={_GH_TOKEN} failed",
+        [_GH_TOKEN],
+        ["https://example.com/api?token=", "failed"],
+    ),
+    (
+        "url query password",
+        "http://host/auth?password=supersecret&x=1#frag",
+        ["supersecret"],
+        ["http://host/auth?password=", "&x=1#frag"],
+    ),
+    ("url query api key", f"https://h/v1?api_key={_OPENAI}", [_OPENAI], ["https://h/v1?api_key="]),
+    ("url path blob", f"https://h/{_GH_TOKEN}/x", [_GH_TOKEN], ["https://h/", "/x"]),
+    ("token in parens", f"failed with token ({_GH_TOKEN})", [_GH_TOKEN], ["failed with token ("]),
+    (
+        "bearer in parens",
+        "error in (Bearer my_token_12345)",
+        ["my_token_12345"],
+        ["error in (Bearer"],
+    ),
+    ("angle brackets", f"<{_GH_TOKEN}>", [_GH_TOKEN], ["<", ">"]),
+    (
+        "plain url",
+        "https://docs.example.com/path/page.html?q=1",
+        [],
+        ["https://docs.example.com/path/page.html?q=1"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden", "kept"),
+    [case[1:] for case in _ROUND3_CASES],
+    ids=[case[0].replace(" ", "_") for case in _ROUND3_CASES],
+)
+def test_redaction_table_round3(raw, forbidden, kept):
+    out = registry._sanitize_resolution_text(raw, 2000)
+    assert out == executor_self_check._sanitize_resolution_text(raw, 2000)
+    for value in forbidden:
+        assert value not in out, (value, out)
+    for value in kept:
+        assert value in out, (value, out)
+
+
+def test_raw_cap_drops_the_token_it_cuts():
+    partial_key = "AK" + "IA1234567890ABCDEF"
+    raw = " " * 1985 + partial_key
+    for sanitize in (
+        registry._sanitize_resolution_text,
+        executor_self_check._sanitize_resolution_text,
+    ):
+        out = sanitize(raw, 5000)
+        assert "AK" + "IA1234567890A" not in out
+        assert "1234567890" not in out
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "OAuth2AuthenticationError",
+        "Http404NotFoundException",
+        "harness_preflight_sensor_v2",
+        "LocalModelExecutorV2",
+    ],
+)
+def test_identifier_fields_are_never_secret_redacted(identifier):
+    assert registry._sanitize_identifier(identifier) == identifier
+    assert executor_self_check._sanitize_identifier(identifier) == identifier
+    error_class = type(identifier, (RuntimeError,), {})
+    reason = registry.record_executor_resolution_error(
+        identifier, error_class("boom"), origin="test", registry_key=identifier
+    )
+    assert reason["capability"] == identifier
+    assert reason["registry_key"] == identifier
+    assert reason["error_type"] == identifier
+    assert identifier in registry.last_executor_resolution_errors()
+
+
+def test_error_recorded_under_long_versioned_name_is_cleared_by_name():
+    name = "harness_preflight_sensor_v2"
+    registry.record_executor_resolution_error(
+        name, RuntimeError("boom"), origin="test", registry_key=name
+    )
+    assert registry.executor_resolution_error(name) is not None
+    assert "[REDACTED]" not in registry.last_executor_resolution_errors()
+    registry._clear_resolution_error(name)
+    assert registry.executor_resolution_error(name) is None
+    assert registry.last_executor_resolution_errors() == {}
+
+
+def test_executor_qualname_is_an_identifier(monkeypatch):
+    def LocalModelExecutorV2(plan: Any, statement: str) -> Any:  # noqa: N802
+        return None
+
+    monkeypatch.setattr(executor_registry, "get_executor", lambda key: LocalModelExecutorV2)
+    status = registry.executor_resolution_status("pregate")
+    assert status["status"] == "resolved"
+    assert status["executor"].endswith("LocalModelExecutorV2")
