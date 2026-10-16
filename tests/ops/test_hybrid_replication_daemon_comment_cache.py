@@ -523,3 +523,20 @@ def test_ingest_with_unwritable_cache_gives_the_same_report(
     assert gets_b == 7
     assert json.dumps(report_a, sort_keys=True) == json.dumps(report_b, sort_keys=True)
     assert _state_bytes(tmp_path / "a") == _state_bytes(root_b)
+
+
+def test_cache_cleanup_failure_after_write_failure_is_best_effort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Fetcher(monkeypatch)
+
+    def boom(src: Any, dst: Any) -> None:
+        raise OSError("replace failed")
+
+    def unlink_boom(self: Path, missing_ok: bool = False) -> None:
+        raise OSError("unlink failed")
+
+    monkeypatch.setattr(daemon.os, "replace", boom)
+    monkeypatch.setattr(daemon.Path, "unlink", unlink_boom)
+    assert daemon._cached_comments(tmp_path, REPO, _issue(), now=T0) == [{"body": "fetch-1"}]
+    assert not _cache_file(tmp_path).exists()

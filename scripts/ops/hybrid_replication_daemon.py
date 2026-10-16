@@ -146,12 +146,19 @@ def _write_comment_cache(path: Path, payload: dict[str, Any]) -> None:
         os.replace(tmp_name, path)
     except OSError:
         # Best effort: the cache is an optimisation, ingest continues with fetched comments.
-        if tmp_name is not None:
-            Path(tmp_name).unlink(missing_ok=True)
+        _discard_temp(tmp_name)
     except BaseException:
-        if tmp_name is not None:
-            Path(tmp_name).unlink(missing_ok=True)
+        _discard_temp(tmp_name)
         raise
+
+
+def _discard_temp(tmp_name: str | None) -> None:
+    if tmp_name is None:
+        return
+    try:
+        Path(tmp_name).unlink(missing_ok=True)
+    except OSError:
+        pass  # a leftover *.tmp is harmless: readers only open <n>.json
 
 
 def _cached_comments(
