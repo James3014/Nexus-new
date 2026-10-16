@@ -2486,3 +2486,57 @@ def test_cline_adapter_request_profile_denies_cline_customizations(monkeypatch, 
     for name in (".cline", ".clinerules"):
         assert f'(literal "{real_target}/{name}")' in profile
         assert f'(subpath "{real_target}/{name}")' in profile
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Tool approval requires an interactive session, but this session is non-interactive.",
+        "Tool was not executed",
+        "User rejected the tool call",
+    ],
+)
+def test_cline_skip_reason_suffix_denial_is_non_delivery(reason):
+    """#2332: every cline 3.0.69 skip reason ends with a fixed suffix; any of them
+    on a tool ``content_end`` error is a denial even when the run ends ``stop``."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    skip = f"{reason} -- NOT a tool or system failure. Clarify with user before proceeding."
+    event = {
+        "type": "agent_event",
+        "event": {
+            "type": "content_end",
+            "contentType": "tool",
+            "toolName": "editor",
+            "output": {"error": skip},
+            "error": json.dumps({"error": skip}),
+        },
+    }
+    stdout = (json.dumps(event) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+def test_cline_skip_suffix_in_tool_result_or_model_text_is_not_a_denial():
+    """The suffix counts only in a tool's error fields, never in result/model text."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    suffix = "x -- NOT a tool or system failure. Clarify with user before proceeding."
+    tool_result = {
+        "type": "agent_event",
+        "event": {
+            "type": "content_end",
+            "contentType": "tool",
+            "toolName": "read_file",
+            "output": {"result": suffix},
+        },
+    }
+    text = {
+        "type": "agent_event",
+        "event": {"type": "content_end", "contentType": "text", "text": suffix},
+    }
+    stdout = (json.dumps(tool_result) + "\n" + json.dumps(text) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") is None

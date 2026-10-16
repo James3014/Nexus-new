@@ -298,6 +298,10 @@ CLINE_PERMISSION_MODE = "auto_approve_false"
 # ``output.error`` is ``Tool "<name>" requires approval in a TTY session -- ...``
 # and the run may still end with ``finishReason: "stop"``.
 _CLINE_APPROVAL_REQUIRED = "requires approval in a tty session"
+# Every cline 3.0.69 tool skip reason ("Tool approval requires an interactive
+# session ...", "Tool was not executed", "User rejected the tool call", the TTY
+# text above) ends with this fixed suffix (#2332).
+_CLINE_SKIP_SUFFIX = "-- not a tool or system failure"
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
 # Only a finish reason observed from cline 3.0.69 as a clean end counts as
 # delivery; any other, unknown or missing value is non-delivery.
@@ -319,7 +323,9 @@ def _cline_tool_error_denied(event: dict[str, Any]) -> bool:
     if isinstance(output, dict):
         candidates.append(output.get("error"))
     return any(
-        isinstance(item, str) and _CLINE_APPROVAL_REQUIRED in item.lower() for item in candidates
+        isinstance(item, str)
+        and (_CLINE_APPROVAL_REQUIRED in item.lower() or _CLINE_SKIP_SUFFIX in item.lower())
+        for item in candidates
     )
 
 
@@ -355,7 +361,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     """Typed non-delivery reason for a Cline run that exited 0, else ``None``.
 
     Delivery requires a JSON ``run_result`` event whose ``finishReason`` is
-    not ``error``; any denied tool action makes the run non-delivery (#2195).
+    ``stop``; any denied tool action makes the run non-delivery (#2195).
     A denial is a text marker on stderr or a structured stdout event; model
     text that merely quotes a marker is not a denial.
     """
