@@ -193,3 +193,61 @@ def test_head_mismatch_fails_closed(tmp_path: Path) -> None:
         args, capture_output=True, text=True, env={"PATH": f"{bindir}:/usr/bin:/bin"}
     )
     assert proc.returncode == 1 and "HEAD_MOVED" in proc.stdout
+
+
+def _run_sibling_publish(
+    tmp_path: Path, output: str, rc: int, gh_rc: int = 0
+) -> tuple[int, str, str]:
+    """Execute the real sibling publish step under `bash -e` with fake python3/gh.
+
+    The fake python3 answers only the bindings script and fails every other call,
+    so the stop-token fallback is exercised too.
+    """
+    import os
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "python3").write_text(
+        '#!/bin/sh\ncase "$*" in *sibling_bindings_check.py*) ;; *) exit 1;; esac\n'
+        f"cat <<'OUT'\n{output}\nOUT\nexit {rc}\n",
+        encoding="utf-8",
+    )
+    posted = tmp_path / "posted.txt"
+    posted.write_text("", encoding="utf-8")
+    (bindir / "gh").write_text(
+        f'#!/bin/sh\necho "$@" >> {posted}\nexit {gh_rc}\n', encoding="utf-8"
+    )
+    for tool in ("python3", "gh"):
+        (bindir / tool).chmod(0o755)
+    run = _yaml(REUSABLE)["jobs"]["bindings"]["steps"][-1]["run"]
+    env = {
+        "PATH": f"{bindir}:/usr/bin:/bin",
+        "RUNNER_TEMP": str(tmp_path),
+        "REPO": "o/r",
+        "PR": "1",
+        "HEAD_SHA": "a" * 40,
+        "RUN_URL": "u",
+        "CONTEXT": "Bindings preflight (default branch)",
+        "DEFAULT_BRANCH": "main",
+        "HOME": os.environ.get("HOME", str(tmp_path)),
+    }
+    proc = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True)
+    return proc.returncode, posted.read_text(encoding="utf-8"), proc.stdout
+
+
+def test_sibling_publish_step_under_bash_e(tmp_path: Path) -> None:
+    import re
+
+    rc, posted, out = _run_sibling_publish(tmp_path / "pass", "PASS  bindings: intents=[]", 0)
+    assert rc == 0 and "state=success" in posted
+    # python3 failed for the token, so the /dev/urandom fallback produced one
+    assert re.search(r"^::stop-commands::[0-9a-f]{32}$", out, re.MULTILINE)
+    rc, posted, _ = _run_sibling_publish(tmp_path / "fail", "FAIL  bindings [X]: bad", 1)
+    assert rc == 1 and "state=failure" in posted
+    rc, posted, _ = _run_sibling_publish(tmp_path / "skip", "SKIP  bindings: nothing", 0)
+    assert rc == 1 and "state=failure" in posted and "state=success" not in posted
+
+
+def test_sibling_publish_step_fails_when_status_post_fails(tmp_path: Path) -> None:
+    rc, posted, _ = _run_sibling_publish(tmp_path, "PASS  bindings: intents=[]", 0, gh_rc=1)
+    assert "state=success" in posted and rc == 1

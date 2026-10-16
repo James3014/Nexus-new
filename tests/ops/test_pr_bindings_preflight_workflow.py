@@ -81,7 +81,9 @@ def test_status_goes_pending_before_any_step_can_fail() -> None:
     assert steps[pending]["env"]["CONTEXT"] == CONTEXT
 
 
-def _run_publish_step(tmp_path: Path, preflight_output: str, preflight_rc: int) -> tuple[int, str]:
+def _run_publish_step(
+    tmp_path: Path, preflight_output: str, preflight_rc: int, gh_rc: int = 0
+) -> tuple[int, str]:
     """Execute the real publish step with fake python3/gh on PATH."""
     import os
     import stat
@@ -93,7 +95,9 @@ def _run_publish_step(tmp_path: Path, preflight_output: str, preflight_rc: int) 
         f"#!/bin/sh\ncat <<'OUT'\n{preflight_output}\nOUT\nexit {preflight_rc}\n", encoding="utf-8"
     )
     posted = tmp_path / "posted.txt"
-    (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {posted}\n', encoding="utf-8")
+    (bindir / "gh").write_text(
+        f'#!/bin/sh\necho "$@" >> {posted}\nexit {gh_rc}\n', encoding="utf-8"
+    )
     for tool in ("python3", "gh"):
         (bindir / tool).chmod(stat.S_IRWXU)
     run = next(s for s in _job()["steps"] if s.get("name", "").startswith("Run the bindings"))
@@ -121,3 +125,9 @@ def test_publish_step_pass_fail_and_skip(tmp_path: Path) -> None:
         tmp_path / "skip", "SKIP  bindings: gate missing\nRESULT: PASS", 0
     )
     assert rc == 1 and "state=failure" in posted and "state=success" not in posted
+
+
+def test_publish_step_fails_when_status_post_fails(tmp_path: Path) -> None:
+    """A PASS whose final status POST fails must not leave the job green."""
+    rc, posted = _run_publish_step(tmp_path, "PASS  bindings: ok\nRESULT: PASS", 0, gh_rc=1)
+    assert "state=success" in posted and rc == 1
