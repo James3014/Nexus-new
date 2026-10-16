@@ -40,6 +40,11 @@ class FakeService:
         return {"actionable_count": 0, "tasks": []}
 
 
+@pytest.fixture(autouse=True)
+def _health_hmac_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_GATEWAY_HEALTH_HMAC_KEY_FILE", str(tmp_path / "health-hmac.key"))
+
+
 def _server(service=None):
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0),
@@ -115,7 +120,7 @@ def test_unauthenticated_health_has_no_absolute_paths():
         assert "executable_path" not in payload["github_observer"]
         assert [v for v in _walk_strings(payload) if v.startswith("/")] == []
         # Non-path identity fields the deployer and drift check rely on stay.
-        assert len(payload["repo_root_sha256"]) == 64
+        assert len(payload["repo_root_hmac_sha256"]) == 64
         assert "executable_sha256" in payload["github_observer"]
         assert payload["git_head"] and payload["status"] in {"ok", "degraded"}
         assert set(payload["core_provenance"]) == {
@@ -141,7 +146,7 @@ def test_authenticated_health_keeps_full_path_detail():
         )
         payload = json.loads(urllib.request.urlopen(request, timeout=3).read())
         assert payload["repo_root"].startswith("/")
-        assert "repo_root_sha256" not in payload
+        assert "repo_root_hmac_sha256" not in payload
         assert "executable_path" in payload["github_observer"]
     finally:
         server.shutdown()
@@ -161,7 +166,7 @@ def test_health_with_bad_bearer_gets_only_redacted_detail(authorization):
         request.add_header("Authorization", authorization)
         payload = json.loads(urllib.request.urlopen(request, timeout=3).read())
         assert "repo_root" not in payload
-        assert "repo_root_sha256" in payload
+        assert "repo_root_hmac_sha256" in payload
         assert "executable_path" not in payload["github_observer"]
     finally:
         server.shutdown()
@@ -509,3 +514,65 @@ def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_
         server.server_close()
         thread.join(timeout=3)
     assert not thread.is_alive()
+
+
+def test_unauthenticated_health_has_no_guessable_path_digest(monkeypatch, tmp_path):
+    """#2226: no value on /health may equal sha256 of a known host path."""
+    import hashlib
+
+    import scripts.ops.nexus_mcp_gateway_http as http_module
+
+    exe = tmp_path / "bin" / "gh"
+    observer = {
+        "schema": "nexus.github_observer_dependency.v1",
+        "ready": True,
+        "executable_path": str(exe),
+        "executable_sha256": "e" * 64,
+    }
+    monkeypatch.setattr(http_module, "github_observer_runtime_identity", lambda: dict(observer))
+    server, thread = _server()
+    try:
+        payload = json.loads(
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/health", timeout=3
+            ).read()
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+    guesses = {
+        hashlib.sha256(str(candidate).encode("utf-8")).hexdigest()
+        for candidate in (
+            http_module.LOADED_SOURCE_ROOT,
+            http_module.LOADED_SOURCE_ROOT.resolve(),
+            exe,
+            exe.resolve(),
+        )
+    }
+    assert guesses.isdisjoint(set(_walk_strings(payload)))
+    assert "repo_root_sha256" not in payload
+    assert "executable_path_sha256" not in payload["github_observer"]
+    assert len(payload["repo_root_hmac_sha256"]) == 64
+    assert len(payload["github_observer"]["executable_path_hmac_sha256"]) == 64
+
+
+def test_health_hmac_key_is_private_stable_and_not_overwritten(tmp_path):
+    from scripts.ops.gateway_health_hmac import (
+        HealthHmacKeyError,
+        load_or_create_key,
+        path_hmac,
+    )
+
+    key_file = tmp_path / "state" / "key"
+    first = load_or_create_key(key_file)
+    assert (key_file.stat().st_mode & 0o777) == 0o600
+    assert load_or_create_key(key_file) == first
+    assert path_hmac("repo_root", "/x", first) != path_hmac("executable_path", "/x", first)
+    key_file.chmod(0o644)
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(key_file)
+    key_file.chmod(0o600)
+    key_file.write_text("short\n")
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(key_file)

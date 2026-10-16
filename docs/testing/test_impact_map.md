@@ -395,3 +395,4 @@
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
+| scripts/ops/gateway_health_hmac.py | tests/nexus/orchestrator/test_unified_mcp_gateway_http.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/ops/test_golden_finding_probes.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_health_path_hmac_contract |
