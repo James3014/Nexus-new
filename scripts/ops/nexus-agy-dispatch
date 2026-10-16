@@ -3385,7 +3385,9 @@ def _pool_recovery_estimate(
     }
     manager = getattr(coordinator, "manager", None)
     call_cli = getattr(manager, "_call_manager_cli", None)
-    if not callable(call_cli):
+    # An in-memory (alias-env) pool has no manager state to read; the real
+    # manager's accounts would not be this coordinator's accounts.
+    if not callable(call_cli) or getattr(manager, "_use_real_manager", True) is False:
         return result
     try:
         status = call_cli(["status", "--json"])
@@ -3500,28 +3502,27 @@ POOL_QUEUE_TICKET_STALE_SECONDS = 90.0
 
 
 class _PoolQueueTicket:
-    """One FIFO waiter in ``<leases_dir>/queue`` for one (family, exclusions) queue.
+    """One FIFO waiter in ``<leases_dir>/queue`` for one model family.
 
     Without an order, a waiter polling a full pool loses each freed lease to
     whichever process takes the allocator lock first, so newcomers can starve
     it until its deadline (seven 900 s waits ended busy on 2026-10-15 while
-    later dispatches leased).  Waiters with the same model family and the same
-    exclusions see the same candidate accounts, so only the oldest live one
-    of them takes allocator passes.  A ticket is live while its process exists
-    and it keeps touching the file; anything else is pruned.
+    later dispatches leased).  Every new dispatch takes a ticket before its
+    first allocator pass; it may pass only while no older live unrestricted
+    ticket (one without ``--exclude-account``) of the same family exists.
+    Restricted tickets never block anyone: they may have excluded the very
+    account that is free (head-of-line blocking).  A ticket is live while its
+    process exists and keeps touching the file; anything else is pruned.
     """
 
-    @staticmethod
-    def suffix_for(model_family: str | None, exclude_hashes: set[str]) -> str:
-        signature = hashlib.sha256(",".join(sorted(exclude_hashes)).encode("utf-8")).hexdigest()
-        return f".{model_family or 'any'}.{signature[:12]}.ticket"
-
-    def __init__(self, queue_dir: Path, *, model_family: str | None, exclude_hashes: set[str]):
-        self.suffix = self.suffix_for(model_family, exclude_hashes)
+    def __init__(self, queue_dir: Path, *, model_family: str | None, restricted: bool):
+        self.family = model_family or "any"
         self.queue_dir = queue_dir
         queue_dir.mkdir(parents=True, exist_ok=True)
+        kind = "r" if restricted else "u"
         self.path = queue_dir / (
-            f"{time.time_ns():020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}{self.suffix}"
+            f"{time.time_ns():020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+            f".{self.family}.{kind}.ticket"
         )
         self.path.write_text(f"{os.getpid()}\n", encoding="utf-8")
 
@@ -3543,11 +3544,11 @@ class _PoolQueueTicket:
         return True
 
     @classmethod
-    def live_tickets(cls, queue_dir: Path, suffix: str) -> list[Path]:
+    def live_tickets(cls, queue_dir: Path, family: str) -> list[Path]:
         now = time.time()
         live: list[Path] = []
         try:
-            paths = sorted(queue_dir.glob(f"*{suffix}"))
+            paths = sorted(queue_dir.glob(f"*.{family}.[ur].ticket"))
         except OSError:
             return live
         for path in paths:
@@ -3561,8 +3562,13 @@ class _PoolQueueTicket:
         return live
 
     def is_head(self) -> bool:
-        live = self.live_tickets(self.queue_dir, self.suffix)
-        return not live or live[0] == self.path or self.path not in live
+        """True when no older live unrestricted ticket of this family is waiting."""
+        for path in self.live_tickets(self.queue_dir, self.family):
+            if path == self.path:
+                return True
+            if path.name.endswith(".u.ticket"):
+                return False
+        return True
 
     def touch(self) -> None:
         try:
@@ -3592,20 +3598,36 @@ def _acquire_claim_queued(
     quota_snapshot: dict,
     first_pass: Any = None,
     on_queue: Any = None,
+    refresh_availability: Any = None,
+    restricted: bool | None = None,
 ) -> tuple[Any, float]:
     """Claim one account, queueing while the pool is busy or recovers in time.
 
     Each pass is a single non-blocking allocator pass (``wait_timeout=0``); the
     queue sleeps between passes so many waiters do not spin on the allocator
-    lock.  ``first_pass`` lets a rotation retire its failed claim exactly once;
-    a rotation is a running task and never waits behind new dispatches.
-    A new dispatch joins the FIFO when older waiters exist instead of barging.
+    lock, and no pass starts after the wait deadline.  ``first_pass`` lets a
+    rotation retire its failed claim exactly once; a rotation is a running
+    task and never waits behind new dispatches.  A new dispatch takes a FIFO
+    ticket first.  After waiting for a predicted recovery,
+    ``refresh_availability`` re-reads quota availability (and returns the new
+    snapshot) so an account whose quota reset is claimable again.
     """
     started = _queue_monotonic()
     deadline = started + max(0.0, float(wait_budget))
     poll = _pool_queue_poll_seconds()
     queue_dir = _pool_queue_dir(coordinator)
     ticket: _PoolQueueTicket | None = None
+    if first_pass is None and queue_dir is not None:
+        try:
+            # Ordering is best effort: a queue directory failure must not turn
+            # a fairness aid into an outage, so the dispatch proceeds unordered.
+            ticket = _PoolQueueTicket(
+                queue_dir,
+                model_family=model_family,
+                restricted=bool(exclude_hashes) if restricted is None else restricted,
+            )
+        except OSError:
+            ticket = None
 
     def default_pass() -> Any:
         return coordinator.acquire_claim(
@@ -3615,36 +3637,28 @@ def _acquire_claim_queued(
             model_family=model_family,
         )
 
-    def join_queue() -> _PoolQueueTicket | None:
-        if queue_dir is None:
-            return None
-        try:
-            return _PoolQueueTicket(
-                queue_dir, model_family=model_family, exclude_hashes=exclude_hashes
-            )
-        except OSError:
-            return None
-
-    if first_pass is None and queue_dir is not None:
-        suffix = _PoolQueueTicket.suffix_for(model_family, exclude_hashes)
-        if _PoolQueueTicket.live_tickets(queue_dir, suffix):
-            ticket = join_queue()
-
     attempt = first_pass or default_pass
     passes = 0
     state = "POOL_BUSY"
     recovery: dict[str, Any] | None = None
+    refresh_before_pass = False
+
+    def give_up() -> _PoolClaimFailure:
+        return _PoolClaimFailure(
+            busy=state != "POOL_RECOVERING",
+            waited_seconds=_queue_monotonic() - started,
+            recovery=recovery if state == "POOL_RECOVERING" else None,
+        )
+
     try:
         while True:
+            if passes > 0 and _queue_monotonic() >= deadline:
+                raise give_up()
             if ticket is not None and not ticket.is_head():
                 ticket.touch()
                 remaining = deadline - _queue_monotonic()
                 if remaining <= 0:
-                    raise _PoolClaimFailure(
-                        busy=state == "POOL_BUSY",
-                        waited_seconds=_queue_monotonic() - started,
-                        recovery=recovery,
-                    )
+                    raise give_up()
                 if on_queue is not None:
                     on_queue(
                         state="QUEUED_BEHIND_OLDER_WAITER",
@@ -3654,6 +3668,11 @@ def _acquire_claim_queued(
                     )
                 _sleep(max(0.01, min(poll, remaining)))
                 continue
+            if refresh_before_pass and refresh_availability is not None:
+                refreshed = refresh_availability()
+                if isinstance(refreshed, dict):
+                    quota_snapshot = refreshed
+            refresh_before_pass = False
             passes += 1
             try:
                 claim = attempt()
@@ -3674,26 +3693,17 @@ def _acquire_claim_queued(
             remaining = deadline - _queue_monotonic()
             if busy:
                 if remaining <= 0:
-                    raise _PoolClaimFailure(
-                        busy=True,
-                        waited_seconds=_queue_monotonic() - started,
-                        recovery=None,
-                    )
+                    raise give_up()
                 delay = min(poll, remaining)
             else:
                 assert recovery is not None
                 earliest = recovery.get("earliest_reset_ts")
                 until_reset = None if earliest is None else float(earliest) - time.time()
                 if until_reset is None or until_reset > remaining:
-                    raise _PoolClaimFailure(
-                        busy=False,
-                        waited_seconds=_queue_monotonic() - started,
-                        recovery=recovery,
-                    )
+                    raise give_up()
                 delay = min(max(until_reset, 0.0) + 0.5, POOL_QUEUE_MAX_SLEEP_SECONDS, remaining)
-            if ticket is None:
-                ticket = join_queue()
-            else:
+                refresh_before_pass = True
+            if ticket is not None:
                 ticket.touch()
             if on_queue is not None:
                 reset_at = None if recovery is None else recovery.get("earliest_reset_at")
@@ -4003,6 +4013,7 @@ def dispatch_run(
         return 64
 
     claim: Optional[AccountLeaseClaim] = None
+    user_exclude_hashes = frozenset(exclude_hashes)
     pool_queue: dict[str, Any] = {
         "wait_ms": 0,
         "waits": 0,
@@ -4049,6 +4060,13 @@ def dispatch_run(
 
     last_wait_budget = [0.0]
 
+    def _refresh_availability() -> dict:
+        # After waiting for a predicted quota reset, republish availability so
+        # NEXUS_AGY_BLOCKED_ACCOUNTS no longer hides an account that reset.
+        nonlocal quota_snapshot, availability_state
+        quota_snapshot, availability_state = _apply_dynamic_availability(model)
+        return quota_snapshot
+
     def _queued_claim(first_pass: Any = None) -> Any:
         last_wait_budget[0] = _pool_wait_budget(
             total_deadline=total_deadline,
@@ -4064,6 +4082,8 @@ def dispatch_run(
                 quota_snapshot=quota_snapshot,
                 first_pass=first_pass,
                 on_queue=_on_pool_queue,
+                refresh_availability=_refresh_availability,
+                restricted=bool(user_exclude_hashes),
             )
         except _PoolClaimFailure as exc:
             _record_pool_wait(exc.waited_seconds)
@@ -4251,6 +4271,16 @@ def dispatch_run(
                         if reset_ts is not None and reset_ts > time.time()
                         else time.time() + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
                     )
+                    _operation_hook(
+                        operation_hook,
+                        failure_history_entry={
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "QUOTA_EXHAUSTED_KNOWN_PRE_ATTEMPT",
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                        },
+                    )
                     if rotations >= max_failovers:
                         coordinator.retire_failed_claim(
                             claim,
@@ -4270,16 +4300,6 @@ def dispatch_run(
                         })
                         return 75
                     blocked_claim = claim
-                    _operation_hook(
-                        operation_hook,
-                        failure_history_entry={
-                            "attempts": attempts,
-                            "rotations": rotations,
-                            "failure_kind": "QUOTA_EXHAUSTED_KNOWN_PRE_ATTEMPT",
-                            "account_alias_hash": blocked_claim.account_alias_hash,
-                            "lease_id_hash": blocked_claim.lease_id_hash,
-                        },
-                    )
                     try:
                         claim = _queued_claim(
                             first_pass=lambda: coordinator.rotate_claim(

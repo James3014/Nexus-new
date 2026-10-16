@@ -127,6 +127,7 @@ def _records(tmp_path: Path) -> list[dict]:
         "agyop_done",
         created_at=_at(3),
         started_at=_at(3),
+        provider_started_at=_at(3.1),
         finished_at=_at(8),
         account_alias_hash="bbbbbbbbbbbb",
         status="COMPLETED",

@@ -165,8 +165,9 @@ def test_burst_larger_than_pool_queues_and_all_complete(pool_env) -> None:
     terminal = [meta for meta in pool_env.metas if "status" in meta]
     assert [meta["status"] for meta in terminal] == ["completed"] * 6
     assert not any(meta.get("failure_kind") for meta in terminal)
-    # At least the four dispatches beyond the pool size waited in the queue.
-    assert sum(1 for meta in terminal if meta.get("pool_queue_wait_ms", 0) > 0) >= 4
+    # At least the four dispatches beyond the pool size waited for a running
+    # task (each holds its account for 200 ms) rather than a millisecond pass.
+    assert sum(1 for meta in terminal if meta.get("pool_queue_wait_ms", 0) >= 100) >= 4
 
 
 def test_quota_on_first_account_rotates_and_completes(pool_env) -> None:
@@ -632,10 +633,9 @@ class _ImmediateCoordinator:
         return _FakeClaim("a")
 
 
-def _older_ticket(queue_dir: Path, pid: int) -> Path:
+def _older_ticket(queue_dir: Path, pid: int, kind: str = "u") -> Path:
     queue_dir.mkdir(parents=True, exist_ok=True)
-    suffix = dispatch._PoolQueueTicket.suffix_for("gemini", set())
-    path = queue_dir / f"{1:020d}-{pid}-deadbeef{suffix}"
+    path = queue_dir / f"{1:020d}-{pid}-deadbeef.gemini.{kind}.ticket"
     path.write_text(f"{pid}\n", encoding="utf-8")
     return path
 
@@ -685,7 +685,25 @@ def test_dead_waiter_ticket_is_pruned_and_never_blocks(tmp_path: Path, monkeypat
     assert not stale.exists()
 
 
-def test_other_queue_signature_does_not_block(tmp_path: Path, monkeypatch) -> None:
+def test_restricted_older_waiter_does_not_block(tmp_path: Path, monkeypatch) -> None:
+    # An older waiter with --exclude-account may have excluded the free
+    # account; it must not hold up unrestricted dispatches (head-of-line).
+    coordinator = _ImmediateCoordinator(tmp_path)
+    _older_ticket(coordinator.leases_dir / "queue", os.getpid(), kind="r")
+    monkeypatch.setattr(dispatch, "_sleep", lambda _s: pytest.fail("must not wait"))
+
+    claim, _waited = dispatch._acquire_claim_queued(
+        coordinator,
+        consumer_id="c",
+        exclude_hashes=set(),
+        wait_budget=60.0,
+        model_family="gemini",
+        quota_snapshot={},
+    )
+    assert claim.internal_id == "a"
+
+
+def test_other_model_family_does_not_block(tmp_path: Path, monkeypatch) -> None:
     coordinator = _ImmediateCoordinator(tmp_path)
     _older_ticket(coordinator.leases_dir / "queue", os.getpid())
     monkeypatch.setattr(dispatch, "_sleep", lambda _s: pytest.fail("must not wait"))
@@ -693,12 +711,124 @@ def test_other_queue_signature_does_not_block(tmp_path: Path, monkeypatch) -> No
     claim, _waited = dispatch._acquire_claim_queued(
         coordinator,
         consumer_id="c",
-        exclude_hashes={"0123456789ab"},
+        exclude_hashes=set(),
         wait_budget=60.0,
-        model_family="gemini",
+        model_family="claude_gpt",
         quota_snapshot={},
     )
     assert claim.internal_id == "a"
+
+
+def test_waiters_are_served_oldest_first(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_AGY_POOL_QUEUE_POLL_SECONDS", "0.05")
+    accounts = [AgyAccount(alias="solo", home_dir=str(tmp_path / "solo"))]
+
+    def coordinator() -> CrossProcessLeaseCoordinator:
+        return CrossProcessLeaseCoordinator(
+            manager=AgyAccountPoolManager(accounts=accounts, use_real_manager=False),
+            allocator_lock_path=tmp_path / "allocator.lock",
+            leases_dir=tmp_path / "leases",
+        )
+
+    holder = coordinator().acquire_claim("holder", wait_timeout=0.0)
+    order: list[str] = []
+    order_lock = threading.Lock()
+
+    def waiter(name: str) -> None:
+        claim, _waited = dispatch._acquire_claim_queued(
+            coordinator(),
+            consumer_id=name,
+            exclude_hashes=set(),
+            wait_budget=20.0,
+            model_family="gemini",
+            quota_snapshot={},
+        )
+        with order_lock:
+            order.append(name)
+        threading.Event().wait(0.2)
+        claim.release()
+
+    queue_dir = tmp_path / "leases" / "queue"
+    first = threading.Thread(target=waiter, args=("older",))
+    first.start()
+    for _ in range(100):
+        if queue_dir.is_dir() and list(queue_dir.glob("*.ticket")):
+            break
+        threading.Event().wait(0.02)
+    second = threading.Thread(target=waiter, args=("newer",))
+    second.start()
+    for _ in range(100):
+        if len(list(queue_dir.glob("*.ticket"))) == 2:
+            break
+        threading.Event().wait(0.02)
+    threading.Event().wait(0.2)  # both are polling a busy pool now
+    holder.release()
+    first.join(timeout=20)
+    second.join(timeout=20)
+
+    assert order == ["older", "newer"]
+    assert list(queue_dir.glob("*.ticket")) == []
+
+
+def test_no_allocator_pass_starts_after_the_wait_deadline(pool_env, monkeypatch) -> None:
+    clock = {"now": 0.0}
+
+    def fake_sleep(seconds: float) -> None:
+        clock["now"] += 10.0  # each wait overshoots: passes at t=0 and t=10 only
+
+    monkeypatch.setattr(dispatch, "_sleep", fake_sleep)
+    monkeypatch.setattr(dispatch, "_queue_monotonic", lambda: clock["now"])
+
+    class Busy:
+        passes = 0
+
+        def acquire_claim(self, **_kwargs):
+            self.passes += 1
+            raise dispatch.AgyAccountPoolBusyError("leased")
+
+    busy = Busy()
+    with pytest.raises(dispatch._PoolClaimFailure) as failure:
+        dispatch._acquire_claim_queued(
+            busy,
+            consumer_id="c",
+            exclude_hashes=set(),
+            wait_budget=15.0,
+            model_family="gemini",
+            quota_snapshot={},
+        )
+    assert failure.value.busy is True
+    assert busy.passes == 2
+
+
+def test_quota_availability_is_republished_after_waiting_for_a_reset(
+    pool_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool_env.make(["late"])
+    applied: list[str | None] = []
+    snapshot = _fresh_snapshot(["late"])
+
+    def apply(model):
+        applied.append(model)
+        return snapshot, _state()
+
+    monkeypatch.setattr(dispatch, "_apply_dynamic_availability", apply)
+    monkeypatch.setattr(dispatch, "_sleep", lambda _s: None)
+    now = datetime.now(timezone.utc).timestamp()
+    coordinator = _CoolingCoordinator(pool_env.tmp_path, {"late": now + 20}, recover_after=1)
+
+    code = dispatch.dispatch_run(
+        prompt="work",
+        cwd=str(ROOT),
+        mode="plan",
+        model=GEMINI,
+        timeout=300,
+        max_calls=1,
+        coordinator=coordinator,
+        run_agy_fn=lambda **_k: (0, "done", "", False, 5),
+    )
+
+    assert code == 0
+    assert applied == [GEMINI, GEMINI]  # once at start, once before the post-reset pass
 
 
 def test_rotation_pass_is_never_queued_behind_new_dispatches(tmp_path: Path, monkeypatch) -> None:
@@ -721,3 +851,145 @@ def test_rotation_pass_is_never_queued_behind_new_dispatches(tmp_path: Path, mon
         first_pass=rotation_pass,
     )
     assert claim.internal_id == "b" and rotated == ["retired-and-claimed"]
+
+
+class _CountingCoordinator:
+    def __init__(self, names: list[str]) -> None:
+        self.claims = [_FakeClaim(name) for name in names]
+        self.index = 0
+        self.rotations = 0
+        self.retired: list[tuple[str, str]] = []
+
+    def acquire_claim(self, **_kwargs):
+        return self.claims[self.index]
+
+    def rotate_claim(self, *, current_claim, failure_kind, **_kwargs):
+        self.rotations += 1
+        self.retire_failed_claim(current_claim, failure_kind)
+        self.index += 1
+        return self.claims[self.index]
+
+    def retire_failed_claim(self, claim, failure_kind, **_kwargs):
+        self.retired.append((claim.internal_id, failure_kind.value))
+        claim.release()
+
+
+def test_no_new_lease_when_no_budget_is_left_for_another_attempt(
+    pool_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool_env.make(["a", "b"])
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(dispatch, "_monotonic", lambda: clock["now"])
+    coordinator = _CountingCoordinator(["a", "b"])
+
+    def runner(**kwargs):
+        clock["now"] += kwargs["timeout"] - 2  # leaves 2 s, below the 5 s floor
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="work",
+        cwd=str(ROOT),
+        mode="plan",
+        model=GEMINI,
+        timeout=100,
+        max_calls=1,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 124
+    assert coordinator.rotations == 0  # nothing new was leased
+    assert coordinator.retired == [("a", "QUOTA_EXHAUSTED")]  # but quota is still recorded
+
+
+def test_dispatch_rotations_are_capped_by_pool_size(pool_env, monkeypatch) -> None:
+    monkeypatch.delenv("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS", raising=False)
+    make_coordinator = pool_env.make(["a", "b"])
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="work",
+        cwd=str(ROOT),
+        mode="plan",
+        model=GEMINI,
+        timeout=60,
+        max_calls=1,
+        coordinator=make_coordinator(),
+        run_agy_fn=runner,
+    )
+
+    assert code == 75
+    assert len(calls) == 2
+    final = pool_env.metas[-1]
+    assert final["failure_kind"] == "ACCOUNT_FAILOVER_LIMIT"
+    assert final["rotations"] == 1
+
+
+def test_known_quota_rotation_is_recorded_in_failure_history(pool_env, monkeypatch) -> None:
+    pool_env.make(["a", "b"])
+    checked_at = datetime.now(timezone.utc).isoformat()
+    reset_at = _iso(datetime.now(timezone.utc).timestamp() + 3600)
+
+    def row(name: str, remaining: float) -> dict:
+        return {
+            "account": name,
+            "checked_at": checked_at,
+            "ok": True,
+            "groups": {
+                "Gemini Models": {
+                    "5h": {"status": "known", "remaining_pct": remaining, "reset_at": reset_at}
+                }
+            },
+        }
+
+    snapshot = {"checked_at": checked_at, "accounts": [row("a", 0.0), row("b", 90.0)]}
+    monkeypatch.setattr(dispatch, "_apply_dynamic_availability", lambda _m: (snapshot, _state()))
+    coordinator = _CountingCoordinator(["a", "b"])
+    events: list[dict] = []
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append("run")
+        return 0, "done", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="work",
+        cwd=str(ROOT),
+        mode="plan",
+        model=GEMINI,
+        timeout=60,
+        max_calls=1,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0 and calls == ["run"]
+    entries = [e["failure_history_entry"] for e in events if "failure_history_entry" in e]
+    assert entries == [
+        {
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "QUOTA_EXHAUSTED_KNOWN_PRE_ATTEMPT",
+            "account_alias_hash": coordinator.claims[0].account_alias_hash,
+            "lease_id_hash": coordinator.claims[0].lease_id_hash,
+        }
+    ]
+
+
+def test_recovery_estimate_ignores_an_in_memory_pool(tmp_path: Path) -> None:
+    manager = SimpleNamespace(
+        _use_real_manager=False,
+        _call_manager_cli=lambda *_a, **_k: pytest.fail("must not read the real manager"),
+    )
+    estimate = dispatch._pool_recovery_estimate(
+        SimpleNamespace(manager=manager, leases_dir=tmp_path),
+        model_family="gemini",
+        exclude_hashes=set(),
+        quota_snapshot={},
+    )
+    assert estimate["earliest_reset_ts"] is None

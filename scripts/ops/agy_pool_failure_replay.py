@@ -10,8 +10,12 @@ pool was busy (``AGY_ACCOUNT_POOL_BUSY``) or reported exhausted
   queues until its own total deadline, so it is ``WOULD_QUEUE`` unless it had
   already waited the whole budget.  ``lease_freed_in_budget`` says whether
   another recorded operation released a lease inside that longer wait.  A
-  waiter that did wait the whole budget while later arrivals leased accounts
-  ``WOULD_LEASE_FIFO``: the new queue serves waiters oldest first.
+  waiter that did wait the whole budget while later arrivals were proven to
+  hold a lease (their provider process started before it gave up)
+  ``WOULD_LEASE_FIFO``: the new queue serves waiters oldest first.  Records
+  keep no per-dispatch timeout or exact lease times, so this is a
+  reconstruction from ``started_at`` / ``provider_started_at`` /
+  ``finished_at``.
 * exhausted: the old dispatcher put an account into a one-hour manager
   cooldown after every ``TIMEOUT``; the new one cools it for five minutes.
   When the pool snapshot still listed usable accounts and some account was
@@ -112,6 +116,9 @@ def replay(
     new_timeout_cooldowns: list[tuple[str, float, float]] = []
     other_cooldowns: list[tuple[str, float, float]] = []
     lease_spans: list[tuple[str, float, float]] = []
+    # (operation start, first proof it held a lease): a provider process
+    # only starts under a lease, so provider_started_at bounds the claim time.
+    lease_proofs: list[tuple[float, float]] = []
     for record in records:
         for alias, kind, at in _account_failures(record):
             if kind == "TIMEOUT":
@@ -124,6 +131,9 @@ def replay(
         finished = _ts(record.get("finished_at"))
         if isinstance(alias, str) and alias and started is not None and finished is not None:
             lease_spans.append((alias, started, finished))
+        provider_started = _ts(record.get("provider_started_at"))
+        if started is not None and provider_started is not None:
+            lease_proofs.append((started, provider_started))
 
     def cooling_at(spans: list[tuple[str, float, float]], at: float) -> dict[str, float]:
         active: dict[str, float] = {}
@@ -157,10 +167,12 @@ def replay(
             freed = any(
                 started + old_wait <= end <= started + budget for _alias, _begin, end in lease_spans
             )
-            # Later arrivals that leased while this dispatch was still waiting:
-            # a FIFO queue would have served this waiter first.
+            # Later arrivals proven to hold a lease (their provider started)
+            # while this dispatch was still waiting: FIFO serves it first.
             barged = sum(
-                1 for _alias, lease_start, _end in lease_spans if started < lease_start < finished
+                1
+                for arrived, provider_started in lease_proofs
+                if started < arrived and provider_started < finished
             )
             row["lease_freed_in_budget"] = freed
             row["later_arrivals_leased_during_wait"] = barged
