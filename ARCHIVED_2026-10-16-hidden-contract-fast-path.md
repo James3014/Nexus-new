@@ -7,7 +7,10 @@ unreachable-plus-manifest variant of `ARCHIVED_2026-10-12.md` / `ARCHIVED_2026-1
 physical-deletion precedent is #2197 (Owner decision on #1927).
 
 Originals are preserved on branch `archive/2026-10-16-hidden-contract-fast-path`, cut at
-`219fa4ca7dce887626ea19a7919f4a8f409a9a6a` (the exact base of this change).
+`219fa4ca7dce887626ea19a7919f4a8f409a9a6a`. That commit is the base the change was written on and
+an ancestor of the base #2347 merged onto (`62ee368d3`). The only commit in between that touched these
+files (`9d919f67f`, #2325, strict-lane gate inputs in `sprint_service.py`) did not touch any of the removed
+code, so the archive holds the removed code exactly as it was deleted.
 
 ## Evidence
 
@@ -74,3 +77,24 @@ No test function was deleted or renamed (the exact-base impact gate reads a miss
 lost coverage). The 24 tests that asserted the removed behaviour keep their ids and now assert its
 absence; each fails on the base commit. New: `tests/research/test_no_benchmark_local_fast_path.py`
 runs every P16 fixture with a NOOP model in the non-strict lane (24 cases, all failing on base).
+
+## Follow-up: answer-table reachability (PR-5c-2)
+
+#2347 left three ways the local answer table could still reach a model run's delivery. This
+follow-up closes them:
+
+- **Self-heal support block.** With `NEXUS_MODEL_REQUIRED_EXECUTION_MODE=model_participation_only`
+  outside the symmetric lane, the self-heal prompt carried the local mutator's solution as
+  `[NEXUS LOCAL SUPPORT CANDIDATE]`. An echoing model returned it as `llm_self_heal`. The block is
+  removed. A self-heal after a model call that produced no candidate restarts from the original source,
+  never from the local fallback.
+- **Companion edits.** The baseline flow wrote fixture-keyed companion files (`invoice.py`/`tax.py`
+  pricing, nightshift `runner.py`/`store.py`) next to a model patch and kept them on success. The
+  sprint's in-place scorer applied them while scoring model candidates. Now companions only accompany
+  a local-mode patch, and a model candidate is scored exactly as it is delivered.
+- **Skipped model baseline / learn-SLO guard.** With `llm_mode` on and the model baseline skipped
+  (route-cost `skip_llm_baseline`), the baseline flow delivered the local answer table. A NOOP probe
+  solved 4/12 P16 tasks this way. A sprint whose model the learn-SLO guard withheld also delivered
+  locally. A model-configured run now returns `model_baseline_skipped` and escalates to the model
+  sprint, and the sprint's model-only delivery gate also covers `config.llm_mode`.
+

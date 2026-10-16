@@ -1539,7 +1539,8 @@ def test_model_required_self_heal_can_use_local_support_without_promoting_it(mon
                     "model_patch_generated": True,
                 }
             assert "Previous candidate failed verification" in kwargs["task"]
-            assert "[NEXUS LOCAL SUPPORT CANDIDATE]" in kwargs["task"]
+            # #2339 follow-up: the local answer table is never shown to the model.
+            assert "[NEXUS LOCAL SUPPORT CANDIDATE]" not in kwargs["task"]
             return "def build():\n    return ['artifact']\n", {
                 "source": "llm",
                 "model_calls": 1,
@@ -1577,8 +1578,8 @@ def test_model_required_self_heal_can_use_local_support_without_promoting_it(mon
     assert res.status == "SUCCESS"
     assert res.winner_source == "llm_self_heal"
     assert res.model_calls == 2
-    assert calls == {"llm": 2, "local": 1}
-    assert "model_required_local_support_hint" in res.error_codes
+    assert calls["llm"] == 2
+    assert "model_required_local_support_hint" not in res.error_codes
 
 
 def test_llm_self_heal_repairs_failed_candidate(monkeypatch, tmp_path: Path):
@@ -2072,7 +2073,10 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
 
     cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
+    # #2339 follow-up: a run configured for a model never delivers the local candidate, even when
+    # the learn-SLO guard withheld the model.
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
     assert "learn_slo_block" in res.error_codes
     assert res.learning_trace.get("learn_slo_guard", {}).get("active") is True
 
