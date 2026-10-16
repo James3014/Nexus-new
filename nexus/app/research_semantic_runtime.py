@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -271,3 +272,18 @@ def augment_semantic_runtime_capabilities(
         capabilities["formal_report_schema_version"] = str(report.get("schema") or "")
         capabilities["verification_summary_ref"] = f"{normalized_success_criteria}:{verification[0]['status']}"
         capabilities["formal_report_gate_passed"] = bool(report.get("status") == "READY" and artifact_verified)
+        # #1869: bind the claim gate to the exact bytes verified: read the written report once,
+        # hash those bytes, and verify they equal the rendered report (no re-read after hashing).
+        written = Path(report_path)
+        if not written.is_absolute():
+            written = Path(repo_root) / written
+        try:
+            report_bytes = written.read_bytes()
+        except OSError:
+            report_bytes = b""
+        if report_bytes and report_bytes == str(report.get("markdown") or "").encode("utf-8"):
+            # Namespaced: never write generic source_hash/verifier_status into the shared payload.
+            capabilities["formal_report_source_hash"] = "sha256:" + hashlib.sha256(report_bytes).hexdigest()
+            capabilities["formal_report_verifier_status"] = (
+                "pass" if artifact_verified and capabilities["formal_report_gate_passed"] else "fail"
+            )

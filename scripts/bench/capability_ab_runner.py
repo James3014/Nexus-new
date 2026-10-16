@@ -103,6 +103,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
+from nexus.contracts.model_output_json import ModelOutputParseError, ModelOutputShapeError, parse_model_json  # noqa: E402
 from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names, normalize_capability_receipt
 from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
@@ -4948,13 +4949,15 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
         outer, _ = json.JSONDecoder().raw_decode(raw_stdout)
     output_text = str(outer.get("output") or outer.get("response") or raw_stdout)
     try:
-        payload = json.loads(output_text)
-    except json.JSONDecodeError:
+        payload = parse_model_json(output_text, expect="object", mode="strict")
+    except ModelOutputShapeError:
+        raise
+    except ModelOutputParseError:
         start = output_text.find("{")
         end = output_text.rfind("}")
         if start == -1 or end == -1:
             raise
-        payload = json.loads(output_text[start : end + 1])
+        payload = parse_model_json(output_text[start : end + 1], expect="object", mode="strict")
     token_info = _extract_token_info_from_payload(outer)
     tokens_total = int(token_info["total_tokens"])
     payload["tokens_used"] = tokens_total
@@ -14882,6 +14885,7 @@ def _finalize_with_nexus_row(
             solve_hash = exec_resp.candidate_hash
             verifier_status = "not_run"
             gate_passed = False
+            solve_source_hash = ""
             fallback_block_reason = exec_resp.error if dry_run_val else ""
             
             # Execute C-side gates & verifier verification via isolated solve
@@ -14907,6 +14911,10 @@ def _finalize_with_nexus_row(
                 solve_resp = run_isolated_local_solve_loop(solve_req)
                 solve_invoked = True
                 verifier_status = solve_resp.capability_payload["metadata"].get("verifier_status", "not_run")
+                # #1869: bench-only signal (this receipt is attached directly, not rebuilt by the receipt
+                # adapters, and is never claim evidence). For real runs the payload's gate_passed is
+                # already bound to verifier_status + source_hash by run_isolated_local_solve_loop.
+                solve_source_hash = str(solve_resp.capability_payload.get("source_hash") or "")
                 gate_passed = solve_resp.capability_payload.get("gate_passed", False) and verifier_status == "pass"
                 fallback_block_reason = solve_resp.hybrid_route.fallback_block_reason or ""
             
@@ -14931,6 +14939,7 @@ def _finalize_with_nexus_row(
                 telemetries={
                     "candidate_hash": solve_hash,
                     "verifier_status": verifier_status,
+                    "source_hash": solve_source_hash,
                     "provider": exec_resp.provider,
                     "model_name": exec_resp.model_name,
                 }
