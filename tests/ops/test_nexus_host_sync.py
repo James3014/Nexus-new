@@ -1411,34 +1411,34 @@ def test_manifest_covers_agy_dispatch_nexus_import_closure() -> None:
     assert missing == []
 
 
-def test_manifest_requires_executors_runtime_paths(tmp_path: Path) -> None:
-    for omitted in _EXECUTORS_RUNTIME_PATHS:
-        case_dir = tmp_path / omitted.replace("/", "_")
-        case_dir.mkdir()
-        source_repo = _make_source_repo(case_dir)
-        manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["runtime_files"] = [
-            entry for entry in manifest["runtime_files"] if entry["path"] != omitted
-        ]
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
-        _git(source_repo, "commit", "-m", f"omit {omitted}")
-        revision = _git(source_repo, "rev-parse", "HEAD")
-        manager_python = case_dir / "manager-python"
-        _write_fake_manager(manager_python)
-        proc = _invoke(
-            source_repo,
-            case_dir / "runtime",
-            manager_python,
-            case_dir / "bin" / "nexus-agy-dispatch",
-            case_dir / "bin" / "nexus-host-sync",
-            "desired",
-            revision=revision,
-        )
-        assert proc.returncode == 2, omitted
-        payload = json.loads(proc.stdout)
-        assert payload["error"] == "HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING", omitted
+def test_pre_executors_manifest_still_parses_for_rollback(tmp_path: Path) -> None:
+    # Rollback validates the previous generation's manifest, which predates the
+    # executors entries, so they must not be in the parser's required set; the
+    # import-closure test above is what keeps them in the current manifest.
+    source_repo = _make_source_repo(tmp_path)
+    manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtime_files"] = [
+        entry
+        for entry in manifest["runtime_files"]
+        if entry["path"] not in _EXECUTORS_RUNTIME_PATHS
+    ]
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "pre-executors manifest")
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    manager_python = tmp_path / "manager-python"
+    _write_fake_manager(manager_python)
+    proc = _invoke(
+        source_repo,
+        tmp_path / "runtime",
+        manager_python,
+        tmp_path / "bin" / "nexus-agy-dispatch",
+        tmp_path / "bin" / "nexus-host-sync",
+        "desired",
+        revision=revision,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_manifest_only_snapshot_imports_agy_dispatch_boundary(tmp_path: Path) -> None:

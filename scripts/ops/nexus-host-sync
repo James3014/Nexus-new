@@ -388,11 +388,6 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         "nexus/services/agy_account_pool.py",
         "nexus/services/external_account_pool.py",
         "nexus/services/agy_operation_journal.py",
-        "nexus/executors/__init__.py",
-        "nexus/executors/agy_dispatch_boundary.py",
-        "nexus/executors/cli_worker.py",
-        "nexus/executors/agy_write_admission.py",
-        "nexus/executors/exec_policy.py",
     }
     components = manifest.get("components", {})
     if isinstance(components, dict) and isinstance(
