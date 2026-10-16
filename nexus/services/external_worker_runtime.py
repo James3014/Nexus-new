@@ -14,9 +14,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import TYPE_CHECKING, Mapping, Protocol
 
 from nexus.services.external_account_pool import AccountFailureKind, is_rotation_eligible
+
+if TYPE_CHECKING:
+    from nexus.services.claude_account_pool import ClaudeLease
 
 
 class ExternalWorkerRuntimeError(RuntimeError):
@@ -145,7 +148,7 @@ def _cli_version(executable: str, env: Mapping[str, str] | None = None) -> str |
         text=True,
         timeout=10,
         check=False,
-        **({} if env is None else {"env": dict(env)}),
+        env=None if env is None else dict(env),
     )
     if proc.returncode != 0:
         return None
@@ -1026,7 +1029,7 @@ class ClaudeAccountAdapter:
         from nexus.services.claude_account_pool import get_claude_account_pool_manager
 
         self.manager = get_claude_account_pool_manager()
-        self._leases: dict[str, object] = {}
+        self._leases: dict[str, ClaudeLease] = {}
 
     @staticmethod
     def _lease_hash(lease_id: str) -> str:

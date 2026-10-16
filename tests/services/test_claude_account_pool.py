@@ -450,6 +450,7 @@ def test_unknown_outcome_blocks_reuse_until_reconcile(tmp_path: Path) -> None:
     manager, _, root = _pool(tmp_path, ["a"])
     adapter = _adapter(manager)
     binding = adapter.acquire("claudeop_" + "1" * 32)
+    assert binding.lease_id_hash is not None
     lease = adapter._leases[binding.lease_id_hash]
     adapter.hold_unknown_outcome(binding)
     adapter.release(binding)  # dispatch releases afterwards; must NOT free it
