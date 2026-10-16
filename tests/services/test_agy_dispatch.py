@@ -6245,3 +6245,287 @@ def test_unknown_family_claim_failure_is_typed_in_durable_readback(
         1,
         0,
     )
+
+
+# --- #1357: account-scoped Agy model catalog admission -------------------------
+
+
+@pytest.fixture(autouse=True)
+def _agy_model_catalog_check_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy tests use fake runners; never let them reach a real `agy models`."""
+    monkeypatch.setenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "0")
+
+
+_CATALOG_HEADER = "Fetching available models...\n"
+_CATALOG_SONNET = (
+    "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n"
+    "claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)\n"
+    "claude-sonnet-5-5\tClaude Sonnet 5.5\n"
+)
+_CATALOG_NO_SONNET = "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n"
+
+
+def _catalog_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    name: str = "acct",
+    catalog: str | None = _CATALOG_SONNET,
+    sleep_seconds: float = 0,
+    exit_code: int = 0,
+) -> Path:
+    """Fake `agy` on PATH whose `models` output is read from the leased HOME."""
+    monkeypatch.delenv("NEXUS_AGY_MODEL_CATALOG_CHECK", raising=False)
+    monkeypatch.setattr(dispatch, "OPERATION_ROOT", tmp_path / "ops")
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "agy"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "models" ]; then\n'
+        '  echo models >> "$HOME/calls.log"\n'
+        f"  sleep {sleep_seconds}\n"
+        '  printf "Fetching available models...\\n"\n'
+        '  cat "$HOME/catalog.txt"\n'
+        f"  exit {exit_code}\n"
+        "fi\n"
+        'echo task >> "$HOME/calls.log"\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    home = tmp_path / f"home-{name}"
+    home.mkdir()
+    if catalog is not None:
+        (home / "catalog.txt").write_text(catalog, encoding="utf-8")
+    return home
+
+
+def _catalog_claim_coordinator(home: Path, alias: str) -> "_WriteScopeCoordinator":
+    coordinator = _WriteScopeCoordinator(home)
+    coordinator.claim.account_alias_hash = alias
+    return coordinator
+
+
+def _catalog_dispatch(tmp_path: Path, coordinator, *, model, effort=None, events=None):
+    provider_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        provider_calls.append(True)
+        return 0, "ok", "", False, 5
+
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=model,
+        effort=effort,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append if events is not None else None,
+    )
+    return code, provider_calls
+
+
+def _catalog_calls(home: Path) -> list[str]:
+    log = home / "calls.log"
+    return log.read_text(encoding="utf-8").split() if log.exists() else []
+
+
+def test_catalog_admits_fixed_model_present_in_account_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch)
+    coordinator = _catalog_claim_coordinator(home, "alias-a")
+    events: list[dict[str, object]] = []
+
+    code, provider_calls = _catalog_dispatch(
+        tmp_path, coordinator, model="claude-sonnet-5-5", events=events
+    )
+
+    assert code == 0
+    assert provider_calls == [True]
+    assert _catalog_calls(home) == ["models"]
+    evidence = [e for e in events if "model_catalog" in e]
+    assert evidence[0]["requested_model"] == "claude-sonnet-5-5"
+    assert evidence[0]["resolved_model"] == "claude-sonnet-5-5"
+    assert evidence[0]["model_catalog"]["status"] == "OK"
+    assert evidence[0]["model_catalog"]["source"] == "FRESH"
+    assert evidence[0]["model_catalog"]["checked_at"]
+    assert len(evidence[0]["model_catalog"]["catalog_sha256"]) == 64
+    assert evidence[0]["model_catalog"]["mismatch_reason"] is None
+
+
+def test_catalog_missing_fixed_model_fails_before_provider_and_releases_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch, catalog=_CATALOG_NO_SONNET)
+    coordinator = _catalog_claim_coordinator(home, "alias-a")
+    events: list[dict[str, object]] = []
+
+    code, provider_calls = _catalog_dispatch(
+        tmp_path, coordinator, model="claude-sonnet-4-6", events=events
+    )
+
+    assert code == 64
+    assert provider_calls == []
+    assert _catalog_calls(home) == ["models"]  # catalog fetch only, no task invocation
+    assert coordinator.claim.released is True
+    rejected = [e for e in events if e.get("phase") == "MODEL_REJECTED"]
+    assert len(rejected) == 1
+    assert rejected[0]["failure_kind"] == "MODEL_CAPABILITY_UNAVAILABLE"
+    assert rejected[0]["failure_detail"] == (
+        "DISPATCH_MODEL_CONTRACT_REJECTED:MODEL_CAPABILITY_UNAVAILABLE:claude-sonnet-4-6"
+    )
+    assert rejected[0]["provider_effect"] is False
+    assert rejected[0]["retry_permitted"] is True
+    assert not any(e.get("phase") == "EXECUTING" for e in events)
+    assert not any(e.get("phase") == "ACCOUNT_ROTATED" for e in events)
+    catalog = [e for e in events if "model_catalog" in e][0]["model_catalog"]
+    assert catalog["status"] == "MODEL_CAPABILITY_UNAVAILABLE"
+    assert catalog["mismatch_reason"] == "MODEL_NOT_IN_ACCOUNT_CATALOG"
+    assert '"failure_kind": "MODEL_CAPABILITY_UNAVAILABLE"' in capsys.readouterr().err
+
+
+def test_catalog_decision_follows_the_leased_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home_a = _catalog_env(tmp_path, monkeypatch, name="a", catalog=_CATALOG_SONNET)
+    home_b = tmp_path / "home-b"
+    home_b.mkdir()
+    (home_b / "catalog.txt").write_text(_CATALOG_NO_SONNET, encoding="utf-8")
+
+    code_a, calls_a = _catalog_dispatch(
+        tmp_path, _catalog_claim_coordinator(home_a, "alias-a"), model="claude-sonnet-5-5"
+    )
+    code_b, calls_b = _catalog_dispatch(
+        tmp_path, _catalog_claim_coordinator(home_b, "alias-b"), model="claude-sonnet-5-5"
+    )
+
+    assert (code_a, calls_a) == (0, [True])
+    assert (code_b, calls_b) == (64, [])
+    assert _catalog_calls(home_b) == ["models"]
+
+
+def test_catalog_cache_is_reused_within_ttl_and_refreshed_after(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch)
+    env = {"HOME": str(home)}
+    t0 = 1_000_000.0
+
+    first = dispatch._agy_model_catalog_snapshot(env=env, account_alias_hash="alias-a", now=t0)
+    second = dispatch._agy_model_catalog_snapshot(
+        env=env, account_alias_hash="alias-a", now=t0 + 60
+    )
+    assert _catalog_calls(home) == ["models"]
+    assert (first["source"], second["source"]) == ("FRESH", "CACHED")
+    assert first["catalog_sha256"] == second["catalog_sha256"]
+    assert second["ids"] == first["ids"] and "claude-sonnet-5-5-medium" in first["ids"]
+
+    other = dispatch._agy_model_catalog_snapshot(env=env, account_alias_hash="alias-z", now=t0)
+    assert other["source"] == "FRESH"  # cache is per account alias hash
+
+    third = dispatch._agy_model_catalog_snapshot(
+        env=env,
+        account_alias_hash="alias-a",
+        now=t0 + dispatch.AGY_MODEL_CATALOG_TTL_DEFAULT_SEC + 1,
+    )
+    assert third["source"] == "FRESH"
+    assert _catalog_calls(home) == ["models", "models", "models"]
+
+
+def test_catalog_timeout_is_degraded_not_cached_and_dispatch_proceeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch, sleep_seconds=5)
+    monkeypatch.setenv("NEXUS_AGY_MODEL_CATALOG_TIMEOUT_SEC", "0.3")
+    coordinator = _catalog_claim_coordinator(home, "alias-a")
+    events: list[dict[str, object]] = []
+
+    started = time.monotonic()
+    code, provider_calls = _catalog_dispatch(
+        tmp_path, coordinator, model="claude-sonnet-5-5", events=events
+    )
+
+    assert time.monotonic() - started < 4
+    assert code == 0
+    assert provider_calls == [True]
+    catalog = [e for e in events if "model_catalog" in e][0]["model_catalog"]
+    assert catalog["status"] == "DEGRADED"
+    assert catalog["mismatch_reason"] == "CATALOG_TIMEOUT"
+    assert not (tmp_path / "ops" / "model-catalog" / "alias-a.json").exists()
+
+
+def test_catalog_nonzero_exit_and_empty_output_are_degraded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch, catalog="no models here\n")
+    env = {"HOME": str(home)}
+    empty = dispatch._agy_model_catalog_snapshot(env=env, account_alias_hash="alias-a")
+    assert (empty["catalog_status"], empty["reason"]) == ("DEGRADED", "CATALOG_EMPTY")
+
+    (tmp_path / "bin" / "agy").write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    failed = dispatch._agy_model_catalog_snapshot(env=env, account_alias_hash="alias-b")
+    assert (failed["catalog_status"], failed["reason"]) == ("DEGRADED", "CATALOG_EXIT_3")
+
+
+def test_catalog_not_required_without_fixed_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch)
+    events: list[dict[str, object]] = []
+
+    code, provider_calls = _catalog_dispatch(
+        tmp_path, _catalog_claim_coordinator(home, "alias-a"), model=None, events=events
+    )
+
+    assert (code, provider_calls) == (0, [True])
+    assert _catalog_calls(home) == []
+    evidence = [e for e in events if "model_catalog" in e][0]
+    assert evidence["requested_model"] is None
+    assert evidence["model_catalog"]["status"] == "NOT_REQUIRED"
+
+
+def test_catalog_kill_switch_disables_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(tmp_path, monkeypatch, catalog=_CATALOG_NO_SONNET)
+    monkeypatch.setenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "0")
+    events: list[dict[str, object]] = []
+
+    code, provider_calls = _catalog_dispatch(
+        tmp_path,
+        _catalog_claim_coordinator(home, "alias-a"),
+        model="claude-sonnet-5-5",
+        events=events,
+    )
+
+    assert (code, provider_calls) == (0, [True])
+    assert _catalog_calls(home) == []
+    assert [e for e in events if "model_catalog" in e][0]["model_catalog"]["status"] == "DISABLED"
+
+
+def test_catalog_accepts_effort_encoded_id_and_resolves_legacy_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _catalog_env(
+        tmp_path,
+        monkeypatch,
+        catalog="claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)\n"
+        "claude-opus-4-6-thinking\tOpus thinking\n",
+    )
+    env = {"HOME": str(home)}
+    ok = dispatch._agy_model_catalog_admission(
+        model="claude-sonnet-5-5", effort="medium", env=env, account_alias_hash="a"
+    )
+    bad = dispatch._agy_model_catalog_admission(
+        model="claude-sonnet-5-5", effort="high", env=env, account_alias_hash="a"
+    )
+    legacy = dispatch._agy_model_catalog_admission(
+        model="claude-opus-4-6", effort=None, env=env, account_alias_hash="a"
+    )
+    assert ok["admitted"] is True
+    assert bad["admitted"] is False
+    assert legacy["admitted"] is True and legacy["resolved_model"] == "claude-opus-4-6-thinking"
