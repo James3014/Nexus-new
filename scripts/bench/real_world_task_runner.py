@@ -166,11 +166,41 @@ def _run_tests(case_dir: Path, timeout_sec: int) -> bool:
     return res.returncode == 0
 
 
+def _bench_home() -> Path:
+    """Host home for bench CLIs: ``NEXUS_BENCH_HOME`` override, else the real home (#2202)."""
+    override = os.getenv("NEXUS_BENCH_HOME", "").strip()
+    return Path(override) if override else Path.home()
+
+
+def _apply_bench_env(env: dict[str, str]) -> None:
+    """Point HOME/PATH at this host's home instead of a hard-coded M4 path (#2202)."""
+    home = _bench_home()
+    env["HOME"] = str(home)
+    env["PATH"] = (
+        f"/opt/homebrew/bin:{home}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    )
+
+
+def _stage1_sweep_failed(payload: Any) -> bool:
+    """True when a Nexus payload reports an agy descendant-sweep failure anywhere in it."""
+    if isinstance(payload, dict):
+        if payload.get("agy_sweep_failed") is True or payload.get("_stage1_sweep_failed") is True:
+            return True
+        return any(_stage1_sweep_failed(value) for value in payload.values())
+    if isinstance(payload, (list, tuple)):
+        return any(_stage1_sweep_failed(value) for value in payload)
+    if isinstance(payload, str):
+        return "descendant_sweep_failed" in payload
+    return False
+
+
 def _resolve_gemini_bin() -> str:
+    home = _bench_home()
     candidates = [
-        "/Users/jameschen/.local/bin/agy",
+        str(home / ".local" / "bin" / "agy"),
+        shutil.which("agy") or "",
         os.getenv("NEXUS_GEMINI_BIN", ""),
-        "/Users/jameschen/.npm-global/bin/gemini",
+        str(home / ".npm-global" / "bin" / "gemini"),
         "/opt/homebrew/bin/gemini",
         "/usr/local/bin/gemini",
         shutil.which("gemini") or "",
@@ -360,10 +390,7 @@ def _run_gemini_patch(
         if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
             cmd.insert(1, "-y")
     env = os.environ.copy()
-    env["HOME"] = "/Users/jameschen"
-    env["PATH"] = (
-        f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
-    )
+    _apply_bench_env(env)
 
     if "agy" in str(bin_path) or "agy" in os.path.basename(os.path.realpath(bin_path)):
         # #1912: same confinement as the production adapter, through the shared
@@ -603,8 +630,7 @@ def _run_full_nexus_learn_chain(
         "--output-json",
     ]
     env = os.environ.copy()
-    env["HOME"] = "/Users/jameschen"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    _apply_bench_env(env)
 
     try:
         ingest = subprocess.run(
@@ -715,8 +741,7 @@ def _run_full_nexus_auto_flow_patch(
     env.setdefault("NEXUS_GEMINI_YOLO", "1")
     env.setdefault("NEXUS_BYPASS_LEARN_SLO", "1")
     env.setdefault("NEXUS_GATEWAY_MAX_RETRIES", "1")
-    env["HOME"] = "/Users/jameschen"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    _apply_bench_env(env)
     try:
         res = subprocess.run(
             cmd,
@@ -828,8 +853,7 @@ def _run_full_nexus_nightshift_patch(
     env = os.environ.copy()
     env.setdefault("NIGHTSHIFT_BYPASS_LEARN_SLO", "1")
     env.setdefault("NIGHTSHIFT_BYPASS_POLICY", "1")
-    env["HOME"] = "/Users/jameschen"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    _apply_bench_env(env)
     res = subprocess.run(
         cmd,
         cwd=Path(__file__).resolve().parents[2],
@@ -905,6 +929,11 @@ def _run_full_nexus_patch(
             or str(result.get("status") or "") != "SUCCESS"
         )
     )
+    # #2202: capture the stage-1 sweep verdict before nightshift can rewrite the
+    # result to SUCCESS; survivors may still be editing the case dir.
+    stage1_sweep_failed = _stage1_sweep_failed(payload)
+    if stage1_sweep_failed:
+        payload["_stage1_sweep_failed"] = True
     if should_run_nightshift:
         nightshift_info = _run_full_nexus_nightshift_patch(
             case_dir,
@@ -949,6 +978,7 @@ def _run_full_nexus_patch(
         "learn_info": learn_info,
         "nightshift_info": nightshift_info,
         "runtime_chain": runtime_chain,
+        "agy_sweep_failed": stage1_sweep_failed,
         "error": (
             ""
             if str(nightshift_info.get("status") or "") == "SUCCESS"
@@ -1094,6 +1124,8 @@ def _apply_without_nexus_patch(case_dir: Path, task: RealWorldTask) -> dict[str,
 
 def _full_nexus_succeeded(patch_info: dict[str, Any]) -> bool:
     """True when the Nexus pipeline (or its nightshift recovery) reported SUCCESS."""
+    if patch_info.get("agy_sweep_failed") or _stage1_sweep_failed(patch_info.get("nexus_payload")):
+        return False
     result = (patch_info.get("nexus_payload") or {}).get("result") or {}
     nightshift = patch_info.get("nightshift_info") or {}
     return (
