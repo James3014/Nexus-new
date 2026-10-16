@@ -270,8 +270,7 @@ def _tagged_pids(tag: str) -> set[int]:
             if not entry.name.isdigit() or int(entry.name) == own:
                 continue
             try:
-                if needle_bytes in (entry / "environ").read_bytes():
-                    found.add(int(entry.name))
+                environ = (entry / "environ").read_bytes()
             except (FileNotFoundError, ProcessLookupError):
                 if _pid_alive(int(entry.name)) and not _proc_is_zombie(entry):
                     raise  # environ vanished but the process lives: unknown
@@ -290,6 +289,14 @@ def _tagged_pids(tag: str) -> set[int]:
                     # its descendants.)
                     raise
                 continue
+            else:
+                if not environ and _proc_state(entry) in ("Z", "X") and not _proc_is_zombie(entry):
+                    # A dead thread-group leader whose other threads still run
+                    # reads as an empty environ: that says nothing about the
+                    # tag, so the process is unknown, not clean.
+                    raise PermissionError(f"empty environ of dead leader {entry.name} with threads")
+                if needle_bytes in environ:
+                    found.add(int(entry.name))
         return found
     out = subprocess.run(
         ["ps", "-axww", "-E", "-o", "pid=,command="],
@@ -347,6 +354,14 @@ def _predates_run(entry: Path, tag: str) -> bool:
     return floor is not None and started is not None and started < floor
 
 
+def _proc_state(entry: Path) -> Optional[str]:
+    """The state letter from ``/proc/<pid>/stat``, or None when unreadable."""
+    try:
+        return (entry / "stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return None
+
+
 def _proc_is_zombie(entry: Path) -> bool:
     """True when ``entry`` is a zombie or dead process with no live threads.
 
@@ -355,10 +370,7 @@ def _proc_is_zombie(entry: Path) -> bool:
     when ``/proc/<pid>/task`` lists at most one thread. Fails closed: an
     unreadable stat or task listing is not a zombie.
     """
-    try:
-        state = (entry / "stat").read_text().rsplit(")", 1)[1].split()[0]
-    except (OSError, IndexError):
-        return False
+    state = _proc_state(entry)
     if state not in ("Z", "X"):
         return False
     try:
