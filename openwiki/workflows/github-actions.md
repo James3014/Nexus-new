@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 24 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 26 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 24 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 26 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -37,10 +37,12 @@ The repository currently contains **all 24 GitHub Actions workflows** under `.gi
 | `nexus-smoke.yml` | Nexus Smoke Benchmark | `workflow_dispatch` | Manual (archived) | ARCHIVED 2026-10-13 legacy-engine: the legacy NexusEngine smoke benchmark reported a hard-coded PASS; push/nightly triggers removed, dispatch only fails with the archive notice (`ARCHIVED_2026-10-13-legacy-engine.md`) |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Pinned OpenWiki generation with containment checks and artifact upload |
 | `policy-lane-gate.yml` | Policy Lane Gate CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Policy-contract validation lane |
+| `pr-bindings-preflight.yml` | Bindings preflight | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `edited`) | Event-driven | Default-branch #2365 check that `Closes #N`, the `NEXUS_ISSUE_INTENT_V1` block and the PR commit messages agree; fetches the PR head as git objects only and publishes the commit status `Bindings preflight (default branch)` on the PR head |
 | `pytest.yml` | Nexus Pytest CI | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Exact-base impact gate followed by revision-bound Pytest verification |
 | `repository-intelligence-comment.yml` | Repository Intelligence comment | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Default-branch sticky Repository Intelligence PR comment |
 | `review-record-present.yml` | Review record present | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`), `issue_comment` (`created`, `edited`, `deleted`) | Event-driven | Advisory #2290 check that the PR carries a review record (reviewer, current head sha, verdict; cross-model for high-risk paths); default-branch script via the REST API only, publishes the commit status `Review record present (advisory)` on the PR head |
 | `repository-intelligence.yml` | Repository Intelligence | `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Repository Intelligence snapshot and guard-delta jobs |
+| `sibling-merge-checks.yml` | Sibling merge checks | `workflow_call` | Reusable | #2385 reusable job for the sibling repos: runs the Nexus-new main copies of the review-record and bindings checks for a caller's PR and publishes the same `Review record present (advisory)` / `Bindings preflight (default branch)` statuses; never runs PR code |
 | `security.yml` | Nexus Exact-Base Bandit CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Bandit security scan |
 | `trusted-deletion-anchor.yml` | Trusted deletion-evidence bootstrap anchor | `pull_request_target` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | Event-driven | Trusted controller → unprivileged executor → trusted verification path for deletion evidence |
 | `trusted-dependency-contract.yml` | Trusted dependency contract | `pull_request_target` (`main`; `opened`, `synchronize`, `reopened`, `ready_for_review`, `edited`) | Event-driven | Default-branch check of the pyproject.toml/uv.lock anchor rule (`DEPENDENCY_CONTRACT_DRIFT`), independent of the merge-lane binding (#2156) |
