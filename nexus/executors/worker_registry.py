@@ -21,6 +21,7 @@ from nexus.executors.agy_write_admission import (
     AGY_READ_ONLY_ROLES,
     CLINE_TARGET_CUSTOMIZATION_PATHS,
     KEYCHAIN_NOT_APPLICABLE,
+    CredentialPathOverlapError,
     agy_child_env,
     agy_delivery_failure,
     agy_model_shape_ok,
@@ -559,7 +560,10 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     run_root=run_tmp,
                     writable_target=target_path,
                     extra_protected_target_names=CLINE_TARGET_CUSTOMIZATION_PATHS,
+                    source_home=worker_home(None),
                 )
+            except CredentialPathOverlapError:
+                return failed("cline_target_inside_credential_path")
             except ValueError:
                 return failed("cline_seatbelt_profile_unrepresentable")
             seatbelt_sha256 = hashlib.sha256(seatbelt.encode("utf-8")).hexdigest()
@@ -901,7 +905,11 @@ class AgyWorkerAdapter:
                     run_root=run_tmp,
                     writable_target=None if read_only else target_path,
                     run_home=run_home,
+                    source_home=source_home,
+                    target_root=target_path,
                 )
+            except CredentialPathOverlapError:
+                return "agy_target_inside_credential_path", run_env, ""
             except ValueError:
                 return "agy_seatbelt_profile_unrepresentable", run_env, ""
             facts["seatbelt_sha256"] = hashlib.sha256(seatbelt.encode("utf-8")).hexdigest()
