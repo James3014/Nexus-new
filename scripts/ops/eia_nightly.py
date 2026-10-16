@@ -843,7 +843,8 @@ class Nightly:
 
     # ---- prepare --------------------------------------------------------------------
     def finish_previous_night(self) -> None:
-        """A previous night left unfinalized (e.g. a failed bootout) is finished first."""
+        """A previous night left unfinalized (failed bootout, pending disarm or candidate
+        label swap) is finished first; finalize() retries all of them."""
         previous = night_of(self.now() - dt.timedelta(days=1))
         night = self.load(previous)
         if night and night.get("started") and not night.get("finalized"):
@@ -1913,7 +1914,16 @@ class Nightly:
                 continue
             entry.update(status="HARD_STOPPED", disarm_pending=False)
             entry.pop("disarm_error", None)
-        disarm_pending = bool(self._entries(night, "HARD_STOPPING"))
+        # Candidate-PR Issues whose label swap failed still carry the daemon label too.
+        for entry in self._entries(night, "CANDIDATE_PR"):
+            if entry.get("labels_pending"):
+                try:
+                    self._finish_candidate_labels(night, entry)
+                except NightlyError as exc:
+                    entry["labels_error"] = _one_line(exc, 200)
+        disarm_pending = bool(self._entries(night, "HARD_STOPPING")) or any(
+            e.get("labels_pending") for e in self._entries(night, "CANDIDATE_PR")
+        )
         if disarm_pending:
             self._event(night, "disarm_pending")
         if bootout_ok and disarm_pending:  # never FINISHED with a daemon label left on

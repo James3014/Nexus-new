@@ -160,7 +160,9 @@ next tick retries. `start` records `BOOTSTRAP_FAILED` or `KICKSTART_FAILED`, dep
 which step failed. On a failed or timed-out bootout, `stop` still disarms in-flight Issues,
 records `BOOTOUT_FAILED`, and retries. An in-flight Issue stays `HARD_STOPPING`
 (`disarm_pending`) until removal of `nexus:external-intelligence` is confirmed. Every tick
-retries it, and the night is never `FINISHED` while any disarm is pending.
+retries it, and the night is never `FINISHED` while any disarm is pending. A candidate-PR
+Issue whose label swap is still pending counts as a pending disarm too. The next
+`prepare` or `start` finishes a previous night left in that state.
 
 ## Install (operator only)
 

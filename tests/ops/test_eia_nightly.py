@@ -1600,3 +1600,29 @@ def test_failed_disarm_at_hard_stop_is_retried_before_finishing(env) -> None:
     assert night["status"] == "FINISHED"
     assert entry["status"] == "HARD_STOPPED" and entry["disarm_pending"] is False
     assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_pending_candidate_labels_block_finishing_until_fixed(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+    broken = {"on": True}
+
+    def no_labels(argv):
+        if broken["on"] and "--add-label" in argv and "eia:candidate-pr" in argv:
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = no_labels
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert night["issues"]["11"]["labels_pending"] is True
+    night = _dispatch(env, "2026-10-17T09:00:00")  # hard stop while still pending
+    assert night["status"] == "DISARM_PENDING" and not night.get("finalized")
+    assert "nexus:external-intelligence" in env["gh"].issues[11]["labels"]
+    broken["on"] = False
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T16:00:00")
+    env["app"].finish_previous_night()  # next prepare/start retries it
+    night = env["app"].load(NIGHT)
+    assert night["status"] == "FINISHED" and night["issues"]["11"]["labels_pending"] is False
+    assert env["gh"].issues[11]["labels"] == {"eia:candidate-pr"}
