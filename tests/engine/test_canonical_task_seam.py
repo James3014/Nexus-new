@@ -165,7 +165,7 @@ def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
         "execution_topology",
         "recommended_flow",
     })
-    assert request.route["workforce_bindings"]["online"]["worker_id"] == "grok_review"
+    assert request.route["workforce_bindings"]["online"]["worker_id"] == "agy_flash_38_high"
     assert "provider" not in request.route["workforce_bindings"]["online"]
     assert result.production_ingress_count == 1
     assert result.production_runtime_entry_count == 1
@@ -304,7 +304,7 @@ def test_canonical_product_verified_repair_topology_is_planner_owned(
     assert request.codeintel["verify_commands"] == ["python -m py_compile target.py"]
     assert request.codeintel["mempalace_tenant_id"] == "canonical-product"
     assert request.codeintel["mempalace_artifact"]["task_id"] == "canonical-world-c-1"
-    assert request.route["workforce_bindings"]["online"]["worker_id"] == "grok_review"
+    assert request.route["workforce_bindings"]["online"]["worker_id"] == "agy_flash_38_high"
 
 
 def test_canonical_product_online_deny_removes_online_runtime_demand(
