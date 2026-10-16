@@ -1,0 +1,121 @@
+{
+  "base_sha": "bcd85005b556d0b05c31532919212188cf87cc6e",
+  "candidate_commit": "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+  "candidate_diff_sha256": "961ce381089a94044041c4328e9c4ab21378fe0893d8cb4aa3fac99867c5a09b",
+  "candidate_tree": "6e272db4f150e2e8b2c032df85401df4aca6403c",
+  "failed_integrity_check_ids": [],
+  "failed_verifier_ids": [],
+  "integrity_base_sha": "bcd85005b556d0b05c31532919212188cf87cc6e",
+  "integrity_checks": [
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--no-ext-diff",
+        "--no-renames",
+        "--check",
+        "bcd85005b556d0b05c31532919212188cf87cc6e",
+        "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+        "--"
+      ],
+      "argv_sha256": "8a2b021dd299dd31d1e88e981b4649458aaf466c8fe357a7a16a1abb1ac19ad0",
+      "check_id": "nexus.integrity.diff-check",
+      "code": "",
+      "findings": [],
+      "passed": true,
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--no-ext-diff",
+        "--no-renames",
+        "--name-only",
+        "-z",
+        "--diff-filter=D",
+        "bcd85005b556d0b05c31532919212188cf87cc6e",
+        "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+        "--"
+      ],
+      "argv_sha256": "f34cf6d6583263d25aecda2e9bebfdc08193799edd780658b8b2d8bbcf6d6049",
+      "check_id": "nexus.integrity.deletions",
+      "code": "",
+      "findings": [],
+      "passed": true,
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--no-ext-diff",
+        "--no-renames",
+        "--name-only",
+        "-z",
+        "bcd85005b556d0b05c31532919212188cf87cc6e",
+        "6e2f4734ebeb1886f09977caedc85489a6be00bd",
+        "--"
+      ],
+      "argv_sha256": "3a217f3e2d77d05456057a1e70a817333603fed5431f732e7004096b8132ced5",
+      "check_id": "nexus.integrity.scope",
+      "code": "",
+      "findings": [],
+      "passed": true,
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a379642e4209e668a64ff5d4fd4fd5177142bc5876d04b2c6cfaa2b271c1dfe7"
+    }
+  ],
+  "integrity_status": "PASS",
+  "results": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/ops/test_external_intelligence_open_swe_canary_20261014.py"
+      ],
+      "argv_sha256": "5191358b005abc9a9f43ef37539370f5badce315e9f766d6f497f491b310482b",
+      "cwd_sha256": "5f88e431441475f9eafdb0fa42ed16aad854c7d860fac91f91d85187269b4c52",
+      "error": "",
+      "owner_unit": "",
+      "passed": true,
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "cdd212685a8b7c65751ee313e256d42c354abd5ba2f63c64677bf56fbd34f7fb",
+      "verifier_id": "pytest-open-swe-canary-20261014-whole",
+      "wall_time_ms": 6453
+    },
+    {
+      "argv": [
+        "sh",
+        "-c",
+        "git diff --check \"$NEXUS_BASE_SHA\" \"$NEXUS_CANDIDATE_SHA\""
+      ],
+      "argv_sha256": "62736a6ee989820778968e23673e763cd0d92ff2e32ad9578284652d14b145b7",
+      "cwd_sha256": "5f88e431441475f9eafdb0fa42ed16aad854c7d860fac91f91d85187269b4c52",
+      "error": "",
+      "owner_unit": "",
+      "passed": true,
+      "returncode": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verifier_id": "diff-check-scoped",
+      "wall_time_ms": 312
+    }
+  ],
+  "schema": "external_intelligence_whole_task_verification.v1",
+  "scope": "WHOLE_TASK",
+  "status": "PASS",
+  "task_candidate_id": "737ee165b7d4c640e3924a10fd33718f4d43cf4bb983bb0fd399dc447fd544d3",
+  "task_id": "eia-open-swe-canary-20261014",
+  "unit_id": "",
+  "verification_id": "0ddf14d725ad3b7b1167e5a29632e58401248d2cd4d4f57e1ae57366494bdd53",
+  "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/closure/James3014_Nexus-new/ei-close-eia-open-swe-canary-20261014-21946d4ee940"
+}

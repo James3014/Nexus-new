@@ -17,6 +17,8 @@ from typing import Any
 import pytest
 
 from nexus.services.external_intelligence_automation import IssueWorkItem, parse_issue_contract
+from nexus.services.external_intelligence_closure import _canonical_json as closure_canonical_json
+from nexus.services.external_intelligence_closure import _sha256 as closure_sha256
 from scripts.ops import eia_nightly as en
 
 NIGHT = "20261016"
@@ -147,6 +149,8 @@ class FakeGitHub:
                 "headRefOid": self.remote[opt["--head"]],
                 "state": "OPEN",
                 "baseRefName": opt["--base"],
+                "isCrossRepository": False,
+                "headRepositoryOwner": {"login": "James3014"},
                 "title": opt["--title"],
                 "body": body,
                 "mergeCommit": None,
@@ -552,7 +556,16 @@ def _complete(
         _git(wt, "add", "-A")
         _git(wt, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qm", "more")
     sha = _git(wt, "rev-parse", "HEAD")
-    vid = "ab" * 32
+    ids = verifier_ids if verifier_ids is not None else [f"whole-v1-a{att['attempt']}"]
+    material = {
+        "status": "PASS",
+        "candidate_commit": sha,
+        "results": [{"verifier_id": i, "passed": True} for i in ids],
+        "integrity_status": "PASS",
+        "failed_integrity_check_ids": [],
+        "integrity_checks": [{"check_id": "nexus.integrity.scope", "passed": True}],
+    }
+    vid = closure_sha256(closure_canonical_json(material))
     packet = env["eia_state"] / "closure" / "acceptance-packets" / "packet.json"
     packet.parent.mkdir(parents=True, exist_ok=True)
     packet.write_text(
@@ -569,14 +582,7 @@ def _complete(
         / (f"{entry['task_id']}--task--whole_task--{vid}.json")
     )
     verification.parent.mkdir(parents=True, exist_ok=True)
-    ids = verifier_ids if verifier_ids is not None else [f"whole-v1-a{att['attempt']}"]
-    verification.write_text(
-        json.dumps({
-            "status": "PASS",
-            "candidate_commit": sha,
-            "results": [{"verifier_id": i, "passed": True} for i in ids],
-        })
-    )
+    verification.write_text(json.dumps({**material, "verification_id": vid}))
     _write_daemon_state(
         env,
         11,
@@ -594,7 +600,7 @@ def _complete(
             "acceptance_packet_sha256": hashlib.sha256(packet.read_bytes()).hexdigest(),
         },
         publication_record={"state": "COMPLETED"},
-        worker_binding={"provider": "opencli_chatgpt", "model": "advanced"},
+        worker_binding={"provider": "opencli_chatgpt", "model": "opencli_chatgpt/advanced"},
     )
     return sha
 
@@ -1052,6 +1058,8 @@ def test_existing_closed_pr_for_candidate_branch_is_refused(env) -> None:
         "headRefOid": sha,
         "state": "CLOSED",
         "baseRefName": "main",
+        "isCrossRepository": False,
+        "headRepositoryOwner": {"login": "James3014"},
     }
     night = _dispatch(env, "2026-10-17T01:30:00")
     assert "EXISTING_PR_INVALID" in night["issues"]["11"]["escalation"]["reason"]
@@ -1070,7 +1078,8 @@ def test_label_failure_after_candidate_pr_is_reconciled_next_tick(env) -> None:
 
     env["sys"].gh = no_labels
     night = _dispatch(env, "2026-10-17T01:30:00")
-    assert night["issues"]["11"]["status"] == "ARMED"
+    assert night["issues"]["11"]["status"] == "CANDIDATE_PR"
+    assert night["issues"]["11"]["labels_pending"] is True
     env["sys"].gh = real
     night = _dispatch(env, "2026-10-17T01:35:00")
     assert night["issues"]["11"]["status"] == "CANDIDATE_PR" and len(env["gh"].prs) == 2
@@ -1169,3 +1178,198 @@ def test_card_commit_is_pinned_by_a_ref(env) -> None:
     night = _prepared(env)
     ref = _git(env["repo"], "rev-parse", f"refs/eia-nightly/cards/{NIGHT}")
     assert ref == night["card_pr"]["commit"]
+
+
+# ------------------------------------------------------------------------- review round 3
+
+REAL = Path(__file__).parent / "fixtures" / "eia_nightly_real"
+
+
+def test_real_complete_record_passes_field_and_verification_checks(env) -> None:
+    """Minimal copies of the real #2150 COMPLETE record, packet and whole-task verification
+    record: guards against drift between the test fixtures and what the daemon writes."""
+    record = json.loads((REAL / "automation" / "complete-record.json").read_text())
+    tokens = en.publication_tokens(record)
+    assert tokens["model"] == "opencli_chatgpt/advanced"
+    pub = record["publication"]
+    packet_path = REAL / "closure" / "acceptance-packets" / Path(pub["acceptance_packet_ref"]).name
+    raw = packet_path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == pub["acceptance_packet_sha256"]
+    packet = json.loads(raw)
+    env["app"].eia_state_root = REAL.resolve()
+    verification = env["app"].load_whole_verification(
+        packet_path.resolve(), packet, pub["task_id"], pub["candidate_commit"]
+    )
+    assert verification["status"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("status", "FAIL", "ID_MISMATCH"),  # tampering breaks the content-derived id
+        ("integrity_status", "FAIL", "ID_MISMATCH"),
+    ],
+)
+def test_tampered_verification_record_is_refused(env, tmp_path, field, value, code) -> None:
+    import shutil
+
+    root = tmp_path / "state"
+    shutil.copytree(REAL, root)
+    vfile = next((root / "closure" / "verifications").iterdir())
+    data = json.loads(vfile.read_text())
+    data[field] = value
+    vfile.write_text(json.dumps(data))
+    record = json.loads((root / "automation" / "complete-record.json").read_text())
+    pub = record["publication"]
+    packet_path = root / "closure" / "acceptance-packets" / Path(pub["acceptance_packet_ref"]).name
+    env["app"].eia_state_root = root.resolve()
+    with pytest.raises(en.CandidateRefused, match=code):
+        env["app"].load_whole_verification(
+            packet_path.resolve(),
+            json.loads(packet_path.read_text()),
+            pub["task_id"],
+            pub["candidate_commit"],
+        )
+
+
+def test_failed_integrity_with_consistent_id_is_refused(env, tmp_path) -> None:
+    import shutil
+
+    root = tmp_path / "state"
+    shutil.copytree(REAL, root)
+    vfile = next((root / "closure" / "verifications").iterdir())
+    data = json.loads(vfile.read_text())
+    data["integrity_checks"][0]["passed"] = False
+    data.pop("verification_id")
+    vid = closure_sha256(closure_canonical_json(data))
+    data["verification_id"] = vid
+    task_id = json.loads((root / "automation" / "complete-record.json").read_text())["publication"][
+        "task_id"
+    ]
+    (root / "closure" / "verifications" / f"{task_id}--task--whole_task--{vid}.json").write_text(
+        json.dumps(data)
+    )
+    env["app"].eia_state_root = root.resolve()
+    packet_path = next((root / "closure" / "acceptance-packets").iterdir()).resolve()
+    with pytest.raises(en.CandidateRefused, match="INTEGRITY_FAILED"):
+        env["app"].load_whole_verification(
+            packet_path, {"whole_task_verification_id": vid}, task_id, data["candidate_commit"]
+        )
+
+
+def test_publication_tokens_reject_bad_worker_values() -> None:
+    record = json.loads((REAL / "automation" / "complete-record.json").read_text())
+    for bad in ("a/b/c", "x y", "`m`", None):
+        record["worker_binding"]["model"] = bad
+        with pytest.raises(en.CandidateRefused):
+            en.publication_tokens(record)
+
+
+def test_partial_label_write_after_candidate_pr_is_never_withdrawn(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+
+    def partial(argv):
+        if "--add-label" in argv and "eia:candidate-pr" in argv:
+            env["gh"].issues[11]["labels"].discard("eia:queue")  # half applied, then 502
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = partial
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "CANDIDATE_PR" and entry["labels_pending"] is True
+    assert entry["attempts"][-1]["pr_number"] == entry["pr"]["number"]
+    env["sys"].gh = real
+    night = _dispatch(env, "2026-10-17T01:35:00")
+    assert night["issues"]["11"]["status"] == "CANDIDATE_PR"
+    assert night["issues"]["11"]["labels_pending"] is False
+    assert env["gh"].issues[11]["labels"] == {"eia:candidate-pr"}
+
+
+@pytest.mark.parametrize(
+    "edits", [{"nodes": []}, {"totalCount": None, "nodes": []}, {"totalCount": 0}]
+)
+def test_missing_edit_history_fields_fail_closed(env, edits) -> None:
+    env["gh"].add_issue(11, task_body())
+    real = env["gh"].__call__
+
+    def mangled(argv):
+        out = real(argv)
+        if argv[1:3] == ["api", "graphql"]:
+            data = json.loads(out.stdout)
+            data["data"]["repository"]["issue"]["userContentEdits"] = edits
+            return _cp(argv, out=json.dumps(data))
+        return out
+
+    env["sys"].gh = mangled
+    assert env["app"]._queue_trusted(11) == (False, "EDIT_HISTORY_INCOMPLETE")
+
+
+def test_new_candidate_pr_is_read_back_before_ready(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+
+    def wrong_base(argv):
+        out = real(argv)
+        if argv[1:3] == ["pr", "create"]:
+            env["gh"].prs[env["gh"].next_number]["baseRefName"] = "release"
+        return out
+
+    env["sys"].gh = wrong_base
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert not any("ready-candidate" in k for k in night.get("outbox", {}))
+
+
+def test_fork_pr_with_same_branch_name_is_ignored(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    sha = _complete(env, night["issues"]["11"])
+    branch = f"eia/11-n{NIGHT}-a1"
+    env["gh"].prs[901] = {
+        "number": 901,
+        "head": branch,
+        "headRefOid": "f" * 40,
+        "state": "OPEN",
+        "baseRefName": "main",
+        "isCrossRepository": True,
+        "headRepositoryOwner": {"login": "mallory"},
+    }
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "CANDIDATE_PR" and entry["pr"]["number"] != 901
+    assert env["gh"].prs[entry["pr"]["number"]]["headRefOid"] == sha
+
+
+def test_guarded_counts_consecutive_failures_and_catches_value_errors(env) -> None:
+    entry = {"issue": 11, "status": "ARMED", "attempts": []}
+    night = {"night": NIGHT, "issues": {"11": entry}, "order": [11]}
+
+    def bad(_n, _e):
+        raise ValueError("corrupt json")
+
+    env["app"]._guarded(night, entry, bad)
+    env["app"]._guarded(night, entry, bad)
+    assert entry["failures"] == 2
+    env["app"]._guarded(night, entry, lambda _n, _e: None)
+    assert entry["failures"] == 0
+
+
+def test_bootout_failure_notifies_once_and_next_start_finishes_it(env) -> None:
+    _started(env)
+    env["sys"].bootout_rc = 1
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
+    env["app"].stop()
+    _dispatch(env, "2026-10-17T07:35:00")
+    _dispatch(env, "2026-10-17T07:40:00")
+    notes = [c for c in env["sys"].calls if c[0] == "osascript" and "bootout failed" in c[-1]]
+    assert len(notes) == 1
+    env["sys"].bootout_rc = 0
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T16:00:00")
+    env["app"].prepare()
+    assert env["app"].load(NIGHT)["status"] == "FINISHED"

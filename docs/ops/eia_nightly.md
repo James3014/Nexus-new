@@ -97,11 +97,19 @@ acts on that result as follows:
   commit must be exactly one commit whose only parent is the contract's `main_sha`, and its
   tree must match. `git diff --raw` may show only added or modified regular files (modes
   100644/100755) that are in `allowed_files`: no deletions, type changes, symlinks or
-  gitlinks. The whole-task verification record must show every declared verifier passing
-  for that commit. `candidate_tree` must be 40 hex characters. Gate, claim ceiling, closure
-  run id and worker fields must match `^[A-Za-z0-9_.:-]{1,120}$`. Only these validated
-  values ever reach the PR body or coord messages. An existing PR is reused only if it is
-  OPEN, based on `main`, and at that exact head. The candidate commit and the card commit are
+  gitlinks. The whole-task verification record must sit under the state root. Its
+  content-derived `verification_id` is recomputed with the closure's own
+  `_sha256(_canonical_json(...))` and must equal both the record's own id and the packet's
+  `whole_task_verification_id`. Its integrity checks must all pass, and every declared
+  verifier must pass for that commit. `candidate_tree` must be 40 hex characters. Gate, claim ceiling and
+  closure run id must match `^[A-Za-z0-9_.:-]{1,120}$`. Worker provider and model may contain
+  one `/` (the real value is `opencli_chatgpt/advanced`). Only these validated
+  values ever reach the PR body or coord messages. A branch lookup only considers PRs
+  that are not cross-repository and whose head owner is `James3014`; such a PR is reused only
+  if it is OPEN, based on `main`, and at that exact head. A newly created PR is read back the
+  same way before READY is sent. The PR number is saved before labels change. A failed or
+  partial label edit leaves the Issue `CANDIDATE_PR` with labels pending (never `WITHDRAWN`),
+  and every tick retries the labels. The candidate commit and the card commit are
   pinned under `refs/eia-nightly/`. The scheduler then pushes that exact commit as
   `eia/<N>-<revision>` with the bot credential, opens a PR (`Closes #N`, Core marker, CLOSE
   intent, receipt summary) and sends READY to merge-queue. Labels become `eia:candidate-pr`;
@@ -126,12 +134,13 @@ request. To keep that window short, `dispatch` watches the local state file ever
 to 270 s per invocation (it makes no GitHub calls while watching). It disarms within seconds
 of a terminal result.
 
-Each Issue is isolated: an error is counted against that Issue, and the Issue escalates after
-3 errors without stalling the others. `stop` writes a `STOP_REQUESTED` file before it takes
+Each Issue is isolated: consecutive errors, including JSON and file errors, are counted
+against that Issue, the count resets after a success, and the Issue escalates after 3 errors
+without stalling the others. `stop` writes a `STOP_REQUESTED` file before it takes
 the lock. A watching `dispatch` sees the file and releases the lock. `stop` then waits up to
 about 5.5 minutes for the lock and exits with 75 if it still cannot get it; the 09:05 run
-retries. If `launchctl bootout` fails, the night is not finalised: it is reported, and both
-`dispatch` and the 09:05 `stop` retry.
+retries. If `launchctl bootout` fails, the night is not finalised: it is reported once, and
+`dispatch`, the 09:05 `stop`, and the next `prepare` or `start` all retry it.
 
 `RECONCILIATION_REQUIRED` with prior state `INTELLIGENCE_DISPATCHING` or `FANOUT_DISPATCHING`
 is left alone, because the daemon resumes it by itself.

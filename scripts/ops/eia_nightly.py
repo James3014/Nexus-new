@@ -53,6 +53,12 @@ from nexus.services.external_intelligence_automation import (  # noqa: E402
     IssueWorkItem,
     parse_issue_contract,
 )
+from nexus.services.external_intelligence_closure import (  # noqa: E402
+    _canonical_json as closure_canonical_json,
+)
+from nexus.services.external_intelligence_closure import (  # noqa: E402
+    _sha256 as closure_sha256,
+)
 from nexus.services.external_intelligence_core_binding import (  # noqa: E402
     CAPABILITY_DISCOVERY_INDEX_PATH,
     DONOR_CAPABILITY_DISPOSITIONS,
@@ -118,6 +124,9 @@ PROTECTED_NAMES = (
 # mapped to that form only when ``__typename == "Bot"``).
 TRUSTED_ACTORS = frozenset({"James3014", "james3014-nexus-agent[bot]"})
 DAEMON_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+# Worker provider/model ids may contain ``/`` (real value: ``opencli_chatgpt/advanced``).
+WORKER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,60}(/[A-Za-z0-9_.:-]{1,60})?$")
+REPO_OWNER = "James3014"
 STOP_FILE = "STOP_REQUESTED"
 GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
 MAX_ISSUE_FAILURES = 3
@@ -499,6 +508,23 @@ def validate_contract(
     return IssueWorkItem(REPOSITORY, issue, title, body, contract).identity_hash, contract
 
 
+def publication_tokens(record: Mapping[str, Any]) -> dict[str, str]:
+    """Daemon-sourced fields allowed into the candidate PR body; anything odd is refused."""
+    pub = record.get("publication") or {}
+    worker = record.get("worker_binding") or {}
+    tokens = {
+        "gate": pub.get("current_gate"),
+        "ceiling": pub.get("claim_ceiling"),
+        "run_id": record.get("closure_run_id"),
+    }
+    workers = {"provider": worker.get("provider"), "model": worker.get("model")}
+    if any(_token(v) == "INVALID" for v in tokens.values()) or not all(
+        isinstance(v, str) and WORKER_TOKEN_RE.fullmatch(v) for v in workers.values()
+    ):
+        raise CandidateRefused("PUBLICATION_FIELD_INVALID")
+    return {**tokens, **workers}  # type: ignore[dict-item]
+
+
 def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
     """Return (kind, reason) with kind in wait|complete|infra|model.  Unknown -> model."""
     state = str(daemon_state.get("state") or "")
@@ -663,24 +689,26 @@ class Nightly:
             )
 
     def _existing_pr(self, branch: str, sha: str) -> int | None:
-        """An existing PR for ``branch`` is reused only if OPEN, based on main, at ``sha``."""
-        fields = "number,headRefOid,state,baseRefName"
-        rows = (
-            self._ghj(
-                *f"pr list --repo {REPOSITORY} --state all --json {fields}".split(),
-                "--head",
-                branch,
-            )
-            or []
+        """A same-repository PR for ``branch`` is reused only if OPEN, based on main, at ``sha``.
+        PRs from forks that happen to use the same branch name are ignored."""
+        fields = "number,headRefOid,state,baseRefName,isCrossRepository,headRepositoryOwner"
+        rows = self._ghj(
+            *f"pr list --repo {REPOSITORY} --state all --json {fields}".split(), "--head", branch
         )
-        if not rows:
+        ours = [
+            row
+            for row in rows or []
+            if row.get("isCrossRepository") is False
+            and (row.get("headRepositoryOwner") or {}).get("login") == REPO_OWNER
+        ]
+        if not ours:
             return None
-        row = rows[0]
+        row = ours[0]
         if (
-            len(rows) != 1
+            len(ours) != 1
             or row.get("state") != "OPEN"
             or row.get("baseRefName") != "main"
-            or (row.get("headRefOid") != sha)
+            or row.get("headRefOid") != sha
         ):
             raise CandidateRefused(f"EXISTING_PR_INVALID:{branch}")
         return _issue_number(row.get("number"))
@@ -788,7 +816,18 @@ class Nightly:
         return (self.state_dir / "PAUSE").exists()
 
     # ---- prepare --------------------------------------------------------------------
+    def finish_previous_night(self) -> None:
+        """A previous night left unfinalized (e.g. a failed bootout) is finished first."""
+        previous = night_of(self.now() - dt.timedelta(days=1))
+        night = self.load(previous)
+        if night and night.get("started") and not night.get("finalized"):
+            night.setdefault("stop_requested_at", self._iso())
+            self.finalize(night)
+            self._flush_outbox(night)
+            self.save(night)
+
     def prepare(self, night_id: str | None = None) -> dict[str, Any]:
+        self.finish_previous_night()
         night_id = night_id or night_of(self.now())
         night = self.load(night_id)
         if night and night.get("card_pr"):
@@ -909,13 +948,9 @@ class Nightly:
                 body,
             )
             number = _number_from_url(url)
-        head = _sha(
-            self._ghj("pr", "view", str(number), "--repo", REPOSITORY, "--json", "headRefOid")[
-                "headRefOid"
-            ]
-        )
-        if head != commit:
-            raise NightlyError("CARD_PR_HEAD_MISMATCH")
+        if self._existing_pr(branch, commit) != number:  # read back: ours, OPEN, main, head
+            raise NightlyError("CARD_PR_READBACK_MISMATCH")
+        head = commit
         pr.update(number=number, head_sha=head, tracking_issue=tracking)
         self._queue_msg(
             night,
@@ -991,7 +1026,13 @@ class Nightly:
             return False, "AUTHOR_UNTRUSTED"
         edits = found.get("userContentEdits") or {}
         nodes = edits.get("nodes")
-        if not isinstance(nodes, list) or int(edits.get("totalCount") or 0) > len(nodes):
+        total = edits.get("totalCount")
+        if (
+            not isinstance(nodes, list)
+            or not isinstance(total, int)
+            or isinstance(total, bool)
+            or total > len(nodes)
+        ):
             return False, "EDIT_HISTORY_INCOMPLETE"
         for node in nodes:
             if _ts(node.get("editedAt")) > since and not self._trusted_gql(node.get("editor")):
@@ -1164,6 +1205,7 @@ class Nightly:
 
     # ---- start ----------------------------------------------------------------------
     def start(self) -> dict[str, Any]:
+        self.finish_previous_night()
         night_id = night_of(self.now())
         night = self.load(night_id) or {
             "schema": STATE_SCHEMA,
@@ -1310,6 +1352,9 @@ class Nightly:
                 self._guarded(night, entry, self._harvest)
                 self.save(night)
             self._watch(night)
+            for entry in self._entries(night, "CANDIDATE_PR"):
+                if entry.get("labels_pending"):
+                    self._guarded(night, entry, self._finish_candidate_labels)
             stopping = self._stop_requested(night)
             now = self.now()
             busy = bool(self._entries(night, "ARMED") or self._entries(night, "ARMING"))
@@ -1317,7 +1362,7 @@ class Nightly:
                 self.finalize(night)
             elif not stopping and not busy and now < night_clock(night["night"], self.arm_cutoff):
                 nxt = self._entries(night, "PREPARED") + self._entries(night, "RETRY_PENDING")
-                if nxt and not self._foreign_in_flight():
+                if nxt and not self._foreign_in_flight(night):
                     first = min(nxt, key=lambda e: night["order"].index(e["issue"]))
                     self._guarded(night, first, self._arm)
         finally:
@@ -1328,16 +1373,17 @@ class Nightly:
     def _guarded(
         self, night: dict[str, Any], entry: dict[str, Any], step: Callable[..., Any]
     ) -> None:
-        """Isolate one Issue: errors are counted per Issue and escalate after 3."""
+        """Isolate one Issue: consecutive errors are counted per Issue and escalate after 3."""
         try:
             step(night, entry)
-        except NightlyError as exc:
+            entry["failures"] = 0
+        except (NightlyError, ValueError, OSError) as exc:
             entry["failures"] = int(entry.get("failures") or 0) + 1
             self._event(night, "issue_error", issue=entry["issue"], error=_one_line(exc, 200))
             if entry["failures"] >= MAX_ISSUE_FAILURES and entry["status"] != "ESCALATED":
                 try:
                     self._escalate(night, entry, "infra", f"REPEATED_ERRORS:{_one_line(exc, 120)}")
-                except NightlyError as again:
+                except (NightlyError, ValueError, OSError) as again:
                     self._event(night, "escalate_failed", issue=entry["issue"], error=str(again))
 
     def _watch(self, night: dict[str, Any]) -> None:
@@ -1372,9 +1418,14 @@ class Nightly:
             if night["issues"][str(n)]["status"] == status
         ]
 
-    def _foreign_in_flight(self) -> bool:
+    def _foreign_in_flight(self, night: Mapping[str, Any]) -> bool:
+        """Any open Issue carrying the daemon label, except our own candidate-PR Issues whose
+        label clean-up is still pending (the daemon reuses their COMPLETE state)."""
+        ours = {
+            int(e["issue"]) for e in self._entries(night, "CANDIDATE_PR") if e.get("labels_pending")
+        }
         args = f"issue list --repo {REPOSITORY} --state open --json number --label {L_EIA}"
-        return bool(self._ghj(*args.split()))
+        return any(int(r.get("number") or 0) not in ours for r in self._ghj(*args.split()) or [])
 
     @staticmethod
     def _text_sha(value: Any) -> str:
@@ -1468,6 +1519,10 @@ class Nightly:
         view = self._view_issue(issue)
         if self._issue_matches(view, att):
             return True
+        if att.get("pr_number"):  # a candidate PR exists: never call this WITHDRAWN
+            entry.update(status="CANDIDATE_PR", labels_pending=True)
+            self._finish_candidate_labels(night, entry)
+            return False
         if L_QUEUE not in view["label_names"]:  # withdrawn: only undo our own label
             self._labels(issue, remove=[L_EIA])
             att.update(result="withdrawn", reason="QUEUE_LABEL_REMOVED", finished_at=self._iso())
@@ -1584,16 +1639,7 @@ class Nightly:
             sha, tree = _sha(pub.get("candidate_commit")), _sha(pub.get("candidate_tree"))
         except NightlyError as exc:
             raise CandidateRefused("PUBLICATION_SHA_INVALID") from exc
-        worker = record.get("worker_binding") or {}
-        tokens = {
-            "gate": pub.get("current_gate"),
-            "ceiling": pub.get("claim_ceiling"),
-            "run_id": record.get("closure_run_id"),
-            "provider": worker.get("provider"),
-            "model": worker.get("model"),
-        }
-        if any(_token(v) == "INVALID" for v in tokens.values()):
-            raise CandidateRefused("PUBLICATION_FIELD_INVALID")
+        tokens = publication_tokens(record)
         if (
             pub.get("verification_state") != "WHOLE_TASK_PASS"
             or pub.get("task_id") != entry["task_id"]
@@ -1612,7 +1658,15 @@ class Nightly:
             or packet.get("whole_task_status") != "PASS"
         ):
             raise CandidateRefused("ACCEPTANCE_PACKET_MISMATCH")
-        self._check_whole_verification(packet_path, packet, entry, att, sha)
+        verification = self.load_whole_verification(packet_path, packet, entry["task_id"], sha)
+        passed = {
+            r.get("verifier_id"): r.get("passed") is True
+            for r in verification.get("results") or []
+            if isinstance(r, Mapping)
+        }
+        contract = build_contract(entry, int(att["attempt"]), main_sha)
+        if not all(passed.get(spec["id"]) for spec in contract["whole_verifiers"]):
+            raise CandidateRefused("WHOLE_VERIFICATION_NOT_PASSED")
         repo = self.daemon_repo
         if self._git(repo, "cat-file", "-t", sha) != "commit":
             raise CandidateRefused("CANDIDATE_NOT_COMMIT")
@@ -1651,44 +1705,39 @@ class Nightly:
         )
         return {"sha": sha, "tree": tree, "packet_sha": packet_sha, "rows": rows, **tokens}
 
-    def _check_whole_verification(
-        self,
-        packet_path: Path,
-        packet: Mapping[str, Any],
-        entry: Mapping[str, Any],
-        att: Mapping[str, Any],
-        sha: str,
-    ) -> None:
-        """Every declared whole-task verifier id is recorded as passed for this candidate."""
+    def load_whole_verification(
+        self, packet_path: Path, packet: Mapping[str, Any], task_id: str, sha: str
+    ) -> dict[str, Any]:
+        """Load the closure's whole-task verification record and check it is the one the
+        packet names: content-derived id recomputed as the closure does, PASS status and
+        integrity checks, same candidate, and a path inside the EIA state root."""
         vid = str(packet.get("whole_task_verification_id") or "")
         if not re.fullmatch(r"[0-9a-f]{64}", vid):
             raise CandidateRefused("WHOLE_VERIFICATION_ID_INVALID")
-        path = (
-            packet_path.parent.parent
-            / "verifications"
-            / (f"{entry['task_id']}--task--whole_task--{vid}.json")
-        )
+        name = f"{task_id}--task--whole_task--{vid}.json"
+        path = (packet_path.parent.parent / "verifications" / name).resolve()
+        if not path.is_relative_to(self.eia_state_root):
+            raise CandidateRefused("WHOLE_VERIFICATION_OUTSIDE_STATE_ROOT")
         try:
             verification = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise CandidateRefused("WHOLE_VERIFICATION_MISSING") from exc
-        passed = {
-            r.get("verifier_id"): r.get("passed") is True
-            for r in verification.get("results") or []
-            if isinstance(r, Mapping)
-        }
-        declared = [
-            spec["id"]
-            for spec in build_contract(entry, int(att["attempt"]), att["main_sha"])[
-                "whole_verifiers"
-            ]
-        ]
+        material = {k: v for k, v in verification.items() if k != "verification_id"}
         if (
-            verification.get("status") != "PASS"
-            or verification.get("candidate_commit") != sha
-            or not all(passed.get(vid_) for vid_ in declared)
+            closure_sha256(closure_canonical_json(material)) != vid
+            or verification.get("verification_id") != vid
         ):
+            raise CandidateRefused("WHOLE_VERIFICATION_ID_MISMATCH")
+        checks = verification.get("integrity_checks")
+        if checks is not None and (
+            verification.get("integrity_status") != "PASS"
+            or verification.get("failed_integrity_check_ids")
+            or not all(isinstance(c, Mapping) and c.get("passed") is True for c in checks)
+        ):
+            raise CandidateRefused("WHOLE_VERIFICATION_INTEGRITY_FAILED")
+        if verification.get("status") != "PASS" or verification.get("candidate_commit") != sha:
             raise CandidateRefused("WHOLE_VERIFICATION_NOT_PASSED")
+        return verification
 
     def _candidate_pr(
         self, night: dict[str, Any], entry: dict[str, Any], facts: Mapping[str, Any]
@@ -1727,8 +1776,18 @@ class Nightly:
                 ],
                 body,
             )
-            number = _number_from_url(url)
+            created = _number_from_url(url)
+            number = self._existing_pr(branch, sha)  # read back: ours, OPEN, main, head
+            if number != created:
+                raise CandidateRefused("CANDIDATE_PR_READBACK_MISMATCH")
         att["pr_number"] = number
+        entry.update(
+            status="CANDIDATE_PR",
+            pr={"number": number, "head_sha": sha, "branch": branch},
+            labels_pending=True,
+        )
+        att.update(result="complete", finished_at=self._iso())
+        self.save(night)  # the PR is recorded before any label is touched
         self._queue_msg(
             night,
             f"ready-candidate-{number}",
@@ -1738,14 +1797,20 @@ class Nightly:
             "NOT reviewed yet: needs independent review (+ cross-model if high-risk) per "
             "normal rules. Sent by m4-eia-nightly (unattended).",
         )
-        # Labels first: CANDIDATE_PR is recorded only once the daemon label is gone, so a
-        # failed label call is retried next tick instead of blocking the night.
-        self._labels(issue, add=[L_CANDIDATE], remove=[L_EIA, L_QUEUE])
-        entry.update(
-            status="CANDIDATE_PR", pr={"number": number, "head_sha": sha, "branch": branch}
-        )
-        att.update(result="complete", finished_at=self._iso())
         self._event(night, "candidate_pr", issue=issue, pr=number, head=sha)
+        self._finish_candidate_labels(night, entry)
+
+    def _finish_candidate_labels(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
+        """Idempotent; a failed or partial label edit is re-read and retried next tick."""
+        issue = _issue_number(entry["issue"])
+        try:
+            self._labels(issue, add=[L_CANDIDATE], remove=[L_EIA, L_QUEUE])
+        except NightlyError:
+            names = self._view_issue(issue)["label_names"]
+            if L_CANDIDATE not in names or names & {L_EIA, L_QUEUE}:
+                self._event(night, "candidate_labels_pending", issue=issue)
+                return
+        entry["labels_pending"] = False
 
     # ---- stop -----------------------------------------------------------------------
     def stop(self) -> dict[str, Any]:
@@ -1786,7 +1851,9 @@ class Nightly:
                 f"EIA nightly {night['night']}: launchctl bootout of {DAEMON_LABEL} FAILED; "
                 "will retry (dispatch every 5 min, stop at 09:05).",
             )
-            self._notify(f"EIA nightly {night['night']}: daemon bootout failed, retrying")
+            if not night.get("bootout_notified"):
+                night["bootout_notified"] = True
+                self._notify(f"EIA nightly {night['night']}: daemon bootout failed, retrying")
             self._event(night, "bootout_failed")
             return
         pid = night.get("caffeinate_pid")
