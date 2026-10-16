@@ -2321,6 +2321,12 @@ _SCANNER_DETECTOR_SAMPLES = {
     "openai_api_key": ["sk-" + "proj-" + "E" * 30, "sk-" + "E" * 30],
     "slack_token": ["xo" + "x" + t + "-1234567890-" + "F" * 12 for t in "baprs"],
     "stripe_live_key": ["sk_" + "live_" + "G" * 24, "rk_" + "live_" + "G" * 24],
+    "slack_webhook_url": [
+        "https://hooks.slack" + ".com/services/T" + "0" * 9 + "/B" + "1" * 9 + "/" + "H" * 24
+    ],
+    "sendgrid_api_key": ["SG" + "." + "J" * 22 + "." + "K" * 43],
+    "twilio_api_key": ["SK" + "0123456789abcdef" * 2],
+    "azure_storage_account_key": ["AccountKey=" + "L" * 86 + "=="],
 }
 
 # Keys of the scanner's ASSIGNMENT_PATTERN (regex source -> concrete sample name).
@@ -2688,3 +2694,111 @@ def test_resolver_env_override_wins_over_populated_legacy(tmp_path: Path, monkey
     (legacy / "task.json").write_text("{}")
     monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(tmp_path / "x"))
     assert resolve_canonical_state_root() == (tmp_path / "x").resolve()
+
+
+_SPLIT_TOKEN = "ghp_" + "A1b2C3d4" * 5
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        # incomplete first fragment, plain newline
+        (f"a {_SPLIT_TOKEN[:10]}\n{_SPLIT_TOKEN[10:]} b", "a [REDACTED] b"),
+        # complete first fragment, explicit backslash continuation
+        (f"a {_SPLIT_TOKEN[:30]} \\\n  {_SPLIT_TOKEN[30:]}\nnext", "a [REDACTED]\nnext"),
+        # CRLF and three fragments
+        (
+            f"x {_SPLIT_TOKEN[:8]}\r\n{_SPLIT_TOKEN[8:20]}\r\n{_SPLIT_TOKEN[20:]} y",
+            "x [REDACTED] y",
+        ),
+        # sk- key wrapped at a "-" boundary
+        ("k sk-ant-api03-" + "D" * 4 + "\n" + "D" * 20 + " z", "k [REDACTED] z"),
+    ],
+)
+def test_redaction_issue_1873_split_known_prefix_token(before, after):
+    assert _redact_value(before) == after
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # a complete token followed by a plain newline does not swallow the next line
+        _SPLIT_TOKEN + "\nplain words here",
+        "see sk-ab\ncd\nef next",  # joined text is not a token
+        "hf_hub_download\nanother line",
+        "sha256:" + "ab" * 32 + "\n" + "ab" * 20,
+        "0123456789abcdef0123456789abcdef01234567\n0123456789",
+    ],
+)
+def test_redaction_issue_1873_split_pass_leaves_other_text(text):
+    out = _redact_value(text)
+    if "ghp_" not in text:
+        assert out == text
+    else:
+        assert out == "[REDACTED]\nplain words here"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "sk-\n" * 300_000,
+        "ghp_" + "a" * 100 + "\n" + "a" * 100 + "\n" * 4000,
+        ("sk-" + "a" * 100 + "\\\n") * 8_000,
+        "eyJ" * 300_000 + "\n",
+        ("hf_" + "a" * 5 + "\n") * 120_000,
+        "\n" * 1_000_000,
+    ],
+    ids=lambda payload: f"{payload[:14]!r}-len{len(payload)}",
+)
+def test_redaction_issue_1873_split_pass_is_linear(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 2.0
+
+
+_B62_1873 = "Zq3Lm9Rt5Vx7Bn2Cd4Fg6"
+
+
+@pytest.mark.parametrize(
+    ("label", "secret", "template"),
+    [
+        ("stripe_sk_test", "sk_" + "test_" + _B62_1873, "pay {s} ok"),
+        ("stripe_pk_live", "pk_" + "live_" + _B62_1873, "pay {s} ok"),
+        ("stripe_whsec", "whsec_" + _B62_1873, "pay {s} ok"),
+        (
+            "slack_webhook",
+            "https://hooks.slack" + ".com/services/T0AB12CD3/B0EF45GH6/" + _B62_1873,
+            "post {s} done",
+        ),
+        (
+            "azure_key",
+            "AccountKey=" + "Lk9" * 28 + "Lk==",
+            "DefaultEndpointsProtocol=https;{s};Blob=x",
+        ),
+        ("sendgrid", "SG" + "." + _B62_1873 + "x." + "K" * 43, "key {s} ok"),
+        ("twilio", "SK" + "0a1b2c3d4e5f6a7b" * 2, "sid {s} ok"),
+        ("google_refresh", "1//0" + _B62_1873 + "-_x", "rt {s} ok"),
+        ("db_pass", "DB_PASS=" + _B62_1873, "env {s} ok"),
+        ("mysql_pwd", "MYSQL_PWD=" + _B62_1873, "env {s} ok"),
+        ("mysql_p", "mysql -u root -p" + _B62_1873, "run {s} ok"),
+        ("client_secret_space", "--client-secret " + _B62_1873, "run {s} ok"),
+        ("client_secret_eq", "--client-secret=" + _B62_1873, "run {s} ok"),
+        ("api_key_flag", "--api_key " + _B62_1873, "run {s} ok"),
+        ("key_flag", "--key=" + _B62_1873, "run {s} ok"),
+        ("auth_token", "Authorization: token " + _B62_1873, "hdr {s}"),
+        ("url_at_password", "https://al:p@ss" + _B62_1873 + "@host.example/x", "go {s} ok"),
+        ("after_underscore", "MY_" + "AKIA" + "B" * 16, "env {s} ok"),
+        ("short_glpat", "glpat-" + "a" * 20, "tok {s} ok"),
+        ("short_github_pat", "github_pat_" + "a" * 12, "tok {s} ok"),
+    ],
+)
+def test_redaction_issue_1873_each_format_before_after(label, secret, template):
+    text = template.format(s=secret)
+    out = _redact_value(text)
+    assert "[REDACTED]" in out, label
+    for fragment in (_B62_1873, "Lk9Lk9", "0a1b2c3d4e5f6a7b", "T0AB12CD3"):
+        assert fragment not in out, label
+    prefix, _, suffix = template.partition("{s}")
+    assert out.startswith(prefix) and out.endswith(suffix.rstrip()), label

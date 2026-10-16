@@ -70,9 +70,32 @@ _URL_CREDENTIAL_PATTERN = re.compile(
 # password containing "@" is redacted up to the LAST "@" before the host (the
 # greedy match backtracks to it) instead of leaking the tail after the first "@".
 #
-# Out of scope (tracked in #1873): tokens split across lines or across separate
-# JSON fields (e.g. a key wrapped at 80 columns).  Each pattern matches within a
-# single token; reassembling fragments would need cross-string state.
+# Split tokens (#1873): the patterns above match within a single line.  A bounded
+# second pass (_redact_split_tokens) handles a token of a KNOWN prefix that is
+# wrapped across lines: a line that ends in a known credential prefix plus body
+# characters, followed by up to _MAX_SPLIT_CONTINUATIONS continuation lines made
+# only of token characters.  Fragments are re-joined and the span is redacted
+# when the joined text matches a pattern.  A newline continues the token only if
+# (a) the line ends in a backslash (shell/line continuation), or (b) the fragment
+# so far is too short to match a pattern on its own.  A complete token followed
+# by a plain newline is NOT extended into the next line (that line is ordinary
+# text), and fragments split across separate JSON fields or strings are out of
+# scope (each string is redacted independently).
+_MAX_SPLIT_CONTINUATIONS = 4
+_SPLIT_TOKEN_CHARS = r"[A-Za-z0-9_.\-]"
+_SPLIT_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9\-.])"
+    r"(?:sk-|sk_live_|sk_test_|rk_live_|rk_test_|pk_live_|whsec_|gh[pousr]_|github_pat_|glpat-"
+    r"|AIza|AKIA|ASIA|xox[abposr]-|xapp-|hf_|npm_|SG\.|ya29\.|eyJ)"
+    + _SPLIT_TOKEN_CHARS
+    + r"{0,120}"
+    r"(?P<cont>(?:[ \t]*\\?[ \t]*\r?\n[ \t]*"
+    + _SPLIT_TOKEN_CHARS
+    + r"{1,200}){1,"
+    + str(_MAX_SPLIT_CONTINUATIONS)
+    + r"})"
+)
+_SPLIT_JOIN_RE = re.compile(r"([ \t]*(\\)?[ \t]*\r?\n[ \t]*)(" + _SPLIT_TOKEN_CHARS + r"{1,200})")
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # Full PEM private-key block (BEGIN..END inclusive). Must run first so a keyed
     # PEM (private_key: -----BEGIN ...) is not truncated by the generic assignment
@@ -294,9 +317,41 @@ def _contains_forbidden_future_key(value: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _redact_split_tokens(value: str) -> str:
+    """Redact known-prefix tokens wrapped across lines (see _SPLIT_TOKEN_RE)."""
+    if "\n" not in value:
+        return value
+
+    def _replace(match: re.Match[str]) -> str:
+        text = match.group(0)
+        head = text[: match.start("cont") - match.start()]
+        joined = head
+        consumed_end = len(head)
+        for part in _SPLIT_JOIN_RE.finditer(match.group("cont")):
+            complete_alone = _redact_plain(joined) != joined
+            if complete_alone and not part.group(2):
+                break
+            joined += part.group(3)
+            consumed_end = len(head) + part.end()
+        if joined == head or _redact_plain(joined) == joined:
+            return text
+        return _REDACTED_SENTINEL + text[consumed_end:]
+
+    return _SPLIT_TOKEN_RE.sub(_replace, value)
+
+
+def _redact_plain(value: str) -> str:
+    result = value
+    for pattern in _SECRET_PATTERNS:
+        if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
+            continue
+        result = pattern.sub(_REDACTED_SENTINEL, result)
+    return result
+
+
 def _redact_string(value: str) -> str:
     """Redact known secret patterns from a string value."""
-    result = value
+    result = _redact_split_tokens(value)
     for pattern in _SECRET_PATTERNS:
         if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
             continue
