@@ -230,7 +230,9 @@ def replay(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=(__doc__ or "").splitlines()[0] if __doc__ else None
+    )
     parser.add_argument(
         "--operation-root",
         default=str(Path.home() / ".local/state/nexus-agy-operations"),
