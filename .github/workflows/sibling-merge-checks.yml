@@ -122,8 +122,9 @@ jobs:
             --pr "$PR" --head "$HEAD_SHA" --base-ref "origin/${DEFAULT_BRANCH}" \
             --gate nexus-tools/scripts/ops/trusted_merge_lane_gate.py > "$out" 2>&1
           rc=$?
-          stop="$(python3 -I -c 'import secrets; print(secrets.token_hex(16))' 2>/dev/null || od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-          [ -n "$stop" ] || { echo "no stop token" >&2; exit 1; }
+          stop="$(python3 -I -c 'import secrets; print(secrets.token_hex(16))' 2>/dev/null)" ||
+            stop="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          [[ "$stop" =~ ^[0-9a-f]{32}$ ]] || { echo "no usable stop token" >&2; exit 1; }
           echo "::stop-commands::${stop}"
           cat "$out"
           echo "::${stop}::"

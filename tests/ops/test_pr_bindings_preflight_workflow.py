@@ -92,7 +92,10 @@ def _run_publish_step(
     bindir = tmp_path / "bin"
     bindir.mkdir(parents=True)
     (bindir / "python3").write_text(
-        f"#!/bin/sh\ncat <<'OUT'\n{preflight_output}\nOUT\nexit {preflight_rc}\n", encoding="utf-8"
+        # answer only the preflight call; the stop-token call fails, so the fallback runs
+        '#!/bin/sh\ncase "$*" in *secrets*) echo junk; exit 1;; esac\n'
+        f"cat <<'OUT'\n{preflight_output}\nOUT\nexit {preflight_rc}\n",
+        encoding="utf-8",
     )
     posted = tmp_path / "posted.txt"
     (bindir / "gh").write_text(

@@ -208,7 +208,7 @@ def _run_sibling_publish(
     bindir = tmp_path / "bin"
     bindir.mkdir(parents=True)
     (bindir / "python3").write_text(
-        '#!/bin/sh\ncase "$*" in *sibling_bindings_check.py*) ;; *) exit 1;; esac\n'
+        '#!/bin/sh\ncase "$*" in *sibling_bindings_check.py*) ;; *) echo junk; exit 1;; esac\n'
         f"cat <<'OUT'\n{output}\nOUT\nexit {rc}\n",
         encoding="utf-8",
     )
@@ -240,7 +240,7 @@ def test_sibling_publish_step_under_bash_e(tmp_path: Path) -> None:
 
     rc, posted, out = _run_sibling_publish(tmp_path / "pass", "PASS  bindings: intents=[]", 0)
     assert rc == 0 and "state=success" in posted
-    # python3 failed for the token, so the /dev/urandom fallback produced one
+    # python3 printed junk and failed for the token: only the /dev/urandom fallback is used
     assert re.search(r"^::stop-commands::[0-9a-f]{32}$", out, re.MULTILINE)
     rc, posted, _ = _run_sibling_publish(tmp_path / "fail", "FAIL  bindings [X]: bad", 1)
     assert rc == 1 and "state=failure" in posted
