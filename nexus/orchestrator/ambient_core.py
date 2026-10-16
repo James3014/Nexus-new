@@ -371,3 +371,6 @@ class LazyCanonicalCoreControlPort:
 
     def verify_candidate(self, **kwargs: Any) -> Mapping[str, Any]:
         return self._delegate().verify_candidate(**kwargs)
+
+    def record_terminal_not_covered(self, **kwargs: Any) -> Mapping[str, Any]:
+        return self._delegate().record_terminal_not_covered(**kwargs)
