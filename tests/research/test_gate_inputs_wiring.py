@@ -29,6 +29,26 @@ VISIBLE = (
 HIDDEN = "from pathlib import Path\nPath(__file__).with_name('HIDDEN_RAN').write_text('x')\n"
 
 
+def _detect_receipt_only() -> bool:
+    """``runtime_supports_receipt_only()`` re-evaluated (it is ``lru_cache``d)."""
+
+    from nexus.research.gate_inputs import runtime_supports_receipt_only
+
+    runtime_supports_receipt_only.cache_clear()
+    return runtime_supports_receipt_only()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_receipt_only_detection() -> Any:
+    """No test sees a detection result cached under another test's runtime patches."""
+
+    from nexus.research.gate_inputs import runtime_supports_receipt_only
+
+    runtime_supports_receipt_only.cache_clear()
+    yield
+    runtime_supports_receipt_only.cache_clear()
+
+
 def _workspace(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     root.mkdir()
@@ -115,6 +135,85 @@ def _run(
     finally:
         os.chdir(cwd)
     return dict(receipt), prompts
+
+
+def _sprint_run(
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    feed: bool,
+    model_context: bool = False,
+) -> tuple[Any, dict[str, Any], list[str]]:
+    """Like ``_run``, but the request (route included) is assembled by the sprint itself
+    (``LLMCandidateGenerator._ask_unified_candidate``), so the strict lane's
+    ``receipt_only_capabilities`` declaration comes from production code, never from the
+    test.  ``model_context`` wraps the online invoker with the runtime's
+    ``wrap_online_invoker`` so the prompt carries ``[NEXUS MODEL CONTEXT]``.  Returns
+    ``(request, receipt, prompts)``."""
+
+    from nexus.research.sprint_service import LLMCandidateGenerator
+    from nexus.services.mainchain_entry import run_mainchain
+
+    monkeypatch.setenv("NEXUS_SPRINT_GATE_INPUTS", "1" if feed else "0")
+    generator = LLMCandidateGenerator(
+        root,
+        safe_mode=True,
+        target_file="target.py",
+        route_signals={"route_features": {"risk_score": 55}},
+    )
+    generator._workspace_revision = lambda: "fixture-rev"  # type: ignore[method-assign]
+    generator.gate_input_test_file = "test_visible.py"
+    captured: dict[str, Any] = {"prompts": []}
+
+    def online(context: Any) -> dict[str, Any]:
+        captured["prompts"].append(str(context.get("online_prompt") or ""))
+        task_id = str(context.get("task_id") or captured["request"].task_id)
+        return {
+            "task_id": task_id,
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "response": {"status": "APPROVED", "patch": ORIGINAL},
+            "evidence_refs": [f"online:{task_id}"],
+        }
+
+    online.provider = "agy"  # type: ignore[attr-defined]
+    online.online_invoker_provider = "agy"  # type: ignore[attr-defined]
+
+    def ask_unified(request: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["request"] = request
+        invoker: Any = online
+        if model_context:
+            from nexus_runtime.task_context import wrap_online_invoker
+
+            invoker = wrap_online_invoker(online)
+        cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            return dict(
+                run_mainchain(
+                    request,
+                    online_invoker=invoker,
+                    verifier=kwargs["verifier"],
+                    receipt_path=tmp_path / f"sprint_{int(feed)}.json",
+                    with_nexus_armor=True,
+                )
+            )
+        finally:
+            os.chdir(cwd)
+
+    generator.gateway.ask_unified = ask_unified  # type: ignore[method-assign]
+    _out, _raw, receipt = generator._ask_unified_candidate(
+        prompt="Task: " + TASK,
+        payload="x",
+        task=TASK,
+        seed=0,
+        attempt=1,
+        model="gemini-3.8-flash-medium",
+        source_code=ORIGINAL,
+    )
+    return captured["request"], receipt, captured["prompts"]
 
 
 # Missing-input refusal code of every fed capability before wiring PR-4.
@@ -259,13 +358,18 @@ def test_fed_gates_evaluate_instead_of_refusing_for_missing_inputs(
 def test_strict_lane_prompt_text_is_identical_with_and_without_gate_inputs(
     governed_admission: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from nexus.research.gate_inputs import fed_capability_names
     from scripts.bench import prompt_symmetry_audit as psa
 
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
     root = _workspace(tmp_path)
     _install_target_python(root)
-    before, before_prompts = _run(root, tmp_path, feed=False)
-    after, after_prompts = _run(root, tmp_path, feed=True)
+    # Requests assembled by the sprint: the strict lane declares the receipt-only key itself.
+    before_request, _before, before_prompts = _sprint_run(root, tmp_path, monkeypatch, feed=False)
+    after_request, after, after_prompts = _sprint_run(root, tmp_path, monkeypatch, feed=True)
+    for request in (before_request, after_request):
+        assert request.route["receipt_only_capabilities"] == sorted(fed_capability_names())
+    assert dict(before_request.codeintel) == {} and after_request.codeintel["verify_commands"]
     assert after["capability_results"]["plan_quality_gate"]["status"] == "SUCCEEDED"
     assert len(before_prompts) == len(after_prompts) == 1
     raw_before, raw_after = before_prompts[0], after_prompts[0]
@@ -895,15 +999,26 @@ def test_gate_inputs_kill_switch_is_fail_closed(monkeypatch: pytest.MonkeyPatch,
 def test_strict_lane_feeds_no_gate_inputs_because_model_context_would_carry_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Counted-shape proof (round 3): with the inputs fed, the runtime's [NEXUS MODEL CONTEXT]
-    materialised the passing gates' evidence ids and payloads and the prompt audit failed."""
+    """PR-5a: the strict lane is fed only when the runtime honours receipt-only evidence; on an
+    older runtime it falls back to design A (no inputs), because [NEXUS MODEL CONTEXT] would
+    carry the passing gates' evidence ids and payloads (round-3 counted-shape proof)."""
+
+    from nexus.research import gate_inputs
 
     monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS", raising=False)
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
-    (tmp_path / "strict").mkdir()
-    (tmp_path / "fed").mkdir()
-    strict, _root = _capture_request(tmp_path / "strict", monkeypatch)
-    assert dict(strict.codeintel) == {} and "workspace_root" not in strict.route
+    for name in ("old", "new", "fed"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setattr(gate_inputs, "runtime_supports_receipt_only", lambda: False)
+    strict_old, _root = _capture_request(tmp_path / "old", monkeypatch)
+    assert dict(strict_old.codeintel) == {} and "workspace_root" not in strict_old.route
+    assert strict_old.route["receipt_only_capabilities"]  # declared either way
+    monkeypatch.setattr(gate_inputs, "runtime_supports_receipt_only", lambda: True)
+    strict_new, _root = _capture_request(tmp_path / "new", monkeypatch)
+    assert strict_new.codeintel["verify_commands"]
+    assert strict_new.route["receipt_only_capabilities"] == sorted(
+        gate_inputs.fed_capability_names()
+    )
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT")
     fed, _root = _capture_request(tmp_path / "fed", monkeypatch)
     assert fed.codeintel["verify_commands"]
@@ -1003,11 +1118,19 @@ def test_strict_route_names_the_receipt_only_capabilities_and_the_pinned_runtime
     keyed, keyed_prompts = _run(
         root,
         tmp_path,
-        feed=False,
+        feed=True,
         extra_route={"receipt_only_capabilities": sorted(fed_capability_names())},
     )
     assert keyed["online"]["status"] == plain["online"]["status"]
     assert _mask_run_identity(keyed_prompts[0]) == _mask_run_identity(plain_prompts[0])
+    # The pinned runtime acts on the key: every fed gate's entry is sealed receipt-only.
+    sealed = {e["name"]: e for e in keyed["capability_evidence_bundle"]["entries"]}
+    for name in FED_CAPABILITIES:
+        entry = sealed.get(name) or sealed.get("mempalace" if name == "mempalace_gate" else "")
+        assert entry is not None and entry.get("consumer_visibility") == "receipt_only", name
+    assert all(
+        "consumer_visibility" not in e for e in plain["capability_evidence_bundle"]["entries"]
+    )
 
 
 def test_misspelt_kill_switch_is_ignored_in_the_strict_lane_and_refused_by_the_runner(
@@ -1044,3 +1167,226 @@ def test_visibility_flag_alone_is_not_physical_output() -> None:
     assert _physical_output(record) is False
     record["response"]["outcome"]["result"] = {"hit_count": 2}
     assert _physical_output(record) is True
+
+
+def test_pinned_runtime_supports_receipt_only_and_detection_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    assert _detect_receipt_only() is True  # pin e73d152f1 (nexus-runtime #217)
+    import importlib
+
+    bundle = importlib.import_module("nexus_runtime.planning.services.capability_evidence_bundle")
+
+    monkeypatch.setattr(bundle, "RECEIPT_ONLY_ROUTE_KEY", "other_key")
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+    monkeypatch.delattr(bundle, "receipt_only_capability_names")
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+    # An older pin without the module at all: import failure means no support.
+    real_import = builtins.__import__
+
+    def no_bundle(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name.startswith("nexus_runtime.planning.services"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    def no_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        raise ImportError(name)
+
+    monkeypatch.setattr(builtins, "__import__", no_bundle)
+    monkeypatch.setattr(importlib, "import_module", no_module)
+    assert _detect_receipt_only() is False
+
+
+# --- Boundary tests: the receipt-only declaration really keeps the fed gates out of the
+# model-facing ``[NEXUS MODEL CONTEXT]`` block.  Nexus-new builds its runtime with
+# ``online_context_projection=False``, so ``_run`` alone never renders that block; these
+# tests wrap the online invoker with the pinned runtime's ``wrap_online_invoker`` (the
+# projection the original leak went through).
+_LEAK_MARKERS = ("capability_wired", "cost_lane", "ev_cap_")
+_MODEL_CONTEXT_MARKER = "[NEXUS MODEL CONTEXT]"
+_TIMESTAMP = re.compile(r'"timestamp":\s*"[^"]*"')
+
+
+# The 64-hex values that differ fed vs unfed in the strict model context are exactly the
+# hashes the runtime computes over the whole sealed bundle: ``bundle_hash`` (also rendered as
+# ``capability-evidence:<h>``), ``consumer_projection_hash`` and ``package_hash``.  They are
+# opaque SHA-256 digests over content that INCLUDES the receipt-only entries (gate outcomes)
+# and, in other lanes, the per-run random ``ev_cap_*`` ids, so they are not pure run noise.
+# They are masked here; hashing only the model-visible projection is nexus-runtime #220.
+_BUNDLE_CONTENT_HASH_KEYS = (
+    '"bundle_hash":"',
+    '"capability-evidence:',
+    '"consumer_projection_hash":"',
+    '"package_hash":"',
+)
+
+
+def _mask_projection_noise(prompt: str) -> str:
+    """Only three classes are masked: random ``ev_cap_*`` ids, the learn-mode timestamp and
+    64-hex content hashes (see ``_BUNDLE_CONTENT_HASH_KEYS``)."""
+
+    return _TIMESTAMP.sub('"timestamp": "<t>"', _mask_run_identity(prompt))
+
+
+def _strict_fed_and_unfed_model_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, dict[str, Any], str, str, dict[str, Any]]:
+    """Strict lane through the sprint's own request assembly (which declares the
+    receipt-only capabilities) and the runtime's model-context projection; returns
+    ``(fed_request, fed_receipt, fed_prompt, unfed_prompt, fed_codeintel)``."""
+
+    monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    root = _workspace(tmp_path)
+    _install_target_python(root)
+    (tmp_path / "fed").mkdir()
+    (tmp_path / "unfed").mkdir()
+    fed_request, fed, fed_prompts = _sprint_run(
+        root, tmp_path / "fed", monkeypatch, feed=True, model_context=True
+    )
+    _unfed_request, _unfed, unfed_prompts = _sprint_run(
+        root, tmp_path / "unfed", monkeypatch, feed=False, model_context=True
+    )
+    assert len(fed_prompts) == len(unfed_prompts) == 1
+    return fed_request, fed, fed_prompts[0], unfed_prompts[0], dict(fed_request.codeintel)
+
+
+def test_strict_model_context_is_identical_fed_and_unfed_and_carries_no_gate_input(
+    governed_admission: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research.gate_inputs import fed_capability_names
+
+    request, fed, fed_prompt, unfed_prompt, codeintel = _strict_fed_and_unfed_model_context(
+        tmp_path, monkeypatch
+    )
+    # (a) The sprint itself declared the receipt-only capabilities on the request route.
+    assert request.route["receipt_only_capabilities"] == sorted(fed_capability_names())
+    # The projection really ran (otherwise the comparison below proves nothing).
+    assert _MODEL_CONTEXT_MARKER in fed_prompt and _MODEL_CONTEXT_MARKER in unfed_prompt
+    assert _mask_projection_noise(fed_prompt) == _mask_projection_noise(unfed_prompt)
+    # Unmasked, the only differing tokens are the bundle-content hashes (nexus-runtime #220):
+    # every other 64-hex value, and all text between the hex values, is byte-identical.
+    fed_hex, unfed_hex = list(_HEX.finditer(fed_prompt)), list(_HEX.finditer(unfed_prompt))
+    assert _HEX.split(fed_prompt) == _HEX.split(unfed_prompt)
+    assert len(fed_hex) == len(unfed_hex)
+    differing = [f for f, u in zip(fed_hex, unfed_hex) if f.group() != u.group()]
+    for match in differing:
+        before = fed_prompt[: match.start()]
+        assert before.endswith(_BUNDLE_CONTENT_HASH_KEYS), before[-60:]
+    # The six fed gates evaluated and were sealed receipt-only.
+    entries = {e["name"]: e for e in fed["capability_evidence_bundle"]["entries"]}
+    for name in FED_CAPABILITIES:
+        entry = entries.get(name) or entries.get("mempalace" if name == "mempalace_gate" else "")
+        assert entry is not None, name
+        assert entry.get("consumer_visibility") == "receipt_only", name
+        assert entry["status"] != "SELECTED_NOT_EXECUTED", name
+    # None of the fed input values reaches the model.
+    fed_values = [
+        codeintel["workspace_root"],
+        *codeintel["verify_commands"],
+        codeintel["target_symbol"],
+        codeintel["mempalace_artifact"]["artifact_id"],
+        codeintel["mempalace_artifact"]["visible_test_sha256"],
+        *codeintel["steps"],
+        *codeintel["acceptance_criteria"],
+    ]
+    for value in filter(None, fed_values):
+        assert value not in fed_prompt, value
+    for key in ("target_file", "target_files", "target_symbol"):
+        assert key not in fed_prompt, key
+    for marker in _LEAK_MARKERS:
+        assert marker not in fed_prompt, marker
+
+
+def test_strict_model_context_differs_when_the_runtime_ignores_the_declaration(
+    governed_admission: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a runtime that ignores ``receipt_only_capabilities`` leaks the
+    fed gates into the model context, and the comparison above catches it."""
+
+    import nexus_runtime.kernel.unified_runtime as unified_runtime
+
+    from nexus.research import gate_inputs
+
+    monkeypatch.setattr(
+        unified_runtime, "resolve_receipt_only_capabilities", lambda _route: (frozenset(), None)
+    )
+    # The behavioural detection would now (rightly) refuse to feed the strict lane; force the
+    # old names-only answer so the sprint feeds a runtime that ignores the declaration.
+    monkeypatch.setattr(gate_inputs, "runtime_supports_receipt_only", lambda: True)
+    _request, fed, fed_prompt, unfed_prompt, _codeintel = _strict_fed_and_unfed_model_context(
+        tmp_path, monkeypatch
+    )
+    assert _MODEL_CONTEXT_MARKER in fed_prompt
+    assert all(
+        e.get("consumer_visibility") != "receipt_only"
+        for e in fed["capability_evidence_bundle"]["entries"]
+    )
+    assert _mask_projection_noise(fed_prompt) != _mask_projection_noise(unfed_prompt)
+    assert len(fed_prompt) > len(unfed_prompt)
+    for marker in ("capability_wired", "ev_cap_"):
+        assert marker in fed_prompt and marker not in unfed_prompt, marker
+
+
+def test_receipt_only_detection_is_behavioural_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Names and constants are not enough: a runtime whose route resolution or projection
+    ignores the declaration is reported unsupported, and so is any runtime error."""
+
+    import importlib
+
+    import nexus_runtime.kernel.unified_runtime as unified_runtime
+    import nexus_runtime.task_context.consumer_projection as projection
+
+    assert _detect_receipt_only() is True  # real pin: projection hides the entry
+    # Route resolution ignores the key (contract names unchanged).
+    monkeypatch.setattr(
+        unified_runtime, "resolve_receipt_only_capabilities", lambda _route: (frozenset(), None)
+    )
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+    # The entry is sealed receipt-only but the projection renders it anyway.
+    monkeypatch.setattr(projection, "entry_prompt_visible", lambda _entry: True)
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+
+    # Evidence ids hidden, but the projection still renders the receipt-only payload.
+    real_build = projection.build_online_context_package
+
+    def leaks_payload(context: Any) -> dict[str, Any]:
+        package = dict(real_build(context))
+        package["leaked_payloads"] = [
+            e.get("consumer_payload") for e in context["capability_evidence_bundle"]["entries"]
+        ]
+        return package
+
+    monkeypatch.setattr(projection, "build_online_context_package", leaks_payload)
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+
+    # Projection raises: fail closed.
+    def broken(_context: Any) -> dict[str, Any]:
+        raise RuntimeError("projection unavailable")
+
+    monkeypatch.setattr(projection, "build_online_context_package", broken)
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+    # The projection module (or the kernel) cannot be imported: fail closed.
+    real_import_module = importlib.import_module
+
+    def no_projection(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in {
+            "nexus_runtime.task_context.consumer_projection",
+            "nexus_runtime.kernel.unified_runtime",
+        }:
+            raise ImportError(name)
+        return real_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", no_projection)
+    assert _detect_receipt_only() is False
+    monkeypatch.undo()
+    assert _detect_receipt_only() is True
