@@ -44,6 +44,11 @@
 | scripts/test_l6_mechanical_gate.py | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
 | nexus/delivery/suggestions.py | tests/delivery/test_suggestions.py, tests/test_cli_thinning.py | active | medium | verification_command_suggestion_contract |
 | nexus/bridge | tests/integration/test_capability_existence_155.py, tests/integration/test_rust_wave3_cutover.py, tests/core/test_l1_l4_realization.py | active | low | rust_bridge_python_scan_contract |
+| nexus-core-rs | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
+| generate_full_matrix_report.py | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
+| generate_rollback_drill_report.py | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
+| scripts/generate-prod-package.sh | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
+| tests/ops/test_retired_rust_crate_removed.py | tests/ops/test_retired_rust_crate_removed.py | active | medium | test_contract |
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |

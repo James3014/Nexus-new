@@ -37,8 +37,6 @@ def suggest_verification_commands(project_root: Path, task_name: str) -> list[st
     if language == "rust":
         if _has(project_root, "Cargo.toml"):
             return ["cargo test --manifest-path Cargo.toml"]
-        if (project_root / "nexus-core-rs" / "Cargo.toml").exists():
-            return ["cargo test --manifest-path nexus-core-rs/Cargo.toml"]
         return ["cargo test"]
 
     if language == "go":

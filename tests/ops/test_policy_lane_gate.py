@@ -105,7 +105,7 @@ class TestHardLane:
                     **policy,
                     "test_entrypoints": [],
                 }
-                if policy["policy_id"] == "P-GATE-03"
+                if policy["policy_id"] == "P-CLAIM-02"
                 else policy
                 for policy in original["policies"]
             ],
@@ -114,13 +114,13 @@ class TestHardLane:
             "scripts.ops.check_policy_lane_gate.load_manifest",
             lambda: tampered,
         )
-        hostile = check_lane_gate("P-GATE-03", "modify")
+        hostile = check_lane_gate("P-CLAIM-02", "modify")
         assert hostile["allowed"] is False
         assert "TEST_COVERAGE_MISSING" in hostile["errors"]
 
     def test_hard_lane_modify_with_drill_allowed(self):
-        """Hard lane: modify with rollback drill → ALLOW (for P-GATE-03 which has drill)."""
-        result = check_lane_gate("P-GATE-03", "modify")
+        """Hard lane: modify with rollback drill → ALLOW (P-CLAIM-02 has a drill; P-GATE-03 retired 2026-10-16)."""
+        result = check_lane_gate("P-CLAIM-02", "modify")
         assert result["allowed"] is True
         assert result["lane"] == "hard"
 
@@ -132,13 +132,13 @@ class TestHardLane:
 
     def test_hard_lane_cutover_always_blocked(self):
         """Hard lane: cutover always requires human approval → BLOCK."""
-        result = check_lane_gate("P-FLOW-01", "cutover")
+        result = check_lane_gate("P-DELIVERY-01", "cutover")
         assert result["allowed"] is False
         assert "CUTOVER_REQUIRES_HUMAN_APPROVAL" in result["errors"]
 
     def test_hard_lane_observe_allowed(self):
         """Hard lane: observe action is allowed."""
-        result = check_lane_gate("P-GATE-03", "observe")
+        result = check_lane_gate("P-CLAIM-02", "observe")
         assert result["allowed"] is True
 
     def test_hard_lane_unknown_policy_blocked(self):
@@ -152,12 +152,12 @@ class TestHardLane:
         tampered = {
             **original,
             "policies": [
-                {**policy, "test_entrypoints": []} if policy["policy_id"] == "P-GATE-03" else policy
+                {**policy, "test_entrypoints": []} if policy["policy_id"] == "P-CLAIM-02" else policy
                 for policy in original["policies"]
             ],
         }
         monkeypatch.setattr("scripts.ops.check_policy_lane_gate.load_manifest", lambda: tampered)
-        result = check_lane_gate("P-GATE-03", "modify")
+        result = check_lane_gate("P-CLAIM-02", "modify")
         assert result["allowed"] is False
         assert "TEST_COVERAGE_MISSING" in result["errors"]
 
@@ -278,7 +278,7 @@ class TestOverrideReceipt:
         """Override on hard lane → BLOCK."""
         receipt = {
             "override_id": "OVR-HARD-001",
-            "policy_id": "P-GATE-03",
+            "policy_id": "P-CLAIM-02",
             "lane": "hard",
             "who": "agent",
             "why": "Should be blocked",
@@ -330,7 +330,7 @@ class TestManifestStructure:
         """Manifest v2 loads successfully."""
         manifest = load_manifest()
         assert manifest["manifest_version"] == "2.0.0"
-        assert len(manifest["policies"]) == 28
+        assert len(manifest["policies"]) == 26  # P-GATE-03, P-FLOW-01 retired 2026-10-16
 
     def test_all_policies_have_lane(self):
         """Every policy must have a lane assignment."""
@@ -374,7 +374,7 @@ class TestManifestStructure:
         assert policy["override_mode"] == "blocked"
 
     def test_hard_lane_count_increased(self):
-        """Hard lane count should be 11 (including P-CONTAM-01)."""
+        """Hard lane count is 9 (including P-CONTAM-01; P-GATE-03 and P-FLOW-01 retired 2026-10-16)."""
         manifest = load_manifest()
         hard_count = sum(1 for p in manifest["policies"] if p["lane"] == "hard")
-        assert hard_count == 11
+        assert hard_count == 9

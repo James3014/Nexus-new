@@ -41,7 +41,6 @@ BASELINE_FREEZE_IDS = frozenset({
     "P-S2T-03",
     "P-GATE-01",
     "P-GATE-02",
-    "P-GATE-03",
     "P-CLAIM-01",
     "P-CLAIM-02",
     "P-CLAIM-03",
@@ -53,7 +52,6 @@ BASELINE_FREEZE_IDS = frozenset({
     "P-BELIEF-01",
     "P-CTX-01",
     "P-SETTLE-01",
-    "P-FLOW-01",
     "P-TEST-NODRILL-01",
 })
 
@@ -106,7 +104,7 @@ def test_guard_modules_are_a_subset_of_source_file_and_present_for_multi_source(
 
 def test_invalid_enforcement_mode_fails_closed_in_every_lane(monkeypatch) -> None:
     original = load_manifest()
-    for policy_id in ("P-GATE-03", "P-ROUTE-01", "P-AUTO-01"):
+    for policy_id in ("P-CLAIM-02", "P-ROUTE-01", "P-AUTO-01"):
         for bad in (None, "", "advisory"):
             tampered = {
                 **original,
@@ -619,12 +617,12 @@ def test_only_an_explicit_drill_date_counts_as_drilled(monkeypatch, status) -> N
     tampered = {
         **original,
         "policies": [
-            {**p, "rollback_drill_status": status} if p["policy_id"] == "P-GATE-03" else p
+            {**p, "rollback_drill_status": status} if p["policy_id"] == "P-CLAIM-02" else p
             for p in original["policies"]
         ],
     }
     monkeypatch.setattr(gate, "load_manifest", lambda: tampered)
-    result = check_lane_gate("P-GATE-03", "modify")
+    result = check_lane_gate("P-CLAIM-02", "modify")
     assert result["allowed"] is False
     assert "ROLLBACK_DRILL_MISSING" in result["errors"]
 

@@ -54,9 +54,9 @@ class TestOverrideAuthorityContract:
         assert result.get("lane") == "soft"
 
     def test_hard_lane_override_respects_authority(self):
-        """Hard lane override on P-GATE-03 (authority_impact=evidence) → blocked."""
-        result = run_script(LANE_GATE, ["--policy-id", "P-GATE-03", "--action", "modify"])
-        assert result.get("allowed") is True  # P-GATE-03 has drill, so modify is allowed
+        """Hard lane override on P-CLAIM-02 (critical tier) → blocked."""
+        result = run_script(LANE_GATE, ["--policy-id", "P-CLAIM-02", "--action", "modify"])
+        assert result.get("allowed") is True  # P-CLAIM-02 has drill, so modify is allowed
         assert result.get("lane") == "hard"
 
     def test_hard_lane_without_drill_blocked(self):
@@ -130,9 +130,9 @@ class TestOverrideLifecycle:
     def test_hard_lane_override_create_blocked(self):
         """Hard lane override create → blocked at creation."""
         result = run_script(OVERRIDE_LIFECYCLE, [
-            "create", "--policy-id", "P-GATE-03", "--who", "integration-test",
+            "create", "--policy-id", "P-CLAIM-02", "--who", "integration-test",
             "--why", "Should be blocked", "--scope", "evidence verifier",
-            "--expiry", "2099-12-31T23:59:59Z", "--rollback-target", "P-GATE-03.1.0.0"
+            "--expiry", "2099-12-31T23:59:59Z", "--rollback-target", "P-CLAIM-02.1.0.0"
         ])
         assert result.get("error") == "HARD_LANE_OVERRIDE_BLOCKED"
 
@@ -167,16 +167,16 @@ class TestHardLaneDrillGating:
         assert result.get("lane") == "hard"
 
     def test_evidence_family_passes_with_drill(self):
-        """P-GATE-03 (receipt_verifier) → passes with drill."""
+        """P-GATE-03 (Rust receipt_verifier) was retired 2026-10-16 with its source: no longer a policy."""
         result = run_script(LANE_GATE, ["--policy-id", "P-GATE-03", "--action", "modify"])
-        assert result.get("allowed") is True
-        assert result.get("lane") == "hard"
+        assert result.get("allowed") is False
+        assert result.get("errors") == ["POLICY_NOT_FOUND: P-GATE-03"]
 
     def test_flow_family_passes_with_drill(self):
-        """P-FLOW-01 (flow_machine) → passes with drill."""
+        """P-FLOW-01 (Rust flow_machine) was retired 2026-10-16 with its source: no longer a policy."""
         result = run_script(LANE_GATE, ["--policy-id", "P-FLOW-01", "--action", "modify"])
-        assert result.get("allowed") is True
-        assert result.get("lane") == "hard"
+        assert result.get("allowed") is False
+        assert result.get("errors") == ["POLICY_NOT_FOUND: P-FLOW-01"]
 
 
 # ─── 4. Cutover → Always Human-Gated ───────────────────────────────────
@@ -186,7 +186,7 @@ class TestCutoverHumanGating:
 
     def test_hard_lane_cutover_blocked(self):
         """Hard lane cutover → always blocked."""
-        for pid in ["P-S2T-01", "P-GATE-03", "P-FLOW-01", "P-CONTAM-01"]:
+        for pid in ["P-S2T-01", "P-CLAIM-02", "P-DELIVERY-01", "P-CONTAM-01"]:
             result = run_script(LANE_GATE, ["--policy-id", pid, "--action", "cutover"])
             assert result.get("allowed") is False, f"{pid} cutover should be blocked"
             assert "CUTOVER_REQUIRES_HUMAN_APPROVAL" in result.get("errors", [])

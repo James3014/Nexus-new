@@ -318,32 +318,6 @@
       "promotion_allowed": true
     },
     {
-      "policy_id": "P-GATE-03",
-      "phase": "Rust-Kernel",
-      "owner_module": "receipt_verifier",
-      "source_file": "nexus-core-rs/src/receipt_verifier.rs",
-      "schema_version": "v1.0",
-      "commit_sha": "1c9dce65",
-      "status_tag": "code-backed",
-      "test_entrypoints": ["nexus-core-rs/src/receipt_verifier.rs::tests (11 tests)", "tests/integration/test_rust_kernel_smoke.py::test_rust_kernel_receipt_verification"],
-      "receipt_type": "ReceiptVerificationResult",
-      "rollback_drill_status": "drilled-2026-06-15",
-      "promotion_allowed": true
-    },
-    {
-      "policy_id": "P-FLOW-01",
-      "phase": "Rust-Kernel",
-      "owner_module": "flow_machine",
-      "source_file": "nexus-core-rs/src/flow_machine.rs",
-      "schema_version": "v1.0",
-      "commit_sha": "1c9dce65",
-      "status_tag": "code-backed",
-      "test_entrypoints": ["nexus-core-rs/src/flow_machine.rs::tests (27 tests)", "tests/integration/test_rust_wave3_cutover.py (4 tests, dual-run mismatch=0)"],
-      "receipt_type": "TransitionValidation",
-      "rollback_drill_status": "drilled-2026-06-15",
-      "promotion_allowed": true
-    },
-    {
       "policy_id": "P-CONTAM-01",
       "phase": "Rust-Kernel",
       "owner_module": "contamination_guard",
@@ -385,15 +359,15 @@
     }
   },
   "summary": {
-    "total_policies": 27,
-    "code_backed": 25,
+    "total_policies": 25,
+    "code_backed": 23,
     "spec_backed": 0,
     "inferred": 0,
     "historical": 2,
-    "rollback_drills_passing": 27,
-    "rollback_drills_total": 27,
-    "promotion_allowed_count": 27,
-    "verification_note": "All 27 policies successfully drilled and marked as promotion allowed on 2026-06-15.",
+    "rollback_drills_passing": 25,
+    "rollback_drills_total": 25,
+    "promotion_allowed_count": 25,
+    "verification_note": "All 27 policies successfully drilled and marked as promotion allowed on 2026-06-15. P-GATE-03 and P-FLOW-01 retired 2026-10-16 (Owner decision A, ARCHIVED_2026-10-16-rust-crate.md): source code removed; 25 remain.",
     "test_coverage_gaps": [],
     "schema_gaps": []
   }

@@ -26,9 +26,8 @@ def test_suggest_verification_commands_for_rust_subrepo(tmp_path: Path) -> None:
     rust_dir.mkdir()
     (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
 
-    assert suggest_verification_commands(tmp_path, "fix rust leak in nexus-core") == [
-        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
-    ]
+    # The nexus-core-rs sub-crate hint was retired with the crate (2026-10-16, #2359).
+    assert suggest_verification_commands(tmp_path, "fix rust leak in nexus-core") == ["cargo test"]
 
 
 def test_suggest_verification_commands_for_go_subrepo(tmp_path: Path) -> None:
@@ -47,14 +46,13 @@ def test_suggest_verification_commands_for_retained_rust_crate(tmp_path: Path) -
     rust_dir.mkdir()
     (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core-rs'\n", encoding="utf-8")
 
-    assert suggest_verification_commands(tmp_path, "fix rust receipt verifier") == [
-        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
-    ]
+    # No sub-crate special case any more: a stray nexus-core-rs/ is not a target.
+    assert suggest_verification_commands(tmp_path, "fix rust receipt verifier") == ["cargo test"]
 
 
 def test_suggest_verification_commands_for_this_repo_targets_retained_crate() -> None:
     repo_root = Path(__file__).resolve().parents[2]
 
-    assert suggest_verification_commands(repo_root, "fix rust flow machine") == [
-        "cargo test --manifest-path nexus-core-rs/Cargo.toml"
-    ]
+    # nexus-core-rs/ was deleted (2026-10-16, #2359); this repo has no Rust crate left.
+    assert not (repo_root / "nexus-core-rs").exists()
+    assert suggest_verification_commands(repo_root, "fix rust flow machine") == ["cargo test"]
