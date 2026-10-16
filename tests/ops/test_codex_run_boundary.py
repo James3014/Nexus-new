@@ -25,7 +25,7 @@ done
     if [[ -e "$HOME/$p" ]]; then echo "reach:$p"; fi
   done
   if [[ -e "${CODEX_HOME:-/nonexistent}/auth.json" ]]; then
-    echo "auth_mode=$(stat -f %Lp "$CODEX_HOME/auth.json" 2>/dev/null || stat -c %a "$CODEX_HOME/auth.json")"
+    echo "auth_mode=$(stat -c %a "$CODEX_HOME/auth.json" 2>/dev/null || stat -f %Lp "$CODEX_HOME/auth.json")"
     if [[ -L "$CODEX_HOME/auth.json" ]]; then echo "auth_is_symlink"; fi
     echo "auth_body=$(cat "$CODEX_HOME/auth.json")"
   fi
