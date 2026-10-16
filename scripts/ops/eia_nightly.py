@@ -14,8 +14,10 @@ Subcommands (each idempotent, serialised by a lock, one state file per night):
             write the morning report, send it to coordinator, post a macOS notification.
   status    print the night state.
 
-It never merges anything and never touches an Issue without the ``eia:queue`` label.  Every
-decision fails closed.  See docs/ops/eia_nightly.md.
+It never merges anything.  It only writes to Issues that carry ``eia:queue`` (queued and
+authored by a trusted actor); the one exception is removing ``nexus:external-intelligence``,
+which it added itself, when the queue label is withdrawn mid-run.  Every decision fails
+closed.  See docs/ops/eia_nightly.md.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import argparse
 import contextlib
 import datetime as dt
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -95,9 +98,29 @@ PROTECTED_PATHS = (
     "scripts/ops/eia_nightly*",
     "scripts/ops/com.nexus.eia-nightly*",
     "tests/ops/test_eia_nightly.py",
+    "pytest.ini",
+    "setup.cfg",
+    "tox.ini",
+    "policy",
+    "Makefile",
+)
+# File-name patterns refused anywhere in the tree (compared casefolded).
+PROTECTED_NAMES = (
+    "conftest.py",
+    "sitecustomize.py",
+    "governance_baseline_manifest*.json",
+    "taskfile*",
+    "makefile",
+    ".pre-commit-config*",
 )
 # Who may queue an Issue (apply ``eia:queue``) or edit its body after it was queued.
-TRUSTED_ACTORS = frozenset({"James3014", "james3014-nexus-agent", "james3014-nexus-agent[bot]"})
+# REST logins, compared exactly (a GitHub App bot is ``<slug>[bot]``; GraphQL Bot actors are
+# mapped to that form only when ``__typename == "Bot"``).
+TRUSTED_ACTORS = frozenset({"James3014", "james3014-nexus-agent[bot]"})
+DAEMON_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+STOP_FILE = "STOP_REQUESTED"
+GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
+MAX_ISSUE_FAILURES = 3
 PYTEST_TARGET_RE = re.compile(r"^tests/[A-Za-z0-9_][A-Za-z0-9_/.-]*\.py(::[A-Za-z0-9_]+)*$")
 DIFF_CHECK_ARGV = ["sh", "-c", 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"']
 MAX_ALLOWED_FILES = 10
@@ -165,6 +188,16 @@ def _number_from_url(output: str) -> int:
     return _issue_number(lines[-1].rstrip("/").rsplit("/", 1)[-1] if lines else "")
 
 
+def _token(value: Any) -> str:
+    """A daemon-sourced string that is safe to echo; anything else becomes ``INVALID``."""
+    text = str(value) if value is not None else ""
+    return text if DAEMON_TOKEN_RE.fullmatch(text) else "INVALID"
+
+
+class CandidateRefused(NightlyError):
+    """The candidate (or its branch/PR) must not be published; escalate, do not retry."""
+
+
 def _ts(value: Any) -> dt.datetime:
     try:
         return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -221,7 +254,7 @@ def parse_task_block(body: str) -> dict[str, Any]:
         if not isinstance(path, str) or not SAFE_PATH_RE.fullmatch(path):
             raise NightlyError("TASK_ALLOWED_FILES_INVALID")
         parts = PurePosixPath(path).parts
-        if PurePosixPath(path).as_posix() != path or ".." in parts or "." in parts:
+        if PurePosixPath(path).as_posix() != path or any(p.startswith(".") for p in parts):
             raise NightlyError("TASK_ALLOWED_FILES_INVALID")
         if is_protected(path):
             raise NightlyError("TASK_ALLOWED_FILES_PROTECTED")
@@ -255,11 +288,15 @@ def parse_task_block(body: str) -> dict[str, Any]:
 
 
 def is_protected(path: str) -> bool:
-    for rule in PROTECTED_PATHS:
+    low = path.casefold()
+    name = PurePosixPath(low).name
+    if any(fnmatch.fnmatchcase(name, pattern) for pattern in PROTECTED_NAMES):
+        return True
+    for rule in (r.casefold() for r in PROTECTED_PATHS):
         if rule.endswith("*"):
-            if path.startswith(rule[:-1]):
+            if low.startswith(rule[:-1]):
                 return True
-        elif path == rule or path.startswith(rule + "/"):
+        elif low == rule or low.startswith(rule + "/"):
             return True
     return False
 
@@ -477,21 +514,22 @@ def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
     fields += [result.get(k) for k in ("error", "status", "reason", "errors")]
     detail = json.dumps(fields, default=str).upper()
     if state == "RECONCILIATION_REQUIRED":
-        if str(daemon_state.get("prior_state") or "") in RESUMABLE_PRIOR:
-            return "wait", f"{state}:{daemon_state.get('prior_state')}"
-        return "infra", f"{state}:RECONCILE_ONLY:{daemon_state.get('prior_state')}"
+        prior = _token(daemon_state.get("prior_state"))
+        if prior in RESUMABLE_PRIOR:
+            return "wait", f"{state}:{prior}"
+        return "infra", f"{state}:RECONCILE_ONLY:{prior}"
     if state == "BLOCKED":
-        error = str(daemon_state.get("error") or "")
+        error = _token(daemon_state.get("error")) if daemon_state.get("error") else ""
         if any(marker in detail for marker in MODEL_MARKERS):
-            return "model", f"BLOCKED:{error or daemon_state.get('closure_status')}"
+            return "model", f"BLOCKED:{error or _token(daemon_state.get('closure_status'))}"
         if daemon_state.get("stage") == "CLOSURE":
-            return "model", f"BLOCKED:CLOSURE:{daemon_state.get('closure_status')}"
+            return "model", f"BLOCKED:CLOSURE:{_token(daemon_state.get('closure_status'))}"
         if any(marker in detail for marker in INFRA_MARKERS):
             return "infra", f"BLOCKED:{error or 'TRANSPORT'}"
         if not daemon_state.get("semantic_dispatched") and EXCEPTION_NAME_RE.fullmatch(error):
             return "infra", f"BLOCKED:{error}"
         return "model", f"BLOCKED:{error or 'UNCLASSIFIED'}"
-    return "model", f"UNKNOWN_STATE:{state or 'EMPTY'}"
+    return "model", f"UNKNOWN_STATE:{_token(state)}"
 
 
 # --------------------------------------------------------------------------- scheduler
@@ -523,7 +561,7 @@ class Nightly:
         watch_seconds: int = 270,
     ):
         self.watch_seconds = watch_seconds
-        self.trusted_actors = frozenset(a.strip().removesuffix("[bot]") for a in trusted_actors)
+        self.trusted_actors = frozenset(a.strip() for a in trusted_actors if a.strip())
         self.state_dir = Path(state_dir).expanduser()
         self.work_repo = Path(work_repo).expanduser()
         self.run, self.now, self.sleep, self.kill = runner, now, sleep, kill
@@ -571,7 +609,7 @@ class Nightly:
         remote = self._git(repo, "ls-remote", "origin", "--", ref, code="LS_REMOTE_FAILED")
         if remote:
             if remote.split()[0] != sha:
-                raise NightlyError(f"REMOTE_BRANCH_CONFLICT:{branch}")
+                raise CandidateRefused(f"REMOTE_BRANCH_CONFLICT:{branch}")
             return
         helper = f"credential.helper=!{self.git_credential}"
         argv = ["git", "-C", str(repo), "-c", "credential.helper=", "-c", helper, "push"]
@@ -614,17 +652,38 @@ class Nightly:
 
     def _comment_once(self, issue: int, marker: str, text: str) -> None:
         path = f"repos/{REPOSITORY}/issues/{issue}/comments"
-        bodies = self._ok(
-            [self.gh, "api", "--paginate", path, "--jq", ".[].body"], code="GH_COMMENTS_FAILED"
+        out = self._ok(
+            [self.gh, "api", "--paginate", path, "--jq", ".[] | {user: .user.login, body}"],
+            code="GH_COMMENTS_FAILED",
         )
-        if marker not in bodies:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+        if not any(self._trusted(r.get("user")) and marker in str(r.get("body")) for r in rows):
             self._gh_file(
                 ["issue", "comment", str(issue), "--repo", REPOSITORY], f"{marker}\n{text}"
             )
 
-    def _pr_for_branch(self, branch: str) -> list[dict[str, Any]]:
-        args = f"pr list --repo {REPOSITORY} --state all --json number,headRefOid --head"
-        return self._ghj(*args.split(), branch) or []
+    def _existing_pr(self, branch: str, sha: str) -> int | None:
+        """An existing PR for ``branch`` is reused only if OPEN, based on main, at ``sha``."""
+        fields = "number,headRefOid,state,baseRefName"
+        rows = (
+            self._ghj(
+                *f"pr list --repo {REPOSITORY} --state all --json {fields}".split(),
+                "--head",
+                branch,
+            )
+            or []
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        if (
+            len(rows) != 1
+            or row.get("state") != "OPEN"
+            or row.get("baseRefName") != "main"
+            or (row.get("headRefOid") != sha)
+        ):
+            raise CandidateRefused(f"EXISTING_PR_INVALID:{branch}")
+        return _issue_number(row.get("number"))
 
     def _view_issue(self, issue: int) -> dict[str, Any]:
         value = self._ghj(
@@ -697,18 +756,33 @@ class Nightly:
         })
 
     @contextlib.contextmanager
-    def locked(self) -> Iterator[bool]:
+    def locked(self, wait_polls: int = 0) -> Iterator[bool]:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         with open(self.state_dir / ".lock", "a") as handle:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                yield False
-                return
+            for poll in range(wait_polls + 1):
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if poll == wait_polls:
+                        yield False
+                        return
+                    self.sleep(5)
             try:
                 yield True
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def request_stop(self, night_id: str) -> None:
+        """Written outside the lock so a dispatch that is watching notices and lets go."""
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        (self.state_dir / STOP_FILE).write_text(night_id, encoding="utf-8")
+
+    def _stop_requested(self, night: dict[str, Any]) -> bool:
+        path = self.state_dir / STOP_FILE
+        if path.exists() and path.read_text(encoding="utf-8").strip() == night["night"]:
+            night.setdefault("stop_requested_at", self._iso())
+        return bool(night.get("stop_requested_at"))
 
     def paused(self) -> bool:
         return (self.state_dir / "PAUSE").exists()
@@ -800,6 +874,7 @@ class Nightly:
         night["order"] = [e["issue"] for e in picked]
         branch = f"eia-nightly/cards-{night_id}"
         night["card_pr"] = {"branch": branch, "commit": commit, "number": None, "merged": False}
+        self._git(self.work_repo, "update-ref", f"refs/eia-nightly/cards/{night_id}", commit)
         night["status"] = "CARDS_PENDING"
         self.save(night)  # write-ahead before any remote effect
         return self._open_card_pr(night)
@@ -810,10 +885,8 @@ class Nightly:
         picked = [night["issues"][str(n)] for n in night["order"]]
         self._push(self.work_repo, commit, branch)
         tracking = self._tracking_issue()
-        existing = self._pr_for_branch(branch)
-        if existing:
-            number = _issue_number(existing[0]["number"])
-        else:
+        number = self._existing_pr(branch, commit)
+        if number is None:
             listing = "\n".join(f"- `{e['card_ref']}` for #{e['issue']}" for e in picked)
             body = (
                 f"EIA nightly task cards for night {night_id}, generated by "
@@ -860,7 +933,16 @@ class Nightly:
         return night
 
     def _trusted(self, login: Any) -> bool:
-        return isinstance(login, str) and login.removesuffix("[bot]") in self.trusted_actors
+        return isinstance(login, str) and login in self.trusted_actors
+
+    def _trusted_gql(self, actor: Any) -> bool:
+        actor = actor if isinstance(actor, Mapping) else {}
+        login, kind = actor.get("login"), actor.get("__typename")
+        if not isinstance(login, str):
+            return False
+        return self._trusted(
+            f"{login}[bot]" if kind == "Bot" else login if kind == "User" else None
+        )
 
     def _queue_trusted(self, issue: int) -> tuple[bool, str]:
         """The latest ``eia:queue`` label, and every title/body edit after it, by a trusted actor."""
@@ -900,22 +982,20 @@ class Nightly:
         owner, name = REPOSITORY.split("/")
         query = (
             f'query($num:Int!){{repository(owner:"{owner}",name:"{name}"){{issue(number:$num)'
-            "{userContentEdits(first:100){totalCount nodes{editedAt editor{login}}}}}}"
+            "{author{login __typename} userContentEdits(first:100)"
+            "{totalCount nodes{editedAt editor{login __typename}}}}}}"
         )
         data = self._ghj("api", "graphql", "-f", f"query={query}", "-F", f"num={issue}")
-        edits = (((data or {}).get("data") or {}).get("repository") or {}).get("issue") or {}
-        edits = edits.get("userContentEdits") or {}
+        found = (((data or {}).get("data") or {}).get("repository") or {}).get("issue") or {}
+        if not self._trusted_gql(found.get("author")):  # public repo: author must be trusted
+            return False, "AUTHOR_UNTRUSTED"
+        edits = found.get("userContentEdits") or {}
         nodes = edits.get("nodes")
-        if not isinstance(nodes, list):
-            return False, "EDIT_HISTORY_UNREADABLE"
+        if not isinstance(nodes, list) or int(edits.get("totalCount") or 0) > len(nodes):
+            return False, "EDIT_HISTORY_INCOMPLETE"
         for node in nodes:
-            if _ts(node.get("editedAt")) > since:
-                if not self._trusted((node.get("editor") or {}).get("login")):
-                    return False, "BODY_EDITED_BY_UNTRUSTED"
-        if int(edits.get("totalCount") or 0) > len(nodes) and (
-            not nodes or min(_ts(n.get("editedAt")) for n in nodes) > since
-        ):
-            return False, "EDIT_HISTORY_TRUNCATED"
+            if _ts(node.get("editedAt")) > since and not self._trusted_gql(node.get("editor")):
+                return False, "BODY_EDITED_BY_UNTRUSTED"
         return True, ""
 
     def _tree_mode(self, base: str, path: str) -> str | None:
@@ -1223,44 +1303,63 @@ class Nightly:
             self.save(night)
             return night
         try:
+            stopping = self._stop_requested(night)
             for entry in self._entries(night, "ARMING"):  # resume an interrupted arming
-                self._arm(night, entry)
+                self._guarded(night, entry, self._arm)
             for entry in self._entries(night, "ARMED"):
-                self._harvest(night, entry)
+                self._guarded(night, entry, self._harvest)
                 self.save(night)
             self._watch(night)
-            now, busy = (
-                self.now(),
-                bool(self._entries(night, "ARMED") or self._entries(night, "ARMING")),
-            )
-            if now >= night_clock(night["night"], self.hard_stop) or (
-                night.get("stop_requested_at") and not busy
-            ):
+            stopping = self._stop_requested(night)
+            now = self.now()
+            busy = bool(self._entries(night, "ARMED") or self._entries(night, "ARMING"))
+            if now >= night_clock(night["night"], self.hard_stop) or (stopping and not busy):
                 self.finalize(night)
-            elif not night.get("stop_requested_at") and not busy:
+            elif not stopping and not busy and now < night_clock(night["night"], self.arm_cutoff):
                 nxt = self._entries(night, "PREPARED") + self._entries(night, "RETRY_PENDING")
-                if nxt and now < night_clock(night["night"], self.arm_cutoff):
-                    if not self._foreign_in_flight():
-                        self._arm(night, min(nxt, key=lambda e: night["order"].index(e["issue"])))
+                if nxt and not self._foreign_in_flight():
+                    first = min(nxt, key=lambda e: night["order"].index(e["issue"]))
+                    self._guarded(night, first, self._arm)
         finally:
             self._flush_outbox(night)
             self.save(night)
         return night
 
+    def _guarded(
+        self, night: dict[str, Any], entry: dict[str, Any], step: Callable[..., Any]
+    ) -> None:
+        """Isolate one Issue: errors are counted per Issue and escalate after 3."""
+        try:
+            step(night, entry)
+        except NightlyError as exc:
+            entry["failures"] = int(entry.get("failures") or 0) + 1
+            self._event(night, "issue_error", issue=entry["issue"], error=_one_line(exc, 200))
+            if entry["failures"] >= MAX_ISSUE_FAILURES and entry["status"] != "ESCALATED":
+                try:
+                    self._escalate(night, entry, "infra", f"REPEATED_ERRORS:{_one_line(exc, 120)}")
+                except NightlyError as again:
+                    self._event(night, "escalate_failed", issue=entry["issue"], error=str(again))
+
     def _watch(self, night: dict[str, Any]) -> None:
-        """Poll the local daemon state file (no GitHub) every 20 s while an Issue is in flight,
-        so a terminal result is disarmed within seconds instead of at the next 5-min tick."""
-        for _ in range(int(self.watch_seconds // WATCH_INTERVAL)):
+        """While an Issue is in flight: poll the local daemon state file every 20 s (no
+        GitHub) and re-read the Issue every 60 s, for up to ``watch_seconds``."""
+        for poll in range(int(self.watch_seconds // WATCH_INTERVAL)):
             armed = self._entries(night, "ARMED")
-            if not armed:
+            if not armed or self._stop_requested(night):
                 return
-            att = armed[0]["attempts"][-1]
-            record = self._daemon_record(int(armed[0]["issue"]), att["identity_hash"])
+            entry = armed[0]
+            if poll and poll % GUARD_EVERY_POLLS == 0:
+                self._guarded(night, entry, self._guard_issue)
+                self.save(night)
+                if entry["status"] != "ARMED":
+                    return
+            att = entry["attempts"][-1]
+            record = self._daemon_record(int(entry["issue"]), att["identity_hash"])
             if record is not None:
                 kind = classify(record)[0]
                 published = (record.get("publication_record") or {}).get("state") == "COMPLETED"
                 if kind in ("infra", "model") or (kind == "complete" and published):
-                    self._harvest(night, armed[0])
+                    self._guarded(night, entry, self._harvest)
                     self.save(night)
                     return
             self.sleep(WATCH_INTERVAL)
@@ -1277,6 +1376,10 @@ class Nightly:
         args = f"issue list --repo {REPOSITORY} --state open --json number --label {L_EIA}"
         return bool(self._ghj(*args.split()))
 
+    @staticmethod
+    def _text_sha(value: Any) -> str:
+        return _sha256(str(value or "").encode("utf-8"))
+
     def _arm(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
         issue = _issue_number(entry["issue"])
         pr = night.get("card_pr") or {}
@@ -1288,9 +1391,9 @@ class Nightly:
             or L_QUEUE not in view["label_names"]
             or (view["label_names"] & {L_ESCALATE, L_TEMPLATE, L_CANDIDATE})
         ):
+            if L_EIA in view["label_names"] and entry["status"] == "ARMING":
+                self._labels(issue, remove=[L_EIA])  # only the label we may have added
             entry["status"] = "SKIPPED_LABELS_CHANGED"
-            if L_EIA in view["label_names"] and L_QUEUE in view["label_names"]:
-                self._labels(issue, remove=[L_EIA])
             self._event(night, "arm_skipped", issue=issue)
             return
         trusted, why = self._queue_trusted(issue)
@@ -1309,6 +1412,7 @@ class Nightly:
         contract = build_contract(entry, attempt, main_sha)
         new_body = body_with_contract(str(view.get("body") or ""), contract, attempt)
         try:
+            self._check_paths(main_sha, entry)  # against the main this attempt binds
             identity, _ = validate_contract(
                 self.work_repo, issue, view["title"], new_body, lineage=True
             )
@@ -1323,7 +1427,8 @@ class Nightly:
                 "unit_id": contract["execution_units"][0]["unit_id"],
                 "main_sha": main_sha,
                 "identity_hash": identity,
-                "body_sha256": _sha256(new_body.encode("utf-8")),
+                "body_sha256": self._text_sha(new_body),
+                "title_sha256": self._text_sha(view.get("title")),
                 "armed_at": self._iso(),
             }
             entry["attempts"].append(record)
@@ -1337,11 +1442,40 @@ class Nightly:
         # byte-identical read-back, and the daemon will derive exactly this identity
         if view.get("body") != new_body or self._body_identity(issue, view) != identity:
             return self._escalate(night, entry, "model", "ARM_READBACK_MISMATCH")
+        # Close the read-back -> label race: full trust check, then the bytes once more.
+        trusted, why = self._queue_trusted(issue)
+        view = self._view_issue(issue)
+        if not trusted or not self._issue_matches(view, record):
+            return self._escalate(night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}")
         if L_EIA not in view["label_names"]:
             self._labels(issue, add=[L_EIA])  # the arming mutation, always last
         record["armed_at"] = self._iso()
         entry["status"] = "ARMED"
         self._event(night, "armed", issue=issue, attempt=attempt, identity=identity)
+
+    def _issue_matches(self, view: Mapping[str, Any], record: Mapping[str, Any]) -> bool:
+        return (
+            self._text_sha(view.get("body")) == record.get("body_sha256")
+            and self._text_sha(view.get("title")) == record.get("title_sha256")
+            and L_QUEUE in view["label_names"]
+            and view.get("state") == "OPEN"
+        )
+
+    def _guard_issue(self, night: dict[str, Any], entry: dict[str, Any]) -> bool:
+        """The daemon's semantic request embeds the Issue title and body: any change, or a
+        withdrawn queue label, stops the run before anything else is sent."""
+        issue, att = _issue_number(entry["issue"]), entry["attempts"][-1]
+        view = self._view_issue(issue)
+        if self._issue_matches(view, att):
+            return True
+        if L_QUEUE not in view["label_names"]:  # withdrawn: only undo our own label
+            self._labels(issue, remove=[L_EIA])
+            att.update(result="withdrawn", reason="QUEUE_LABEL_REMOVED", finished_at=self._iso())
+            entry["status"] = "WITHDRAWN"
+            self._event(night, "withdrawn", issue=issue)
+        else:
+            self._escalate(night, entry, "model", "ISSUE_CHANGED_AFTER_ARMING")
+        return False
 
     @staticmethod
     def _body_identity(issue: int, view: Mapping[str, Any]) -> str:
@@ -1374,12 +1508,11 @@ class Nightly:
 
     def _harvest(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
         issue, att = _issue_number(entry["issue"]), entry["attempts"][-1]
-        view = self._view_issue(issue)
-        body_sha = _sha256(str(view.get("body") or "").encode("utf-8"))
-        if body_sha != att.get("body_sha256") or L_QUEUE not in view["label_names"]:
-            # The daemon's semantic request embeds the Issue body: a changed body or a
-            # withdrawn queue label must stop the run before anything else is sent.
-            return self._escalate(night, entry, "model", "ISSUE_CHANGED_AFTER_ARMING")
+        if not self._guard_issue(night, entry):
+            return
+        trusted, why = self._queue_trusted(issue)
+        if not trusted:
+            return self._escalate(night, entry, "model", f"UNTRUSTED_AFTER_ARMING:{why}")
         record = self._daemon_record(issue, att["identity_hash"])
         age = self._minutes_since(att["armed_at"])
         if record is None:
@@ -1387,7 +1520,7 @@ class Nightly:
                 self._infra(night, entry, "NO_DAEMON_STATE_WITHIN_CAP")
             return
         kind, reason = classify(record)
-        att["daemon_state"] = record.get("state")
+        att["daemon_state"] = _token(record.get("state"))
         if kind == "complete":
             pub = (record.get("publication_record") or {}).get("state")
             att.setdefault("complete_seen_at", self._iso())
@@ -1397,10 +1530,10 @@ class Nightly:
             ):
                 return
             try:
-                sha, rows = self._verify_candidate(entry, record)
-            except NightlyError as exc:
+                facts = self._verify_candidate(entry, record)
+                self._candidate_pr(night, entry, facts)  # GitHub errors retry next tick
+            except CandidateRefused as exc:
                 return self._escalate(night, entry, "model", f"CANDIDATE_REJECTED:{exc}")
-            self._candidate_pr(night, entry, record, sha, rows)  # GitHub errors retry next tick
         elif kind == "wait":
             if age > self.issue_cap_min:
                 self._infra(night, entry, f"ISSUE_CAP_EXCEEDED:{reason}")
@@ -1441,73 +1574,145 @@ class Nightly:
 
     def _verify_candidate(
         self, entry: Mapping[str, Any], record: Mapping[str, Any]
-    ) -> tuple[str, list[list[str]]]:
-        """Check the daemon's COMPLETE receipt against git before anything is pushed."""
+    ) -> dict[str, Any]:
+        """Check the daemon's COMPLETE receipt against git and the closure records before
+        anything is pushed; return only validated values for the PR body."""
         att = entry["attempts"][-1]
+        main_sha = _sha(att["main_sha"])
         pub = record.get("publication") or {}
-        sha = _sha(pub.get("candidate_commit"))
+        try:
+            sha, tree = _sha(pub.get("candidate_commit")), _sha(pub.get("candidate_tree"))
+        except NightlyError as exc:
+            raise CandidateRefused("PUBLICATION_SHA_INVALID") from exc
+        worker = record.get("worker_binding") or {}
+        tokens = {
+            "gate": pub.get("current_gate"),
+            "ceiling": pub.get("claim_ceiling"),
+            "run_id": record.get("closure_run_id"),
+            "provider": worker.get("provider"),
+            "model": worker.get("model"),
+        }
+        if any(_token(v) == "INVALID" for v in tokens.values()):
+            raise CandidateRefused("PUBLICATION_FIELD_INVALID")
         if (
             pub.get("verification_state") != "WHOLE_TASK_PASS"
             or pub.get("task_id") != entry["task_id"]
         ):
-            raise NightlyError("PUBLICATION_NOT_WHOLE_TASK_PASS")
+            raise CandidateRefused("PUBLICATION_NOT_WHOLE_TASK_PASS")
         packet_path = Path(str(pub.get("acceptance_packet_ref") or "")).resolve()
         if not packet_path.is_relative_to(self.eia_state_root) or not packet_path.is_file():
-            raise NightlyError("ACCEPTANCE_PACKET_MISSING")
+            raise CandidateRefused("ACCEPTANCE_PACKET_MISSING")
         raw = packet_path.read_bytes()
         packet = json.loads(raw)
+        packet_sha = _sha256(raw)
         if (
-            _sha256(raw) != pub.get("acceptance_packet_sha256")
+            packet_sha != pub.get("acceptance_packet_sha256")
             or (packet.get("task_candidate") or {}).get("candidate_commit") != sha
             or packet.get("task_card_hash") != entry["card_hash"]
+            or packet.get("whole_task_status") != "PASS"
         ):
-            raise NightlyError("ACCEPTANCE_PACKET_MISMATCH")
+            raise CandidateRefused("ACCEPTANCE_PACKET_MISMATCH")
+        self._check_whole_verification(packet_path, packet, entry, att, sha)
         repo = self.daemon_repo
         if self._git(repo, "cat-file", "-t", sha) != "commit":
-            raise NightlyError("CANDIDATE_NOT_COMMIT")
-        if not self._is_ancestor(repo, _sha(att["main_sha"]), sha):
-            raise NightlyError("CANDIDATE_NOT_ON_MAIN_SHA")
-        status = self._git(
-            repo, "diff", "--name-status", "--no-renames", att["main_sha"], sha, "--"
+            raise CandidateRefused("CANDIDATE_NOT_COMMIT")
+        parents = self._git(repo, "rev-list", "--parents", "-n", "1", sha).split()
+        count = self._git(repo, "rev-list", "--count", f"{main_sha}..{sha}")
+        if parents != [sha, main_sha] or count != "1":
+            raise CandidateRefused("CANDIDATE_NOT_SINGLE_COMMIT_ON_MAIN_SHA")
+        if self._git(repo, "rev-parse", f"{sha}^{{tree}}") != tree:
+            raise CandidateRefused("CANDIDATE_TREE_MISMATCH")
+        raw_diff = self._git(
+            repo, "diff", "--raw", "--no-renames", "--no-abbrev", main_sha, sha, "--"
         )
-        rows = [line.split("\t", 1) for line in status.splitlines() if line.strip()]
-        if not rows or any(
-            kind == "D" or path not in entry["allowed_files"] for kind, path in rows
+        rows: list[list[str]] = []
+        for line in raw_diff.splitlines():
+            meta, _, path = line.partition("\t")
+            fields = meta.lstrip(":").split()
+            if len(fields) != 5:
+                raise CandidateRefused("CANDIDATE_DIFF_UNPARSABLE")
+            old_mode, new_mode, status = fields[0], fields[1], fields[4]
+            regular = {"100644", "100755"}
+            if (
+                status not in ("A", "M")
+                or new_mode not in regular
+                or (old_mode not in regular and not (status == "A" and old_mode == "000000"))
+                or path not in entry["allowed_files"]
+            ):
+                raise CandidateRefused("CANDIDATE_SCOPE_VIOLATION")
+            rows.append([status, path])
+        if not rows:
+            raise CandidateRefused("CANDIDATE_EMPTY")
+        self._git(
+            repo,
+            "update-ref",
+            f"refs/eia-nightly/candidates/{entry['issue']}-{att['revision']}",
+            sha,
+        )
+        return {"sha": sha, "tree": tree, "packet_sha": packet_sha, "rows": rows, **tokens}
+
+    def _check_whole_verification(
+        self,
+        packet_path: Path,
+        packet: Mapping[str, Any],
+        entry: Mapping[str, Any],
+        att: Mapping[str, Any],
+        sha: str,
+    ) -> None:
+        """Every declared whole-task verifier id is recorded as passed for this candidate."""
+        vid = str(packet.get("whole_task_verification_id") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", vid):
+            raise CandidateRefused("WHOLE_VERIFICATION_ID_INVALID")
+        path = (
+            packet_path.parent.parent
+            / "verifications"
+            / (f"{entry['task_id']}--task--whole_task--{vid}.json")
+        )
+        try:
+            verification = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise CandidateRefused("WHOLE_VERIFICATION_MISSING") from exc
+        passed = {
+            r.get("verifier_id"): r.get("passed") is True
+            for r in verification.get("results") or []
+            if isinstance(r, Mapping)
+        }
+        declared = [
+            spec["id"]
+            for spec in build_contract(entry, int(att["attempt"]), att["main_sha"])[
+                "whole_verifiers"
+            ]
+        ]
+        if (
+            verification.get("status") != "PASS"
+            or verification.get("candidate_commit") != sha
+            or not all(passed.get(vid_) for vid_ in declared)
         ):
-            raise NightlyError("CANDIDATE_SCOPE_VIOLATION")
-        return sha, rows
+            raise CandidateRefused("WHOLE_VERIFICATION_NOT_PASSED")
 
     def _candidate_pr(
-        self,
-        night: dict[str, Any],
-        entry: dict[str, Any],
-        record: Mapping[str, Any],
-        sha: str,
-        rows: list[list[str]],
+        self, night: dict[str, Any], entry: dict[str, Any], facts: Mapping[str, Any]
     ) -> None:
         issue, att = _issue_number(entry["issue"]), entry["attempts"][-1]
-        pub, repo = record.get("publication") or {}, self.daemon_repo
+        sha, rows = facts["sha"], facts["rows"]
         branch = f"eia/{issue}-{att['revision']}"
         att.update(candidate_commit=sha, branch=branch)
         self.save(night)
-        self._push(repo, sha, branch)
-        existing = self._pr_for_branch(branch)
-        if existing:
-            number = _issue_number(existing[0]["number"])
-        else:
-            worker = record.get("worker_binding") or {}
+        self._push(self.daemon_repo, sha, branch)
+        number = self._existing_pr(branch, sha)
+        if number is None:
             files = "\n".join(f"- `{p}` ({k})" for k, p in rows)
             body = (
                 f"Closes #{issue}\n\nEIA candidate produced overnight by the External Intelligence "
                 f"daemon on M4 for #{issue} (task `{entry['task_id']}`, revision "
                 f"`{att['revision']}`). The branch head is the daemon's candidate commit, unchanged, "
-                f"on base `{att['main_sha']}`.\n\nChanged files:\n{files}\n\n## EIA receipt\n"
-                f"- Candidate: `{sha}` (tree `{pub.get('candidate_tree')}`)\n"
-                f"- Verification: `{pub.get('verification_state')}`, gate `{pub.get('current_gate')}`\n"
-                f"- Acceptance packet sha256: `{pub.get('acceptance_packet_sha256')}`\n"
-                f"- Closure run: `{record.get('closure_run_id')}`; identity `{att['identity_hash']}`\n"
-                f"- Worker: `{_one_line(worker.get('provider'), 60)}/{_one_line(worker.get('model'), 60)}`\n"
-                f"- Claim ceiling: `{pub.get('claim_ceiling')}`\n\nNot reviewed yet: this needs the "
+                f"a single commit on base `{att['main_sha']}`.\n\nChanged files:\n{files}\n\n"
+                f"## EIA receipt\n- Candidate: `{sha}` (tree `{facts['tree']}`)\n"
+                f"- Verification: `WHOLE_TASK_PASS`, gate `{facts['gate']}`\n"
+                f"- Acceptance packet sha256: `{facts['packet_sha']}`\n"
+                f"- Closure run: `{facts['run_id']}`; identity `{att['identity_hash']}`\n"
+                f"- Worker: `{facts['provider']}/{facts['model']}`\n"
+                f"- Claim ceiling: `{facts['ceiling']}`\n\nNot reviewed yet: this needs the "
                 "normal independent review before merge.\n\n"
                 f"<!-- NEXUS_CORE_ISSUE: {issue} -->\n<!-- NEXUS_ISSUE_INTENT_V1\n"
                 f'[{{"issue": {issue}, "on_merge": "CLOSE"}}]\nNEXUS_ISSUE_INTENT_V1 -->\n\n'
@@ -1523,21 +1728,23 @@ class Nightly:
                 body,
             )
             number = _number_from_url(url)
-        entry.update(
-            status="CANDIDATE_PR", pr={"number": number, "head_sha": sha, "branch": branch}
-        )
-        att.update(result="complete", finished_at=self._iso())
-        self.save(night)
+        att["pr_number"] = number
         self._queue_msg(
             night,
             f"ready-candidate-{number}",
             "merge-queue",
             f"READY Nexus-new#{number} head {sha}; EIA candidate for #{issue} "
-            f"(WHOLE_TASK_PASS, packet {str(pub.get('acceptance_packet_sha256'))[:12]}); "
+            f"(WHOLE_TASK_PASS, packet {facts['packet_sha'][:12]}); "
             "NOT reviewed yet: needs independent review (+ cross-model if high-risk) per "
             "normal rules. Sent by m4-eia-nightly (unattended).",
         )
+        # Labels first: CANDIDATE_PR is recorded only once the daemon label is gone, so a
+        # failed label call is retried next tick instead of blocking the night.
         self._labels(issue, add=[L_CANDIDATE], remove=[L_EIA, L_QUEUE])
+        entry.update(
+            status="CANDIDATE_PR", pr={"number": number, "head_sha": sha, "branch": branch}
+        )
+        att.update(result="complete", finished_at=self._iso())
         self._event(night, "candidate_pr", issue=issue, pr=number, head=sha)
 
     # ---- stop -----------------------------------------------------------------------
@@ -1559,10 +1766,6 @@ class Nightly:
     def finalize(self, night: dict[str, Any]) -> None:
         out = self.run(["launchctl", "bootout", f"gui/{os.getuid()}/{DAEMON_LABEL}"], timeout=30)
         bootout_ok = out.returncode == 0 or "Could not find service" in f"{out.stdout}{out.stderr}"
-        pid = night.get("caffeinate_pid")
-        if pid and self._is_caffeinate(pid):
-            with contextlib.suppress(ProcessLookupError):
-                self.kill(int(pid), signal.SIGTERM)
         for entry in self._entries(night, "ARMED") + self._entries(night, "ARMING"):
             entry["status"] = "HARD_STOPPED"
             if entry["attempts"]:
@@ -1571,23 +1774,37 @@ class Nightly:
                 )
             try:
                 self._labels(entry["issue"], remove=[L_EIA])
-            except NightlyError as exc:  # best effort; the daemon is already booted out
-                entry["disarm_error"] = str(exc)
+            except NightlyError as exc:
+                entry["disarm_error"] = _one_line(exc, 200)
+        if not bootout_ok:  # stay unfinalized: dispatch and the 09:05 stop retry
+            night["status"] = "BOOTOUT_FAILED"
+            night["bootout_failures"] = int(night.get("bootout_failures") or 0) + 1
+            self._queue_msg(
+                night,
+                "bootout-failed",
+                "coordinator",
+                f"EIA nightly {night['night']}: launchctl bootout of {DAEMON_LABEL} FAILED; "
+                "will retry (dispatch every 5 min, stop at 09:05).",
+            )
+            self._notify(f"EIA nightly {night['night']}: daemon bootout failed, retrying")
+            self._event(night, "bootout_failed")
+            return
+        pid = night.get("caffeinate_pid")
+        if pid and self._is_caffeinate(pid):
+            with contextlib.suppress(ProcessLookupError):
+                self.kill(int(pid), signal.SIGTERM)
         report = self.report(night)
         self._update_ledger(night)
         report_path = self.state_dir / f"{night['night']}-report.md"
         report_path.write_text(report, encoding="utf-8")
-        night["finalized"] = {
-            "at": self._iso(),
-            "bootout_ok": bootout_ok,
-            "report": str(report_path),
-        }
+        night["finalized"] = {"at": self._iso(), "bootout_ok": True, "report": str(report_path)}
         night["status"] = "FINISHED"
+        with contextlib.suppress(FileNotFoundError):
+            (self.state_dir / STOP_FILE).unlink()
         totals = night["totals"]
         summary = (
             f"EIA nightly {night['night']}: {totals['candidate_pr']} candidate PR, "
             f"{totals['escalated']} escalated, {totals['other']} other of {totals['issues']}"
-            f"{'' if bootout_ok else '; DAEMON BOOTOUT FAILED'}"
         )
         self._queue_msg(
             night,
@@ -1596,7 +1813,7 @@ class Nightly:
             f"{summary}. Report {report_path}:\n{report[:1200]}",
         )
         self._notify(summary)
-        self._event(night, "finalized", bootout_ok=bootout_ok)
+        self._event(night, "finalized")
 
     def report(self, night: dict[str, Any]) -> str:
         lines = [
@@ -1668,10 +1885,13 @@ def main(argv: list[str] | None = None) -> int:
     if app.paused() and args.command != "stop":
         print(json.dumps({"status": "PAUSED"}))
         return 0
-    with app.locked() as got:
+    if args.command == "stop":  # outside the lock: a watching dispatch lets go
+        app.request_stop(night_of(app.now()))
+    with app.locked(wait_polls=66 if args.command == "stop" else 0) as got:
         if not got:
-            print(json.dumps({"status": "LOCKED"}))
-            return 0
+            status = "STOP_REQUESTED_LOCKED" if args.command == "stop" else "LOCKED"
+            print(json.dumps({"status": status}))
+            return 75 if args.command == "stop" else 0
         try:
             result = (
                 app.prepare(args.night)

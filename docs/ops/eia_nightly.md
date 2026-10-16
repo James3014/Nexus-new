@@ -7,11 +7,15 @@ merges anything. Card PRs and candidate PRs both go to the merge-queue session t
 
 ## Queue an Issue
 
-1. Add the label `eia:queue`. Only a trusted actor may do this (default `James3014` and
-   `james3014-nexus-agent[bot]`; override with `--trusted-actors`). The scheduler reads the
-   Issue timeline: the latest `eia:queue` label event, and every title or body edit after it
-   (GraphQL `userContentEdits`), must come from a trusted actor. Otherwise it leaves the
-   Issue completely untouched.
+1. Add the label `eia:queue`. The repository is public, so the scheduler only acts when the
+   Issue author, the latest `eia:queue` label event, and every title or body edit after that
+   event all belong to a trusted actor. The default trusted actors are `James3014` and
+   `james3014-nexus-agent[bot]`; override them with `--trusted-actors`.
+   - Timeline (REST) logins are compared exactly.
+   - A GraphQL actor counts as the bot only when `__typename == "Bot"`.
+   - An incomplete edit history (`totalCount` larger than the nodes returned) is refused.
+
+   An Issue that fails any of these checks is left completely untouched.
 2. Put exactly one fenced JSON block in the Issue body:
 
 ````
@@ -29,14 +33,17 @@ merges anything. Card PRs and candidate PRs both go to the merge-queue session t
 The block's fields:
 
 - `difficulty`: `easy`, `medium` or `hard`. Hard Issues are not scheduled.
-- `allowed_files`: at most 10 literal, normalised, repo-relative paths. Globs, `..`, `.`,
-  absolute paths and dotfiles are rejected. At `origin/main`, each path must be a regular file
+- `allowed_files`: at most 10 literal, normalised, repo-relative paths. Globs, absolute paths,
+  and any path component that starts with `.` are rejected. At `origin/main`, each path must be a regular file
   or a new file in an existing directory, with no symlink anywhere on the path. Protected paths
   are refused: `.github/`, `.nexus-core/`, `.gitmodules`, `docs/governance/`, `docs/agents/`,
   `docs/testing/test_impact_map.md`, `tasks/`, `pyproject.toml`, `uv.lock`, bootstrap files
   (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `MUSE_PROTO.md`), `nexus/services/external_intelligence*`,
-  `scripts/ops/external_intelligence*`, `scripts/ops/trusted_*`, and this scheduler with its
-  templates and tests.
+  `scripts/ops/external_intelligence*`, `scripts/ops/trusted_*`, `pytest.ini`, `setup.cfg`,
+  `tox.ini`, `policy/`, `Makefile`, and this scheduler with its templates and tests. Also
+  refused anywhere in the tree: `conftest.py`, `sitecustomize.py`,
+  `governance_baseline_manifest*.json`, `Taskfile*` and `.pre-commit-config*`. All of these
+  comparisons ignore case. Paths are checked again against the `main` that each attempt binds.
 - `verification`: only two forms are accepted. Any other option, shell form or path is
   rejected.
   - `python3 -m pytest [-q] [-p no:cacheprovider] tests/<file>.py[::test] ...`, where each
@@ -87,8 +94,15 @@ acts on that result as follows:
 - **COMPLETE** (after the daemon's own publication comment, or a 15 min grace): the scheduler
   re-checks the receipt. It requires `WHOLE_TASK_PASS`, a matching task id, and an acceptance
   packet that sits under the EIA state root and matches its sha256 and the candidate. The
-  commit must exist in the daemon checkout, descend from the contract's `main_sha`, and change
-  only allowed files, with no deletions. The scheduler then pushes that exact commit as
+  commit must be exactly one commit whose only parent is the contract's `main_sha`, and its
+  tree must match. `git diff --raw` may show only added or modified regular files (modes
+  100644/100755) that are in `allowed_files`: no deletions, type changes, symlinks or
+  gitlinks. The whole-task verification record must show every declared verifier passing
+  for that commit. `candidate_tree` must be 40 hex characters. Gate, claim ceiling, closure
+  run id and worker fields must match `^[A-Za-z0-9_.:-]{1,120}$`. Only these validated
+  values ever reach the PR body or coord messages. An existing PR is reused only if it is
+  OPEN, based on `main`, and at that exact head. The candidate commit and the card commit are
+  pinned under `refs/eia-nightly/`. The scheduler then pushes that exact commit as
   `eia/<N>-<revision>` with the bot credential, opens a PR (`Closes #N`, Core marker, CLOSE
   intent, receipt summary) and sends READY to merge-queue. Labels become `eia:candidate-pr`;
   `eia:queue` and `nexus:external-intelligence` are removed. A GitHub error is retried on the
@@ -112,12 +126,20 @@ request. To keep that window short, `dispatch` watches the local state file ever
 to 270 s per invocation (it makes no GitHub calls while watching). It disarms within seconds
 of a terminal result.
 
+Each Issue is isolated: an error is counted against that Issue, and the Issue escalates after
+3 errors without stalling the others. `stop` writes a `STOP_REQUESTED` file before it takes
+the lock. A watching `dispatch` sees the file and releases the lock. `stop` then waits up to
+about 5.5 minutes for the lock and exits with 75 if it still cannot get it; the 09:05 run
+retries. If `launchctl bootout` fails, the night is not finalised: it is reported, and both
+`dispatch` and the 09:05 `stop` retry.
+
 `RECONCILIATION_REQUIRED` with prior state `INTELLIGENCE_DISPATCHING` or `FANOUT_DISPATCHING`
 is left alone, because the daemon resumes it by itself.
 
 ## Install (operator only)
 
 Fill in the four templates `scripts/ops/com.nexus.eia-nightly-{prepare,start,dispatch,stop}.plist.template`
-and load them with `launchctl bootstrap gui/$(id -u) <plist>`. The daemon checkout must contain
+then run `mkdir -p ~/Workspace/nexus-self-hosted-state/eia-nightly` (launchd does not
+create log directories), and load them with `launchctl bootstrap gui/$(id -u) <plist>`. The daemon checkout must contain
 this script. GitHub writes use the bot wrapper `~/.config/nexus-agent-bot/bin/gh`, and pushes use
 `nexus-agent-git-credential`. The scheduler never falls back to the owner's identity.

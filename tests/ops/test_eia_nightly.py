@@ -50,6 +50,7 @@ class FakeGitHub:
         labels=("eia:queue",),
         title: str = "Fix it",
         labeler: str = "James3014",
+        author: dict[str, str] | None = None,
     ):
         self.issues[number] = {
             "number": number,
@@ -63,10 +64,13 @@ class FakeGitHub:
                 for n in labels
             ],
             "edits": [],
+            "author": author or {"login": "James3014", "__typename": "User"},
+            "foreign_comments": [],
         }
 
     def _issue_json(self, issue: dict[str, Any]) -> dict[str, Any]:
-        hidden = {"comments": None, "events": None, "edits": None}
+        hidden = {"comments": None, "events": None, "edits": None, "author": None}
+        hidden["foreign_comments"] = None
         return {**issue, "labels": [{"name": n} for n in sorted(issue["labels"])], **hidden}
 
     def __call__(self, argv: list[str]) -> subprocess.CompletedProcess:
@@ -96,14 +100,18 @@ class FakeGitHub:
             number = int(args[-1].split("=", 1)[1])
             nodes = self.issues[number]["edits"]
             edits = {"totalCount": len(nodes), "nodes": nodes}
-            data = {"data": {"repository": {"issue": {"userContentEdits": edits}}}}
+            issue = {"userContentEdits": edits, "author": self.issues[number]["author"]}
+            data = {"data": {"repository": {"issue": issue}}}
             return _cp(argv, out=json.dumps(data))
         if args[0] == "api" and args[2].endswith("/timeline"):
             number = int(args[2].split("/")[-2])
             return _cp(argv, out="\n".join(json.dumps(e) for e in self.issues[number]["events"]))
         if args[0] == "api":
             number = int(args[2].split("/")[-2])
-            return _cp(argv, out="\n".join(self.issues[number]["comments"]))
+            bot = "james3014-nexus-agent[bot]"
+            rows = [{"user": bot, "body": b} for b in self.issues[number]["comments"]]
+            rows += [{"user": u, "body": b} for u, b in self.issues[number]["foreign_comments"]]
+            return _cp(argv, out="\n".join(json.dumps(r) for r in rows))
         self.writes.append(args)
         if head == ["label", "create"]:
             self.labels.add(args[2])
@@ -121,7 +129,7 @@ class FakeGitHub:
                 issue["body"] = body
                 issue["edits"].append({
                     "editedAt": "2026-10-16T20:00:00Z",
-                    "editor": {"login": "james3014-nexus-agent"},
+                    "editor": {"login": "james3014-nexus-agent", "__typename": "Bot"},
                 })
         elif head == ["issue", "comment"]:
             self.issues[int(args[2])]["comments"].append(body)
@@ -138,6 +146,7 @@ class FakeGitHub:
                 "head": opt["--head"],
                 "headRefOid": self.remote[opt["--head"]],
                 "state": "OPEN",
+                "baseRefName": opt["--base"],
                 "title": opt["--title"],
                 "body": body,
                 "mergeCommit": None,
@@ -157,6 +166,7 @@ class FakeSystem:
         self.healthcheck_rc = 0
         self.bridge = "Extension: connected"
         self.python3_rc = 0
+        self.bootout_rc = 0
 
     def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         self.calls.append(list(argv))
@@ -181,6 +191,8 @@ class FakeSystem:
                     else self.launchctl_print[0]
                 )
                 return _cp(argv, 113 if "Could not find" in text else 0, text)
+            if argv[1] == "bootout" and self.bootout_rc:
+                return _cp(argv, self.bootout_rc, "", "Boot-out failed: 5")
             return _cp(argv)
         if argv[0] == "/usr/bin/env":
             return _cp(argv, self.python3_rc)
@@ -514,21 +526,55 @@ def test_dispatch_arms_one_issue_with_label_last(env) -> None:
     )
 
 
-def _complete(env, entry: dict[str, Any], *, path: str = "pkg/mod.py") -> str:
+def _complete(
+    env,
+    entry: dict[str, Any],
+    *,
+    path: str = "pkg/mod.py",
+    extra_commits: int = 0,
+    verifier_ids: list[str] | None = None,
+    run_id: str = "run-1",
+    symlink: bool = False,
+) -> str:
     repo, att = env["repo"], entry["attempts"][-1]
     wt = env["tmp"] / "cand"
     _git(repo, "worktree", "add", "-q", "--detach", str(wt), att["main_sha"])
     (wt / path).parent.mkdir(parents=True, exist_ok=True)
-    (wt / path).write_text("X = 2\n")
+    if symlink:
+        (wt / path).unlink()
+        (wt / path).symlink_to("/etc/passwd")
+    else:
+        (wt / path).write_text("X = 2\n")
     _git(wt, "add", "-A")
     _git(wt, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qm", "candidate")
+    for extra in range(extra_commits):
+        (wt / f"pkg/extra{extra}.py").write_text("Y = 1\n")
+        _git(wt, "add", "-A")
+        _git(wt, "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qm", "more")
     sha = _git(wt, "rev-parse", "HEAD")
-    packet = env["eia_state"] / "closure" / "packet.json"
+    vid = "ab" * 32
+    packet = env["eia_state"] / "closure" / "acceptance-packets" / "packet.json"
     packet.parent.mkdir(parents=True, exist_ok=True)
     packet.write_text(
         json.dumps({
             "task_candidate": {"candidate_commit": sha},
             "task_card_hash": entry["card_hash"],
+            "whole_task_status": "PASS",
+            "whole_task_verification_id": vid,
+        })
+    )
+    verification = (
+        packet.parent.parent
+        / "verifications"
+        / (f"{entry['task_id']}--task--whole_task--{vid}.json")
+    )
+    verification.parent.mkdir(parents=True, exist_ok=True)
+    ids = verifier_ids if verifier_ids is not None else [f"whole-v1-a{att['attempt']}"]
+    verification.write_text(
+        json.dumps({
+            "status": "PASS",
+            "candidate_commit": sha,
+            "results": [{"verifier_id": i, "passed": True} for i in ids],
         })
     )
     _write_daemon_state(
@@ -536,10 +582,12 @@ def _complete(env, entry: dict[str, Any], *, path: str = "pkg/mod.py") -> str:
         11,
         att["identity_hash"],
         state="COMPLETE",
-        closure_run_id="run-1",
+        closure_run_id=run_id,
         publication={
             "candidate_commit": sha,
-            "candidate_tree": "t",
+            "candidate_tree": _git(wt, "rev-parse", "HEAD^{tree}"),
+            "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+            "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
             "task_id": entry["task_id"],
             "verification_state": "WHOLE_TASK_PASS",
             "acceptance_packet_ref": str(packet),
@@ -704,10 +752,8 @@ def test_github_failure_while_publishing_candidate_retries_instead_of_escalating
         return real(argv)
 
     env["sys"].gh = flaky
-    with pytest.raises(en.NightlyError, match="GH_WRITE_FAILED"):
-        _dispatch(env, "2026-10-17T01:30:00")
-    night = env["app"].load(NIGHT)
-    assert night["issues"]["11"]["status"] == "ARMED"
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert night["issues"]["11"]["status"] == "ARMED" and night["issues"]["11"]["failures"] == 1
     night = _dispatch(env, "2026-10-17T01:35:00")
     assert night["issues"]["11"]["status"] == "CANDIDATE_PR"
     assert env["gh"].remote[f"eia/11-n{NIGHT}-a1"] == sha and len(env["gh"].prs) == 2
@@ -723,8 +769,7 @@ def test_arming_interrupted_after_body_edit_resumes_without_new_attempt(env) -> 
         return real(argv)
 
     env["sys"].gh = no_label
-    with pytest.raises(en.NightlyError):
-        _dispatch(env, "2026-10-17T00:30:00")
+    _dispatch(env, "2026-10-17T00:30:00")
     assert env["app"].load(NIGHT)["issues"]["11"]["status"] == "ARMING"
     env["sys"].gh = real
     night = _dispatch(env, "2026-10-17T00:35:00")
@@ -768,20 +813,22 @@ def test_prepare_ignores_body_edited_by_untrusted_actor_after_queueing(env) -> N
     env["gh"].add_issue(11, task_body())
     env["gh"].issues[11]["edits"].append({
         "editedAt": "2026-10-16T09:00:00Z",
-        "editor": {"login": "mallory"},
+        "editor": {"login": "mallory", "__typename": "User"},
     })
     assert env["app"].prepare()["status"] == "NO_TASKS"
     env["gh"].add_issue(12, task_body(), labeler="james3014-nexus-agent[bot]")
     env["gh"].issues[12]["edits"].append({
         "editedAt": "2026-10-16T07:00:00Z",
-        "editor": {"login": "mallory"},
+        "editor": {"login": "mallory", "__typename": "User"},
     })
     assert env["app"].prepare()["order"] == [12]  # edit before trusted queueing is fine
 
 
 def test_trusted_actor_list_is_configurable(env) -> None:
     env["app"].trusted_actors = frozenset({"mallory"})
-    env["gh"].add_issue(11, task_body(), labeler="mallory")
+    env["gh"].add_issue(
+        11, task_body(), labeler="mallory", author={"login": "mallory", "__typename": "User"}
+    )
     assert env["app"].prepare()["order"] == [11]
 
 
@@ -789,7 +836,7 @@ def test_arm_refuses_issue_edited_by_untrusted_actor_after_cards(env) -> None:
     _started(env)
     env["gh"].issues[11]["edits"].append({
         "editedAt": "2026-10-16T22:00:00Z",
-        "editor": {"login": "mallory"},
+        "editor": {"login": "mallory", "__typename": "User"},
     })
     night = _dispatch(env, "2026-10-17T00:30:00")
     assert night["issues"]["11"]["status"] == "SKIPPED_UNTRUSTED"
@@ -879,3 +926,246 @@ def test_watcher_disarms_terminal_result_within_the_same_invocation(env) -> None
     night = _dispatch(env, "2026-10-17T00:35:00")
     assert polls == [20, 20] and night["issues"]["11"]["status"] == "ESCALATED"
     assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+# ------------------------------------------------------------------------- review round 2
+
+
+def test_untrusted_author_is_refused_silently(env) -> None:
+    env["gh"].add_issue(11, task_body(), author={"login": "mallory", "__typename": "User"})
+    night = env["app"].prepare()
+    assert night["status"] == "NO_TASKS" and not env["gh"].issues[11]["comments"]
+    assert not env["gh"].writes or all("11" not in w for w in env["gh"].writes)
+
+
+@pytest.mark.parametrize(
+    "labeler,editor",
+    [
+        ("james3014-nexus-agent", None),  # REST bot actor must carry [bot]
+        ("James3014", {"login": "james3014-nexus-agent", "__typename": "User"}),
+        ("James3014", {"login": "james3014-nexus-agent[bot]", "__typename": "Bot"}),
+        ("James3014", None),
+    ],
+)
+def test_bot_identity_is_matched_exactly(env, labeler, editor) -> None:
+    env["gh"].add_issue(11, task_body(), labeler=labeler)
+    if editor:
+        env["gh"].issues[11]["edits"].append({"editedAt": "2026-10-16T09:00:00Z", "editor": editor})
+    trusted = labeler == "James3014" and editor is None
+    assert env["app"]._queue_trusted(11)[0] is trusted
+
+
+def test_incomplete_edit_history_fails_closed(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    real = env["gh"].__call__
+
+    def truncated(argv):
+        out = real(argv)
+        if argv[1:3] == ["api", "graphql"]:
+            data = json.loads(out.stdout)
+            data["data"]["repository"]["issue"]["userContentEdits"]["totalCount"] = 101
+            return _cp(argv, out=json.dumps(data))
+        return out
+
+    env["sys"].gh = truncated
+    assert env["app"]._queue_trusted(11) == (False, "EDIT_HISTORY_INCOMPLETE")
+
+
+def test_title_change_between_readback_and_label_aborts_arming(env) -> None:
+    _started(env)
+    real = env["gh"].__call__
+    seen = {"edited": False, "views": 0}
+
+    def racing(argv):
+        if argv[1:3] == ["issue", "edit"] and "--body-file" in argv:
+            seen["edited"] = True
+        if argv[1:3] == ["issue", "view"] and seen["edited"]:
+            seen["views"] += 1
+            if seen["views"] == 2:  # the re-check right before the label
+                env["gh"].issues[11]["title"] = "Do something else"
+        return real(argv)
+
+    env["sys"].gh = racing
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert "ARM_RACE" in night["issues"]["11"]["escalation"]["reason"]
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_watch_rereads_issue_and_disarms_on_edit(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    polls = []
+
+    def sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 1:
+            env["gh"].issues[11]["body"] += "\nredirect the worker"
+
+    env["app"].sleep, env["app"].watch_seconds = sleep, 270
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert len(polls) == 3  # caught by the 60 s Issue re-read
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_withdrawn_queue_label_only_removes_our_label(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    env["gh"].issues[11]["labels"].discard("eia:queue")
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "WITHDRAWN"
+    assert env["gh"].issues[11]["labels"] == set() and not env["gh"].issues[11]["comments"]
+
+
+@pytest.mark.parametrize(
+    "kwargs,code",
+    [
+        ({"extra_commits": 1}, "NOT_SINGLE_COMMIT"),
+        ({"symlink": True}, "CANDIDATE_SCOPE_VIOLATION"),
+        ({"run_id": "run 1`"}, "PUBLICATION_FIELD_INVALID"),
+        ({"verifier_ids": []}, "WHOLE_VERIFICATION_NOT_PASSED"),
+    ],
+)
+def test_candidate_shape_and_fields_are_enforced(env, kwargs, code) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    if kwargs.get("extra_commits"):
+        night["issues"]["11"]["allowed_files"].append("pkg/extra0.py")
+        env["app"].save(night)
+    _complete(env, night["issues"]["11"], **kwargs)
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert code in night["issues"]["11"]["escalation"]["reason"]
+    assert len(env["gh"].prs) == 1  # only the card PR
+
+
+def test_existing_closed_pr_for_candidate_branch_is_refused(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    sha = _complete(env, night["issues"]["11"])
+    branch = f"eia/11-n{NIGHT}-a1"
+    env["gh"].remote[branch] = sha
+    env["gh"].prs[900] = {
+        "number": 900,
+        "head": branch,
+        "headRefOid": sha,
+        "state": "CLOSED",
+        "baseRefName": "main",
+    }
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert "EXISTING_PR_INVALID" in night["issues"]["11"]["escalation"]["reason"]
+
+
+def test_label_failure_after_candidate_pr_is_reconciled_next_tick(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+
+    def no_labels(argv):
+        if "--add-label" in argv and "eia:candidate-pr" in argv:
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = no_labels
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    assert night["issues"]["11"]["status"] == "ARMED"
+    env["sys"].gh = real
+    night = _dispatch(env, "2026-10-17T01:35:00")
+    assert night["issues"]["11"]["status"] == "CANDIDATE_PR" and len(env["gh"].prs) == 2
+    assert "eia:candidate-pr" in env["gh"].issues[11]["labels"]
+
+
+def test_bootout_failure_keeps_night_open_and_retries(env) -> None:
+    _started(env)
+    env["sys"].bootout_rc = 1
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
+    night = env["app"].stop()
+    assert night["status"] == "BOOTOUT_FAILED" and not night.get("finalized")
+    assert not env["kills"]
+    env["sys"].bootout_rc = 0
+    night = _dispatch(env, "2026-10-17T07:35:00")
+    assert night["status"] == "FINISHED" and env["kills"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pkg/conftest.py",
+        "MAKEFILE",
+        "Policy/rules.py",
+        "pkg/.hidden/x.py",
+        "pkg/governance_baseline_manifest_v2.json",
+        "Taskfile.yml",
+        "PYTEST.INI",
+        "Scripts/Ops/Trusted_x.py",
+    ],
+)
+def test_dotfiles_and_protected_names_are_refused(path: str) -> None:
+    with pytest.raises(en.NightlyError, match="TASK_ALLOWED_FILES_(PROTECTED|INVALID)"):
+        en.parse_task_block(task_body(allowed_files=[path]))
+
+
+def test_stop_file_releases_a_watching_dispatch(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T05:00:00")
+    polls = []
+
+    def sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 2:
+            env["app"].request_stop(NIGHT)
+
+    env["app"].sleep, env["app"].watch_seconds = sleep, 270
+    night = _dispatch(env, "2026-10-17T07:30:00")
+    assert len(polls) == 2 and night["stop_requested_at"]
+    assert night["issues"]["11"]["status"] == "ARMED"  # still draining, nothing new armed
+
+
+def test_stop_waits_for_lock_bounded(env) -> None:
+    import fcntl
+
+    app = env["app"]
+    app.state_dir.mkdir(parents=True, exist_ok=True)
+    waits = []
+    app.sleep = waits.append
+    with open(app.state_dir / ".lock", "a") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with app.locked(wait_polls=3) as got:
+            assert got is False
+    assert waits == [5, 5, 5]
+    with app.locked(wait_polls=3) as got:
+        assert got is True
+
+
+def test_one_failing_issue_is_escalated_after_three_errors(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    real = env["gh"].__call__
+
+    def broken_view(argv):
+        if argv[1:4] == ["issue", "view", "11"]:
+            return _cp(argv, 1, "", "HTTP 500")
+        return real(argv)
+
+    env["sys"].gh = broken_view
+    for minute in (35, 40, 45):
+        night = _dispatch(env, f"2026-10-17T00:{minute}:00")
+    entry = night["issues"]["11"]
+    assert entry["failures"] == 3 and entry["status"] == "ESCALATED"
+    assert "REPEATED_ERRORS" in entry["escalation"]["reason"]
+
+
+def test_markers_in_untrusted_comments_do_not_suppress_ours(env) -> None:
+    env["gh"].add_issue(13, "no block")
+    marker = f"<!-- eia-nightly:needs-template:{NIGHT} -->"
+    env["gh"].issues[13]["foreign_comments"].append(("mallory", marker))
+    env["app"].prepare()
+    assert len(env["gh"].issues[13]["comments"]) == 1
+
+
+def test_card_commit_is_pinned_by_a_ref(env) -> None:
+    night = _prepared(env)
+    ref = _git(env["repo"], "rev-parse", f"refs/eia-nightly/cards/{NIGHT}")
+    assert ref == night["card_pr"]["commit"]
