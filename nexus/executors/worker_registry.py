@@ -19,6 +19,7 @@ from nexus.executors.agy_write_admission import (
     AGY_PERMISSION_MODE_ACCEPT_EDITS,
     AGY_PERMISSION_MODE_PLAN,
     AGY_READ_ONLY_ROLES,
+    CLINE_TARGET_CUSTOMIZATION_PATHS,
     KEYCHAIN_NOT_APPLICABLE,
     agy_child_env,
     agy_delivery_failure,
@@ -29,6 +30,7 @@ from nexus.executors.agy_write_admission import (
     escaping_symlinks,
     fingerprint_roots,
     leased_target_failure,
+    materialize_cline_run_home,
     materialize_run_home,
     paths_overlap,
     protected_checkout_plan,
@@ -291,10 +293,33 @@ CLINE_PERMISSION_MODE = "auto_approve_false"
 #   {"type": "tool-approval-response", "approved": false}   a refused approval
 #   {"is_error": true, "result": "Tool execution denied ..."} a provider-mapped
 #       denied tool result (the default reasons below, prefix match only)
+# Observed (cline 3.0.69, headless with tool auto-approval off, #2254): the denied
+# tool surfaces as a tool ``content_end`` event whose ``error`` /
+# ``output.error`` is ``Tool "<name>" requires approval in a TTY session -- ...``
+# and the run may still end with ``finishReason: "stop"``.
+_CLINE_APPROVAL_REQUIRED = "requires approval in a tty session"
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
+# A run that did not finish on its own is never a delivery.
+_CLINE_FAILED_FINISH_REASONS = frozenset({"error", "aborted"})
 _CLINE_DENIED_DEFAULT_REASONS = ("tool execution denied", "tool call execution denied")
 # Model-authored tool arguments are never read as structure.
 _CLINE_MODEL_ARGUMENT_KEYS = frozenset({"input", "args", "arguments", "params", "parameters"})
+
+
+def _cline_tool_error_denied(event: dict[str, Any]) -> bool:
+    """A tool result event whose *error* fields carry the headless approval refusal.
+
+    Only the ``error`` and ``output.error`` strings of a tool result are read;
+    a tool's successful ``result`` text (e.g. a file that quotes the phrase)
+    and the model's own text are never inspected.
+    """
+    candidates = [event.get("error")]
+    output = event.get("output")
+    if isinstance(output, dict):
+        candidates.append(output.get("error"))
+    return any(
+        isinstance(item, str) and _CLINE_APPROVAL_REQUIRED in item.lower() for item in candidates
+    )
 
 
 def _cline_structured_denial(value: Any) -> bool:
@@ -304,6 +329,10 @@ def _cline_structured_denial(value: Any) -> bool:
         return False
     kind = value.get("type")
     if kind in _CLINE_DENIED_TYPES:
+        return True
+    if kind == "content_end" and value.get("contentType") == "tool" and _cline_tool_error_denied(
+        value
+    ):
         return True
     if kind == "tool-approval-response" and value.get("approved") is False:
         return True
@@ -350,7 +379,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     if not results:
         return "cline_output_unparseable"
     finish = str(results[-1].get("finishReason") or "").lower()
-    if not finish or finish == "error":
+    if not finish or finish in _CLINE_FAILED_FINISH_REASONS:
         return "cline_status_not_success"
     return None
 
@@ -387,11 +416,16 @@ def _cline_target_args(prompt: str, model: str, target: str) -> tuple[str, ...]:
 
 
 class ClineWorkerAdapter(DirectCliWorkerAdapter):
-    """Cline under the #1912 write-admission model (#2195).
+    """Cline under the #1912 write-admission model (#2195, #2254).
 
     No auto-approval: Cline runs with tool auto-approval off in the leased
-    target only, the protected checkouts are fingerprinted before and after
-    the run, and a denied tool action is non-delivery.
+    target only.  It runs under the same boundary as Agy: a Seatbelt profile
+    (only the target and the per-run root are writable; no sandbox-exec means
+    the launcher refuses to start), a disposable HOME carrying only cline's
+    auth file, an exact child env and a descendant sweep.  The protected
+    checkouts are fingerprinted, and the target's symlinks and ``.git`` entry
+    are compared, before and after the run; a denied tool action is
+    non-delivery.
     """
 
     # The registry (production path) always binds the target to the lease.
@@ -471,13 +505,47 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         before = fingerprint_roots(plan)
         if before is None:
             return failed("canonical_checkout_snapshot_unavailable")
-        request = CliWorkerRequest(
-            executable=self.executable,
-            argv=argv,
-            cwd=str(target_path),
-            timeout_seconds=timeout_seconds or 900.0,
-        )
-        result = run_cli_worker(request, on_process_group=on_process_group)
+        symlinks_before = escaping_symlinks(target_path)
+        git_entry_before = target_git_entry_state(target_path)
+
+        # #2254: same boundary as Agy.  Seatbelt makes the target and the run
+        # root the only writable paths (the canonical checkout, the real HOME
+        # and ~/.ssh / ~/.config/gh stay read-only); the worker sees a
+        # disposable HOME with only cline's auth file and an exact env.  With
+        # no sandbox-exec the launcher refuses to start (fail closed).
+        run_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-cline-run-")))
+        seatbelt_sha256 = ""
+        try:
+            run_home = run_tmp / "home"
+            run_tmpdir = run_tmp / "tmp"
+            run_tmpdir.mkdir(parents=True)
+            run_env = agy_child_env(None, home=run_home, tmpdir=run_tmpdir)
+            refusal = materialize_cline_run_home(worker_home(None), run_home)
+            if refusal is not None:
+                return failed(refusal)
+            try:
+                seatbelt = build_seatbelt_profile(
+                    run_root=run_tmp,
+                    writable_target=target_path,
+                    extra_protected_target_names=CLINE_TARGET_CUSTOMIZATION_PATHS,
+                )
+            except ValueError:
+                return failed("cline_seatbelt_profile_unrepresentable")
+            seatbelt_sha256 = hashlib.sha256(seatbelt.encode("utf-8")).hexdigest()
+            request = CliWorkerRequest(
+                executable=self.executable,
+                argv=argv,
+                cwd=str(target_path),
+                timeout_seconds=timeout_seconds or 900.0,
+                env=run_env,
+                seatbelt_profile=seatbelt,
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(target_path), str(run_tmp)),
+                exact_env=True,
+            )
+            result = run_cli_worker(request, on_process_group=on_process_group)
+        finally:
+            shutil.rmtree(run_tmp, ignore_errors=True)
         failure_reason: Optional[str] = None
         if result.status is CliWorkerStatus.TIMED_OUT:
             outcome = WorkerOutcome.INCOMPLETE
@@ -485,8 +553,12 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
             outcome = WorkerOutcome.FAILED
             failure_reason = f"{self.provider} execution did not complete successfully"
+            if result.stderr == b"seatbelt_unavailable":
+                failure_reason = "cline_seatbelt_unavailable"
         else:
             failure_reason = cline_delivery_failure(result.stdout, result.stderr)
+            if failure_reason is None and result.descendants_swept is False:
+                failure_reason = "cline_descendant_sweep_failed"
             outcome = WorkerOutcome.FAILED if failure_reason else WorkerOutcome.EXECUTION_COMPLETED
         after = fingerprint_roots(plan)
         if after is None:
@@ -496,6 +568,10 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                 WorkerOutcome.FAILED,
                 "canonical_checkout_integrity_violation",
             )
+        elif target_git_entry_state(target_path) != git_entry_before:
+            outcome, failure_reason = WorkerOutcome.FAILED, "cline_target_gitdir_tampered"
+        elif escaping_symlinks(target_path) != symlinks_before:
+            outcome, failure_reason = WorkerOutcome.FAILED, "cline_target_symlink_escape"
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
@@ -518,6 +594,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
             push_performed=False,
             failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else failure_reason,
             provider_permission_mode=CLINE_PERMISSION_MODE,
+            provider_write_sandbox=f"seatbelt:{seatbelt_sha256};keychain:{KEYCHAIN_NOT_APPLICABLE}",
         )
 
 
