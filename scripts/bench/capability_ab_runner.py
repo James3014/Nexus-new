@@ -3387,34 +3387,63 @@ def _missing_hidden_tests(tasks: list[CapabilityTask], repo_root: Path, *, mater
 def _bench_path_hidden_hits(
     tasks: list[CapabilityTask], repo_root: Path, out_dir: Path, *, materialize_missing: bool
 ) -> list[str]:
-    """Counted mode: bench paths (repo root, output dir) carrying any task's hidden-only text."""
+    """Counted mode: reasons the prompt audit would reject a bench path once it is rendered.
+
+    Rendered paths (format, length and hidden-text checks): the repo root as the runner's
+    unresolved module path, the cwd and resolved, plus the default run root the registry
+    derives for every task id (``_resolve_run_root``).  The output dir gets the hidden-text
+    checks.  A task whose fixture cannot be read is reported (fail closed), never skipped.
+    """
 
     from scripts.bench.bench_path_precheck import bench_path_hidden_hits
     from scripts.bench.prompt_symmetry_audit import TaskMaterial
 
     materials = []
+    errors: list[str] = []
     for task in tasks:
-        target, test_file = _resolve_task_files(
-            repo_root, task, materialize_missing=materialize_missing
-        )
-        materials.append(
-            TaskMaterial(
-                task_id=task.id,
-                visible_test=Path(test_file).read_text(encoding="utf-8"),
-                hidden_test=Path(_hidden_test_for_visible_test(test_file)).read_text(
-                    encoding="utf-8"
-                ),
-                source=Path(target).read_text(encoding="utf-8"),
-                task_desc=task.task_desc,
+        try:
+            target, test_file = _resolve_task_files(
+                repo_root, task, materialize_missing=materialize_missing
             )
-        )
-    paths = [
-        os.path.abspath(repo_root),
-        str(Path(repo_root).resolve()),
-        os.path.abspath(out_dir),
-        str(Path(out_dir).resolve()),
-    ]
-    return bench_path_hidden_hits(dict.fromkeys(paths), materials)
+            materials.append(
+                TaskMaterial(
+                    task_id=task.id,
+                    visible_test=Path(test_file).read_text(encoding="utf-8"),
+                    hidden_test=Path(_hidden_test_for_visible_test(test_file)).read_text(
+                        encoding="utf-8"
+                    ),
+                    source=Path(target).read_text(encoding="utf-8"),
+                    task_desc=task.task_desc,
+                )
+            )
+        except (OSError, NotImplementedError, ValueError) as exc:
+            errors.append(
+                f"{task.id}: fixture unreadable for the path precheck ({type(exc).__name__})"
+            )
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _resolve_run_root
+
+    def forms(path: Path) -> list[str]:
+        return [os.path.abspath(path), str(path.resolve())]
+
+    # Rendered verbatim into the prompt: the repo root (the runner's checkout, given via its
+    # unresolved module path and the cwd, and resolved) and the executors' default run roots,
+    # derived exactly as the registry derives them (``_resolve_run_root``) for every task id.
+    roots = [Path(__file__).parents[2], Path(repo_root), Path.cwd()]
+    rendered: list[str] = []
+    for root in roots:
+        rendered.extend(forms(root))
+        for task in tasks:
+            plan = CapabilityExecutionPlan(
+                plan_id="path-precheck",
+                task_id=str(task.id),
+                phases=["R"],
+                constraints={"project_root": str(root)},
+            )
+            rendered.extend(forms(_resolve_run_root(plan)[1]))
+    return errors + bench_path_hidden_hits(
+        forms(Path(out_dir)), materials, rendered=list(dict.fromkeys(rendered))
+    )
 
 
 FILE_LOCK_DENIED = "file_lock_denied"
@@ -20941,6 +20970,21 @@ def main() -> int:
         repeat_trials=int(args.repeat_trials),
         shuffle_seed=args.shuffle_seed,
     )
+    if bool(args.counted_first_attempt) and _counted_mode_expects_model_calls(args):
+        # Before any subprocess (confinement parity, persistent worker, legs) starts, so a
+        # refusal leaves nothing behind.
+        path_hits = _bench_path_hidden_hits(
+            tasks,
+            repo_root,
+            repo_root / args.output_dir,
+            materialize_missing=bool(args.materialize_missing),
+        )
+        if path_hits:
+            parser.error(
+                "counted run refused: a bench path would fail the prompt audit once rendered into "
+                "the with-Nexus prompt ([NEXUS MODEL CONTEXT] resolved_run_root), voiding the run; "
+                f"move the runner checkout or --output-dir: {path_hits[:5]}"
+            )
 
     with_rows: list[dict[str, Any]] = []
     without_rows: list[dict[str, Any]] = []
@@ -21146,15 +21190,6 @@ def main() -> int:
         missing_hidden = _missing_hidden_tests(tasks, repo_root, materialize_missing=bool(args.materialize_missing))
         if missing_hidden:
             parser.error(f"--counted-first-attempt needs every task's hidden and visible test: {missing_hidden[:5]}")
-        path_hits = _bench_path_hidden_hits(
-            tasks, repo_root, out_dir, materialize_missing=bool(args.materialize_missing)
-        )
-        if path_hits:
-            parser.error(
-                "counted run refused: a bench path contains a task's hidden-only text and would reach "
-                "the with-Nexus prompt ([NEXUS MODEL CONTEXT] resolved_run_root), voiding the run; "
-                f"move BENCH_ROOT / --output-dir: {path_hits[:5]}"
-            )
     prompt_audit_capture = (
         _install_prompt_capture(out_dir)
         if bool(args.counted_first_attempt) and not bool(args.nexus_only) and not bool(args.without_only)

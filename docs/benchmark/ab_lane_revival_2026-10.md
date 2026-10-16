@@ -260,6 +260,20 @@ read as not capability-attributed until re-read with `--reclassify` against a su
 
 ## Bench path precheck (counted runs, 2026-10-16)
 
-nexus-runtime (e73d152f1) renders the resolved run root into the with-Nexus `[NEXUS MODEL CONTEXT]` block. That run root is an absolute path inside the bench worktree. The prompt symmetry audit rejects any Nexus-block string that contains a hidden-only word, line or literal of the task. A bench path such as `.../20261016-proof-main/...` (`main` is hidden-only for hard_v1 `oabh-remote`) therefore voids a whole counted run with `nexus_block_string_not_allowed`, and only after the models have been paid for.
+nexus-runtime (e73d152f1) renders the resolved run root into the with-Nexus `[NEXUS MODEL CONTEXT]` block. That run root is an absolute path inside the bench worktree. The prompt symmetry audit rejects a Nexus-block string that:
+- is not a plain absolute path (`abs_path`: `^/[A-Za-z0-9_./-]+$`);
+- is longer than 120 characters (`MAX_JSON_STRING_CHARS`);
+- contains a hidden-only word, line or literal of the task, in the string itself or in any decoded variant (percent, base64 or hex).
 
-`capability_ab_runner` now refuses to start a counted run (`--counted-first-attempt` with model calls) when the repo root or the output dir, as given or resolved, contains any task's hidden-only text. It exits with code 2 and prints the offending task, path and word. The check (`scripts/bench/bench_path_precheck.py`) uses the audit's own extraction: `hidden_only_words` against the synthetic bare reference, plus `hidden_only_literals` and `hidden_only_lines`. The audit itself is unchanged. To fix a refused run, move `BENCH_ROOT` or `--output-dir` to a path without the reported word.
+Any of these voids the whole counted run (`nexus_block_string_not_allowed`), and only after the paid calls. Example: `main` is hidden-only for hard_v1 `oabh-remote`.
+
+`capability_ab_runner` now checks the bench paths with the audit's own functions (`scripts/bench/bench_path_precheck.py`) before any subprocess starts: confinement parity, persistent worker and legs. The audit itself is unchanged. For a counted run (`--counted-first-attempt` with model calls) it refuses to start with exit code 2.
+
+- **Paths checked for format, length and hidden text.** These are the paths that get rendered:
+  - the repo root, which is the location of the runner's checkout. It is checked as the runner's unresolved module path, as the cwd, and resolved.
+  - the default run root the executor registry derives for every task id (`_resolve_run_root`: `<repo>/.nexus/runtime/<task id>`).
+- **Path checked for hidden text only.** The output dir.
+- **Fixtures.** A fixture that cannot be read is reported with its task id; it is never skipped.
+- **Messages.** A message prints the task id, the path, and the single offending word. A literal or line is reported only as its length and a sha256 prefix, never as text.
+
+To fix a refused run, move the runner checkout or `--output-dir` (or rename the task) so that the reported path no longer carries the word or character.
