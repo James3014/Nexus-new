@@ -629,13 +629,10 @@ def test_dead_dispatcher_with_live_provider_keeps_lease_as_unknown(tmp_path: Pat
     assert manager.acquire("claudeop_" + "2" * 32).lease_id
 
 
-def test_dead_dispatcher_and_dead_provider_is_reclaimed(tmp_path: Path) -> None:
+def test_dead_dispatcher_before_launch_is_reclaimed(tmp_path: Path) -> None:
     manager, _, root = _pool(tmp_path, ["a"])
     adapter = _adapter(manager)
     binding = adapter.acquire("claudeop_" + "1" * 32)
-    done = subprocess.Popen(["true"], start_new_session=True)
-    done.wait()
-    adapter.attach_provider(binding, done.pid)
     state = json.loads((root / "state.json").read_text())
     (lease_id,) = state["leases"]
     state["leases"][lease_id]["pid"] = 2**22 + 12345
@@ -729,3 +726,57 @@ def test_operator_reconcile_flags_list_and_release(
         assert json.loads(capsys.readouterr().out)["unknown_outcome_leases"] == []
     finally:
         set_claude_account_pool_manager(None)
+
+
+def _dead_pid() -> int:
+    done = subprocess.Popen(["true"])
+    done.wait()
+    return done.pid
+
+
+def test_launch_pending_lease_survives_dispatcher_death_before_attach(tmp_path: Path) -> None:
+    manager, _, root = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    adapter.mark_launch_pending(binding)
+    state = json.loads((root / "state.json").read_text())
+    (lease_id,) = state["leases"]
+    assert state["leases"][lease_id]["launch_pending"] is True
+    assert "provider_pid" not in state["leases"][lease_id]
+    state["leases"][lease_id]["pid"] = _dead_pid()  # died between Popen and attach
+    (root / "state.json").write_text(json.dumps(state))
+    with pytest.raises(ClaudeAccountPoolExhaustedError):
+        manager.acquire("claudeop_" + "2" * 32)
+    assert manager.unknown_outcome_leases() == (lease_id,)
+    manager.reconcile_release(lease_id)
+    assert manager.acquire("claudeop_" + "2" * 32).lease_id
+
+
+def test_launched_lease_needs_confirmed_terminal_release(tmp_path: Path) -> None:
+    manager, _, root = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    adapter.mark_launch_pending(binding)
+    adapter.release(binding)  # unconfirmed release of a launched lease: kept
+    assert len(json.loads((root / "state.json").read_text())["leases"]) == 1
+    with pytest.raises(ClaudeAccountPoolExhaustedError):
+        manager.acquire("claudeop_" + "2" * 32)
+
+
+def test_confirm_terminal_frees_launched_lease(tmp_path: Path) -> None:
+    manager, _, root = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    adapter.mark_launch_pending(binding)
+    adapter.confirm_terminal(binding)
+    assert json.loads((root / "state.json").read_text())["leases"] == {}
+    assert manager.acquire("claudeop_" + "2" * 32).lease_id
+
+
+def test_mark_launch_pending_failure_means_not_launched(tmp_path: Path) -> None:
+    manager, _, _ = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    adapter.release(binding)
+    with pytest.raises(ExternalWorkerRuntimeError, match="NOT_OWNED"):
+        adapter.mark_launch_pending(binding)

@@ -515,16 +515,23 @@ class ClaudeAccountPoolManager:
 
     @classmethod
     def _lease_live(cls, record: dict[str, Any]) -> bool:
-        """A lease is reclaimable only if dispatcher AND provider process are both dead."""
+        """Pid-death pruning applies only to pre-launch leases.
 
-        if record.get("unknown_outcome") or _pid_alive(record.get("pid")):
+        A lease that was marked launch_pending (set durably before the provider is
+        started), has an attached provider, or is unknown_outcome is never reclaimed
+        by pruning; it is freed only by a confirmed terminal release or
+        reconcile_release.
+        """
+
+        launched = bool(record.get("launch_pending")) or record.get("provider_pid") is not None
+        if record.get("unknown_outcome"):
             return True
-        if _pid_alive(record.get("provider_pid")) or cls._pgid_alive(record.get("provider_pgid")):
-            # Dispatcher died but the provider may still be producing effects.
-            record["unknown_outcome"] = True
-            record["unknown_outcome_at"] = time.time()
+        if launched:
+            if not _pid_alive(record.get("pid")):
+                record["unknown_outcome"] = True
+                record["unknown_outcome_at"] = time.time()
             return True
-        return False
+        return _pid_alive(record.get("pid"))
 
     @classmethod
     def _prune_dead_leases(cls, state: dict[str, Any]) -> None:
@@ -541,6 +548,41 @@ class ClaudeAccountPoolManager:
         if json.dumps(state["leases"], sort_keys=True) != before:
             state["updated_at"] = time.time()
             self._write_state(state)
+
+    def mark_launch_pending(self, lease: ClaudeLease) -> None:
+        """Durably record (fsync'd) that a provider launch is about to happen."""
+
+        lock = self._lock()
+        try:
+            state = self._load_state()
+            self._assert_host_binding(state)
+            record = self._record_for(state, lease)
+            record["launch_pending"] = True
+            state["updated_at"] = time.time()
+            self._write_state(state)
+        finally:
+            self._unlock(lock)
+
+    def note_terminal_failure(self, lease: ClaudeLease, failure_kind: AccountFailureKind) -> None:
+        """Cool down an account after a known, non-rotated per-person limit failure."""
+
+        if failure_kind not in _NO_ROTATION_KINDS:
+            return
+        lock = self._lock()
+        try:
+            state = self._load_state()
+            self._assert_host_binding(state)
+            record = self._record_for(state, lease)
+            account = state["accounts"].get(str(record.get("alias") or ""))
+            if isinstance(account, dict):
+                now = time.time()
+                account["cooldown_until"] = now + self.cooldown_seconds
+                account["last_failure_timestamp"] = now
+                account["last_failure_reason"] = failure_kind.value
+                state["updated_at"] = now
+                self._write_state(state)
+        finally:
+            self._unlock(lock)
 
     def attach_provider(self, lease: ClaudeLease, provider_pid: int) -> None:
         """Record the provider pid/pgid (provider runs in its own session)."""
@@ -689,8 +731,14 @@ class ClaudeAccountPoolManager:
             raise ClaudeAccountPoolError("CLAUDE_INVALID_ACCOUNT_LEASE")
         return record
 
-    def release(self, lease: ClaudeLease) -> None:
-        """Release on a known terminal outcome. A lease marked UNKNOWN_OUTCOME is kept."""
+    def release(self, lease: ClaudeLease, *, known_terminal: bool = False) -> None:
+        """Release a lease.
+
+        Pre-launch leases are freed directly. A lease that reached launch (or is
+        UNKNOWN_OUTCOME) is kept unless the dispatcher confirms a known terminal
+        outcome with known_terminal=True; unknown_outcome is only cleared by
+        reconcile_release.
+        """
 
         lock = self._lock()
         try:
@@ -699,6 +747,9 @@ class ClaudeAccountPoolManager:
             self._prune_dead_leases(state)
             record = self._record_for(state, lease)
             if record.get("unknown_outcome"):
+                return
+            launched = bool(record.get("launch_pending")) or record.get("provider_pid") is not None
+            if launched and not known_terminal:
                 return
             state["leases"].pop(lease.lease_id, None)
             state["updated_at"] = time.time()

@@ -343,9 +343,62 @@ def _run_operation(
         stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
         stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
         proc = None
+        mark_pending = getattr(account_adapter, "mark_launch_pending", None)
+        if mark_pending is not None:
+            try:
+                mark_pending(binding)
+            except BaseException as exc:
+                # Pre-effect: nothing launched. Release normally and do not start.
+                try:
+                    account_adapter.release(binding)
+                finally:
+                    journal.mark_terminal(
+                        operation_id,
+                        status="FAILED",
+                        exit_code=None,
+                        failure_kind=f"LAUNCH_PENDING_PERSIST_FAILED:{type(exc).__name__}",
+                        cwd=cwd,
+                        attempts=attempts,
+                        rotations=rotations,
+                        reconciliation={
+                            "at": utc_now(),
+                            "result": "NO_PROVIDER_PROCESS_STARTED",
+                            "retry_permitted": False,
+                        },
+                    )
+                return 1
         started = time.monotonic()
         last_heartbeat = 0.0
         last_sizes = (stdout_start, stderr_start)
+
+        def _fail_closed_after_start(exc: BaseException) -> int:
+            """Kill the provider group, then record an unknown outcome; never release."""
+
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if proc is not None:
+                _kill_and_reap(proc)
+            failure = f"PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME:{type(exc).__name__}"
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    failure += f":HOLD_FAILED:{type(hold_exc).__name__}"
+                    print(f"ERROR {failure}", file=sys.stderr)
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN",
+                exit_code=None,
+                failure_kind=failure,
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
 
         try:
             with (
@@ -399,31 +452,8 @@ def _run_operation(
                         last_heartbeat = now
                     time.sleep(0.25)
         except BaseException as exc:
-            hold = getattr(account_adapter, "hold_unknown_outcome", None)
-            if proc is not None and hold is not None:
-                # Provider may have started: kill by PID, reap, then fail closed.
-                _kill_and_reap(proc)
-                failure = f"PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME:{type(exc).__name__}"
-                try:
-                    hold(binding)
-                except BaseException as hold_exc:
-                    failure += f":HOLD_FAILED:{type(hold_exc).__name__}"
-                    print(f"ERROR {failure}", file=sys.stderr)
-                journal.mark_terminal(
-                    operation_id,
-                    status="OUTCOME_UNKNOWN",
-                    exit_code=None,
-                    failure_kind=failure,
-                    cwd=cwd,
-                    attempts=attempts,
-                    rotations=rotations,
-                    reconciliation={
-                        "at": utc_now(),
-                        "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
-                        "retry_permitted": False,
-                    },
-                )
-                return 1
+            if proc is not None and mark_pending is not None:
+                return _fail_closed_after_start(exc)
             try:
                 account_adapter.release(binding)
             except BaseException:
@@ -477,17 +507,22 @@ def _run_operation(
             )
             return 124
 
-        exit_code = int(proc.returncode or 0)
-        stdout_bytes = stdout_path.read_bytes()
-        stderr_bytes = stderr_path.read_bytes()
-        stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
-        stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
-        outcome = adapter.interpret(
-            request,
-            exit_code=exit_code,
-            stdout_text=stdout_text,
-            stderr_text=stderr_text,
-        )
+        try:
+            exit_code = int(proc.returncode or 0)
+            stdout_bytes = stdout_path.read_bytes()
+            stderr_bytes = stderr_path.read_bytes()
+            stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
+            stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
+            outcome = adapter.interpret(
+                request,
+                exit_code=exit_code,
+                stdout_text=stdout_text,
+                stderr_text=stderr_text,
+            )
+        except BaseException as exc:
+            if mark_pending is None:
+                raise
+            return _fail_closed_after_start(exc)
 
         failure_enum = None
         if outcome.failure_kind:
@@ -548,8 +583,18 @@ def _run_operation(
                         file=sys.stderr,
                     )
         if not hold_failed:
+            note = getattr(account_adapter, "note_terminal_failure", None)
+            if note is not None and failure_enum is not None and outcome.status == "FAILED":
+                try:
+                    note(binding, failure_enum)
+                except BaseException:
+                    pass
+            confirm = getattr(account_adapter, "confirm_terminal", None)
             try:
-                account_adapter.release(binding)
+                if confirm is not None and outcome.status != "OUTCOME_UNKNOWN":
+                    confirm(binding)
+                else:
+                    account_adapter.release(binding)
             except BaseException:
                 pass
         journal.mark_terminal(

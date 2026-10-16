@@ -601,3 +601,151 @@ def test_dispatch_hold_failure_never_releases_lease(
     assert code == 124
     assert released == []
     assert journal.read(operation_id)["status"] == "OUTCOME_UNKNOWN"
+
+
+def _kill_dispatcher_pid_in_state(pool_root: Path) -> None:
+    import json
+
+    done = subprocess.Popen(["true"])
+    done.wait()
+    state = json.loads((pool_root / "state.json").read_text())
+    for record in state["leases"].values():
+        record["pid"] = done.pid
+    (pool_root / "state.json").write_text(json.dumps(state))
+
+
+def test_claude_failing_hold_with_dead_processes_still_blocks_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolExhaustedError,
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    def failing_hold(self, binding):
+        raise RuntimeError("hold failed")
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "hold_unknown_outcome", failing_hold)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "sleep 60"
+    )
+    try:
+        assert (
+            _run_claude_inproc(tmp_path, operation_id, prompt_path, root, timeout=1, grace=0.0)
+            == 124
+        )
+        _kill_dispatcher_pid_in_state(pool_root)
+        manager = get_claude_account_pool_manager()
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            manager.acquire("claudeop_" + "9" * 32)
+        capsys.readouterr()
+        assert dispatch.main(["--claude-list-unknown"]) == 0
+        listed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        assert len(listed["unknown_outcome_leases"]) == 1
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+def test_claude_interpret_exception_kills_group_and_blocks_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolExhaustedError,
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    pid_file = tmp_path / "provider.pid"
+    original_attach = runtime.ClaudeAccountAdapter.attach_provider
+
+    def record_pid(self, binding, provider_pid):
+        pid_file.write_text(str(provider_pid))
+        original_attach(self, binding, provider_pid)
+
+    def broken_interpret(self, request, **kwargs):
+        raise ValueError("interpret exploded")
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "attach_provider", record_pid)
+    monkeypatch.setattr(runtime.ClaudeExecutionAdapter, "interpret", broken_interpret)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+        current = journal.read(operation_id)
+        assert current["status"] == "OUTCOME_UNKNOWN"
+        assert current["failure_kind"].endswith("ValueError")
+        with pytest.raises(ProcessLookupError):
+            os.killpg(_pids_of(pid_file), 0)
+        _kill_dispatcher_pid_in_state(pool_root)
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32)
+        (lease,) = json.loads((pool_root / "state.json").read_text())["leases"].values()
+        assert lease["unknown_outcome"] is True
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+def test_claude_clean_success_releases_and_account_is_reusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services.claude_account_pool import (
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 0
+        assert journal.read(operation_id)["status"] == "COMPLETED"
+        assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+        assert get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32).lease_id
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+def test_claude_quota_terminal_failure_cools_down_account_for_next_acquire(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolExhaustedError,
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    fake = tmp_path / "claude"
+    fake.write_text(
+        fake.read_text().replace(
+            '"subtype":"success","is_error":false,"session_id":"cs-1","total_cost_usd":0.01,"result":"ok"',
+            '"subtype":"error","is_error":true,"session_id":"cs-1","result":"Claude usage limit reached"',
+        )
+    )
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) != 0
+        current = journal.read(operation_id)
+        assert current["status"] == "FAILED"
+        assert current["failure_kind"] == "QUOTA_EXHAUSTED"
+        assert current["rotations"] == 0
+        state = json.loads((pool_root / "state.json").read_text())
+        assert state["leases"] == {}
+        assert state["accounts"]["claude-a"]["last_failure_reason"] == "QUOTA_EXHAUSTED"
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32)
+    finally:
+        set_claude_account_pool_manager(None)

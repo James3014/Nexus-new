@@ -1063,6 +1063,23 @@ class ClaudeAccountAdapter:
 
         self.manager.attach_provider(self._lease_for(binding), provider_pid)
 
+    def mark_launch_pending(self, binding: AccountBinding) -> None:
+        """Durably persist launch_pending before the provider is started."""
+
+        self.manager.mark_launch_pending(self._lease_for(binding))
+
+    def confirm_terminal(self, binding: AccountBinding) -> None:
+        """Release after the dispatcher confirmed a known terminal outcome."""
+
+        lease = self._lease_for(binding)
+        self.manager.release(lease, known_terminal=True)
+        self._leases.pop(binding.lease_id_hash or "", None)
+
+    def note_terminal_failure(
+        self, binding: AccountBinding, failure_kind: AccountFailureKind
+    ) -> None:
+        self.manager.note_terminal_failure(self._lease_for(binding), failure_kind)
+
     def hold_unknown_outcome(self, binding: AccountBinding) -> None:
         """Keep this account leased (UNKNOWN_OUTCOME) until explicit reconciliation."""
 
