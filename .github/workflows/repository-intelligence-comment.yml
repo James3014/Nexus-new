@@ -43,6 +43,9 @@ jobs:
       - name: Checkout default branch (never the PR head)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # Full history so same-repo PR branch objects can be fetched as data
+          # for the guard semantic delta (#1580); this is still the default branch.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout pinned Repository Intelligence engine
@@ -52,6 +55,40 @@ jobs:
           ref: 77a937b67c3da4756f535a41b59cdf5555a25e31  # v0.1.5
           path: .rie-engine
           persist-credentials: false
+
+      - name: Checkout Repository Intelligence engine at the guard-delta pin
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: James3014/repository-intelligence-engine
+          ref: 88285acf570688befbc8e36eb73f46987171bd4e
+          path: .rie-guard-engine
+          persist-credentials: false
+
+      # Guard semantic delta (#1580), advisory only. Default-branch code reads the
+      # exact base/head git blobs as data (git show); PR-head code is never
+      # checked out or executed. NEVER add the behavioral-probe flag here: it would
+      # execute PR-head Python in a job that holds a write token.
+      - name: Compute guard semantic delta from base/head blobs (data only)
+        continue-on-error: true
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" || true
+          python3 -I scripts/ops/rie_guard_delta_evidence.py \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --repository "$REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --current-main-sha "$GITHUB_SHA" \
+            --engine-root "$GITHUB_WORKSPACE/.rie-guard-engine" \
+            --python-bin python3 \
+            --output "$RUNNER_TEMP/rie-guard-delta.json"
 
       - name: Render and upsert the sticky comment
         shell: bash
@@ -71,5 +108,6 @@ jobs:
             --repo-root "$GITHUB_WORKSPACE" \
             --engine-root "$GITHUB_WORKSPACE/.rie-engine" \
             --engine-pin "$RIE_PIN" \
+            --guard-delta-json "$RUNNER_TEMP/rie-guard-delta.json" \
             --post \
             --step-summary "$GITHUB_STEP_SUMMARY"
