@@ -6,6 +6,7 @@ import base64
 import hashlib
 import inspect
 import json
+import logging
 import os
 import re
 import signal
@@ -3481,6 +3482,10 @@ class SelfHostedTaskService:
         return result
 
     TERMINAL_CORE_RECORD_SCHEMA = "nexus.self_hosted_terminal_core_record.v1"
+    _TERMINAL_CORE_EXPECTED_HOST_REASONS = frozenset({
+        "AMBIENT_CORE_FAILED_VERIFICATION:UNVERIFIABLE",
+        "CORE_COVERAGE_INCOMPLETE",
+    })
 
     def _build_terminal_core_record(
         self, state: Mapping[str, Any], *, contract: Any = None
@@ -3554,17 +3559,31 @@ class SelfHostedTaskService:
             if not verdict.get("blocking"):
                 # A task that produced nothing can never read as covered.
                 raise RuntimeError("CORE_TERMINAL_RECORD_NOT_BLOCKING")
+            # RECORDED means exactly Core's NOT_COVERED answer for this
+            # universe from the pinned Core; any other host finding (an
+            # unpinned Core, an identity or universe mismatch) is a failure.
+            unexpected = [
+                code
+                for code in verdict.get("host_reason_codes") or ()
+                if code not in self._TERMINAL_CORE_EXPECTED_HOST_REASONS
+            ]
+            if unexpected:
+                record.update(core_verdict=verdict)
+                raise RuntimeError(str(unexpected[0]))
+            if isinstance(projection, Mapping) and projection.get("terminal_status"):
+                record["terminal_status"] = str(projection["terminal_status"])
             record.update(record_status="RECORDED", core_verdict=verdict)
         except Exception as exc:
             code = str(exc).split(":", 1)[0].strip() or type(exc).__name__
             reason = f"CORE_TERMINAL_RECORD_FAILED:{code}"
             record["failure_reason"] = reason
-            try:
-                record["core_verdict"] = build_core_verdict(
-                    contract=contract, projection=None, transport_error=reason
-                )
-            except Exception:
-                record["core_verdict"] = None
+            if record.get("core_verdict") is None:
+                try:
+                    record["core_verdict"] = build_core_verdict(
+                        contract=contract, projection=None, transport_error=reason
+                    )
+                except Exception:
+                    record["core_verdict"] = None
         return record
 
     def _record_terminal_core_not_covered(self, task_id: str, state: Any) -> None:
@@ -3574,7 +3593,13 @@ class SelfHostedTaskService:
                 return
             attempt_id = str(state.get("attempt_id") or "")
             existing = state.get("terminal_core_record")
-            if isinstance(existing, Mapping) and existing.get("attempt_id") == attempt_id:
+            if (
+                isinstance(existing, Mapping)
+                and existing.get("attempt_id") == attempt_id
+                and existing.get("record_status") == "RECORDED"
+            ):
+                # Recorded once per attempt; a FAILED record is tried again
+                # at the next terminal write (e.g. after Core is fixed).
                 return
             record = self._build_terminal_core_record(state)
             if record is None:
@@ -3591,8 +3616,11 @@ class SelfHostedTaskService:
                     current["terminal_core_record"] = _jsonable(record)
 
             self._mutate_state(task_id, attach)
-        except Exception:
+        except Exception as exc:
             # Recording is evidence only; the terminal state stands as written.
+            logging.getLogger(__name__).warning(
+                "terminal Core record for %s not persisted: %s", task_id, type(exc).__name__
+            )
             return
 
     def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:

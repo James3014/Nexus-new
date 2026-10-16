@@ -682,6 +682,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     coverage_json TEXT NOT NULL,
                     core_provenance_status TEXT NOT NULL,
                     projection_hash TEXT NOT NULL,
+                    projection_json TEXT NOT NULL,
                     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (task_id, attempt_id)
                 )
@@ -790,7 +791,14 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "core_source_identity": core_source,
             "core_provenance": provenance,
         }
+        if provenance.get("status") != "CORE_REVISION_PINNED":
+            # Only a pinned Core may write the durable record; the host
+            # records this as a failure and may record again once Core is fixed.
+            raise RuntimeError(
+                f"CORE_PROVENANCE_NOT_PINNED:{provenance.get('status') or 'MISSING'}"
+            )
         proj_hash = projection_hash(projection_payload)
+        projection_json = json.dumps(projection_payload, sort_keys=True, default=str)
 
         self._ensure_db()
         with sqlite3.connect(self.db_path) as conn:
@@ -800,8 +808,9 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 INSERT OR IGNORE INTO core_terminal_records
                 (task_id, attempt_id, terminal_status, core_status, integrity,
                  core_reason_codes_json, acceptance_contract_hash, universe_identity,
-                 universe_generation, coverage_json, core_provenance_status, projection_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 universe_generation, coverage_json, core_provenance_status, projection_hash,
+                 projection_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     task_id,
@@ -816,19 +825,25 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     json.dumps(verification["coverage"], sort_keys=True),
                     str(provenance.get("status") or ""),
                     proj_hash,
+                    projection_json,
                 ),
             )
             conn.commit()
             cursor.execute(
-                "SELECT universe_identity, acceptance_contract_hash FROM core_terminal_records"
+                "SELECT universe_identity, acceptance_contract_hash, projection_hash,"
+                " projection_json FROM core_terminal_records"
                 " WHERE task_id = ? AND attempt_id = ?",
                 (task_id, attempt_id),
             )
             row = cursor.fetchone()
-        # An existing row for this attempt must describe the same contract.
-        if row is None or tuple(row) != (str(universe_identity), contract_hash):
+        # One durable record per attempt: a replay returns exactly the stored
+        # record, which must describe the same contract and universe.
+        if row is None or (row[0], row[1]) != (str(universe_identity), contract_hash):
             raise RuntimeError("CORE_TERMINAL_RECORD_CONFLICT")
-        return projection_payload
+        stored = json.loads(row[3])
+        if projection_hash(stored) != row[2]:
+            raise RuntimeError("CORE_TERMINAL_RECORD_TAMPERED")
+        return stored
 
     def readback_terminal_record(self, task_id: str, attempt_id: str) -> dict[str, Any] | None:
         self._ensure_db()

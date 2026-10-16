@@ -1749,3 +1749,58 @@ def test_transport_terminal_record_requires_core(tmp_path):
             terminal_status="FINAL_BLOCK",
         )
     assert not (tmp_path / "core.sqlite").exists()
+
+
+def _not_covered_projection(provenance: str, tmp_path: Path) -> dict[str, Any]:
+    declared = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    return {
+        "terminal_status": "FINAL_BLOCK",
+        "core_response": {
+            "verification": {
+                "status": "UNVERIFIABLE",
+                "reason_codes": ["CANDIDATE_MISSING", "MISSING"],
+                "integrity": "MISSING",
+                "coverage": {
+                    "universe_generation": 1,
+                    "universe_identity": core_universe_identity(declared),
+                    "entries": [{**DIFF_CHECK, "category": "NOT_COVERED"}],
+                    "unexpected_subjects": [],
+                },
+            }
+        },
+        "core_provenance": {"status": provenance},
+    }
+
+
+def test_terminal_record_recorded_only_from_pinned_core(tmp_path):
+    pinned = _host_service(
+        tmp_path, _CountingPort(answer=_not_covered_projection("CORE_REVISION_PINNED", tmp_path))
+    )._build_terminal_core_record(_terminal_state(tmp_path), contract=_universe_contract(tmp_path))
+    assert pinned["record_status"] == "RECORDED"
+    assert pinned["core_verdict"]["host_reason_codes"] == [
+        "AMBIENT_CORE_FAILED_VERIFICATION:UNVERIFIABLE",
+        "CORE_COVERAGE_INCOMPLETE",
+    ]
+    drifted = _host_service(
+        tmp_path,
+        _CountingPort(answer=_not_covered_projection("CORE_REVISION_MISMATCH", tmp_path)),
+    )._build_terminal_core_record(_terminal_state(tmp_path), contract=_universe_contract(tmp_path))
+    assert drifted["record_status"] == "FAILED"
+    assert drifted["failure_reason"] == "CORE_TERMINAL_RECORD_FAILED:CORE_PROVENANCE_NOT_PINNED"
+    assert drifted["candidate_commit_allowed"] is False
+    assert drifted["core_verdict"]["blocking"] is True
+
+
+@pytest.mark.parametrize("existing_status, rebuilt", [("RECORDED", False), ("FAILED", True)])
+def test_terminal_record_is_retried_only_after_a_failure(
+    tmp_path, monkeypatch, existing_status, rebuilt
+):
+    service = _host_service(tmp_path, _CountingPort(answer={}))
+    built: list[Any] = []
+    monkeypatch.setattr(service, "_build_terminal_core_record", lambda state: built.append(1))
+    state = _terminal_state(
+        tmp_path,
+        terminal_core_record={"attempt_id": "attempt-1", "record_status": existing_status},
+    )
+    service._record_terminal_core_not_covered("verdict-unit", state)
+    assert bool(built) is rebuilt
