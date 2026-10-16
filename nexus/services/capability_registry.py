@@ -15,6 +15,7 @@ import logging
 import re
 import threading
 from typing import Any, Callable, Mapping
+from urllib.parse import unquote
 
 from nexus.engine.capability_planner import default_capability_nodes
 
@@ -1465,6 +1466,7 @@ _RESOLUTION_UNSAFE_CHARS = re.compile(r"[^\x20-\x7e]")
 _RESOLUTION_SPLIT = re.compile(r"(\s+|[\"'{}\[\](),;<>\\])")
 _RESOLUTION_SEPARATOR = re.compile(r"\s+|[\"'{}\[\](),;<>\\]")
 _RESOLUTION_URL_SPLIT = re.compile(r"([/?&#])")
+_RESOLUTION_PERCENT = re.compile(r"%[0-9A-Fa-f]{2}")
 _RESOLUTION_SENSITIVE_KEY = re.compile(
     r"(?i)token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key"
     r"|authorization|bearer|cookie|credential"
@@ -1497,7 +1499,23 @@ def _resolution_sensitive_key(key: str) -> bool:
 
 
 def _redact_resolution_token(token: str) -> tuple[str, int, bool]:
-    """(replacement, values to redact after it, bare sensitive key seen)."""
+    """(replacement, values to redact after it, bare sensitive key seen).
+
+    A token with percent-escapes (outside a URL, whose pieces come back here) is
+    decoded once (``%253D`` stays ``%3D``: one pass only) and judged in decoded
+    form; if that form hits a rule, the original token is redacted whole.
+    """
+    if "://" not in token and _RESOLUTION_PERCENT.search(token):
+        decoded = unquote(token)
+        if decoded != token:
+            replacement, pending, bare_key = _redact_resolution_plain_token(decoded)
+            if replacement != decoded or pending:
+                return _RESOLUTION_REDACTED, pending, bare_key
+            return token, 0, bare_key
+    return _redact_resolution_plain_token(token)
+
+
+def _redact_resolution_plain_token(token: str) -> tuple[str, int, bool]:
     scheme_end = token.find("://")
     if scheme_end > 0:
         start = scheme_end + 3
@@ -1521,6 +1539,9 @@ def _redact_resolution_token(token: str) -> tuple[str, int, bool]:
         cut = min(seps)
         key, sep, value = token[:cut], token[cut], token[cut + 1 :].lstrip("=:")
         if _resolution_sensitive_key(key):
+            if value.lower() in _RESOLUTION_AUTH_SCHEMES:
+                # ``authorization=Basic <credential>``: the credential is the next token.
+                return f"{key}{sep}{_RESOLUTION_REDACTED}", 1, False
             if value:
                 return f"{key}{sep}{_RESOLUTION_REDACTED}", 0, False
             return token, 1, False
@@ -1596,10 +1617,13 @@ def _sanitize_resolution_text(value: Any, limit: int = _RESOLUTION_TEXT_MAX) -> 
     """Redacted gist: raw cap, per-token redaction, printable ASCII, CI-safe, truncated."""
     raw = str(value)
     if len(raw) > _RESOLUTION_RAW_MAX:
+        boundary_is_separator = _RESOLUTION_SEPARATOR.match(raw, _RESOLUTION_RAW_MAX) is not None
         raw = raw[:_RESOLUTION_RAW_MAX]
-        # Drop the token the cap cut through: its remainder could escape every rule.
-        cut = max((m.end() for m in _RESOLUTION_SEPARATOR.finditer(raw)), default=0)
-        raw = raw[:cut] + "..."
+        if not boundary_is_separator:
+            # Drop the token the cap cut through: its remainder could escape every rule.
+            cut = max((m.end() for m in _RESOLUTION_SEPARATOR.finditer(raw)), default=0)
+            raw = raw[:cut]
+        raw += "..."
     return _resolution_ci_safe(_redact_resolution_secrets(raw), limit)
 
 

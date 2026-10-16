@@ -659,3 +659,73 @@ def test_executor_qualname_is_an_identifier(monkeypatch):
     status = registry.executor_resolution_status("pregate")
     assert status["status"] == "resolved"
     assert status["executor"].endswith("LocalModelExecutorV2")
+
+
+_ROUND4_CASES = [
+    (
+        "pct token in url",
+        f"http://h/p?token%3D{_GH_TOKEN}",
+        [_GH_TOKEN, "abcdefghijkl"],
+        ["http://h/p?"],
+    ),
+    ("pct password in url", "http://h/p?password%3Ds3cret", ["s3cret"], ["http://h/p?"]),
+    ("pct api key in url", f"http://h/p?api_key%3D{_OPENAI}", [_OPENAI], ["http://h/p?"]),
+    ("pct value in url", f"http://h/p?val%3D{_GH_TOKEN}", [_GH_TOKEN], ["http://h/p?"]),
+    ("pct colon token", f"see token%3A{_GH_TOKEN} here", [_GH_TOKEN], ["see", "here"]),
+    ("pct plain text", "plain%20text here", [], ["plain%20text here"]),
+    (
+        "auth kv basic",
+        "authorization=Basic dXNlcjpwYXNz",
+        ["dXNlcjpwYXNz", "Basic"],
+        ["authorization="],
+    ),
+    (
+        "auth kv bearer letters",
+        "Authorization:Bearer abcdefghijklmnop",
+        ["abcdefghijklmnop"],
+        ["Authorization:"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden", "kept"),
+    [case[1:] for case in _ROUND4_CASES],
+    ids=[case[0].replace(" ", "_") for case in _ROUND4_CASES],
+)
+def test_redaction_table_round4(raw, forbidden, kept):
+    out = registry._sanitize_resolution_text(raw, 2000)
+    assert out == executor_self_check._sanitize_resolution_text(raw, 2000)
+    for value in forbidden:
+        assert value not in out, (value, out)
+    for value in kept:
+        assert value in out, (value, out)
+
+
+def test_percent_decoding_is_a_single_pass():
+    # Documented limit: %253D decodes once to %3D, which is not decoded again.
+    raw = "password%253Dabc"
+    assert registry._sanitize_resolution_text(raw) == raw
+    assert executor_self_check._sanitize_resolution_text(raw) == raw
+
+
+def test_raw_cap_keeps_a_token_ending_exactly_at_the_boundary():
+    raw = "x " * 995 + "SAFE_TOKEN more text"
+    assert len("x " * 995 + "SAFE_TOKEN") == registry._RESOLUTION_RAW_MAX
+    for sanitize in (
+        registry._sanitize_resolution_text,
+        executor_self_check._sanitize_resolution_text,
+    ):
+        out = sanitize(raw, 5000)
+        assert out.endswith("SAFE_TOKEN...")
+
+
+def test_raw_cap_drops_a_token_crossing_the_boundary():
+    raw = "x " * 995 + "SAFE_TOKENX more"
+    for sanitize in (
+        registry._sanitize_resolution_text,
+        executor_self_check._sanitize_resolution_text,
+    ):
+        out = sanitize(raw, 5000)
+        assert "SAFE_TOKEN" not in out
+        assert out.endswith("x ...")
