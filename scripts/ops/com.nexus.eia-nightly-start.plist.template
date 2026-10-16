@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  EIA nightly scheduler, `start`: 23:30: caffeinate, Chrome + ibase bridge, health check, start the EIA daemon.
+  One of four templates (prepare / start / dispatch / stop); see docs/ops/eia_nightly.md.
+  Replace every __PLACEHOLDER__, then install as a user LaunchAgent on the M4 EIA host.
+  Agents must not install it; the operator does.
+    __HOME__        home directory of the M4 user (e.g. /Users/jameschen)
+    __NEXUS_REPO__  the EIA daemon checkout (e.g. __HOME__/Workspace/nexus-automation-repos/Nexus-new)
+    __PYTHON__      that checkout's venv python (__NEXUS_REPO__/.venv/bin/python)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexus.eia-nightly-start</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__NEXUS_REPO__/scripts/ops/eia_nightly.py</string>
+    <string>start</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__NEXUS_REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONDONTWRITEBYTECODE</key>
+    <string>1</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Workspace/nexus-self-hosted-state/eia-nightly/launchd-start.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Workspace/nexus-self-hosted-state/eia-nightly/launchd-start.err.log</string>
+</dict>
+</plist>
