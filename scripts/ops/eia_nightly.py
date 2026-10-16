@@ -134,6 +134,7 @@ REPO_OWNER = "James3014"
 STOP_FILE = "STOP_REQUESTED"
 GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
 MAX_ISSUE_FAILURES = 3
+MAX_LOOKBACK_NIGHTS = 14
 PYTEST_TARGET_RE = re.compile(r"^tests/[A-Za-z0-9_][A-Za-z0-9_/.-]*\.py(::[A-Za-z0-9_]+)*$")
 DIFF_CHECK_ARGV = ["sh", "-c", 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"']
 MAX_ALLOWED_FILES = 10
@@ -842,16 +843,43 @@ class Nightly:
         return (self.state_dir / "PAUSE").exists()
 
     # ---- prepare --------------------------------------------------------------------
+    def _older_nights(self) -> list[dict[str, Any]]:
+        """Night states from the last ``MAX_LOOKBACK_NIGHTS`` nights before tonight,
+        oldest first (unreadable files are skipped, never fatal)."""
+        current = night_of(self.now())
+        oldest = night_of(self.now() - dt.timedelta(days=MAX_LOOKBACK_NIGHTS))
+        found = []
+        for path in sorted(self.state_dir.glob("20*.json")):
+            if not re.fullmatch(r"20\d{6}", path.stem) or not oldest <= path.stem < current:
+                continue
+            try:
+                night = self.load(path.stem)
+            except (NightlyError, ValueError, OSError):
+                continue
+            if night:
+                found.append(night)
+        return found
+
     def finish_previous_night(self) -> None:
-        """A previous night left unfinalized (failed bootout, pending disarm or candidate
-        label swap) is finished first; finalize() retries all of them."""
-        previous = night_of(self.now() - dt.timedelta(days=1))
-        night = self.load(previous)
-        if night and night.get("started") and not night.get("finalized"):
-            night.setdefault("stop_requested_at", self._iso())
-            self.finalize(night)
-            self._flush_outbox(night)
-            self.save(night)
+        """Every earlier night left unfinalized (failed bootout, pending disarm or candidate
+        label swap) is finished first, oldest first; finalize() retries all of them."""
+        for night in self._older_nights():
+            if night.get("started") and not night.get("finalized"):
+                night.setdefault("stop_requested_at", self._iso())
+                self.finalize(night)
+                self._flush_outbox(night)
+                self.save(night)
+
+    def _older_night_pending(self) -> bool:
+        """An earlier night may still have left a daemon label on: do not arm new work."""
+        return any(
+            not night.get("finalized")
+            and any(
+                e.get("disarm_pending") or e.get("labels_pending")
+                for e in (night.get("issues") or {}).values()
+            )
+            for night in self._older_nights()
+        )
 
     def prepare(self, night_id: str | None = None) -> dict[str, Any]:
         self.finish_previous_night()
@@ -1419,7 +1447,9 @@ class Nightly:
                 self.finalize(night)
             elif not stopping and not busy and now < night_clock(night["night"], self.arm_cutoff):
                 nxt = self._entries(night, "PREPARED") + self._entries(night, "RETRY_PENDING")
-                if nxt and not self._foreign_in_flight(night):
+                if nxt and self._older_night_pending():
+                    self._event(night, "arm_blocked_older_night_pending")
+                elif nxt and not self._foreign_in_flight(night):
                     first = min(nxt, key=lambda e: night["order"].index(e["issue"]))
                     self._guarded(night, first, self._arm)
         finally:

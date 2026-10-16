@@ -161,8 +161,10 @@ which step failed. On a failed or timed-out bootout, `stop` still disarms in-fli
 records `BOOTOUT_FAILED`, and retries. An in-flight Issue stays `HARD_STOPPING`
 (`disarm_pending`) until removal of `nexus:external-intelligence` is confirmed. Every tick
 retries it, and the night is never `FINISHED` while any disarm is pending. A candidate-PR
-Issue whose label swap is still pending counts as a pending disarm too. The next
-`prepare` or `start` finishes a previous night left in that state.
+Issue whose label swap is still pending counts as a pending disarm too. `prepare` and
+`start` revisit every unfinalized night from the last 14 nights, oldest first, so an outage
+longer than a day is still repaired. While any earlier night still has a pending disarm or
+label swap, `dispatch` arms nothing new, because that night's daemon label may be stale.
 
 ## Install (operator only)
 

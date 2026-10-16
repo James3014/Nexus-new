@@ -1626,3 +1626,57 @@ def test_pending_candidate_labels_block_finishing_until_fixed(env) -> None:
     night = env["app"].load(NIGHT)
     assert night["status"] == "FINISHED" and night["issues"]["11"]["labels_pending"] is False
     assert env["gh"].issues[11]["labels"] == {"eia:candidate-pr"}
+
+
+def test_multi_day_label_outage_is_repaired_on_day_three(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+    broken = {"on": True}
+
+    def no_labels(argv):
+        if broken["on"] and "--add-label" in argv and "eia:candidate-pr" in argv:
+            return _cp(argv, 1, "", "HTTP 502")
+        return real(argv)
+
+    env["sys"].gh = no_labels
+    _dispatch(env, "2026-10-17T01:30:00")
+    assert _dispatch(env, "2026-10-17T09:00:00")["status"] == "DISARM_PENDING"
+    # Day 2: still broken; the next night must not arm while the old label may be stale.
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T16:00:00")
+    env["app"].finish_previous_night()
+    assert env["app"].load(NIGHT)["status"] == "DISARM_PENDING"
+    assert env["app"]._older_night_pending() is True
+    tonight = {
+        "schema": en.STATE_SCHEMA,
+        "night": "20261017",
+        "issues": {"12": {"issue": 12, "status": "PREPARED", "attempts": []}},
+        "order": [12],
+        "started": {"ok": True},
+    }
+    env["app"].save(tonight)
+    armed = []
+    env["app"]._arm = lambda n, e: armed.append(e["issue"])
+    tonight = _dispatch(env, "2026-10-18T00:30:00")
+    assert armed == [] and any(
+        e["event"] == "arm_blocked_older_night_pending" for e in tonight["events"]
+    )
+    # Day 3: GitHub is back; prepare/start finishes every older night, oldest first.
+    broken["on"] = False
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-18T16:00:00")
+    env["app"].finish_previous_night()
+    old = env["app"].load(NIGHT)
+    assert old["status"] == "FINISHED" and old["issues"]["11"]["labels_pending"] is False
+    assert env["gh"].issues[11]["labels"] == {"eia:candidate-pr"}
+    assert env["app"]._older_night_pending() is False
+
+
+def test_older_night_scan_is_bounded_and_skips_bad_files(env) -> None:
+    state = env["app"].state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "20260901.json").write_text("{}")  # too old: ignored
+    (state / "20261015.json").write_text("not json")  # unreadable: skipped
+    (state / "issues.json").write_text("{}")
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-18T16:00:00")
+    assert env["app"]._older_nights() == []
