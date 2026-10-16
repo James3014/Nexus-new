@@ -47,6 +47,7 @@ from nexus.executors.agy_write_admission import (
     KEYCHAIN_NOT_APPLICABLE,
     SANDBOX_EXEC_PATH,
     SECURITY_TOOL_PATH,
+    CredentialPathOverlapError,
     _sbpl_path,
     agy_child_env,
     build_seatbelt_profile,
@@ -297,10 +298,17 @@ def prepare_accept_edits_boundary(
         try:
             profile = _with_literal_writes(
                 build_seatbelt_profile(
-                    run_root=run_root, writable_target=target_real, run_home=run_home
+                    run_root=run_root,
+                    writable_target=target_real,
+                    run_home=run_home,
+                    source_home=worker_home(source_env),
                 ),
                 extras,
             )
+        except CredentialPathOverlapError as exc:
+            raise AgyWriteBoundaryError(
+                f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_inside_credential_path"
+            ) from exc
         except ValueError as exc:
             raise AgyWriteBoundaryError(
                 f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:profile_unrepresentable"
