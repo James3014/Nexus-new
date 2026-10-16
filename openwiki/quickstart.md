@@ -30,7 +30,7 @@ The Nexus Singularity OS knowledge base is organized into seven core concept dom
 3. **[MCP Gateway & Ingress Protocols](runtime/mcp-gateway.md)**: Covers the Model Context Protocol execution gateway, HTTP/stdio transport adapters, and self-hosted MCP servers.
 4. **[CLI Commands & Cueline Operations](runtime/cli-and-cueline.md)**: Details the primary `nexus` CLI surface, Cueline adapter, durable self-hosted task service, and bounded NightShift queue path.
 5. **[Governance Gates & Completion Contracts](governance/gates-and-contracts.md)**: Explains fail-closed completion, independent Candidate acceptance, operator outcome receipts, and non-mutating GitHub merge-intent preparation.
-6. **[GitHub Actions & CI/CD Lanes](workflows/github-actions.md)**: Catalogs all 10 GitHub Actions workflows and their exact trigger modes.
+6. **[GitHub Actions & CI/CD Lanes](workflows/github-actions.md)**: Catalogs all 26 GitHub Actions workflows and their exact trigger modes.
 7. **[Validation Suites & Benchmarks](testing/validation-and-benchmarks.md)**: Categorizes unit, integration, governance, runtime-contract, and benchmark test suites with focused quiet validation commands.
 
 ---
