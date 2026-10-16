@@ -1383,7 +1383,9 @@ def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
     assert not hasattr(sprint_service, "generate_local_companion_edits")
     case = _case(tmp_path)
     monkeypatch.delenv(seam.CONFINE_VISIBLE_TEST_ENV, raising=False)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", ""))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", "")
+    )
     seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="helper.py")
     try:
         executor = InPlaceSprintExecutor(
