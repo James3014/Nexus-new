@@ -113,6 +113,33 @@ def _repo_regular_file(root: Path, relative: str) -> bool:
     return current.is_file()
 
 
+RECEIPT_ONLY_ROUTE_KEY = "receipt_only_capabilities"
+
+
+def runtime_supports_receipt_only() -> bool:
+    """True when the installed nexus-runtime honours the strict-lane receipt-only declaration.
+
+    Feature-detected on the runtime's own contract (nexus-runtime #217):
+    ``capability_evidence_bundle.RECEIPT_ONLY_ROUTE_KEY == "receipt_only_capabilities"``,
+    ``CONSUMER_VISIBILITY_RECEIPT_ONLY == "receipt_only"`` and a callable
+    ``receipt_only_capability_names``.  Any import or contract mismatch means an older pin.
+    """
+
+    import importlib
+
+    try:
+        bundle = importlib.import_module(
+            "nexus_runtime.planning.services.capability_evidence_bundle"
+        )
+    except Exception:  # noqa: BLE001 - older/absent runtime: no receipt-only support
+        return False
+    return (
+        getattr(bundle, "RECEIPT_ONLY_ROUTE_KEY", None) == RECEIPT_ONLY_ROUTE_KEY
+        and getattr(bundle, "CONSUMER_VISIBILITY_RECEIPT_ONLY", None) == "receipt_only"
+        and callable(getattr(bundle, "receipt_only_capability_names", None))
+    )
+
+
 def gate_inputs_env_error() -> str:
     """ "" when ``NEXUS_SPRINT_GATE_INPUTS`` is unset, ``0`` or ``1``; else the error text."""
 

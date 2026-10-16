@@ -284,6 +284,20 @@ def _gate_inputs_enabled() -> bool:
     return gate_inputs_enabled()
 
 
+def _gate_inputs_active_for_lane() -> bool:
+    """Feed the gate inputs?  Non-strict: the switch.  Strict: the switch AND runtime support for
+    receipt-only evidence (otherwise design A: the strict lane sends nothing)."""
+    if not _symmetric_prompt_mode():
+        return _gate_inputs_enabled()
+    from nexus.research.gate_inputs import gate_inputs_env_error, runtime_supports_receipt_only
+
+    # Strict lane: an invalid switch never fails the with-Nexus arm (the counted runner refuses
+    # to start on it); it means "not fed", like an older runtime.
+    if gate_inputs_env_error() or not _gate_inputs_enabled():
+        return False
+    return runtime_supports_receipt_only()
+
+
 def planner_route_signals(route: Mapping[str, Any] | None) -> dict[str, Any]:
     """Bounded copy of the flow route's task signals for the mainchain request route."""
 
@@ -521,12 +535,12 @@ class LLMCandidateGenerator:
         # candidate ran armor-off (host-default invokers, no prompt armor).
         route.setdefault("with_nexus_armor", True)
         gate_codeintel: dict[str, Any] = {}
-        # Strict (symmetric) lane: not fed.  A gate that then succeeds is sealed REAL_INVOKED and
-        # the runtime's [NEXUS MODEL CONTEXT] (consumer_projection) materialises its evidence ids
-        # and payload into the prompt, which the bare arm never sees; that block comes from the
-        # hash-sealed bundle, so Nexus-new cannot withhold it.  Fed in every other lane.
-        # Symmetric mode is checked first: the switch is never even parsed in the strict lane.
-        if not _symmetric_prompt_mode() and _gate_inputs_enabled():
+        # Strict (symmetric) lane: fed only when the pinned runtime honours
+        # route["receipt_only_capabilities"] (nexus-runtime #217): it then seals the fed gates
+        # receipt-only and keeps them out of [NEXUS MODEL CONTEXT], so the prompt does not change.
+        # On an older runtime the strict lane falls back to design A (no inputs), because that
+        # block would otherwise carry the passing gates' evidence ids and payloads.
+        if _gate_inputs_active_for_lane():
             from nexus.research.gate_inputs import sprint_gate_inputs
 
             # Wiring PR-4: the preflight gates' inputs from the sprint's own task contract

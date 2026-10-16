@@ -884,15 +884,26 @@ def test_gate_inputs_kill_switch_is_fail_closed(monkeypatch: pytest.MonkeyPatch,
 def test_strict_lane_feeds_no_gate_inputs_because_model_context_would_carry_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Counted-shape proof (round 3): with the inputs fed, the runtime's [NEXUS MODEL CONTEXT]
-    materialised the passing gates' evidence ids and payloads and the prompt audit failed."""
+    """PR-5a: the strict lane is fed only when the runtime honours receipt-only evidence; on an
+    older runtime it falls back to design A (no inputs), because [NEXUS MODEL CONTEXT] would
+    carry the passing gates' evidence ids and payloads (round-3 counted-shape proof)."""
+
+    from nexus.research import gate_inputs
 
     monkeypatch.delenv("NEXUS_SPRINT_GATE_INPUTS", raising=False)
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
-    (tmp_path / "strict").mkdir()
-    (tmp_path / "fed").mkdir()
-    strict, _root = _capture_request(tmp_path / "strict", monkeypatch)
-    assert dict(strict.codeintel) == {} and "workspace_root" not in strict.route
+    for name in ("old", "new", "fed"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setattr(gate_inputs, "runtime_supports_receipt_only", lambda: False)
+    strict_old, _root = _capture_request(tmp_path / "old", monkeypatch)
+    assert dict(strict_old.codeintel) == {} and "workspace_root" not in strict_old.route
+    assert strict_old.route["receipt_only_capabilities"]  # declared either way
+    monkeypatch.setattr(gate_inputs, "runtime_supports_receipt_only", lambda: True)
+    strict_new, _root = _capture_request(tmp_path / "new", monkeypatch)
+    assert strict_new.codeintel["verify_commands"]
+    assert strict_new.route["receipt_only_capabilities"] == sorted(
+        gate_inputs.fed_capability_names()
+    )
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT")
     fed, _root = _capture_request(tmp_path / "fed", monkeypatch)
     assert fed.codeintel["verify_commands"]
@@ -1033,3 +1044,37 @@ def test_visibility_flag_alone_is_not_physical_output() -> None:
     assert _physical_output(record) is False
     record["response"]["outcome"]["result"] = {"hit_count": 2}
     assert _physical_output(record) is True
+
+
+def test_pinned_runtime_supports_receipt_only_and_detection_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    from nexus.research.gate_inputs import runtime_supports_receipt_only
+
+    assert runtime_supports_receipt_only() is True  # pin e73d152f1 (nexus-runtime #217)
+    import importlib
+
+    bundle = importlib.import_module("nexus_runtime.planning.services.capability_evidence_bundle")
+
+    monkeypatch.setattr(bundle, "RECEIPT_ONLY_ROUTE_KEY", "other_key")
+    assert runtime_supports_receipt_only() is False
+    monkeypatch.undo()
+    monkeypatch.delattr(bundle, "receipt_only_capability_names")
+    assert runtime_supports_receipt_only() is False
+    monkeypatch.undo()
+    # An older pin without the module at all: import failure means no support.
+    real_import = builtins.__import__
+
+    def no_bundle(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name.startswith("nexus_runtime.planning.services"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    def no_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        raise ImportError(name)
+
+    monkeypatch.setattr(builtins, "__import__", no_bundle)
+    monkeypatch.setattr(importlib, "import_module", no_module)
+    assert runtime_supports_receipt_only() is False
