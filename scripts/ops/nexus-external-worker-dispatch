@@ -454,8 +454,13 @@ def _run_operation(
         except BaseException as exc:
             if proc is not None and mark_pending is not None:
                 return _fail_closed_after_start(exc)
+            # No child exists (Popen never succeeded): known pre-effect failure.
+            confirm_start_failure = getattr(account_adapter, "confirm_terminal", None)
             try:
-                account_adapter.release(binding)
+                if proc is None and confirm_start_failure is not None:
+                    confirm_start_failure(binding)
+                else:
+                    account_adapter.release(binding)
             except BaseException:
                 pass
             journal.mark_terminal(

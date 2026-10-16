@@ -749,3 +749,37 @@ def test_claude_quota_terminal_failure_cools_down_account_for_next_acquire(
             get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32)
     finally:
         set_claude_account_pool_manager(None)
+
+
+def test_claude_popen_failure_is_pre_effect_and_account_reusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services.claude_account_pool import (
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    real_popen = subprocess.Popen
+
+    def failing_popen(argv, *args, **kwargs):
+        if "--output-format" in list(argv):
+            raise OSError("exec failed")
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", failing_popen)
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+        current = journal.read(operation_id)
+        assert current["status"] == "FAILED"
+        assert current["failure_kind"] == "PROVIDER_START_FAILED:OSError"
+        assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+        manager = get_claude_account_pool_manager()
+        assert manager.unknown_outcome_leases() == ()
+        assert manager.acquire("claudeop_" + "9" * 32).lease_id
+    finally:
+        set_claude_account_pool_manager(None)
