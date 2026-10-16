@@ -184,13 +184,15 @@ def _apply_bench_env(env: dict[str, str]) -> None:
 def _stage1_sweep_failed(payload: Any) -> bool:
     """True when a Nexus payload reports an agy descendant-sweep failure anywhere in it."""
     if isinstance(payload, dict):
-        if any("sweep_failed" in str(key) and bool(value) for key, value in payload.items()):
+        if any("sweep_failed" in str(key).lower() and bool(value) for key, value in payload.items()):
+            return True
+        if payload.get("descendants_swept") is False:
             return True
         return any(_stage1_sweep_failed(value) for value in payload.values())
-    if isinstance(payload, (list, tuple)):
+    if isinstance(payload, (list, tuple, set, frozenset)):
         return any(_stage1_sweep_failed(value) for value in payload)
     if isinstance(payload, str):
-        return "sweep_failed" in payload
+        return "sweep_failed" in payload.lower()
     return False
 
 

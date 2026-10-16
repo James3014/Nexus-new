@@ -723,3 +723,12 @@ def test_real_world_resolve_gemini_bin_uses_which_agy(tmp_path: Path, monkeypatc
     )
 
     assert real_world_task_runner._resolve_gemini_bin() == str(agy)
+
+
+def test_real_world_stage1_sweep_failure_detector_covers_production_markers():
+    detect = real_world_task_runner._stage1_sweep_failed
+    assert detect({"result": {"error": "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"}}) is True
+    assert detect({"result": {"report": {"descendants_swept": False}}}) is True
+    assert detect({"result": {"errors": ["x", "agy_descendant_sweep_failed: y"]}}) is True
+    assert detect({"result": {"status": "FAILED", "error": "stage1_no_passing_candidate"}}) is False
+    assert detect({"agy_sweep_failed": False, "descendants_swept": True}) is False
