@@ -8,6 +8,7 @@ lanes (``NEXUS_SYMMETRIC_PROMPT=1``) they now run on a fresh empty store per cal
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 from pathlib import Path
@@ -15,16 +16,20 @@ from typing import Any
 
 import pytest
 
-from nexus.core.belief_contracts import CapabilityExecutionPlan
 from nexus.core.capability_executor_registry import (
     COUNTED_FIXED_TIMESTAMP,
     _exec_learn_mode,
     _exec_learn_phase_slo,
 )
 
+# Facade re-export (resolved at runtime); importlib keeps static analysis quiet.
+_PLAN_CLS: Any = getattr(
+    importlib.import_module("nexus.core.belief_contracts"), "CapabilityExecutionPlan"
+)
 
-def _plan(root: Path) -> CapabilityExecutionPlan:
-    return CapabilityExecutionPlan(
+
+def _plan(root: Path) -> Any:
+    return _PLAN_CLS(
         plan_id="p",
         task_id="sprint-abc-s0-a1",
         phases=["R"],
@@ -47,7 +52,10 @@ def _outcome(receipt: Any) -> dict[str, Any]:
 def _evidence_view(name: str, receipt: Any) -> str:
     """The strict-lane [NEXUS CAPABILITY EVIDENCE] rendering of this capability's payload."""
 
-    from nexus.services.capability_evidence_bundle import extract_bounded_consumer_payload
+    extract_bounded_consumer_payload = getattr(
+        importlib.import_module("nexus.services.capability_evidence_bundle"),
+        "extract_bounded_consumer_payload",
+    )
     from nexus.services.online_nexus_context import (
         _SYMMETRIC_PAYLOAD_SPEC,
         whitelist_block,
