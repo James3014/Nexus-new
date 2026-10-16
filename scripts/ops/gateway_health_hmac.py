@@ -20,7 +20,6 @@ from pathlib import Path
 
 KEY_FILE_ENV = "NEXUS_GATEWAY_HEALTH_HMAC_KEY_FILE"
 _KEY_BYTES = 32
-_MIN_KEY_HEX = _KEY_BYTES * 2
 
 
 class HealthHmacKeyError(RuntimeError):
@@ -35,45 +34,61 @@ def key_file_path(environ: dict[str, str] | None = None) -> Path:
     return Path.home() / ".local/state/nexus-gateway/health-hmac.key"
 
 
+def _check_parent(parent: Path) -> None:
+    info = os.stat(parent)
+    if info.st_uid != os.getuid() or info.st_mode & 0o022:
+        raise HealthHmacKeyError(
+            "health hmac key directory must be owned by us and not writable by others"
+        )
+
+
 def _read_key(path: Path) -> bytes:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
             raise HealthHmacKeyError("health hmac key file must be a regular file with mode 0600")
-        text = os.read(fd, 4096).decode("ascii", "replace").strip()
+        if info.st_uid != os.getuid():
+            raise HealthHmacKeyError("health hmac key file must be owned by the current user")
+        raw = os.read(fd, 4096)
     finally:
         os.close(fd)
-    if len(text) < _MIN_KEY_HEX or any(c not in "0123456789abcdef" for c in text):
+    text = raw.decode("ascii", "replace").strip()
+    if len(text) != _KEY_BYTES * 2 or any(c not in "0123456789abcdef" for c in text):
         raise HealthHmacKeyError("health hmac key file is malformed")
     return bytes.fromhex(text)
 
 
 def load_or_create_key(path: Path | None = None) -> bytes:
     """Return the per-host key, creating it atomically (0600, never overwritten)."""
-    target = path or key_file_path()
     try:
-        return _read_key(target)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise HealthHmacKeyError(f"health hmac key unreadable: {type(exc).__name__}") from exc
-    try:
+        target = path or key_file_path()
+        if target.parent.exists():
+            _check_parent(target.parent)
+        try:
+            return _read_key(target)
+        except FileNotFoundError:
+            pass
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _check_parent(target.parent)
         tmp = target.with_name(f".{target.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            os.write(fd, (secrets.token_hex(_KEY_BYTES) + "\n").encode("ascii"))
-        finally:
-            os.close(fd)
-        try:
-            os.link(tmp, target)  # fails if another process created it first
-        except FileExistsError:
-            pass
+            try:
+                os.write(fd, (secrets.token_hex(_KEY_BYTES) + "\n").encode("ascii"))
+            finally:
+                os.close(fd)
+            try:
+                os.link(tmp, target)  # fails if another process created it first
+            except FileExistsError:
+                pass
         finally:
             tmp.unlink(missing_ok=True)
         return _read_key(target)
-    except OSError as exc:
+    except HealthHmacKeyError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
         raise HealthHmacKeyError(f"health hmac key unavailable: {type(exc).__name__}") from exc
 
 
@@ -87,5 +102,5 @@ def path_hmac_or_none(label: str, value: str) -> str | None:
     """Digest for ``/health``; ``None`` (never a path-derived plain hash) if no key."""
     try:
         return path_hmac(label, value, load_or_create_key())
-    except HealthHmacKeyError:
+    except Exception:  # noqa: BLE001 - /health must answer; never emit a plain hash
         return None

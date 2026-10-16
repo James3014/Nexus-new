@@ -496,6 +496,13 @@ def _event_bus_class():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_gateway_health_hmac_key(tmp_path_factory, monkeypatch):
+    """#2226: no test may create or read the real per-host /health HMAC key."""
+    key_dir = tmp_path_factory.mktemp("gateway-health-key")
+    monkeypatch.setenv("NEXUS_GATEWAY_HEALTH_HMAC_KEY_FILE", str(key_dir / "health-hmac.key"))
+
+
+@pytest.fixture(autouse=True)
 def _restore_event_bus_binding():
     bus = _event_bus_class()
     saved = (

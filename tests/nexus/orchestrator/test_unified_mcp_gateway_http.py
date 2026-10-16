@@ -576,3 +576,54 @@ def test_health_hmac_key_is_private_stable_and_not_overwritten(tmp_path):
     key_file.write_text("short\n")
     with pytest.raises(HealthHmacKeyError):
         load_or_create_key(key_file)
+
+
+def test_health_answers_with_null_digests_when_key_file_is_malformed(tmp_path, monkeypatch):
+    key_file = tmp_path / "bad.key"
+    key_file.write_text("a" * 65 + "\n")  # odd length: bytes.fromhex would raise ValueError
+    key_file.chmod(0o600)
+    monkeypatch.setenv("NEXUS_GATEWAY_HEALTH_HMAC_KEY_FILE", str(key_file))
+    server, thread = _server()
+    try:
+        payload = json.loads(
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/health", timeout=3
+            ).read()
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+    assert payload["repo_root_hmac_sha256"] is None
+    assert "repo_root_sha256" not in payload
+
+
+def test_health_hmac_key_rejects_fifo_without_blocking_and_unsafe_parent(tmp_path):
+    import os
+
+    from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
+
+    fifo = tmp_path / "fifo.key"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(fifo)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o770)
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(shared / "key")
+
+
+def test_health_hmac_key_failed_write_leaves_no_temp_file(tmp_path, monkeypatch):
+    import os
+
+    from scripts.ops import gateway_health_hmac as mod
+
+    def boom(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mod.os, "write", boom)
+    key_dir = tmp_path / "state"
+    with pytest.raises(mod.HealthHmacKeyError):
+        mod.load_or_create_key(key_dir / "key")
+    assert os.listdir(key_dir) == []

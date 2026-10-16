@@ -399,11 +399,12 @@ def probe_gb077_live_gateway_identity(
     from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key, path_hmac
 
     expected_root = str((evaluated_root or (lambda: str(ROOT.resolve())))())
-    try:
-        expected_root_hmac: str | None = path_hmac("repo_root", expected_root, load_or_create_key())
-    except HealthHmacKeyError:
-        expected_root_hmac = None
-        reasons.append("gateway_health_hmac_key_unavailable")
+    expected_root_hmac: str | None = None
+    if "repo_root_hmac_sha256" in health:
+        try:
+            expected_root_hmac = path_hmac("repo_root", expected_root, load_or_create_key())
+        except HealthHmacKeyError:
+            reasons.append("gateway_health_hmac_key_unavailable")
     for name in _GATEWAY_IDENTITY_FIELDS:
         value = health.get(name)
         if name == "repo_root_hmac_sha256" and name not in health and "repo_root" in health:

@@ -385,3 +385,15 @@ def test_gb077_fails_closed_when_the_hmac_key_is_unusable(tmp_path, monkeypatch)
     passed, detail = _gb077()
     assert passed is False
     assert "gateway_health_hmac_key_unavailable" in detail["reasons"]
+
+
+def test_gb077_does_not_load_the_key_when_only_plain_repo_root_is_reported(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv(KEY_FILE_ENV, str(tmp_path / "missing-dir" / "key"))
+    payload = _health()
+    del payload["repo_root_hmac_sha256"]
+    payload["repo_root"] = EVAL_ROOT
+    passed, _detail = _gb077(payload)
+    assert passed is True
+    assert not (tmp_path / "missing-dir").exists()
