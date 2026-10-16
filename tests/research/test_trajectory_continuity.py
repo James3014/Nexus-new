@@ -2904,7 +2904,7 @@ def test_redaction_issue_1873_backslash_joins_short_lowercase_continuation():
     assert _redact_value(f"x {token} \\\nab\nnext") == "x [REDACTED]\nnext"
     assert _redact_value(f"x {token} \\\ntail rest") == "x [REDACTED] rest"
     # without the backslash a bare lowercase word after a complete token is kept
-    assert _redact_value(f"x {token}\nab\nnext") == f"x [REDACTED]\nab\nnext"
+    assert _redact_value(f"x {token}\nab\nnext") == "x [REDACTED]\nab\nnext"
     assert _redact_value(f"x {token}\ntail rest") == "x [REDACTED]\ntail rest"
 
 
