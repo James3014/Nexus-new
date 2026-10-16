@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import Any
 
+from nexus.contracts.model_output_json import ModelOutputParseError, parse_model_json
 from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
     LocalModelProviderRequest,
@@ -87,14 +87,14 @@ def _parse_verifier_response(raw_text: str) -> tuple[str, float]:
     end = text.rfind("}")
     if start != -1 and end != -1:
         try:
-            parsed = json.loads(text[start:end+1])
+            parsed = parse_model_json(text[start : end + 1], expect="object", mode="strict")
             verdict = str(parsed.get("verdict", "fail")).strip()
             confidence = float(parsed.get("confidence", 0.0))
             if verdict not in ("pass", "fail"):
                 verdict = "fail"
             confidence = max(0.0, min(1.0, confidence))
             return verdict, confidence
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (ModelOutputParseError, TypeError, ValueError):
             pass
     return "fail", 0.0
 
