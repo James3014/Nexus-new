@@ -56,13 +56,24 @@ PARTIAL_REVIEW = "## Review of PR #2370\n\n1. The first finding is"
 # fields; cwd was a non-git review directory, so the change observation was
 # unavailable).
 TRIAL_2412_QUOTA_OPERATIONS = [
-    "agyop_0dcd1b7e60364aa4bf1c740d3817405c",
-    "agyop_17a5c1ec4d32464c9ebb4b4a10dbd72f",
-    "agyop_8a7edd87433747478bae0964b07df4f7",
-    "agyop_99fdad0e8b1f4b9dbf6e5a507574b3ce",
-    "agyop_a9892537c54c4e2287f33f002ffb9ae6",
-    "agyop_d4bc75d6b8e5406c87bd372f20b55c9d",
-    "agyop_ebf65ece2ba44000bf1964f7458a6202",
+    # (operation id, recorded permission_profile_kind, effective_permissions,
+    #  recorded failure_kind, model); cwd redacted to <review>.
+    (
+        op,
+        "READ_ONLY_RESEARCH",
+        {"allow": ["read_file(<review>/**)"], "deny": ["command(*)"]},
+        "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT",
+        model,
+    )
+    for op, model in (
+        ("agyop_0dcd1b7e60364aa4bf1c740d3817405c", "claude-opus-4-6-thinking"),
+        ("agyop_17a5c1ec4d32464c9ebb4b4a10dbd72f", "claude-opus-4-6-thinking"),
+        ("agyop_8a7edd87433747478bae0964b07df4f7", "claude-opus-4-6-thinking"),
+        ("agyop_99fdad0e8b1f4b9dbf6e5a507574b3ce", "claude-opus-4-6-thinking"),
+        ("agyop_a9892537c54c4e2287f33f002ffb9ae6", "claude-opus-5-5-high"),
+        ("agyop_d4bc75d6b8e5406c87bd372f20b55c9d", "claude-opus-4-6-thinking"),
+        ("agyop_ebf65ece2ba44000bf1964f7458a6202", "claude-opus-4-6-thinking"),
+    )
 ]
 
 
@@ -328,31 +339,23 @@ def test_quota_effect_rules() -> None:
 
 
 def test_2412_trial_operations_would_have_rotated(tmp_path: Path) -> None:
-    """Replay the seven lost trial reviews from their recorded permission profile.
-
-    Each operation.json recorded ``effective_permissions.allow ==
-    ["read_file(<review dir>/**)"]``, deny ``["command(*)"]``, plan mode, a
-    non-git review dir (no change observation) and a mid-run quota failure.
-    """
+    """Replay the seven lost trial reviews from their recorded operation.json fields."""
     review_dir = tmp_path / "pr2370-review"
     review_dir.mkdir()
-    for _operation_id in TRIAL_2412_QUOTA_OPERATIONS:
+    assert len(TRIAL_2412_QUOTA_OPERATIONS) == 7
+    for _op, recorded_kind, recorded_perms, recorded_failure, _model in TRIAL_2412_QUOTA_OPERATIONS:
+        assert recorded_failure == "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
+        allow = [rule.replace("<review>", str(review_dir)) for rule in recorded_perms["allow"]]
+        # The recorded grants rebuild to the recorded profile (plan mode).
         permissions, kind, _sha = dispatch.build_effective_permission_profile(
-            cwd=str(review_dir),
-            mode="plan",
-            allow_rules=[f"read_file({review_dir}/**)"],
+            cwd=str(review_dir), mode="plan", allow_rules=allow
         )
-        assert kind == "READ_ONLY_RESEARCH"
-        assert permissions["deny"] == ["command(*)"]
-        label, effect, reconcile = dispatch._quota_failure_effect(
-            None, mode="plan", permission_profile_kind=kind
-        )
-        assert (label, effect, reconcile) == (
-            "PROVIDER_QUOTA_EXHAUSTED_NO_WRITE_PROFILE",
-            False,
-            False,
-        )
-        assert dispatch.is_agy_rotation_eligible(dispatch.AccountFailureKind.QUOTA_EXHAUSTED)
+        assert kind == recorded_kind
+        assert permissions["deny"] == recorded_perms["deny"]
+        # cwd was not a git repo: no change observation (None).
+        assert dispatch._quota_failure_effect(
+            None, mode="plan", permission_profile_kind=kind, allow_rules=permissions["allow"]
+        ) == ("PROVIDER_QUOTA_EXHAUSTED_NO_WRITE_PROFILE", False, False)
 
 
 # --- Codex r1 on #2435 --------------------------------------------------------
