@@ -1,6 +1,6 @@
 # Archive manifest: tests, 2026-10
 
-Archived tests of archived scripts. tests/archive is in pytest.ini norecursedirs; pure git mv, nothing deleted.
+Archived tests of archived scripts. tests/archive is in pytest.ini norecursedirs; pure git mv, nothing deleted. Files carry a .txt suffix (test_x.py -> test_x.py.txt): the impact gate runs every changed test_*.py by explicit path (which bypasses norecursedirs and --ignore), and an archived test cannot import its moved script, so a .py file would fail on the head side. To resurrect one, drop the .txt and move its script back.
 
 ## Batch 2 (tests of archived scripts)
 
