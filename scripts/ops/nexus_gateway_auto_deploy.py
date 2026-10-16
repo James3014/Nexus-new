@@ -137,6 +137,15 @@ PR_TARGET_ONLY_CHECKS = frozenset({
     "Trusted impact gate (default branch)",
     "Trusted dependency contract (default branch)",
 })
+# Required contexts that are commit STATUSES posted only on PR heads by
+# pull_request_target workflows (#2365): GitHub's ruleset enforces them at merge
+# time and they never appear on main commits, so the deployer cannot re-verify
+# them and does not wait for them.  Named exactly; any other name the deployer
+# cannot bind still fails closed (UNKNOWN_REQUIRED_CHECK).
+PR_HEAD_STATUS_CONTEXTS = frozenset({
+    "Bindings preflight (default branch)",
+    "Review record present (advisory)",
+})
 CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
 TRACK_REF = "refs/nexus-auto-deploy/main"
@@ -934,6 +943,8 @@ def required_checks(
         live = live_required_checks(api_get, repo=repo, branch=branch)
     except Exception as exc:  # noqa: BLE001 - an unreadable ruleset fails closed
         return {"verdict": "UNKNOWN", "error": f"RULESET:{type(exc).__name__}:{exc}"[:300]}
+    merge_time_only = [name for name in live if name in PR_HEAD_STATUS_CONTEXTS]
+    live = {name: issuer for name, issuer in live.items() if name not in merge_time_only}
     unknown = [name for name in live if name not in REQUIRED_CHECKS]
     if unknown:
         return {"verdict": "UNKNOWN_REQUIRED_CHECK", "unknown_required": unknown, "checks": {}}
@@ -989,6 +1000,7 @@ def required_checks(
         "verdict": verdict,
         "required": list(required),
         "floor_added": floor_added,
+        "merge_time_only": merge_time_only,
         "missing": [n for n, d in detail.items() if d["state"] == "MISSING"],
         "checks": detail,
     }
