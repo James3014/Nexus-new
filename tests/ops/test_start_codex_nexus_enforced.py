@@ -103,7 +103,7 @@ def _launch(
         # The denial classifier (python3 -I) fails; the startup check still runs.
         stub = bin_dir / "python3"
         stub.write_text(
-            f'#!/usr/bin/env bash\n[[ "$1" == "-I" ]] && exit 1\nexec "{sys.executable}" "$@"\n',
+            f'#!/usr/bin/env bash\n[[ "$1" == "-I" && "$2" == "-" ]] && exit 1\nexec "{sys.executable}" "$@"\n',
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -114,6 +114,7 @@ def _launch(
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "CODEX_BIN": "codex",
+        "NEXUS_CODEX_ENV_PASSTHROUGH": "FAKE_CODEX_MODE,FAKE_CODEX_ARGV,FAKE_CANONICAL",
         "FAKE_CODEX_MODE": mode,
         "FAKE_CODEX_ARGV": str(tmp_path / "argv.txt"),
         "FAKE_CANONICAL": str(canonical),

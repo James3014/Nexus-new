@@ -14,9 +14,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import TYPE_CHECKING, Mapping, Protocol
 
 from nexus.services.external_account_pool import AccountFailureKind, is_rotation_eligible
+
+if TYPE_CHECKING:
+    from nexus.services.claude_account_pool import ClaudeLease
 
 
 class ExternalWorkerRuntimeError(RuntimeError):
@@ -138,13 +141,14 @@ def _resolve_executable(env_name: str, binary: str) -> str:
     return str(path.resolve())
 
 
-def _cli_version(executable: str) -> str | None:
+def _cli_version(executable: str, env: Mapping[str, str] | None = None) -> str | None:
     proc = subprocess.run(
         [executable, "--version"],
         capture_output=True,
         text=True,
         timeout=10,
         check=False,
+        env=None if env is None else dict(env),
     )
     if proc.returncode != 0:
         return None
@@ -860,6 +864,251 @@ class GrokAccountAdapter:
         )
 
 
+class ClaudeExecutionAdapter:
+    provider = "claude"
+
+    def default_model(self) -> str:
+        return os.getenv("NEXUS_CLAUDE_WORKER_MODEL", "sonnet").strip()
+
+    def compile(
+        self,
+        request: WorkerRequest,
+        *,
+        binding: AccountBinding,
+    ) -> WorkerCommand:
+        if binding.provider != self.provider:
+            raise ExternalWorkerRuntimeError("ACCOUNT_BINDING_PROVIDER_MISMATCH")
+        if request.provider != self.provider:
+            raise ExternalWorkerRuntimeError("WORKER_REQUEST_PROVIDER_MISMATCH")
+        if request.mode not in {"plan", "act"}:
+            raise ExternalWorkerRuntimeError("CLAUDE_MODE_INVALID")
+        config_dir = str(binding.execution_env.get("CLAUDE_CONFIG_DIR") or "")
+        if not config_dir or not Path(config_dir).is_absolute():
+            # Fail closed: never run against the default ~/.claude profile.
+            raise ExternalWorkerRuntimeError("CLAUDE_PROFILE_BINDING_REQUIRED")
+        from nexus.services.claude_account_pool import is_default_profile_path
+
+        if is_default_profile_path(config_dir):
+            raise ExternalWorkerRuntimeError("CLAUDE_DEFAULT_PROFILE_NOT_ALLOWED")
+        executable = _resolve_executable("NEXUS_CLAUDE_BIN", "claude")
+        argv = [
+            executable,
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--permission-mode",
+            "plan" if request.mode == "plan" else "acceptEdits",
+            "--model",
+            request.model,
+            # Never load project/local settings, hooks or .mcp.json from an
+            # untrusted cwd: only the profile's own user settings apply.
+            "--setting-sources",
+            "user",
+            "--settings",
+            '{"disableAllHooks": true}',
+            "--strict-mcp-config",
+            "--",
+            request.prompt,
+        ]
+        env = dict(binding.execution_env)
+        return WorkerCommand(
+            argv=tuple(argv),
+            env=env,
+            cli_version=_cli_version(executable, env),
+        )
+
+    def interpret(
+        self,
+        request: WorkerRequest,
+        *,
+        exit_code: int,
+        stdout_text: str,
+        stderr_text: str,
+    ) -> WorkerOutcome:
+        events = _jsonl_events(stdout_text)
+        observed_model = None
+        tool_event_count = 0
+        for event in events:
+            if event.get("type") not in {"system", "assistant"}:
+                continue
+            message = event.get("message")
+            raw_model = event.get("model")
+            if raw_model is None and isinstance(message, dict):
+                raw_model = message.get("model")
+            if isinstance(raw_model, str) and raw_model.strip():
+                observed_model = raw_model.strip()
+            if event.get("type") == "assistant" and isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, list):
+                    tool_event_count += sum(
+                        1
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "tool_use"
+                    )
+        results = [e for e in events if e.get("type") == "result"]
+        terminal = results[-1] if results else None
+        session_raw = terminal.get("session_id") if terminal else None
+        cost_raw = terminal.get("total_cost_usd") if terminal else None
+        session_id = str(session_raw) if isinstance(session_raw, str) and session_raw else None
+        total_cost = float(cost_raw) if isinstance(cost_raw, (int, float)) else None
+        subtype = str(terminal.get("subtype") or "") if terminal else ""
+
+        if terminal is not None and subtype == "success" and terminal.get("is_error") is False:
+            return WorkerOutcome(
+                status="COMPLETED",
+                failure_kind=None,
+                observed_provider="claude",
+                observed_model=observed_model,
+                finish_reason=subtype,
+                total_cost=total_cost,
+                provider_session_id=session_id,
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={
+                    "model_binding": (
+                        "provider_output"
+                        if observed_model is not None
+                        else "explicit_command_argument"
+                    )
+                },
+            )
+
+        if terminal is None:
+            # No terminal result: effects may have occurred. Never rotate or replay.
+            return WorkerOutcome(
+                status="OUTCOME_UNKNOWN",
+                failure_kind=AccountFailureKind.UNKNOWN.value,
+                observed_provider="claude",
+                observed_model=observed_model,
+                finish_reason=None,
+                total_cost=None,
+                provider_session_id=None,
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={"exit_code": exit_code, "unknown_outcome": True},
+            )
+
+        from nexus.services.claude_account_pool import classify_claude_failure
+
+        result_text = terminal.get("result")
+        failure_text = (
+            (str(result_text) if isinstance(result_text, str) else "") + "\n" + stderr_text
+        )
+        failure_kind = classify_claude_failure(failure_text)
+        # Only pre-effect auth failures may switch to another authorized profile.
+        # Quota/rate limits are per-person entitlements and are never rotated around.
+        retry = (
+            failure_kind
+            in {
+                AccountFailureKind.AUTH_OR_SESSION_INVALID,
+                AccountFailureKind.TOKEN_EXPIRED,
+                AccountFailureKind.TOKEN_REFRESH_FAILED,
+            }
+            and tool_event_count == 0
+        )
+        return WorkerOutcome(
+            status="FAILED",
+            failure_kind=failure_kind.value,
+            observed_provider="claude",
+            observed_model=observed_model,
+            finish_reason=subtype or None,
+            total_cost=total_cost,
+            provider_session_id=session_id,
+            tool_event_count=tool_event_count,
+            retry_permitted=retry,
+            details={"exit_code": exit_code},
+        )
+
+
+class ClaudeAccountAdapter:
+    max_failover_retries = 1
+
+    def __init__(self) -> None:
+        from nexus.services.claude_account_pool import get_claude_account_pool_manager
+
+        self.manager = get_claude_account_pool_manager()
+        self._leases: dict[str, ClaudeLease] = {}
+
+    @staticmethod
+    def _lease_hash(lease_id: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(lease_id.encode("utf-8")).hexdigest()[:16]
+
+    def _binding(self, lease) -> AccountBinding:
+        lease_hash = self._lease_hash(lease.lease_id)
+        self._leases[lease_hash] = lease
+        return AccountBinding(
+            provider="claude",
+            execution_env=lease.execution_env,
+            account_alias_hash=lease.account_alias_hash,
+            lease_id_hash=lease_hash,
+        )
+
+    def acquire(self, operation_id: str) -> AccountBinding:
+        return self._binding(self.manager.acquire(operation_id))
+
+    def _lease_for(self, binding: AccountBinding):
+        lease = self._leases.get(binding.lease_id_hash or "")
+        if lease is None:
+            raise ExternalWorkerRuntimeError("CLAUDE_ACCOUNT_BINDING_NOT_OWNED")
+        return lease
+
+    def release(self, binding: AccountBinding) -> None:
+        lease = self._lease_for(binding)
+        self.manager.release(lease)
+        self._leases.pop(binding.lease_id_hash or "", None)
+
+    def attach_provider(self, binding: AccountBinding, provider_pid: int) -> None:
+        """Record the provider pid/pgid so lease reclamation sees the real process."""
+
+        self.manager.attach_provider(self._lease_for(binding), provider_pid)
+
+    def mark_launch_pending(self, binding: AccountBinding) -> None:
+        """Durably persist launch_pending before the provider is started."""
+
+        self.manager.mark_launch_pending(self._lease_for(binding))
+
+    def confirm_terminal(self, binding: AccountBinding) -> None:
+        """Release after the dispatcher confirmed a known terminal outcome."""
+
+        lease = self._lease_for(binding)
+        self.manager.release(lease, known_terminal=True)
+        self._leases.pop(binding.lease_id_hash or "", None)
+
+    def note_terminal_failure(
+        self, binding: AccountBinding, failure_kind: AccountFailureKind
+    ) -> None:
+        self.manager.note_terminal_failure(self._lease_for(binding), failure_kind)
+
+    def hold_unknown_outcome(self, binding: AccountBinding) -> None:
+        """Keep this account leased (UNKNOWN_OUTCOME) until explicit reconciliation."""
+
+        self.manager.mark_unknown_outcome(self._lease_for(binding))
+
+    def report_failure(
+        self,
+        binding: AccountBinding,
+        failure_kind: AccountFailureKind,
+    ) -> AccountBinding | None:
+        lease = self._lease_for(binding)
+        try:
+            replacement = self.manager.report_failure(lease, failure_kind)
+        except Exception as exc:
+            if type(exc).__name__ in {
+                "ClaudeAccountPoolExhaustedError",
+                "ClaudeAccountIdentityError",
+            }:
+                self._leases.pop(binding.lease_id_hash or "", None)
+            raise
+        if replacement is None:
+            return None  # lease still held by the caller; release() frees it
+        self._leases.pop(binding.lease_id_hash or "", None)
+        return self._binding(replacement)
+
+
 def get_execution_adapter(provider: str) -> ExecutionAdapter:
     key = str(provider).strip().lower()
     if key == "cline":
@@ -870,6 +1119,8 @@ def get_execution_adapter(provider: str) -> ExecutionAdapter:
         return CodexExecutionAdapter()
     if key == "grok":
         return GrokExecutionAdapter()
+    if key == "claude":
+        return ClaudeExecutionAdapter()
     raise ExternalWorkerRuntimeError(f"EXTERNAL_WORKER_PROVIDER_UNSUPPORTED:{key}")
 
 
@@ -879,4 +1130,6 @@ def get_account_adapter(provider: str) -> AccountAdapter:
         return NoopAccountAdapter(key)
     if key == "grok":
         return GrokAccountAdapter()
+    if key == "claude":
+        return ClaudeAccountAdapter()
     raise ExternalWorkerRuntimeError(f"EXTERNAL_ACCOUNT_ADAPTER_UNSUPPORTED:{key}")

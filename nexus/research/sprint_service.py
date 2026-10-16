@@ -1571,7 +1571,13 @@ class InPlaceSprintExecutor:
 
         start = time.time()
         target_path = self.repo_root / self.target_file
-        companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
+        # A model candidate is scored exactly as it is delivered (target file only): the
+        # fixture-keyed local companion edits never prop up its score (#2339 follow-up).
+        companion_edits = (
+            {}
+            if _is_model_owned_source(source)
+            else generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
+        )
         # PR-2 seam: the lock on the target AND every companion is taken FIRST and held for the
         # whole evaluation (acquire is the check; no separate "held by another?" pre-check),
         # covering the in-place write, the test run and the restore.
@@ -2675,7 +2681,7 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             if (
                 self_heal_enabled
                 and llm_generator is not None
-                and (used_source.startswith("llm") or model_required_final_delivery)
+                and (_is_model_owned_source(used_source) or model_required_final_delivery)
                 and ev.score < 1.0
                 and "quota" not in error_codes
                 # PR-3: the treatment lane repairs only a model candidate, never a local fallback.
@@ -2684,46 +2690,26 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             ):
                 candidates.append(ev)
                 ev_recorded = True
-                failure_tail = (ev.error or ev.stdout or "")[-1200:]
-                local_support_block = ""
-                # PR-3: a local candidate is never shown to the model in the audited A/B prompt.
-                if model_required_final_delivery and not _symmetric_prompt_mode():
-                    try:
-                        support_code, support_meta = local_generator.generate(
-                            source_code=source_code,
-                            task=config.task,
-                            mutation_hint=f"{hint}\nmodel_required_local_support_hint",
-                            seed=idx + 9000,
-                        )
-                        support_source = str(support_meta.get("source", "local_support_hint"))
-                        support_guard_ok, _support_guard_reason = _semantic_guard(
-                            source_code, support_code, config.task, support_source
-                        )
-                        if support_guard_ok and support_code.strip() and support_code != candidate_code:
-                            fallback_used = True
-                            error_codes.append("model_required_local_support_hint")
-                            local_support_block = (
-                                "\n[NEXUS LOCAL SUPPORT CANDIDATE]\n"
-                                "This candidate is support evidence only, not final delivery. "
-                                "Use it to produce a model-owned corrected patch if it satisfies the visible contract.\n"
-                                f"{support_code}\n"
-                            )
-                    except Exception:  # noqa: BLE001
-                        error_codes.append("model_required_local_support_hint_failed")
+                # #2339 follow-up: a local fallback (answer table) is never model input. When the
+                # model produced no candidate, the repair starts again from the original source.
+                heal_from_model = _is_model_owned_source(used_source)
+                heal_input = candidate_code if heal_from_model else source_code
+                failure_tail = (
+                    (ev.error or ev.stdout or "")[-1200:] if heal_from_model else "previous model call produced no candidate"
+                )
                 heal_call_recorded = False
                 repair_task = (
                     f"{config.task}\n\n"
                     "Previous candidate failed verification. "
                     "Repair the candidate using the failure evidence below.\n"
                     f"[FAILURE]\n{failure_tail}\n"
-                    f"{local_support_block}"
                 )
                 try:
                     visible_verifier_binding.update(
                         {"hint": f"{hint} | self_heal_after_pytest_failed", "seed": idx + 10000}
                     )
                     repair_code, repair_meta = llm_generator.generate(
-                        source_code=candidate_code,
+                        source_code=heal_input,
                         task=repair_task,
                         mutation_hint=f"{hint}\nself_heal_after_pytest_failed",
                         seed=idx + 10000,
@@ -2737,7 +2723,7 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                             _bench_lane.record_model_candidate(learning_trace, repair_code, "llm_self_heal")
                         else:
                             _bench_lane.record_failed_model_call(learning_trace, "llm_self_heal_failed")
-                    repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
+                    repair_guard_ok, repair_guard_reason = _semantic_guard(heal_input, repair_code, config.task, "llm_self_heal")
                     if repair_guard_ok:
                         repair_ev = _evaluate_candidate(
                             seed=idx + 10000,
@@ -2900,7 +2886,13 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
     candidates = routed_candidates
     # A run with a model never delivers a locally generated candidate (the strict lane already
     # required this; #2339 removed the benchmark-keyed local fast paths from every lane).
-    if (model_required_final_delivery or llm_generator is not None) and not _is_model_owned_source(best.source):
+    # A run configured for a model (even when the learn-SLO guard then withheld the model) never
+    # delivers a local candidate either.
+    if config.llm_mode and not llm_mode_effective:
+        error_codes.append("learn_slo_block")
+    if (model_required_final_delivery or llm_generator is not None or config.llm_mode) and not _is_model_owned_source(
+        best.source
+    ):
         model_candidates = [item for item in candidates if _is_model_owned_source(item.source)]
         best_model = max(model_candidates, key=lambda item: item.score, default=None)
         local_support_code = "model_required_local_support_not_delivery" if best.score >= 1.0 else ""

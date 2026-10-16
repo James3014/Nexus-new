@@ -135,7 +135,12 @@ def reduce_candidate_acceptance(
     *,
     verified_repair_evidence: Mapping[str, Any] | None = None,
 ) -> CandidateAcceptanceResult:
-    """Reduce exact identities and existing #16 evidence without promoting."""
+    """Reduce exact identities and existing #16 evidence without promoting.
+
+    This reducer has no production caller (tests only); the live fail-to-pass
+    gate for opted-in repair tasks is in
+    ``SelfHostedTaskService._finalize_runtime_candidate`` (#2274).
+    """
     reasons: list[str] = []
     if request.implementer_id == review.reviewer_id:
         reasons.append("reviewer_is_implementer")

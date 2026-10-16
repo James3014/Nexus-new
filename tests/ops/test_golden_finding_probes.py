@@ -12,19 +12,29 @@ from typing import Any
 import pytest
 
 from scripts.ops import run_golden_behavior_eval as evaluator
+from scripts.ops.gateway_health_hmac import KEY_FILE_ENV, path_hmac
 from tests.golden_behavior.corpus import CASES
 
 EVAL_ROOT = "/srv/nexus/deployments/r1"
-EVAL_ROOT_SHA256 = hashlib.sha256(EVAL_ROOT.encode()).hexdigest()
+HMAC_KEY = bytes(range(32))
+EVAL_ROOT_HMAC = path_hmac("repo_root", EVAL_ROOT, HMAC_KEY)
 EVALUATED = "1" * 40
 OTHER = "2" * 40
+
+
+@pytest.fixture(autouse=True)
+def _health_hmac_key(tmp_path, monkeypatch):
+    key_file = tmp_path / "health-hmac.key"
+    key_file.write_text(HMAC_KEY.hex() + "\n")
+    key_file.chmod(0o600)
+    monkeypatch.setenv(KEY_FILE_ENV, str(key_file))
 
 
 def _health(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",
         "server": "nexus-mcp-gateway",
-        "repo_root_sha256": EVAL_ROOT_SHA256,
+        "repo_root_hmac_sha256": EVAL_ROOT_HMAC,
         "git_head": EVALUATED,
         "repo_head_at_start": EVALUATED,
         "repo_head_current": EVALUATED,
@@ -101,7 +111,8 @@ def test_gb077_stale_tampered_or_substituted_identity_fails_closed(
         "git_head",
         "repo_head_at_start",
         "repo_head_current",
-        "repo_root_sha256",
+        # id kept from before the #2226 field rename: the exact-base impact gate tracks test ids.
+        pytest.param("repo_root_hmac_sha256", id="repo_root_sha256"),
         "server_instance_id",
         "tool_manifest_revision",
         "permission_policy_hash",
@@ -308,7 +319,7 @@ def test_include_findings_stays_nonzero_even_when_probe_passes(monkeypatch, caps
 
 def test_gb077_accepts_legacy_repo_root_from_pre_2217_gateway() -> None:
     payload = _health()
-    del payload["repo_root_sha256"]
+    del payload["repo_root_hmac_sha256"]
     payload["repo_root"] = EVAL_ROOT
     passed, _detail = _gb077(payload)
     assert passed is True
@@ -317,15 +328,26 @@ def test_gb077_accepts_legacy_repo_root_from_pre_2217_gateway() -> None:
 @pytest.mark.parametrize(
     ("overrides", "drop", "reason"),
     [
-        ({"repo_root_sha256": "b" * 64}, (), "gateway_repo_root_not_evaluated_root"),
-        ({"repo_root_sha256": "XYZ"}, (), "gateway_field_malformed:repo_root_sha256"),
-        ({"repo_root_sha256": "A" * 64}, (), "gateway_field_malformed:repo_root_sha256"),
+        ({"repo_root_hmac_sha256": "b" * 64}, (), "gateway_repo_root_not_evaluated_root"),
+        # ids kept from before the #2226 field rename: the exact-base impact gate tracks test ids.
+        pytest.param(
+            {"repo_root_hmac_sha256": "XYZ"},
+            (),
+            "gateway_field_malformed:repo_root_hmac_sha256",
+            id="overrides1-drop1-gateway_field_malformed:repo_root_sha256",
+        ),
+        pytest.param(
+            {"repo_root_hmac_sha256": "A" * 64},
+            (),
+            "gateway_field_malformed:repo_root_hmac_sha256",
+            id="overrides2-drop2-gateway_field_malformed:repo_root_sha256",
+        ),
         (
             {"repo_root": "/srv/nexus/deployments/other"},
-            ("repo_root_sha256",),
+            ("repo_root_hmac_sha256",),
             "gateway_repo_root_not_evaluated_root",
         ),
-        ({"repo_root": "  "}, ("repo_root_sha256",), "gateway_field_malformed:repo_root"),
+        ({"repo_root": "  "}, ("repo_root_hmac_sha256",), "gateway_field_malformed:repo_root"),
     ],
 )
 def test_gb077_repo_root_must_be_the_evaluated_root(overrides, drop, reason) -> None:
@@ -335,3 +357,55 @@ def test_gb077_repo_root_must_be_the_evaluated_root(overrides, drop, reason) -> 
     passed, detail = _gb077(payload)
     assert passed is False
     assert reason in detail["reasons"]
+
+
+def test_gb077_accepts_only_the_hmac_of_the_evaluated_root() -> None:
+    passed, _detail = _gb077(_health())
+    assert passed is True
+    wrong = path_hmac("repo_root", "/srv/nexus/deployments/other", HMAC_KEY)
+    passed, detail = _gb077(_health(repo_root_hmac_sha256=wrong))
+    assert passed is False
+    assert "gateway_repo_root_not_evaluated_root" in detail["reasons"]
+
+
+def test_gb077_rejects_a_guessable_plain_sha256_of_the_root() -> None:
+    plain = hashlib.sha256(EVAL_ROOT.encode()).hexdigest()
+    passed, detail = _gb077(_health(repo_root_hmac_sha256=plain))
+    assert passed is False
+    assert "gateway_repo_root_not_evaluated_root" in detail["reasons"]
+    # The pre-#2226 field name no longer satisfies the probe.
+    payload = _health()
+    del payload["repo_root_hmac_sha256"]
+    payload["repo_root_sha256"] = plain
+    passed, detail = _gb077(payload)
+    assert passed is False
+    assert "gateway_field_missing:repo_root_hmac_sha256" in detail["reasons"]
+
+
+def test_gb077_hmac_from_another_host_key_is_rejected() -> None:
+    other = path_hmac("repo_root", EVAL_ROOT, bytes(range(1, 33)))
+    passed, detail = _gb077(_health(repo_root_hmac_sha256=other))
+    assert passed is False
+    assert "gateway_repo_root_not_evaluated_root" in detail["reasons"]
+
+
+def test_gb077_fails_closed_when_the_hmac_key_is_unusable(tmp_path, monkeypatch) -> None:
+    bad = tmp_path / "loose.key"
+    bad.write_text(HMAC_KEY.hex() + "\n")
+    bad.chmod(0o644)
+    monkeypatch.setenv(KEY_FILE_ENV, str(bad))
+    passed, detail = _gb077()
+    assert passed is False
+    assert "gateway_health_hmac_key_unavailable" in detail["reasons"]
+
+
+def test_gb077_does_not_load_the_key_when_only_plain_repo_root_is_reported(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv(KEY_FILE_ENV, str(tmp_path / "missing-dir" / "key"))
+    payload = _health()
+    del payload["repo_root_hmac_sha256"]
+    payload["repo_root"] = EVAL_ROOT
+    passed, _detail = _gb077(payload)
+    assert passed is True
+    assert not (tmp_path / "missing-dir").exists()

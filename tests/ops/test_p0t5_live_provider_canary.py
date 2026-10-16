@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-# Ensure scripts/ops can be imported if needed, or import function directly
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "ops"))
+# The script was archived in #2373 (scripts/ops -> scripts/archive/2026-10/ops).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "archive" / "2026-10" / "ops"))
 import p0t5_live_provider_canary  # noqa: I001
 from p0t5_live_provider_canary import (
     _assert_canonical_admission,

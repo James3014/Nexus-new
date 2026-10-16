@@ -3329,6 +3329,32 @@ def build_structural_stub_invoker(
     return invoke
 
 
+def _with_knowledge_applicability(
+    out: dict[str, Any], context: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge bounded RIE knowledge applicability into codeintel ``evidence`` (#1579).
+
+    Only reached when the Planner selected ``codeintel``.  Never raises and never
+    overwrites other evidence keys; failures stay explicit non-CURRENT evidence.
+    """
+    try:
+        from nexus.services.rie_knowledge_codeintel_hook import knowledge_applicability_evidence
+
+        fragment = knowledge_applicability_evidence(context)
+        existing = out.get("evidence")
+        if existing is None or isinstance(existing, Mapping):
+            out["evidence"] = {**(existing or {}), **fragment}
+        else:
+            response = dict(out.get("response") or {})
+            nested = response.get("evidence")
+            if nested is None or isinstance(nested, Mapping):
+                response["evidence"] = {**(nested or {}), **fragment}
+                out["response"] = response
+    except Exception:
+        pass
+    return out
+
+
 def build_default_mainchain_invokers(
     *,
     codeintel: Mapping[str, Any] | None = None,
@@ -3355,7 +3381,7 @@ def build_default_mainchain_invokers(
     if real_codeintel is not None:
         def _codeintel_production(context: Mapping[str, Any]) -> Mapping[str, Any]:
             # Prefer physical engine; merge preflight compact evidence when present.
-            out = dict(real_codeintel(context))
+            out = _with_knowledge_applicability(dict(real_codeintel(context)), context)
             try:
                 pf = preflight_codeintel(context)
                 if isinstance(pf, Mapping) and pf.get("evidence"):
@@ -3368,7 +3394,10 @@ def build_default_mainchain_invokers(
 
         invokers["codeintel"] = _codeintel_production
     else:
-        invokers["codeintel"] = preflight_codeintel
+        def _codeintel_preflight(context: Mapping[str, Any]) -> Mapping[str, Any]:
+            return _with_knowledge_applicability(dict(preflight_codeintel(context)), context)
+
+        invokers["codeintel"] = _codeintel_preflight
     if include_postflight_gates:
         invokers.update(build_plan_gated_postflight_invokers())
 

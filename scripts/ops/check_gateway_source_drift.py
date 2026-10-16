@@ -222,7 +222,7 @@ def analyze(
         "observed": {
             k: health.get(k)
             for k in (
-                "repo_root_sha256",
+                "repo_root_hmac_sha256",
                 "repo_head_at_start",
                 "repo_head_current",
                 "reload_required",
