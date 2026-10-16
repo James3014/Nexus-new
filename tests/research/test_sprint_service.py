@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import nexus.research.sprint_service as sprint_service
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import (
     CandidateEval,
@@ -10,7 +11,6 @@ from nexus.research.sprint_service import (
     _build_value_task_contract,
     _candidate_code_from_llm_output,
     _select_candidate_with_routing_layers,
-    _should_try_local_preflight_before_llm,
     run_hyper_sprint,
     write_sprint_report,
 )
@@ -23,6 +23,61 @@ def _write_ready_learn_slo(tmp_path: Path) -> None:
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
+
+
+# Issue #2339: the benchmark-keyed local paths (hidden-contract fast path, local preflight,
+# hidden invariant shadow) are deleted; a run with a model never delivers a local candidate.
+_REMOVED_LOCAL_SOURCES = ("local_hidden_contract_fast_path", "local_preflight", "local_hidden_shadow")
+_REMOVED_LOCAL_CODES = (
+    "hidden_contract_fast_path_success",
+    "hidden_contract_fast_path_miss",
+    "local_preflight_before_llm_success",
+    "local_preflight_before_llm_miss",
+    "hidden_invariant_shadow_candidate",
+)
+
+
+def _assert_no_local_delivery(res) -> None:
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
+    assert not any(str(item.source).startswith(_REMOVED_LOCAL_SOURCES) for item in res.candidates)
+    assert not set(_REMOVED_LOCAL_CODES) & set(res.error_codes)
+
+
+def _run_noop_model_sprint(monkeypatch, tmp_path: Path, *, task: str, source: str) -> tuple[object, list[str]]:
+    """Run one sprint whose model returns no candidate; record generator call order."""
+    _write_ready_learn_slo(tmp_path)
+    (tmp_path / "demo.py").write_text(source, encoding="utf-8")
+    order: list[str] = []
+
+    class NoopModel:
+        model_chain = ["fake-noop"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args, **kwargs):
+            order.append("llm")
+            raise RuntimeError("noop model: no candidate")
+
+    real_local = sprint_service.LocalCandidateGenerator
+
+    class SpyLocal(real_local):
+        def generate(self, source_code, task, mutation_hint, seed):
+            order.append(f"local:{mutation_hint.splitlines()[-1]}")
+            return super().generate(source_code, task, mutation_hint, seed)
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", NoopModel)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", SpyLocal)
+    cfg = SprintConfig(task=task, target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    return run_hyper_sprint(repo_root=tmp_path, config=cfg), order
+
+
+def _assert_model_called_before_any_local(order: list[str]) -> None:
+    assert order and order[0] == "llm"
+    assert not any("local_preflight_before_llm" in item or "hidden_verifier" in item for item in order)
 
 
 def test_select_candidate_with_routing_layers_uses_autoreason_and_ddtree(monkeypatch):
@@ -372,61 +427,66 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     assert "retrieval_hits" in res.learning_trace
 
 
-def test_should_try_local_preflight_before_llm_skips_claim_evidence_contracts():
-    assert (
-        _should_try_local_preflight_before_llm(
-            task="Fix claim verification so only fully supported successful claims are accepted.",
-            source_code="def verified_claims(claims):\n    return claims\n",
-        )
-        is False
+def test_should_try_local_preflight_before_llm_skips_claim_evidence_contracts(monkeypatch, tmp_path: Path):
+    # The preflight selector is deleted (#2339); claim contracts reach the model first.
+    assert not hasattr(sprint_service, "_should_try_local_preflight_before_llm")
+    res, order = _run_noop_model_sprint(
+        monkeypatch,
+        tmp_path,
+        task="Fix claim verification so only fully supported successful claims are accepted.",
+        source="def verified_claims(claims):\n    return claims\n",
     )
+    _assert_model_called_before_any_local(order)
+    _assert_no_local_delivery(res)
 
 
-def test_should_try_local_preflight_before_llm_keeps_deterministic_contracts():
-    assert (
-        _should_try_local_preflight_before_llm(
-            task="Repair secret redaction for a credential scrubber.",
-            source_code="def redact(secret):\n    return secret\n",
-        )
-        is True
+def test_should_try_local_preflight_before_llm_keeps_deterministic_contracts(monkeypatch, tmp_path: Path):
+    res, order = _run_noop_model_sprint(
+        monkeypatch,
+        tmp_path,
+        task="Repair secret redaction for a credential scrubber.",
+        source="def redact(secret):\n    return secret\n",
     )
+    _assert_model_called_before_any_local(order)
+    _assert_no_local_delivery(res)
 
 
-def test_should_try_local_preflight_before_llm_keeps_governance_action_filter():
-    assert (
-        _should_try_local_preflight_before_llm(
-            task="Repair governance action filter; reason governance_block for destructive actions.",
-            source_code="def rlm_harder_v2_filter_action(action):\n    return {'allowed': True, 'reason': 'ok'}\n",
-        )
-        is True
+def test_should_try_local_preflight_before_llm_keeps_governance_action_filter(monkeypatch, tmp_path: Path):
+    res, order = _run_noop_model_sprint(
+        monkeypatch,
+        tmp_path,
+        task="Repair governance action filter; reason governance_block for destructive actions.",
+        source="def rlm_harder_v2_filter_action(action):\n    return {'allowed': True, 'reason': 'ok'}\n",
     )
+    _assert_model_called_before_any_local(order)
+    _assert_no_local_delivery(res)
 
 
-def test_should_try_local_preflight_before_llm_keeps_rlm_evidence_memory_and_second_round_contracts():
-    assert _should_try_local_preflight_before_llm(
-        task="Repair RLM evidence gap.",
-        source_code="def rlm_harder_v2_verified_claims(claims):\n    return []\n",
+def test_should_try_local_preflight_before_llm_keeps_rlm_evidence_memory_and_second_round_contracts(
+    monkeypatch, tmp_path: Path
+):
+    cases = (
+        ("Repair RLM evidence gap.", "def rlm_harder_v2_verified_claims(claims):\n    return []\n"),
+        ("Repair RLM evidence replay.", "def rlm_harder_v2_accept_receipt(receipt):\n    return True\n"),
+        (
+            "Repair memory selection.",
+            "def rlm_harder_v2_select_memory_hits(items, task_type, keywords):\n    return items\n",
+        ),
+        (
+            "Repair second round settings merge.",
+            "def rlm_harder_v2_merge_settings(defaults, override):\n    return defaults\n",
+        ),
+        (
+            "Repair belief budget selection.",
+            "def rlm_harder_v2_repair_budget(confidence, risk):\n    return {'rounds': 1, 'needs_evidence': False}\n",
+        ),
     )
-    assert _should_try_local_preflight_before_llm(
-        task="Repair RLM evidence replay.",
-        source_code="def rlm_harder_v2_accept_receipt(receipt):\n    return True\n",
-    )
-    assert _should_try_local_preflight_before_llm(
-        task="Repair memory selection.",
-        source_code="def rlm_harder_v2_select_memory_hits(items, task_type, keywords):\n    return items\n",
-    )
-    assert _should_try_local_preflight_before_llm(
-        task="Repair second round settings merge.",
-        source_code="def rlm_harder_v2_merge_settings(defaults, override):\n    return defaults\n",
-    )
-    assert _should_try_local_preflight_before_llm(
-        task="Repair governance scope decision.",
-        source_code="def rlm_harder_v2_scope_decision(request):\n    return {'allowed': True, 'reason': 'approved'}\n",
-    )
-    assert _should_try_local_preflight_before_llm(
-        task="Repair belief budget selection.",
-        source_code="def rlm_harder_v2_repair_budget(confidence, risk):\n    return {'rounds': 1, 'needs_evidence': False}\n",
-    )
+    for index, (task, source) in enumerate(cases):
+        case_root = tmp_path / f"case{index}"
+        case_root.mkdir()
+        res, order = _run_noop_model_sprint(monkeypatch, case_root, task=task, source=source)
+        _assert_model_called_before_any_local(order)
+        _assert_no_local_delivery(res)
 
 
 def test_local_mutator_patches_rlm_governance_filter_action():
@@ -683,8 +743,9 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
-    assert res.winner_source == "local"
+    # #2339: a model run never delivers the local candidate that follows a model failure.
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
     assert "quota" in res.error_codes
     assert "llm_fallback_local" in res.error_codes
     assert res.total_tokens == 0
@@ -1225,7 +1286,9 @@ def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path,
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
-    assert res.status == "SUCCESS"
+    # #2339: a model run never delivers the local candidate that follows a model failure.
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
     assert res.model_calls == 1
     assert res.total_tokens == 333
     assert res.token_capture_status == "measured"
@@ -1341,12 +1404,13 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
+    # #2339: a model run never delivers the local candidate that follows a model failure.
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
     assert res.model_calls == 1
     assert res.total_tokens > 0
     assert res.token_capture_status == "estimated"
     assert res.gateway_error_category == "timeout"
-    assert res.winner_source == "local"
     assert "llm_error" in res.error_codes
 
 
@@ -1683,7 +1747,8 @@ def test_contract_feature_allows_one_line_artifact_fix(monkeypatch, tmp_path: Pa
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "SUCCESS"
-    assert res.winner_source == "local_preflight"
+    # #2339: no local preflight before the model; the one-line model fix is delivered.
+    assert res.winner_source == "llm"
 
 
 def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_path: Path):
@@ -1723,7 +1788,9 @@ def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
+    # #2339: a model run never delivers the local candidate that follows a model failure.
+    assert res.status == "FAILED"
+    assert res.winner_source == "model_required_no_model_candidate"
     assert calls["local"] == 2
     assert res.attempt_count == 2
 
@@ -1777,9 +1844,11 @@ def test_local_contract_fallback_repairs_phase_evidence_fields(monkeypatch, tmp_
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.fallback_used is False
-    assert res.winner_source == "local_preflight"
+    # #2339: the "phased report summary" local preflight is deleted. The model returned the
+    # unchanged source, so nothing verified is delivered and the local answer is never the winner.
+    assert res.status == "FAILED"
+    assert not res.winner_source.startswith("local")
+    assert not any(str(item.source).startswith(_REMOVED_LOCAL_SOURCES) for item in res.candidates)
 
 
 def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch, tmp_path: Path):
@@ -1842,12 +1911,14 @@ def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
+    # #2339: the hidden-contract fast path / invariant shadow is deleted; the model's verified
+    # candidate is delivered and no local candidate is produced for this benchmark contract.
     assert res.status == "SUCCESS"
-    assert calls["llm"] == 0
-    assert res.fallback_used is False
-    assert res.winner_source == "local_hidden_contract_fast_path"
-    assert "value is not None" in (res.patch or "")
-    assert "hidden_contract_fast_path_success" in res.error_codes
+    assert calls["llm"] >= 1
+    assert res.winner_source.startswith("llm")
+    assert not any(str(item.source).startswith(_REMOVED_LOCAL_SOURCES) for item in res.candidates)
+    assert not set(_REMOVED_LOCAL_CODES) & set(res.error_codes)
+
 
 
 def test_hidden_verifier_mode_uses_fast_path_for_remaining_ms_contract(monkeypatch, tmp_path: Path):
@@ -1903,11 +1974,14 @@ def test_hidden_verifier_mode_uses_fast_path_for_remaining_ms_contract(monkeypat
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
+    # #2339: the hidden-contract fast path / invariant shadow is deleted; the model's verified
+    # candidate is delivered and no local candidate is produced for this benchmark contract.
     assert res.status == "SUCCESS"
-    assert calls["llm"] == 0
-    assert res.winner_source == "local_hidden_contract_fast_path"
-    assert "elapsed = max(0, now_ms - start_ms)" in (res.patch or "")
-    assert "return max(0, timeout_ms - elapsed)" in (res.patch or "")
+    assert calls["llm"] >= 1
+    assert res.winner_source.startswith("llm")
+    assert not any(str(item.source).startswith(_REMOVED_LOCAL_SOURCES) for item in res.candidates)
+    assert not set(_REMOVED_LOCAL_CODES) & set(res.error_codes)
+
 
 
 def test_hidden_verifier_mode_uses_fast_path_for_belief_budget_contract(monkeypatch, tmp_path: Path):
@@ -1966,11 +2040,14 @@ def test_hidden_verifier_mode_uses_fast_path_for_belief_budget_contract(monkeypa
     )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
+    # #2339: the hidden-contract fast path / invariant shadow is deleted; the model's verified
+    # candidate is delivered and no local candidate is produced for this benchmark contract.
     assert res.status == "SUCCESS"
-    assert calls["llm"] == 0
-    assert res.winner_source == "local_hidden_contract_fast_path"
-    assert "confidence < 0.8" in (res.patch or "")
-    assert "risk_level in {'medium', 'high'}" in (res.patch or "")
+    assert calls["llm"] >= 1
+    assert res.winner_source.startswith("llm")
+    assert not any(str(item.source).startswith(_REMOVED_LOCAL_SOURCES) for item in res.candidates)
+    assert not set(_REMOVED_LOCAL_CODES) & set(res.error_codes)
+
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
@@ -2187,7 +2264,7 @@ def test_run_hyper_sprint_uses_local_preflight_before_expensive_llm(monkeypatch,
         model_chain = ["fake-gemini"]
 
         def generate(self, *_args, **_kwargs):
-            raise AssertionError("LLM should not be called when local preflight verifies the patch")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
@@ -2203,11 +2280,10 @@ def test_run_hyper_sprint_uses_local_preflight_before_expensive_llm(monkeypatch,
 
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.model_calls == 0
-    assert res.fallback_used is False
-    assert res.winner_source == "local_preflight"
-    assert "local_preflight_before_llm_success" in res.error_codes
+    # #2339: no local preflight before the model; the failed model call leaves no deliverable.
+    assert res.model_calls >= 1
+    _assert_no_local_delivery(res)
+
 
 
 def test_run_hyper_sprint_uses_local_preflight_for_governance_redaction(monkeypatch, tmp_path: Path):
@@ -2230,7 +2306,7 @@ def test_run_hyper_sprint_uses_local_preflight_for_governance_redaction(monkeypa
         model_chain = ["fake-gemini"]
 
         def generate(self, *_args, **_kwargs):
-            raise AssertionError("LLM should not be called for deterministic redaction preflight")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
@@ -2246,9 +2322,10 @@ def test_run_hyper_sprint_uses_local_preflight_for_governance_redaction(monkeypa
 
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.model_calls == 0
-    assert res.winner_source == "local_preflight"
+    # #2339: no local preflight before the model; the failed model call leaves no deliverable.
+    assert res.model_calls >= 1
+    _assert_no_local_delivery(res)
+
 
 
 def test_run_hyper_sprint_uses_local_preflight_for_rlm_governance_guard(monkeypatch, tmp_path: Path):
@@ -2273,7 +2350,7 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_governance_guard(monkeypa
         model_chain = ["fake-gemini"]
 
         def generate(self, *_args, **_kwargs):
-            raise AssertionError("LLM should not be called for deterministic governance guard preflight")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
@@ -2289,10 +2366,10 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_governance_guard(monkeypa
 
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.model_calls == 0
-    assert res.winner_source == "local_preflight"
-    assert "local_preflight_before_llm_success" in res.error_codes
+    # #2339: no local preflight before the model; the failed model call leaves no deliverable.
+    assert res.model_calls >= 1
+    _assert_no_local_delivery(res)
+
 
 
 def test_run_hyper_sprint_uses_local_preflight_for_rlm_evidence_gap(monkeypatch, tmp_path: Path):
@@ -2316,7 +2393,7 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_evidence_gap(monkeypatch,
         model_chain = ["fake-gemini"]
 
         def generate(self, *_args, **_kwargs):
-            raise AssertionError("LLM should not be called for deterministic evidence-gap preflight")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
@@ -2332,9 +2409,10 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_evidence_gap(monkeypatch,
 
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.model_calls == 0
-    assert res.winner_source == "local_preflight"
+    # #2339: no local preflight before the model; the failed model call leaves no deliverable.
+    assert res.model_calls >= 1
+    _assert_no_local_delivery(res)
+
 
 
 def test_run_hyper_sprint_uses_local_preflight_for_rlm_memory_contract(monkeypatch, tmp_path: Path):
@@ -2358,7 +2436,7 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_memory_contract(monkeypat
         model_chain = ["fake-gemini"]
 
         def generate(self, *_args, **_kwargs):
-            raise AssertionError("LLM should not be called for deterministic memory preflight")
+            raise RuntimeError("noop model: no candidate")
 
     monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
     monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
@@ -2374,9 +2452,10 @@ def test_run_hyper_sprint_uses_local_preflight_for_rlm_memory_contract(monkeypat
 
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
-    assert res.status == "SUCCESS"
-    assert res.model_calls == 0
-    assert res.winner_source == "local_preflight"
+    # #2339: no local preflight before the model; the failed model call leaves no deliverable.
+    assert res.model_calls >= 1
+    _assert_no_local_delivery(res)
+
 
 
 def test_inplace_executor_rejects_no_change_candidate(tmp_path: Path):

@@ -174,8 +174,6 @@ def write_msa_receipt_reports(repo_root: Path, *, task_id: str | None, evidence:
 
 def infer_research_role(*, task_desc: str, task_type: str, route_features: dict[str, Any]) -> str:
     task_lower = f"{task_body_only(task_desc)} {task_type}".lower()
-    if bool(route_features.get("benchmark_hidden_contract_fast_path", False)):
-        return "general"
     if any(token in task_lower for token in ("benchmark", "latency", "throughput", "public report", "solve rate", "p99")):
         return "benchmark_framer"
     if bool(route_features.get("claim_uncertainty", False)) or any(
