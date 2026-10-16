@@ -417,6 +417,14 @@
 | tests/nexus/orchestrator/test_gateway_controller_root.py | tests/nexus/orchestrator/test_gateway_controller_root.py | active | medium | test_contract |
 | tests/ops/test_gateway_routine_deploy_authority.py | tests/ops/test_gateway_routine_deploy_authority.py | active | medium | test_contract |
 | scripts/ops/eia_scoreboard.py | tests/ops/test_eia_scoreboard.py | active | medium | eia_scoreboard_report |
+| scripts/ops/eia_nightly.py | tests/ops/test_eia_nightly.py | active | medium | eia_nightly_scheduler_contract |
+| scripts/ops/com.nexus.eia-nightly-prepare.plist.template | tests/ops/test_eia_nightly.py | active | low | eia_nightly_launchd_template |
+| scripts/ops/com.nexus.eia-nightly-start.plist.template | tests/ops/test_eia_nightly.py | active | low | eia_nightly_launchd_template |
+| scripts/ops/com.nexus.eia-nightly-dispatch.plist.template | tests/ops/test_eia_nightly.py | active | low | eia_nightly_launchd_template |
+| scripts/ops/com.nexus.eia-nightly-stop.plist.template | tests/ops/test_eia_nightly.py | active | low | eia_nightly_launchd_template |
+| docs/ops/eia_nightly.md | tests/ops/test_eia_nightly.py | active | low | eia_nightly_runbook |
+| tasks/eia-nightly | tests/ops/test_eia_nightly.py | active | low | eia_nightly_task_cards |
+| tests/ops/fixtures/eia_nightly_real | tests/ops/test_eia_nightly.py | active | low | eia_nightly_real_record_fixture |
 | nexus/contracts/self_hosted_state_root.py | tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/research/test_trajectory_continuity.py | active | high | self_hosted_state_root_legacy_guard_contract |
 | scripts/ops/gateway_health_hmac.py | tests/nexus/orchestrator/test_unified_mcp_gateway_http.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/ops/test_golden_finding_probes.py, tests/ops/test_nexus_gateway_auto_deploy.py | active | medium | gateway_health_path_hmac_contract |
 | ARCHIVED_2026-10-16-hidden-contract-fast-path.md | tests/research/test_no_benchmark_local_fast_path.py | active | low | hidden_contract_fast_path_archive_manifest |
@@ -425,3 +433,4 @@
 | tests/integration/test_model_json_routing_2174.py | tests/integration/test_model_json_routing_2174.py | active | medium | test_contract |
 | nexus/knowledge/autonomous_memory_curator.py | tests/knowledge/test_autonomous_memory_curator.py, tests/integration/test_model_json_routing_2174.py | active | medium | model_output_json_routing_contract |
 | nexus/services/claude_account_pool.py | tests/services/test_claude_account_pool.py, tests/services/test_external_worker_dispatch.py, tests/services/test_external_worker_runtime.py, tests/services/test_grok_account_pool.py | active | high | claude_account_pool_identity_lease_contract |
+| docs/arch/OPENCLI_CHATGPT_ADAPTER_CONTRACT.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | low | opencli_adapter_contract_doc |

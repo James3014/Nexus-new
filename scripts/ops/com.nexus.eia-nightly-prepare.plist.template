@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  EIA nightly scheduler, `prepare`: afternoon: render, validate and open the night's Task Card PR (16:00; 20:00 re-checks the merge).
+  One of four templates (prepare / start / dispatch / stop); see docs/ops/eia_nightly.md.
+  Replace every __PLACEHOLDER__, then install as a user LaunchAgent on the M4 EIA host.
+  Agents must not install it; the operator does.
+  launchd does not create log directories: run
+    mkdir -p __HOME__/Workspace/nexus-self-hosted-state/eia-nightly
+  before loading, or the job fails to start.
+    __HOME__        home directory of the M4 user (e.g. /Users/jameschen)
+    __NEXUS_REPO__  the EIA daemon checkout (e.g. __HOME__/Workspace/nexus-automation-repos/Nexus-new)
+    __PYTHON__      that checkout's venv python (__NEXUS_REPO__/.venv/bin/python)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexus.eia-nightly-prepare</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__NEXUS_REPO__/scripts/ops/eia_nightly.py</string>
+    <string>prepare</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__NEXUS_REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONDONTWRITEBYTECODE</key>
+    <string>1</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Workspace/nexus-self-hosted-state/eia-nightly/launchd-prepare.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Workspace/nexus-self-hosted-state/eia-nightly/launchd-prepare.err.log</string>
+</dict>
+</plist>
