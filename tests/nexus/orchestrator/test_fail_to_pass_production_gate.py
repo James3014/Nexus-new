@@ -103,12 +103,10 @@ def _run(tmp_path: Path, monkeypatch, task_id: str, verifier_commands: list[str]
     targets.mkdir()
     # tmp roots are otherwise redirected next to the CWD; keep targets in tmp_path.
     monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(targets))
-    registry = WorkerRegistry(
-        {
-            provider: _StubAdapter(provider, "fixed\n")
-            for provider in ("codex", "gemini", "opencode", "mimo", "ollama")
-        }
-    )
+    registry = WorkerRegistry({
+        provider: _StubAdapter(provider, "fixed\n")
+        for provider in ("codex", "gemini", "opencode", "mimo", "ollama")
+    })
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state",
         worker_registry=registry,
@@ -306,3 +304,18 @@ def test_probe_fails_closed_when_base_cannot_be_checked_out(tmp_path):
     assert probe["required"] is True
     assert probe["base_exit_codes"] == []
     assert _git(controller, "worktree", "list").count("\n") == 0
+
+
+def test_required_probe_blocks_recovery_until_it_records_verified() -> None:
+    from nexus.orchestrator.self_hosted_task_service import _fail_to_pass_blocked
+
+    def state(status: str, required: bool) -> dict:
+        return {"fail_to_pass": {"status": status, "required": required}}
+
+    # A crash between the VERIFIED checkpoint and the probe leaves PENDING.
+    assert _fail_to_pass_blocked(state("PENDING", True))
+    assert _fail_to_pass_blocked(state("BASE_ALREADY_PASS", True))
+    assert _fail_to_pass_blocked(state("BASE_NOT_PHYSICAL_FAIL", True))
+    assert not _fail_to_pass_blocked(state("VERIFIED", True))
+    assert not _fail_to_pass_blocked(state("UNPROVEN", False))
+    assert not _fail_to_pass_blocked({})

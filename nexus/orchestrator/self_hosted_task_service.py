@@ -312,8 +312,18 @@ _FAIL_TO_PASS_BLOCKED_STATUSES = frozenset({"BASE_ALREADY_PASS", "BASE_NOT_PHYSI
 
 
 def _fail_to_pass_blocked(state: Mapping[str, Any]) -> bool:
+    """True when a candidate must not be committed or recovered as verified.
+
+    A required probe blocks until it has durably recorded VERIFIED, so a crash
+    between the VERIFIED checkpoint and the probe cannot be recovered into a
+    commit that skipped the gate.
+    """
     probe = state.get("fail_to_pass") if isinstance(state, Mapping) else None
-    return isinstance(probe, Mapping) and probe.get("status") in _FAIL_TO_PASS_BLOCKED_STATUSES
+    if not isinstance(probe, Mapping):
+        return False
+    if probe.get("status") in _FAIL_TO_PASS_BLOCKED_STATUSES:
+        return True
+    return probe.get("required") is True and probe.get("status") != "VERIFIED"
 
 
 def _utc_now() -> str:
@@ -4971,6 +4981,13 @@ class SelfHostedTaskService:
                 "status": "UNPROVEN",
                 "reason": "fail_to_pass_unproven",
                 "required": False,
+            }
+        else:
+            # Blocks verified-candidate recovery until the probe records VERIFIED.
+            verified_values["fail_to_pass"] = {
+                "schema": FAIL_TO_PASS_PROBE_SCHEMA,
+                "status": "PENDING",
+                "required": True,
             }
         update("VERIFIED", verified_values)
 
