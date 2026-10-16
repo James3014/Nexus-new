@@ -132,8 +132,8 @@ def _unreadable_directories(target: Path) -> list[str]:
     def onerror(error: OSError) -> None:
         found.append(str(error.filename))
 
-    for _directory, dirnames, _filenames in os.walk(real_target, onerror=onerror):
-        if ".git" in dirnames:
+    for directory, dirnames, _filenames in os.walk(real_target, onerror=onerror):
+        if Path(directory) == real_target and ".git" in dirnames:
             dirnames.remove(".git")
     return sorted(found)
 

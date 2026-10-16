@@ -39,6 +39,7 @@ case "$FAKE_CODEX_MODE" in
   hidden) mkdir "$work/locked"; ln -s "$FAKE_ESCAPE_DIR" "$work/locked/escape"; chmod 000 "$work/locked" ;;
   nestedgit) mkdir "$work/sub"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git" ;;
   nestedgitdir) mkdir -p "$work/sub/.git"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git/leak" ;;
+  lockedgit) mkdir -p "$work/sub/.git"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git/leak"; chmod 000 "$work/sub/.git" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
 echo '{"type":"turn.completed"}'
@@ -260,3 +261,9 @@ def test_codex_env_lc_prefix_does_not_pass_credential_shaped_names():
 
     assert env["LC_ALL"] == "C"
     assert "LC_GITHUB_TOKEN" not in env and "LC_AUTH_SOCK" not in env
+
+
+def test_codex_run_fails_on_an_escaping_symlink_inside_an_unreadable_nested_dot_git(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "lockedgit")
+
+    assert res.returncode == 6, res.stderr
