@@ -21,7 +21,7 @@ def _job() -> dict:
 
 def test_runs_default_branch_copy_on_pr_target_including_body_edits() -> None:
     data = _load()
-    triggers = data.get("on", data.get(True))
+    triggers = data["on"] if "on" in data else data[True]
     assert set(triggers) == {"pull_request_target"}
     target = triggers["pull_request_target"]
     assert target["branches"] == ["main"]

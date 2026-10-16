@@ -21,7 +21,8 @@ def _yaml(path: Path) -> dict:
 
 
 def _triggers(doc: dict) -> dict:
-    return doc.get("on", doc.get(True))
+    # PyYAML parses the bare key `on` as boolean True.
+    return doc["on"] if "on" in doc else doc[True]
 
 
 def test_reusable_is_call_only_and_tools_come_from_nexus_new_main() -> None:

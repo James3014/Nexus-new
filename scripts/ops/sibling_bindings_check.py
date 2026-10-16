@@ -88,7 +88,9 @@ def run(args: argparse.Namespace) -> tuple[bool, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=(__doc__ or "").splitlines()[0] if __doc__ else None
+    )
     parser.add_argument("--repo", required=True, help="owner/name of the PR's repository")
     parser.add_argument(
         "--repo-dir", required=True, help="checkout of that repo holding the PR head objects"
