@@ -315,8 +315,9 @@ def _run_auto_flow(
         candidate_count=1,
         root_cause_confidence=1.0,
         findings_query=None,
-        llm_mode=False,
-        llm_baseline=False,
+        # #2339 follow-up: the shared fixture's baseline patch comes from a fake model now.
+        llm_mode=True,
+        llm_baseline=True,
         timeout_sec=30,
         stage1_timeout_sec=20,
         max_time_ratio_guard=1.2,

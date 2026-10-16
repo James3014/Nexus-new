@@ -22,9 +22,6 @@ from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research import bench_treatment_lane as _bench_lane
 from nexus.research.candidate_pool_policy import decide_candidate_pool_policy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
-from nexus.research.local_sprint_mutator import (
-    generate_local_companion_edits,
-)
 from nexus.research.swarm_broker import SwarmBroker
 
 from .runtime.runtime_resilience import (
@@ -1457,19 +1454,8 @@ def _select_candidate_with_routing_layers(
     return max(active, key=lambda c: c.score), active
 
 
-class LocalCandidateGenerator:
-    source = "local"
-
-    def generate(self, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
-        from .local_sprint_mutator import generate_local_candidate
-        code = generate_local_candidate(source_code, task, mutation_hint, seed)
-        return code, {
-            "source": self.source,
-            "model_calls": 0,
-            "quota_backoffs": 0,
-            "tokens_used": 0,
-            "token_capture_status": "not_applicable_local_only",
-        }
+NO_LOCAL_CANDIDATE_GENERATOR = "no_local_candidate_generator"
+NO_MODEL_CANDIDATE = "no_model_candidate"
 
 
 class SprintExecutor:
@@ -1571,13 +1557,9 @@ class InPlaceSprintExecutor:
 
         start = time.time()
         target_path = self.repo_root / self.target_file
-        # A model candidate is scored exactly as it is delivered (target file only): the
-        # fixture-keyed local companion edits never prop up its score (#2339 follow-up).
-        companion_edits = (
-            {}
-            if _is_model_owned_source(source)
-            else generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
-        )
+        # A candidate is scored exactly as it is delivered (target file only); the fixture-keyed
+        # local companion edits were deleted with the answer table (#2339 follow-up).
+        companion_edits: dict[Path, str] = {}
         # PR-2 seam: the lock on the target AND every companion is taken FIRST and held for the
         # whole evaluation (acquire is the check; no separate "held by another?" pre-check),
         # covering the in-place write, the test run and the restore.
@@ -2002,7 +1984,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
             target_file=config.target_file,
             route_signals=config.route_signals,
         )
-    local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     enable_local_swarm_executor = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
@@ -2495,7 +2476,9 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         }
 
     _SPRINT_METER.set(_meter)
-    for idx in range(max(1, config.candidate_count)):
+    # Without a model there is no candidate generator: the deterministic local answer table was
+    # deleted (#2339 follow-up), so the sprint reports no_local_candidate_generator instead.
+    for idx in range(max(1, config.candidate_count) if llm_generator is not None else 0):
         if idx > 0 and _bench_lane.treatment_lane_active() and not _bench_lane.treatment_round_allowed(learning_trace, f"candidate_{idx}", model_calls):
             # PR-3: one row deadline and one call budget cover every round of the row.
             break
@@ -2585,28 +2568,17 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
                         error_codes.append("quota")
-                        error_codes.append("llm_fallback_local")
                     else:
                         error_codes.append("llm_error")
-                    candidate_code, meta = local_generator.generate(
-                        source_code=source_code,
-                        task=config.task,
-                        mutation_hint=hint,
-                        seed=idx,
-                    )
-                    used_source = str(meta.get("source", "local"))
+                    # No local answer replaces a failed model call: the round carries no candidate.
+                    candidate_code, meta = source_code, {"source": NO_MODEL_CANDIDATE, "model_calls": 0}
+                    used_source = NO_MODEL_CANDIDATE
             else:
-                candidate_code, meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=hint,
-                    seed=idx,
-                )
-                used_source = str(meta.get("source", "local"))
+                # Unreachable: a sprint without a model returns no_local_candidate_generator early.
+                candidate_code, meta = source_code, {"source": NO_LOCAL_CANDIDATE_GENERATOR, "model_calls": 0}
+                used_source = NO_LOCAL_CANDIDATE_GENERATOR
 
             _record_llm_meta(meta)
-            if used_source.startswith("local") and llm_generator is not None:
-                fallback_used = True
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
                 ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
@@ -2627,51 +2599,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                     )
                 else:
                     ev = _evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
-            if (
-                candidate_pool_policy.enabled
-                and idx == 0
-                and llm_generator is not None
-                and used_source.startswith("llm")
-                and ev.score >= 1.0
-            ):
-                for support_idx in range(candidate_pool_policy.local_support_candidates):
-                    support_seed = idx + 8000 + support_idx
-                    support_code, support_meta = local_generator.generate(
-                        source_code=source_code,
-                        task=config.task,
-                        mutation_hint=f"{hint}\nddtree_local_support_pool",
-                        seed=support_seed,
-                    )
-                    support_source = str(support_meta.get("source") or "local")
-                    if support_source == "local":
-                        support_source = "local_ddtree_support"
-                    support_guard_ok, support_guard_reason = _semantic_guard(
-                        source_code,
-                        support_code,
-                        config.task,
-                        support_source,
-                    )
-                    if support_guard_ok:
-                        support_ev = sprint_evaluate(
-                            seed=support_seed,
-                            hint=f"{hint} | ddtree_local_support_pool",
-                            code=support_code,
-                            source=support_source,
-                        )
-                        support_ev.score = min(
-                            support_ev.score,
-                            candidate_pool_policy.local_support_score_cap,
-                        )
-                    else:
-                        support_ev = CandidateEval(
-                            seed=support_seed,
-                            score=0.0,
-                            hint=f"{hint} | ddtree_local_support_pool",
-                            error=support_guard_reason,
-                            candidate_code=support_code,
-                            source=support_source,
-                        )
-                    candidates.append(support_ev)
             self_heal_enabled = (
                 os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
                 # L2: symmetric mode itself means one model call, except in the bench treatment
@@ -2765,43 +2692,6 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
                             source="llm_self_heal",
                         )
                     )
-            if (
-                llm_generator is not None
-                and used_source.startswith("llm")
-                and ev.score < 1.0
-                and "quota" not in error_codes
-            ):
-                if not ev_recorded:
-                    candidates.append(ev)
-                    ev_recorded = True
-                local_code, local_meta = local_generator.generate(
-                    source_code=source_code,
-                    task=config.task,
-                    mutation_hint=hint,
-                    seed=idx + 1000,
-                )
-                local_source = str(local_meta.get("source", "local_guard_fallback"))
-                fallback_used = True
-                local_guard_ok, local_guard_reason = _semantic_guard(source_code, local_code, config.task, local_source)
-                if local_guard_ok:
-                    local_ev = sprint_evaluate(
-                        seed=idx + 1000,
-                        hint=f"{hint} | local_guard_fallback",
-                        code=local_code,
-                        source=local_source,
-                    )
-                else:
-                    local_ev = CandidateEval(
-                        seed=idx + 1000,
-                        score=0.0,
-                        hint=f"{hint} | local_guard_fallback",
-                        error=local_guard_reason,
-                        candidate_code=local_code,
-                        source=local_source,
-                    )
-                candidates.append(local_ev)
-                if local_ev.score >= 1.0:
-                    ev = local_ev
         except Exception as exc:  # noqa: BLE001
             ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=str(exc), source=used_source)
         if "timed out" in (ev.error or "").lower():
@@ -2817,25 +2707,18 @@ def _run_hyper_sprint_core(*, repo_root: Path, config: SprintConfig) -> SprintRe
         if config.safe_mode:
             time.sleep(1.0)
 
-# R1.1: Emergency Fallback Valve - Ensure we match baseline if all else fails
-    has_success = any(c.score >= 1.0 for c in candidates)
-    if not has_success:
-        # Perform one last verified local run as "local" source. This remains active even
-        # after a failed local fallback so bounded LLM runs do not under-sample simple fixes.
-        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=999)
-        if code != source_code:
-            guard_ok, _ = _semantic_guard(source_code, code, config.task, meta.get("source", "local"))
-            if guard_ok:
-                ev = sprint_evaluate(seed=999, hint="emergency_fallback", code=code, source=meta.get("source", "local"))
-                candidates.append(ev)
-
     if not candidates:
+        no_generator = llm_generator is None
+        if no_generator:
+            error_codes.append(NO_LOCAL_CANDIDATE_GENERATOR)
+            if config.llm_mode and not llm_mode_effective:
+                error_codes.append("learn_slo_block")
         return SprintResult(
             codeintel_context=codeintel_status,
             status="FAILED",
-            reason=SprintOutcome.GENERATION_FAIL.value,
+            reason=NO_LOCAL_CANDIDATE_GENERATOR if no_generator else SprintOutcome.GENERATION_FAIL.value,
             target_file=config.target_file,
-            winner_source="unknown",
+            winner_source=NO_LOCAL_CANDIDATE_GENERATOR if no_generator else "unknown",
             final_score=0.0,
             elapsed_sec=round(time.time() - start, 4),
             attempt_count=0,

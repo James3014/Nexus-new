@@ -1414,8 +1414,8 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
     monkeypatch, tmp_path: Path
 ) -> None:
     """End to end on the runner-produced row: the real sprint (fake generator, visible test fails)
-    adds a local candidate (attempt_count 2, model_calls 1); run_with_nexus turns its report into a
-    strict row and audit_run, with the one captured call, passes the row."""
+    no longer adds a local candidate since #2339 (attempt_count 1, model_calls 1); run_with_nexus
+    turns its report into a strict row and audit_run, with the one captured call, passes the row."""
 
     import hashlib
     import json
@@ -1487,7 +1487,9 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
             safe_mode=True,
         ),
     )
-    assert res.model_calls == 1 and res.attempt_count >= 2  # the local candidate is in the pool
+    # #2339 follow-up: the local fallback candidate is deleted, so the pool holds the model call only.
+    assert res.model_calls == 1 and res.attempt_count == 1
+    assert not any(str(item.source).startswith("local") for item in res.candidates)
 
     # The runner turns that report into a strict with-Nexus row (product subprocess faked).
     for name, value in {
@@ -1545,7 +1547,7 @@ def test_strict_sprint_local_fallback_counts_as_one_model_attempt(
         strict_llm_baseline=True,
     )
     row["mode"] = "with_nexus"
-    assert row["attempt_count"] >= 2 and row["model_calls"] == 1
+    assert row["attempt_count"] == 1 and row["model_calls"] == 1
     assert isinstance(row["model_attempts"], list) and len(row["model_attempts"]) == 1
     capture = tmp_path / "captures"
     capture.mkdir()

@@ -140,13 +140,12 @@ def test_deterministic_hidden_pre_retry_marks_local_winner_and_is_never_a_model_
     monkeypatch.setenv("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", "0")
     out, _ = _run_pre_retry_case(tmp_path, monkeypatch)
 
-    assert out["hidden_retry_reason"] == "hidden_verifier_failure_deterministic_pre_retry"
-    assert out["status"] == "SUCCESS"
-    # The local fixture mutator produced the delivered file, not the model.
-    assert out["nexus_winner_source"] == "local_hidden_pre_retry"
-    out["mode"] = "with_nexus"
-    apply_strict_llm_baseline_classification([out])
-    assert out["solve_classification"] == HIDDEN_FEEDBACK_RESCUE
+    # #2339 follow-up: the local fixture mutator (deterministic pre-retry) is deleted, so no local
+    # file is ever delivered on a hidden-verifier failure.
+    assert out["hidden_retry_reason"] != "hidden_verifier_failure_deterministic_pre_retry"
+    assert not out.get("hidden_pre_retry_used")
+    assert out.get("nexus_winner_source") != "local_hidden_pre_retry"
+    assert out["status"] == "FAILED"
 
 
 def test_no_hidden_feedback_disables_bounded_model_retry_quoting_hidden_test(
