@@ -59,6 +59,14 @@ from nexus.executors.worker_contract import (
     WorkerProviderUnavailable,
     redacted_output_tail,
 )
+from nexus.services.agy_failure_signals import (
+    AGY_UPSTREAM_UNAVAILABLE,
+    agy_error_text,
+    agy_login_required,
+    classify_agy_account_failure,
+    is_account_global_retirement,
+    max_account_retirements,
+)
 from nexus.services.external_account_pool import (
     AccountFailureKind,
     AccountLease,
@@ -659,12 +667,12 @@ _POOL_SWITCH_OFF = ("0", "false", "no")
 
 
 def _agy_login_required(result: CliWorkerResult) -> bool:
-    text = (
-        result.stdout.decode("utf-8", errors="replace")
-        + "\n"
-        + result.stderr.decode("utf-8", errors="replace")
+    # #2415: agy's own text only (stderr, envelope ``error``), not the reply.
+    return agy_login_required(
+        result.stdout.decode("utf-8", errors="replace"),
+        result.stderr.decode("utf-8", errors="replace"),
+        stdout_is_envelope=True,
     )
-    return any(marker in text for marker in AGY_LOGIN_PROMPT_MARKERS)
 
 
 def _installed_agy_account_pool() -> Optional[Any]:
@@ -695,11 +703,14 @@ def _agy_model_family(model: str) -> Optional[str]:
 
 
 def _agy_quota_reset_seconds(result: CliWorkerResult) -> Optional[int]:
-    """Seconds until the quota resets, from agy's "Resets in 64h23m29s" text."""
-    text = (
-        result.stdout.decode("utf-8", errors="replace")
-        + "\n"
-        + result.stderr.decode("utf-8", errors="replace")
+    """Seconds until the quota resets, from agy's "Resets in 64h23m29s" text.
+
+    #2415: read from agy's own error text, never from the model's reply.
+    """
+    text = agy_error_text(
+        result.stdout.decode("utf-8", errors="replace"),
+        result.stderr.decode("utf-8", errors="replace"),
+        stdout_is_envelope=True,
     )
     match = _AGY_RESET_IN_RE.search(text)
     if match is None:
@@ -840,25 +851,18 @@ class AgyWorkerAdapter:
 
     @staticmethod
     def _classify_failure_static(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> AccountFailureKind:
+        # #2415: account-level kinds come only from agy's own error channel
+        # (AGY_ERROR line, the JSON envelope's ``error``, else stderr text),
+        # never from the model's reply.
         if status is CliWorkerStatus.TIMED_OUT:
             return AccountFailureKind.TIMEOUT
-        text = (stdout.decode("utf-8", errors="replace") + "\n" + stderr.decode("utf-8", errors="replace")).lower()
-        if any(kw in text for kw in ("quota", "resource_exhausted", "exceeded your current quota", "insufficient_quota")):
-            return AccountFailureKind.QUOTA_EXHAUSTED
-        if any(kw in text for kw in ("429", "rate limit", "ratelimit")):
-            return AccountFailureKind.RATE_LIMITED
-        if any(kw in text for kw in ("unauthorized", "authenticated", "authentication", "invalid api key", "invalid_api_key", "401", "token expired", "invalid token", "login required")):
-            if "expired" in text:
-                return AccountFailureKind.TOKEN_EXPIRED
-            return AccountFailureKind.AUTH_OR_SESSION_INVALID
-        if "refresh failed" in text or "token refresh" in text:
-            return AccountFailureKind.TOKEN_REFRESH_FAILED
-        if "403" in text or "forbidden" in text:
-            return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-        if any(kw in text for kw in ("unavailable", "503", "service unavailable")):
-            return AccountFailureKind.ACCOUNT_UNAVAILABLE
-        if "disabled" in text:
-            return AccountFailureKind.ACCOUNT_DISABLED
+        kind = classify_agy_account_failure(
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+            stdout_is_envelope=True,
+        )
+        if kind is not None:
+            return kind
         if exit_code == 2:
             return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
         return AccountFailureKind.UNKNOWN
@@ -1588,6 +1592,15 @@ class AgyWorkerAdapter:
         previous_kind: Optional[AccountFailureKind] = None
 
         credential_refusals = 0
+        # #2415: account-wide retirements this run made (not quota cooldowns,
+        # not token-less accounts); at the cap the failure is host-wide.
+        account_retirements = 0
+        retirement_cap = max_account_retirements()
+        upstream_outage: Optional[AccountFailureKind] = None
+        quota_failures = 0
+        # The account whose attempt produced ``last_result`` (#2415): a later
+        # token-less account must not take over the receipt's tails.
+        last_result_hash: Optional[str] = None
 
         retirement_unsafe = False
 
@@ -1609,7 +1622,7 @@ class AgyWorkerAdapter:
         # Each pass claims an account not tried yet, so pool_size + 1 passes
         # always end in success, a final failure or an exhausted pool.
         for _ in range(pool_size + 1):
-            if retirement_unsafe:
+            if retirement_unsafe or upstream_outage is not None:
                 break
             remaining = timeout - (time.monotonic() - started_at) if timeout > 0 else 0.0
             if remaining <= 0:
@@ -1627,6 +1640,15 @@ class AgyWorkerAdapter:
                 break
             except AgyAccountPoolBusyError:
                 failure_reason = AGY_POOL_BUSY
+                if quota_failures:
+                    # #2415: say the busy pool came after quota exhaustion.
+                    failure_reason += (
+                        f": after quota exhaustion on {quota_failures} account(s)"
+                    )
+                    if earliest_reset is not None:
+                        failure_reason += (
+                            f", earliest reset in {_format_duration(earliest_reset)}"
+                        )
                 break
             except Exception as exc:
                 failure_reason = f"account pool lease acquire failed: {type(exc).__name__}"
@@ -1673,6 +1695,7 @@ class AgyWorkerAdapter:
                 attempts += 1
                 result = run_cli_worker(request, on_process_group=on_process_group)
                 last_result = result
+                last_result_hash = claim.account_alias_hash
                 if result.status is CliWorkerStatus.TIMED_OUT:
                     real_calls += 1
                     outcome = WorkerOutcome.INCOMPLETE.value
@@ -1704,6 +1727,7 @@ class AgyWorkerAdapter:
                 retire_kind = None if kind is AccountFailureKind.RATE_LIMITED else kind
                 excluded.add(claim.account_alias_hash)
                 if kind is AccountFailureKind.QUOTA_EXHAUSTED:
+                    quota_failures += 1
                     reset_seconds = _agy_quota_reset_seconds(result)
                     if reset_seconds is not None and (
                         earliest_reset is None or reset_seconds < earliest_reset
@@ -1722,6 +1746,17 @@ class AgyWorkerAdapter:
                 else:
                     rotations += 1
             finally:
+                if (
+                    retire_kind is not None
+                    and attempts
+                    and last_result_hash == claim.account_alias_hash
+                    and is_account_global_retirement(retire_kind, model_family)
+                ):
+                    # A provider-reported account-wide failure (a token-less
+                    # account is a local fact and does not count).
+                    account_retirements += 1
+                    if account_retirements >= retirement_cap:
+                        upstream_outage = retire_kind
                 if retire_kind is not None:
                     excluded.add(claim.account_alias_hash)
                     try:
@@ -1739,8 +1774,14 @@ class AgyWorkerAdapter:
                         retirement_unsafe = True
                 claim.release()
         else:
-            if not retirement_unsafe:
+            if not retirement_unsafe and upstream_outage is None:
                 failure_reason = exhausted_reason()
+        if upstream_outage is not None and not retirement_unsafe:
+            failure_reason = (
+                f"{AGY_UPSTREAM_UNAVAILABLE}: {account_retirements} accounts failed "
+                f"account-wide in one run (last: {upstream_outage.value}); "
+                "no further accounts retired"
+            )
         if retirement_unsafe:
             failure_reason = AGY_ACCOUNT_RETIREMENT_UNSAFE
 
@@ -1753,7 +1794,8 @@ class AgyWorkerAdapter:
             self.provider, contract, target=target, executable=executable, argv=argv,
             started_at=started_at, result=last_result, outcome=outcome,
             failure_reason=failure_reason, provider_calls=real_calls, rotations=rotations,
-            attempts=attempts, account_alias_hash=last_hash,
+            attempts=attempts,
+            account_alias_hash=last_result_hash if last_result is not None else last_hash,
         )
 
 
