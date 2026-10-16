@@ -1,0 +1,83 @@
+name: Bindings preflight
+
+# #2365: the merge queue's `coord ready` ran scripts/ops/pr_preflight.py --only
+# bindings by hand before every GO. This workflow runs the same check on GitHub
+# so it can be a required status and no session has to do it. It uses the
+# default-branch copy of the script (pull_request_target), never PR code: the PR
+# head is fetched as plain git objects so the script can read its commit
+# messages, and the PR body/title come from the REST API. The result is
+# published as the commit status "Bindings preflight (default branch)" on the
+# PR head; a body edit (types: edited) re-runs it without a new push.
+# The check fails when `Closes #N`, the NEXUS_ISSUE_INTENT_V1 block and the
+# final merge fields (commit messages) disagree (#1247 option A), or when the
+# PR cannot be read.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  bindings-preflight:
+    name: Bindings preflight (default branch job)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Checkout default branch (never PR code)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the PR head as git objects only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # No checkout of the PR tree: the script only needs the commits for
+          # their messages. The token is passed per command, never stored.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            fetch --no-tags origin "refs/pull/${PR}/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
+
+      - name: Run the bindings preflight and publish the status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONTEXT: Bindings preflight (default branch)
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/bindings-preflight.txt"
+          python3 -I scripts/ops/pr_preflight.py --repo . --pr "$PR" --head "$HEAD_SHA" \
+            --only bindings --no-fetch > "$out" 2>&1
+          rc=$?
+          cat "$out"
+          if [ "$rc" -eq 0 ]; then
+            state=success; description="bindings agree at head ${HEAD_SHA:0:12}"
+          else
+            # One line, sanitized: the status text is rendered on the PR.
+            first="$(grep -m1 -E '^FAIL|^PREFLIGHT|Error|error' "$out" | tr -c 'A-Za-z0-9 _:#.,()/-' ' ' | cut -c1-120 || true)"
+            state=failure; description="${first:-bindings preflight failed} (head ${HEAD_SHA:0:12})"
+          fi
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state="$state" -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="${description:0:140}" > /dev/null
+          exit "$rc"
