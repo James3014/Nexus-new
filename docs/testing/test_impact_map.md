@@ -113,6 +113,15 @@
 | nexus/services/open_swe_external_intelligence.py | tests/services/test_open_swe_external_intelligence.py, tests/services/test_open_swe_worker_transport.py | active | high | open_swe_external_intelligence_effect_projection_contract |
 | nexus/services/external_intelligence_core_binding.py | tests/services/test_external_intelligence_core_binding.py, tests/services/test_external_intelligence_fanout.py, tests/services/test_open_swe_worker_transport.py, tests/services/test_external_intelligence_closure.py | active | high | external_intelligence_core_mutation_binding_contract |
 | nexus/services | tests/services, tests/test_services_*.py | active | medium | service_contract |
+| nexus/services/local_assist_advisor_canary.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_bounded_dispatch.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_candidate_canary.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_contribution.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_default_policy.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_preflight.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_value_matrix.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/local_assist_verified_canary.py | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
+| nexus/services/reach/resolvers | tests/services/test_archived_deadcode_b1_b5_2026_10_16.py | active | low | retired_deadcode_b1_b5_guard_2340 |
 | nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
 | nexus/evaluation/eval_harness.py | tests/services/test_archived_legacy_engine_2026_10_13.py | active | medium | archived_legacy_engine_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
@@ -127,6 +136,9 @@
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py | active | high | agy_write_admission_run_home_seatbelt_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
+| tests/conftest.py | tests/conftest.py, tests/services/test_executor_resolution_observable.py | active | high | test_contract |
+| tests/services/test_executor_resolution_observable.py | tests/services/test_executor_resolution_observable.py | active | high | test_contract |
+| nexus/services/executor_self_check.py | tests/services/test_executor_resolution_observable.py, tests/services/test_runtime_compat.py | active | high | executor_resolution_observable_self_check_contract |
 | nexus/services/post_candidate_seam.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py, tests/services/test_escalate_planner_signal_triggers.py | active | high | post_candidate_seam_sandbox_ultra_review_file_lock_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
 | nexus/executors/exec_policy.py | tests/nexus/executors/test_exec_policy.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_candidate_verifier.py, tests/engine/test_cli_pregate.py | active | high | worker_exec_policy_contract |
@@ -384,6 +396,8 @@
 | scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
 | scripts/ops/review_record_check.py | tests/ops/test_review_record_check.py | active | high | review_record_advisory_check_contract |
 | .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
+| .github/workflows/pr-bindings-preflight.yml | tests/ops/test_pr_bindings_preflight_workflow.py, tests/ops/test_pr_workflow_concurrency.py | active | high | bindings_preflight_workflow_contract |
+| tests/ops/test_pr_bindings_preflight_workflow.py | tests/ops/test_pr_bindings_preflight_workflow.py | active | high | test_contract |
 | tests/nightly_quarantine_items | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_items_per_entry_package |
 | tests/ops/test_nightly_quarantine_items_layout.py | tests/ops/test_nightly_quarantine_items_layout.py | active | medium | test_contract |
 | tests/nightly_quarantine_entries.py | tests/ops/test_nightly_quarantine.py, tests/ops/test_nightly_quarantine_items_layout.py | active | medium | nightly_quarantine_entries_compat_shim |
