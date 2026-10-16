@@ -2519,3 +2519,103 @@ def test_cline_target_inside_a_credential_path_is_refused_before_launch(monkeypa
     )
     assert calls == []
     assert receipt.failure_reason == "cline_target_inside_credential_path"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Tool approval requires an interactive session, but this session is non-interactive.",
+        "Tool was not executed",
+        "User rejected the tool call",
+    ],
+)
+def test_cline_skip_reason_suffix_denial_is_non_delivery(reason):
+    """#2332: every cline 3.0.69 skip reason ends with a fixed suffix; any of them
+    on a tool ``content_end`` error is a denial even when the run ends ``stop``."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    skip = f"{reason} -- NOT a tool or system failure. Clarify with user before proceeding."
+    event = {
+        "type": "agent_event",
+        "event": {
+            "type": "content_end",
+            "contentType": "tool",
+            "toolName": "editor",
+            "output": {"error": skip},
+            "error": json.dumps({"error": skip}),
+        },
+    }
+    stdout = (json.dumps(event) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+def test_cline_skip_suffix_in_tool_result_or_model_text_is_not_a_denial():
+    """The suffix counts only in a tool's error fields, never in result/model text."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    suffix = "x -- NOT a tool or system failure. Clarify with user before proceeding."
+    tool_result = {
+        "type": "agent_event",
+        "event": {
+            "type": "content_end",
+            "contentType": "tool",
+            "toolName": "read_file",
+            "output": {"result": suffix},
+        },
+    }
+    text = {
+        "type": "agent_event",
+        "event": {"type": "content_end", "contentType": "text", "text": suffix},
+    }
+    stdout = (json.dumps(tool_result) + "\n" + json.dumps(text) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") is None
+
+
+@pytest.mark.parametrize("field", ["event_error", "output_error", "error_object"])
+def test_cline_skip_suffix_in_each_tool_error_field_is_a_denial(field):
+    """#2335 review: each tool error field alone carries the denial."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    skip = "Tool was not executed -- NOT a tool or system failure. Clarify with user."
+    event = {"type": "content_end", "contentType": "tool", "toolName": "editor"}
+    if field == "event_error":
+        event["error"] = skip
+    elif field == "output_error":
+        event["output"] = {"error": skip}
+    else:
+        event["error"] = {"message": skip}
+    stdout = (json.dumps({"type": "agent_event", "event": event}) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+def test_cline_skip_suffix_on_stderr_is_a_denial():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    stderr = b"Tool was not executed -- NOT a tool or system failure. Clarify with user.\n"
+    assert cline_delivery_failure(_CLINE_OK, stderr) == "cline_permission_denied"
+
+
+@pytest.mark.parametrize(
+    "shape", ["error_object_error_key", "truncated_reason_event", "truncated_reason_output"]
+)
+def test_cline_structured_or_truncated_skip_reason_is_a_denial(shape):
+    """#2335 Gemini r2: ``{"error": ...}`` objects and reasons cut before the suffix."""
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    event = {"type": "content_end", "contentType": "tool", "toolName": "editor"}
+    if shape == "error_object_error_key":
+        event["error"] = {"error": "User rejected the tool call -- NOT a tool or system failure."}
+    elif shape == "truncated_reason_event":
+        event["error"] = "Tool approval requires an interactive session, but this"
+    else:
+        event["output"] = {"error": "Tool was not executed"}
+    stdout = (json.dumps({"type": "agent_event", "event": event}) + "\n").encode() + _CLINE_OK
+    assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"

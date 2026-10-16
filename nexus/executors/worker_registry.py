@@ -285,7 +285,12 @@ class DirectCliWorkerAdapter:
 # reason "Tool execution denied by user." (observed in the cline 3.0.69 CLI).
 # The text markers are trusted on stderr only (as for Agy's headless marker);
 # stdout is read as JSON events and only structural keys are inspected.
-_CLINE_DENIAL_MARKERS = ("execution-denied", "execution denied", "denied by user")
+_CLINE_DENIAL_MARKERS = (
+    "execution-denied",
+    "execution denied",
+    "denied by user",
+    "-- not a tool or system failure",
+)
 CLINE_PERMISSION_MODE = "auto_approve_false"
 # Assumed structured shapes (cline 3.0.69 bundles the AI SDK tool-result
 # model; the exact ``--json`` envelope is not pinned, so any nesting depth is
@@ -299,6 +304,16 @@ CLINE_PERMISSION_MODE = "auto_approve_false"
 # ``output.error`` is ``Tool "<name>" requires approval in a TTY session -- ...``
 # and the run may still end with ``finishReason: "stop"``.
 _CLINE_APPROVAL_REQUIRED = "requires approval in a tty session"
+# Every cline 3.0.69 tool skip reason ("Tool approval requires an interactive
+# session ...", "Tool was not executed", "User rejected the tool call", the TTY
+# text above) ends with this fixed suffix (#2332).
+_CLINE_SKIP_SUFFIX = "-- not a tool or system failure"
+# Reason prefixes, so a reason whose suffix was cut off still counts (#2335).
+_CLINE_SKIP_REASONS = (
+    "tool approval requires an interactive session",
+    "tool was not executed",
+    "user rejected the tool call",
+)
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
 # Only a finish reason observed from cline 3.0.69 as a clean end counts as
 # delivery; any other, unknown or missing value is non-delivery.
@@ -319,8 +334,18 @@ def _cline_tool_error_denied(event: dict[str, Any]) -> bool:
     output = event.get("output")
     if isinstance(output, dict):
         candidates.append(output.get("error"))
+    # A structured error object carries its text in ``message`` (#2335 review).
+    for item in list(candidates):
+        if isinstance(item, dict):
+            candidates += [item.get("error"), item.get("message")]
     return any(
-        isinstance(item, str) and _CLINE_APPROVAL_REQUIRED in item.lower() for item in candidates
+        isinstance(item, str)
+        and (
+            _CLINE_APPROVAL_REQUIRED in item.lower()
+            or _CLINE_SKIP_SUFFIX in item.lower()
+            or item.strip().lower().startswith(_CLINE_SKIP_REASONS)
+        )
+        for item in candidates
     )
 
 
@@ -356,7 +381,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     """Typed non-delivery reason for a Cline run that exited 0, else ``None``.
 
     Delivery requires a JSON ``run_result`` event whose ``finishReason`` is
-    not ``error``; any denied tool action makes the run non-delivery (#2195).
+    ``stop``; any denied tool action makes the run non-delivery (#2195).
     A denial is a text marker on stderr or a structured stdout event; model
     text that merely quotes a marker is not a denial.
     """
