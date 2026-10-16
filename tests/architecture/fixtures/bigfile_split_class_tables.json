@@ -1,0 +1,1114 @@
+{
+ "classes": {
+  "nexus.orchestrator.self_hosted_task_service:SelfHostedTaskService": {
+   "PUBLIC_WORK_CLAIM_CEILING": {
+    "kind": "str",
+    "signature": null
+   },
+   "PUBLIC_WORK_CLAIM_SCHEMA": {
+    "kind": "str",
+    "signature": null
+   },
+   "TERMINAL_CORE_RECORD_SCHEMA": {
+    "kind": "str",
+    "signature": null
+   },
+   "_CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS": {
+    "kind": "frozenset",
+    "signature": null
+   },
+   "_TERMINAL_CORE_EXPECTED_HOST_REASONS": {
+    "kind": "frozenset",
+    "signature": null
+   },
+   "__init__": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state_dir: str | Path | None = None, POSITIONAL_OR_KEYWORD:runner: Optional[Runner] = None, KEYWORD_ONLY:stale_after_seconds: float = 30.0, KEYWORD_ONLY:auto_reconcile: bool = True, KEYWORD_ONLY:worker_registry: Optional[WorkerRegistry] = None, KEYWORD_ONLY:ephemeral: bool = False, KEYWORD_ONLY:ambient_core_port: Optional[AmbientCoreControlPort] = None)"
+   },
+   "_ambient_core_required": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> bool"
+   },
+   "_approval_requirements": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_archive_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_archive_state_candidates": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> list[Path]"
+   },
+   "_archive_state_path": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Path"
+   },
+   "_assert_persisted_workforce_dispatch": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:binding: Optional[Mapping[str, Any]], KEYWORD_ONLY:active_provider: Optional[str] = None) -> None"
+   },
+   "_bound_custom_runner_values": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:values: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_bridge_validate_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str | None = None, KEYWORD_ONLY:operation: str = 'MUTATION') -> Optional[dict[str, Any]]"
+   },
+   "_build_legacy_v1_negative_compatibility_proof": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:lease: TargetWorktreeLease, POSITIONAL_OR_KEYWORD:manager: WorktreeManager) -> dict[str, Any] | None"
+   },
+   "_build_terminal_core_record": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], KEYWORD_ONLY:contract: Any = None) -> Optional[dict[str, Any]]"
+   },
+   "_candidate_commit": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Optional[str]"
+   },
+   "_capture_resumed_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:controller: SelfHostedDevelopmentController, POSITIONAL_OR_KEYWORD:lease: TargetWorktreeLease, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any])"
+   },
+   "_card_evidence_binding_error": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> Optional[str]"
+   },
+   "_checkpoint": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:status: str, POSITIONAL_OR_KEYWORD:values: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:attempt_id: Optional[str] = None) -> Optional[dict[str, Any]]"
+   },
+   "_claim_hash": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:identity: Mapping[str, Any]) -> str"
+   },
+   "_claim_identity": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_claim_request": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_cleanup_authority_blocker": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:contract: Any, POSITIONAL_OR_KEYWORD:lease: TargetWorktreeLease) -> Optional[str]"
+   },
+   "_complete_direct_canonical_physical": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:expected_commit_sha: Optional[str] = None) -> dict[str, Any]"
+   },
+   "_contract_from_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> ArchitectTaskContract"
+   },
+   "_core_blocked_receipt": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:verified: VerifiedCandidateReceipt, POSITIONAL_OR_KEYWORD:verdict: Mapping[str, Any]) -> VerifiedCandidateReceipt"
+   },
+   "_create_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: dict[str, Any]) -> tuple[dict[str, Any], bool]"
+   },
+   "_direct_lane_claims_evidence": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> bool"
+   },
+   "_emit_attempt_transition": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:result: Optional[Mapping[str, Any]], POSITIONAL_OR_KEYWORD:task_id: str) -> None"
+   },
+   "_emit_bound_attempt_transition": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:result: Optional[Mapping[str, Any]], POSITIONAL_OR_KEYWORD:task_id: str) -> None"
+   },
+   "_escalation_policy": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract) -> Optional[WorkerEscalationPolicy]"
+   },
+   "_finalize_runtime_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request, POSITIONAL_OR_KEYWORD:lease, POSITIONAL_OR_KEYWORD:state, POSITIONAL_OR_KEYWORD:attempts, POSITIONAL_OR_KEYWORD:update, KEYWORD_ONLY:execution, KEYWORD_ONLY:status)"
+   },
+   "_finalize_runtime_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id, POSITIONAL_OR_KEYWORD:attempt_id, POSITIONAL_OR_KEYWORD:exc)"
+   },
+   "_heartbeat": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str, POSITIONAL_OR_KEYWORD:stop: threading.Event) -> None"
+   },
+   "_invalid_state_status": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:code: str, KEYWORD_ONLY:detail: str, KEYWORD_ONLY:source_path: Path, KEYWORD_ONLY:approval_requirements_reasons: Sequence[str] = ()) -> dict[str, Any]"
+   },
+   "_is_negative_candidate_record": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any) -> bool"
+   },
+   "_is_negative_verified_record": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any) -> bool"
+   },
+   "_latest_archived_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]"
+   },
+   "_launch_worker": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_lease_from_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> TargetWorktreeLease"
+   },
+   "_legacy_v1_omission_set_matches": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:required_current_fields: set[str] | None = None) -> bool"
+   },
+   "_load_state_path": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:path: Path, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_lock_path": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_mutate_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:mutator: Callable[[dict[str, Any]], None]) -> Optional[dict[str, Any]]"
+   },
+   "_next_ready_provider": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:policy: WorkerEscalationPolicy, POSITIONAL_OR_KEYWORD:attempts: Sequence[WorkerExecutionReceipt], KEYWORD_ONLY:before_preflight: Callable[[str], None]) -> Optional[str]"
+   },
+   "_normalize_state_write": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Mapping[str, Any]"
+   },
+   "_persisted_cleanup_contract": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> tuple[Optional[ArchitectTaskContract], Optional[str]]"
+   },
+   "_pid_alive": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:pid: int) -> bool"
+   },
+   "_pre_apply_rejection_evidence": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "_prepare_ambient_core": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:lease, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str) -> Mapping[str, Any]"
+   },
+   "_project_public_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:claim_record: Mapping[str, Any], KEYWORD_ONLY:state: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_projected_blocker": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "_projected_pre_apply_recovery_evidence": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "_promotion_authority_error": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:contract: Optional[ArchitectTaskContract] = None, KEYWORD_ONLY:request: Optional[Mapping[str, Any]] = None) -> Optional[str]"
+   },
+   "_prompt": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract) -> str"
+   },
+   "_reactivate_archived_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: dict[str, Any]) -> dict[str, Any]"
+   },
+   "_read_adoption_artifact": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:raw_locator: str, POSITIONAL_OR_KEYWORD:digest: str, POSITIONAL_OR_KEYWORD:kind: str) -> bytes"
+   },
+   "_read_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_read_state_snapshot": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_receipt_from_state": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any) -> Optional[WorkerExecutionReceipt]"
+   },
+   "_reconcile_direct_action": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_reconcile_direct_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_reconcile_projected_pre_apply_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:evidence: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_record_direct_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:blocker: str, POSITIONAL_OR_KEYWORD:error: str = '') -> Optional[dict[str, Any]]"
+   },
+   "_record_event_append_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:error: Exception) -> None"
+   },
+   "_record_integration": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:receipt: Any, KEYWORD_ONLY:task_id: Optional[str] = None) -> dict[str, Any]"
+   },
+   "_record_terminal_core_not_covered": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: Any) -> None"
+   },
+   "_record_track1_verified_outcome": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:contract, KEYWORD_ONLY:lease, KEYWORD_ONLY:state: Mapping[str, Any], KEYWORD_ONLY:candidate, KEYWORD_ONLY:verified: VerifiedCandidateReceipt, KEYWORD_ONLY:execution: WorkerExecutionReceipt) -> dict[str, Any]"
+   },
+   "_replace_failed_target": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:manager: WorktreeManager, POSITIONAL_OR_KEYWORD:controller: SelfHostedDevelopmentController, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:lease: TargetWorktreeLease, KEYWORD_ONLY:task_states: Optional[Mapping[str, dict]] = None) -> TargetWorktreeLease"
+   },
+   "_request_hash": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> str"
+   },
+   "_require_integrated_replacement": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:superseded_by: str) -> None"
+   },
+   "_resolve_current_execution_task_id": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> str"
+   },
+   "_resume_external_adoption": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_retained_state_has_candidate_authority": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> bool"
+   },
+   "_retained_state_has_complete_negative_evidence": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> bool"
+   },
+   "_revalidate_ambient_core": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:preparation: Mapping[str, Any], POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:lease, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:active_provider: str) -> None"
+   },
+   "_revalidate_provider_boundary": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:binding: Optional[Mapping[str, Any]], KEYWORD_ONLY:active_provider: Optional[str] = None) -> None"
+   },
+   "_revalidate_tracked_dispatch_task_card": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:binding: Optional[Mapping[str, Any]]) -> None"
+   },
+   "_run_default": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:request, POSITIONAL_OR_KEYWORD:update)"
+   },
+   "_run_default_resumable": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:update: Callable[[str, dict[str, Any]], None], KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str) -> dict[str, Any]"
+   },
+   "_run_fail_to_pass_probe": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:manager, POSITIONAL_OR_KEYWORD:contract) -> dict[str, Any]"
+   },
+   "_run_owned_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> None"
+   },
+   "_select_initial_provider": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract, KEYWORD_ONLY:before_preflight: Callable[[str], None]) -> tuple[str, Any]"
+   },
+   "_set_child_pgid": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str, POSITIONAL_OR_KEYWORD:pgid: Optional[int]) -> None"
+   },
+   "_settled_candidate_less_final_block": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> bool"
+   },
+   "_snapshot_target_integrity": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:target_path: Path) -> tuple[str, Optional[str]]"
+   },
+   "_state_error_receipt": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:path: Path, POSITIONAL_OR_KEYWORD:error: BaseException) -> dict[str, Any]"
+   },
+   "_state_lock": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Iterator[None]"
+   },
+   "_state_path": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Path"
+   },
+   "_store_adoption_artifact": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:digest: str, POSITIONAL_OR_KEYWORD:content: bytes, POSITIONAL_OR_KEYWORD:kind: str) -> str"
+   },
+   "_submission_task_states": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, dict[str, Any]]"
+   },
+   "_submit_direct_canonical": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "_task_action_envelope": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_terminal_failure_blocker": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "_terminal_retry_revision_refresh_allowed": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:existing: Mapping[str, Any], POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:contract: ArchitectTaskContract) -> bool"
+   },
+   "_terminate_owned_processes": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:exclude_pid: Optional[int] = None) -> None"
+   },
+   "_touch_owned_state": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: dict[str, Any], POSITIONAL_OR_KEYWORD:attempt_id: str) -> None"
+   },
+   "_validate_claim_enclosure": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:record: Mapping[str, Any], KEYWORD_ONLY:expected_task_id: str = '') -> None"
+   },
+   "_validate_claim_locked": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> Mapping[str, Any]"
+   },
+   "_validate_claim_record": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:record: Mapping[str, Any]) -> None"
+   },
+   "_validate_persisted_external_adoption": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:request: ExternalCandidateAdoptionRequest, POSITIONAL_OR_KEYWORD:semantic_hash: str, POSITIONAL_OR_KEYWORD:acceptance: Mapping[str, Any]) -> None"
+   },
+   "_validate_state_payload": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:payload: Mapping[str, Any], POSITIONAL_OR_KEYWORD:source_path: Path) -> dict[str, Any]"
+   },
+   "_verify_ambient_core_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:contract, KEYWORD_ONLY:request: Mapping[str, Any], KEYWORD_ONLY:lease, KEYWORD_ONLY:state: Mapping[str, Any], KEYWORD_ONLY:candidate, KEYWORD_ONLY:verified: VerifiedCandidateReceipt) -> VerifiedCandidateReceipt"
+   },
+   "_wait_for_owner": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str, POSITIONAL_OR_KEYWORD:pid: int) -> bool"
+   },
+   "_with_task_action": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: dict[str, Any]) -> dict[str, Any]"
+   },
+   "_worker_context_materialization": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:request: Mapping[str, Any], KEYWORD_ONLY:state: Mapping[str, Any], KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:fresh_submission: bool, KEYWORD_ONLY:contract: ArchitectTaskContract, KEYWORD_ONLY:lease: TargetWorktreeLease, KEYWORD_ONLY:base_prompt: str, KEYWORD_ONLY:actual_provider: str, KEYWORD_ONLY:actual_model: str | None) -> tuple[str, dict[str, Any]] | None"
+   },
+   "_workspace_task_states": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, dict[str, Any]]"
+   },
+   "_write_state": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: dict[str, Any]) -> dict[str, Any]"
+   },
+   "_write_state_locked": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:state: dict[str, Any]) -> dict[str, Any]"
+   },
+   "acquire_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:enforce_issue_uniqueness: bool = False) -> dict[str, Any]"
+   },
+   "adopt_external_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:raw_request: ExternalCandidateAdoptionRequest | Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "apply_workspace_convergence": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:controller_root: Optional[str | Path] = None, KEYWORD_ONLY:expected_controller_revision: str, KEYWORD_ONLY:expected_plan_hash: str, KEYWORD_ONLY:apply: bool = False) -> dict[str, Any]"
+   },
+   "approve_promotion": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:candidate_commit_sha: str, KEYWORD_ONLY:candidate_tree_sha: str, KEYWORD_ONLY:candidate_state_hash: str, KEYWORD_ONLY:verified_receipt_hash: str, KEYWORD_ONLY:approval_context: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+   },
+   "archive_states": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:dry_run: bool = True) -> dict[str, Any]"
+   },
+   "bind_candidate_integration_closure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:external_acceptance: ExternalAcceptanceReceipt, KEYWORD_ONLY:approval: Mapping[str, Any], KEYWORD_ONLY:runtime_identity: Mapping[str, Any], KEYWORD_ONLY:expected_canonical_head: str, KEYWORD_ONLY:integration_branch: str = 'nexus/integration/main', KEYWORD_ONLY:_recovery_authority_normalization: bool = False) -> dict[str, Any]"
+   },
+   "build_contract": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> ArchitectTaskContract"
+   },
+   "cancel_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "canonical_state_dir": {
+    "kind": "staticmethod",
+    "signature": "() -> Path"
+   },
+   "claim_work": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:enforce_issue_uniqueness: bool = False) -> dict[str, Any]"
+   },
+   "cleanup_tasks": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:task_id: Optional[str] = None, KEYWORD_ONLY:dry_run: bool = True) -> dict[str, Any]"
+   },
+   "close_retained_without_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:superseded_by: str) -> dict[str, Any]"
+   },
+   "close_task_without_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:superseded_by: str) -> dict[str, Any]"
+   },
+   "close_without_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:superseded_by: str) -> dict[str, Any]"
+   },
+   "complete_direct_canonical": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:expected_commit_sha: Optional[str] = None) -> dict[str, Any]"
+   },
+   "correct_applied_integration_receipt": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:expected_state_hash: str, KEYWORD_ONLY:original_receipt_hash: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:candidate_commit_sha: str, KEYWORD_ONLY:candidate_tree_sha: str, KEYWORD_ONLY:acceptance_receipt_hash: str, KEYWORD_ONLY:approval: Mapping[str, Any], KEYWORD_ONLY:authorization: Mapping[str, Any], KEYWORD_ONLY:runtime_identity: Mapping[str, Any], KEYWORD_ONLY:closure_binding: Mapping[str, Any], KEYWORD_ONLY:integration_branch: str, KEYWORD_ONLY:expected_applied_head: str, KEYWORD_ONLY:corrected_base_sha: str, KEYWORD_ONLY:reason: str = 'RECOVERY_BASE_MISBOUND_TO_APPLIED_HEAD') -> dict[str, Any]"
+   },
+   "correct_integration_receipt": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:expected_state_hash: str, KEYWORD_ONLY:original_receipt_hash: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:candidate_commit_sha: str, KEYWORD_ONLY:candidate_tree_sha: str, KEYWORD_ONLY:acceptance_receipt_hash: str, KEYWORD_ONLY:approval: Mapping[str, Any], KEYWORD_ONLY:authorization: Mapping[str, Any], KEYWORD_ONLY:runtime_identity: Mapping[str, Any], KEYWORD_ONLY:closure_binding: Mapping[str, Any], KEYWORD_ONLY:integration_branch: str, KEYWORD_ONLY:expected_applied_head: str, KEYWORD_ONLY:corrected_base_sha: str, KEYWORD_ONLY:reason: str = 'RECOVERY_BASE_MISBOUND_TO_APPLIED_HEAD') -> dict[str, Any]"
+   },
+   "dispose_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:disposition: str, KEYWORD_ONLY:superseded_by: Optional[str] = None) -> dict[str, Any]"
+   },
+   "evaluate_candidate_acceptance": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request: CandidateAcceptanceRequest | Mapping[str, Any], POSITIONAL_OR_KEYWORD:review: IndependentReviewReceipt | Mapping[str, Any], KEYWORD_ONLY:verified_repair_evidence: Mapping[str, Any] | None = None) -> dict[str, Any]"
+   },
+   "find_tasks_by_repository_issue": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:repository: str, POSITIONAL_OR_KEYWORD:issue_number: int) -> list[dict[str, Any]]"
+   },
+   "freeze_retained_forensic_target": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:authority_confirmation: bool = False) -> dict[str, Any]"
+   },
+   "get_promotion_packet": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "get_receipt": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "get_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "get_task_snapshot": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:include_details: bool = False) -> Optional[dict[str, Any]]"
+   },
+   "integrate_approved": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:integration_branch: str = 'nexus/integration/main', KEYWORD_ONLY:runtime_identity: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+   },
+   "lifecycle_status": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, Any]"
+   },
+   "list_actionable_tasks": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:include_details: bool = False) -> dict[str, Any]"
+   },
+   "list_active_claims": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:filter_spec: Mapping[str, Any] | None = None) -> list[dict[str, Any]]"
+   },
+   "list_active_work_claims": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:filter_spec: Mapping[str, Any] | None = None) -> list[dict[str, Any]]"
+   },
+   "normalize_integration_recovery_authority": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:external_acceptance: ExternalAcceptanceReceipt, KEYWORD_ONLY:approval: Mapping[str, Any], KEYWORD_ONLY:runtime_identity: Mapping[str, Any], KEYWORD_ONLY:expected_canonical_head: str, KEYWORD_ONLY:integration_branch: str = 'nexus/integration/main') -> dict[str, Any]"
+   },
+   "owner_finish": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:candidate_commit_sha: str, KEYWORD_ONLY:candidate_tree_sha: str, KEYWORD_ONLY:candidate_state_hash: str, KEYWORD_ONLY:verified_receipt_hash: str, KEYWORD_ONLY:integration_branch: str = 'nexus/integration/main', KEYWORD_ONLY:approval_context: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:external_acceptance: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:integration_authorization: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+   },
+   "project_candidate_acceptance_for_retry": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: CandidateAcceptanceRequest | Mapping[str, Any], POSITIONAL_OR_KEYWORD:review: IndependentReviewReceipt | Mapping[str, Any], KEYWORD_ONLY:verified_repair_evidence: Mapping[str, Any] | None = None, KEYWORD_ONLY:repair_target: str = 'IMPLEMENTATION') -> dict[str, Any]"
+   },
+   "read_canonical_attempt_continuity": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> list[Any]"
+   },
+   "read_canonical_attempt_events": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str, KEYWORD_ONLY:project_root: Optional[Path] = None) -> list[dict[str, Any]]"
+   },
+   "read_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "read_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "reconcile_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "reconcile_tasks": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> list[dict[str, Any]]"
+   },
+   "record_canonical_action_failure": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:blocker: str, POSITIONAL_OR_KEYWORD:error: str = '') -> Optional[dict[str, Any]]"
+   },
+   "record_operator_outcome": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:receipt: OperatorOutcomeReceipt | Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "recover_applied_integration_receipt": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:receipt: Any, KEYWORD_ONLY:runtime_identity: Mapping[str, Any], KEYWORD_ONLY:integration_branch: Optional[str] = None) -> dict[str, Any]"
+   },
+   "recover_retained_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "recover_verified_uncommitted_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "recover_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:reason: str = 'RECOVERY') -> dict[str, Any]"
+   },
+   "rehydrate_project_entry": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: Optional[str], KEYWORD_ONLY:repository: str, KEYWORD_ONLY:issue_number: int) -> dict[str, Any]"
+   },
+   "rehydrate_task_continuation": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: Optional[str] = None, KEYWORD_ONLY:_project_entry: bool = False, KEYWORD_ONLY:_state: Mapping[str, Any] | None = None, KEYWORD_ONLY:_project_entry_repository: str | None = None, KEYWORD_ONLY:_project_entry_issue: int | None = None) -> dict[str, Any]"
+   },
+   "rehydrate_task_continuation_snapshot": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:attempt_continuity_events: Iterable[Any], KEYWORD_ONLY:attempt_id: Optional[str] = None) -> dict[str, Any]"
+   },
+   "release_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "renew_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "resume_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "retry_integration": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:integration_branch: Optional[str] = None) -> dict[str, Any]"
+   },
+   "retry_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "state_root_inventory": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, Any]"
+   },
+   "submit_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "validate_work_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "verify_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "wait_task": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:timeout_seconds: float = 10.0, KEYWORD_ONLY:poll_interval_seconds: float = 0.25, KEYWORD_ONLY:include_details: bool = False) -> Optional[dict[str, Any]]"
+   },
+   "workspace_convergence_plan": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:controller_root: Optional[str | Path] = None, KEYWORD_ONLY:expected_controller_revision: Optional[str] = None) -> dict[str, Any]"
+   },
+   "workspace_inventory": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:controller_root: Optional[str | Path] = None) -> dict[str, Any]"
+   },
+   "workspace_slot_prepare": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:campaign_id: str = 'default', KEYWORD_ONLY:slot_index: int = 0) -> dict[str, Any]"
+   },
+   "workspace_slot_status": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:campaign_id: str = 'default', KEYWORD_ONLY:slot_index: int = 0, KEYWORD_ONLY:controller_root: Optional[str | Path] = None) -> dict[str, Any]"
+   }
+  },
+  "nexus.orchestrator.unified_mcp_gateway:UnifiedMCPGateway": {
+   "_ASSIST_GIT_CHANGE_RE": {
+    "kind": "Pattern",
+    "signature": null
+   },
+   "_ASSIST_GIT_HEADER_RE": {
+    "kind": "Pattern",
+    "signature": null
+   },
+   "_ASSIST_GIT_OTHER_RE": {
+    "kind": "Pattern",
+    "signature": null
+   },
+   "_ASSIST_HUNK_HEADER_RE": {
+    "kind": "Pattern",
+    "signature": null
+   },
+   "__init__": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:service: Optional[SelfHostedTaskService] = None, KEYWORD_ONLY:model_runner: Any = None, KEYWORD_ONLY:apply_runner: Any = None, KEYWORD_ONLY:github_issue_observer: Any = None, KEYWORD_ONLY:mutation_repository_observer: Any = None, KEYWORD_ONLY:upstream_observer: Any = None, KEYWORD_ONLY:upstream_cache_ttl_seconds: float = 30.0, KEYWORD_ONLY:owner_confirmation_channel: Any = None)"
+   },
+   "_abandon_assist_account_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any]) -> None"
+   },
+   "_acquire_agy_probe_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:model: str)"
+   },
+   "_agy_probe_model_family": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:model: str) -> str"
+   },
+   "_append_owner_confirmation_audit": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:record: Mapping[str, Any]) -> None"
+   },
+   "_assist_action": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:job: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_assist_cancel": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "_assist_command": {
+    "kind": "staticmethod",
+    "signature": "(KEYWORD_ONLY:executable: str, KEYWORD_ONLY:provider: str, KEYWORD_ONLY:model: str, KEYWORD_ONLY:prompt: str, KEYWORD_ONLY:explicit_effort: str = '', KEYWORD_ONLY:agy_print_timeout: str = '25s') -> list[str]"
+   },
+   "_assist_patch_is_substantive": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:patch: Any) -> bool"
+   },
+   "_assist_path": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Path"
+   },
+   "_assist_prompt": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str]) -> str"
+   },
+   "_assist_read": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_assist_read_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_assist_read_snapshot": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_assist_record_stream_artifacts": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:job: dict[str, Any]) -> None"
+   },
+   "_assist_refresh": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"
+   },
+   "_assist_response": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:job: Mapping[str, Any], KEYWORD_ONLY:operation: str = 'status') -> dict[str, Any]"
+   },
+   "_assist_retry": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "_assist_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_assist_submit": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+   },
+   "_assist_wait": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:timeout_seconds: float = 10.0, KEYWORD_ONLY:poll_interval_seconds: float = 0.25) -> dict[str, Any]"
+   },
+   "_assist_write": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:value: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_call_tool": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:name: str, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_candidate_adopt_external": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_candidate_approve": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_candidate_bind_integration": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_candidate_dispose": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_candidate_integrate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_canonical_hash": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any) -> str"
+   },
+   "_canonical_request": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str], POSITIONAL_OR_KEYWORD:base: str, KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:contract_binding: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+   },
+   "_cleanup_assist_workspace": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:job: dict[str, Any]) -> None"
+   },
+   "_confirm_with_owner": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:tool: str, KEYWORD_ONLY:draft: Mapping[str, Any], KEYWORD_ONLY:summary_lines: tuple[str, ...], KEYWORD_ONLY:now: datetime, KEYWORD_ONLY:not_after: datetime) -> dict[str, Any]"
+   },
+   "_decode_assist_payload": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:text: str, POSITIONAL_OR_KEYWORD:provider: str, KEYWORD_ONLY:require_patch: bool = False) -> Optional[dict[str, Any]]"
+   },
+   "_decode_model_probe_payload": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:text: str, POSITIONAL_OR_KEYWORD:provider: str, POSITIONAL_OR_KEYWORD:resolved_model: str) -> tuple[Optional[dict[str, Any]], Optional[str]]"
+   },
+   "_diff": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_error": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request_id: Any, POSITIONAL_OR_KEYWORD:error: Exception | str) -> dict[str, Any]"
+   },
+   "_exact_hash": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any, POSITIONAL_OR_KEYWORD:field: str, POSITIONAL_OR_KEYWORD:length: int) -> str"
+   },
+   "_finish": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_convergence": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_execution_readiness": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_recover_exact": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_recovery_materialize": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_recovery_preflight": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_gateway_status": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, Any]"
+   },
+   "_hash_file": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:path: Path) -> str"
+   },
+   "_learning_policy_control": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], KEYWORD_ONLY:action: AutonomyActionClass) -> dict[str, Any]"
+   },
+   "_model_calibration_evidence": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_model_calibration_plan": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_model_probe_submit": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_mutation_admission_status": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_mutation_admit": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_mutation_task_card_authority": {
+    "kind": "staticmethod",
+    "signature": "(KEYWORD_ONLY:issue_number: int, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:task_card_path: str, KEYWORD_ONLY:task_card_hash: str) -> dict[str, str]"
+   },
+   "_negotiate_initialize": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:params: Any) -> str"
+   },
+   "_observe_upstream_freshness": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:deployed_head: str) -> dict[str, Any]"
+   },
+   "_owner_effect_key": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> StandingGrantKey"
+   },
+   "_owner_standing_grant_issue": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_probe_command_identity_valid": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:job: Mapping[str, Any]) -> bool"
+   },
+   "_probe_evidence_identity": {
+    "kind": "classmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:values: Mapping[str, Any]) -> str"
+   },
+   "_probe_evidence_read_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_probe_evidence_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_project_entry": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_project_entry_binding_hash": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:payload: Mapping[str, Any]) -> str"
+   },
+   "_project_entry_blocker": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:repository: str, POSITIONAL_OR_KEYWORD:issue: int, POSITIONAL_OR_KEYWORD:code: str, POSITIONAL_OR_KEYWORD:detail: str, KEYWORD_ONLY:task_id: str | None = None, KEYWORD_ONLY:cause_code: str | None = None) -> dict[str, Any]"
+   },
+   "_provider_executable": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:provider: str) -> tuple[dict[str, str], Optional[str]]"
+   },
+   "_provider_execution_ready": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:preflight: Mapping[str, Any], KEYWORD_ONLY:provider: str, KEYWORD_ONLY:model: Optional[str] = None) -> tuple[bool, Optional[str]]"
+   },
+   "_provider_preflight": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_provider_requires_authentication": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:provider: str) -> bool"
+   },
+   "_read": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_read_probe_evidence": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:provider: str, KEYWORD_ONLY:requested_model: str, KEYWORD_ONLY:resolved_model: str, KEYWORD_ONLY:executable: str, KEYWORD_ONLY:binary_sha256: str, KEYWORD_ONLY:cli_version: str) -> Optional[dict[str, Any]]"
+   },
+   "_recovery_payload": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], KEYWORD_ONLY:operation: str = 'status', KEYWORD_ONLY:include_state: bool = False) -> dict[str, Any]"
+   },
+   "_release_assist_account_claim": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any]) -> bool"
+   },
+   "_require_owner_effect_authority": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:action: AutonomyActionClass, POSITIONAL_OR_KEYWORD:effect: Mapping[str, Any], KEYWORD_ONLY:key: StandingGrantKey) -> dict[str, Any]"
+   },
+   "_resolve_assisted_worker": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:requested: str, POSITIONAL_OR_KEYWORD:requested_model: str) -> tuple[str, str, str | None]"
+   },
+   "_run_agy_plan": {
+    "kind": "staticmethod",
+    "signature": "(KEYWORD_ONLY:prompt: str, KEYWORD_ONLY:allowed_files: list[str], KEYWORD_ONLY:provider: str, KEYWORD_ONLY:model: str = '', KEYWORD_ONLY:explicit_effort: str = '') -> dict[str, Any]"
+   },
+   "_safe_slug": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any, POSITIONAL_OR_KEYWORD:field: str, KEYWORD_ONLY:max_length: int = 80) -> str"
+   },
+   "_search": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_snapshot_workspace": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:root: Path) -> dict[str, str]"
+   },
+   "_standing_key": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:goal_id: str, POSITIONAL_OR_KEYWORD:thread_id: str) -> StandingGrantKey"
+   },
+   "_success": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:request_id: Any, POSITIONAL_OR_KEYWORD:payload: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_card_authority_restore": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_card_authority_switch": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_card_commit": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_card_create": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_card_expected_evidence": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> Optional[ExpectedEvidenceUniverse]"
+   },
+   "_task_id": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str]) -> str"
+   },
+   "_task_list_actionable": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_not_found": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:operation: str, KEYWORD_ONLY:timeout_seconds: Optional[float] = None, KEYWORD_ONLY:poll_interval_seconds: Optional[float] = None) -> dict[str, Any]"
+   },
+   "_task_reconcile": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_resume": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_retry": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_task_run": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_utc_now": {
+    "kind": "staticmethod",
+    "signature": "() -> str"
+   },
+   "_validate_external_adoption_result": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:result: Any, POSITIONAL_OR_KEYWORD:request: ExternalCandidateAdoptionRequest | None = None) -> None"
+   },
+   "_validate_output_schema": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:value: Any, POSITIONAL_OR_KEYWORD:schema: Any) -> tuple[bool, str]"
+   },
+   "_worker_candidate": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_workspace_snapshot": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, Any]"
+   },
+   "_write_probe_evidence": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:job: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "handle": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> Optional[dict[str, Any]]"
+   },
+   "serve": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:input_stream, POSITIONAL_OR_KEYWORD:output_stream) -> None"
+   },
+   "tool_specs": {
+    "kind": "staticmethod",
+    "signature": "() -> list[dict[str, Any]]"
+   }
+  }
+ },
+ "regenerate": "python tests/architecture/test_bigfile_split_surface.py --write",
+ "schema": "nexus.bigfile_split_class_tables.v1"
+}
