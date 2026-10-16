@@ -30,7 +30,11 @@ if sub == "issue-check":
     (d / "r1.json").write_text(json.dumps({
         "receipt_hash": "rh123",
         "target": {"target_tree": "tt456"},
-        "outcome": {"status": status},
+        "outcome": {
+            "status": status,
+            **({"reason_codes": json.loads(os.environ["FAKE_REASONS"])} if "FAKE_REASONS" in os.environ else {}),
+            **({"transport_error": json.loads(os.environ["FAKE_TRANSPORT"])} if "FAKE_TRANSPORT" in os.environ else {}),
+        },
     }))
     print("claim ceiling: ISSUE_BOUND_VERIFIED")
     sys.exit(0 if status == "VERIFIED" else 3)
@@ -190,3 +194,57 @@ def test_pin_read_from_two_job_workflow_fields(env):
     proc, out = run(env)
     assert proc.returncode == 0, proc.stderr
     assert out["pin"] == PIN
+
+
+def test_failed_receipt_reason_codes_in_summary(env):
+    proc, out = run(
+        env,
+        FAKE_STATUS="FAILED_CLOSED",
+        FAKE_REASONS='["MISSING_EVIDENCE", "STALE_HEAD"]',
+        FAKE_TRANSPORT="true",
+    )
+    assert proc.returncode == 1
+    assert out["status"] == "FAILED_CLOSED"
+    assert out["reason_codes"] == ["MISSING_EVIDENCE", "STALE_HEAD"]
+    assert out["transport_error"] is True
+
+
+def test_verified_receipt_empty_reason_codes(env):
+    proc, out = run(env)
+    assert proc.returncode == 0, proc.stderr
+    assert out["reason_codes"] == []
+    assert out["transport_error"] is False
+
+
+def test_malformed_reason_fields_are_normalised(env):
+    proc, out = run(env, FAKE_STATUS="FAILED_CLOSED", FAKE_REASONS='"oops"', FAKE_TRANSPORT='"yes"')
+    assert proc.returncode == 1
+    assert out["reason_codes"] == []
+    assert out["transport_error"] is False
+
+
+def test_json_out_writes_summary_file(env):
+    target = env["tmp"] / "nested" / "dir" / "summary.json"
+    proc, out = run(env, "--json-out", str(target))
+    assert proc.returncode == 0, proc.stderr
+    assert target.read_bytes() == proc.stdout.encode("utf-8")
+    assert json.loads(target.read_text(encoding="utf-8")) == out
+    assert target.read_text(encoding="utf-8").endswith("}\n")
+
+
+def test_json_out_written_on_tooling_error(env):
+    (env["repo"] / "new.txt").write_text("x")
+    target = env["tmp"] / "err" / "summary.json"
+    proc, out = run(env, "--json-out", str(target))
+    assert proc.returncode == 2
+    assert out["error_code"] == "WORKTREE_DIRTY"
+    assert json.loads(target.read_text(encoding="utf-8")) == out
+
+
+def test_json_out_write_failure_keeps_exit_code(env):
+    blocker = env["tmp"] / "blocker"
+    blocker.write_text("file")
+    proc, out = run(env, "--json-out", str(blocker / "summary.json"))
+    assert proc.returncode == 0
+    assert out["status"] == "VERIFIED"
+    assert "warning: cannot write --json-out" in proc.stderr

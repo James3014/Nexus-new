@@ -2560,6 +2560,69 @@ def test_wrapper_exports_core_root_and_rejects_unsafe_core_path(cfg: ad.Config) 
         ad.wrapper_command(cfg, root, python, core_root=Path('/g/core/"; rm -rf ~'))
 
 
+def test_wrapper_exports_agy_runtime_authorization_only(cfg: ad.Config) -> None:
+    """#2318: every rendered wrapper exports the narrow Agy flag, after the env
+    file (which therefore cannot switch it off), and never the broad flag."""
+    root, python = Path("/d/a1-x"), Path("/v/bin/python")
+    digest = ("a" * 40, "sha256:" + "b" * 64)
+    commands = [
+        ad.wrapper_command(cfg, root, python),
+        ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc")),
+        ad.wrapper_command(cfg, root, python, core_root=Path("/g/core/abc"), core_digest=digest),
+        ad.wrapper_command(cfg, root, python, 50123, state_dir=Path("/probe")),
+        ad.wrapper_command(cfg, root, python, controller_root=Path("/c/a1-x")),
+    ]
+    for command in commands:
+        assert command.count("export NEXUS_AGY_RUNTIME_AUTHORIZED=1 ; ") == 1, command
+        assert command.index("NEXUS_AGY_RUNTIME_AUTHORIZED=1") > command.index(
+            f'source "{cfg.env_file}"'
+        )
+        assert command.index("NEXUS_AGY_RUNTIME_AUTHORIZED=1") < command.index("exec ")
+        assert "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED" not in command
+        assert command.endswith(f'exec "{python}" "{root / ad.ENTRYPOINT}"')
+
+
+def test_wrapper_agy_authorization_reaches_gateway_process_env(tmp_path: Path) -> None:
+    """Run the rendered wrapper for real: the exec'd process sees the Agy flag
+    even when the env file sets it to 0, and no broad external flag appears."""
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    cfg = ad.Config.default(tmp_path / "home")
+    root = tmp_path / "deploy"
+    root.mkdir()
+    cfg.env_file.parent.mkdir(parents=True)
+    cfg.env_file.write_text("export NEXUS_AGY_RUNTIME_AUTHORIZED=0\n")
+    dump = tmp_path / "env.json"
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os\n"
+        f"open({str(dump)!r}, 'w').write(json.dumps(dict(os.environ)))\n"
+    )
+    fake_python.chmod(0o755)
+    command = ad.wrapper_command(cfg, root, fake_python)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("NEXUS_")}
+    subprocess.run(["bash", "-c", command], env=env, check=True, timeout=60)
+    seen = json.loads(dump.read_text())
+    assert seen["NEXUS_AGY_RUNTIME_AUTHORIZED"] == "1"
+    assert "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED" not in seen
+
+
+def test_deployed_plist_and_spare_probe_export_agy_runtime_authorization(
+    cfg: ad.Config,
+) -> None:
+    """#2318: the plist a deploy writes (and the spare-port probe it starts)
+    carries the narrow Agy flag; the broad external flag is never exported."""
+    host, prober = FakeHost(), FakeProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    command = plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+    for rendered in (command, host.started[0]):
+        assert "export NEXUS_AGY_RUNTIME_AUTHORIZED=1 ; " in rendered
+        assert "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED" not in rendered
+    assert "NEXUS_AGY_RUNTIME_AUTHORIZED=1" in ad._wrapper_tokens(cfg.plist.read_bytes())
+
+
 def _fixture_digest(checkout: Path) -> str:
     """The fixture Core's own digest of ``checkout`` (no deployer code involved)."""
     out = subprocess.run(
