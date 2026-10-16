@@ -3560,10 +3560,10 @@ class SelfHostedTaskService:
             port = self.ambient_core_port
             if port is None:
                 raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
-            recorder = getattr(port, "record_terminal_not_covered", None)
+            recorder: Any = getattr(port, "record_terminal_not_covered", None)
             if not callable(recorder):
                 raise RuntimeError("AMBIENT_CORE_TERMINAL_RECORD_UNSUPPORTED")
-            projection = recorder(
+            projection: Any = recorder(
                 contract=contract,
                 request=request,
                 task_id=task_id,

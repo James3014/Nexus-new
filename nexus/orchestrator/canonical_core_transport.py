@@ -720,15 +720,20 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         if "expected_subjects" not in contract_payload:
             # Legacy (no-universe) tasks are never recorded.
             raise RuntimeError("CORE_TERMINAL_RECORD_UNIVERSE_MISSING")
+        # Resolved at run time from the configured Core: the in-tree
+        # ``product`` package that static analysis sees is not Core.
         try:
-            from product.evidence import (
-                Applicability,
-                ExpectedEvidenceSubject,
-                IntegrityStatus,
-                RequirementMode,
-            )
-            from product.verification import derive_coverage, reduce_verification
-        except ImportError as exc:
+            import importlib
+
+            core_evidence: Any = importlib.import_module("product.evidence")
+            core_verification: Any = importlib.import_module("product.verification")
+            Applicability = core_evidence.Applicability
+            ExpectedEvidenceSubject = core_evidence.ExpectedEvidenceSubject
+            IntegrityStatus = core_evidence.IntegrityStatus
+            RequirementMode = core_evidence.RequirementMode
+            derive_coverage = core_verification.derive_coverage
+            reduce_verification = core_verification.reduce_verification
+        except (ImportError, AttributeError) as exc:
             raise RuntimeError(f"CANONICAL_NEXUS_CORE_UNAVAILABLE: {exc}") from exc
         shadowed = _loaded_core_shadow_reason(_core_repo_root)
         if shadowed:
