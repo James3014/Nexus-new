@@ -138,13 +138,14 @@ def _resolve_executable(env_name: str, binary: str) -> str:
     return str(path.resolve())
 
 
-def _cli_version(executable: str) -> str | None:
+def _cli_version(executable: str, env: Mapping[str, str] | None = None) -> str | None:
     proc = subprocess.run(
         [executable, "--version"],
         capture_output=True,
         text=True,
         timeout=10,
         check=False,
+        **({} if env is None else {"env": dict(env)}),
     )
     if proc.returncode != 0:
         return None
@@ -882,6 +883,10 @@ class ClaudeExecutionAdapter:
         if not config_dir or not Path(config_dir).is_absolute():
             # Fail closed: never run against the default ~/.claude profile.
             raise ExternalWorkerRuntimeError("CLAUDE_PROFILE_BINDING_REQUIRED")
+        from nexus.services.claude_account_pool import is_default_profile_path
+
+        if is_default_profile_path(config_dir):
+            raise ExternalWorkerRuntimeError("CLAUDE_DEFAULT_PROFILE_NOT_ALLOWED")
         executable = _resolve_executable("NEXUS_CLAUDE_BIN", "claude")
         argv = [
             executable,
@@ -894,6 +899,13 @@ class ClaudeExecutionAdapter:
             "plan" if request.mode == "plan" else "acceptEdits",
             "--model",
             request.model,
+            # Never load project/local settings, hooks or .mcp.json from an
+            # untrusted cwd: only the profile's own user settings apply.
+            "--setting-sources",
+            "user",
+            "--settings",
+            '{"disableAllHooks": true}',
+            "--strict-mcp-config",
             "--",
             request.prompt,
         ]
@@ -901,7 +913,7 @@ class ClaudeExecutionAdapter:
         return WorkerCommand(
             argv=tuple(argv),
             env=env,
-            cli_version=_cli_version(executable),
+            cli_version=_cli_version(executable, env),
         )
 
     def interpret(
@@ -1045,6 +1057,11 @@ class ClaudeAccountAdapter:
         lease = self._lease_for(binding)
         self.manager.release(lease)
         self._leases.pop(binding.lease_id_hash or "", None)
+
+    def attach_provider(self, binding: AccountBinding, provider_pid: int) -> None:
+        """Record the provider pid/pgid so lease reclamation sees the real process."""
+
+        self.manager.attach_provider(self._lease_for(binding), provider_pid)
 
     def hold_unknown_outcome(self, binding: AccountBinding) -> None:
         """Keep this account leased (UNKNOWN_OUTCOME) until explicit reconciliation."""

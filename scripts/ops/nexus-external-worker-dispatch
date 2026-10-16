@@ -147,6 +147,20 @@ def _kill_process_group(proc: subprocess.Popen[bytes]) -> None:
         pass
 
 
+def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
+    """Kill the provider process group by PID and reap the child."""
+
+    _kill_process_group(proc)
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def _spawn_background(
     *,
     provider: str,
@@ -328,6 +342,7 @@ def _run_operation(
 
         stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
         stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
+        proc = None
         started = time.monotonic()
         last_heartbeat = 0.0
         last_sizes = (stdout_start, stderr_start)
@@ -347,6 +362,9 @@ def _run_operation(
                     start_new_session=True,
                     close_fds=True,
                 )
+                attach = getattr(account_adapter, "attach_provider", None)
+                if attach is not None:
+                    attach(binding, proc.pid)
                 journal.heartbeat(
                     operation_id,
                     phase="PROVIDER_RUNNING",
@@ -381,6 +399,31 @@ def _run_operation(
                         last_heartbeat = now
                     time.sleep(0.25)
         except BaseException as exc:
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            if proc is not None and hold is not None:
+                # Provider may have started: kill by PID, reap, then fail closed.
+                _kill_and_reap(proc)
+                failure = f"PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME:{type(exc).__name__}"
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    failure += f":HOLD_FAILED:{type(hold_exc).__name__}"
+                    print(f"ERROR {failure}", file=sys.stderr)
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN",
+                    exit_code=None,
+                    failure_kind=failure,
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
+                        "retry_permitted": False,
+                    },
+                )
+                return 1
             try:
                 account_adapter.release(binding)
             except BaseException:
@@ -403,15 +446,21 @@ def _run_operation(
 
         if timed_out:
             hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            hold_failed = False
             if hold is not None:
                 try:
                     hold(binding)
+                except BaseException as hold_exc:
+                    hold_failed = True
+                    print(
+                        f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
+                        file=sys.stderr,
+                    )
+            if not hold_failed:
+                try:
+                    account_adapter.release(binding)
                 except BaseException:
                     pass
-            try:
-                account_adapter.release(binding)
-            except BaseException:
-                pass
             journal.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN",
@@ -486,17 +535,23 @@ def _run_operation(
                 rotations += 1
                 continue
 
+        hold_failed = False
         if outcome.status == "OUTCOME_UNKNOWN":
             hold = getattr(account_adapter, "hold_unknown_outcome", None)
             if hold is not None:
                 try:
                     hold(binding)
-                except BaseException:
-                    pass
-        try:
-            account_adapter.release(binding)
-        except BaseException:
-            pass
+                except BaseException as hold_exc:
+                    hold_failed = True
+                    print(
+                        f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
+                        file=sys.stderr,
+                    )
+        if not hold_failed:
+            try:
+                account_adapter.release(binding)
+            except BaseException:
+                pass
         journal.mark_terminal(
             operation_id,
             status=outcome.status,
@@ -546,11 +601,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--background", action="store_true")
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument(
+        "--claude-list-unknown",
+        action="store_true",
+        help="list Claude account leases held as UNKNOWN_OUTCOME",
+    )
+    ap.add_argument(
+        "--claude-reconcile-release",
+        metavar="LEASE_ID",
+        help="explicitly release one reconciled UNKNOWN_OUTCOME Claude lease",
+    )
     ap.add_argument("--operation-root", default=str(OPERATION_ROOT))
     ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     operation_root = Path(args.operation_root).expanduser()
+    if args.claude_list_unknown or args.claude_reconcile_release:
+        from nexus.services.claude_account_pool import get_claude_account_pool_manager
+
+        manager = get_claude_account_pool_manager()
+        if args.claude_reconcile_release:
+            manager.reconcile_release(args.claude_reconcile_release)
+        print(json.dumps({"unknown_outcome_leases": list(manager.unknown_outcome_leases())}))
+        return 0
     if args.status or args.reconcile:
         operation_id = args.status or args.reconcile
         provider = _provider_from_operation_id(operation_id)

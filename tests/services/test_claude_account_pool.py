@@ -432,7 +432,7 @@ def test_rotation_to_account_with_bad_identity_fails_closed(tmp_path: Path) -> N
     other = "b" if "cfg-a" in first.execution_env["CLAUDE_CONFIG_DIR"] else "a"
     observer.table[str((tmp_path / f"cfg-{other}").resolve())] = _fp("intruder")
     with pytest.raises(ClaudeAccountIdentityError):
-        adapter.report_failure(first, AccountFailureKind.QUOTA_EXHAUSTED)
+        adapter.report_failure(first, AccountFailureKind.AUTH_OR_SESSION_INVALID)
 
 
 @pytest.mark.parametrize("kind", [AccountFailureKind.TIMEOUT, AccountFailureKind.UNKNOWN])
@@ -476,4 +476,256 @@ def test_exhausted_after_rotation_request(tmp_path: Path) -> None:
     adapter = _adapter(manager)
     binding = adapter.acquire("claudeop_" + "1" * 32)
     with pytest.raises(ClaudeAccountPoolExhaustedError):
-        adapter.report_failure(binding, AccountFailureKind.QUOTA_EXHAUSTED)
+        adapter.report_failure(binding, AccountFailureKind.AUTH_OR_SESSION_INVALID)
+
+
+@pytest.mark.parametrize(
+    "kind", [AccountFailureKind.QUOTA_EXHAUSTED, AccountFailureKind.RATE_LIMITED]
+)
+def test_quota_and_rate_limit_never_rotate(tmp_path: Path, kind: AccountFailureKind) -> None:
+    manager, _, _ = _pool(tmp_path, ["a", "b"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    assert adapter.report_failure(binding, kind) is None
+    adapter.release(binding)
+
+
+# -- hooks / settings isolation ------------------------------------------
+def test_compile_disables_project_settings_hooks_and_mcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(_fake_claude(tmp_path)))
+    hostile = tmp_path / "repo" / ".claude"
+    hostile.mkdir(parents=True)
+    (hostile / "settings.json").write_text('{"hooks": {"x": []}}', encoding="utf-8")
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    binding = AccountBinding(provider="claude", execution_env={"CLAUDE_CONFIG_DIR": str(cfg)})
+    request = _request(tmp_path / "repo")
+    command = ClaudeExecutionAdapter().compile(request, binding=binding)
+    argv = list(command.argv)
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True}
+    assert "--strict-mcp-config" in argv and "--mcp-config" not in argv
+    assert argv.index("--strict-mcp-config") < argv.index("--")
+    assert str(hostile) not in " ".join(argv) + json.dumps(dict(command.env))
+
+
+def test_compile_refuses_default_profile_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(_fake_claude(tmp_path)))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    default = tmp_path / ".claude"
+    (default / "sub").mkdir(parents=True)
+    for target in (default, default / "sub"):
+        binding = AccountBinding(
+            provider="claude", execution_env={"CLAUDE_CONFIG_DIR": str(target)}
+        )
+        with pytest.raises(ExternalWorkerRuntimeError, match="DEFAULT_PROFILE_NOT_ALLOWED"):
+            ClaudeExecutionAdapter().compile(_request(tmp_path), binding=binding)
+
+
+# -- version probe env ----------------------------------------------------
+def test_version_probe_runs_with_sanitized_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dump = tmp_path / "env.dump"
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\nenv > {dump}\necho '2.1.296'\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
+    for key, value in SECRETS.items():
+        monkeypatch.setenv(key, value)
+    manager, _, _ = _pool(tmp_path, ["a"])
+    lease = manager.acquire("claudeop_" + "1" * 32)
+    binding = AccountBinding(provider="claude", execution_env=lease.execution_env)
+    command = ClaudeExecutionAdapter().compile(_request(tmp_path), binding=binding)
+    assert command.cli_version == "2.1.296"
+    text = dump.read_text()
+    assert not any(k in text for k in SECRETS) and not any(v in text for v in SECRETS.values())
+    assert f"CLAUDE_CONFIG_DIR={lease.execution_env['CLAUDE_CONFIG_DIR']}" in text
+
+
+# -- default observer attestation ----------------------------------------
+def _observer_cli(tmp_path: Path, payload: dict) -> Path:
+    fake = tmp_path / "claude-auth"
+    fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + json.dumps(payload) + "\nEOF\n", encoding="utf-8")
+    fake.chmod(0o755)
+    return fake
+
+
+@pytest.mark.parametrize(
+    "mutate,ok",
+    [
+        ({}, True),
+        ({"authMethod": "OAuth Token"}, True),
+        ({"loggedIn": False}, False),
+        ({"loggedIn": "true"}, False),
+        ({"configDirectory": None}, False),
+        ({"configDirectory": "/somewhere/else"}, False),
+        ({"authMethod": "api_key"}, False),
+        ({"authMethod": None}, False),
+    ],
+)
+def test_default_observer_requires_full_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: dict, ok: bool
+) -> None:
+    from nexus.services.claude_account_pool import default_identity_observer
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(mode=0o700)
+    payload = {
+        "loggedIn": True,
+        "authMethod": "claude.ai",
+        "configDirectory": str(cfg),
+        "accountUuid": "acct-1",
+        "organizationUuid": "org-1",
+    }
+    payload.update(mutate)
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(_observer_cli(tmp_path, payload)))
+    observed = default_identity_observer(cfg)
+    assert observed == (identity_fingerprint("acct-1", "org-1") if ok else None)
+
+
+def test_register_refuses_dir_inside_default_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    inner = tmp_path / ".claude" / "profiles" / "x"
+    inner.mkdir(parents=True, mode=0o700)
+    manager = ClaudeAccountPoolManager(tmp_path / "pool", host_identity=HOST)
+    with pytest.raises(ClaudeAccountPoolError, match="DEFAULT_PROFILE"):
+        manager.register_local_profile(
+            alias="x", config_dir=inner, approved_identity_fingerprint=_fp("x")
+        )
+
+
+# -- provider liveness ----------------------------------------------------
+def test_dead_dispatcher_with_live_provider_keeps_lease_as_unknown(tmp_path: Path) -> None:
+    manager, _, root = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    sleeper = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        adapter.attach_provider(binding, sleeper.pid)
+        state = json.loads((root / "state.json").read_text())
+        (lease_id,) = state["leases"]
+        assert state["leases"][lease_id]["provider_pid"] == sleeper.pid
+        assert state["leases"][lease_id]["provider_pgid"] == sleeper.pid
+        state["leases"][lease_id]["pid"] = 2**22 + 12345  # dispatcher dead
+        (root / "state.json").write_text(json.dumps(state))
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            manager.acquire("claudeop_" + "2" * 32)
+        state = json.loads((root / "state.json").read_text())
+        assert state["leases"][lease_id]["unknown_outcome"] is True
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    # provider now dead too, but the lease was marked unknown: still blocked until reconcile
+    with pytest.raises(ClaudeAccountPoolExhaustedError):
+        manager.acquire("claudeop_" + "2" * 32)
+    manager.reconcile_release(lease_id)
+    assert manager.acquire("claudeop_" + "2" * 32).lease_id
+
+
+def test_dead_dispatcher_and_dead_provider_is_reclaimed(tmp_path: Path) -> None:
+    manager, _, root = _pool(tmp_path, ["a"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    done = subprocess.Popen(["true"], start_new_session=True)
+    done.wait()
+    adapter.attach_provider(binding, done.pid)
+    state = json.loads((root / "state.json").read_text())
+    (lease_id,) = state["leases"]
+    state["leases"][lease_id]["pid"] = 2**22 + 12345
+    (root / "state.json").write_text(json.dumps(state))
+    assert manager.acquire("claudeop_" + "2" * 32).lease_id != lease_id
+
+
+def test_env_is_strict_allowlist_even_for_unlisted_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.services import claude_account_pool as mod
+
+    unlisted = {
+        "HF_TOKEN": "hf-SECRET",
+        "NPM_TOKEN": "npm-SECRET",
+        "SSH_AUTH_SOCK": "/tmp/ssh-SECRET",
+        "GH_ENTERPRISE_TOKEN": "ghe-SECRET",
+    }
+    for key, value in {**SECRETS, **unlisted}.items():
+        monkeypatch.setenv(key, value)
+    dump = tmp_path / "env.dump"
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\nenv > {dump}\necho 2.1.296\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
+    manager, _, _ = _pool(tmp_path, ["a"])
+    lease = manager.acquire("claudeop_" + "1" * 32)
+    allowed = set(mod._NEUTRAL_ENV_KEYS) | {"CLAUDE_CONFIG_DIR"}
+    assert set(lease.execution_env) <= allowed
+    binding = AccountBinding(provider="claude", execution_env=lease.execution_env)
+    command = ClaudeExecutionAdapter().compile(_request(tmp_path), binding=binding)
+    assert set(command.env) <= allowed
+    probed = {line.split("=", 1)[0] for line in dump.read_text().splitlines() if "=" in line}
+    assert not (probed & (set(SECRETS) | set(unlisted)))
+    assert not any(v in dump.read_text() for v in {**SECRETS, **unlisted}.values())
+
+
+def test_default_profile_detected_by_inode_incl_symlink_and_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.services.claude_account_pool import is_default_profile_path
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / ".claude" / "x").mkdir(parents=True)
+    link = tmp_path / "alias"
+    link.symlink_to(tmp_path / ".claude")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    assert is_default_profile_path(tmp_path)
+    assert is_default_profile_path(tmp_path / ".claude")
+    assert is_default_profile_path(tmp_path / ".claude" / "x")
+    assert is_default_profile_path(link)
+    assert not is_default_profile_path(other)
+
+
+def test_quota_failure_cools_down_account_for_new_tasks(tmp_path: Path) -> None:
+    manager, _, _ = _pool(tmp_path, ["a", "b"])
+    adapter = _adapter(manager)
+    binding = adapter.acquire("claudeop_" + "1" * 32)
+    used = binding.execution_env["CLAUDE_CONFIG_DIR"]
+    assert adapter.report_failure(binding, AccountFailureKind.QUOTA_EXHAUSTED) is None
+    adapter.release(binding)
+    nxt = manager.acquire("claudeop_" + "2" * 32)
+    assert nxt.execution_env["CLAUDE_CONFIG_DIR"] != used
+    with pytest.raises(ClaudeAccountPoolExhaustedError):
+        manager.acquire("claudeop_" + "3" * 32)  # first account cooling, second held
+    reasons = {a.alias: a.last_failure_reason for a in manager.local_accounts()}
+    assert "QUOTA_EXHAUSTED" in reasons.values()
+
+
+def test_operator_reconcile_flags_list_and_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    manager, _, root = _pool(tmp_path, ["a"])
+    lease = manager.acquire("claudeop_" + "1" * 32)
+    manager.mark_unknown_outcome(lease)
+    state = json.loads((root / "state.json").read_text())
+    state["host_binding"]["host_id_hash"] = ClaudeAccountPoolManager(root).host_id_hash
+    (root / "state.json").write_text(json.dumps(state))
+    monkeypatch.setenv("NEXUS_CLAUDE_ACCOUNT_POOL_DIR", str(root))
+    set_claude_account_pool_manager(None)
+    dispatch = SourceFileLoader(
+        "nexus_dispatch_claude_flags", str(ROOT / "scripts/ops/nexus-external-worker-dispatch")
+    ).load_module()
+    try:
+        assert dispatch.main(["--claude-list-unknown"]) == 0
+        assert json.loads(capsys.readouterr().out)["unknown_outcome_leases"] == [lease.lease_id]
+        assert dispatch.main(["--claude-reconcile-release", lease.lease_id]) == 0
+        assert json.loads(capsys.readouterr().out)["unknown_outcome_leases"] == []
+    finally:
+        set_claude_account_pool_manager(None)

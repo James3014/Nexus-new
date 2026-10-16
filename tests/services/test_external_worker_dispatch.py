@@ -355,7 +355,7 @@ def _fake_claude_cli(path: Path, *, terminal: bool) -> None:
         f"""#!/bin/sh
 case "$1" in
   --version) echo "2.1.296 (Claude Code)"; exit 0;;
-  auth) echo '{{"loggedIn":true,"accountUuid":"acct-1","organizationUuid":"org-1"}}'; exit 0;;
+  auth) echo '{{"loggedIn":true,"authMethod":"claude.ai","configDirectory":"'"$CLAUDE_CONFIG_DIR"'","accountUuid":"acct-1","organizationUuid":"org-1"}}'; exit 0;;
 esac
 echo '{{"type":"system","subtype":"init","model":"claude-sonnet-5-5","session_id":"cs-1"}}'
 {result}
@@ -432,3 +432,172 @@ def test_background_claude_no_terminal_result_keeps_lease_unknown(
     assert current["rotations"] == 0
     (lease,) = state["leases"].values()
     assert lease["unknown_outcome"] is True
+
+
+def _claude_inproc_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script_tail: str):
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolManager,
+        identity_fingerprint,
+        set_claude_account_pool_manager,
+    )
+
+    fake = tmp_path / "claude"
+    _fake_claude_cli(fake, terminal=True)
+    text = fake.read_text().replace(
+        'echo \'{"type":"system"', script_tail + '\necho \'{"type":"system"', 1
+    )
+    fake.write_text(text)
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
+    pool_root = tmp_path / "claude-pool"
+    monkeypatch.setenv("NEXUS_CLAUDE_ACCOUNT_POOL_DIR", str(pool_root))
+    home = tmp_path / "cfg-a"
+    home.mkdir(mode=0o700)
+    ClaudeAccountPoolManager(pool_root).register_local_profile(
+        alias="claude-a",
+        config_dir=home,
+        approved_identity_fingerprint=identity_fingerprint("acct-1", "org-1"),
+    )
+    set_claude_account_pool_manager(None)
+    root = tmp_path / "ops"
+    journal = dispatch._journal("claude", root)
+    operation_id = journal.new_operation_id()
+    import hashlib
+
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="claude",
+        model="sonnet",
+        effort="none",
+        prompt_sha256=hashlib.sha256(b"hello").hexdigest(),
+        runtime_revision=None,
+        initial_fields={"mode": "plan", "auto_approve": False, "require_free": False},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "hello")
+    return journal, operation_id, prompt_path, root, pool_root
+
+
+def _run_claude_inproc(tmp_path, operation_id, prompt_path, root, timeout=30, grace=1.0):
+    return dispatch._run_operation(
+        operation_id=operation_id,
+        provider="claude",
+        model="sonnet",
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=timeout,
+        require_free=False,
+        thinking="none",
+        operation_root=root,
+        heartbeat_interval=1.0,
+        outer_grace_seconds=grace,
+    )
+
+
+def _pids_of(path: Path) -> int:
+    return int(path.read_text())
+
+
+def test_claude_supervision_failure_kills_provider_and_holds_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    pid_file = tmp_path / "provider.pid"
+    original_attach = runtime.ClaudeAccountAdapter.attach_provider
+
+    def boom(self, binding, provider_pid):
+        pid_file.write_text(str(provider_pid))
+        original_attach(self, binding, provider_pid)
+        raise RuntimeError("supervision exploded")
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "attach_provider", boom)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "sleep 30"
+    )
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+    finally:
+        set_claude_account_pool_manager(None)
+    current = journal.read(operation_id)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["failure_kind"].startswith("PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME")
+    with pytest.raises(ProcessLookupError):
+        os.killpg(_pids_of(pid_file), 0)
+    state = json.loads((pool_root / "state.json").read_text())
+    (lease,) = state["leases"].values()
+    assert lease["unknown_outcome"] is True
+
+
+def test_claude_wall_timeout_holds_lease_until_reconcile_and_kills_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import (
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    pid_file = tmp_path / "provider.pid"
+    original_attach = runtime.ClaudeAccountAdapter.attach_provider
+
+    def record_pid(self, binding, provider_pid):
+        pid_file.write_text(str(provider_pid))
+        original_attach(self, binding, provider_pid)
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "attach_provider", record_pid)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "sleep 60"
+    )
+    try:
+        code = _run_claude_inproc(tmp_path, operation_id, prompt_path, root, timeout=1, grace=0.0)
+        assert code == 124
+        current = journal.read(operation_id)
+        assert current["status"] == "OUTCOME_UNKNOWN"
+        with pytest.raises(ProcessLookupError):
+            os.killpg(_pids_of(pid_file), 0)
+        manager = get_claude_account_pool_manager()
+        (lease_id,) = manager.unknown_outcome_leases()
+        assert json.loads((pool_root / "state.json").read_text())["leases"][lease_id][
+            "unknown_outcome"
+        ]
+        manager.reconcile_release(lease_id)
+        assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+def test_dispatch_hold_failure_never_releases_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    released: list[str] = []
+
+    def failing_hold(self, binding):
+        raise RuntimeError("hold failed")
+
+    def tracking_release(self, binding):
+        released.append("release")
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "hold_unknown_outcome", failing_hold)
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "release", tracking_release)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "sleep 60"
+    )
+    try:
+        code = _run_claude_inproc(tmp_path, operation_id, prompt_path, root, timeout=1, grace=0.0)
+    finally:
+        set_claude_account_pool_manager(None)
+    assert code == 124
+    assert released == []
+    assert journal.read(operation_id)["status"] == "OUTCOME_UNKNOWN"

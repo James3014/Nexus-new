@@ -62,6 +62,11 @@ _SENSITIVE_ENV_KEYS = (
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
 )
+_AUTH_METHOD_MARKERS = ("claude.ai", "oauth")
+_NO_ROTATION_KINDS = frozenset({
+    AccountFailureKind.QUOTA_EXHAUSTED,
+    AccountFailureKind.RATE_LIMITED,
+})
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
 _HOST_BINDING_SCHEMA = "nexus.claude_pool_host_binding.v1"
@@ -133,6 +138,31 @@ def identity_fingerprint(account_id: str, organization_id: str = "") -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def is_default_profile_path(path: str | Path) -> bool:
+    """True if path is $HOME, ~/.claude, or inside ~/.claude (inode comparison, so
+    case-insensitive filesystems and symlinks cannot disguise it)."""
+
+    home = Path.home()
+    default = home / ".claude"
+    candidate = Path(os.path.realpath(Path(path).expanduser()))
+    if _same_file(candidate, home):
+        return True
+    if not default.exists():
+        # Nothing to compare by inode; fall back to the resolved path (incl. case-folding).
+        resolved = Path(os.path.realpath(default))
+        return any(
+            str(p).casefold() == str(resolved).casefold() for p in (candidate, *candidate.parents)
+        )
+    return any(_same_file(p, default) for p in (candidate, *candidate.parents))
+
+
 def build_claude_profile_env(config_dir: str | Path) -> dict[str, str]:
     """Build the minimal environment for one Claude profile; never the default profile."""
 
@@ -175,7 +205,18 @@ def default_identity_observer(config_dir: Path) -> str | None:
         return None
     if proc.returncode != 0 or not isinstance(payload, dict):
         return None
-    if payload.get("loggedIn") is False:
+    if payload.get("loggedIn") is not True:
+        return None
+    reported_dir = payload.get("configDirectory")
+    if not isinstance(reported_dir, str) or not reported_dir.strip():
+        return None
+    if os.path.realpath(reported_dir) != os.path.realpath(config_dir):
+        return None
+    # Accept only subscription/OAuth logins (Claude.ai); API-key/other methods fail closed.
+    method = payload.get("authMethod")
+    if not isinstance(method, str) or not any(
+        marker in method.lower() for marker in _AUTH_METHOD_MARKERS
+    ):
         return None
     account = _first_str(payload, ("accountUuid", "account_uuid", "userId", "email"))
     if not account:
@@ -415,7 +456,7 @@ class ClaudeAccountPoolManager:
         if stat.S_IMODE(source.stat().st_mode) & 0o077:
             raise ClaudeAccountPoolError("CLAUDE_PROFILE_CONFIG_DIR_PERMISSIONS_TOO_OPEN")
         resolved = source.resolve()
-        if resolved == (Path.home() / ".claude").resolve():
+        if is_default_profile_path(resolved):
             raise ClaudeAccountPoolError("CLAUDE_DEFAULT_PROFILE_NOT_ALLOWED")
 
         lock = self._lock()
@@ -461,8 +502,29 @@ class ClaudeAccountPoolManager:
 
     # -- leases ---------------------------------------------------------
     @staticmethod
-    def _lease_live(record: dict[str, Any]) -> bool:
-        return bool(record.get("unknown_outcome")) or _pid_alive(record.get("pid"))
+    def _pgid_alive(pgid: object) -> bool:
+        if not isinstance(pgid, int) or pgid <= 0:
+            return False
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @classmethod
+    def _lease_live(cls, record: dict[str, Any]) -> bool:
+        """A lease is reclaimable only if dispatcher AND provider process are both dead."""
+
+        if record.get("unknown_outcome") or _pid_alive(record.get("pid")):
+            return True
+        if _pid_alive(record.get("provider_pid")) or cls._pgid_alive(record.get("provider_pgid")):
+            # Dispatcher died but the provider may still be producing effects.
+            record["unknown_outcome"] = True
+            record["unknown_outcome_at"] = time.time()
+            return True
+        return False
 
     @classmethod
     def _prune_dead_leases(cls, state: dict[str, Any]) -> None:
@@ -470,6 +532,35 @@ class ClaudeAccountPoolManager:
         for lease_id, record in list(leases.items()):
             if not isinstance(record, dict) or not cls._lease_live(record):
                 leases.pop(lease_id, None)
+
+    def _prune_and_persist(self, state: dict[str, Any]) -> None:
+        """Prune, persisting any reclaim/unknown-outcome marking even if the caller fails."""
+
+        before = json.dumps(state.get("leases", {}), sort_keys=True)
+        self._prune_dead_leases(state)
+        if json.dumps(state["leases"], sort_keys=True) != before:
+            state["updated_at"] = time.time()
+            self._write_state(state)
+
+    def attach_provider(self, lease: ClaudeLease, provider_pid: int) -> None:
+        """Record the provider pid/pgid (provider runs in its own session)."""
+
+        if not isinstance(provider_pid, int) or provider_pid <= 0:
+            raise ClaudeAccountPoolError("CLAUDE_PROVIDER_PID_INVALID")
+        lock = self._lock()
+        try:
+            state = self._load_state()
+            self._assert_host_binding(state)
+            record = self._record_for(state, lease)
+            record["provider_pid"] = provider_pid
+            try:
+                record["provider_pgid"] = os.getpgid(provider_pid)
+            except OSError:
+                record["provider_pgid"] = provider_pid
+            state["updated_at"] = time.time()
+            self._write_state(state)
+        finally:
+            self._unlock(lock)
 
     @staticmethod
     def _eligible(state: dict[str, Any], now: float) -> list[tuple[str, dict[str, Any]]]:
@@ -542,7 +633,9 @@ class ClaudeAccountPoolManager:
         except Exception:
             observed = None
         error: str | None = None
-        if not approved or not _FINGERPRINT_RE.fullmatch(approved):
+        if is_default_profile_path(config_dir):
+            error = "CLAUDE_DEFAULT_PROFILE_NOT_ALLOWED"
+        elif not approved or not _FINGERPRINT_RE.fullmatch(approved):
             error = "CLAUDE_ACCOUNT_IDENTITY_UNAPPROVED"
         elif not isinstance(observed, str) or not observed:
             error = "CLAUDE_ACCOUNT_IDENTITY_MISSING"
@@ -574,7 +667,7 @@ class ClaudeAccountPoolManager:
         try:
             state = self._load_state()
             self._assert_host_binding(state)
-            self._prune_dead_leases(state)
+            self._prune_and_persist(state)
             if any(
                 isinstance(r, dict) and r.get("consumer_id") == consumer
                 for r in state["leases"].values()
@@ -670,6 +763,20 @@ class ClaudeAccountPoolManager:
         try:
             state = self._load_state()
             self._assert_host_binding(state)
+            if failure_kind in _NO_ROTATION_KINDS:
+                # Never rotate around a per-person limit; cool the account so new
+                # tasks stop picking it. The caller releases its own lease.
+                self._prune_dead_leases(state)
+                record = self._record_for(state, lease)
+                account = state["accounts"].get(str(record.get("alias") or ""))
+                if isinstance(account, dict):
+                    now = time.time()
+                    account["cooldown_until"] = now + self.cooldown_seconds
+                    account["last_failure_timestamp"] = now
+                    account["last_failure_reason"] = failure_kind.value
+                    state["updated_at"] = now
+                    self._write_state(state)
+                return None
             if not is_rotation_eligible(failure_kind):
                 return None
             self._prune_dead_leases(state)
