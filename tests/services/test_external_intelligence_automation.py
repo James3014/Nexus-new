@@ -2571,3 +2571,36 @@ def test_c_units_core_authority_tolerates_cards_without_core_fields(tmp_path):
     units, _lease = c.calls[0]
     assert all(unit["core_authority"]["execution_lane"] == "" for unit in units)
     assert all(unit["core_authority"]["capability_ids"] is None for unit in units)
+
+
+def test_extract_verifier_paths_ignores_option_values_and_strips_node_ids():
+    from nexus.services.external_intelligence_automation import ExternalIntelligenceAutomation
+
+    contract = {
+        "unit_verifiers": {
+            "u1": [
+                {"argv": ["python3", "-c", "import nexus.x"]},
+                {
+                    "argv": [
+                        "python",
+                        "-m",
+                        "pytest",
+                        "tests/a_test.py::test_one",
+                        "--deselect",
+                        "tests/b_test.py::test_two",
+                        "-k",
+                        "foo.bar",
+                        "--ignore",
+                        "tests/ignored.py",
+                        "--junitxml=out/report.xml",
+                    ]
+                },
+                {"argv": ["python3", "tests/with space.py", "tests/q'uote.py"]},
+            ]
+        },
+        "whole_verifiers": [{"argv": ["pytest", "tests/c_test.py"]}],
+    }
+    assert ExternalIntelligenceAutomation._extract_verifier_paths(contract) == [
+        "tests/a_test.py",
+        "tests/c_test.py",
+    ]

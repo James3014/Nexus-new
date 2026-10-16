@@ -70,9 +70,37 @@ _URL_CREDENTIAL_PATTERN = re.compile(
 # password containing "@" is redacted up to the LAST "@" before the host (the
 # greedy match backtracks to it) instead of leaking the tail after the first "@".
 #
-# Out of scope (tracked in #1873): tokens split across lines or across separate
-# JSON fields (e.g. a key wrapped at 80 columns).  Each pattern matches within a
-# single token; reassembling fragments would need cross-string state.
+# Split tokens (#1873): the patterns below match within a single line.  A bounded
+# line-based pass (_redact_split_tokens) handles a token of a KNOWN prefix that is
+# wrapped across lines.  A line that ends (ignoring trailing blanks and one
+# backslash) in a known credential prefix plus token characters starts a token;
+# following lines are consumed while they consist ONLY of token characters (a
+# fixed-width wrap), up to _MAX_SPLIT_CONTINUATIONS lines.  A last line that has
+# other text after its token run is consumed (the run only) when the previous
+# line ended in a backslash or the fragment so far is too short to match a
+# pattern.  The re-joined text must match an existing pattern, otherwise nothing
+# is redacted.  Accepted costs: a lone token-shaped (not bare-lowercase) word on the
+# line right after a token is redacted too (over-redaction is preferred), a short
+# all-lowercase final fragment of a wrapped token stays visible, and the tail of a token
+# wrapped over more than _MAX_SPLIT_CONTINUATIONS lines, or split across separate
+# JSON strings, stays visible.  Each line is examined O(1) times (token-only lines of a join
+# are skipped, a trailing text line is revisited once), so the pass is linear in the input.
+_MAX_SPLIT_CONTINUATIONS = 32
+_SPLIT_JOIN_CHECK_CHARS = 8192
+_SPLIT_MIN_TOKEN_CHARS = 20
+_SPLIT_PREFIX_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(?:sk-|sk_live_|sk_test_|rk_live_|rk_test_|pk_live_|whsec_|gh[pousr]_|github_pat_|glpat-"
+    r"|AIza|AKIA|ASIA|xox[abposr]-|xapp-|hf_|npm_|SG\.|ya29\.|eyJ)"
+)
+_SPLIT_NONTOKEN_RE = re.compile(r"[^A-Za-z0-9_.\-]")
+_SPLIT_TOKEN_ONLY_RE = re.compile(r"[A-Za-z0-9_.\-]+")
+# After a fragment that already matches on its own, a plain-newline continuation
+# must look like token material: at least this long, or not a bare lowercase word
+# (so "token\nafter" keeps "after").  A short all-lowercase tail of a wrapped token
+# is therefore the one fragment that can stay visible (documented trade-off).
+_SPLIT_PLAIN_MIN_CHARS = 12
+_SPLIT_LOWER_WORD_RE = re.compile(r"[a-z]+")
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # Full PEM private-key block (BEGIN..END inclusive). Must run first so a keyed
     # PEM (private_key: -----BEGIN ...) is not truncated by the generic assignment
@@ -294,9 +322,114 @@ def _contains_forbidden_future_key(value: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _split_line_parts(line: str) -> tuple[str, int, bool]:
+    """Return (stripped content, leading blank count, ends_with_backslash)."""
+    body = line.rstrip(" \t\r")
+    backslash = body.endswith("\\")
+    if backslash:
+        body = body[:-1].rstrip(" \t")
+    lead = len(body) - len(body.lstrip(" \t"))
+    return body[lead:], lead, backslash
+
+
+def _joined_matches(text: str) -> bool:
+    text = text[:_SPLIT_JOIN_CHECK_CHARS]
+    return len(text) >= _SPLIT_MIN_TOKEN_CHARS and _redact_plain(text) != text
+
+
+def _redact_split_tokens(value: str) -> str:
+    """Redact known-prefix tokens wrapped across lines (see the note above)."""
+    if "\n" not in value or _SPLIT_PREFIX_RE.search(value) is None:
+        return value
+    lines = value.split("\n")
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line) + 1)
+    spans: list[tuple[int, int]] = []
+    i = 0
+    last = len(lines) - 1
+    while i < last:
+        body, lead, backslash = _split_line_parts(lines[i])
+        run = _SPLIT_NONTOKEN_RE.split(body)[-1] if body else ""
+        prefix = _SPLIT_PREFIX_RE.search(run) if run else None
+        if prefix is None:
+            i += 1
+            continue
+        start = offsets[i] + lead + len(body) - len(run) + prefix.start()
+        parts = [run[prefix.start() :]]
+        end = offsets[i] + lead + len(body)
+        k = i
+        via_fragment = False  # last consumed line had text after its token run
+        state = [False, 0, len(parts[0])]  # complete-so-far, length last checked, total length
+
+        def complete(frags: list[str], state: list = state) -> bool:
+            # "Complete" (matches a pattern on its own) is monotone while fragments are
+            # appended, so it is re-checked only when the text has doubled: O(log n)
+            # pattern passes per token instead of one per line.
+            total = state[2]
+            if not state[0] and total >= max(_SPLIT_MIN_TOKEN_CHARS, 2 * state[1]):
+                state[1] = total
+                state[0] = _joined_matches("".join(frags))
+            return state[0]
+
+        while k < last and k - i < _MAX_SPLIT_CONTINUATIONS:
+            cont, clead, cbackslash = _split_line_parts(lines[k + 1])
+            if not cont:
+                break
+            if _SPLIT_TOKEN_ONLY_RE.fullmatch(cont):
+                if not (
+                    backslash
+                    or len(cont) >= _SPLIT_PLAIN_MIN_CHARS
+                    or _SPLIT_LOWER_WORD_RE.fullmatch(cont) is None
+                    or not complete(parts)
+                ):
+                    break
+                parts.append(cont)
+                state[2] += len(cont)
+                k += 1
+                end = offsets[k] + clead + len(cont)
+                backslash = cbackslash
+                continue
+            fragment = _SPLIT_TOKEN_ONLY_RE.match(cont)
+            if fragment is not None and (
+                backslash or fragment.end() >= _SPLIT_PLAIN_MIN_CHARS or not complete(parts)
+            ):
+                parts.append(fragment.group(0))
+                state[2] += fragment.end()
+                k += 1
+                end = offsets[k] + clead + fragment.end()
+                via_fragment = True
+            break
+        if k > i and (state[0] or _joined_matches("".join(parts))):
+            spans.append((start, end))
+        # Token-only lines are consumed (a later head inside them would only re-check a
+        # suffix of the same text).  A fragment line also carries ordinary text that may
+        # hold its own head, so it is examined again: each line is visited at most twice.
+        i = k if via_fragment else k + 1
+    if not spans:
+        return value
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        pieces.append(value[cursor:start])
+        pieces.append(_REDACTED_SENTINEL)
+        cursor = end
+    pieces.append(value[cursor:])
+    return "".join(pieces)
+
+
+def _redact_plain(value: str) -> str:
+    result = value
+    for pattern in _SECRET_PATTERNS:
+        if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
+            continue
+        result = pattern.sub(_REDACTED_SENTINEL, result)
+    return result
+
+
 def _redact_string(value: str) -> str:
     """Redact known secret patterns from a string value."""
-    result = value
+    result = _redact_split_tokens(value)
     for pattern in _SECRET_PATTERNS:
         if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
             continue

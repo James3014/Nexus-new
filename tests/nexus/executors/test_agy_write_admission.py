@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -301,8 +302,13 @@ def test_implementation_run_uses_accept_edits_seatbelt_and_records_posture(
     assert "(deny file-write*)" in profile
     assert f'(subpath "{target}")' in profile
     assert f'(subpath "{target / ".git"}")' in profile  # .git entry stays read-only
-    assert str(agy_home) not in profile  # real HOME is never writable
-    assert "Keychains" not in profile
+    # #1752: the profile now also lists the real HOME's credential paths in a
+    # trailing read-deny block; the WRITE rules (everything before it) still
+    # must not mention the real HOME or any keychain.
+    write_rules = profile.split("(deny file-read*")[0]
+    assert str(agy_home) not in write_rules  # real HOME is never writable
+    assert "Keychains" not in write_rules
+    assert "(allow file-write" not in profile.split("(deny file-read*")[1]
     assert str(canonical) not in profile
     run_home = Path(request.env["HOME"])
     run_tmp = Path(request.env["TMPDIR"])
@@ -1995,7 +2001,9 @@ def test_materialize_run_home_gets_isolated_default_keychain(tmp_path, agy_home)
         run_root=run_home.parent, writable_target=None, run_home=run_home
     )
     assert f'(subpath "{run_home.parent}")' in profile_text
-    assert "Keychains" not in profile_text  # no literal: the real ~/Library/Keychains stays denied
+    # no write literal: the real ~/Library/Keychains stays denied (#1752 adds a read deny)
+    assert "Keychains" not in profile_text.split("(deny file-read*")[0]
+    assert "(allow file-write" not in profile_text.split("(deny file-read*")[1]
     if not _assert_profile_text_or_skip_run(
         profile_text,
         denied=[run_home / admission.AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config"],
@@ -2127,3 +2135,334 @@ def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path,
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
     assert row["error"] == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
     assert row["model_calls"] == 0 and row["written_files"] == []
+
+
+# --- #1752: confined workers must not read the real home's credentials -------
+
+
+def _read_denied_entries(profile: str) -> set[str]:
+    """Entries of every ``(deny file-read* ...)`` block in the profile text."""
+    entries: set[str] = set()
+    inside = False
+    for line in profile.splitlines():
+        stripped = line.strip()
+        if stripped == "(deny file-read*":
+            inside = True
+            continue
+        if inside:
+            if stripped == ")":
+                inside = False
+                continue
+            entries.add(stripped)
+    return entries
+
+
+def _effective_read(profile: str, path: Path) -> str:
+    sbpl = admission._sbpl_path(path)
+    denied = _read_denied_entries(profile)
+    for entry in denied:
+        kind, _, quoted = entry.partition(" ")
+        target = quoted.strip().removesuffix(")").strip('"')
+        if kind == "(literal" and target == sbpl:
+            return "deny"
+        if kind == "(subpath" and (sbpl == target or sbpl.startswith(target + "/")):
+            return "deny"
+    return "allow"
+
+
+def test_seatbelt_profile_denies_reading_source_home_credentials(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    target = (tmp_path / "real-home" / "workspace" / "repo").resolve()
+    target.mkdir(parents=True)
+    run_root = (tmp_path / "run").resolve()
+    (run_root / "home").mkdir(parents=True)
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=target, source_home=source_home
+    )
+    for relative in (
+        ".ssh/id_test",
+        ".config/gh/hosts.yml",
+        ".git-credentials",
+        ".netrc",
+        ".gitconfig",
+        ".config/git/credentials",
+        ".config/nexus-agent-bot/app.pem",
+        ".config/nexus-jev/env",
+        ".codex/auth.json",
+        ".cline/data/settings/providers.json",
+        ".gemini/oauth_creds.json",
+        ".grok/auth.json",
+        ".aws/credentials",
+        ".docker/config.json",
+        ".npmrc",
+        ".pypirc",
+        "Library/Keychains/login.keychain-db",
+    ):
+        assert _effective_read(profile, source_home / relative) == "deny", relative
+    # Only the credential subpaths: the target (inside the real home) and the
+    # run root stay readable, as do ordinary files in the real home.
+    assert _effective_read(profile, target / "README.md") == "allow"
+    assert _effective_read(profile, run_root / "home" / ".ssh" / "x") == "allow"
+    assert _effective_read(profile, source_home / "notes.txt") == "allow"
+    # The leading write-profile lines are unchanged.
+    assert profile.splitlines()[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
+
+
+def test_seatbelt_profile_denies_pool_home_and_account_home_credentials(tmp_path):
+    pool_home = (tmp_path / "pool-home").resolve()
+    profile = admission.build_seatbelt_profile(
+        run_root=(tmp_path / "run").resolve(), writable_target=None, source_home=pool_home
+    )
+    assert _effective_read(profile, pool_home / ".ssh" / "id") == "deny"
+    account_home = Path(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))
+    assert _effective_read(profile, account_home / ".ssh" / "id") == "deny"
+
+
+def test_seatbelt_profile_denies_symlink_targets_of_credential_paths(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    dotfiles = (tmp_path / "dotfiles").resolve()
+    dotfiles.mkdir(parents=True)
+    (dotfiles / "gitconfig").write_text("[user]\n", encoding="utf-8")
+    (dotfiles / "ssh").mkdir()
+    source_home.mkdir()
+    (source_home / ".gitconfig").symlink_to(dotfiles / "gitconfig")
+    (source_home / ".ssh").symlink_to(dotfiles / "ssh")
+    run_root = (tmp_path / "run").resolve()
+    run_root.mkdir()
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=None, source_home=source_home
+    )
+    assert _effective_read(profile, dotfiles / "gitconfig") == "deny"
+    assert _effective_read(profile, dotfiles / "ssh" / "id_test") == "deny"
+    assert _effective_read(profile, source_home / ".gitconfig") == "deny"
+    assert _effective_read(profile, dotfiles / "unrelated.txt") == "allow"
+
+
+def test_seatbelt_profile_refuses_target_or_run_root_inside_a_credential_path(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    inside = source_home / ".codex" / "worktrees" / "repo"
+    inside.mkdir(parents=True)
+    ok_root = (tmp_path / "run").resolve()
+    ok_root.mkdir()
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=ok_root, writable_target=inside, source_home=source_home
+        )
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=inside, writable_target=None, source_home=source_home
+        )
+    # a target elsewhere in the real home is fine
+    elsewhere = source_home / "workspace" / "repo"
+    elsewhere.mkdir(parents=True)
+    admission.build_seatbelt_profile(
+        run_root=ok_root, writable_target=elsewhere, source_home=source_home
+    )
+
+
+def test_seatbelt_profile_refuses_overlap_in_both_directions_and_read_only_roots(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    dotfiles = (source_home / "dotfiles").resolve()
+    dotfiles.mkdir(parents=True)
+    (dotfiles / "gitconfig").write_text("x", encoding="utf-8")
+    (source_home / ".gitconfig").symlink_to(dotfiles / "gitconfig")
+    run_root = (tmp_path / "run").resolve()
+    run_root.mkdir()
+    # the writable target CONTAINS the resolved credential file: it would be writable
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=dotfiles, source_home=source_home
+        )
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=None, source_home=source_home, target_root=dotfiles
+        )
+    # a read-only role has no writable target, but its target is checked too
+    inside = source_home / ".codex" / "worktrees" / "repo"
+    inside.mkdir(parents=True)
+    with pytest.raises(admission.CredentialPathOverlapError):
+        admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=None, source_home=source_home, target_root=inside
+        )
+
+
+def test_seatbelt_profile_denies_symlinks_inside_credential_directories(tmp_path):
+    source_home = (tmp_path / "real-home").resolve()
+    dotfiles = (tmp_path / "dotfiles").resolve()
+    (dotfiles / "ssh").mkdir(parents=True)
+    (dotfiles / "ssh" / "id_rsa").write_text("x", encoding="utf-8")
+    (source_home / ".ssh").mkdir(parents=True)
+    (source_home / ".ssh" / "id_rsa").symlink_to(dotfiles / "ssh" / "id_rsa")
+    run_root = (tmp_path / "run").resolve()
+    run_root.mkdir()
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=None, source_home=source_home
+    )
+    assert _effective_read(profile, dotfiles / "ssh" / "id_rsa") == "deny"
+    assert _effective_read(profile, source_home / ".config" / "git" / "config") == "deny"
+
+
+def test_bench_runner_refuses_a_target_inside_a_credential_path(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    fake_home = (tmp_path / "bench-home").resolve()
+    case_dir = fake_home / ".codex" / "case"
+    case_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+    monkeypatch.setattr(
+        "nexus.executors.cli_worker.run_cli_worker",
+        lambda *a, **k: pytest.fail("must not start agy"),
+    )
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert row["error"] == "agy_target_inside_credential_path"
+    assert row["model_calls"] == 0
+
+
+def test_bench_runner_reports_an_unrepresentable_profile_as_a_typed_error(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+
+    def unrepresentable(**kwargs):
+        raise ValueError("path not representable in a Seatbelt profile")
+
+    monkeypatch.setattr(admission, "build_seatbelt_profile", unrepresentable)
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert row["error"] == "agy_seatbelt_profile_unrepresentable"
+
+
+def test_agy_adapter_refuses_a_read_only_target_inside_a_credential_path(
+    monkeypatch, tmp_path, agy_home
+):
+    _ready(monkeypatch)
+    _no_spawn(monkeypatch)
+    target = agy_home / ".codex" / "worktrees" / "repo"
+    target.mkdir(parents=True)
+    receipt = _invoke(
+        AgyWorkerAdapter(canonical_root=_repo(tmp_path)), target, worker_role="review"
+    )
+    assert receipt.failure_reason == "agy_target_inside_credential_path"
+
+
+def _spy_profile_builder(monkeypatch, dotted: str, seen: list):
+    real = admission.build_seatbelt_profile
+
+    def spy(**kwargs):
+        seen.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(dotted, spy)
+
+
+def test_agy_adapter_passes_source_home_to_the_seatbelt_profile(monkeypatch, tmp_path, agy_home):
+    _ready(monkeypatch)
+    seen: list = []
+    _spy_profile_builder(
+        monkeypatch, "nexus.executors.worker_registry.build_seatbelt_profile", seen
+    )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: _result(request, stdout=_OK),
+    )
+    _invoke(AgyWorkerAdapter(canonical_root=_repo(tmp_path)), _target(tmp_path), timeout_seconds=30)
+    assert seen and all(kwargs["source_home"] == agy_home for kwargs in seen)
+    profile = admission.build_seatbelt_profile(
+        run_root=tmp_path / "x-run", writable_target=None, source_home=seen[0]["source_home"]
+    )
+    assert _effective_read(profile, agy_home / ".ssh" / "id") == "deny"
+
+
+def test_bench_runner_passes_source_home_to_the_seatbelt_profile(tmp_path, monkeypatch):
+    from scripts.bench import real_world_task_runner as runner
+
+    fake_home = (tmp_path / "bench-home").resolve()
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    seen: list = []
+
+    def spy(**kwargs):
+        seen.append(kwargs)
+        raise RuntimeError("profile spy: stop before launching agy")
+
+    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+    monkeypatch.setattr(admission, "build_seatbelt_profile", spy)
+    monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
+    monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    task = SimpleNamespace(
+        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+    )
+    with pytest.raises(RuntimeError, match="profile spy"):
+        runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
+    assert seen[0]["source_home"] == fake_home
+
+
+# Opt-in: defined (so collected) only when NEXUS_LOCAL_PHYSICAL_WITNESS=1, never in CI.
+if os.environ.get("NEXUS_LOCAL_PHYSICAL_WITNESS") == "1":
+
+    def test_local_physical_seatbelt_denies_source_home_credential_reads(tmp_path):
+        """Real sandbox-exec: a fake source home's .ssh is unreadable, the target is not."""
+        if not _seatbelt_usable():
+            pytest.skip("sandbox-exec unavailable")
+        source_home = (tmp_path / "fake-home").resolve()
+        (source_home / ".ssh").mkdir(parents=True)
+        (source_home / ".ssh" / "id_test").write_text("FAKE-SECRET", encoding="utf-8")
+        dotfiles = (tmp_path / "dotfiles").resolve()
+        dotfiles.mkdir()
+        (dotfiles / "gitconfig").write_text("FAKE-GITCONFIG", encoding="utf-8")
+        (source_home / ".gitconfig").symlink_to(dotfiles / "gitconfig")
+        target = (source_home / "workspace" / "repo").resolve()
+        target.mkdir(parents=True)
+        (target / "ok.txt").write_text("fine", encoding="utf-8")
+        run_root = (tmp_path / "run").resolve()
+        (run_root / "home").mkdir(parents=True)
+        profile = admission.build_seatbelt_profile(
+            run_root=run_root, writable_target=target, source_home=source_home
+        )
+        code = (
+            "import sys\n"
+            "out = []\n"
+            "for p in sys.argv[1:]:\n"
+            "    try:\n"
+            "        open(p).read()\n"
+            "        out.append('READ')\n"
+            "    except OSError:\n"
+            "        out.append('DENIED')\n"
+            "print(','.join(out))\n"
+        )
+        result = run_cli_worker(
+            CliWorkerRequest(
+                executable=sys.executable,
+                argv=(
+                    "-c",
+                    code,
+                    str(source_home / ".ssh" / "id_test"),
+                    str(target / "ok.txt"),
+                    str(dotfiles / "gitconfig"),
+                    str(source_home / ".gitconfig"),
+                ),
+                cwd=str(target),
+                env={"HOME": str(run_root / "home"), "TMPDIR": str(run_root)},
+                seatbelt_profile=profile,
+            )
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.strip() == b"DENIED,READ,DENIED,DENIED"
