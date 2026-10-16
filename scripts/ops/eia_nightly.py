@@ -68,6 +68,7 @@ from nexus.services.external_intelligence_core_binding import (  # noqa: E402
     _require_lane,
     build_capability_discovery_receipt,
 )
+from scripts.ops import external_intelligence_service as eia_service  # noqa: E402
 
 HOME = Path.home()
 REPOSITORY = "James3014/Nexus-new"
@@ -78,7 +79,7 @@ SKIP_LABELS = {L_EIA, L_ESCALATE, L_TEMPLATE, L_CANDIDATE}
 TRACKING_TITLE = "EIA nightly task cards"
 CARD_DIR = "tasks/eia-nightly"
 COORD_AS = "m4-eia-nightly"
-DAEMON_LABEL = "com.nexus.external-intelligence"
+DAEMON_LABEL = eia_service.SERVICE_LABEL
 BOT_NAME = "james3014-nexus-agent[bot]"
 BOT_EMAIL = "341779647+james3014-nexus-agent[bot]@users.noreply.github.com"
 TASK_FENCE_RE = re.compile(r"```eia-task[ \t]*\n(.*?)\n```", re.DOTALL)
@@ -587,9 +588,13 @@ class Nightly:
         coord_host: str = "james@100.104.233.2",
         daemon_plist: Path = HOME / "Library/LaunchAgents" / f"{DAEMON_LABEL}.plist",
         trusted_actors: Sequence[str] = tuple(TRUSTED_ACTORS),
+        launchctl: Callable[..., Any] | None = None,
         watch_seconds: int = 270,
     ):
         self.watch_seconds = watch_seconds
+        # launchd effects for the EIA daemon stay owned by external_intelligence_service
+        # (see tests/architecture/test_effect_owner_uniqueness.py).
+        self.launchctl = launchctl or eia_service._launchctl
         self.trusted_actors = frozenset(a.strip() for a in trusted_actors if a.strip())
         self.state_dir = Path(state_dir).expanduser()
         self.work_repo = Path(work_repo).expanduser()
@@ -916,7 +921,6 @@ class Nightly:
         night["order"] = [e["issue"] for e in picked]
         branch = f"eia-nightly/cards-{night_id}"
         night["card_pr"] = {"branch": branch, "commit": commit, "number": None, "merged": False}
-        self._git(self.work_repo, "update-ref", f"refs/eia-nightly/cards/{night_id}", commit)
         night["status"] = "CARDS_PENDING"
         self.save(night)  # write-ahead before any remote effect
         return self._open_card_pr(night)
@@ -1311,7 +1315,7 @@ class Nightly:
         raise NightlyError("BROWSER_BRIDGE_NOT_CONNECTED")
 
     def _daemon_state(self) -> str:
-        out = self.run(["launchctl", "print", f"gui/{os.getuid()}/{DAEMON_LABEL}"], timeout=20)
+        out = self.launchctl("print", f"gui/{os.getuid()}/{DAEMON_LABEL}")
         text = str(out.stdout) + str(out.stderr)
         if "Could not find service" in text:
             return "absent"
@@ -1323,11 +1327,13 @@ class Nightly:
         state = self._daemon_state()
         domain = f"gui/{os.getuid()}"
         if state == "absent":
-            self._ok(["launchctl", "bootstrap", domain, self.daemon_plist], code="BOOTSTRAP_FAILED")
+            result = eia_service._bootstrap(domain, self.daemon_plist, runner=self.launchctl)
         elif state == "loaded":
-            self._ok(
-                ["launchctl", "kickstart", f"{domain}/{DAEMON_LABEL}"], code="KICKSTART_FAILED"
-            )
+            result = self.launchctl("kickstart", f"{domain}/{DAEMON_LABEL}")
+        else:
+            result = subprocess.CompletedProcess([], 0)
+        if result.returncode != 0:
+            raise NightlyError(f"DAEMON_START_FAILED:{_one_line(result.stderr, 200)}")
         for _ in range(6):
             if self._daemon_state() == "running":
                 return
@@ -1708,12 +1714,6 @@ class Nightly:
             rows.append([status, path])
         if not rows:
             raise CandidateRefused("CANDIDATE_EMPTY")
-        self._git(
-            repo,
-            "update-ref",
-            f"refs/eia-nightly/candidates/{entry['issue']}-{att['revision']}",
-            sha,
-        )
         return {"sha": sha, "tree": tree, "packet_sha": packet_sha, "rows": rows, **tokens}
 
     def load_whole_verification(
@@ -1844,7 +1844,7 @@ class Nightly:
         return night
 
     def finalize(self, night: dict[str, Any]) -> None:
-        out = self.run(["launchctl", "bootout", f"gui/{os.getuid()}/{DAEMON_LABEL}"], timeout=30)
+        out = eia_service.stop(launchctl_runner=self.launchctl)
         bootout_ok = out.returncode == 0 or "Could not find service" in f"{out.stdout}{out.stderr}"
         for entry in self._entries(night, "ARMED") + self._entries(night, "ARMING"):
             entry["status"] = "HARD_STOPPED"

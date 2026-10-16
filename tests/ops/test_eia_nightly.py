@@ -271,6 +271,7 @@ def env(tmp_path: Path):
         gh=Path(GH),
         daemon_plist=plist,
         watch_seconds=0,
+        launchctl=lambda *args: system(["launchctl", *args]),
     )
     return {
         "app": app,
@@ -1178,12 +1179,6 @@ def test_markers_in_untrusted_comments_do_not_suppress_ours(env) -> None:
     assert len(env["gh"].issues[13]["comments"]) == 1
 
 
-def test_card_commit_is_pinned_by_a_ref(env) -> None:
-    night = _prepared(env)
-    ref = _git(env["repo"], "rev-parse", f"refs/eia-nightly/cards/{NIGHT}")
-    assert ref == night["card_pr"]["commit"]
-
-
 # ------------------------------------------------------------------------- review round 3
 
 REAL = Path(__file__).parent / "fixtures" / "eia_nightly_real"
@@ -1455,3 +1450,16 @@ def test_candidate_pr_not_visible_yet_is_retried_then_found(env) -> None:
     entry = night["issues"]["11"]
     assert entry["status"] == "CANDIDATE_PR" and len(env["gh"].prs) == 2
     assert env["gh"].prs[entry["pr"]["number"]]["headRefOid"] == sha
+
+
+def test_launchd_effects_go_through_the_eia_service_owner(env) -> None:
+    """No raw launchctl argv in the scheduler (effect-owner architecture test)."""
+    source = Path(en.__file__).read_text(encoding="utf-8")
+    assert '"launchctl"' not in source and "'launchctl'" not in source
+    assert '"update-ref"' not in source
+    app = en.Nightly(
+        state_dir=env["tmp"] / "other",
+        eia_config=env["config"],
+        work_repo=env["repo"],
+    )
+    assert app.launchctl is en.eia_service._launchctl

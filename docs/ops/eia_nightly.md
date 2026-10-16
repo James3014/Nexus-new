@@ -112,8 +112,10 @@ acts on that result as follows:
   same way before READY is sent. If the new PR is not visible yet, the tick is retried, and
   the next tick finds the PR by branch. A different PR, base or head is refused. The PR number is saved before labels change. A failed or
   partial label edit leaves the Issue `CANDIDATE_PR` with labels pending (never `WITHDRAWN`),
-  and every tick retries the labels. The candidate commit and the card commit are
-  pinned under `refs/eia-nightly/`. The scheduler then pushes that exact commit as
+  and every tick retries the labels. The scheduler writes no local refs: a raw ref writer
+  would be a second candidate-integration primitive (see
+  `tests/architecture/test_effect_owner_uniqueness.py`). Both commits are pushed the same
+  night, well inside git's two-week prune window. The scheduler then pushes that exact commit as
   `eia/<N>-<revision>` with the bot credential, opens a PR (`Closes #N`, Core marker, CLOSE
   intent, receipt summary) and sends READY to merge-queue. Labels become `eia:candidate-pr`;
   `eia:queue` and `nexus:external-intelligence` are removed. A GitHub error is retried on the
