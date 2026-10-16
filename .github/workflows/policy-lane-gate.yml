@@ -9,7 +9,6 @@ on:
       - 'nexus/governance/**'
       - 'nexus/services/**'
       - 'nexus/delivery/**'
-      - 'nexus-core-rs/src/**'
       - 'nexus/research/**'
       - 'nexus/app/research_flow_service.py'
       - 'docs/reports/policy-manifest.v2.json'
@@ -21,7 +20,6 @@ on:
       - 'nexus/governance/**'
       - 'nexus/services/**'
       - 'nexus/delivery/**'
-      - 'nexus-core-rs/src/**'
       - 'nexus/research/**'
       - 'nexus/app/research_flow_service.py'
       - 'docs/reports/policy-manifest.v2.json'
@@ -94,7 +92,7 @@ jobs:
 
           while IFS= read -r -d '' path; do
             case "$path" in
-              nexus/engine/*|nexus/core/*|nexus/governance/*|nexus/services/*|nexus/delivery/*|nexus/research/*|nexus/app/research_flow_service.py|nexus-core-rs/src/*|docs/reports/policy-manifest.v2.json)
+              nexus/engine/*|nexus/core/*|nexus/governance/*|nexus/services/*|nexus/delivery/*|nexus/research/*|nexus/app/research_flow_service.py|docs/reports/policy-manifest.v2.json)
                 printf '%s\0' "$path" >> "$out"
                 ;;
             esac
