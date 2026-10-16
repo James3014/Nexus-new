@@ -2257,6 +2257,11 @@ _NO_TOOL_DENY_RULE_TOOLS = {
         "multi_replace_file_content",
     }),
 }
+# Only file tools fail in permission declaration; a run_command error that
+# starts with a crafted cwd must not pass as one.
+_NO_TOOL_DECLARATION_TOOLS = (
+    _NO_TOOL_DENY_RULE_TOOLS["read_file"] | _NO_TOOL_DENY_RULE_TOOLS["write_file"]
+)
 _NO_TOOL_PASSIVE_STEP_TYPES = frozenset({"USER_INPUT", "PLANNER_RESPONSE"})
 
 
@@ -2309,7 +2314,11 @@ def _no_tool_refused_tool_call_count(transcript_path: Path | None) -> int | None
         if deny is not None:
             if tool not in _NO_TOOL_DENY_RULE_TOOLS[deny.group(1)]:
                 return None
-        elif declaration is None or declaration.group(1) != tool:
+        elif (
+            declaration is None
+            or declaration.group(1) != tool
+            or tool not in _NO_TOOL_DECLARATION_TOOLS
+        ):
             return None
         refused += 1
     if calls == 0 or refused != calls or pending:

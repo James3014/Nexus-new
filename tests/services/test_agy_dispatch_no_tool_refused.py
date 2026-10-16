@@ -287,6 +287,20 @@ def test_no_tool_violation_kept_when_cwd_changed(tmp_path: Path) -> None:
             "",
         ),
         ([_planner(["write_to_file"]), _refused(DENIED_VIEW)], ""),
+        # refusal text embedded in a longer error: full match required
+        (
+            [_planner(["run_command"]), _refused("/tmp/" + DENIED_COMMAND + ": no such directory")],
+            "",
+        ),
+        ([_planner(["view_file"]), _refused("/tmp/x " + DENIED_VIEW)], ""),
+        # a crafted cwd echoed by run_command must not pass as a cortex refusal
+        (
+            [
+                _planner(["run_command"]),
+                _refused(DENIED_VIEW.replace("view_file", "run_command") + " x"),
+            ],
+            "",
+        ),
         ([_planner(["run_command"]), _refused(), _refused()], ""),
     ],
 )
