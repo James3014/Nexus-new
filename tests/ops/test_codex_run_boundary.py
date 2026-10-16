@@ -3,6 +3,8 @@
 import os
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 _LAUNCHER = (
@@ -40,6 +42,14 @@ case "$FAKE_CODEX_MODE" in
   nestedgit) mkdir "$work/sub"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git" ;;
   nestedgitdir) mkdir -p "$work/sub/.git"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git/leak" ;;
   lockedgit) mkdir -p "$work/sub/.git"; ln -s "$FAKE_ESCAPE_DIR" "$work/sub/.git/leak"; chmod 000 "$work/sub/.git" ;;
+  nestedfile) mkdir "$work/sub"; echo "gitdir: /outside" > "$work/sub/.git" ;;
+  nestedcfg) mkdir -p "$work/n2/.git"; printf '[core]\n\tfsmonitor = x\n' > "$work/n2/.git/config" ;;
+  bgsymlink) ( sleep 2; ln -s "$FAKE_ESCAPE_DIR" "$work/late-link" ) >/dev/null 2>&1 & ;;
+  refresh) echo '{"OPENAI_API_KEY":"sk-refreshed"}' > "$CODEX_HOME/auth.json" ;;
+  refreshconflict)
+    echo '{"OPENAI_API_KEY":"sk-refreshed"}' > "$CODEX_HOME/auth.json"
+    echo '{"OPENAI_API_KEY":"sk-other-session"}' > "$FAKE_HOST_AUTH" ;;
+  refreshinvalid) echo 'not json' > "$CODEX_HOME/auth.json" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
 echo '{"type":"turn.completed"}'
@@ -55,7 +65,14 @@ def _git(root: Path, *args: str) -> None:
     )
 
 
-def _launch(tmp_path: Path, mode: str, *, prepare=None, report_file: Path | None = None):
+def _launch(
+    tmp_path: Path,
+    mode: str,
+    *,
+    prepare=None,
+    report_file: Path | None = None,
+    guard_fail: str | None = None,
+):
     canonical = tmp_path / "canonical"
     ops = canonical / "scripts" / "ops"
     ops.mkdir(parents=True)
@@ -101,10 +118,11 @@ def _launch(tmp_path: Path, mode: str, *, prepare=None, report_file: Path | None
         "SSH_AUTH_SOCK": "/tmp/agent.sock",
         "OPENAI_API_KEY": "sk-ambient",
         "CODEX_BIN": "codex",
-        "NEXUS_CODEX_ENV_PASSTHROUGH": "FAKE_CODEX_MODE,FAKE_CODEX_DUMP,FAKE_ESCAPE_DIR,GH_TOKEN",
+        "NEXUS_CODEX_ENV_PASSTHROUGH": "FAKE_CODEX_MODE,FAKE_CODEX_DUMP,FAKE_ESCAPE_DIR,FAKE_HOST_AUTH,GH_TOKEN",
         "FAKE_CODEX_MODE": mode,
         "FAKE_CODEX_DUMP": str(dump),
         "FAKE_ESCAPE_DIR": str(secret_dir),
+        "FAKE_HOST_AUTH": str(codex_home / "auth.json"),
         "NEXUS_MACHINE_STATE_DIR": str(tmp_path / "state"),
         "LOCK_FILE": str(tmp_path / "launcher.lock"),
         "NEXUS_CODEX_WORK_ROOT": str(tmp_path / "runs"),
@@ -112,6 +130,15 @@ def _launch(tmp_path: Path, mode: str, *, prepare=None, report_file: Path | None
         "TMPDIR": str(tmp_path / "tmpdir"),
     }
     env.pop("REPORT_FILE", None)
+    if guard_fail is not None:
+        stub = bin_dir / "python3"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f'[[ "$2" == *codex_run_guard.py && "$3" == "{guard_fail}" ]] && exit 1\n'
+            f'exec "{sys.executable}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
     if report_file is not None:
         env["REPORT_FILE"] = str(report_file)
     res = subprocess.run(
@@ -267,3 +294,93 @@ def test_codex_run_fails_on_an_escaping_symlink_inside_an_unreadable_nested_dot_
     res, _, _, _ = _launch(tmp_path, "lockedgit")
 
     assert res.returncode == 6, res.stderr
+
+
+def test_codex_run_fails_on_a_nested_dot_git_file_pointing_outside(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedfile")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_run_fails_on_a_nested_dot_git_directory_with_a_planted_config(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedcfg")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_run_kills_a_backgrounded_child_before_verifying(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "bgsymlink")
+    time.sleep(3)
+    late = [p for p in (tmp_path / "runs").glob("run.*/late-link")]
+
+    assert late == [], "a backgrounded child outlived the run and planted a symlink"
+    assert res.returncode == 0, res.stderr
+
+
+def test_codex_refreshed_auth_is_written_back_to_the_host_atomically(tmp_path):
+    res, _, real_home, _ = _launch(tmp_path, "refresh")
+
+    assert res.returncode == 0, res.stderr
+    host = real_home / ".codex" / "auth.json"
+    assert host.read_text(encoding="utf-8").strip() == '{"OPENAI_API_KEY":"sk-refreshed"}'
+    assert stat.S_IMODE(host.stat().st_mode) == 0o600
+    assert sorted(p.name for p in (real_home / ".codex").glob("auth.json*")) == ["auth.json"]
+
+
+def test_codex_refreshed_auth_does_not_clobber_a_host_file_changed_meanwhile(tmp_path):
+    res, _, real_home, _ = _launch(tmp_path, "refreshconflict")
+
+    assert res.returncode == 0, res.stderr
+    host = real_home / ".codex" / "auth.json"
+    assert host.read_text(encoding="utf-8").strip() == '{"OPENAI_API_KEY":"sk-other-session"}'
+
+
+def test_codex_invalid_refreshed_auth_is_not_written_back(tmp_path):
+    res, _, real_home, _ = _launch(tmp_path, "refreshinvalid")
+
+    assert res.returncode == 0, res.stderr
+    host = real_home / ".codex" / "auth.json"
+    assert host.read_text(encoding="utf-8") == '{"OPENAI_API_KEY":"sk-fake"}'
+
+
+def test_codex_launcher_fails_closed_when_the_guard_fails_in_home(tmp_path):
+    res, dump, _, _ = _launch(tmp_path, "inside", guard_fail="home")
+
+    assert res.returncode == 2
+    assert dump == []
+
+
+def test_codex_launcher_fails_closed_when_the_guard_fails_in_snapshot(tmp_path):
+    res, dump, _, _ = _launch(tmp_path, "inside", guard_fail="snapshot")
+
+    assert res.returncode == 2
+    assert dump == []
+
+
+def test_codex_launcher_fails_closed_when_the_guard_fails_in_verify(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "inside", guard_fail="verify")
+
+    assert res.returncode == 6
+    assert "codex_target_symlink_or_git_escape" in res.stderr
+
+
+def test_codex_env_strips_proxy_credentials_and_odd_locale_values():
+    from nexus.executors.codex_run_boundary import codex_child_env
+
+    env = codex_child_env(
+        {
+            "HTTPS_PROXY": "http://user:pw@proxy.example:8080/",
+            "http_proxy": "http://proxy.example:3128",
+            "NO_PROXY": "localhost,127.0.0.1",
+            "LC_ALL": "en_US.UTF-8",
+            "LC_MESSAGES": "$(touch /tmp/x)",
+        },
+        home=Path("/h"),
+        tmpdir=Path("/h/tmp"),
+    )
+
+    assert env["HTTPS_PROXY"] == "http://proxy.example:8080/"
+    assert env["http_proxy"] == "http://proxy.example:3128"
+    assert env["NO_PROXY"] == "localhost,127.0.0.1"
+    assert env["LC_ALL"] == "en_US.UTF-8"
+    assert "LC_MESSAGES" not in env

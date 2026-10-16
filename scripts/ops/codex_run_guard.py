@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +24,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from nexus.executors import codex_run_boundary as boundary  # noqa: E402
 
 ESCAPE_EXIT = 6
+
+
+def run_in_own_group(command: list[str], env: dict[str, str], home: Path) -> int:
+    """Run codex in its own session; kill the whole group once it exits so a
+    backgrounded child cannot touch the work copy after ``verify``; then write
+    a refreshed auth token back to the host."""
+    try:
+        child = subprocess.Popen(command, env=env, start_new_session=True)
+    except OSError as error:
+        print(f"[nexus-enforced] codex_start_failed: {error}", file=sys.stderr)
+        return 127
+    group = child.pid
+
+    def forward(signum: int, _frame: object) -> None:
+        try:
+            os.killpg(group, signum)
+        except ProcessLookupError:
+            pass
+
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, forward)
+    status = child.wait()
+    try:
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    boundary.write_back_refreshed_auth(home)
+    return status if status >= 0 else 128 - status
 
 
 def main(argv: list[str]) -> int:
@@ -50,7 +80,7 @@ def main(argv: list[str]) -> int:
     if len(argv) >= 4 and argv[0] == "exec" and argv[2] == "--":
         home = Path(argv[1])
         env = boundary.codex_child_env(None, home=home, tmpdir=home / "tmp")
-        os.execvpe(argv[3], argv[3:], env)
+        return run_in_own_group(argv[3:], env, home)
     print("usage: codex_run_guard.py home|snapshot|verify|exec ...", file=sys.stderr)
     return 64
 

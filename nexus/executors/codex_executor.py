@@ -22,6 +22,7 @@ from nexus.executors.codex_run_boundary import (
     materialize_codex_home,
     target_integrity_failure,
     target_integrity_snapshot,
+    write_back_refreshed_auth,
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
@@ -172,6 +173,7 @@ class CodexCliExecutor:
             else:
                 result = run_cli_worker(request, on_process_group=self.on_process_group)
             receipt = self._receipt(contract, lease, result)
+            write_back_refreshed_auth(run_home)
             failure = target_integrity_failure(before, target_integrity_snapshot(target))
             if failure is not None:
                 receipt = dataclasses.replace(

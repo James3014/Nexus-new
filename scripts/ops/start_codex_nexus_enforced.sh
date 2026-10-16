@@ -254,4 +254,9 @@ if [[ "$CODEX_STATUS" -ne 0 ]]; then
   echo "[nexus-enforced] codex exited $CODEX_STATUS (work copy kept: $WORK_DIR)" >&2
   exit "$CODEX_STATUS"
 fi
+# Re-verify right before reporting delivery (the group was killed after codex exited).
+if ! printf '%s' "$TARGET_SNAPSHOT" | python3 -I "$GUARD" verify "$WORK_DIR"; then
+  echo "[nexus-enforced] codex_target_symlink_or_git_escape: work copy kept: $WORK_DIR" >&2
+  exit 6
+fi
 echo "[nexus-enforced] delivered; review the diff in $WORK_DIR, then: git worktree remove $WORK_DIR"

@@ -115,3 +115,38 @@ def test_codex_executor_fails_the_run_when_the_git_pointer_changes(tmp_path, mon
 
     assert receipt.exit_code == 1
     assert receipt.failure_reason == "codex_target_symlink_or_git_escape"
+
+
+def test_codex_adapter_surfaces_the_typed_boundary_failure_reason(tmp_path, monkeypatch):
+    from nexus.executors.worker_registry import CodexWorkerAdapter, WorkerPreflight
+
+    contract = _contract(tmp_path)
+    lease = _lease(tmp_path, contract)
+    executable = str(_executable(tmp_path))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        _fake_worker({}, lambda target: os.symlink(outside, target / "escape")),
+    )
+    _real_home(tmp_path, monkeypatch)
+    executor = CodexCliExecutor(executable=executable)
+    adapter = CodexWorkerAdapter(executor)
+    monkeypatch.setattr(
+        adapter,
+        "preflight",
+        lambda: WorkerPreflight(
+            provider="codex",
+            executable=executable,
+            executable_available=True,
+            authorized=True,
+            implementation_status="IMPLEMENTED",
+            ready=True,
+            reason="ready",
+        ),
+    )
+
+    receipt = adapter.invoke(contract, lease, prompt="Edit only files allowed by the contract.")
+
+    assert receipt.outcome == "FAILED"
+    assert receipt.failure_reason == "codex_target_symlink_or_git_escape"

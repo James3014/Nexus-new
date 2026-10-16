@@ -15,10 +15,15 @@ plugins and hooks, i.e. ambient authority, so it is deliberately not copied).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Mapping, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from nexus.executors.agy_write_admission import (
     escaping_symlinks,
@@ -46,6 +51,7 @@ _CREDENTIAL_NAME_PREFIXES = ("GH_", "GITHUB_", "SSH_")
 # Loader / interpreter / git hooks that run code or fetch credentials.
 _INJECTION_NAME_PREFIXES = ("GIT_", "LD_", "DYLD_", "PYTHON", "NODE_", "NPM_", "BASH_", "PERL")
 _INJECTION_NAMES = frozenset({"ENV", "IFS", "SHELLOPTS", "PS4"})
+AUTH_BASELINE_FILE = "auth-baseline.sha256"
 CODEX_RUN_HOME_UNAVAILABLE = "codex_run_home_unavailable"
 CODEX_TARGET_ESCAPE = "codex_target_symlink_or_git_escape"
 
@@ -69,6 +75,23 @@ def _credential_shaped(name: str) -> bool:
     )
 
 
+_LOCALE_VALUE = re.compile(r"[A-Za-z0-9_.@-]{0,40}")
+
+
+def _without_userinfo(value: str) -> str:
+    """Drop ``user:pass@`` from proxy URLs (NO_PROXY style lists pass unchanged)."""
+    if "@" not in value or "://" not in value:
+        return value
+    try:
+        parts = urlsplit(value)
+        if parts.username is None and parts.password is None:
+            return value
+        host = parts.netloc.rpartition("@")[2]
+        return urlunsplit(parts._replace(netloc=host))
+    except ValueError:
+        return ""
+
+
 def codex_child_env(
     source: Optional[Mapping[str, str]], *, home: Path, tmpdir: Path
 ) -> dict[str, str]:
@@ -79,14 +102,19 @@ def codex_child_env(
         for name in str(base.get(CODEX_ENV_PASSTHROUGH_VAR) or "").split(",")
         if name.strip() and not _credential_shaped(name.strip())
     }
-    env = {
-        str(key): str(value)
-        for key, value in base.items()
-        if key in CODEX_ENV_ALLOWLIST
-        or key in CODEX_ENV_PROXY_KEYS
-        or key in extra
-        or (str(key).startswith("LC_") and not _credential_shaped(str(key)))
-    }
+    env = {}
+    for key, value in base.items():
+        name, text = str(key), str(value)
+        if name in CODEX_ENV_PROXY_KEYS:
+            env[name] = _without_userinfo(text)
+        elif name in CODEX_ENV_ALLOWLIST or name in extra:
+            env[name] = text
+        elif (
+            name.startswith("LC_")
+            and not _credential_shaped(name)
+            and _LOCALE_VALUE.fullmatch(text)
+        ):
+            env[name] = text
     env["HOME"] = str(home)
     env["CODEX_HOME"] = str(home / ".codex")
     env["TMPDIR"] = str(tmpdir)
@@ -116,11 +144,95 @@ def materialize_codex_home(
         try:
             shutil.copyfile(origin, destination)
             os.chmod(destination, 0o600)
+            # Outside CODEX_HOME so the run never writes it; used by write-back.
+            (run_home / AUTH_BASELINE_FILE).write_text(
+                hashlib.sha256(destination.read_bytes()).hexdigest(), encoding="utf-8"
+            )
         except FileNotFoundError:
             continue
         except OSError:
             return CODEX_RUN_HOME_UNAVAILABLE
     return None
+
+
+def write_back_refreshed_auth(
+    run_home: Path, *, source: Optional[Mapping[str, str]] = None
+) -> bool:
+    """Copy a token refreshed by codex in the run HOME back to the host, atomically.
+
+    Only when the run copy changed, is a JSON object, and the host file still
+    equals what was copied (another session did not refresh meanwhile).  Temp
+    file in the host directory, 0600, then rename.  Never raises.
+    """
+    try:
+        host = codex_source_home(source) / "auth.json"
+        baseline = (run_home / AUTH_BASELINE_FILE).read_text(encoding="utf-8").strip()
+        refreshed = (run_home / ".codex" / "auth.json").read_bytes()
+        if hashlib.sha256(refreshed).hexdigest() == baseline:
+            return False
+        if not isinstance(json.loads(refreshed), dict):
+            return False
+        if hashlib.sha256(host.read_bytes()).hexdigest() != baseline:
+            return False
+        descriptor, temporary = tempfile.mkstemp(prefix=".auth.json.", dir=str(host.parent))
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(refreshed)
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, host)
+        except OSError:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+            return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _nested_git_entries(target: Path) -> dict[str, str]:
+    """Every non-root ``.git`` entry (file, dir or symlink) with a content hash.
+
+    A nested ``.git`` file (``gitdir: /outside``) or directory (``config`` with
+    ``core.fsmonitor``, hooks) is a code-execution or redirect vector for the
+    next git command run in the tree; only the baseline set may stay unchanged.
+    """
+    real_target = Path(os.path.realpath(target))
+    found: dict[str, str] = {}
+    for directory, dirnames, filenames in os.walk(real_target, onerror=lambda _error: None):
+        here = Path(directory)
+        if here == real_target and ".git" in dirnames:
+            dirnames.remove(".git")
+        for name in [*dirnames, *filenames]:
+            if name != ".git" or here == real_target:
+                continue
+            path = here / name
+            digest = hashlib.sha256()
+            if path.is_symlink():
+                digest.update(b"symlink" + os.readlink(path).encode("utf-8", "surrogateescape"))
+            elif path.is_file():
+                try:
+                    digest.update(b"file" + path.read_bytes())
+                except OSError:
+                    digest.update(b"unreadable")
+            else:
+                digest.update(b"dir")
+                for sub, subdirs, subfiles in sorted(os.walk(path, onerror=lambda _e: None)):
+                    subdirs.sort()
+                    for entry in sorted(subfiles):
+                        full = Path(sub) / entry
+                        digest.update(
+                            str(full.relative_to(path)).encode("utf-8", "surrogateescape")
+                        )
+                        try:
+                            digest.update(
+                                os.readlink(full).encode("utf-8", "surrogateescape")
+                                if full.is_symlink()
+                                else full.read_bytes()
+                            )
+                        except OSError:
+                            digest.update(b"unreadable")
+            found[path.relative_to(real_target).as_posix()] = digest.hexdigest()
+    return found
 
 
 def _unreadable_directories(target: Path) -> list[str]:
@@ -170,6 +282,7 @@ def target_integrity_snapshot(target: Path) -> dict[str, object]:
     return {
         "escaping": escaping_symlinks(target),
         "nested_git": _nested_git_escapes(target),
+        "nested_git_entries": _nested_git_entries(target),
         "unreadable": _unreadable_directories(target),
         "git": target_git_entry_state(target),
     }
@@ -185,7 +298,8 @@ def target_integrity_failure(
     few) are the baseline; only a difference is an escape.
     """
     if any(
-        after.get(key) != before.get(key) for key in ("escaping", "nested_git", "unreadable", "git")
+        after.get(key) != before.get(key)
+        for key in ("escaping", "nested_git", "nested_git_entries", "unreadable", "git")
     ):
         return CODEX_TARGET_ESCAPE
     return None

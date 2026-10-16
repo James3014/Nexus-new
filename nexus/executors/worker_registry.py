@@ -173,7 +173,12 @@ class CodexWorkerAdapter:
             commit_created=receipt.commit_created,
             merge_performed=receipt.merge_performed,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else "Codex execution did not complete successfully",
+            failure_reason=None
+            if outcome == WorkerOutcome.EXECUTION_COMPLETED
+            else (
+                getattr(receipt, "failure_reason", None)
+                or "Codex execution did not complete successfully"
+            ),
             provider_attempt_count=getattr(receipt, "provider_attempt_count", None),
         )
 
