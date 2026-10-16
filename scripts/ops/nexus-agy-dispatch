@@ -4601,8 +4601,17 @@ def _supervisor_terminal_guard(func):
                 "QUEUED",
                 "STARTING",
                 "ACCOUNT_LEASED",
-                "MODEL_REJECTED",
             }
+            if phase == "MODEL_REJECTED":
+                # Pre-provider only when no provider attempt ever ran: after an
+                # account rotation an earlier attempt may have had an effect.
+                provider_effect_possible = bool(
+                    int(record.get("attempts") or 0) > 0
+                    or record.get("provider_pid")
+                    or record.get("provider_started_at")
+                    or record.get("first_effect_at")
+                    or int(record.get("tool_event_count") or 0) > 0
+                )
             attestation = _parse_agy_attestation(
                 attestation_log_path,
                 requested_model=model,

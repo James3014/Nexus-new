@@ -6705,3 +6705,97 @@ def test_plan_with_fixed_model_succeeds_with_catalog_check_on(
     assert code == 0
     assert coordinator.claim.released is True
     assert _catalog_calls(home) == ["models"]
+
+
+def test_model_rejected_after_rotation_interrupt_is_not_before_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home_a = _catalog_env(tmp_path, monkeypatch, name="a", catalog=_CATALOG_SONNET)
+    home_b = tmp_path / "home-b"
+    home_b.mkdir()
+    (home_b / "catalog.txt").write_text(_CATALOG_NO_SONNET, encoding="utf-8")
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: {})
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "claude_gpt",
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+                "snapshot_fresh": False,
+            },
+        ),
+    )
+    claim_b = _WriteScopeClaim(home_b)
+    claim_b.account_alias_hash = "alias-b"
+
+    class RotatingCoordinator(_WriteScopeCoordinator):
+        def rotate_claim(self, **_kwargs):
+            return claim_b
+
+        def retire_failed_claim(self, *_a, **_kw):
+            return None
+
+    coordinator = _catalog_claim_coordinator(home_a, "alias-a")
+    coordinator.__class__ = RotatingCoordinator
+    provider_accounts: list[str] = []
+
+    def runner(**kwargs):
+        provider_accounts.append(kwargs["env"]["ACCOUNT"])
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 5
+
+    root = tmp_path / "rotation-ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="claude-sonnet-5-5",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "rotation probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+    real_dispatch_run = dispatch.dispatch_run
+
+    def interrupted_dispatch_run(**kwargs):
+        code = real_dispatch_run(coordinator=coordinator, run_agy_fn=runner, **kwargs)
+        assert code == 64  # second account rejected the fixed model
+        raise RuntimeError("interrupted after rotated model rejection")
+
+    monkeypatch.setattr(dispatch, "dispatch_run", interrupted_dispatch_run)
+
+    with pytest.raises(RuntimeError, match="interrupted after rotated model rejection"):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(work),
+            mode="plan",
+            model="claude-sonnet-5-5",
+            effort=None,
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=60,
+        )
+
+    assert provider_accounts == ["write-scope-account"]  # one attempt ran before rotation
+    record = journal.read(operation_id)
+    assert record["phase"] == "TERMINAL"
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT"
