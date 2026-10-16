@@ -1659,9 +1659,8 @@ def test_multi_day_label_outage_is_repaired_on_day_three(env) -> None:
     armed = []
     env["app"]._arm = lambda n, e: armed.append(e["issue"])
     tonight = _dispatch(env, "2026-10-18T00:30:00")
-    assert armed == [] and any(
-        e["event"] == "arm_blocked_older_night_pending" for e in tonight["events"]
-    )
+    assert armed == [] and tonight["arm_blocked"] == f"OLDER_NIGHT_PENDING:{NIGHT}"
+    assert any(e["event"] == "arm_blocked" for e in tonight["events"])
     # Day 3: GitHub is back; prepare/start finishes every older night, oldest first.
     broken["on"] = False
     env["clock"].at = dt.datetime.fromisoformat("2026-10-18T16:00:00")
@@ -1676,7 +1675,89 @@ def test_older_night_scan_is_bounded_and_skips_bad_files(env) -> None:
     state = env["app"].state_dir
     state.mkdir(parents=True, exist_ok=True)
     (state / "20260901.json").write_text("{}")  # too old: ignored
-    (state / "20261015.json").write_text("not json")  # unreadable: skipped
+    (state / "20261015.json").write_text("not json")  # unreadable, in window: reported
     (state / "issues.json").write_text("{}")
     env["clock"].at = dt.datetime.fromisoformat("2026-10-18T16:00:00")
-    assert env["app"]._older_nights() == []
+    assert env["app"]._older_nights() == ([], ["20261015"])
+    assert env["app"]._older_night_block() == "OLDER_NIGHT_UNREADABLE:20261015"
+    env["app"].finish_previous_night()  # does not crash
+
+
+def _tonight_with_prepared(env, status: str = "PREPARED") -> None:
+    tonight = {
+        "schema": en.STATE_SCHEMA,
+        "night": "20261017",
+        "issues": {"12": {"issue": 12, "status": status, "attempts": []}},
+        "order": [12],
+        "started": {"ok": True},
+    }
+    env["app"].save(tonight)
+
+
+def test_resumed_arming_goes_through_the_gate(env) -> None:
+    state = env["app"].state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    old = {
+        "schema": en.STATE_SCHEMA,
+        "night": "20261016",
+        "issues": {"11": {"issue": 11, "status": "HARD_STOPPING", "disarm_pending": True}},
+        "order": [11],
+        "started": {"ok": True},
+    }
+    env["app"].save(old)
+    _tonight_with_prepared(env, status="ARMING")
+    armed = []
+    env["app"]._arm = lambda n, e: armed.append(e["issue"])
+    tonight = _dispatch(env, "2026-10-18T00:30:00")
+    assert armed == [] and tonight["arm_blocked"] == "OLDER_NIGHT_PENDING:20261016"
+    old["issues"]["11"].update(status="HARD_STOPPED", disarm_pending=False)
+    env["app"].save(old)
+    tonight = _dispatch(env, "2026-10-18T00:35:00")
+    assert armed == [12] and "arm_blocked" not in tonight
+
+
+@pytest.mark.parametrize("content", ["not json", "[]", '{"schema": "x"}'])
+def test_unreadable_older_night_blocks_arming_and_is_reported(env, content, capsys) -> None:
+    state = env["app"].state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "20261016.json").write_text(content)
+    _tonight_with_prepared(env)
+    armed = []
+    env["app"]._arm = lambda n, e: armed.append(e["issue"])
+    tonight = _dispatch(env, "2026-10-18T00:30:00")
+    assert armed == [] and tonight["arm_blocked"] == "OLDER_NIGHT_UNREADABLE:20261016"
+    assert "Arming blocked: OLDER_NIGHT_UNREADABLE" in env["app"].report(tonight)
+
+
+@pytest.mark.parametrize(
+    "rows,blocked",
+    [
+        ([], False),
+        ([{"number": 12}], False),
+        ([{"number": 99}], True),
+        ([{"number": 1}] * 200, True),
+    ],
+)
+def test_foreign_query_is_bounded_and_fails_closed(env, rows, blocked) -> None:
+    calls = []
+
+    def gh(argv):
+        calls.append(argv)
+        return _cp(argv, out=json.dumps(rows))
+
+    env["sys"].gh = gh
+    night = {"night": "20261017", "issues": {}, "order": []}
+    assert env["app"]._foreign_in_flight(night, own=12) is blocked
+    assert calls[0][-2:] == ["--limit", "200"]
+
+
+@pytest.mark.parametrize("reason,setup", [("PAUSED", "pause"), ("AFTER_CUTOFF", "late")])
+def test_gate_checks_pause_and_cutoff(env, reason, setup) -> None:
+    _tonight_with_prepared(env)
+    if setup == "pause":
+        (env["app"].state_dir / "PAUSE").write_text("")
+    env["clock"].at = dt.datetime.fromisoformat(
+        "2026-10-18T06:30:00" if setup == "late" else "2026-10-18T00:30:00"
+    )
+    night = env["app"].load("20261017")
+    assert env["app"]._arm_gate(night, night["issues"]["12"]) == reason

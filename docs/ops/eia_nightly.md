@@ -163,8 +163,20 @@ records `BOOTOUT_FAILED`, and retries. An in-flight Issue stays `HARD_STOPPING`
 retries it, and the night is never `FINISHED` while any disarm is pending. A candidate-PR
 Issue whose label swap is still pending counts as a pending disarm too. `prepare` and
 `start` revisit every unfinalized night from the last 14 nights, oldest first, so an outage
-longer than a day is still repaired. While any earlier night still has a pending disarm or
-label swap, `dispatch` arms nothing new, because that night's daemon label may be stale.
+longer than a day is still repaired. Every arming path goes through one gate (`_arm_gate`), and that includes resuming an
+interrupted ARMING entry. The gate refuses to arm when any of these holds:
+
+- `PAUSE` is set;
+- a stop has been requested;
+- the 06:00 cutoff has passed;
+- an earlier night (within 14 nights) has a pending disarm or label swap, because its daemon
+  label may be stale;
+- an earlier night file cannot be read or validated;
+- another open Issue carries `nexus:external-intelligence`. This query uses `--limit 200`,
+  and a full page counts as in flight.
+
+The blocking reason is recorded once as an `arm_blocked` event, kept in the night state, and
+shown by `status` and in the morning report.
 
 ## Install (operator only)
 

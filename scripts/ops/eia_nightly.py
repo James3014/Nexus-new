@@ -135,6 +135,7 @@ STOP_FILE = "STOP_REQUESTED"
 GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
 MAX_ISSUE_FAILURES = 3
 MAX_LOOKBACK_NIGHTS = 14
+FOREIGN_QUERY_LIMIT = 200
 PYTEST_TARGET_RE = re.compile(r"^tests/[A-Za-z0-9_][A-Za-z0-9_/.-]*\.py(::[A-Za-z0-9_]+)*$")
 DIFF_CHECK_ARGV = ["sh", "-c", 'git diff --check "$NEXUS_BASE_SHA" "$NEXUS_CANDIDATE_SHA"']
 MAX_ALLOWED_FILES = 10
@@ -843,43 +844,54 @@ class Nightly:
         return (self.state_dir / "PAUSE").exists()
 
     # ---- prepare --------------------------------------------------------------------
-    def _older_nights(self) -> list[dict[str, Any]]:
-        """Night states from the last ``MAX_LOOKBACK_NIGHTS`` nights before tonight,
-        oldest first (unreadable files are skipped, never fatal)."""
+    def _older_nights(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """Night states from the last ``MAX_LOOKBACK_NIGHTS`` nights before tonight, oldest
+        first, plus the ids of in-window night files that cannot be read or validated."""
         current = night_of(self.now())
         oldest = night_of(self.now() - dt.timedelta(days=MAX_LOOKBACK_NIGHTS))
-        found = []
+        found, unreadable = [], []
         for path in sorted(self.state_dir.glob("20*.json")):
             if not re.fullmatch(r"20\d{6}", path.stem) or not oldest <= path.stem < current:
                 continue
             try:
                 night = self.load(path.stem)
-            except (NightlyError, ValueError, OSError):
+                if not isinstance(night, dict) or not isinstance(night.get("issues"), dict):
+                    raise NightlyError("NIGHT_STATE_INVALID")
+            except (NightlyError, ValueError, OSError, AttributeError):
+                unreadable.append(path.stem)
                 continue
-            if night:
-                found.append(night)
-        return found
+            found.append(night)
+        return found, unreadable
 
     def finish_previous_night(self) -> None:
         """Every earlier night left unfinalized (failed bootout, pending disarm or candidate
-        label swap) is finished first, oldest first; finalize() retries all of them."""
-        for night in self._older_nights():
+        label swap) is finished first, oldest first; finalize() retries all of them.
+        Unreadable night files are left for the arming gate, which refuses to arm."""
+        nights, _unreadable = self._older_nights()
+        for night in nights:
             if night.get("started") and not night.get("finalized"):
                 night.setdefault("stop_requested_at", self._iso())
                 self.finalize(night)
                 self._flush_outbox(night)
                 self.save(night)
 
-    def _older_night_pending(self) -> bool:
-        """An earlier night may still have left a daemon label on: do not arm new work."""
-        return any(
-            not night.get("finalized")
-            and any(
+    def _older_night_block(self) -> str:
+        """Why an earlier night forbids arming ("" when clear): a night file that cannot be
+        read, or one whose daemon label may still be on (pending disarm or label swap)."""
+        nights, unreadable = self._older_nights()
+        if unreadable:
+            return f"OLDER_NIGHT_UNREADABLE:{','.join(unreadable)}"
+        for night in nights:
+            if not night.get("finalized") and any(
                 e.get("disarm_pending") or e.get("labels_pending")
-                for e in (night.get("issues") or {}).values()
-            )
-            for night in self._older_nights()
-        )
+                for e in night["issues"].values()
+                if isinstance(e, Mapping)
+            ):
+                return f"OLDER_NIGHT_PENDING:{night['night']}"
+        return ""
+
+    def _older_night_pending(self) -> bool:
+        return bool(self._older_night_block())
 
     def prepare(self, night_id: str | None = None) -> dict[str, Any]:
         self.finish_previous_night()
@@ -1432,7 +1444,7 @@ class Nightly:
         try:
             stopping = self._stop_requested(night)
             for entry in self._entries(night, "ARMING"):  # resume an interrupted arming
-                self._guarded(night, entry, self._arm)
+                self._guarded(night, entry, self._gated_arm)
             for entry in self._entries(night, "ARMED"):
                 self._guarded(night, entry, self._harvest)
                 self.save(night)
@@ -1445,17 +1457,41 @@ class Nightly:
             busy = bool(self._entries(night, "ARMED") or self._entries(night, "ARMING"))
             if now >= night_clock(night["night"], self.hard_stop) or (stopping and not busy):
                 self.finalize(night)
-            elif not stopping and not busy and now < night_clock(night["night"], self.arm_cutoff):
+            elif not stopping and not busy:
                 nxt = self._entries(night, "PREPARED") + self._entries(night, "RETRY_PENDING")
-                if nxt and self._older_night_pending():
-                    self._event(night, "arm_blocked_older_night_pending")
-                elif nxt and not self._foreign_in_flight(night):
+                if nxt:
                     first = min(nxt, key=lambda e: night["order"].index(e["issue"]))
-                    self._guarded(night, first, self._arm)
+                    self._guarded(night, first, self._gated_arm)
         finally:
             self._flush_outbox(night)
             self.save(night)
         return night
+
+    def _arm_gate(self, night: dict[str, Any], entry: Mapping[str, Any]) -> str:
+        """The single gate in front of every arming, including a resumed ARMING entry.
+        Returns "" when arming may proceed, otherwise the blocking reason."""
+        if self.paused():
+            return "PAUSED"
+        if self._stop_requested(night):
+            return "STOP_REQUESTED"
+        if self.now() >= night_clock(night["night"], self.arm_cutoff):
+            return "AFTER_CUTOFF"
+        older = self._older_night_block()
+        if older:
+            return older
+        if self._foreign_in_flight(night, own=int(entry["issue"])):
+            return "FOREIGN_IN_FLIGHT"
+        return ""
+
+    def _gated_arm(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
+        reason = self._arm_gate(night, entry)
+        if reason:
+            if night.get("arm_blocked") != reason:
+                self._event(night, "arm_blocked", issue=entry["issue"], reason=reason)
+            night["arm_blocked"] = reason
+            return
+        night.pop("arm_blocked", None)
+        self._arm(night, entry)
 
     def _guarded(
         self, night: dict[str, Any], entry: dict[str, Any], step: Callable[..., Any]
@@ -1513,14 +1549,18 @@ class Nightly:
             if night["issues"][str(n)]["status"] == status
         ]
 
-    def _foreign_in_flight(self, night: Mapping[str, Any]) -> bool:
-        """Any open Issue carrying the daemon label, except our own candidate-PR Issues whose
-        label clean-up is still pending (the daemon reuses their COMPLETE state)."""
-        ours = {
+    def _foreign_in_flight(self, night: Mapping[str, Any], own: int = 0) -> bool:
+        """Any open Issue carrying the daemon label, except the Issue being armed and our own
+        candidate-PR Issues whose label clean-up is still pending.  A result that reaches
+        the query limit may be truncated, so it counts as in flight (fail closed)."""
+        ours = {own} | {
             int(e["issue"]) for e in self._entries(night, "CANDIDATE_PR") if e.get("labels_pending")
         }
         args = f"issue list --repo {REPOSITORY} --state open --json number --label {L_EIA}"
-        return any(int(r.get("number") or 0) not in ours for r in self._ghj(*args.split()) or [])
+        rows = self._ghj(*args.split(), "--limit", str(FOREIGN_QUERY_LIMIT)) or []
+        if len(rows) >= FOREIGN_QUERY_LIMIT:
+            return True
+        return any(int(r.get("number") or 0) not in ours for r in rows)
 
     @staticmethod
     def _text_sha(value: Any) -> str:
@@ -2008,6 +2048,7 @@ class Nightly:
             f"(merged: {(night.get('card_pr') or {}).get('merged')})",
             f"- Night status: {night.get('status')}",
             f"- Start: {_one_line((night.get('started') or {}).get('error') or 'ok', 200)}",
+            f"- Arming blocked: {_one_line(night.get('arm_blocked') or 'no', 200)}",
             "",
             "| Issue | Result | Attempts | Duration (min) | PR | Escalation |",
             "| --- | --- | --- | --- | --- | --- |",
@@ -2065,8 +2106,12 @@ def main(argv: list[str] | None = None) -> int:
         trusted_actors=[a for a in args.trusted_actors.split(",") if a.strip()],
     )
     if args.command == "status":
-        night = app.load(args.night or night_of(app.now()))
-        print(json.dumps({"paused": app.paused(), "night": night}, indent=2, sort_keys=True))
+        try:
+            night: Any = app.load(args.night or night_of(app.now()))
+        except (NightlyError, ValueError, OSError) as exc:
+            night = {"error": _one_line(exc, 200)}
+        view = {"paused": app.paused(), "night": night, "older_nights": app._older_night_block()}
+        print(json.dumps(view, indent=2, sort_keys=True))
         return 0
     if app.paused() and args.command != "stop":
         print(json.dumps({"status": "PAUSED"}))
