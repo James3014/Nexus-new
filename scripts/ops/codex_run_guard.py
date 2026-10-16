@@ -7,6 +7,7 @@ file's location, never from the caller's cwd or PYTHONPATH.
   home <run_home>                          create the disposable HOME (auth only)
   snapshot <target>                        print escaping symlinks + .git state (JSON)
   verify <target>                          read the snapshot on stdin; exit 6 on change
+  writeback <run_home>                     copy a refreshed auth.json back to the host
   exec <run_home> -- <cmd> [args...]       exec cmd with the allowlisted env
 """
 
@@ -26,10 +27,9 @@ from nexus.executors import codex_run_boundary as boundary  # noqa: E402
 ESCAPE_EXIT = 6
 
 
-def run_in_own_group(command: list[str], env: dict[str, str], home: Path) -> int:
+def run_in_own_group(command: list[str], env: dict[str, str]) -> int:
     """Run codex in its own session; kill the whole group once it exits so a
-    backgrounded child cannot touch the work copy after ``verify``; then write
-    a refreshed auth token back to the host."""
+    backgrounded child cannot touch the work copy after ``verify``."""
     try:
         child = subprocess.Popen(command, env=env, start_new_session=True)
     except OSError as error:
@@ -50,7 +50,6 @@ def run_in_own_group(command: list[str], env: dict[str, str], home: Path) -> int
         os.killpg(group, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    boundary.write_back_refreshed_auth(home)
     return status if status >= 0 else 128 - status
 
 
@@ -77,10 +76,13 @@ def main(argv: list[str]) -> int:
             print(f"[nexus-enforced] {failure}: {argv[1]}", file=sys.stderr)
             return ESCAPE_EXIT
         return 0
+    if len(argv) == 2 and argv[0] == "writeback":
+        boundary.write_back_refreshed_auth(Path(argv[1]))
+        return 0
     if len(argv) >= 4 and argv[0] == "exec" and argv[2] == "--":
         home = Path(argv[1])
         env = boundary.codex_child_env(None, home=home, tmpdir=home / "tmp")
-        return run_in_own_group(argv[3:], env, home)
+        return run_in_own_group(argv[3:], env)
     print("usage: codex_run_guard.py home|snapshot|verify|exec ...", file=sys.stderr)
     return 64
 

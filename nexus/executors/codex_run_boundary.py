@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 from typing import Mapping, Optional
@@ -80,8 +81,10 @@ _LOCALE_VALUE = re.compile(r"[A-Za-z0-9_.@-]{0,40}")
 
 def _without_userinfo(value: str) -> str:
     """Drop ``user:pass@`` from proxy URLs (NO_PROXY style lists pass unchanged)."""
-    if "@" not in value or "://" not in value:
+    if "@" not in value:
         return value
+    if "://" not in value:
+        return value.rpartition("@")[2]
     try:
         parts = urlsplit(value)
         if parts.username is None and parts.password is None:
@@ -165,14 +168,20 @@ def write_back_refreshed_auth(
     file in the host directory, 0600, then rename.  Never raises.
     """
     try:
-        host = codex_source_home(source) / "auth.json"
+        host = (codex_source_home(source) / "auth.json").resolve()
         baseline = (run_home / AUTH_BASELINE_FILE).read_text(encoding="utf-8").strip()
         refreshed = (run_home / ".codex" / "auth.json").read_bytes()
         if hashlib.sha256(refreshed).hexdigest() == baseline:
             return False
-        if not isinstance(json.loads(refreshed), dict):
+        new_body = json.loads(refreshed)
+        host_bytes = host.read_bytes()
+        if hashlib.sha256(host_bytes).hexdigest() != baseline:
             return False
-        if hashlib.sha256(host.read_bytes()).hexdigest() != baseline:
+        old_body = json.loads(host_bytes)
+        # Same top-level shape as the real file and a non-empty credential.
+        if not isinstance(new_body, dict) or set(new_body) != set(old_body):
+            return False
+        if not any(new_body.get(key) for key in ("tokens", "OPENAI_API_KEY")):
             return False
         descriptor, temporary = tempfile.mkstemp(prefix=".auth.json.", dir=str(host.parent))
         try:
@@ -187,6 +196,22 @@ def write_back_refreshed_auth(
         return True
     except (OSError, ValueError):
         return False
+
+
+def _hash_entry(digest: "hashlib._Hash", path: Path) -> None:
+    """Type-tagged hash of one entry; never opens a FIFO/device (would block)."""
+    try:
+        mode = os.lstat(path).st_mode
+        if stat.S_ISLNK(mode):
+            digest.update(b"symlink" + os.readlink(path).encode("utf-8", "surrogateescape"))
+        elif stat.S_ISREG(mode):
+            digest.update(b"file" + path.read_bytes())
+        elif stat.S_ISDIR(mode):
+            digest.update(b"dir")
+        else:
+            digest.update(b"special")
+    except OSError:
+        digest.update(b"unreadable")
 
 
 def _nested_git_entries(target: Path) -> dict[str, str]:
@@ -207,30 +232,16 @@ def _nested_git_entries(target: Path) -> dict[str, str]:
                 continue
             path = here / name
             digest = hashlib.sha256()
-            if path.is_symlink():
-                digest.update(b"symlink" + os.readlink(path).encode("utf-8", "surrogateescape"))
-            elif path.is_file():
-                try:
-                    digest.update(b"file" + path.read_bytes())
-                except OSError:
-                    digest.update(b"unreadable")
-            else:
-                digest.update(b"dir")
-                for sub, subdirs, subfiles in sorted(os.walk(path, onerror=lambda _e: None)):
+            _hash_entry(digest, path)
+            if path.is_dir() and not path.is_symlink():
+                for sub, subdirs, subfiles in os.walk(path, onerror=lambda _e: None):
                     subdirs.sort()
-                    for entry in sorted(subfiles):
+                    for entry in sorted([*subdirs, *subfiles]):
                         full = Path(sub) / entry
                         digest.update(
                             str(full.relative_to(path)).encode("utf-8", "surrogateescape")
                         )
-                        try:
-                            digest.update(
-                                os.readlink(full).encode("utf-8", "surrogateescape")
-                                if full.is_symlink()
-                                else full.read_bytes()
-                            )
-                        except OSError:
-                            digest.update(b"unreadable")
+                        _hash_entry(digest, full)
             found[path.relative_to(real_target).as_posix()] = digest.hexdigest()
     return found
 

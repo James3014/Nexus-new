@@ -49,6 +49,11 @@ case "$FAKE_CODEX_MODE" in
   refreshconflict)
     echo '{"OPENAI_API_KEY":"sk-refreshed"}' > "$CODEX_HOME/auth.json"
     echo '{"OPENAI_API_KEY":"sk-other-session"}' > "$FAKE_HOST_AUTH" ;;
+  refreshescape)
+    echo '{"OPENAI_API_KEY":"sk-refreshed"}' > "$CODEX_HOME/auth.json"
+    ln -s "$FAKE_ESCAPE_DIR" "$work/escape-link" ;;
+  refreshempty) echo '{"OPENAI_API_KEY":""}' > "$CODEX_HOME/auth.json" ;;
+  nestedhooklink) mkdir -p "$work/sub/.git" "$work/inner"; ln -s "$work/inner" "$work/sub/.git/hooks" ;;
   refreshinvalid) echo 'not json' > "$CODEX_HOME/auth.json" ;;
   inside) ln -s tracked.txt "$work/inside-link" ;;
 esac
@@ -384,3 +389,35 @@ def test_codex_env_strips_proxy_credentials_and_odd_locale_values():
     assert env["NO_PROXY"] == "localhost,127.0.0.1"
     assert env["LC_ALL"] == "en_US.UTF-8"
     assert "LC_MESSAGES" not in env
+
+
+def test_codex_auth_is_not_written_back_when_the_run_is_rejected(tmp_path):
+    res, _, real_home, _ = _launch(tmp_path, "refreshescape")
+
+    assert res.returncode == 6
+    host = real_home / ".codex" / "auth.json"
+    assert host.read_text(encoding="utf-8") == '{"OPENAI_API_KEY":"sk-fake"}'
+
+
+def test_codex_empty_credential_is_not_written_back(tmp_path):
+    res, _, real_home, _ = _launch(tmp_path, "refreshempty")
+
+    assert res.returncode == 0, res.stderr
+    host = real_home / ".codex" / "auth.json"
+    assert host.read_text(encoding="utf-8") == '{"OPENAI_API_KEY":"sk-fake"}'
+
+
+def test_codex_run_fails_on_an_in_tree_symlink_inside_a_nested_dot_git(tmp_path):
+    res, _, _, _ = _launch(tmp_path, "nestedhooklink")
+
+    assert res.returncode == 6, res.stderr
+
+
+def test_codex_env_strips_credentials_from_schemeless_proxy_values():
+    from nexus.executors.codex_run_boundary import codex_child_env
+
+    env = codex_child_env(
+        {"HTTP_PROXY": "user:pw@proxy.example:8080"}, home=Path("/h"), tmpdir=Path("/h/tmp")
+    )
+
+    assert env["HTTP_PROXY"] == "proxy.example:8080"

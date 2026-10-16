@@ -173,8 +173,9 @@ class CodexCliExecutor:
             else:
                 result = run_cli_worker(request, on_process_group=self.on_process_group)
             receipt = self._receipt(contract, lease, result)
-            write_back_refreshed_auth(run_home)
             failure = target_integrity_failure(before, target_integrity_snapshot(target))
+            if failure is None and receipt.exit_code == 0:
+                write_back_refreshed_auth(run_home)
             if failure is not None:
                 receipt = dataclasses.replace(
                     receipt,

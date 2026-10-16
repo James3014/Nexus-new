@@ -259,4 +259,6 @@ if ! printf '%s' "$TARGET_SNAPSHOT" | python3 -I "$GUARD" verify "$WORK_DIR"; th
   echo "[nexus-enforced] codex_target_symlink_or_git_escape: work copy kept: $WORK_DIR" >&2
   exit 6
 fi
+# Only a verified, non-denied, successful run may refresh the host token.
+python3 -I "$GUARD" writeback "$RUN_HOME" || true
 echo "[nexus-enforced] delivered; review the diff in $WORK_DIR, then: git worktree remove $WORK_DIR"
