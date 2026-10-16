@@ -1670,6 +1670,9 @@ class Nightly:
         # Close the read-back -> label race: full trust check, then the bytes once more.
         trusted, why = self._queue_trusted(issue)
         view = self._view_issue(issue)
+        blocked = self._not_armable(view)
+        if blocked:  # closed, unqueued or taken over meanwhile: withdraw, do not escalate
+            return self._withdraw(night, entry, blocked, has_label=L_EIA in view["label_names"])
         if not trusted or not self._issue_matches(view, record):
             return self._escalate(night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}")
         if L_EIA not in view["label_names"]:
@@ -1715,10 +1718,13 @@ class Nightly:
         blocking = sorted(names & {L_ESCALATE, L_TEMPLATE, L_CANDIDATE})
         return f"BLOCKING_LABEL:{','.join(blocking)}" if blocking else ""
 
-    def _withdraw(self, night: dict[str, Any], entry: dict[str, Any], reason: str) -> None:
+    def _withdraw(
+        self, night: dict[str, Any], entry: dict[str, Any], reason: str, has_label: bool = True
+    ) -> None:
         """Someone else took the Issue over: only undo our own daemon label."""
         issue = _issue_number(entry["issue"])
-        self._labels(issue, remove=[L_EIA])
+        if has_label:
+            self._labels(issue, remove=[L_EIA])
         if entry.get("attempts"):
             entry["attempts"][-1].update(result="withdrawn", reason=reason, finished_at=self._iso())
         entry["status"] = "WITHDRAWN"

@@ -1892,3 +1892,40 @@ def test_gate_deferred_attempts_do_not_count_toward_retries_or_night_cap(env) ->
     env["app"]._update_ledger(night)
     ledger = json.loads((env["app"].state_dir / "issues.json").read_text())
     assert ledger["11"]["nights"] == [NIGHT] and ledger["12"]["nights"] == []
+
+
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        ("eia:escalate", "BLOCKING_LABEL:eia:escalate"),
+        ("eia:candidate-pr", "BLOCKING_LABEL:eia:candidate-pr"),
+        ("unqueue", "QUEUE_LABEL_REMOVED"),
+        ("close", "ISSUE_NOT_OPEN"),
+    ],
+)
+def test_arm_readback_race_with_takeover_withdraws_not_escalates(env, change, reason) -> None:
+    _started(env)
+    real = env["gh"].__call__
+    seen = {"edited": False, "views": 0}
+
+    def racing(argv):
+        if argv[1:3] == ["issue", "edit"] and "--body-file" in argv:
+            seen["edited"] = True
+        if argv[1:3] == ["issue", "view"] and seen["edited"]:
+            seen["views"] += 1
+            if seen["views"] == 2:  # the final re-check right before the label
+                issue = env["gh"].issues[11]
+                if change == "unqueue":
+                    issue["labels"].discard("eia:queue")
+                elif change == "close":
+                    issue["state"] = "CLOSED"
+                else:
+                    issue["labels"].add(change)
+        return real(argv)
+
+    env["sys"].gh = racing
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "WITHDRAWN" and entry["attempts"][-1]["reason"] == reason
+    assert "escalation" not in entry and not env["gh"].issues[11]["comments"]
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
