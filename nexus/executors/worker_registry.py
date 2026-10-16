@@ -679,6 +679,7 @@ def _installed_agy_account_pool() -> Optional[Any]:
 
 AGY_POOL_EXHAUSTED = "agy_pool_exhausted"
 AGY_POOL_BUSY = "agy_pool_busy"
+AGY_ACCOUNT_RETIREMENT_UNSAFE = "agy_account_retirement_unsafe"
 _AGY_RESET_IN_RE = re.compile(r"[Rr]esets in\s+((?:\d+\s*[dhms]\s*)+)")
 _AGY_DURATION_PART_RE = re.compile(r"(\d+)\s*([dhms])")
 _AGY_DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
@@ -721,21 +722,39 @@ def _agy_attempt_had_model_output(result: CliWorkerResult) -> bool:
     agy's JSON envelope reports token usage; a quota or login rejection reports
     zero output and thinking tokens.  Anything unparseable counts as model work.
     """
-    envelopes = [
-        obj
-        for obj in top_level_json_objects(result.stdout.decode("utf-8", errors="replace"))
-        if isinstance(obj.get("usage"), dict)
-    ]
+    envelopes = top_level_json_objects(result.stdout.decode("utf-8", errors="replace"))
     if not envelopes:
         return True
     for envelope in envelopes:
-        usage = envelope["usage"]
-        try:
-            if int(usage.get("output_tokens") or 0) > 0 or int(usage.get("thinking_tokens") or 0) > 0:
-                return True
-        except (TypeError, ValueError):
+        usage = envelope.get("usage")
+        response = envelope.get("response")
+        if not isinstance(usage, dict) or (isinstance(response, str) and response.strip()):
             return True
+        for key in ("output_tokens", "thinking_tokens"):
+            value = usage.get(key)
+            # A missing or non-integer count is not proof of zero work.
+            if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+                return True
     return False
+
+
+def _earliest_family_reset_seconds(coordinator: Any, model_family: Optional[str]) -> Optional[int]:
+    """Seconds until the earliest durable model-family cooldown ends, if any."""
+    if model_family is None:
+        return None
+    now = time.time()
+    earliest: Optional[float] = None
+    try:
+        for path in Path(coordinator.leases_dir).glob(f"*.family-unavailable.{model_family}.json"):
+            try:
+                until = float(json.loads(path.read_text(encoding="utf-8"))["unavailable_until"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if until > now and (earliest is None or until < earliest):
+                earliest = until
+    except OSError:
+        return None
+    return None if earliest is None else int(round(earliest - now))
 
 
 def _supports_cross_process_claims(pool: Any) -> bool:
@@ -1570,17 +1589,27 @@ class AgyWorkerAdapter:
 
         credential_refusals = 0
 
+        retirement_unsafe = False
+
         def exhausted_reason() -> str:
             if attempts == 0 and credential_refusals:
                 # No account in the pool could authenticate at all.
                 return AGY_CREDENTIALS_UNAVAILABLE
-            if earliest_reset is None:
+            # Accounts other processes already cooled down count too.
+            known = [
+                value
+                for value in (earliest_reset, _earliest_family_reset_seconds(coordinator, model_family))
+                if value is not None
+            ]
+            if not known:
                 return AGY_POOL_EXHAUSTED
-            return f"{AGY_POOL_EXHAUSTED}: earliest reset in {_format_duration(earliest_reset)}"
+            return f"{AGY_POOL_EXHAUSTED}: earliest reset in {_format_duration(min(known))}"
 
         # Each pass claims an account not tried yet, so pool_size + 1 passes
         # always end in success, a final failure or an exhausted pool.
         for _ in range(pool_size + 1):
+            if retirement_unsafe:
+                break
             remaining = timeout - (time.monotonic() - started_at) if timeout > 0 else 0.0
             if remaining <= 0:
                 failure_reason = "shared wall-time budget exhausted"
@@ -1669,7 +1698,10 @@ class AgyWorkerAdapter:
                     real_calls += 1
                     failure_reason = f"non-eligible account failure: {kind.value}"
                     break
-                retire_kind = kind
+                # A rate limit is transient: rotate away for this run without
+                # retiring the account for everyone else.
+                retire_kind = None if kind is AccountFailureKind.RATE_LIMITED else kind
+                excluded.add(claim.account_alias_hash)
                 if kind is AccountFailureKind.QUOTA_EXHAUSTED:
                     reset_seconds = _agy_quota_reset_seconds(result)
                     if reset_seconds is not None and (
@@ -1701,10 +1733,15 @@ class AgyWorkerAdapter:
                             ),
                         )
                     except Exception:
-                        pass
+                        # Fail closed like nexus-agy-dispatch: an account whose
+                        # failure is not durably recorded is not rotated past.
+                        retirement_unsafe = True
                 claim.release()
         else:
-            failure_reason = exhausted_reason()
+            if not retirement_unsafe:
+                failure_reason = exhausted_reason()
+        if retirement_unsafe:
+            failure_reason = AGY_ACCOUNT_RETIREMENT_UNSAFE
 
         if outcome != WorkerOutcome.EXECUTION_COMPLETED.value and last_result is not None:
             if _agy_login_required(last_result) and failure_reason and not failure_reason.startswith(

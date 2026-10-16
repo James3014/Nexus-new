@@ -381,3 +381,101 @@ def test_pool_where_no_account_has_a_token_is_credentials_unavailable(pool_env):
     assert receipt.failure_reason == "agy_credentials_unavailable"
     assert receipt.provider_calls == 0
     assert receipt.account_rotation_attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# Codex review r1 on #2413
+# ---------------------------------------------------------------------------
+
+
+def test_model_output_without_usage_or_with_response_text_counts_as_work():
+    no_usage = json.dumps({"status": "ERROR", "response": "", "error": "quota"}).encode()
+    partial = json.dumps({"status": "ERROR", "usage": {"input_tokens": 3}}).encode()
+    with_text = json.dumps({
+        "status": "ERROR",
+        "response": "I edited two files before the quota ran out",
+        "usage": {"output_tokens": 0, "thinking_tokens": 0},
+    }).encode()
+
+    assert _agy_attempt_had_model_output(_result(no_usage)) is True
+    assert _agy_attempt_had_model_output(_result(partial)) is True
+    assert _agy_attempt_had_model_output(_result(with_text)) is True
+
+
+def test_unpersistable_retirement_stops_rotation(pool_env):
+    _install_pool(pool_env, {"r1": "quota", "r2": "ok"})
+    pool_env.monkeypatch.setenv("NEXUS_AGY_PREFERRED_ACCOUNTS", "r1,r2")
+
+    def unsafe(self, claim, failure_kind, **kwargs):
+        raise RuntimeError("AGY_FAMILY_RETIREMENT_UNSAFE")
+
+    pool_env.monkeypatch.setattr(
+        "nexus.services.agy_account_pool.CrossProcessLeaseCoordinator.retire_failed_claim", unsafe
+    )
+    seen: list[str] = []
+    _fake_agy(pool_env, seen)
+
+    receipt = _invoke(pool_env, calls=1)
+
+    assert seen == ["quota"]
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "agy_account_retirement_unsafe"
+    # The failed account's claim is still released.
+    assert not (pool_env.leases / f"{_hash('r1')}.receipt.json").exists()
+
+
+def test_rate_limit_rotates_without_retiring_the_account(pool_env):
+    _install_pool(pool_env, {"rl": "rate", "ok2": "ok"})
+    pool_env.monkeypatch.setenv("NEXUS_AGY_PREFERRED_ACCOUNTS", "rl,ok2")
+    seen: list[str] = []
+
+    def fake_worker(request, on_process_group=None):
+        behaviour = (Path(request.env["HOME"]) / TOKEN).read_text(encoding="utf-8")
+        seen.append(behaviour)
+        rate = behaviour == "rate"
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1 if rate else 0,
+            stdout=_envelope("ERROR", error="rate limit") if rate else OK_STDOUT,
+            stderr=b"error: 429 rate limit, retry later" if rate else b"",
+            wall_time_ms=3,
+            process_group_id=None,
+            timed_out=False,
+            descendants_swept=True,
+        )
+
+    pool_env.monkeypatch.setattr(worker_registry, "run_cli_worker", fake_worker)
+
+    receipt = _invoke(pool_env, calls=1)
+
+    assert seen == ["rate", "ok"]
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert receipt.account_rotation_attempts == 1
+    assert not (pool_env.leases / f"{_hash('rl')}.quarantine.json").exists()
+    assert not list(pool_env.leases.glob(f"{_hash('rl')}.family-unavailable.*"))
+
+
+def test_exhausted_pool_reports_reset_from_existing_cooldowns(pool_env):
+    _install_pool(pool_env, {"cool": "ok"})
+    pool_env.leases.mkdir(parents=True, exist_ok=True)
+    (pool_env.leases / f"{_hash('cool')}.family-unavailable.gemini.json").write_text(
+        json.dumps({
+            "account_alias_hash": _hash("cool"),
+            "model_family": "gemini",
+            "reason": "QUOTA_EXHAUSTED",
+            "unavailable_until": time.time() + 2 * 3600 + 30,
+        }),
+        encoding="utf-8",
+    )
+    seen: list[str] = []
+    _fake_agy(pool_env, seen)
+
+    receipt = _invoke(pool_env, calls=1)
+
+    assert seen == []
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason is not None
+    assert receipt.failure_reason.startswith(f"{AGY_POOL_EXHAUSTED}: earliest reset in 2h00m")
