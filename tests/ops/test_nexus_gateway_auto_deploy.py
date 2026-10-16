@@ -5934,7 +5934,7 @@ def test_trusted_impact_gate_from_another_workflow_is_not_green(path: str) -> No
     assert result["missing"] == [TRUSTED_IMPACT]
 
 
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "schedule"])
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "schedule", "pull_request"])
 def test_trusted_impact_gate_pr_head_run_with_wrong_event_is_not_green(event: str) -> None:
     result = ad.required_checks(_live_2026_10_16_api(impact_event=event), NEW)
     assert result["verdict"] == "UNKNOWN"
@@ -5962,3 +5962,29 @@ def test_live_ruleset_plus_an_unbound_name_still_fails_closed() -> None:
     result = ad.required_checks(api, NEW)
     assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
     assert result["unknown_required"] == ["Trusted impact gate (fork)"]
+
+
+@pytest.mark.parametrize("name", sorted(ad.PR_TARGET_ONLY_CHECKS))
+def test_pull_request_event_run_of_a_pr_target_only_check_never_binds(name: str) -> None:
+    """``pull_request`` runs PR-controlled workflow code under the same path and name."""
+    suite = SUITES[name] + PR_SUITE_OFFSET
+    base = _live_2026_10_16_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if path.endswith(f"check_suite_id={suite}"):
+            for run in payload["workflow_runs"]:
+                run["event"] = "pull_request"
+        return payload
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [name]
+
+
+def test_pr_target_only_checks_match_their_workflow_triggers() -> None:
+    import yaml
+
+    for name in ad.PR_TARGET_ONLY_CHECKS:
+        on = yaml.safe_load((REPO_ROOT / ad.REQUIRED_CHECKS[name]).read_text("utf-8"))[True]
+        assert set(on) == {"pull_request_target"}, (name, on)

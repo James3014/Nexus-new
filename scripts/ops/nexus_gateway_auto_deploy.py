@@ -128,6 +128,15 @@ REQUIRED_CHECKS = {
         ".github/workflows/trusted-dependency-contract.yml"
     ),
 }
+# Checks whose workflow runs only on pull_request_target (trusted default-branch
+# workflow code).  A merged-PR-head run of these from a ``pull_request`` event
+# would come from PR-controlled workflow code under the same path and name, so it
+# never binds (#2364 review).  Push runs on main use main's own workflow files.
+PR_TARGET_ONLY_CHECKS = frozenset({
+    "Deletion guard",
+    "Trusted impact gate (default branch)",
+    "Trusted dependency contract (default branch)",
+})
 CHECK_APP = "github-actions"
 DEPLOYMENT_PREFIX = "a1-"
 TRACK_REF = "refs/nexus-auto-deploy/main"
@@ -797,11 +806,20 @@ def _bound_runs(
         workflow_runs = api_get(f"repos/{repo}/actions/runs?check_suite_id={int(suite)}")
         candidates = workflow_runs.get("workflow_runs") or []
         if any(
-            w.get("path") == REQUIRED_CHECKS[name] and _from_origin(run, w, sha, origin)
+            w.get("path") == REQUIRED_CHECKS[name]
+            and _from_origin(run, w, sha, origin)
+            and _pr_event_allowed(name, w, origin)
             for w in candidates
         ):
             bound.append(run)
     return bound
+
+
+def _pr_event_allowed(name: str, workflow_run: dict, origin: Dict[str, Any]) -> bool:
+    """A merged-PR-head run of a pull_request_target-only check must be that event."""
+    if origin["kind"] != "pr" or name not in PR_TARGET_ONLY_CHECKS:
+        return True
+    return workflow_run.get("event") == "pull_request_target"
 
 
 def _from_origin(run: dict, workflow_run: dict, sha: str, origin: Dict[str, Any]) -> bool:
