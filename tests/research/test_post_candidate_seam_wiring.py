@@ -879,7 +879,9 @@ def test_baseline_apply_refuses_when_a_companion_file_is_held(tmp_path: Path, mo
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT", raising=False)
     monkeypatch.setattr(rfs, "LLMCandidateGenerator", FakeLLMGenerator)
     monkeypatch.setattr(rfs, "_build_codeintel_evidence", lambda *_a, **_k: {"status": "ok"})
-    monkeypatch.setattr(rfs, "generate_local_candidate", lambda *a, **k: "def value():\n    return 2\n")
+    monkeypatch.setattr(
+        rfs, "generate_local_candidate", lambda *a, **k: "def value():\n    return 2\n"
+    )
     monkeypatch.setattr(
         rfs,
         "generate_local_companion_edits",
