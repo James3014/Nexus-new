@@ -93,8 +93,16 @@ def test_bound_site_fails_closed_without_artifact_and_source_hash(name: str) -> 
 
 @pytest.mark.parametrize("name", sorted(_BOUND_PAYLOADS))
 def test_bound_site_passes_with_artifact_and_source_hash(name: str) -> None:
+    binding = (
+        {
+            "formal_report_verifier_status": "pass",
+            "formal_report_source_hash": _BINDING["source_hash"],
+        }
+        if name == "formal_report"
+        else _BINDING
+    )
     receipt = RECEIPT_ADAPTERS[name].build(
-        claim_verified=True, payload={**_BOUND_PAYLOADS[name], **_BINDING}
+        claim_verified=True, payload={**_BOUND_PAYLOADS[name], **binding}
     )
     assert receipt.gate_passed is True
     # contribution authority stays fail-closed (#453)
@@ -162,3 +170,28 @@ def test_gate_adapters_still_require_binding_if_verifier_authority_is_bound(
     assert "missing_source_hash" in unbound.failure_reason
     bound = adapter.build(claim_verified=True, payload={**_ALL_BOUND_BARE[name], **_BINDING})
     assert bound.gate_passed is True
+
+
+def test_formal_report_ignores_generic_binding_keys() -> None:
+    payload = {**_BOUND_PAYLOADS["formal_report"], **_BINDING}
+    receipt = RECEIPT_ADAPTERS["formal_report"].build(claim_verified=True, payload=payload)
+    assert receipt.gate_passed is False
+    assert "missing_source_hash" in receipt.failure_reason
+
+
+def test_formal_report_binding_does_not_satisfy_other_adapters() -> None:
+    ns = {
+        "formal_report_verifier_status": "pass",
+        "formal_report_source_hash": _BINDING["source_hash"],
+    }
+    for name in ("local_heal", "local_model_executor"):
+        receipt = RECEIPT_ADAPTERS[name].build(
+            claim_verified=True, payload={**_ALL_BOUND_BARE[name], **ns}
+        )
+        assert receipt.gate_passed is False, name
+    assert (
+        RECEIPT_ADAPTERS["formal_report"]
+        .build(claim_verified=True, payload={**_BOUND_PAYLOADS["formal_report"], **ns})
+        .gate_passed
+        is True
+    )

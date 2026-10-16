@@ -282,5 +282,8 @@ def augment_semantic_runtime_capabilities(
         except OSError:
             report_bytes = b""
         if report_bytes and report_bytes == str(report.get("markdown") or "").encode("utf-8"):
-            capabilities["source_hash"] = "sha256:" + hashlib.sha256(report_bytes).hexdigest()
-            capabilities["verifier_status"] = "pass" if capabilities["formal_report_gate_passed"] else "fail"
+            # Namespaced: never write generic source_hash/verifier_status into the shared payload.
+            capabilities["formal_report_source_hash"] = "sha256:" + hashlib.sha256(report_bytes).hexdigest()
+            capabilities["formal_report_verifier_status"] = (
+                "pass" if artifact_verified and capabilities["formal_report_gate_passed"] else "fail"
+            )

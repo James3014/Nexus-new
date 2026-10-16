@@ -40,8 +40,8 @@ def _run(tmp_path: Path, *, artifact_verified: bool) -> dict:
 def test_formal_report_producer_emits_hash_of_written_bytes_and_gate_passes(tmp_path: Path) -> None:
     caps = _run(tmp_path, artifact_verified=True)
     written = (tmp_path / caps["formal_report_path"]).read_bytes()
-    assert caps["source_hash"] == "sha256:" + hashlib.sha256(written).hexdigest()
-    assert caps["verifier_status"] == "pass"
+    assert caps["formal_report_source_hash"] == "sha256:" + hashlib.sha256(written).hexdigest()
+    assert caps["formal_report_verifier_status"] == "pass"
     receipt = RECEIPT_ADAPTERS["formal_report"].build(claim_verified=True, payload=caps)
     assert receipt.gate_passed is True
     assert receipt.outcome_contributed is False
@@ -52,3 +52,13 @@ def test_formal_report_producer_unverified_artifact_stays_false(tmp_path: Path) 
     assert caps["formal_report_gate_passed"] is False
     receipt = RECEIPT_ADAPTERS["formal_report"].build(claim_verified=True, payload=caps)
     assert receipt.gate_passed is False
+
+
+def test_formal_report_producer_does_not_write_generic_binding_keys(tmp_path: Path) -> None:
+    caps = _run(tmp_path, artifact_verified=True)
+    assert "source_hash" not in caps and "verifier_status" not in caps
+
+
+def test_formal_report_status_fail_when_artifact_unverified(tmp_path: Path) -> None:
+    caps = _run(tmp_path, artifact_verified=False)
+    assert caps.get("formal_report_verifier_status") == "fail"

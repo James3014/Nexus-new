@@ -1010,7 +1010,14 @@ class FormalReportReceiptAdapter:
         refs = [item for item in (report, schema, summary) if item]
         invoked = bool(refs)
         base_gate = bool(invoked and report and schema == "nexus_formal_report_v1" and _as_bool(payload.get("formal_report_gate_passed", False)))
-        binding_reasons = _claim_gate_binding_reasons(payload)  # claim gate (#1869)
+        # claim gate (#1869): only the formal_report_* namespaced binding counts; never the
+        # generic top-level keys other adapters read from the same shared payload.
+        binding_reasons = _claim_gate_binding_reasons(
+            {
+                "verifier_status": payload.get("formal_report_verifier_status"),
+                "source_hash": payload.get("formal_report_source_hash"),
+            }
+        )
         gate_passed = base_gate and not binding_reasons
         return merge_capability_receipt(
             name=self.name,
