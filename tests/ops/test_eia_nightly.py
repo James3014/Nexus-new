@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from nexus.services.external_intelligence_automation import IssueWorkItem, parse_issue_contract
+from nexus.services.external_intelligence_closure import INTEGRITY_CHECK_IDS
 from nexus.services.external_intelligence_closure import _canonical_json as closure_canonical_json
 from nexus.services.external_intelligence_closure import _sha256 as closure_sha256
 from scripts.ops import eia_nightly as en
@@ -563,7 +564,7 @@ def _complete(
         "results": [{"verifier_id": i, "passed": True} for i in ids],
         "integrity_status": "PASS",
         "failed_integrity_check_ids": [],
-        "integrity_checks": [{"check_id": "nexus.integrity.scope", "passed": True}],
+        "integrity_checks": [{"check_id": check, "passed": True} for check in INTEGRITY_CHECK_IDS],
     }
     vid = closure_sha256(closure_canonical_json(material))
     packet = env["eia_state"] / "closure" / "acceptance-packets" / "packet.json"
@@ -759,7 +760,10 @@ def test_github_failure_while_publishing_candidate_retries_instead_of_escalating
 
     env["sys"].gh = flaky
     night = _dispatch(env, "2026-10-17T01:30:00")
-    assert night["issues"]["11"]["status"] == "ARMED" and night["issues"]["11"]["failures"] == 1
+    assert (
+        night["issues"]["11"]["status"] == "ARMED"
+        and night["issues"]["11"]["failures"]["_harvest"] == 1
+    )
     night = _dispatch(env, "2026-10-17T01:35:00")
     assert night["issues"]["11"]["status"] == "CANDIDATE_PR"
     assert env["gh"].remote[f"eia/11-n{NIGHT}-a1"] == sha and len(env["gh"].prs) == 2
@@ -1162,7 +1166,7 @@ def test_one_failing_issue_is_escalated_after_three_errors(env) -> None:
     for minute in (35, 40, 45):
         night = _dispatch(env, f"2026-10-17T00:{minute}:00")
     entry = night["issues"]["11"]
-    assert entry["failures"] == 3 and entry["status"] == "ESCALATED"
+    assert entry["failures"]["_harvest"] == 3 and entry["status"] == "ESCALATED"
     assert "REPEATED_ERRORS" in entry["escalation"]["reason"]
 
 
@@ -1347,17 +1351,41 @@ def test_fork_pr_with_same_branch_name_is_ignored(env) -> None:
 
 
 def test_guarded_counts_consecutive_failures_and_catches_value_errors(env) -> None:
-    entry = {"issue": 11, "status": "ARMED", "attempts": []}
+    env["gh"].add_issue(11, task_body())
+    env["gh"].labels.add("eia:escalate")
+    entry = {"issue": 11, "status": "ARMED", "attempts": [], "task_id": "t-11"}
     night = {"night": NIGHT, "issues": {"11": entry}, "order": [11]}
 
     def bad(_n, _e):
         raise ValueError("corrupt json")
 
+    def good(_n, _e):
+        return None
+
     env["app"]._guarded(night, entry, bad)
     env["app"]._guarded(night, entry, bad)
-    assert entry["failures"] == 2
+    assert entry["failures"]["bad"] == 2
+    env["app"]._guarded(night, entry, good)  # another step succeeding must not reset "bad"
+    assert entry["failures"] == {"bad": 2, "good": 0}
+    env["app"]._guarded(night, entry, bad)
+    assert entry["status"] == "ESCALATED" and "REPEATED_ERRORS:bad" in entry["escalation"]["reason"]
+
+
+def test_guarded_success_resets_only_its_own_step(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    env["gh"].labels.add("eia:escalate")
+    entry = {"issue": 11, "status": "ARMED", "attempts": [], "task_id": "t-11"}
+    night = {"night": NIGHT, "issues": {"11": entry}, "order": [11]}
+
+    def bad(_n, _e):
+        raise OSError("disk")
+
+    env["app"]._guarded(night, entry, bad)
     env["app"]._guarded(night, entry, lambda _n, _e: None)
-    assert entry["failures"] == 0
+    env["app"]._guarded(night, entry, bad)
+    entry["status"] = "ARMED"
+    env["app"]._guarded(night, entry, bad)
+    assert entry["failures"]["bad"] == 3
 
 
 def test_bootout_failure_notifies_once_and_next_start_finishes_it(env) -> None:
@@ -1373,3 +1401,57 @@ def test_bootout_failure_notifies_once_and_next_start_finishes_it(env) -> None:
     env["clock"].at = dt.datetime.fromisoformat("2026-10-17T16:00:00")
     env["app"].prepare()
     assert env["app"].load(NIGHT)["status"] == "FINISHED"
+
+
+def test_integrity_checks_removed_with_recomputed_id_are_refused(env, tmp_path) -> None:
+    import shutil
+
+    root = tmp_path / "state"
+    shutil.copytree(REAL, root)
+    vfile = next((root / "closure" / "verifications").iterdir())
+    data = json.loads(vfile.read_text())
+    task_id = json.loads((root / "automation" / "complete-record.json").read_text())["publication"][
+        "task_id"
+    ]
+    env["app"].eia_state_root = root.resolve()
+    packet_path = next((root / "closure" / "acceptance-packets").iterdir()).resolve()
+    variants = [
+        lambda d: [d.pop(k) for k in ("integrity_checks", "integrity_status")],
+        lambda d: d.__setitem__("integrity_checks", d["integrity_checks"][:2]),
+        lambda d: d.pop("failed_integrity_check_ids"),
+    ]
+    for mutate in variants:
+        changed = json.loads(json.dumps(data))
+        changed.pop("verification_id")
+        mutate(changed)
+        vid = closure_sha256(closure_canonical_json(changed))
+        changed["verification_id"] = vid
+        name = f"{task_id}--task--whole_task--{vid}.json"
+        (root / "closure" / "verifications" / name).write_text(json.dumps(changed))
+        with pytest.raises(en.CandidateRefused, match="INTEGRITY_FAILED"):
+            env["app"].load_whole_verification(
+                packet_path, {"whole_task_verification_id": vid}, task_id, data["candidate_commit"]
+            )
+
+
+def test_candidate_pr_not_visible_yet_is_retried_then_found(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    sha = _complete(env, night["issues"]["11"])
+    real = env["gh"].__call__
+    hide = {"on": True}
+
+    def lagging(argv):
+        if argv[1:3] == ["pr", "list"] and hide["on"] and "eia/" in " ".join(argv):
+            return _cp(argv, out="[]")
+        return real(argv)
+
+    env["sys"].gh = lagging
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "ARMED" and entry["failures"]["_harvest"] == 1
+    hide["on"] = False
+    night = _dispatch(env, "2026-10-17T01:35:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "CANDIDATE_PR" and len(env["gh"].prs) == 2
+    assert env["gh"].prs[entry["pr"]["number"]]["headRefOid"] == sha

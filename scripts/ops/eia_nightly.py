@@ -57,6 +57,9 @@ from nexus.services.external_intelligence_closure import (  # noqa: E402
     _canonical_json as closure_canonical_json,
 )
 from nexus.services.external_intelligence_closure import (  # noqa: E402
+    _integrity_passed as closure_integrity_passed,
+)
+from nexus.services.external_intelligence_closure import (  # noqa: E402
     _sha256 as closure_sha256,
 )
 from nexus.services.external_intelligence_core_binding import (  # noqa: E402
@@ -1373,16 +1376,24 @@ class Nightly:
     def _guarded(
         self, night: dict[str, Any], entry: dict[str, Any], step: Callable[..., Any]
     ) -> None:
-        """Isolate one Issue: consecutive errors are counted per Issue and escalate after 3."""
+        """Isolate one Issue: consecutive errors are counted per (Issue, step), a success
+        resets only that step's counter, and 3 in a row escalate."""
+        name = getattr(step, "__name__", "step")
+        failures = entry.get("failures")
+        failures = failures if isinstance(failures, dict) else {}
+        entry["failures"] = failures
         try:
             step(night, entry)
-            entry["failures"] = 0
+            failures[name] = 0
         except (NightlyError, ValueError, OSError) as exc:
-            entry["failures"] = int(entry.get("failures") or 0) + 1
-            self._event(night, "issue_error", issue=entry["issue"], error=_one_line(exc, 200))
-            if entry["failures"] >= MAX_ISSUE_FAILURES and entry["status"] != "ESCALATED":
+            failures[name] = int(failures.get(name) or 0) + 1
+            self._event(
+                night, "issue_error", issue=entry["issue"], step=name, error=_one_line(exc, 200)
+            )
+            if failures[name] >= MAX_ISSUE_FAILURES and entry["status"] != "ESCALATED":
                 try:
-                    self._escalate(night, entry, "infra", f"REPEATED_ERRORS:{_one_line(exc, 120)}")
+                    reason = f"REPEATED_ERRORS:{name}:{_one_line(exc, 120)}"
+                    self._escalate(night, entry, "infra", reason)
                 except (NightlyError, ValueError, OSError) as again:
                     self._event(night, "escalate_failed", issue=entry["issue"], error=str(again))
 
@@ -1728,11 +1739,13 @@ class Nightly:
             or verification.get("verification_id") != vid
         ):
             raise CandidateRefused("WHOLE_VERIFICATION_ID_MISMATCH")
-        checks = verification.get("integrity_checks")
-        if checks is not None and (
-            verification.get("integrity_status") != "PASS"
-            or verification.get("failed_integrity_check_ids")
-            or not all(isinstance(c, Mapping) and c.get("passed") is True for c in checks)
+        # The closure's own gate: the full built-in check set ran and passed.  Records that
+        # predate the integrity checks are refused.
+        if (
+            not isinstance(verification.get("integrity_checks"), list)
+            or not all(isinstance(c, Mapping) for c in verification["integrity_checks"])
+            or verification.get("failed_integrity_check_ids") != []
+            or not closure_integrity_passed(verification)
         ):
             raise CandidateRefused("WHOLE_VERIFICATION_INTEGRITY_FAILED")
         if verification.get("status") != "PASS" or verification.get("candidate_commit") != sha:
@@ -1778,6 +1791,8 @@ class Nightly:
             )
             created = _number_from_url(url)
             number = self._existing_pr(branch, sha)  # read back: ours, OPEN, main, head
+            if number is None:  # not visible yet: retry; next tick finds it by branch
+                raise NightlyError("CANDIDATE_PR_NOT_VISIBLE_YET")
             if number != created:
                 raise CandidateRefused("CANDIDATE_PR_READBACK_MISMATCH")
         att["pr_number"] = number

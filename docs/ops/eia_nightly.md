@@ -100,14 +100,17 @@ acts on that result as follows:
   gitlinks. The whole-task verification record must sit under the state root. Its
   content-derived `verification_id` is recomputed with the closure's own
   `_sha256(_canonical_json(...))` and must equal both the record's own id and the packet's
-  `whole_task_verification_id`. Its integrity checks must all pass, and every declared
-  verifier must pass for that commit. `candidate_tree` must be 40 hex characters. Gate, claim ceiling and
+  `whole_task_verification_id`. The closure's own gate (`_integrity_passed`) must hold:
+  the complete `INTEGRITY_CHECK_IDS` set is present and passed, `integrity_status` is PASS,
+  and `failed_integrity_check_ids` is empty. Records written before the integrity checks
+  existed are refused. Every declared verifier must also pass for that commit. `candidate_tree` must be 40 hex characters. Gate, claim ceiling and
   closure run id must match `^[A-Za-z0-9_.:-]{1,120}$`. Worker provider and model may contain
   one `/` (the real value is `opencli_chatgpt/advanced`). Only these validated
   values ever reach the PR body or coord messages. A branch lookup only considers PRs
   that are not cross-repository and whose head owner is `James3014`; such a PR is reused only
   if it is OPEN, based on `main`, and at that exact head. A newly created PR is read back the
-  same way before READY is sent. The PR number is saved before labels change. A failed or
+  same way before READY is sent. If the new PR is not visible yet, the tick is retried, and
+  the next tick finds the PR by branch. A different PR, base or head is refused. The PR number is saved before labels change. A failed or
   partial label edit leaves the Issue `CANDIDATE_PR` with labels pending (never `WITHDRAWN`),
   and every tick retries the labels. The candidate commit and the card commit are
   pinned under `refs/eia-nightly/`. The scheduler then pushes that exact commit as
@@ -135,7 +138,7 @@ to 270 s per invocation (it makes no GitHub calls while watching). It disarms wi
 of a terminal result.
 
 Each Issue is isolated: consecutive errors, including JSON and file errors, are counted
-against that Issue, the count resets after a success, and the Issue escalates after 3 errors
+per Issue and per step, and a success resets only that step's count, and the Issue escalates after 3 errors
 without stalling the others. `stop` writes a `STOP_REQUESTED` file before it takes
 the lock. A watching `dispatch` sees the file and releases the lock. `stop` then waits up to
 about 5.5 minutes for the lock and exits with 75 if it still cannot get it; the 09:05 run
