@@ -1851,3 +1851,44 @@ def test_arming_without_label_after_cutoff_is_deferred_not_left_arming(env) -> N
     assert entry["status"] == "RETRY_PENDING"
     assert entry["attempts"][-1]["reason"] == "GATE:AFTER_CUTOFF"
     assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+@pytest.mark.parametrize("blocking", ["eia:escalate", "eia:needs-template", "eia:candidate-pr"])
+def test_arming_recovery_refuses_blocking_labels(env, blocking) -> None:
+    _crash_after_label(env)
+    env["gh"].issues[11]["labels"].add(blocking)
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "WITHDRAWN"
+    assert entry["attempts"][-1]["reason"] == f"BLOCKING_LABEL:{blocking}"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+@pytest.mark.parametrize("blocking", ["eia:escalate", "eia:needs-template", "eia:candidate-pr"])
+def test_blocking_label_added_while_armed_disarms(env, blocking) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    env["gh"].issues[11]["labels"].add(blocking)
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert night["issues"]["11"]["status"] == "WITHDRAWN"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_gate_deferred_attempts_do_not_count_toward_retries_or_night_cap(env) -> None:
+    _started(env)
+    night = env["app"].load(NIGHT)
+    entry = night["issues"]["11"]
+    deferred = {"attempt": 1, "result": "not_armed", "reason": "GATE:AFTER_CUTOFF"}
+    running = {"attempt": 2, "armed_at": "2026-10-17T00:30:00"}
+    entry.update(status="ARMED", attempts=[deferred, running])
+    env["gh"].issues[11]["labels"].add("nexus:external-intelligence")
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T01:00:00")
+    env["app"]._infra(night, entry, "BLOCKED:OPENCLI_TIMEOUT")
+    assert entry["status"] == "RETRY_PENDING"  # one counted attempt, not two
+    assert en.counted_attempts(entry) == [running]
+    only_deferred = {"issue": 12, "status": "RETRY_PENDING", "attempts": [dict(deferred)]}
+    night["issues"]["12"] = only_deferred
+    night["order"].append(12)
+    env["app"]._update_ledger(night)
+    ledger = json.loads((env["app"].state_dir / "issues.json").read_text())
+    assert ledger["11"]["nights"] == [NIGHT] and ledger["12"]["nights"] == []

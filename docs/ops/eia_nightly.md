@@ -185,11 +185,15 @@ An interrupted arming (state `ARMING`) is reconciled on every tick before the ga
   after the cutoff.
 - **Label on but the Issue changed or trust fails**: the label is removed and the entry is
   escalated.
-- **Label on but `eia:queue` withdrawn**: only the label is removed (`WITHDRAWN`).
+- **Label on but the Issue is no longer armable**: it was closed, `eia:queue` was removed,
+  or it now carries `eia:escalate`, `eia:needs-template` or `eia:candidate-pr`. Only the
+  label is removed (`WITHDRAWN`). The same `_not_armable` predicate guards arming and
+  in-flight Issues.
 - **Label off**: arming resumes if the gate allows; otherwise the entry becomes
   `RETRY_PENDING`.
 
-An entry is never left in `ARMING`.
+An entry is never left in `ARMING`. Attempts that the gate deferred (`not_armed`) count toward neither the 2
+infra retries nor the 3-night cap.
 
 ## Install (operator only)
 

@@ -523,6 +523,12 @@ def validate_contract(
     return IssueWorkItem(REPOSITORY, issue, title, body, contract).identity_hash, contract
 
 
+def counted_attempts(entry: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Attempts that really ran; gate-deferred ones (``not_armed``) count toward neither the
+    infra retry budget nor the cross-night cap."""
+    return [a for a in entry.get("attempts") or [] if a.get("result") != "not_armed"]
+
+
 def publication_tokens(record: Mapping[str, Any]) -> dict[str, str]:
     """Daemon-sourced fields allowed into the candidate PR body; anything odd is refused."""
     pub = record.get("publication") or {}
@@ -1157,7 +1163,7 @@ class Nightly:
             row = ledger.setdefault(str(number), {"nights": []})
             if entry["status"] == "CANDIDATE_PR":
                 row["nights"] = []
-            elif entry.get("attempts") and night["night"] not in row["nights"]:
+            elif counted_attempts(entry) and night["night"] not in row["nights"]:
                 row["nights"].append(night["night"])
         path = self.state_dir / "issues.json"
         fd, tmp = tempfile.mkstemp(prefix=".issues.", dir=self.state_dir)
@@ -1498,14 +1504,9 @@ class Nightly:
         att = entry["attempts"][-1]
         view = self._view_issue(issue)
         if L_EIA in view["label_names"]:
-            if L_QUEUE not in view["label_names"]:
-                self._labels(issue, remove=[L_EIA])
-                att.update(
-                    result="withdrawn", reason="QUEUE_LABEL_REMOVED", finished_at=self._iso()
-                )
-                entry["status"] = "WITHDRAWN"
-                self._event(night, "withdrawn", issue=issue)
-                return
+            blocked = self._not_armable(view)
+            if blocked:  # closed, unqueued, or escalated/needs-template/candidate elsewhere
+                return self._withdraw(night, entry, blocked)
             trusted, why = self._queue_trusted(issue)
             same = self._issue_matches(view, att) and self._body_identity(issue, view) == att.get(
                 "identity_hash"
@@ -1614,11 +1615,7 @@ class Nightly:
         if not pr.get("merged") or entry.get("merged_card_blob") != entry["card_blob"]:
             raise NightlyError("CARD_NOT_MERGED")
         view = self._view_issue(issue)
-        if (
-            view.get("state") != "OPEN"
-            or L_QUEUE not in view["label_names"]
-            or (view["label_names"] & {L_ESCALATE, L_TEMPLATE, L_CANDIDATE})
-        ):
+        if self._not_armable(view):
             if L_EIA in view["label_names"] and entry["status"] == "ARMING":
                 self._labels(issue, remove=[L_EIA])  # only the label we may have added
             entry["status"] = "SKIPPED_LABELS_CHANGED"
@@ -1685,8 +1682,7 @@ class Nightly:
         return (
             self._text_sha(view.get("body")) == record.get("body_sha256")
             and self._text_sha(view.get("title")) == record.get("title_sha256")
-            and L_QUEUE in view["label_names"]
-            and view.get("state") == "OPEN"
+            and not self._not_armable(view)
         )
 
     def _guard_issue(self, night: dict[str, Any], entry: dict[str, Any]) -> bool:
@@ -1700,14 +1696,33 @@ class Nightly:
             entry.update(status="CANDIDATE_PR", labels_pending=True)
             self._finish_candidate_labels(night, entry)
             return False
-        if L_QUEUE not in view["label_names"]:  # withdrawn: only undo our own label
-            self._labels(issue, remove=[L_EIA])
-            att.update(result="withdrawn", reason="QUEUE_LABEL_REMOVED", finished_at=self._iso())
-            entry["status"] = "WITHDRAWN"
-            self._event(night, "withdrawn", issue=issue)
+        blocked = self._not_armable(view)
+        if blocked:  # withdrawn or taken over: only undo our own label
+            self._withdraw(night, entry, blocked)
         else:
             self._escalate(night, entry, "model", "ISSUE_CHANGED_AFTER_ARMING")
         return False
+
+    @staticmethod
+    def _not_armable(view: Mapping[str, Any]) -> str:
+        """Why an Issue must not carry the daemon label ("" when armable).  Shared by arming,
+        ARMING recovery and the in-flight guard."""
+        names = view["label_names"]
+        if view.get("state") != "OPEN":
+            return "ISSUE_NOT_OPEN"
+        if L_QUEUE not in names:
+            return "QUEUE_LABEL_REMOVED"
+        blocking = sorted(names & {L_ESCALATE, L_TEMPLATE, L_CANDIDATE})
+        return f"BLOCKING_LABEL:{','.join(blocking)}" if blocking else ""
+
+    def _withdraw(self, night: dict[str, Any], entry: dict[str, Any], reason: str) -> None:
+        """Someone else took the Issue over: only undo our own daemon label."""
+        issue = _issue_number(entry["issue"])
+        self._labels(issue, remove=[L_EIA])
+        if entry.get("attempts"):
+            entry["attempts"][-1].update(result="withdrawn", reason=reason, finished_at=self._iso())
+        entry["status"] = "WITHDRAWN"
+        self._event(night, "withdrawn", issue=issue, reason=reason)
 
     @staticmethod
     def _body_identity(issue: int, view: Mapping[str, Any]) -> str:
@@ -1783,7 +1798,7 @@ class Nightly:
         entry["attempts"][-1].update(result="infra", reason=reason, finished_at=self._iso())
         self._labels(entry["issue"], remove=[L_EIA])
         if (
-            len(entry["attempts"]) <= self.max_retries
+            len(counted_attempts(entry)) <= self.max_retries
             and self.now() < night_clock(night["night"], self.arm_cutoff)
             and not night.get("stop_requested_at")
         ):
