@@ -1592,18 +1592,19 @@ class AgyWorkerAdapter:
         retirement_unsafe = False
 
         def exhausted_reason() -> str:
-            if attempts == 0 and credential_refusals:
-                # No account in the pool could authenticate at all.
-                return AGY_CREDENTIALS_UNAVAILABLE
-            # Accounts other processes already cooled down count too.
+            # Accounts other processes already cooled down count too: a known
+            # reset means the pool is only temporarily exhausted.
             known = [
                 value
                 for value in (earliest_reset, _earliest_family_reset_seconds(coordinator, model_family))
                 if value is not None
             ]
-            if not known:
-                return AGY_POOL_EXHAUSTED
-            return f"{AGY_POOL_EXHAUSTED}: earliest reset in {_format_duration(min(known))}"
+            if known:
+                return f"{AGY_POOL_EXHAUSTED}: earliest reset in {_format_duration(min(known))}"
+            if attempts == 0 and credential_refusals:
+                # No account in the pool could authenticate at all.
+                return AGY_CREDENTIALS_UNAVAILABLE
+            return AGY_POOL_EXHAUSTED
 
         # Each pass claims an account not tried yet, so pool_size + 1 passes
         # always end in success, a final failure or an exhausted pool.

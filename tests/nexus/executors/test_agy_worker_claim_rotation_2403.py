@@ -479,3 +479,25 @@ def test_exhausted_pool_reports_reset_from_existing_cooldowns(pool_env):
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert receipt.failure_reason is not None
     assert receipt.failure_reason.startswith(f"{AGY_POOL_EXHAUSTED}: earliest reset in 2h00m")
+
+
+def test_token_less_and_cooled_down_pool_reports_the_reset(pool_env):
+    _install_pool(pool_env, {"no-tok": None, "cooled": "ok"})
+    pool_env.leases.mkdir(parents=True, exist_ok=True)
+    (pool_env.leases / f"{_hash('cooled')}.family-unavailable.gemini.json").write_text(
+        json.dumps({
+            "account_alias_hash": _hash("cooled"),
+            "model_family": "gemini",
+            "reason": "QUOTA_EXHAUSTED",
+            "unavailable_until": time.time() + 3 * 3600 + 30,
+        }),
+        encoding="utf-8",
+    )
+    seen: list[str] = []
+    _fake_agy(pool_env, seen)
+
+    receipt = _invoke(pool_env, calls=1)
+
+    assert seen == []
+    assert receipt.failure_reason is not None
+    assert receipt.failure_reason.startswith(f"{AGY_POOL_EXHAUSTED}: earliest reset in 3h00m")
