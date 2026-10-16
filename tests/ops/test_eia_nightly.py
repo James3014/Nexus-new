@@ -172,6 +172,8 @@ class FakeSystem:
         self.bridge = "Extension: connected"
         self.python3_rc = 0
         self.bootout_rc = 0
+        self.launchctl_rc: dict[str, int] = {}
+        self.fail_push = False
 
     def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         self.calls.append(list(argv))
@@ -179,6 +181,8 @@ class FakeSystem:
             return self.gh(argv)
         if argv[0] == "git" and ("push" in argv or "ls-remote" in argv or "fetch" in argv):
             if "push" in argv:
+                if self.fail_push:
+                    return _cp(argv, 1, "", "network down")
                 sha, ref = argv[argv.index("--") + 1].split(":")
                 self.remote[ref.removeprefix("refs/heads/")] = sha
             if "ls-remote" in argv:
@@ -198,6 +202,8 @@ class FakeSystem:
                 return _cp(argv, 113 if "Could not find" in text else 0, text)
             if argv[1] == "bootout" and self.bootout_rc:
                 return _cp(argv, self.bootout_rc, "", "Boot-out failed: 5")
+            if self.launchctl_rc.get(argv[1]):
+                return _cp(argv, self.launchctl_rc[argv[1]], "", f"{argv[1]} failed")
             return _cp(argv)
         if argv[0] == "/usr/bin/env":
             return _cp(argv, self.python3_rc)
@@ -1462,4 +1468,109 @@ def test_launchd_effects_go_through_the_eia_service_owner(env) -> None:
         eia_config=env["config"],
         work_repo=env["repo"],
     )
-    assert app.launchctl is en.eia_service._launchctl
+    assert app.launchctl is en.safe_daemon_launchd
+
+
+# ------------------------------------------------------------------------- review round 5
+
+
+def test_bootout_timeout_still_disarms_and_retries(env, monkeypatch) -> None:
+    env["app"].issue_cap_min = 300
+    _started(env)
+    _dispatch(env, "2026-10-17T05:00:00")
+
+    def hang(*args):
+        raise subprocess.TimeoutExpired(["launchd", *args], 20)
+
+    monkeypatch.setattr(en.eia_service, "_launchctl", hang)
+    env["app"].launchctl = en.safe_daemon_launchd
+    night = _dispatch(env, "2026-10-17T09:00:00")
+    assert night["status"] == "BOOTOUT_FAILED" and not night.get("finalized")
+    assert night["issues"]["11"]["status"] == "HARD_STOPPED"
+    assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+    monkeypatch.setattr(en.eia_service, "_launchctl", lambda *a: _cp(list(a)))
+    night = _dispatch(env, "2026-10-17T09:05:00")
+    assert night["status"] == "FINISHED"
+
+
+def test_safe_runner_maps_os_errors_to_124(monkeypatch) -> None:
+    def boom(*args):
+        raise FileNotFoundError("no binary")
+
+    monkeypatch.setattr(en.eia_service, "_launchctl", boom)
+    result = en.safe_daemon_launchd("print", "gui/1/x")
+    assert result.returncode == 124 and "FileNotFoundError" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "printed,step,code",
+    [
+        ("Could not find service", "bootstrap", "BOOTSTRAP_FAILED"),
+        ("state = waiting", "kickstart", "KICKSTART_FAILED"),
+    ],
+)
+def test_start_reports_which_launchd_step_failed(env, printed, step, code) -> None:
+    _prepared(env)
+    env["sys"].launchctl_print = [printed]
+    env["sys"].launchctl_rc = {step: 1}
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED"
+    assert night["started"]["error"].startswith(code)
+    env["app"]._flush_outbox(night)
+    assert any(code in m for m in env["sys"].coord())
+
+
+def _lose_card_commit(env, *, keep_base: bool) -> dict[str, Any]:
+    env["gh"].add_issue(11, task_body())
+    env["sys"].fail_push = True
+    with pytest.raises(en.NightlyError, match="PUSH_FAILED"):
+        env["app"].prepare()
+    night = env["app"].load(NIGHT)
+    night["card_pr"]["commit"] = "1" * 40  # pruned: no local object, never pushed
+    if not keep_base:
+        night["card_pr"]["base"] = "2" * 40
+    env["app"].save(night)
+    env["sys"].fail_push = False
+    return night
+
+
+def test_missing_unpushed_card_commit_is_rebuilt_from_recorded_inputs(env) -> None:
+    before = _lose_card_commit(env, keep_base=True)
+    night = env["app"].prepare()
+    commit = night["card_pr"]["commit"]
+    assert commit != "1" * 40 and env["gh"].remote[f"eia-nightly/cards-{NIGHT}"] == commit
+    blob = _git(env["repo"], "rev-parse", f"{commit}:tasks/eia-nightly/{NIGHT}/issue-11.md")
+    assert blob == before["issues"]["11"]["card_blob"]
+    assert any(e["event"] == "card_commit_rebuilt" for e in night["events"])
+    assert night["card_pr"]["number"]
+
+
+def test_missing_card_commit_without_base_redoes_prepare(env) -> None:
+    _lose_card_commit(env, keep_base=False)
+    night = env["app"].prepare()
+    assert night["order"] == [11] and night["card_pr"]["number"]
+    assert any(e["event"] == "card_commit_lost_reprepare" for e in night["events"])
+
+
+def test_card_commit_is_deterministic(env) -> None:
+    night = _prepared(env)
+    entries = [night["issues"]["11"]]
+    again = env["app"]._card_commit(NIGHT, entries, night["card_pr"]["base"])
+    assert again == night["card_pr"]["commit"]
+
+
+def test_missing_candidate_commit_is_infra_never_substituted(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    entry = night["issues"]["11"]
+    _complete(env, entry)
+    path = next((env["eia_state"] / "automation" / "James3014_Nexus-new").iterdir())
+    record = json.loads(path.read_text())
+    record["publication"]["candidate_commit"] = "3" * 40
+    path.write_text(json.dumps(record))
+    night = _dispatch(env, "2026-10-17T01:30:00")
+    entry = night["issues"]["11"]
+    assert entry["attempts"][0]["reason"] == "CANDIDATE_COMMIT_MISSING"
+    assert entry["status"] == "ARMED" and len(entry["attempts"]) == 2
+    assert not [b for b in env["gh"].remote if b.startswith("eia/")]

@@ -115,7 +115,11 @@ acts on that result as follows:
   and every tick retries the labels. The scheduler writes no local refs: a raw ref writer
   would be a second candidate-integration primitive (see
   `tests/architecture/test_effect_owner_uniqueness.py`). Both commits are pushed the same
-  night, well inside git's two-week prune window. The scheduler then pushes that exact commit as
+  night, well inside git's two-week prune window. If a commit is gone anyway before its
+  push succeeded, the scheduler recovers as follows. An unpushed card commit is rebuilt
+  deterministically from the recorded base and card inputs (fixed commit dates); if the base
+  is gone too, that night's `prepare` starts over. A missing candidate commit is an infra
+  failure, so the normal retry or escalation applies, and no other SHA is ever substituted. The scheduler then pushes that exact commit as
   `eia/<N>-<revision>` with the bot credential, opens a PR (`Closes #N`, Core marker, CLOSE
   intent, receipt summary) and sends READY to merge-queue. Labels become `eia:candidate-pr`;
   `eia:queue` and `nexus:external-intelligence` are removed. A GitHub error is retried on the
@@ -150,10 +154,16 @@ retries. If `launchctl bootout` fails, the night is not finalised: it is reporte
 `RECONCILIATION_REQUIRED` with prior state `INTELLIGENCE_DISPATCHING` or `FANOUT_DISPATCHING`
 is left alone, because the daemon resumes it by itself.
 
+Every launchd call goes through `external_intelligence_service`. Each call
+is bounded by that module's 20 s timeout; a timeout or OS error becomes exit 124, and the
+next tick retries. `start` records `BOOTSTRAP_FAILED` or `KICKSTART_FAILED`, depending on
+which step failed. On a failed or timed-out bootout, `stop` still disarms in-flight Issues
+(HARD_STOPPED), records `BOOTOUT_FAILED`, and retries.
+
 ## Install (operator only)
 
-Fill in the four templates `scripts/ops/com.nexus.eia-nightly-{prepare,start,dispatch,stop}.plist.template`
-then run `mkdir -p ~/Workspace/nexus-self-hosted-state/eia-nightly` (launchd does not
+Fill in the four templates `scripts/ops/com.nexus.eia-nightly-{prepare,start,dispatch,stop}.plist.template`.
+Before loading them, run `mkdir -p ~/Workspace/nexus-self-hosted-state/eia-nightly` (launchd does not
 create log directories), and load them with `launchctl bootstrap gui/$(id -u) <plist>`. The daemon checkout must contain
 this script. GitHub writes use the bot wrapper `~/.config/nexus-agent-bot/bin/gh`, and pushes use
 `nexus-agent-git-credential`. The scheduler never falls back to the owner's identity.

@@ -171,6 +171,15 @@ def default_runner(argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         return subprocess.CompletedProcess(argv, 124, "", f"{type(exc).__name__}: {exc}")
 
 
+def safe_daemon_launchd(*args: str) -> subprocess.CompletedProcess:
+    """Default launchd runner: the EIA service's own wrapper, with a timeout or OS error
+    turned into exit 124 so stop/finalize keeps going (and retries next tick)."""
+    try:
+        return eia_service._launchctl(*args)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(list(args), 124, "", f"{type(exc).__name__}: {exc}")
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -594,7 +603,7 @@ class Nightly:
         self.watch_seconds = watch_seconds
         # launchd effects for the EIA daemon stay owned by external_intelligence_service
         # (see tests/architecture/test_effect_owner_uniqueness.py).
-        self.launchctl = launchctl or eia_service._launchctl
+        self.launchctl = launchctl or safe_daemon_launchd
         self.trusted_actors = frozenset(a.strip() for a in trusted_actors if a.strip())
         self.state_dir = Path(state_dir).expanduser()
         self.work_repo = Path(work_repo).expanduser()
@@ -648,6 +657,15 @@ class Nightly:
         helper = f"credential.helper=!{self.git_credential}"
         argv = ["git", "-C", str(repo), "-c", "credential.helper=", "-c", helper, "push"]
         self._ok([*argv, "origin", "--", f"{sha}:{ref}"], code="PUSH_FAILED", timeout=180)
+
+    def _has_commit(self, repo: Path, sha: str) -> bool:
+        argv = ["git", "-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}"]
+        return self.run(argv).returncode == 0
+
+    def _remote_sha(self, branch: str) -> str | None:
+        ref = f"refs/heads/{branch}"
+        out = self._git(self.work_repo, "ls-remote", "origin", "--", ref, code="LS_REMOTE_FAILED")
+        return out.split()[0] if out else None
 
     def _is_ancestor(self, repo: Path, older: str, newer: str) -> bool:
         argv = ["git", "-C", str(repo), "merge-base", "--is-ancestor", older, newer]
@@ -920,7 +938,13 @@ class Nightly:
         night["issues"] = {str(e["issue"]): e for e in picked}
         night["order"] = [e["issue"] for e in picked]
         branch = f"eia-nightly/cards-{night_id}"
-        night["card_pr"] = {"branch": branch, "commit": commit, "number": None, "merged": False}
+        night["card_pr"] = {
+            "branch": branch,
+            "commit": commit,
+            "base": base,
+            "number": None,
+            "merged": False,
+        }
         night["status"] = "CARDS_PENDING"
         self.save(night)  # write-ahead before any remote effect
         return self._open_card_pr(night)
@@ -929,6 +953,23 @@ class Nightly:
         night_id, pr = night["night"], night["card_pr"]
         branch, commit = pr["branch"], _sha(pr["commit"])
         picked = [night["issues"][str(n)] for n in night["order"]]
+        if not self._has_commit(self.work_repo, commit) and self._remote_sha(branch) != commit:
+            # No local pin: the unpushed card commit was pruned.  Rebuild it from the
+            # recorded inputs, or start the night's prepare over.  Never fail the night.
+            base = str(pr.get("base") or "")
+            blobs = [e["card_blob"] for e in picked]
+            rebuilt = ""
+            if SHA1_RE.fullmatch(base) and self._has_commit(self.work_repo, base):
+                rebuilt = self._card_commit(night_id, picked, base)
+            if not rebuilt or [e["card_blob"] for e in picked] != blobs:
+                self._event(night, "card_commit_lost_reprepare")
+                fresh = {"schema": STATE_SCHEMA, "night": night_id, "issues": {}, "order": []}
+                fresh["events"] = night.get("events", [])
+                self.save(fresh)
+                return self.prepare(night_id)
+            commit = pr["commit"] = rebuilt
+            self._event(night, "card_commit_rebuilt", commit=commit)
+            self.save(night)
         self._push(self.work_repo, commit, branch)
         tracking = self._tracking_issue()
         number = self._existing_pr(branch, commit)
@@ -1149,6 +1190,9 @@ class Nightly:
                 GIT_AUTHOR_EMAIL=BOT_EMAIL,
                 GIT_COMMITTER_NAME=BOT_NAME,
                 GIT_COMMITTER_EMAIL=BOT_EMAIL,
+                # fixed dates: the same inputs always rebuild the same commit
+                GIT_AUTHOR_DATE=f"{night_id[:4]}-{night_id[4:6]}-{night_id[6:]}T12:00:00+00:00",
+                GIT_COMMITTER_DATE=f"{night_id[:4]}-{night_id[4:6]}-{night_id[6:]}T12:00:00+00:00",
             )
             self._git(self.work_repo, "read-tree", "--", base, env=env)
             for entry in entries:
@@ -1326,14 +1370,17 @@ class Nightly:
     def _ensure_daemon(self) -> None:
         state = self._daemon_state()
         domain = f"gui/{os.getuid()}"
+        # One code per step; each launchd call is bounded (20 s) and the next start retries.
         if state == "absent":
             result = eia_service._bootstrap(domain, self.daemon_plist, runner=self.launchctl)
+            code = "BOOTSTRAP_FAILED"
         elif state == "loaded":
             result = self.launchctl("kickstart", f"{domain}/{DAEMON_LABEL}")
+            code = "KICKSTART_FAILED"
         else:
-            result = subprocess.CompletedProcess([], 0)
+            result, code = subprocess.CompletedProcess([], 0), ""
         if result.returncode != 0:
-            raise NightlyError(f"DAEMON_START_FAILED:{_one_line(result.stderr, 200)}")
+            raise NightlyError(f"{code}:{_one_line(result.stderr, 200)}")
         for _ in range(6):
             if self._daemon_state() == "running":
                 return
@@ -1601,6 +1648,11 @@ class Nightly:
                 and self._minutes_since(att["complete_seen_at"]) < PUBLICATION_GRACE_MIN
             ):
                 return
+            candidate = str((record.get("publication") or {}).get("candidate_commit") or "")
+            if SHA1_RE.fullmatch(candidate) and not self._has_commit(self.daemon_repo, candidate):
+                # No local pin: a pruned candidate is an infra failure (new revision or
+                # escalation).  Never substitute another commit.
+                return self._infra(night, entry, "CANDIDATE_COMMIT_MISSING")
             try:
                 facts = self._verify_candidate(entry, record)
                 self._candidate_pr(night, entry, facts)  # GitHub errors retry next tick
@@ -1904,6 +1956,7 @@ class Nightly:
             f"- Card PR: #{(night.get('card_pr') or {}).get('number')} "
             f"(merged: {(night.get('card_pr') or {}).get('merged')})",
             f"- Night status: {night.get('status')}",
+            f"- Start: {_one_line((night.get('started') or {}).get('error') or 'ok', 200)}",
             "",
             "| Issue | Result | Attempts | Duration (min) | PR | Escalation |",
             "| --- | --- | --- | --- | --- | --- |",
