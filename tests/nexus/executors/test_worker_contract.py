@@ -2465,3 +2465,24 @@ def test_cline_seatbelt_denies_cline_workspace_customizations(tmp_path):
     )
     assert f'(subpath "{target}/.cline")' in profile
     assert f'(literal "{target}/.clinerules")' in profile
+
+
+def test_cline_only_stop_finish_reason_is_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    for reason in ("length", "max_iterations", "tool_calls", "weird", ""):
+        event = ('{"type":"run_result","finishReason":"%s"}\n' % reason).encode()
+        assert cline_delivery_failure(event, b"") == "cline_status_not_success", reason
+    assert cline_delivery_failure(b'{"type":"run_result"}\n', b"") == "cline_status_not_success"
+    assert cline_delivery_failure(_CLINE_OK, b"") is None
+
+
+def test_cline_adapter_request_profile_denies_cline_customizations(monkeypatch, tmp_path):
+    _cline_fake_home(tmp_path, monkeypatch)
+    _, requests, _, target, _ = _cline_admitted_run(monkeypatch, tmp_path)
+
+    profile = requests[0].seatbelt_profile
+    real_target = target.resolve()
+    for name in (".cline", ".clinerules"):
+        assert f'(literal "{real_target}/{name}")' in profile
+        assert f'(subpath "{real_target}/{name}")' in profile

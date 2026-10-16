@@ -299,8 +299,9 @@ CLINE_PERMISSION_MODE = "auto_approve_false"
 # and the run may still end with ``finishReason: "stop"``.
 _CLINE_APPROVAL_REQUIRED = "requires approval in a tty session"
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
-# A run that did not finish on its own is never a delivery.
-_CLINE_FAILED_FINISH_REASONS = frozenset({"error", "aborted"})
+# Only a finish reason observed from cline 3.0.69 as a clean end counts as
+# delivery; any other, unknown or missing value is non-delivery.
+_CLINE_DELIVERED_FINISH_REASONS = frozenset({"stop"})
 _CLINE_DENIED_DEFAULT_REASONS = ("tool execution denied", "tool call execution denied")
 # Model-authored tool arguments are never read as structure.
 _CLINE_MODEL_ARGUMENT_KEYS = frozenset({"input", "args", "arguments", "params", "parameters"})
@@ -379,7 +380,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     if not results:
         return "cline_output_unparseable"
     finish = str(results[-1].get("finishReason") or "").lower()
-    if not finish or finish in _CLINE_FAILED_FINISH_REASONS:
+    if finish not in _CLINE_DELIVERED_FINISH_REASONS:
         return "cline_status_not_success"
     return None
 
