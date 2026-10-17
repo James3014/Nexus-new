@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from nexus.app.nightshift_runner_service import AutoResearchNightShift
 
 
@@ -435,3 +437,15 @@ def test_nightshift_pending_manifest_item_carries_no_bindings(tmp_path: Path):
 
     items = json.loads(runner.pending_manifest_path.read_text(encoding="utf-8"))
     assert "workforce_bindings" not in items[0]
+
+
+def test_pending_manifest_two_appends_keep_both_entries(tmp_path: Path):
+    import json
+
+    runner = AutoResearchNightShift(project_root=tmp_path, task="manifest two appends")
+    runner._append_to_pending_manifest("task-a", "demo.py", "abc123", 1.0, str(tmp_path))
+    runner._append_to_pending_manifest("task-b", "demo.py", "def456", 1.0, str(tmp_path))
+
+    items = json.loads(runner.pending_manifest_path.read_text(encoding="utf-8"))
+    assert len(items) == 2
+    assert [item["task"] for item in items] == ["task-a", "task-b"]
