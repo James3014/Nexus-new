@@ -321,6 +321,39 @@ _CORE_PIN_LINE = re.compile(
     r"^CANONICAL_CORE_REVISION\s*(?::\s*str\s*)?=\s*[\"']([^\"'\n]*)[\"']\s*(?:#.*)?$",
     re.MULTILINE,
 )
+# The Planner-selected codeintel hook (#1579) reaches the Repository
+# Intelligence Engine only through NEXUS_RIE_ENGINE_ROOT / NEXUS_RIE_PYTHON_BIN.
+# The engine revision is pinned by the candidate tree itself (text parse, never
+# imported); the deployer materializes it like Core, as a clean detached
+# checkout ``rie/<sha>`` of a bare ``rie.git``.  Unlike Core it is advisory: a
+# missing or unverified engine never blocks a deploy, the wrapper just unsets
+# both variables and the hook reports NOT_APPLICABLE.
+RIE_REPOSITORY_URL = "https://github.com/James3014/repository-intelligence-engine.git"
+RIE_ORIGIN_URLS = (
+    RIE_REPOSITORY_URL,
+    "https://github.com/James3014/repository-intelligence-engine",
+    "git@github.com:James3014/repository-intelligence-engine.git",
+)
+RIE_PIN_FILE = "nexus/services/rie_knowledge_applicability.py"
+_RIE_PIN_LINE = re.compile(
+    r"^PINNED_RIE_ENGINE_REVISION\s*(?::\s*str\s*)?=\s*[\"']([^\"'\n]*)[\"']\s*(?:#.*)?$",
+    re.MULTILINE,
+)
+RIE_ENV_ENGINE_ROOT = "NEXUS_RIE_ENGINE_ROOT"
+RIE_ENV_PYTHON_BIN = "NEXUS_RIE_PYTHON_BIN"
+RIE_FETCH_TIMEOUT_SECONDS = 120
+RIE_ENGINE_CHECK_TIMEOUT_SECONDS = 60
+# Run with ``-B -I`` (no bytecode, no PYTHON* env, no cwd/user site): the
+# engine's CLI module must import from the pinned checkout alone.
+RIE_ENGINE_CHECK_CODE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import repository_intelligence.cli as cli
+from pathlib import Path
+here = Path(cli.__file__).resolve()
+assert Path(sys.argv[1]).resolve() in here.parents, here
+print("OK")
+"""
 
 # GB-077 per-request timeout and tries: a freshly started candidate can take
 # longer than _fetch_gateway_health's 2 s default to answer /health.  Only
@@ -521,6 +554,14 @@ class Config:
     @property
     def core_checkouts(self) -> Path:
         return self.gateway_root / "core"
+
+    @property
+    def rie_bare_repo(self) -> Path:
+        return self.gateway_root / "rie.git"
+
+    @property
+    def rie_checkouts(self) -> Path:
+        return self.gateway_root / "rie"
 
     @property
     def pycache_prefixes(self) -> Path:
@@ -1781,6 +1822,7 @@ def wrapper_command(
     core_root: Optional[Path] = None,
     controller_root: Optional[Path] = None,
     core_digest: Optional[Tuple[str, str]] = None,
+    rie: Optional[Tuple[Path, Path]] = None,
 ) -> str:
     """The same fixed zsh wrapper as the #526 deployments, with a per-deployment venv.
 
@@ -1800,12 +1842,18 @@ def wrapper_command(
     file (Owner approval in #2318), so ``nexus_worker_candidate`` can dispatch
     its default Agy route.  It never exports the broader
     ``NEXUS_EXTERNAL_RUNTIME_AUTHORIZED``.
+
+    ``rie`` is ``(engine_root, python)`` of a verified RIE checkout (#1579),
+    exported after the env file; without one both variables are unset, so a
+    stale env-file value can never point the Gateway at another engine.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
     controller = root if controller_root is None else controller_root
     values = [str(root), str(python), str(cfg.env_file), str(state), str(controller)]
     if core_root is not None:
         values.append(str(core_root))
+    if rie is not None:
+        values.extend([str(rie[0]), str(rie[1])])
     for value in values:
         if any(token in value for token in _SHELL_UNSAFE):
             raise DeployError("WRAPPER_PATH_UNSAFE")
@@ -1832,12 +1880,18 @@ def wrapper_command(
     else:
         # No build digest: never let a stale value from the env file through.
         core_export += "unset NEXUS_CORE_SOURCE_DIGEST NEXUS_CORE_SOURCE_DIGEST_REVISION ; "
+    if rie is None:
+        rie_export = f"unset {RIE_ENV_ENGINE_ROOT} {RIE_ENV_PYTHON_BIN} ; "
+    else:
+        rie_export = (
+            f'export {RIE_ENV_ENGINE_ROOT}="{rie[0]}" ; export {RIE_ENV_PYTHON_BIN}="{rie[1]}" ; '
+        )
     return (
         f'cd "{controller}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f"{AGY_RUNTIME_AUTHORIZATION_EXPORT}"
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
-        f'{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
+        f'{rie_export}{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
 
 
@@ -2182,6 +2236,191 @@ def core_pins_in_use(cfg: Config) -> set:
     return pins
 
 
+def read_rie_pin(root: Path) -> str:
+    """``PINNED_RIE_ENGINE_REVISION`` of a deployment tree, by text parse (never imported).
+
+    Exactly one 40-hex constant, or ``RIE_PIN_UNREADABLE`` (#1579).
+    """
+    try:
+        text = (root / RIE_PIN_FILE).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DeployError(f"RIE_PIN_UNREADABLE:unreadable:{type(exc).__name__}") from exc
+    found = _RIE_PIN_LINE.findall(text)
+    if len(found) != 1 or not _SHA.match(found[0]):
+        raise DeployError(f"RIE_PIN_UNREADABLE:{found[:2]!r}"[:300])
+    return found[0]
+
+
+def _rie_git(cfg: Config, *args: str) -> List[str]:
+    return ["git", "--git-dir", str(cfg.rie_bare_repo), *args]
+
+
+def rie_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional[str]:
+    """None when ``checkout`` is a clean worktree at exactly ``revision``.
+
+    Stricter than Core: nothing untracked or ignored at all, bytecode included,
+    since the engine always runs with bytecode writing disabled.
+    """
+    if not (checkout / ".git").is_file():
+        return "RIE_CHECKOUT_INCOMPLETE"
+    head = host.run(["git", "-C", str(checkout), "rev-parse", "HEAD"], timeout=60)
+    if head.returncode != 0:
+        return f"RIE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
+    if head.stdout.strip() != revision:
+        return f"RIE_HEAD_MISMATCH:{head.stdout.strip()}"
+    # assume-unchanged / skip-worktree entries hide local edits from `git status`.
+    flags = host.run(["git", "-C", str(checkout), "ls-files", "-v", "-z"], timeout=60)
+    if flags.returncode != 0:
+        return "RIE_LS_FILES_FAILED"
+    for entry in (flags.stdout or "").split("\0"):
+        if entry and not entry.startswith("H "):
+            return f"RIE_INDEX_FLAGGED:{entry[:200]}"
+    status = host.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignored",
+        ],
+        timeout=60,
+    )
+    if status.returncode != 0:
+        return "RIE_STATUS_FAILED"
+    if (status.stdout or "").strip():
+        return f"RIE_TREE_DIRTY:{status.stdout.strip()[:200]}"
+    return None
+
+
+def rie_roots_in_use(cfg: Config) -> set:
+    """RIE checkout names the live wrapper exports; unreadable raises (in use)."""
+    try:
+        tokens = _wrapper_tokens(cfg.plist.read_bytes())
+    except (OSError, DeployError) as exc:
+        raise DeployError(f"RIE_IN_USE_UNKNOWN:{exc}"[:300]) from exc
+    prefix = f"{RIE_ENV_ENGINE_ROOT}="
+    return {Path(t.split("=", 1)[1]).name for t in tokens if t.startswith(prefix)}
+
+
+def _add_rie_checkout(cfg: Config, host: Host, checkout: Path, revision: str) -> None:
+    cfg.rie_checkouts.mkdir(parents=True, exist_ok=True)
+    _must(
+        host,
+        _rie_git(cfg, "worktree", "add", "--detach", str(checkout), revision),
+        "RIE_WORKTREE_ADD_FAILED",
+        timeout=300,
+    )
+
+
+def _remove_rie_checkout(cfg: Config, host: Host, checkout: Path) -> None:
+    parent = cfg.rie_checkouts
+    if (
+        parent.is_symlink()
+        or checkout.is_symlink()
+        or checkout.resolve().parent != parent.resolve()
+    ):
+        raise DeployError("RIE_PATH_SYMLINKED")
+    host.run(_rie_git(cfg, "worktree", "remove", "--force", str(checkout)), timeout=300)
+    if checkout.exists() and not checkout.is_symlink():
+        shutil.rmtree(checkout, ignore_errors=True)
+
+
+def materialize_rie(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
+    """A clean detached RIE checkout ``rie/<revision>``; any doubt raises.
+
+    A commit already present (a previous verified deploy with the same pin) is
+    never fetched again, so a later GitHub outage does not lose the engine.
+    """
+    if not _SHA.match(revision):
+        raise DeployError(f"RIE_PIN_UNREADABLE:{revision!r}"[:300])
+    if cfg.rie_checkouts.is_symlink() or cfg.rie_bare_repo.is_symlink():
+        raise DeployError("RIE_PATH_SYMLINKED")
+    if not cfg.rie_bare_repo.exists():
+        _must(host, ["git", "init", "--bare", "--quiet", str(cfg.rie_bare_repo)], "RIE_INIT_FAILED")
+        _must(host, _rie_git(cfg, "remote", "add", "origin", RIE_REPOSITORY_URL), "RIE_INIT_FAILED")
+    origin = _must(
+        host, _rie_git(cfg, "config", "--get", "remote.origin.url"), "RIE_ORIGIN_FAILED"
+    ).strip()
+    if origin not in RIE_ORIGIN_URLS:
+        raise DeployError(f"RIE_ORIGIN_MISMATCH:{origin}"[:300])
+    present = _rie_git(cfg, "cat-file", "-e", f"{revision}^{{commit}}")
+    if host.run(present, timeout=60).returncode != 0:
+        refspec = "+refs/heads/*:refs/rie/heads/*"
+        fetch = _rie_git(cfg, "fetch", "--quiet", "--no-tags", "origin", refspec)
+        # Never wait on a credential prompt: fail fast instead.
+        _must(
+            host,
+            fetch,
+            "RIE_FETCH_FAILED",
+            timeout=RIE_FETCH_TIMEOUT_SECONDS,
+            env={"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"},
+        )
+        _must(host, present, "RIE_COMMIT_NOT_FOUND", timeout=60)
+    checkout = cfg.rie_checkouts / revision
+    if checkout.is_symlink():
+        raise DeployError("RIE_PATH_SYMLINKED")
+    if not checkout.exists():
+        _add_rie_checkout(cfg, host, checkout, revision)
+    tree = _must(
+        host, _rie_git(cfg, "rev-parse", f"{revision}^{{tree}}"), "RIE_TREE_FAILED", timeout=60
+    ).strip()
+    result = {
+        "revision": revision,
+        "root": str(checkout),
+        "repository": RIE_REPOSITORY_URL,
+        "tree": tree,
+    }
+    problem = rie_checkout_problem(host, checkout, revision)
+    if problem is None:
+        return result
+    if revision in rie_roots_in_use(cfg):
+        raise DeployError(f"RIE_IN_USE_UNHEALTHY:{problem}"[:300])
+    _remove_rie_checkout(cfg, host, checkout)
+    _must(host, _rie_git(cfg, "worktree", "prune"), "RIE_WORKTREE_PRUNE_FAILED")
+    _add_rie_checkout(cfg, host, checkout, revision)
+    again = rie_checkout_problem(host, checkout, revision)
+    if again is not None:
+        raise DeployError(again[:300])
+    return {**result, "rebuilt": problem[:300]}
+
+
+def rie_engine(cfg: Config, host: Host, root: Path, python: Path) -> Dict[str, Any]:
+    """The candidate's pinned RIE engine for the wrapper, or why there is none.
+
+    Never raises: status ``VERIFIED`` (checkout clean at the pin and the engine
+    CLI imports from it with the candidate's interpreter, bytecode off, then the
+    checkout is still clean) or ``UNAVAILABLE`` with an error code.
+    """
+    try:
+        revision = read_rie_pin(root)
+        engine = materialize_rie(cfg, host, revision)
+        check = host.run(
+            [str(python), "-B", "-I", "-c", RIE_ENGINE_CHECK_CODE, engine["root"]],
+            cwd=Path(engine["root"]),
+            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            timeout=RIE_ENGINE_CHECK_TIMEOUT_SECONDS,
+        )
+        if check.returncode != 0 or (check.stdout or "").strip() != "OK":
+            detail = (check.stderr or check.stdout or "").strip()[-200:]
+            raise DeployError(f"RIE_ENGINE_CHECK_FAILED:{detail}")
+        after = rie_checkout_problem(host, Path(engine["root"]), revision)
+        if after is not None:
+            raise DeployError(f"RIE_ENGINE_CHECK_WROTE:{after}"[:300])
+        return {"status": "VERIFIED", **engine, "python": str(python)}
+    except Exception as exc:  # noqa: BLE001 - advisory: never blocks the deploy
+        return {"status": "UNAVAILABLE", "error": f"{exc}"[:300] or type(exc).__name__}
+
+
+def _rie_arg(receipt: Any) -> Optional[Tuple[Path, Path]]:
+    """``wrapper_command(rie=...)`` for a receipt's ``rie`` block (VERIFIED only)."""
+    rie = receipt.get("rie") if isinstance(receipt, dict) else None
+    if isinstance(rie, dict) and rie.get("status") == "VERIFIED":
+        return (Path(str(rie["root"])), Path(str(rie["python"])))
+    return None
+
+
 def materialize_tree(cfg: Config, host: Host, commit: str) -> Path:
     """The detached ``deployments/a1-<commit>`` worktree, at exactly ``commit``."""
     root = cfg.deployments / f"{DEPLOYMENT_PREFIX}{commit}"
@@ -2227,6 +2466,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
     dirty = _must(host, ["git", "-C", str(root), "status", "--porcelain"], "WORKTREE_STATUS_FAILED")
     if dirty.strip():
         raise DeployError("SOURCE_TREE_WRITTEN_BY_BUILD")
+    rie = rie_engine(cfg, host, root, python)
     lock = root / "uv.lock"
     return {
         "deployment_root": str(root),
@@ -2234,6 +2474,7 @@ def build(cfg: Config, host: Host, commit: str) -> Dict[str, Any]:
         "venv_python": str(python),
         "uv_lock_sha256": _sha256(lock.read_bytes()) if lock.exists() else None,
         "core": core,
+        "rie": rie,
     }
 
 
@@ -2483,6 +2724,7 @@ def prune_refusal(cfg: Config) -> Optional[str]:
         cfg.deployments,
         cfg.venvs,
         cfg.core_checkouts,
+        cfg.rie_checkouts,
         cfg.controllers,
         cfg.pycache_prefixes,
     ):
@@ -2537,6 +2779,10 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
         if controller.exists() and not controller.is_symlink():
             shutil.rmtree(controller, ignore_errors=True)
     prune_core(cfg, host, protected)
+    try:
+        prune_rie(cfg, host, protected)
+    except Exception:  # noqa: BLE001 - RIE is advisory: disk cleanup never fails a cycle
+        pass
     return removed
 
 
@@ -2576,6 +2822,43 @@ def prune_core(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List
         if child.resolve().parent != real_parent or child.name in pinned:
             continue
         host.run(_core_git(cfg, "worktree", "remove", "--force", str(child)), timeout=300)
+        if child.exists() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        removed.append(child.name)
+    return removed
+
+
+def prune_rie(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]:
+    """Remove ``rie/<sha>`` checkouts no remaining or protected deployment pins (#1579).
+
+    Kept: every pin of a remaining or protected deployment and the root the live
+    wrapper exports.  Nothing is removed when any of that cannot be read.
+    """
+    parent = cfg.rie_checkouts
+    if prune_refusal(cfg) or parent.is_symlink() or not parent.is_dir():
+        return []
+    roots = [p for p in protected if p is not None]
+    if cfg.deployments.is_dir():
+        roots += [p for p in cfg.deployments.iterdir() if p.is_dir() and not p.is_symlink()]
+    try:
+        pinned = set(rie_roots_in_use(cfg))
+    except DeployError:
+        return []
+    for root in roots:
+        if not (root / RIE_PIN_FILE).exists():
+            continue
+        try:
+            pinned.add(read_rie_pin(root))
+        except DeployError:
+            return []
+    real_parent = parent.resolve()
+    removed: List[str] = []
+    for child in sorted(parent.iterdir()):
+        if child.is_symlink() or not child.is_dir() or not _SHA.match(child.name):
+            continue
+        if child.resolve().parent != real_parent or child.name in pinned:
+            continue
+        host.run(_rie_git(cfg, "worktree", "remove", "--force", str(child)), timeout=60)
         if child.exists() and not child.is_symlink():
             shutil.rmtree(child, ignore_errors=True)
         removed.append(child.name)
@@ -3561,6 +3844,7 @@ class _Cycle:
             core_root=core_root,
             controller_root=_receipt_controller(receipt),
             core_digest=_core_digest_arg(core),
+            rie=_rie_arg(receipt),
         )
         stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
         try:
@@ -3656,6 +3940,7 @@ class _Cycle:
                     core_root=Path(receipt["core"]["root"]),
                     controller_root=_receipt_controller(receipt),
                     core_digest=_core_digest_arg(receipt["core"]),
+                    rie=_rie_arg(receipt),
                 )
                 new_plist = render_plist(previous_plist, command, root)
                 self.write_journal(receipt, previous_plist, new_plist, python)
