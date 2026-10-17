@@ -481,3 +481,14 @@ def test_base_tree_materialization_never_writes_outside_the_temp_dir(
     guard._materialize_base_tree(repo, "HEAD", ["../escaped.py", str(outside), "app.py"], dest)
     assert not outside.exists()
     assert (dest / "app.py").is_file()
+
+
+def test_editing_the_text_of_a_legacy_debt_line_counts_as_new(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
+    # Identity includes the source line text, like the CI exact-base gate.
+    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
+    _fix(repo, "import os  # touched\n\n\ndef value():\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
+    assert code == guard.EXIT_BLOCKED
+    assert receipt["reason_codes"] == ["LINT_FAILURE"]
