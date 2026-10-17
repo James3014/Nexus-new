@@ -247,6 +247,251 @@ def parse_task_card_expected_evidence(text: str) -> Optional[Dict[str, Any]]:
     return universe.model_dump(mode="json")
 
 
+# --- Issue behavior promises (#2532) ---------------------------------------
+#
+# An Issue declares its behavior promises in one fenced block in the Issue
+# body with this info string. The Issue body is frozen by Core's existing
+# issue_contract_hash, so an edited promise set reads as a changed contract.
+ISSUE_PROMISE_SET_FENCE = "nexus.issue_promise_set.v1"
+# A Task Card maps every promise of that set to declared expected-evidence
+# subjects in one fenced block with this info string. Like the universe block
+# it is covered by the card hash, so no worker or tool argument can change it.
+TASK_CARD_ISSUE_PROMISES_FENCE = "nexus-issue-promises"
+
+_MAX_ISSUE_PROMISES = 64
+_PROMISE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
+
+
+class IssuePromisePhase(str, Enum):
+    # Provable before merge by host-run verifier subjects.
+    PRE_MERGE = "PRE_MERGE"
+    # Provable only by a live witness after merge (#2453); never by a test.
+    POST_MERGE = "POST_MERGE"
+
+
+class IssuePromiseRisk(str, Enum):
+    STANDARD = "STANDARD"
+    # Needs both pre-merge evidence and a post-merge live witness (#2453).
+    HIGH = "HIGH"
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _validate_strict_generation(value: Any, field: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{field} must be an integer >= 0")
+    return value
+
+
+class IssuePromise(BaseModel):
+    """One named behavior promise; the statement text stays in the Issue."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    promise_id: str
+    statement_sha256: str
+    phase: IssuePromisePhase
+    risk: IssuePromiseRisk
+
+    @field_validator("promise_id")
+    @classmethod
+    def _validate_promise_id(cls, value: Any) -> str:
+        if not isinstance(value, str) or not _PROMISE_ID_RE.fullmatch(value):
+            raise ValueError("promise_id must be a bounded slug")
+        return value
+
+    @field_validator("statement_sha256")
+    @classmethod
+    def _validate_statement_hash(cls, value: Any) -> str:
+        if not isinstance(value, str) or not _SHA256_HEX_RE.fullmatch(value):
+            raise ValueError("statement_sha256 must be a lowercase 64-hex SHA-256")
+        return value
+
+
+class IssuePromiseSet(BaseModel):
+    """The promise set an Issue body declares (``nexus.issue_promise_set.v1``)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    promise_set_generation: int
+    promises: List[IssuePromise] = Field(min_length=1, max_length=_MAX_ISSUE_PROMISES)
+
+    @field_validator("promise_set_generation", mode="before")
+    @classmethod
+    def _validate_generation(cls, value: Any) -> int:
+        return _validate_strict_generation(value, "promise_set_generation")
+
+    @model_validator(mode="after")
+    def _validate_unique_sorted(self):
+        ids = [promise.promise_id for promise in self.promises]
+        duplicates = sorted({pid for pid in ids if ids.count(pid) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate promise_id: {', '.join(duplicates)}")
+        object.__setattr__(
+            self, "promises", sorted(self.promises, key=lambda promise: promise.promise_id)
+        )
+        return self
+
+    def canonical_json(self) -> str:
+        return _canonical_json(self.model_dump(mode="json"))
+
+    @property
+    def identity(self) -> str:
+        return "sha256:" + sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+def issue_promise_set_identity(promise_set: Dict[str, Any]) -> str:
+    """sha256 identity of one Issue promise set, over its canonical form."""
+    return IssuePromiseSet.model_validate(promise_set).identity
+
+
+class IssuePromiseSubjects(BaseModel):
+    """The expected-evidence subjects one promise is proven by."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    promise_id: str
+    subject_ids: List[str] = Field(min_length=1, max_length=_MAX_EXPECTED_EVIDENCE_SUBJECTS)
+
+    @field_validator("subject_ids")
+    @classmethod
+    def _validate_subject_ids(cls, values: List[Any]) -> List[str]:
+        normalized = [_validate_logical_subject_id(value) for value in values]
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("duplicate subject_id")
+        return sorted(normalized)
+
+
+class IssuePromiseBinding(BaseModel):
+    """A card's map from every Issue promise to expected-evidence subjects.
+
+    The model checks the map covers exactly the Issue's promise set. Whether
+    each subject is in the card's universe is checked where both are known
+    (``nexus_task_card_create``). This grants no approval or closure.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    issue_number: int
+    issue_contract_hash: str
+    promise_set: IssuePromiseSet
+    map: List[IssuePromiseSubjects] = Field(min_length=1, max_length=_MAX_ISSUE_PROMISES)
+
+    @field_validator("repository")
+    @classmethod
+    def _validate_repository(cls, value: Any) -> str:
+        if not isinstance(value, str) or not _REPOSITORY_RE.fullmatch(value):
+            raise ValueError("repository must be owner/name")
+        return value
+
+    @field_validator("issue_number", mode="before")
+    @classmethod
+    def _validate_issue_number(cls, value: Any) -> int:
+        if type(value) is not int or value < 1:
+            raise ValueError("issue_number must be a positive integer")
+        return value
+
+    @field_validator("issue_contract_hash")
+    @classmethod
+    def _validate_contract_hash(cls, value: Any) -> str:
+        if not isinstance(value, str) or not _SHA256_HEX_RE.fullmatch(value):
+            raise ValueError("issue_contract_hash must be a lowercase 64-hex SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_exact_promise_set(self):
+        mapped = [entry.promise_id for entry in self.map]
+        duplicates = sorted({pid for pid in mapped if mapped.count(pid) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate promise_id in map: {', '.join(duplicates)}")
+        declared = {promise.promise_id for promise in self.promise_set.promises}
+        missing = sorted(declared - set(mapped))
+        if missing:
+            raise ValueError(f"promise not mapped to any subject: {', '.join(missing)}")
+        extra = sorted(set(mapped) - declared)
+        if extra:
+            raise ValueError(f"promise not in the Issue promise set: {', '.join(extra)}")
+        object.__setattr__(self, "map", sorted(self.map, key=lambda entry: entry.promise_id))
+        return self
+
+    def canonical_json(self) -> str:
+        return _canonical_json(self.model_dump(mode="json"))
+
+    @property
+    def binding_identity(self) -> str:
+        return "sha256:" + sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+    def subject_ids_for(self, promise_id: str) -> List[str]:
+        for entry in self.map:
+            if entry.promise_id == promise_id:
+                return list(entry.subject_ids)
+        return []
+
+
+def _parse_single_json_fence(text: Any, fence: str, code: str) -> Optional[Any]:
+    """The JSON body of exactly one ```<fence> block; None when there is none.
+
+    Same rules as the expected-evidence block: a near-miss info string, a
+    duplicate or an unterminated block fails closed.
+    """
+    if not isinstance(text, str):
+        raise ValueError(f"{code}: text must be a string")
+    lines = text.splitlines()
+    opener = "```" + fence
+    fences = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().startswith("```") and fence in line
+    ]
+    starts = [index for index in fences if lines[index].strip() == opener]
+    if fences != starts:
+        raise ValueError(f"{code}: malformed fence")
+    if not starts:
+        return None
+    if len(starts) != 1:
+        raise ValueError(f"{code}: duplicate declaration")
+    start = starts[0]
+    end = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].strip() == "```"),
+        None,
+    )
+    if end is None:
+        raise ValueError(f"{code}: unterminated declaration")
+    try:
+        return json.loads("\n".join(lines[start + 1 : end]))
+    except ValueError as exc:
+        raise ValueError(f"{code}: {exc}") from exc
+
+
+def parse_issue_promise_set(issue_body: str) -> Optional[Dict[str, Any]]:
+    """The Issue body's promise set in canonical form, or None when it declares none."""
+    code = "ISSUE_PROMISE_SET_INVALID"
+    raw = _parse_single_json_fence(issue_body, ISSUE_PROMISE_SET_FENCE, code)
+    if raw is None:
+        return None
+    try:
+        return IssuePromiseSet.model_validate(raw).model_dump(mode="json")
+    except ValueError as exc:
+        raise ValueError(f"{code}: {exc}") from exc
+
+
+def parse_task_card_issue_promises(text: str) -> Optional[Dict[str, Any]]:
+    """The card's promise binding in canonical form, or None for cards without one."""
+    code = "TASK_CARD_ISSUE_PROMISES_INVALID"
+    raw = _parse_single_json_fence(text, TASK_CARD_ISSUE_PROMISES_FENCE, code)
+    if raw is None:
+        return None
+    try:
+        return IssuePromiseBinding.model_validate(raw).model_dump(mode="json")
+    except ValueError as exc:
+        raise ValueError(f"{code}: {exc}") from exc
+
+
 class SelfHostedTaskContract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

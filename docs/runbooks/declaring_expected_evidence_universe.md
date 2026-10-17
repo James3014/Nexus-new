@@ -117,3 +117,116 @@ when Core reports one:
   `CORE_COVERAGE_IDENTITY_MISMATCH` or `CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH`;
 - `null`: no universe is declared. A legacy task's receipt normally has no
   `core_verdict` at all (`null`), so check that first.
+
+## Binding Issue promises to subjects (#2532)
+
+A universe says *which* evidence a card expects. It does not say which
+behavior the Issue promised. A generic subject such as `pytest tests/` can be
+green while the real entry point of a promise never ran. Since #2532 an Issue
+can name its promises and a card can map each one to the subjects that prove
+it. Both blocks are optional; a card without them is byte-identical to before.
+
+### 1. The Issue declares its promises
+
+Put exactly one fenced block in the Issue **body**:
+
+````
+```nexus.issue_promise_set.v1
+{"promise_set_generation": 1,
+ "promises": [
+  {"promise_id": "P1", "statement_sha256": "<sha256 of the promise sentence>",
+   "phase": "PRE_MERGE", "risk": "STANDARD"},
+  {"promise_id": "P2", "statement_sha256": "<…>", "phase": "POST_MERGE", "risk": "HIGH"}]}
+```
+````
+
+- `phase`: `PRE_MERGE` promises are proven by host-run verifier subjects.
+  `POST_MERGE` promises are proven only by a live witness (#2453); a test
+  never satisfies them.
+- `risk`: `HIGH` needs both the pre-merge evidence and the #2453 live witness.
+- The Issue body is frozen by Core's existing `issue_contract_hash` and the
+  trusted-author rule (Owner decision on #2532). Editing the promises means
+  editing the body, so raise `promise_set_generation`; old evidence then reads
+  as `STALE`.
+- `parse_issue_promise_set(issue_body)` (`nexus/orchestrator/task_contract.py`)
+  reads the block; `issue_promise_set_identity()` is its identity. A duplicate,
+  unterminated or near-miss block fails closed.
+
+### 2. The card maps every promise to subjects
+
+Pass `issue_promises` to `nexus_task_card_create`, together with
+`expected_evidence`:
+
+```json
+{"repository": "James3014/Nexus-new", "issue_number": 1234,
+ "issue_contract_hash": "<Core issue_contract_hash of the Issue>",
+ "promise_set": {"promise_set_generation": 1, "promises": [ … copied from the Issue … ]},
+ "map": [{"promise_id": "P1", "subject_ids": ["python -m pytest tests/test_x.py::test_real_entry"]},
+         {"promise_id": "P2", "subject_ids": ["…"]}]}
+```
+
+It is written into the hashed card as one `nexus-issue-promises` block, and
+the Owner authorization effect carries `issue_promises_identity`. Card
+creation refuses, with no file written and no authority recorded, when:
+
+- a promise of the set is not mapped, or the map names a promise that is not
+  in the set;
+- a mapped subject is not a `logical_subject_id` of this card's universe;
+- a promise has no `REQUIRED` / `APPLICABLE` subject;
+- `issue_promises` is given without `expected_evidence`;
+- the objective or verifier text smuggles a `nexus-issue-promises` block.
+
+Workers cannot supply or change the map: `nexus_worker_candidate` rejects the
+field, and only the hashed card carries it.
+
+Map a promise to the **exact** test of its real entry point (a pytest node id),
+not to the whole suite. Freeze those tests first: merge them in a RED-test PR
+before the implementation PR (Owner decision on #2532). A worker-added test
+is not in the frozen map, so it cannot cover a promise.
+
+`nexus_task_card_create` cannot read the Issue, so it checks only that the map
+covers the supplied set exactly. The reader checks that the supplied set is
+the live one, through `live_issue` below.
+
+### 3. Reading per-promise coverage
+
+`nexus.orchestrator.issue_promise_coverage.project_issue_promise_coverage(
+promise_block, core_verdict, expected_head, *, evidence_head, live_issue)` is
+a pure function. It returns `nexus.issue_promise_coverage.v1` with one status
+per promise and an `overall` of `COMPLETE`, `PARTIAL` or `BLOCKED`:
+
+| Status | Meaning |
+|---|---|
+| `COVERED` | every mapped subject is satisfied and at least one REQUIRED / APPLICABLE subject was observed with `PASS` |
+| `NOT_COVERED` | a mapped subject was not observed or had no `PASS`; or no verdict, unpinned Core provenance, missing coverage |
+| `FAILED` | a mapped subject was observed with `FAIL` |
+| `STALE` | `evidence_head` ≠ `expected_head`, `core_universe_identity_matches` is not `true`, or `live_issue` (`issue_contract_hash`, `promise_set_identity`) is missing or differs |
+| `PENDING_EXTERNAL_WITNESS` | a `POST_MERGE` promise, or a `HIGH` promise whose pre-merge evidence holds; it waits for a #2453 live witness |
+
+`overall` is `BLOCKED` for an invalid block or any `FAILED` / `STALE` promise,
+`COMPLETE` only when every promise is `COVERED`, and `PARTIAL` otherwise.
+`coverage_complete`, `claimed_items` and similar flags in the verdict are
+ignored; only Core coverage entries count.
+
+The result grants nothing: it has no approve, merge or close field, and
+`claim_ceiling` is `ISSUE_PROMISE_COVERAGE_PROJECTION_ONLY`. #2453's closer,
+not this function and not `issue_closure_guard`, decides what an incomplete
+result blocks.
+
+### Fail-to-pass and missing test ids
+
+If a verifier names a pytest node id that does not exist on base, pytest
+exits 4. The fail-to-pass probe treats exit 4 and 5 as
+`BASE_NOT_PHYSICAL_FAIL` / `base_collected_no_tests`, not as a real base
+failure (#2387; the missing-node case is pinned by
+`test_repair_task_whose_base_lacks_the_named_test_node_is_not_verified`).
+So a promise test must already exist, and fail, on base. Merging the
+RED tests first gives exactly that.
+
+RED tests cannot land as `xfail` or `skip`: the exact-base impact gate counts
+an added test that does not pass as `IMPACT_UNKNOWN`. #2532's RED PR therefore
+gates each RED class with `__test__ = _RED_<issue>` (collected only when
+`NEXUS_RED_<issue>=1`) and pins the file with a source hash; the
+implementation PR deletes only the gate lines. A verifier that must see the
+RED tests on base sets the variable, e.g.
+`NEXUS_RED_2532=1 python -m pytest tests/…::test_x`.

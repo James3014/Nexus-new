@@ -147,10 +147,15 @@ from nexus.orchestrator.standing_grant_store import (
 from nexus.orchestrator.task_card_scope import protected_path_reason
 from nexus.orchestrator.task_contract import (
     TASK_CARD_EXPECTED_EVIDENCE_FENCE,
+    TASK_CARD_ISSUE_PROMISES_FENCE,
     EvidenceRequirementMode,
     EvidenceSubjectApplicability,
     ExpectedEvidenceUniverse,
+    IssuePromiseBinding,
+    IssuePromisePhase,
+    IssuePromiseRisk,
     parse_task_card_expected_evidence,
+    parse_task_card_issue_promises,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_jobs import (
     _AssistJobsMixin as _AssistJobsMixin,
@@ -1210,6 +1215,7 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
         if not verifiers:
             raise GatewayInputError("verifier_commands is required")
         universe = self._task_card_expected_evidence(arguments)
+        promises = self._task_card_issue_promises(arguments, universe)
         head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
         effect: dict[str, Any] = {
             "campaign_id": campaign,
@@ -1222,6 +1228,9 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
         if universe is not None:
             # Bind the Owner authorization to the exact declared universe.
             effect["expected_evidence_identity"] = universe.universe_identity
+        if promises is not None:
+            # ...and to the exact Issue promise -> subject map (#2532).
+            effect["issue_promises_identity"] = promises.binding_identity
         owner_authority = self._require_owner_effect_authority(
             AutonomyActionClass.TASK_CARD_CREATE,
             effect,
@@ -1248,6 +1257,14 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                     "```" + TASK_CARD_EXPECTED_EVIDENCE_FENCE, universe.canonical_json(), "```", "",
                 ]
             ),
+            *(
+                []
+                if promises is None
+                else [
+                    "## Issue promises", "",
+                    "```" + TASK_CARD_ISSUE_PROMISES_FENCE, promises.canonical_json(), "```", "",
+                ]
+            ),
             "## Exit criteria", "", "Owner review of the exact scoped commit.",
             "", "## Block classification", "", "Unverifiable or out-of-scope mutation is a HARD_BLOCK.", "",
         ])
@@ -1260,6 +1277,13 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
             raise GatewayInputError("TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:card text declares a malformed block") from exc
         if declared != (None if universe is None else universe.model_dump(mode="json")):
             raise GatewayInputError("TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:card text does not round-trip")
+        # The same holds for the promise map (#2532).
+        try:
+            declared_promises = parse_task_card_issue_promises(card)
+        except ValueError as exc:
+            raise GatewayInputError("TASK_CARD_CREATE_ISSUE_PROMISES_INVALID:card text declares a malformed block") from exc
+        if declared_promises != (None if promises is None else promises.model_dump(mode="json")):
+            raise GatewayInputError("TASK_CARD_CREATE_ISSUE_PROMISES_INVALID:card text does not round-trip")
         index = "\n".join([
             f"# Campaign Index: {campaign}", "", "artifact_authority: current", "owner: James Chen",
             "status: active, governed and sequential", "AUTO_CHAIN: false", "", "## Objective", "", objective,
@@ -1322,6 +1346,47 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
         except ValueError as exc:
             reason = " ".join(str(exc).split())[:500]
             raise GatewayInputError(f"TASK_CARD_CREATE_EXPECTED_EVIDENCE_INVALID:{reason}") from exc
+
+    @staticmethod
+    def _task_card_issue_promises(
+        arguments: Mapping[str, Any], universe: Optional[ExpectedEvidenceUniverse]
+    ) -> Optional[IssuePromiseBinding]:
+        """Validate the optional Issue promise -> subject map against the card universe (#2532).
+
+        Runs before any authority check or write. Every promise of the Issue
+        set must be mapped, every mapped subject must be declared in this
+        card's universe, and each promise needs at least one REQUIRED /
+        APPLICABLE subject.
+        """
+        raw = arguments.get("issue_promises")
+        if raw is None:
+            return None
+        prefix = "TASK_CARD_CREATE_ISSUE_PROMISES_INVALID"
+        if not isinstance(raw, Mapping):
+            raise GatewayInputError(f"{prefix}:issue_promises must be an object")
+        if universe is None:
+            raise GatewayInputError(f"{prefix}:issue_promises requires expected_evidence")
+        try:
+            binding = IssuePromiseBinding.model_validate(dict(raw))
+        except ValueError as exc:
+            reason = " ".join(str(exc).split())[:500]
+            raise GatewayInputError(f"{prefix}:{reason}") from exc
+        subjects = {subject.logical_subject_id: subject for subject in universe.subjects}
+        for entry in binding.map:
+            unknown = [sid for sid in entry.subject_ids if sid not in subjects]
+            if unknown:
+                raise GatewayInputError(
+                    f"{prefix}:subject not in expected_evidence for {entry.promise_id}: {unknown[0][:200]}"
+                )
+            if not any(
+                subjects[sid].requirement_mode is EvidenceRequirementMode.REQUIRED
+                and subjects[sid].applicability is EvidenceSubjectApplicability.APPLICABLE
+                for sid in entry.subject_ids
+            ):
+                raise GatewayInputError(
+                    f"{prefix}:promise has no REQUIRED/APPLICABLE subject: {entry.promise_id}"
+                )
+        return binding
 
     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
@@ -2486,6 +2551,59 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                                             "evidence_kind": {"type": "string", "minLength": 1},
                                             "requirement_mode": {"type": "string", "enum": [mode.value for mode in EvidenceRequirementMode]},
                                             "applicability": {"type": "string", "enum": [value.value for value in EvidenceSubjectApplicability]},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        "issue_promises": {
+                            "type": "object",
+                            "description": (
+                                "Optional map from every promise of the Issue's nexus.issue_promise_set.v1 block to "
+                                "declared expected_evidence subjects (#2532); requires expected_evidence and is "
+                                "written into the hashed card as one nexus-issue-promises block."
+                            ),
+                            "additionalProperties": False,
+                            "required": ["repository", "issue_number", "issue_contract_hash", "promise_set", "map"],
+                            "properties": {
+                                "repository": {"type": "string"},
+                                "issue_number": {"type": "integer", "minimum": 1},
+                                "issue_contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "promise_set": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["promise_set_generation", "promises"],
+                                    "properties": {
+                                        "promise_set_generation": {"type": "integer", "minimum": 0},
+                                        "promises": {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "maxItems": 64,
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "required": ["promise_id", "statement_sha256", "phase", "risk"],
+                                                "properties": {
+                                                    "promise_id": {"type": "string"},
+                                                    "statement_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                                    "phase": {"type": "string", "enum": [value.value for value in IssuePromisePhase]},
+                                                    "risk": {"type": "string", "enum": [value.value for value in IssuePromiseRisk]},
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                "map": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 64,
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": ["promise_id", "subject_ids"],
+                                        "properties": {
+                                            "promise_id": {"type": "string"},
+                                            "subject_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                                         },
                                     },
                                 },

@@ -176,7 +176,6 @@ THREE_MAP = {"P1": [ENTRY_P1], "P2": [ENTRY_P2], "P3": [ENTRY_P3]}
 class TestIssuePromiseSetFence:
     """The Issue body fence and the card block parse fail-closed."""
 
-    __test__ = _RED_2532
 
     def test_issue_body_without_fence_is_legacy(self):
         assert _contract().parse_issue_promise_set("Plain Issue body.\n") is None
@@ -252,7 +251,6 @@ class TestIssuePromiseSetFence:
 class TestScenario1GenericGreenEntryNotRun:
     """G0 §4 row 1: a green generic suite never covers an unexercised entry."""
 
-    __test__ = _RED_2532
 
     def test_generic_suite_pass_does_not_cover_the_promise_entry(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -288,7 +286,6 @@ class TestScenario1GenericGreenEntryNotRun:
 class TestScenario2WorkerDropsSubject:
     """G0 §4 row 2: dropping or relaxing the mapped subject never covers."""
 
-    __test__ = _RED_2532
 
     def test_mapped_subject_absent_from_coverage_is_not_covered(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -325,7 +322,6 @@ class TestScenario2WorkerDropsSubject:
 class TestScenario3TwoOfThreePromises:
     """G0 §4 row 3: delivering 2 of 3 promises is PARTIAL, whatever is claimed."""
 
-    __test__ = _RED_2532
 
     def test_two_of_three_is_partial(self):
         binding = _binding(THREE, THREE_MAP)
@@ -382,7 +378,6 @@ class TestScenario3TwoOfThreePromises:
 class TestScenario4FakePassUnfrozenTest:
     """G0 §4 row 4: a worker-added test cannot stand in for the frozen subject."""
 
-    __test__ = _RED_2532
 
     def test_unexpected_worker_subject_passing_does_not_cover(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -407,7 +402,6 @@ class TestScenario4FakePassUnfrozenTest:
 class TestScenario5StaleBinding:
     """G0 §4 row 5: wrong commit, Issue edit or promise generation → STALE."""
 
-    __test__ = _RED_2532
 
     def _covered(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -449,7 +443,6 @@ class TestScenario5StaleBinding:
 class TestScenario6ForgedCloseIsProjectionOnly:
     """G0 §4 row 6: the projection grants nothing and cannot be talked into COMPLETE."""
 
-    __test__ = _RED_2532
 
     _AUTHORITY_WORDS = ("approv", "merge", "close", "closure", "authoriz", "grant", "release")
 

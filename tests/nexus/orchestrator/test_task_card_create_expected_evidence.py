@@ -389,7 +389,6 @@ def _task_contract_module() -> Any:
 
 
 class TestTaskCardCreateIssuePromises:
-    __test__ = _RED_2532
 
     ENTRY = "python -m pytest tests/test_feature.py::test_real_entry"
     OTHER = "python -m pytest tests/test_feature.py::test_other_entry"
