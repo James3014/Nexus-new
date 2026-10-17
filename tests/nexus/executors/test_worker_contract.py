@@ -243,6 +243,9 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     monkeypatch.setattr(
         "nexus.executors.worker_registry._default_canonical_checkout_root", lambda: canonical
     )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
+    )
     captured = {}
 
     def fake_worker(request, on_process_group=None):
@@ -284,10 +287,9 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
         "--cwd",
         str(target.resolve()),
         "--json",
-        "--auto-approve",
-        "false",
+        "--yolo",
         "--model",
-        "glm-5.2",
+        "cline-free/mimo-v2.6-flash",
         "bounded candidate",
     )
     assert captured["request"].cwd == str(target.resolve())
@@ -1956,6 +1958,10 @@ def _cline_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "nexus.executors.worker_registry.shutil.which", lambda name: str(tmp_path / "cline")
     )
+    # #2332: the adapter refuses an unprobed cline version before launch.
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
+    )
 
 
 def _cline_run(monkeypatch, tmp_path, *, stdout, side_effect=None, target=None, contract=None):
@@ -2006,7 +2012,13 @@ def test_cline_permission_bypass_detects_every_auto_approve_shape():
     assert (
         cline_permission_bypass(("--json", "--model", "m", "p")) is True
     )  # default is auto-approve
-    assert cline_permission_bypass(("--json", "--yolo", "--model", "m", "p")) is True
+    # #2332: yolo mode (exactly once) is the admitted shape; the run settings
+    # leave only the file tools enabled.
+    assert cline_permission_bypass(("--json", "--yolo", "--model", "m", "p")) is False
+    assert cline_permission_bypass(("--json", "--yolo", "--yolo", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "-y", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "--auto-approve", "false", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "--autoapprove", "p")) is True
     assert cline_permission_bypass(("--json", "-y", "--auto-approve", "false", "p")) is True
     assert cline_permission_bypass(("--json", "--auto-approve", "true", "p")) is True
     assert cline_permission_bypass(("--json", "--auto-approve=false", "p")) is True
@@ -2041,10 +2053,11 @@ def test_cline_successful_run_on_isolated_target_is_delivery(monkeypatch, tmp_pa
     receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
 
     assert len(calls) == 1
-    assert "--yolo" not in calls[0].argv
-    assert calls[0].argv[calls[0].argv.index("--auto-approve") + 1] == "false"
+    # #2332: yolo mode once, never an auto-approve flag.
+    assert calls[0].argv.count("--yolo") == 1
+    assert "--auto-approve" not in calls[0].argv
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
-    assert receipt.provider_permission_mode == "auto_approve_false"
+    assert receipt.provider_permission_mode == "file_tools_auto_approved"
     assert receipt.failure_reason is None
 
 
@@ -2381,7 +2394,7 @@ def test_cline_tty_denial_text_in_model_output_is_not_a_denial():
         b'{"type":"agent_event","event":{"type":"content_end","contentType":"text",'
         b'"text":"requires approval in a TTY session"}}\n'
         b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool",'
-        b'"toolName":"read_file","output":{"result":"requires approval in a TTY session"}}}\n'
+        b'"toolName":"read_files","output":{"result":"requires approval in a TTY session"}}}\n'
     )
     assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
 
@@ -2563,7 +2576,7 @@ def test_cline_skip_suffix_in_tool_result_or_model_text_is_not_a_denial():
         "event": {
             "type": "content_end",
             "contentType": "tool",
-            "toolName": "read_file",
+            "toolName": "read_files",
             "output": {"result": suffix},
         },
     }
@@ -2619,3 +2632,185 @@ def test_cline_structured_or_truncated_skip_reason_is_a_denial(shape):
         event["output"] = {"error": "Tool was not executed"}
     stdout = (json.dumps({"type": "agent_event", "event": event}) + "\n").encode() + _CLINE_OK
     assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+# ---------------------------------------------------------------------------
+# #2332: cline auto-approves file tools only (yolo mode + run settings that the
+# worker cannot write); any other tool in the event stream is non-delivery
+# ---------------------------------------------------------------------------
+
+
+def _cline_tool_event(name, output=None):
+    import json
+
+    return (
+        json.dumps(
+            {
+                "type": "agent_event",
+                "event": {
+                    "type": "content_end",
+                    "contentType": "tool",
+                    "toolName": name,
+                    "output": output if output is not None else [{"success": True}],
+                },
+            }
+        ).encode()
+        + b"\n"
+    )
+
+
+def test_cline_run_settings_leave_only_the_admitted_file_tools():
+    from nexus.executors.agy_write_admission import (
+        CLINE_ADMITTED_TOOLS,
+        CLINE_DISABLED_TOOLS,
+        cline_run_settings,
+    )
+
+    settings = cline_run_settings()
+    assert set(settings["disabledTools"]) == set(CLINE_DISABLED_TOOLS)
+    # Every non-file tool cline 3.0.69 offers in yolo/act mode is disabled.
+    assert {"run_commands", "fetch_web_content", "skills", "ask_question"} <= set(
+        settings["disabledTools"]
+    )
+    assert settings["tools"] == {"web_search": {"enabled": False}}
+    assert not CLINE_ADMITTED_TOOLS & set(CLINE_DISABLED_TOOLS)
+    assert CLINE_ADMITTED_TOOLS == {"read_files", "editor", "apply_patch", "submit_and_exit"}
+
+
+def test_cline_unadmitted_tool_in_the_event_stream_is_non_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # A settings file that failed to load would leave run_commands enabled and
+    # auto-approved: the run must never count as delivery.
+    for name in ("run_commands", "fetch_web_content", "skills", "team_spawn_teammate", ""):
+        stdout = _cline_tool_event("editor") + _cline_tool_event(name) + _CLINE_OK
+        assert cline_delivery_failure(stdout, b"") == "cline_unadmitted_tool", name
+    nested = (
+        b'{"type":"agent_event","event":{"content":[{"type":"content_start",'
+        b'"contentType":"tool","toolName":"run_commands"}]}}\n'
+    )
+    assert cline_delivery_failure(nested + _CLINE_OK, b"") == "cline_unadmitted_tool"
+    missing_name = b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool"}}\n'
+    assert cline_delivery_failure(missing_name + _CLINE_OK, b"") == "cline_unadmitted_tool"
+
+
+def test_cline_admitted_file_tools_and_model_arguments_are_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    stdout = (
+        _cline_tool_event("read_files")
+        + _cline_tool_event("editor", {"result": "Edited a.txt", "success": True})
+        + _cline_tool_event("submit_and_exit", "Submission recorded")
+        # A tool-shaped object inside model-authored arguments is not a tool event.
+        + b'{"type":"agent_event","event":{"type":"content_start","contentType":"tool",'
+        + b'"toolName":"editor","input":{"type":"content_end","contentType":"tool",'
+        + b'"toolName":"run_commands"}}}\n'
+        + b'{"type":"run_result","finishReason":"completed"}\n'
+    )
+    assert cline_delivery_failure(stdout, b"") is None
+
+
+def test_cline_unprobed_version_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    for version in ("3.0.70", "", None):
+        monkeypatch.setattr(
+            "nexus.executors.worker_registry.cline_version_probe",
+            lambda executable, version=version: version,
+        )
+        receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+            type("Contract", (), {"task_id": "cline-2332"})(),
+            type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+            prompt="bounded",
+        )
+        assert receipt.failure_reason == "cline_version_unsupported", version
+        assert receipt.provider_calls == 0
+    assert launched == []
+
+
+def test_cline_version_probe_reads_the_binary_output(tmp_path):
+    from nexus.executors.worker_registry import cline_version_probe
+
+    fake = tmp_path / "cline"
+    fake.write_text("#!/bin/sh\necho 3.0.69\n", encoding="utf-8")
+    fake.chmod(0o755)
+    assert cline_version_probe(str(fake)) == "3.0.69"
+    failing = tmp_path / "cline-bad"
+    failing.write_text("#!/bin/sh\necho 3.0.69\nexit 3\n", encoding="utf-8")
+    failing.chmod(0o755)
+    assert cline_version_probe(str(failing)) is None
+    assert cline_version_probe(str(tmp_path / "missing")) is None
+
+
+def test_cline_run_settings_are_outside_every_writable_path(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    request = calls[0]
+    settings_path = Path(request.env["CLINE_GLOBAL_SETTINGS_PATH"])
+    mcp_path = Path(request.env["CLINE_MCP_SETTINGS_PATH"])
+    profile = request.seatbelt_profile
+    allow_block = profile.split("(deny file-write*)", 1)[1].split(")\n", 1)[0]
+    for path in (settings_path, mcp_path):
+        # Not under the target or the run root (the only writable subpaths).
+        for root in request.sweep_roots:
+            assert not str(path).startswith(root.rstrip("/") + "/"), (path, root)
+        assert str(path.parent) not in allow_block
+    run_root = Path(request.sweep_roots[1])
+    run_home = run_root / "home"
+    # Hooks, plugins, rules and skills in the run HOME are write-denied; only
+    # cline's data directory is re-opened.
+    assert f'(subpath "{run_home / ".cline"}")' in profile
+    assert f'(subpath "{run_home / "Documents"}")' in profile
+    assert f'(subpath "{run_home / ".agents"}")' in profile
+    deny_at = profile.index(f'(subpath "{run_home / ".cline"}")')
+    reallow_at = profile.index(f'(subpath "{run_home / ".cline" / "data"}")')
+    assert deny_at < reallow_at
+    target = Path(request.cwd)
+    for name in (".cline", ".clinerules", ".agents"):
+        assert f'(subpath "{target / name}")' in profile
+    # The files are removed after the run; their content was the tool restriction.
+    assert not settings_path.exists()
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_cline_run_settings_file_carries_the_tool_restriction(tmp_path):
+    import json
+    from pathlib import Path
+
+    from nexus.executors.agy_write_admission import cline_run_settings, write_cline_run_config
+
+    env = write_cline_run_config(tmp_path / "cfg")
+    settings = Path(env["CLINE_GLOBAL_SETTINGS_PATH"])
+    assert json.loads(settings.read_text(encoding="utf-8")) == cline_run_settings()
+    assert json.loads(Path(env["CLINE_MCP_SETTINGS_PATH"]).read_text(encoding="utf-8")) == {
+        "mcpServers": {}
+    }
+    assert settings.stat().st_mode & 0o777 == 0o400
+
+
+def test_seatbelt_extra_protected_paths_deny_then_reallow(tmp_path):
+    from nexus.executors.agy_write_admission import build_seatbelt_profile
+
+    run_root = tmp_path / "run"
+    protected = run_root / "home" / ".cline"
+    reopened = protected / "data"
+    profile = build_seatbelt_profile(
+        run_root=run_root,
+        writable_target=None,
+        extra_protected_paths=(protected,),
+        extra_reallowed_paths=(reopened,),
+    )
+    deny = profile.index("(deny file-write*\n")
+    assert profile.index(f'(subpath "{protected}")', deny) > deny
+    reallow = profile.index("(allow file-write*\n", deny)
+    assert profile.index(f'(subpath "{reopened}")', reallow) > reallow

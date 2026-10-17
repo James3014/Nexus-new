@@ -21,6 +21,10 @@ from nexus.executors.agy_write_admission import (
     AGY_PERMISSION_MODE_PLAN,
     AGY_READ_ONLY_ROLES,
     AGY_RUN_HOME_COPIED_FILES,
+    CLINE_ADMITTED_TOOLS,
+    CLINE_RUN_HOME_PROTECTED_PATHS,
+    CLINE_RUN_HOME_WRITABLE_PATHS,
+    CLINE_SUPPORTED_VERSIONS,
     CLINE_TARGET_CUSTOMIZATION_PATHS,
     KEYCHAIN_NOT_APPLICABLE,
     CredentialPathOverlapError,
@@ -42,6 +46,7 @@ from nexus.executors.agy_write_admission import (
     target_git_entry_state,
     top_level_json_objects,
     worker_home,
+    write_cline_run_config,
 )
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
@@ -308,7 +313,9 @@ _CLINE_DENIAL_MARKERS = (
     "denied by user",
     "-- not a tool or system failure",
 )
-CLINE_PERMISSION_MODE = "auto_approve_false"
+# #2332: only the file tools in ``CLINE_ADMITTED_TOOLS`` exist in the run and
+# they are auto-approved; every other tool is disabled by the run settings.
+CLINE_PERMISSION_MODE = "file_tools_auto_approved"
 # Assumed structured shapes (cline 3.0.69 bundles the AI SDK tool-result
 # model; the exact ``--json`` envelope is not pinned, so any nesting depth is
 # searched):
@@ -333,8 +340,10 @@ _CLINE_SKIP_REASONS = (
 )
 _CLINE_DENIED_TYPES = frozenset({"execution-denied"})
 # Only a finish reason observed from cline 3.0.69 as a clean end counts as
-# delivery; any other, unknown or missing value is non-delivery.
-_CLINE_DELIVERED_FINISH_REASONS = frozenset({"stop"})
+# delivery; any other, unknown or missing value is non-delivery.  ``completed``
+# is the end of a real successful edit run (#2332, 2026-10-17); an all-denied
+# run can also end ``completed``, which the denial check above catches.
+_CLINE_DELIVERED_FINISH_REASONS = frozenset({"stop", "completed"})
 _CLINE_DENIED_DEFAULT_REASONS = ("tool execution denied", "tool call execution denied")
 # Model-authored tool arguments are never read as structure.
 _CLINE_MODEL_ARGUMENT_KEYS = frozenset({"input", "args", "arguments", "params", "parameters"})
@@ -394,13 +403,38 @@ def _cline_structured_denial(value: Any) -> bool:
     )
 
 
+def _cline_tool_names(value: Any) -> set[str]:
+    """Tool names of the tool events in one cline ``--json`` line (#2332).
+
+    Only structural tool events count: ``content_start``/``content_end``
+    with ``contentType: tool``, at any nesting depth, never inside
+    model-authored tool arguments.
+    """
+    names: set[str] = set()
+    if isinstance(value, list):
+        for item in value:
+            names |= _cline_tool_names(item)
+        return names
+    if not isinstance(value, dict):
+        return names
+    if value.get("type") in ("content_start", "content_end") and value.get("contentType") == "tool":
+        name = value.get("toolName")
+        names.add(name if isinstance(name, str) else "")
+    for key, item in value.items():
+        if key not in _CLINE_MODEL_ARGUMENT_KEYS:
+            names |= _cline_tool_names(item)
+    return names
+
+
 def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     """Typed non-delivery reason for a Cline run that exited 0, else ``None``.
 
     Delivery requires a JSON ``run_result`` event whose ``finishReason`` is
-    ``stop``; any denied tool action makes the run non-delivery (#2195).
-    A denial is a text marker on stderr or a structured stdout event; model
-    text that merely quotes a marker is not a denial.
+    in ``_CLINE_DELIVERED_FINISH_REASONS``; any denied tool action makes the
+    run non-delivery (#2195), and so does any tool outside
+    ``CLINE_ADMITTED_TOOLS`` (#2332).  A denial is a text marker on stderr or
+    a structured stdout event; model text that merely quotes a marker is not
+    a denial.
     """
     err = stderr.decode("utf-8", errors="replace").lower()
     if any(marker in err for marker in _CLINE_DENIAL_MARKERS):
@@ -408,6 +442,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     text = stdout.decode("utf-8", errors="replace")
     results: list[dict[str, Any]] = []
     denied = False
+    unadmitted: set[str] = set()
     for line in text.splitlines():
         try:
             value = json.loads(line)
@@ -416,8 +451,11 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
         if not isinstance(value, dict):
             continue
         denied = denied or _cline_structured_denial(value)
+        unadmitted |= _cline_tool_names(value) - CLINE_ADMITTED_TOOLS
         if value.get("type") == "run_result":
             results.append(value)
+    if unadmitted:
+        return "cline_unadmitted_tool"
     if denied:
         return "cline_permission_denied"
     if not results:
@@ -428,31 +466,55 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     return None
 
 
+# cline 3.0.69 rejects a bare model id ("Expected format: modelType/model");
+# this one was used for the #2328 and #2332 real runs.
+CLINE_DEFAULT_MODEL = "cline-free/mimo-v2.6-flash"
 # Cline flag spellings, named once so the #1912/#2195 scan sees one site each.
 CLINE_AUTO_APPROVE_FLAG = "--auto-approve"
-CLINE_YOLO_FLAGS = frozenset({"--yolo", "-y"})
+
+
+CLINE_YOLO_FLAG = "--yolo"
 
 
 def cline_permission_bypass(argv: tuple[str, ...]) -> bool:
-    """True when a Cline argv auto-approves tools (#2195).
+    """True when a Cline argv leaves the admitted approval shape (#2195, #2332).
 
-    Cline auto-approves by default, so the argv must carry exactly one
-    explicit auto-approve flag set to ``false`` and no yolo flag.  Every
-    element is scanned, the trailing prompt included; the adapter refuses a
-    prompt that starts with ``-`` before launch so it is never a flag.
+    Since #2332 the admitted shape is exactly one ``CLINE_YOLO_FLAG`` and no
+    ``CLINE_AUTO_APPROVE_FLAG`` in any spelling (and no ``-y``): yolo mode gives
+    cline its smallest built-in tool set (no sub-agents or teams), and the
+    adapter's run settings disable every tool outside
+    ``CLINE_ADMITTED_TOOLS``, so only file tools run, inside the Seatbelt.
+    Any other approval spelling is refused.  Every element is scanned, the
+    trailing prompt included; the adapter refuses a prompt that starts with
+    ``-`` before launch so it is never a flag.
     """
     options = list(argv)
     if any(
-        item in CLINE_YOLO_FLAGS or item.startswith(CLINE_AUTO_APPROVE_FLAG + "=")
+        item == "-y"
+        or item == CLINE_AUTO_APPROVE_FLAG
+        or item.startswith(CLINE_AUTO_APPROVE_FLAG + "=")
+        or item.startswith("--autoapprove")
         for item in options
     ):
         return True
-    approvals = [
-        options[index + 1] if index + 1 < len(options) else ""
-        for index, item in enumerate(options)
-        if item == CLINE_AUTO_APPROVE_FLAG
-    ]
-    return approvals != ["false"]
+    return options.count(CLINE_YOLO_FLAG) != 1
+
+
+def cline_version_probe(executable: str) -> Optional[str]:
+    """``cline --version`` output, stripped; ``None`` when it cannot be read."""
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.decode("utf-8", errors="replace").strip()
 
 
 def _cline_target_args(prompt: str, model: str, target: str) -> tuple[str, ...]:
@@ -476,7 +538,9 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
     requires_leased_target = True
 
     def __init__(self, canonical_root: Optional[Path | str] = None):
-        super().__init__("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args)
+        super().__init__(
+            "cline", "cline", "NEXUS_CLINE_WORKER_MODEL", CLINE_DEFAULT_MODEL, _cline_args
+        )
         self._canonical_root = Path(canonical_root) if canonical_root is not None else None
 
     def invoke(
@@ -528,6 +592,11 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
             return failed("cline_prompt_shape_unsupported")
         if cline_permission_bypass(argv):
             return failed("cline_command_shape_unsupported")
+        # The tool restriction and the denial/finish parsing are pinned to the
+        # probed cline version; an unknown version could add a tool or change
+        # the event shape (#2332 item 1).
+        if cline_version_probe(self.executable) not in CLINE_SUPPORTED_VERSIONS:
+            return failed("cline_version_unsupported")
         # Same rule as Agy: a required lease is never skipped because the
         # contract lacks the attribute (it then fails the lease check).
         if require_leased_target or hasattr(contract, "target_worktree_root"):
@@ -558,6 +627,10 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         # disposable HOME with only cline's auth file and an exact env.  With
         # no sandbox-exec the launcher refuses to start (fail closed).
         run_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-cline-run-")))
+        # #2332: the run settings (tool restriction, empty MCP list) live
+        # outside every Seatbelt-writable path, so the worker cannot change
+        # them mid-run.
+        config_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-cline-cfg-")))
         seatbelt_sha256 = ""
         try:
             run_home = run_tmp / "home"
@@ -568,11 +641,21 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
             if refusal is not None:
                 return failed(refusal)
             try:
+                run_env.update(write_cline_run_config(config_tmp))
+            except OSError:
+                return failed("cline_run_config_unavailable")
+            try:
                 seatbelt = build_seatbelt_profile(
                     run_root=run_tmp,
                     writable_target=target_path,
                     extra_protected_target_names=CLINE_TARGET_CUSTOMIZATION_PATHS,
                     source_home=worker_home(None),
+                    extra_protected_paths=tuple(
+                        run_home / path for path in CLINE_RUN_HOME_PROTECTED_PATHS
+                    ),
+                    extra_reallowed_paths=tuple(
+                        run_home / path for path in CLINE_RUN_HOME_WRITABLE_PATHS
+                    ),
                 )
             except CredentialPathOverlapError:
                 return failed("cline_target_inside_credential_path")
@@ -593,6 +676,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
             result = run_cli_worker(request, on_process_group=on_process_group)
         finally:
             shutil.rmtree(run_tmp, ignore_errors=True)
+            shutil.rmtree(config_tmp, ignore_errors=True)
         failure_reason: Optional[str] = None
         if result.status is CliWorkerStatus.TIMED_OUT:
             outcome = WorkerOutcome.INCOMPLETE
@@ -1993,8 +2077,12 @@ def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
 
 
 def _cline_args(prompt: str, model: str) -> tuple[str, ...]:
-    """Run Cline non-interactively with tool auto-approval off (#2195)."""
-    return ("--json", CLINE_AUTO_APPROVE_FLAG, "false", "--model", model, prompt)
+    """Run Cline non-interactively with only file tools, auto-approved (#2332).
+
+    Yolo mode auto-approves the tools that exist in the run; the adapter's
+    run settings leave only ``CLINE_ADMITTED_TOOLS`` enabled.
+    """
+    return ("--json", CLINE_YOLO_FLAG, "--model", model, prompt)
 
 
 def _grok_args(prompt: str, model: str) -> tuple[str, ...]:
