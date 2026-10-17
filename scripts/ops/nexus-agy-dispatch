@@ -1535,6 +1535,238 @@ def _parse_input_delivery(text: str) -> dict[str, Any]:
     }
 
 
+AGY_ATTESTATION_TAMPER_SUSPECT = "AGY_ATTESTATION_TAMPER_SUSPECT"
+AGY_LOG_RELAY_INCOMPLETE_MARKER = "NEXUS_AGY_LOG_RELAY_INCOMPLETE"
+AGY_LOG_RELAY_ATTEMPT_MARKER = "NEXUS_AGY_LOG_RELAY_ATTEMPT"
+AGY_LOG_RELAY_JOIN_SECONDS = 10.0
+AGY_LOG_RELAY_MAX_PENDING_BYTES = 1 << 20
+
+
+def _attempt_attestation_disagrees(text: str, *, requested_model: str | None) -> bool:
+    """True when one agy run's relayed log names two models or two conversations."""
+    canonical_requested = canonicalize_agy_model(requested_model)
+    resolved = {
+        match.group("resolved")
+        for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text)
+        if requested_model is None
+        or match.group("alias") in (requested_model, canonical_requested)
+    }
+    conversations = {match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)}
+    return len(resolved) > 1 or len(conversations) > 1
+
+
+class AgyAttestationLogUnwritable(RuntimeError):
+    """The dispatcher cannot write the attestation log; agy must not start."""
+
+
+_AGY_LOG_RELAY_MARKER_PREFIX = b"NEXUS_AGY_LOG_RELAY"
+_AGY_LOG_RELAY_INCOMPLETE_RE = re.compile(rf"(?m)^{AGY_LOG_RELAY_INCOMPLETE_MARKER}:")
+_AGY_LOG_RELAY_ATTEMPT_RE = re.compile(
+    rf"(?m)^{AGY_LOG_RELAY_ATTEMPT_MARKER} [0-9a-f]{{32}}$"
+)
+
+
+class _AgyLogRelay:
+    """Own agy's ``--log-file`` channel so the confined run cannot write it (#2314).
+
+    agy gets the path of a private FIFO instead of the attestation log.  agy
+    1.4.0 opens its log once, in-process, at startup (its descriptor is
+    close-on-exec, so tool children never inherit it).  As soon as that open
+    lands, the relay unlinks the FIFO and its directories, so no later process
+    (a tool spawned inside the Seatbelt) can open the channel by path.  The
+    relay alone appends what agy writes to ``sink``, the dispatcher-owned
+    attestation log, which therefore needs no Seatbelt write grant.
+
+    The FIFO path ends in ``<operation_id>/agy.log`` like the old log path, so
+    the journal's provider identity check (``_pid_has_operation_marker``)
+    still recognizes agy's command line.  Relayed lines that start with the
+    dispatcher's marker prefix are escaped, so only the dispatcher can write
+    attempt boundaries.
+    """
+
+    def __init__(self, sink: Path, *, fifo_parent: Path | None = None) -> None:
+        import tempfile
+
+        self.sink = sink
+        self.sink_error: str | None = None
+        self.root = Path(
+            tempfile.mkdtemp(
+                prefix="nexus-agy-log-", dir=str(fifo_parent) if fifo_parent else None
+            )
+        )
+        self.dir = self.root / (sink.parent.name or "operation")
+        self.fifo = self.dir / (sink.name or "agy.log")
+        self._opened = threading.Event()
+        self._finished = False
+        try:
+            self.dir.mkdir(mode=0o700)
+            os.mkfifo(self.fifo, 0o600)
+            # Dispatcher-written attempt boundary: corroboration is per agy run.
+            # It always starts a line, even after an attempt killed mid-line.
+            lead = "\n" if self._sink_needs_newline() else ""
+            self._append_sink(
+                f"{lead}{AGY_LOG_RELAY_ATTEMPT_MARKER} {uuid.uuid4().hex}\n".encode()
+            )
+        except OSError as exc:
+            self.sink_error = self.sink_error or type(exc).__name__
+        if self.sink_error is not None:
+            self._remove_endpoint()
+            raise AgyAttestationLogUnwritable(
+                f"AGY_ATTESTATION_LOG_UNWRITABLE:{self.sink_error}"
+            )
+        self._thread = threading.Thread(target=self._run, name="agy-log-relay", daemon=True)
+        self._thread.start()
+
+    def _open_sink(self) -> int:
+        """Open the attestation log: a regular file, never a symlink or FIFO."""
+        import stat as _stat
+
+        fd = os.open(
+            self.sink,
+            os.O_WRONLY
+            | os.O_APPEND
+            | os.O_CREAT
+            | os.O_NONBLOCK
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        if not _stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise OSError(21, "attestation log is not a regular file")
+        return fd
+
+    def _sink_needs_newline(self) -> bool:
+        """True when a regular, non-empty sink does not end in a newline."""
+        import stat as _stat
+
+        try:
+            fd = os.open(
+                self.sink, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+            )
+        except OSError:
+            return False
+        try:
+            info = os.fstat(fd)
+            if not _stat.S_ISREG(info.st_mode) or info.st_size == 0:
+                return False
+            return os.pread(fd, 1, info.st_size - 1) != b"\n"
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+
+    def _append_sink(self, data: bytes) -> None:
+        try:
+            fd = self._open_sink()
+        except OSError as exc:
+            self.sink_error = type(exc).__name__
+            return
+        try:
+            self._write_all(fd, data)
+        except OSError as exc:
+            self.sink_error = type(exc).__name__
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def _write_all(fd: int, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view) :]
+
+    def _remove_endpoint(self) -> None:
+        for remove, path in (
+            (os.unlink, self.fifo),
+            (os.rmdir, self.dir),
+            (os.rmdir, self.root),
+        ):
+            try:
+                remove(path)
+            except OSError:
+                pass
+
+    def _relay_write(self, sink_fd: int, data: bytes) -> int | None:
+        """Write to the sink; on failure keep draining agy (never block it)."""
+        try:
+            self._write_all(sink_fd, data)
+            return sink_fd
+        except OSError as exc:
+            self.sink_error = self.sink_error or type(exc).__name__
+            os.close(sink_fd)
+            return None
+
+    @staticmethod
+    def _escape(line: bytes) -> bytes:
+        if line.startswith(_AGY_LOG_RELAY_MARKER_PREFIX):
+            return b"[agy] " + line
+        return line
+
+    def _run(self) -> None:
+        try:
+            source = os.open(self.fifo, os.O_RDONLY)
+        except OSError as exc:
+            self.sink_error = f"RELAY_OPEN_FAILED:{type(exc).__name__}"
+            self._remove_endpoint()
+            return
+        self._opened.set()
+        self._remove_endpoint()
+        sink_fd: int | None = None
+        try:
+            sink_fd = self._open_sink()
+        except OSError as exc:
+            self.sink_error = type(exc).__name__
+        pending = b""
+        try:
+            while True:
+                chunk = os.read(source, 65536)
+                if not chunk:
+                    break
+                pending += chunk
+                *lines, pending = pending.split(b"\n")
+                if len(pending) > AGY_LOG_RELAY_MAX_PENDING_BYTES:
+                    lines.append(pending)  # an unbounded line is flushed as-is
+                    pending = b""
+                if lines and sink_fd is not None:
+                    sink_fd = self._relay_write(
+                        sink_fd, b"".join(self._escape(line) + b"\n" for line in lines)
+                    )
+            if pending and sink_fd is not None:
+                sink_fd = self._relay_write(sink_fd, self._escape(pending) + b"\n")
+        except OSError as exc:
+            self.sink_error = self.sink_error or type(exc).__name__
+        finally:
+            os.close(source)
+            if sink_fd is not None:
+                os.close(sink_fd)
+
+    def finish(self, *, timeout: float = AGY_LOG_RELAY_JOIN_SECONDS) -> bool:
+        """Wait for agy's end of the channel to close; True only when fully relayed."""
+        if not self._finished:
+            self._finished = True
+            deadline = time.monotonic() + max(0.0, timeout)
+            # agy may never have opened its log: release the reader blocked in
+            # open().  ENXIO means the reader is not in open() yet, so retry.
+            while (
+                not self._opened.is_set()
+                and self._thread.is_alive()
+                and time.monotonic() < deadline
+            ):
+                try:
+                    os.close(os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK))
+                    break
+                except OSError:
+                    time.sleep(0.01)
+            self._thread.join(max(0.0, deadline - time.monotonic()))
+            self._remove_endpoint()
+            if self._thread.is_alive():
+                # Something besides agy still holds the write end: the log can
+                # no longer be attested.
+                self._append_sink(
+                    f"\n{AGY_LOG_RELAY_INCOMPLETE_MARKER}:WRITER_OUTLIVED_AGY\n".encode()
+                )
+        return not self._thread.is_alive() and self.sink_error is None
+
+
 def _parse_agy_attestation(
     log_path: Path,
     *,
@@ -1552,10 +1784,14 @@ def _parse_agy_attestation(
         }
 
     input_delivery = _parse_input_delivery(text)
+    # #2314: in a relayed log the witnesses come from the last agy run only;
+    # a log without relay markers (pre-#2314) keeps last-match-wins.
+    segments = _AGY_LOG_RELAY_ATTEMPT_RE.split(text)[1:]
+    scope = segments[-1] if segments else text
 
     canonical_requested = canonicalize_agy_model(requested_model)
     resolved_models: list[str] = []
-    for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text):
+    for match in _AGY_ALIAS_RESOLUTION_RE.finditer(scope):
         alias = match.group("alias")
         if (
             requested_model is None
@@ -1564,14 +1800,32 @@ def _parse_agy_attestation(
         ):
             resolved_models.append(match.group("resolved"))
     if not resolved_models and requested_model:
-        for match in _AGY_RESOLVING_MODEL_RE.finditer(text):
+        for match in _AGY_RESOLVING_MODEL_RE.finditer(scope):
             resolved = match.group("resolved")
             if resolved == requested_model or (
                 canonical_requested and resolved == canonical_requested
             ):
                 resolved_models.append(resolved)
 
-    conversations = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)]
+    conversations = [
+        match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(scope)
+    ]
+    # #2314: the log is relayed by the dispatcher, so the confined run cannot
+    # append to it.  Corroborate anyway and fail closed, with a distinct marker,
+    # when one relayed attempt resolved the requested alias to more than one
+    # model or created more than one conversation (zero cases in 1846 real
+    # operation logs), or the relay saw a writer outlive agy.
+    if _AGY_LOG_RELAY_INCOMPLETE_RE.search(text) or any(
+        _attempt_attestation_disagrees(segment, requested_model=requested_model)
+        for segment in segments
+    ):
+        return {
+            "observed_provider": None,
+            "observed_model": None,
+            "provider_session_id": None,
+            "attestation_failure": AGY_ATTESTATION_TAMPER_SUSPECT,
+            **input_delivery,
+        }
     if not resolved_models or not conversations:
         return {
             "observed_provider": None,
@@ -1627,10 +1881,9 @@ def run_agy(
         f"{timeout}s",
     ]
     attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+    log_relay: _AgyLogRelay | None = None
     if attestation_log:
-        log_path = Path(attestation_log).expanduser()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        argv += ["--log-file", str(log_path)]
+        Path(attestation_log).expanduser().parent.mkdir(parents=True, exist_ok=True)
     canonical_model = canonicalize_agy_model(model)
     if canonical_model:
         argv += ["--model", canonical_model]
@@ -1660,23 +1913,42 @@ def run_agy(
         provider_log_offset = 0
 
     started = time.monotonic()
-    launch_argv = argv
-    if write_boundary is not None:
-        launch_argv = write_boundary.wrap_argv(argv)
-        write_boundary.before_launch()
-    process = subprocess.Popen(
-        launch_argv,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        start_new_session=True,
-    )
+    if provider_log_path is not None:
+        # #2314: agy writes a relay FIFO, never the attestation log itself.
+        log_relay = _AgyLogRelay(
+            provider_log_path,
+            fifo_parent=getattr(write_boundary, "run_root", None),
+        )
+        argv[-2:-2] = ["--log-file", str(log_relay.fifo)]
+    try:
+        launch_argv = argv
+        if write_boundary is not None:
+            launch_argv = write_boundary.wrap_argv(argv)
+            write_boundary.before_launch()
+        process = subprocess.Popen(
+            launch_argv,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+    except BaseException:
+        if log_relay is not None:
+            log_relay.finish(timeout=2.0)
+        raise
     provider_pid = getattr(process, "pid", None)
     if write_boundary is not None and isinstance(provider_pid, int):
-        write_boundary.after_launch(provider_pid)
+        try:
+            write_boundary.after_launch(provider_pid)
+        except BaseException:
+            # The boundary's cleanup sweep stops agy; the relay is then
+            # unattestable, which finish() records (fail closed).
+            if log_relay is not None:
+                log_relay.finish(timeout=2.0)
+            raise
     provider_pgid: int | None = (
         provider_pid if isinstance(provider_pid, int) and provider_pid > 0 else None
     )
@@ -1724,6 +1996,8 @@ def run_agy(
             group_alive = provider_pgid is not None and _agy_operation_journal._process_group_alive(
                 provider_pgid
             )
+            if log_relay is not None:
+                log_relay.finish()
             if provider_alive or group_alive:
                 raise RuntimeError(
                     "PROVIDER_IDENTITY_PERSIST_FAILED_CLEANUP_UNVERIFIED"
@@ -2069,6 +2343,20 @@ def run_agy(
                 )
             except Exception:
                 pass
+        if log_relay is not None and not log_relay.finish():
+            # #2314: a partial or unwritable relay cannot attest this run.
+            if operation_hook:
+                try:
+                    _operation_hook(
+                        operation_hook,
+                        attestation_failure=AGY_ATTESTATION_TAMPER_SUSPECT,
+                        attestation_failure_reason=(
+                            "LOG_RELAY_INCOMPLETE:"
+                            f"{log_relay.sink_error or 'WRITER_OUTLIVED_AGY'}"
+                        ),
+                    )
+                except Exception:
+                    pass
 
     # #2202: a descendant that survives the provider (setsid, cleared env,
     # cwd inside the target or run root) is killed; an unproven sweep fails
@@ -2218,9 +2506,14 @@ def _write_boundary_available() -> bool:
 
 
 def _runner_accepts(runner: Any, name: str) -> bool:
-    return runner is run_agy or (
-        hasattr(runner, "__code__") and name in runner.__code__.co_varnames
-    )
+    """True when ``runner`` takes a parameter ``name`` (#2314: not just a local)."""
+    if runner is run_agy:
+        return True
+    code = getattr(runner, "__code__", None)
+    if code is None:
+        return False
+    params = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+    return name in params
 
 
 def emit_meta(data: dict) -> None:
@@ -4758,14 +5051,13 @@ def dispatch_run(
                     # Disposable HOME + exact env + Seatbelt profile; the permission
                     # profile below is installed into the disposable HOME, never
                     # into the leased account HOME.
-                    attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+                    # #2314: no write grant for the attestation log; run_agy
+                    # relays agy's --log-file through a FIFO in the run root.
                     boundary_module = _agy_dispatch_boundary()
                     try:
                         write_boundary = boundary_module.prepare_accept_edits_boundary(
                             source_env=env,
                             target=cwd,
-                            extra_writable_files=[attestation_log] if attestation_log else [],
-                            extra_writable_roots=[OPERATION_ROOT],
                         )
                     except boundary_module.AgyWriteBoundaryError as exc:
                         # Typed, non-rotating contract rejection; the boundary
@@ -4824,36 +5116,19 @@ def dispatch_run(
                     "effort": effort,
                     "timeout": max(1, int(total_deadline - _monotonic())),
                 }
-                if runner is run_agy or (
-                    hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "operation_hook"):
                     runner_kwargs["operation_hook"] = _inner_operation_hook
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "expect_coding_progress" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "expect_coding_progress"):
                     runner_kwargs["expect_coding_progress"] = bool(
                         mode == "accept-edits" and write_paths
                     )
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "provider_stall_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "provider_stall_seconds"):
                     runner_kwargs["provider_stall_seconds"] = provider_stall_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "stream_no_progress_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "stream_no_progress_seconds"):
                     runner_kwargs["stream_no_progress_seconds"] = stream_no_progress_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "pre_effect_max_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "pre_effect_max_seconds"):
                     runner_kwargs["pre_effect_max_seconds"] = pre_effect_max_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "pre_effect_max_tool_events" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "pre_effect_max_tool_events"):
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary
@@ -5884,6 +6159,28 @@ def _run_background_operation(
             attestation_log_path,
             requested_model=model,
         )
+        # #2314: an attestation that may be forged or incomplete never ends
+        # COMPLETED; with an observed effect the outcome is unknown.
+        if snapshot.get("attestation_failure") and not attestation.get("attestation_failure"):
+            attestation = {
+                **attestation,
+                "observed_provider": None,
+                "observed_model": None,
+                "provider_session_id": None,
+                "attestation_failure": snapshot.get("attestation_failure"),
+            }
+        if attestation.get("attestation_failure") and terminal_status == "COMPLETED":
+            failure_kind = str(attestation["attestation_failure"])
+            if effect_observed:
+                terminal_status = "OUTCOME_UNKNOWN"
+                reconciliation = {
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": "PROVIDER_ATTESTATION_UNTRUSTED_AFTER_EFFECT",
+                    "retry_permitted": False,
+                }
+            else:
+                terminal_status = "FAILED"
+            exit_code = 1
         terminal_record = journal.mark_terminal(
             operation_id,
             status=terminal_status,
