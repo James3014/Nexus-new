@@ -531,8 +531,21 @@ def _run_main_with_fake_arms(
 
     monkeypatch.setattr(runner, "_confinement_parity_failures", parity_spy)
     monkeypatch.setenv("NEXUS_AGY_BIN", str(_fake_agy(tmp_path)))
-    monkeypatch.delenv("NEXUS_AGY_EXECUTABLE", raising=False)
-    monkeypatch.delenv("NEXUS_AGY_COMMAND", raising=False)
+    # runner.main() writes these straight into os.environ (_install_prompt_capture).
+    # delenv(raising=False) on an absent key records nothing for monkeypatch to undo,
+    # so a second call in one test left the first run's wrapper path set after
+    # teardown and broke later agy tests (NEXUS_AGY_BIN != NEXUS_AGY_EXECUTABLE,
+    # #2380). setenv first so monkeypatch always records the pre-test value.
+    for name in (
+        "NEXUS_AGY_EXECUTABLE",
+        "NEXUS_AGY_COMMAND",
+        "NEXUS_BENCH_PROMPT_CAPTURE_REAL",
+        "NEXUS_BENCH_PROMPT_CAPTURE_DIR",
+        "NEXUS_BENCH_CAPTURE_RUN_ID",
+    ):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
     monkeypatch.setattr(
         sys,

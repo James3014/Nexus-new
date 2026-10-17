@@ -141,7 +141,7 @@ except ImportError as exc:
 # scripts/ops/nexus_gateway_auto_deploy.py text-parses this exact one-line
 # `CANONICAL_CORE_REVISION = "<40-hex sha>"` form (it never imports this file);
 # keep that shape when bumping the pin.
-CANONICAL_CORE_REVISION = "96513b24a7254841716a44f68a4d765ddcec201e"
+CANONICAL_CORE_REVISION = "b07ae36d64501af761e8f2069830b79f89ac733b"
 CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
 

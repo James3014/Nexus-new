@@ -2245,6 +2245,11 @@ _monotonic = time.monotonic
 MAX_FAILURE_HISTORY_ENTRIES = 16
 
 
+def _pool_busy_failure_fields(exc: Any) -> dict[str, Any]:
+    """#1681: a busy-pool exit must persist its failure_kind, not a stale earlier one."""
+    return {"failure_kind": "AGY_ACCOUNT_POOL_BUSY"} if exc.busy else {}
+
+
 def _operation_hook(callback: Any, **payload: Any) -> None:
     if callback is not None:
         callback(payload)
@@ -4516,7 +4521,11 @@ def dispatch_run(
                         )
                         continue
                     except _PoolClaimFailure as rotate_exc:
-                        _operation_hook(operation_hook, pool_queue=dict(pool_queue))
+                        _operation_hook(
+                            operation_hook,
+                            pool_queue=dict(pool_queue),
+                            **_pool_busy_failure_fields(rotate_exc),
+                        )
                         emit_meta({
                             "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                             "attempts": attempts,
@@ -4621,7 +4630,11 @@ def dispatch_run(
                         # Unchecked accounts are leased elsewhere: the model may
                         # be available there, so this is a busy pool, not an
                         # invalid model.
-                        _operation_hook(operation_hook, pool_queue=dict(pool_queue))
+                        _operation_hook(
+                            operation_hook,
+                            pool_queue=dict(pool_queue),
+                            failure_kind="AGY_ACCOUNT_POOL_BUSY",
+                        )
                         emit_meta({
                             "status": "pool_busy",
                             "attempts": attempts,
@@ -5270,7 +5283,11 @@ def dispatch_run(
                     pool_queue=dict(pool_queue),
                 )
             except _PoolClaimFailure as rotate_exc:
-                _operation_hook(operation_hook, pool_queue=dict(pool_queue))
+                _operation_hook(
+                    operation_hook,
+                    pool_queue=dict(pool_queue),
+                    **_pool_busy_failure_fields(rotate_exc),
+                )
                 emit_meta({
                     "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                     "attempts": attempts,
