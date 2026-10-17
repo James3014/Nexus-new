@@ -619,7 +619,7 @@
    },
    "recover_work_claim": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:reason: str = 'RECOVERY') -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:reason: str = 'RECOVERY', KEYWORD_ONLY:authorized_attempt_id: str | None = None) -> dict[str, Any]"
    },
    "rehydrate_project_entry": {
     "kind": "function",
