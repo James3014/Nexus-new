@@ -482,7 +482,7 @@ def test_retry_memory_off_injects_nothing_and_leaves_trace_empty(tmp_path, monke
     with pytest.raises(stop):
         _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
 
-    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert not captured.get("memory_lessons")
     assert op._memory_influence_trace.selected_ids == []
     assert not op._memory_influence_trace.prompt_included
     assert op.retrieved_lesson_ids == []
@@ -670,7 +670,7 @@ def test_default_context_retry_injects_no_lessons(tmp_path, monkeypatch):
     with pytest.raises(stop):
         _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
 
-    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert not captured.get("memory_lessons")
     assert op.retrieved_lesson_ids == []
     assert not op._memory_influence_trace.prompt_included
 
@@ -699,7 +699,7 @@ def test_missing_memory_enabled_attribute_is_treated_as_off(tmp_path, monkeypatc
     with pytest.raises(stop):
         _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
 
-    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert not captured.get("memory_lessons")
 
 
 def test_semantic_retry_seed_can_still_enable_memory(tmp_path):
