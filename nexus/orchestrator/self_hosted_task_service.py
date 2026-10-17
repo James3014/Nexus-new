@@ -2824,21 +2824,40 @@ class SelfHostedTaskService:
 
             effective_attempt_id = attempt_id or str(locked_state.get("attempt_id") or "")
             bound_key = (task_id, effective_attempt_id) if effective_attempt_id else None
-            bound = self._bound_attempt_claims.get(bound_key) if bound_key else None
+            # The durable binding persisted with the attempt state is the source
+            # of truth (#2374); the in-process dict is only a cache of it.
+            persisted_all = locked_state.get("attempt_claim_bindings")
+            persisted = (
+                persisted_all.get(effective_attempt_id)
+                if bound_key and isinstance(persisted_all, Mapping)
+                else None
+            )
+            if persisted is not None and not isinstance(persisted, Mapping):
+                raise RuntimeError("WORK_CLAIM_STALE_FENCE")
+            bound = persisted
+            if bound is None and bound_key:
+                bound = self._bound_attempt_claims.get(bound_key)
             if bound is not None:
                 self._validate_claim_locked(locked_state, bound)
-            else:
                 if bound_key:
-                    bound_req = {
-                        **(record.get("identity") or {}),
-                        "task_id": task_id,
-                        "attempt_id": effective_attempt_id,
-                        "claim_id": record["claim_id"],
-                        "generation": record["generation"],
-                        "fencing_token": record["fencing_token"],
-                    }
-                    self._bound_attempt_claims[bound_key] = bound_req
-                    self._validate_claim_locked(locked_state, bound_req)
+                    self._bound_attempt_claims[bound_key] = dict(bound)
+            elif bound_key:
+                # Legacy attempt with no persisted binding: adopt the current
+                # generation (unchanged behaviour) and persist it.
+                bound_req = {
+                    **(record.get("identity") or {}),
+                    "task_id": task_id,
+                    "attempt_id": effective_attempt_id,
+                    "claim_id": record["claim_id"],
+                    "generation": record["generation"],
+                    "fencing_token": record["fencing_token"],
+                }
+                self._bound_attempt_claims[bound_key] = bound_req
+                self._validate_claim_locked(locked_state, bound_req)
+                bindings = dict(persisted_all) if isinstance(persisted_all, Mapping) else {}
+                bindings[effective_attempt_id] = bound_req
+                locked_state["attempt_claim_bindings"] = bindings
+                self._write_state_locked(task_id, locked_state)
 
             return record
 
@@ -2861,7 +2880,13 @@ class SelfHostedTaskService:
             self._write_state_locked(task_id, state)
         return {"status": "RELEASED", "task_id": task_id}
 
-    def recover_work_claim(self, request: Mapping[str, Any], *, reason: str = "RECOVERY") -> dict[str, Any]:
+    def recover_work_claim(
+        self,
+        request: Mapping[str, Any],
+        *,
+        reason: str = "RECOVERY",
+        authorized_attempt_id: str | None = None,
+    ) -> dict[str, Any]:
         task_id = str(request["task_id"])
         with self._state_lock():
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
@@ -2871,6 +2896,22 @@ class SelfHostedTaskService:
             record["fencing_token"] = f"{record['claim_id']}:{generation}"
             record["recovery_reason"] = _bounded_failure_text(reason)
             record["recovered_at"] = _utc_now()
+            # Only the attempt the recovery explicitly authorizes is re-bound to
+            # the new generation; every other bound attempt stays fenced (#2374).
+            authorized = str(authorized_attempt_id or "").strip()
+            if authorized:
+                bindings = dict(state.get("attempt_claim_bindings") or {})
+                rebound = {
+                    **(record.get("identity") or {}),
+                    "task_id": task_id,
+                    "attempt_id": authorized,
+                    "claim_id": record["claim_id"],
+                    "generation": generation,
+                    "fencing_token": record["fencing_token"],
+                }
+                bindings[authorized] = rebound
+                state["attempt_claim_bindings"] = bindings
+                self._bound_attempt_claims[(task_id, authorized)] = dict(rebound)
             self._write_state_locked(task_id, state)
             return {"status": "CLAIMED", "claim": record}
 
