@@ -278,3 +278,51 @@ def test_automation_without_symbol_scope_still_blocks_oversized_source(tmp_path)
 
     assert result["state"] == "BLOCKED"
     assert sidecar.calls == []
+
+
+def test_no_symbol_scope_refusal_carries_reason_path_and_size():
+    content = _big_module()
+    with pytest.raises(ExternalIntelligenceError) as info:
+        _pack(content)
+    assert str(info.value) == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
+    detail = info.value.detail
+    assert detail["reason"] == "no symbol scope"
+    assert detail["ref"] == "nexus/big.py"
+    assert detail["source_bytes"] == len(content.encode("utf-8"))
+    assert detail["max_bytes"] == DEFAULT_CONTEXT_BUDGET
+
+
+def test_excerpt_over_budget_refusal_carries_reason():
+    many = [f"filler_{i}" for i in range(0, 1500, 25)]
+    with pytest.raises(ExternalIntelligenceError) as info:
+        build_context_pack(
+            [_src("source_file", "nexus/big.py", _big_module(), excerpt_symbols=many)],
+            max_bytes=8_000,
+            per_source_bytes=8_000,
+        )
+    assert info.value.detail["reason"] == "excerpt exceeds budget"
+
+
+def test_automation_blocked_record_names_no_symbol_scope(tmp_path):
+    repo, card, _, _, store = _setup(tmp_path)
+    big = repo / "nexus" / "a.py"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text(_big_module(), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "big"], cwd=repo, capture_output=True, check=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    automation = _automation(tmp_path, repo, store)
+    result = automation.run_issue(
+        "o/r", 2357, "title", _body(_contract("tasks/x.md", _sha(card), main_sha=head_sha))
+    )
+    assert result["error_code"] == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
+    assert result["error_detail"]["reason"] == "no symbol scope"
+    assert result["error_detail"]["ref"] == "nexus/a.py"

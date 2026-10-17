@@ -1,13 +1,14 @@
 """
 Tests for env taxonomy, recipe registry, and repro pre-flight gate.
 """
-import pytest
-from nexus.services.local_heal.env_taxonomy import (
-    EnvFailureTaxonomy, classify_env_failure, TAXONOMY_META
-)
-from nexus.services.local_heal.env_recipe_registry import EnvRecipeRegistry, EnvRecipe
-from nexus.services.local_heal.repro_preflight import ReproPreflightDiagnosis, ReproPreflightResult
+import importlib.util
 
+from nexus.services.local_heal.env_recipe_registry import EnvRecipeRegistry
+from nexus.services.local_heal.env_taxonomy import (
+    TAXONOMY_META,
+    EnvFailureTaxonomy,
+    classify_env_failure,
+)
 
 # ─── M1: Taxonomy Tests ───
 
@@ -121,38 +122,25 @@ def _make_ctx(**overrides):
     return ctx
 
 
-def test_preflight_bug_reproduced_no_noise():
-    """Bug reproduced, no noise → allow patch lane."""
-    ctx = _make_ctx(reproduced=True)
-    result = ReproPreflightDiagnosis.diagnose(ctx)
-    assert result.bug_reproduced is True
-    assert result.can_enter_patch_lane is True
-    assert result.next_stop_layer == "localization"
+def test_preflight_bug_reproduced_no_noise() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.repro_preflight") is None
 
 
-def test_preflight_not_reproduced():
-    """Bug not reproduced → stop at reprorunner."""
-    ctx = _make_ctx(reproduced=False)
-    result = ReproPreflightDiagnosis.diagnose(ctx)
-    assert result.bug_reproduced is False
-    assert result.can_enter_patch_lane is False
-    assert result.next_stop_layer == "reprorunner"
+def test_preflight_not_reproduced() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.repro_preflight") is None
 
 
-def test_preflight_env_blocked():
-    """Env blocked → stop at env_resolver."""
-    ctx = _make_ctx(reproduced=False, env_resolution={"ready": False})
-    result = ReproPreflightDiagnosis.diagnose(ctx)
-    assert result.bug_reproduced is False
-    assert result.can_enter_patch_lane is False
-    assert result.next_stop_layer == "env_resolver"
-    assert result.blocking_noise_present is True
+def test_preflight_env_blocked() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.repro_preflight") is None
 
 
-def test_preflight_reproduced_with_noise_resolved():
-    """Bug reproduced after noise was resolved → allow patch lane."""
-    ctx = _make_ctx(reproduced=True, failure_reason="ENV_BLOCKED")
-    result = ReproPreflightDiagnosis.diagnose(ctx)
-    assert result.bug_reproduced is True
-    assert result.can_enter_patch_lane is True
-    assert result.next_stop_layer == "localization"
+def test_preflight_reproduced_with_noise_resolved() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.repro_preflight") is None

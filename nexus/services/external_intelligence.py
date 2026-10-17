@@ -85,7 +85,16 @@ _HEX64 = frozenset("0123456789abcdef")
 
 
 class ExternalIntelligenceError(RuntimeError):
-    pass
+    """Fail-closed error whose message is a stable reason code.
+
+    ``detail`` optionally carries bounded, non-secret facts about the refusal
+    (e.g. which contract path exceeded the context budget) so callers can
+    record why a task was refused without parsing the message (#2357).
+    """
+
+    def __init__(self, *args: object, detail: Mapping[str, Any] | None = None) -> None:
+        super().__init__(*args)
+        self.detail: dict[str, Any] = dict(detail) if detail else {}
 
 
 class IntakeDisposition(str, Enum):
@@ -375,6 +384,20 @@ def build_context_pack(
     remaining = max_bytes
     built: dict[int, dict[str, Any]] = {}
 
+    def _budget_exceeded(
+        source: dict[str, Any], raw: bytes, remaining: int, reason: str | None
+    ) -> ExternalIntelligenceError:
+        detail: dict[str, Any] = {
+            "kind": source["kind"],
+            "ref": source["ref"],
+            "source_bytes": len(raw),
+            "remaining_bytes": remaining,
+            "max_bytes": max_bytes,
+        }
+        if reason:
+            detail["reason"] = reason
+        return ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED", detail=detail)
+
     def _excerpt_entry(source: dict[str, Any], raw: bytes) -> dict[str, Any]:
         # Explicit, labelled excerpt instead of a silent cut: the evidence anchor
         # (source_sha256/source_bytes) stays the complete file at its revision.
@@ -417,9 +440,13 @@ def build_context_pack(
     for index in contract_order:
         raw = normalized[index]["content"].encode("utf-8")
         if len(raw) > remaining:
-            excerpt_entry = _excerpt_entry(normalized[index], raw)
+            source = normalized[index]
+            if source["kind"] != "source_file" or not source.get("excerpt_symbols"):
+                reason = "no symbol scope" if source["kind"] == "source_file" else None
+                raise _budget_exceeded(source, raw, remaining, reason)
+            excerpt_entry = _excerpt_entry(source, raw)
             if excerpt_entry["included_bytes"] > remaining:
-                raise ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED")
+                raise _budget_exceeded(source, raw, remaining, "excerpt exceeds budget")
             built[index] = excerpt_entry
             remaining -= excerpt_entry["included_bytes"]
             continue

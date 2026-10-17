@@ -3,11 +3,9 @@ from __future__ import annotations
 
 import json
 import os
-import pytest
 from nexus.services.local_heal.diversity_selector import select_diverse_candidate
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 from nexus.services.local_heal.memory_decision_gate import evaluate_memory_decision
-from nexus.services.local_heal.memory_belief_signal import compute_memory_belief_signal
 
 
 def _make_candidate(patch, model="qwen"):
