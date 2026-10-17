@@ -39,13 +39,15 @@ def _hash(value: Any) -> str:
 def _render_command(argv: Sequence[str]) -> str:
     """Render argv as the human-readable command string the contract carries.
 
-    Tokens stay bare unless they hold whitespace, quotes or a backslash, so a
-    command that already worked renders byte-identically; a token that would
-    be re-split downstream (#2307) is shell-quoted so the contract string
-    lexes back to exactly the same argv the sealed evidence recorded.
+    Tokens stay bare unless they hold a character the downstream lexer
+    (``shlex`` posix, comments on, ``punctuation_chars=";&|<>"``) treats
+    specially: whitespace, quotes, backslash, ``#`` or ``;&|<>``.  Commands that
+    already worked render byte-identically; any other token is shell-quoted so
+    the contract string lexes back to exactly the argv the sealed evidence
+    recorded (#2307).  Parentheses are not punctuation characters and stay bare.
     """
     return " ".join(
-        token if token and not re.search(r"[\s'\"\\]", token) else shlex.quote(token)
+        token if token and not re.search(r"[\s'\"\\#;&|<>]", token) else shlex.quote(token)
         for token in argv
     )
 

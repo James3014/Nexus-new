@@ -220,3 +220,17 @@ def test_verifier_argument_with_spaces_is_approved_when_it_matches_and_refused_o
             external_acceptance=receipt, authorization=auth,
         )
     assert git(root, "rev-parse", "HEAD") == base
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["a#b", "#x", "&x", ";x", "a|b", "<in", "x>y", "", "a b", "it's", "\\", "$HOME", "*", "exit(1)", "a\"b"],
+)
+def test_rendered_verifier_command_round_trips_through_the_downstream_lexer(token: str):
+    from nexus.orchestrator.target_integration_lifecycle import _render_command
+
+    argv = ("-c", token)  # the token after -c is exempt from the char denylist
+    _executable, parsed, _env = ControlledIntegrationManager._command_intent(
+        _render_command(("python3", *argv))
+    )
+    assert parsed == argv
