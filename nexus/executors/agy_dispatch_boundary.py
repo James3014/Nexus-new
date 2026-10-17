@@ -11,8 +11,7 @@ adapter gets from ``run_cli_worker``:
   per-run tag the descendant sweep looks for;
 * a Seatbelt profile (``build_seatbelt_profile``) that denies every file
   write except the target worktree (minus ``.git``/``.agents``) and the
-  per-run root, plus literal files the dispatcher itself must let Agy append
-  to (its ``--log-file`` attestation log);
+  per-run root, plus any literal files a caller must let Agy append to;
 * a post-exit descendant sweep over the process tree, the run tag and the
   processes whose cwd is inside the target or the run root; it runs exactly
   once per launched run, also when the launch frame raised.
@@ -22,8 +21,10 @@ which on macOS hides the environment of SIP-protected system binaries (for
 example ``/bin/sleep``); such a process is only caught by the descendant
 tracker or the cwd sweep. Agy's own descendants (node/go) are not restricted.
 
-The ``--log-file`` attestation log is writable by the confined process, so
-attestation parsing must not treat its content as trusted (follow-up #2260).
+The dispatcher no longer grants the ``--log-file`` attestation log (#2314):
+agy writes a relay FIFO in the run root, which the dispatcher unlinks once agy
+has opened it, and only the dispatcher appends to the attestation log.
+``extra_writable_files`` stays for callers that still need a literal grant.
 
 There is no unconfined fallback: when ``sandbox-exec`` is unavailable the
 boundary cannot be prepared and the dispatcher refuses the run.

@@ -1535,6 +1535,135 @@ def _parse_input_delivery(text: str) -> dict[str, Any]:
     }
 
 
+AGY_ATTESTATION_TAMPER_SUSPECT = "AGY_ATTESTATION_TAMPER_SUSPECT"
+AGY_LOG_RELAY_INCOMPLETE_MARKER = "NEXUS_AGY_LOG_RELAY_INCOMPLETE"
+AGY_LOG_RELAY_ATTEMPT_MARKER = "NEXUS_AGY_LOG_RELAY_ATTEMPT"
+AGY_LOG_RELAY_JOIN_SECONDS = 10.0
+
+
+def _attempt_attestation_disagrees(text: str, *, requested_model: str | None) -> bool:
+    """True when one agy run's relayed log names two models or two conversations."""
+    canonical_requested = canonicalize_agy_model(requested_model)
+    resolved = {
+        match.group("resolved")
+        for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text)
+        if requested_model is None
+        or match.group("alias") in (requested_model, canonical_requested)
+    }
+    conversations = {match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)}
+    return len(resolved) > 1 or len(conversations) > 1
+
+
+class _AgyLogRelay:
+    """Own agy's ``--log-file`` channel so the confined run cannot write it (#2314).
+
+    agy gets the path of a private FIFO instead of the attestation log.  agy
+    1.4.0 opens its log once, in-process, at startup (its descriptor is
+    close-on-exec, so tool children never inherit it).  As soon as that open
+    lands, the relay unlinks the FIFO and its directory, so no later process
+    (a tool spawned inside the Seatbelt) can open the channel by path.  The
+    relay alone appends what agy writes to ``sink``, the dispatcher-owned
+    attestation log, which therefore needs no Seatbelt write grant.
+    """
+
+    def __init__(self, sink: Path, *, fifo_parent: Path | None = None) -> None:
+        import tempfile
+
+        self.sink = sink
+        self.dir = Path(
+            tempfile.mkdtemp(
+                prefix="nexus-agy-log-", dir=str(fifo_parent) if fifo_parent else None
+            )
+        )
+        self.fifo = self.dir / "agy-log.fifo"
+        os.mkfifo(self.fifo, 0o600)
+        self.sink_error: str | None = None
+        # Dispatcher-written attempt boundary: corroboration is per agy run.
+        self._append_sink(f"{AGY_LOG_RELAY_ATTEMPT_MARKER} {uuid.uuid4().hex}\n".encode())
+        self._opened = threading.Event()
+        self._finished = False
+        self._thread = threading.Thread(target=self._run, name="agy-log-relay", daemon=True)
+        self._thread.start()
+
+    def _open_sink(self) -> int:
+        return os.open(
+            self.sink,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+
+    def _append_sink(self, data: bytes) -> None:
+        try:
+            fd = self._open_sink()
+        except OSError as exc:
+            self.sink_error = type(exc).__name__
+            return
+        try:
+            os.write(fd, data)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+    def _remove_endpoint(self) -> None:
+        try:
+            os.unlink(self.fifo)
+        except OSError:
+            pass
+        try:
+            os.rmdir(self.dir)
+        except OSError:
+            pass
+
+    def _run(self) -> None:
+        try:
+            source = os.open(self.fifo, os.O_RDONLY)
+        except OSError:
+            self._remove_endpoint()
+            return
+        self._opened.set()
+        self._remove_endpoint()
+        sink_fd: int | None = None
+        try:
+            sink_fd = self._open_sink()
+        except OSError as exc:
+            self.sink_error = type(exc).__name__
+        try:
+            while True:
+                chunk = os.read(source, 65536)
+                if not chunk:
+                    break
+                view = memoryview(chunk)
+                while sink_fd is not None and view:
+                    view = view[os.write(sink_fd, view) :]
+        except OSError:
+            pass
+        finally:
+            os.close(source)
+            if sink_fd is not None:
+                os.close(sink_fd)
+
+    def finish(self, *, timeout: float = AGY_LOG_RELAY_JOIN_SECONDS) -> bool:
+        """Wait for agy's end of the channel to close; True when fully relayed."""
+        if self._finished:
+            return not self._thread.is_alive()
+        self._finished = True
+        if not self._opened.is_set():
+            # agy never opened its log: release the reader blocked in open().
+            try:
+                os.close(os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+        self._thread.join(timeout)
+        self._remove_endpoint()
+        if self._thread.is_alive():
+            # Something besides agy still holds the write end: the log can no
+            # longer be attested.
+            self._append_sink(f"{AGY_LOG_RELAY_INCOMPLETE_MARKER}:WRITER_OUTLIVED_AGY\n".encode())
+            return False
+        return True
+
+
 def _parse_agy_attestation(
     log_path: Path,
     *,
@@ -1572,6 +1701,22 @@ def _parse_agy_attestation(
                 resolved_models.append(resolved)
 
     conversations = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)]
+    # #2314: the log is relayed by the dispatcher, so the confined run cannot
+    # append to it.  Corroborate anyway and fail closed, with a distinct marker,
+    # when one relayed attempt resolved the requested alias to more than one
+    # model or created more than one conversation (zero cases in 1846 real
+    # operation logs), or the relay saw a writer outlive agy.
+    if AGY_LOG_RELAY_INCOMPLETE_MARKER in text or any(
+        _attempt_attestation_disagrees(segment, requested_model=requested_model)
+        for segment in text.split(AGY_LOG_RELAY_ATTEMPT_MARKER)[1:]
+    ):
+        return {
+            "observed_provider": None,
+            "observed_model": None,
+            "provider_session_id": None,
+            "attestation_failure": AGY_ATTESTATION_TAMPER_SUSPECT,
+            **input_delivery,
+        }
     if not resolved_models or not conversations:
         return {
             "observed_provider": None,
@@ -1627,10 +1772,9 @@ def run_agy(
         f"{timeout}s",
     ]
     attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+    log_relay: _AgyLogRelay | None = None
     if attestation_log:
-        log_path = Path(attestation_log).expanduser()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        argv += ["--log-file", str(log_path)]
+        Path(attestation_log).expanduser().parent.mkdir(parents=True, exist_ok=True)
     canonical_model = canonicalize_agy_model(model)
     if canonical_model:
         argv += ["--model", canonical_model]
@@ -1660,20 +1804,32 @@ def run_agy(
         provider_log_offset = 0
 
     started = time.monotonic()
-    launch_argv = argv
-    if write_boundary is not None:
-        launch_argv = write_boundary.wrap_argv(argv)
-        write_boundary.before_launch()
-    process = subprocess.Popen(
-        launch_argv,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        start_new_session=True,
-    )
+    if provider_log_path is not None:
+        # #2314: agy writes a relay FIFO, never the attestation log itself.
+        log_relay = _AgyLogRelay(
+            provider_log_path,
+            fifo_parent=getattr(write_boundary, "run_root", None),
+        )
+        argv[-2:-2] = ["--log-file", str(log_relay.fifo)]
+    try:
+        launch_argv = argv
+        if write_boundary is not None:
+            launch_argv = write_boundary.wrap_argv(argv)
+            write_boundary.before_launch()
+        process = subprocess.Popen(
+            launch_argv,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+    except BaseException:
+        if log_relay is not None:
+            log_relay.finish(timeout=2.0)
+        raise
     provider_pid = getattr(process, "pid", None)
     if write_boundary is not None and isinstance(provider_pid, int):
         write_boundary.after_launch(provider_pid)
@@ -1724,6 +1880,8 @@ def run_agy(
             group_alive = provider_pgid is not None and _agy_operation_journal._process_group_alive(
                 provider_pgid
             )
+            if log_relay is not None:
+                log_relay.finish()
             if provider_alive or group_alive:
                 raise RuntimeError(
                     "PROVIDER_IDENTITY_PERSIST_FAILED_CLEANUP_UNVERIFIED"
@@ -2069,6 +2227,8 @@ def run_agy(
                 )
             except Exception:
                 pass
+        if log_relay is not None:
+            log_relay.finish()
 
     # #2202: a descendant that survives the provider (setsid, cleared env,
     # cwd inside the target or run root) is killed; an unproven sweep fails
@@ -2218,9 +2378,14 @@ def _write_boundary_available() -> bool:
 
 
 def _runner_accepts(runner: Any, name: str) -> bool:
-    return runner is run_agy or (
-        hasattr(runner, "__code__") and name in runner.__code__.co_varnames
-    )
+    """True when ``runner`` takes a parameter ``name`` (#2314: not just a local)."""
+    if runner is run_agy:
+        return True
+    code = getattr(runner, "__code__", None)
+    if code is None:
+        return False
+    params = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+    return name in params
 
 
 def emit_meta(data: dict) -> None:
@@ -4745,14 +4910,13 @@ def dispatch_run(
                     # Disposable HOME + exact env + Seatbelt profile; the permission
                     # profile below is installed into the disposable HOME, never
                     # into the leased account HOME.
-                    attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+                    # #2314: no write grant for the attestation log; run_agy
+                    # relays agy's --log-file through a FIFO in the run root.
                     boundary_module = _agy_dispatch_boundary()
                     try:
                         write_boundary = boundary_module.prepare_accept_edits_boundary(
                             source_env=env,
                             target=cwd,
-                            extra_writable_files=[attestation_log] if attestation_log else [],
-                            extra_writable_roots=[OPERATION_ROOT],
                         )
                     except boundary_module.AgyWriteBoundaryError as exc:
                         # Typed, non-rotating contract rejection; the boundary
@@ -4811,36 +4975,19 @@ def dispatch_run(
                     "effort": effort,
                     "timeout": max(1, int(total_deadline - _monotonic())),
                 }
-                if runner is run_agy or (
-                    hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "operation_hook"):
                     runner_kwargs["operation_hook"] = _inner_operation_hook
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "expect_coding_progress" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "expect_coding_progress"):
                     runner_kwargs["expect_coding_progress"] = bool(
                         mode == "accept-edits" and write_paths
                     )
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "provider_stall_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "provider_stall_seconds"):
                     runner_kwargs["provider_stall_seconds"] = provider_stall_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "stream_no_progress_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "stream_no_progress_seconds"):
                     runner_kwargs["stream_no_progress_seconds"] = stream_no_progress_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "pre_effect_max_seconds" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "pre_effect_max_seconds"):
                     runner_kwargs["pre_effect_max_seconds"] = pre_effect_max_seconds
-                if runner is run_agy or (
-                    hasattr(runner, "__code__")
-                    and "pre_effect_max_tool_events" in runner.__code__.co_varnames
-                ):
+                if _runner_accepts(runner, "pre_effect_max_tool_events"):
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary

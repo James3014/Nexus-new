@@ -159,16 +159,16 @@ def test_agy_that_never_opens_its_log_does_not_hang_the_relay(tmp_path, monkeypa
     assert not any(t.name.startswith("agy-log-relay") for t in threading.enumerate())
 
 
-def test_accept_edits_profile_has_no_write_grant_for_the_attestation_log(
-    tmp_path, monkeypatch
-):
+def test_accept_edits_profile_has_no_write_grant_for_the_attestation_log(tmp_path, monkeypatch):
     """The boundary no longer gets ``agy.log`` as a literal write grant."""
     from nexus.executors import agy_dispatch_boundary as boundary_mod
 
     if not admission.seatbelt_available():
         monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: True)
     monkeypatch.setattr(
-        boundary_mod, "_prepare_run_home_keychain", lambda run_home: admission.KEYCHAIN_NOT_APPLICABLE
+        boundary_mod,
+        "_prepare_run_home_keychain",
+        lambda run_home: admission.KEYCHAIN_NOT_APPLICABLE,
     )
     home = (tmp_path / "lease-home").resolve()
     token = home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
@@ -230,7 +230,9 @@ def _effective_write(profile: str, path: Path) -> str:
 
 def test_disagreeing_alias_resolutions_fail_closed_as_tamper_suspect(tmp_path):
     log = tmp_path / "agy.log"
+    marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
     log.write_text(
+        f"{marker} a1\n"
         f'I1017 08:21:10.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
         f"I1017 08:21:11.1       1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
         f'I1017 08:21:12.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{FORGED_MODEL}"\n',
@@ -240,6 +242,73 @@ def test_disagreeing_alias_resolutions_fail_closed_as_tamper_suspect(tmp_path):
     assert attestation["observed_model"] is None
     assert attestation["provider_session_id"] is None
     assert attestation["attestation_failure"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+
+
+def test_two_conversations_in_one_relayed_attempt_fail_closed(tmp_path):
+    marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
+    log = tmp_path / "agy.log"
+    log.write_text(
+        f"{marker} a1\n"
+        f'I1017 08:21:10.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+        f"I1017 08:21:11.1       1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+        f"I1017 08:21:11.2       1 server.go:1199] Created conversation {FORGED_CONVERSATION}\n",
+        encoding="utf-8",
+    )
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert attestation["attestation_failure"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+
+
+def test_rotated_attempts_may_each_resolve_differently(tmp_path):
+    """Per-attempt corroboration: the last attempt still wins across a rotation."""
+    marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
+    log = tmp_path / "agy.log"
+    log.write_text(
+        f"{marker} a1\n"
+        f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}-old"\n'
+        f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+        f"{marker} a2\n"
+        f'I2 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+        f"I2 server.go:1199] Created conversation {FORGED_CONVERSATION}\n",
+        encoding="utf-8",
+    )
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert "attestation_failure" not in attestation
+    assert attestation["observed_model"] == MODEL
+    assert attestation["provider_session_id"] == FORGED_CONVERSATION
+
+
+def test_relay_writer_outliving_agy_fails_closed(tmp_path):
+    log = tmp_path / "agy.log"
+    relay = dispatch._AgyLogRelay(log)
+    writer = os.open(relay.fifo, os.O_WRONLY)  # stands in for a leaked descendant
+    try:
+        os.write(
+            writer,
+            f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'.encode(),
+        )
+        os.write(
+            writer, f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n".encode()
+        )
+        assert relay.finish(timeout=0.5) is False
+    finally:
+        os.close(writer)
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert attestation["observed_model"] is None
+    assert attestation["attestation_failure"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+
+
+def test_relay_refuses_a_symlinked_sink(tmp_path):
+    victim = tmp_path / "victim.json"
+    victim.write_text("{}", encoding="utf-8")
+    log = tmp_path / "agy.log"
+    log.symlink_to(victim)
+    relay = dispatch._AgyLogRelay(log)
+    writer = os.open(relay.fifo, os.O_WRONLY)
+    os.write(writer, b"I1 printmode.go:1] hello\n")
+    os.close(writer)
+    assert relay.finish(timeout=5) is True
+    assert victim.read_text(encoding="utf-8") == "{}"
+    assert relay.sink_error is not None
 
 
 def test_consistent_alias_resolutions_still_attest(tmp_path):
@@ -253,3 +322,17 @@ def test_consistent_alias_resolutions_still_attest(tmp_path):
     attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
     assert attestation["observed_model"] == MODEL
     assert "attestation_failure" not in attestation
+
+
+def test_runner_accepts_matches_parameters_not_locals():
+    def takes_boundary(*, env, write_boundary=None):
+        return env, write_boundary
+
+    def local_only(*, env):
+        write_boundary = None  # a local, not a parameter
+        return env, write_boundary
+
+    assert dispatch._runner_accepts(takes_boundary, "write_boundary") is True
+    assert dispatch._runner_accepts(local_only, "write_boundary") is False
+    assert dispatch._runner_accepts(dispatch.run_agy, "write_boundary") is True
+    assert dispatch._runner_accepts(object(), "write_boundary") is False

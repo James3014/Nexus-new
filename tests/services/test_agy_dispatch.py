@@ -1311,8 +1311,10 @@ def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypa
     assert timed_out is False
     argv = captured["argv"]
     assert "--log-file" in argv
-    assert argv[argv.index("--log-file") + 1] == str(log)
+    # #2314: agy is handed a relay FIFO; only the dispatcher writes the log
+    assert argv[argv.index("--log-file") + 1] != str(log)
     assert log.parent.is_dir()
+    assert log.read_text(encoding="utf-8").startswith(dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER)
 
 
 def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
