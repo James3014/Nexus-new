@@ -6306,3 +6306,218 @@ def test_worker_candidate_fail_to_pass_required_is_forwarded_and_bound(monkeypat
         assert request["bound_action_request"].get("fail_to_pass_required", False) is flag
         hashes[flag] = request["request_hash"]
     assert hashes[False] != hashes[True]
+
+
+# --- #1579: optional RIE knowledge identity hint on nexus_worker_candidate ---------------
+
+_RIE_BASE = "1" * 40
+_RIE_HEAD = "a" * 40  # the autouse fixture's controller HEAD
+
+
+def _rie_hint(**overrides):
+    hint = {"repository": "James3014/Nexus-new", "pr_number": 2381, "base_sha": _RIE_BASE}
+    hint.update(overrides)
+    return hint
+
+
+def _rie_gateway(monkeypatch, *, ancestors=None):
+    """Gateway whose fake git only treats ``ancestors`` as ancestors of HEAD."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    ancestors = {_RIE_BASE, _RIE_HEAD} if ancestors is None else set(ancestors)
+    calls = []
+
+    def fake_git(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            if args[2] in ancestors and args[3] == _RIE_HEAD:
+                return ""
+            raise RuntimeError("not an ancestor")
+        return _RIE_HEAD
+
+    monkeypatch.setattr(gateway_module, "_git", fake_git)
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
+        requested_model="gemini-3.8-flash-medium", resolved_model="gemini-3.8-flash-medium",
+    ))
+    return gateway, service, calls
+
+
+def _call_worker_candidate(gateway, arguments):
+    return gateway.handle({"jsonrpc": "2.0", "id": 1579, "method": "tools/call", "params": {
+        "name": "nexus_worker_candidate", "arguments": arguments,
+    }})
+
+
+def test_worker_candidate_rie_identity_schema_is_optional_and_closed():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_worker_candidate")
+    schema = spec["inputSchema"]
+    assert "rie_knowledge_identity" not in schema["required"]
+    prop = schema["properties"]["rie_knowledge_identity"]
+    assert prop["type"] == "object"
+    assert prop["additionalProperties"] is False
+    assert set(prop["required"]) == {"repository", "pr_number", "base_sha"}
+    assert set(prop["properties"]) == {"repository", "pr_number", "base_sha", "current_main_sha"}
+
+
+def test_worker_candidate_without_rie_identity_binds_nothing_and_hook_is_not_applicable(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+    from nexus.services.rie_knowledge_codeintel_hook import knowledge_applicability_evidence
+
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    response = _call_worker_candidate(gateway, _worker_args("rie-identity-absent"))
+    assert response["result"]["isError"] is False
+    request = service.submitted[0]
+    assert "rie_knowledge_identity" not in request
+    assert "rie_knowledge_identity" not in request["bound_action_request"]
+    effective, _ = _validated_action_request(request)
+    assert "rie_knowledge_identity" not in effective
+    projection = knowledge_applicability_evidence(
+        {"target_revision": _RIE_HEAD, "workspace_root": "/nonexistent"}, env={},
+    )["knowledge_applicability"]
+    assert projection["status"] == "NOT_APPLICABLE"
+    assert "REVISION_IDENTITY_UNAVAILABLE" in projection["evidence_gaps"]
+
+
+def test_worker_candidate_rie_identity_is_normalized_and_bound_into_signed_request(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+    from nexus.services.rie_knowledge_codeintel_hook import validate_identity_hint
+
+    gateway, service, calls = _rie_gateway(monkeypatch)
+    args = _worker_args("rie-identity-bound")
+    args["rie_knowledge_identity"] = _rie_hint(base_sha=_RIE_BASE.upper())
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is False, response
+    request = service.submitted[0]
+    expected = {
+        "repository": "James3014/Nexus-new",
+        "pr_number": 2381,
+        "base_sha": _RIE_BASE,
+        # The hook's own default; never the moving controller HEAD (Codex r1).
+        "current_main_sha": _RIE_BASE,
+    }
+    assert request["rie_knowledge_identity"] == expected
+    assert request["bound_action_request"]["rie_knowledge_identity"] == expected
+    effective, envelope = _validated_action_request(request)
+    assert envelope is not None
+    # The service runs on the signed (bound) request; the hook accepts exactly it.
+    assert effective["rie_knowledge_identity"] == expected
+    assert validate_identity_hint(effective["rie_knowledge_identity"]) == expected
+    # The caller's base is tied to the real history of the bound controller HEAD.
+    assert ("merge-base", "--is-ancestor", _RIE_BASE, _RIE_HEAD) in calls
+
+
+def test_worker_candidate_rie_identity_changes_the_signed_request_hash(monkeypatch):
+    hashes = []
+    for hint in (None, _rie_hint()):
+        gateway, service, _ = _rie_gateway(monkeypatch)
+        args = _worker_args("rie-identity-hash")
+        if hint is not None:
+            args["rie_knowledge_identity"] = hint
+        _call_worker_candidate(gateway, args)
+        hashes.append(service.submitted[0]["request_hash"])
+    assert hashes[0] != hashes[1]
+
+
+@pytest.mark.parametrize(
+    "hint",
+    [
+        "James3014/Nexus-new#2381",
+        _rie_hint(repository="not a repo"),
+        _rie_hint(pr_number=0),
+        _rie_hint(pr_number=True),
+        _rie_hint(pr_number="2381"),
+        _rie_hint(base_sha="xyz"),
+        _rie_hint(current_main_sha="2" * 39),
+        _rie_hint(head_sha="b" * 40),
+        _rie_hint(extra="x"),
+    ],
+    ids=[
+        "not-object", "bad-repository", "zero-pr", "bool-pr", "string-pr", "bad-base",
+        "bad-main", "caller-head", "unknown-key",
+    ],
+)
+def test_worker_candidate_rejects_invalid_rie_identity_before_preflight(monkeypatch, hint):
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    preflight_calls = []
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: preflight_calls.append(1))
+    args = _worker_args("rie-identity-invalid")
+    args["rie_knowledge_identity"] = hint
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is True
+    assert "RIE_KNOWLEDGE_IDENTITY_INVALID" in json.dumps(response)
+    assert service.submitted == []
+    assert preflight_calls == []
+
+
+def test_worker_candidate_rejects_rie_identity_not_in_controller_history(monkeypatch):
+    gateway, service, _ = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, _RIE_HEAD})
+    args = _worker_args("rie-identity-unrelated")
+    args["rie_knowledge_identity"] = _rie_hint(base_sha="2" * 40)
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is True
+    assert "RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR:base_sha" in json.dumps(response)
+    assert service.submitted == []
+
+
+def test_worker_candidate_rie_identity_main_may_be_on_a_sibling_history(monkeypatch):
+    """Codex r1: main moving on after the PR branched is a valid identity."""
+    gateway, service, calls = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, _RIE_HEAD})
+    args = _worker_args("rie-identity-sibling-main")
+    args["rie_knowledge_identity"] = _rie_hint(current_main_sha="2" * 40)
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is False, response
+    assert service.submitted[0]["rie_knowledge_identity"]["current_main_sha"] == "2" * 40
+    assert not any(call[:2] == ("merge-base", "--is-ancestor") and call[2] == "2" * 40 for call in calls)
+
+
+def test_worker_candidate_rie_identity_is_stable_when_controller_head_moves(monkeypatch):
+    """Codex r1: the bound hint never embeds the controller HEAD, so a retry after
+    HEAD moves carries the same task semantics."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    hints = []
+    for head in (_RIE_HEAD, "b" * 40):
+        gateway, service, _ = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, head})
+        monkeypatch.setattr(
+            gateway_module,
+            "_git",
+            lambda *args, _head=head, **kwargs: "" if args[:2] == ("merge-base", "--is-ancestor") else _head,
+        )
+        args = _worker_args("rie-identity-head-moves")
+        args["rie_knowledge_identity"] = _rie_hint()
+        assert _call_worker_candidate(gateway, args)["result"]["isError"] is False
+        hints.append(service.submitted[0]["bound_action_request"]["rie_knowledge_identity"])
+    assert hints[0] == hints[1]
+
+
+def test_worker_candidate_rie_identity_tamper_is_rejected(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    args = _worker_args("rie-identity-tamper")
+    args["rie_knowledge_identity"] = _rie_hint()
+    _call_worker_candidate(gateway, args)
+    original = service.submitted[0]
+    forged = {**original["rie_knowledge_identity"], "pr_number": 1}
+
+    # Tampering inside the signed request breaks its hash.
+    request = dict(original)
+    request["bound_action_request"] = {**original["bound_action_request"], "rie_knowledge_identity": forged}
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request(request)
+
+    # A different outer value next to an intact signed request is refused, not ignored.
+    request = dict(original)
+    request["rie_knowledge_identity"] = forged
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH: rie_knowledge_identity"):
+        _validated_action_request(request)
+
+    # An outer hint injected into a request signed without one is refused too.
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    _call_worker_candidate(gateway, _worker_args("rie-identity-injected"))
+    request = dict(service.submitted[0])
+    request["rie_knowledge_identity"] = _rie_hint()
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH: rie_knowledge_identity"):
+        _validated_action_request(request)

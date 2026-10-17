@@ -834,6 +834,13 @@ def _validated_action_request(
     for source in (bound, request):
         require_match(source, "controller_revision", envelope.expected_head)
         require_match(source, "expected_head", envelope.expected_head)
+    # #1579: the optional RIE knowledge identity hint is only honoured from the
+    # signed request; an outer copy must match it exactly (an outer hint next to
+    # a request signed without one is refused, not ignored).
+    if "rie_knowledge_identity" in request and (
+        request["rie_knowledge_identity"] != bound.get("rie_knowledge_identity")
+    ):
+        raise ValueError("ACTION_IDENTITY_MISMATCH: rie_knowledge_identity")
     expected_paths = tuple(envelope.allowed_paths)
     for source in (bound, request):
         if "allowed_files" in source and tuple(source["allowed_files"]) != expected_paths:
