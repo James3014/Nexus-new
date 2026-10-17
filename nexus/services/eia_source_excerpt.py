@@ -95,7 +95,7 @@ def _is_ambiguous(tree: ast.Module, name: str) -> bool:
     if "." in name:
         class_name, member = name.split(".", 1)
         classes = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name]
-        if len(classes) != 1:
+        if len(classes) != 1 or _binding_counts(tree.body).get(class_name, 0) != 1:
             return True
         return _binding_counts(classes[0].body).get(member, 0) != 1
     return _binding_counts(tree.body).get(name, 0) != 1
@@ -108,7 +108,7 @@ def _head_matches(line: str, symbol: _Symbol) -> bool:
     elif symbol.kind in ("def", "async def"):
         pattern = rf"\s*(async\s+)?def\s+{leaf}\b"
     else:
-        pattern = rf"(.*\W)?{leaf}\s*[:=]"
+        pattern = rf"(?!\s*#)(.*\W)?{leaf}\s*[:=]"
     return re.match(pattern, line) is not None
 
 
@@ -190,9 +190,15 @@ def build_python_excerpt(
             raise ExcerptError("CONTRACT_EXCERPT_SYMBOL_AMBIGUOUS")
         symbol = by_name[name][0]
         if not (
-            0 < symbol.head_line <= len(lines)
+            0 < symbol.start_line <= symbol.head_line <= len(lines)
             and _head_matches(lines[symbol.head_line - 1], symbol)
         ):
+            raise ExcerptError("CONTRACT_EXCERPT_SLICE_MISMATCH")
+        if symbol.start_line != symbol.head_line and not lines[
+            symbol.start_line - 1
+        ].lstrip().startswith("@"):
+            # A multi-line decorator expression starts after its "@" line; never
+            # emit a slice that silently drops part of the definition.
             raise ExcerptError("CONTRACT_EXCERPT_SLICE_MISMATCH")
 
     def _text(start: int, end: int) -> str:
