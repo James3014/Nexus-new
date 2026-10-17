@@ -19,17 +19,12 @@ guard = SourceFileLoader("nexus_dsh_workflow_no_progress_test", str(SCRIPT)).loa
 
 REPO = "James3014/Nexus-new"
 STEP_END = json.dumps({"type": "status", "phase": "step_end", "turn": 2, "step": 1})
-COMPACTION = (
-    "NEXUS_DSH_AGY_OPERATION "
-    + json.dumps(
-        {
-            "schema": "nexus.dsh_agy_operation_marker.v1",
-            "dsh_session_id": "s",
-            "operation_id": "agyop_" + "a" * 32,
-            "purpose": "compaction",
-        }
-    )
-)
+COMPACTION = "NEXUS_DSH_AGY_OPERATION " + json.dumps({
+    "schema": "nexus.dsh_agy_operation_marker.v1",
+    "dsh_session_id": "s",
+    "operation_id": "agyop_" + "a" * 32,
+    "purpose": "compaction",
+})
 AGENT_OP = COMPACTION.replace("compaction", "agent")
 
 
@@ -95,7 +90,10 @@ def test_unreadable_snapshot_counts_as_progress_and_zero_disables() -> None:
 
 def test_garbage_lines_are_ignored() -> None:
     dog = guard.NoProgressWatchdog(Snap(), max_steps=1, max_compactions=1)
-    assert _feed(dog, ["", "not json", "{broken", '{"type":"status"}', "NEXUS_DSH_AGY_OPERATION {"]) == []
+    assert (
+        _feed(dog, ["", "not json", "{broken", '{"type":"status"}', "NEXUS_DSH_AGY_OPERATION {"])
+        == []
+    )
 
 
 FAKE_DSH = """#!/usr/bin/env python3
@@ -204,9 +202,7 @@ def ctx(dsh_non_temp_path: Path) -> dict:
 
 
 def test_start_phase_stops_scripted_no_progress_stream(ctx: dict) -> None:
-    proc = _start(
-        ctx, {"FAKE_DSH_STEPS": "6", "FAKE_DSH_LINGER": "30"}, "--no-progress-steps", "5"
-    )
+    proc = _start(ctx, {"FAKE_DSH_STEPS": "6", "FAKE_DSH_LINGER": "30"}, "--no-progress-steps", "5")
     assert proc.returncode == guard.EXIT_NO_PROGRESS, proc.stderr
     out = json.loads(proc.stdout)
     assert out["decision"] == "NO_PROGRESS"
