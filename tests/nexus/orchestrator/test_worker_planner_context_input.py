@@ -726,7 +726,16 @@ def test_both_canonical_fields_missing_with_workforce_binding_denies(tmp_path):
         )
 
 
-def _run_knowledge_seam(tmp_path, monkeypatch, *, selected, hint, engine_configured=True):
+def _run_knowledge_seam(
+    tmp_path,
+    monkeypatch,
+    *,
+    selected,
+    hint,
+    engine_configured=True,
+    real_executor=False,
+    lookup=None,
+):
     """Drive the real codeintel invoker through the #472 materialization seam (#1579)."""
     from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
     from nexus.services import capability_registry as cr
@@ -749,9 +758,16 @@ def _run_knowledge_seam(tmp_path, monkeypatch, *, selected, hint, engine_configu
         monkeypatch.setenv(ka.ENV_ENGINE_ROOT, "/engine")
     else:
         monkeypatch.delenv(ka.ENV_ENGINE_ROOT, raising=False)
-    monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: None)
+    if not real_executor:
+        monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: None)
     if hint:
         request["rie_knowledge_identity"] = identity(base)
+    if lookup is not None:
+        # Untracked, so HEAD and the RIE change set stay as made by make_repo.
+        (repo / "src" / "lookup_target.py").write_text("def main():\n    return 0\n")
+        # A second definition outside search_paths: only a narrowed lookup finds one.
+        (repo / "src" / "elsewhere.py").write_text("def main():\n    return 2\n")
+        request["codeintel_lookup"] = lookup(repo) if callable(lookup) else lookup
     request["planner_output"]["selected_capabilities"] = selected
     state["request"] = deepcopy(request)
     service._write_state(state["task_id"], state)
@@ -870,3 +886,95 @@ def test_codeintel_selected_without_hint_carries_not_applicable_never_current(
     assert "NOT_APPLICABLE" in text
     assert "REVISION_IDENTITY_UNAVAILABLE" in text
     assert '"CURRENT": 1' not in text and '"status": "CURRENT"' not in text
+
+
+def test_production_codeintel_without_lookup_target_refuses_and_drops_knowledge(
+    tmp_path, monkeypatch
+):
+    """#1579 live run 1: the real executor needs a target symbol; without one the stage
+    is refused and nothing (knowledge included) is claimed or delivered."""
+    persisted, prompts, _, _ = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["codeintel"], hint=True, real_executor=True
+    )
+    entry = next(
+        e
+        for e in persisted["worker_model_context_materialization"]["bundle"]["entries"]
+        if e["name"] == "codeintel"
+    )
+    assert entry["success"] is False
+    assert entry["failure_disposition"] == "refused_missing_inputs"
+    assert "knowledge_applicability" not in prompts[0]
+
+
+def test_production_codeintel_real_lookup_delivers_knowledge_to_the_prompt(tmp_path, monkeypatch):
+    """#1579: a signed codeintel_lookup lets the real executor perform its lookup, so the
+    Planner-selected stage succeeds on its own terms and carries knowledge evidence."""
+    persisted, prompts, stub, _ = _run_knowledge_seam(
+        tmp_path,
+        monkeypatch,
+        selected=["codeintel"],
+        hint=True,
+        real_executor=True,
+        lookup={"target_symbol": "main", "search_paths": ["src/lookup_target.py"]},
+    )
+    assert stub.engine_calls == 1
+    entry = next(
+        e
+        for e in persisted["worker_model_context_materialization"]["bundle"]["entries"]
+        if e["name"] == "codeintel"
+    )
+    fields = entry["consumer_payload"]["fields"]
+    assert fields["lookup_performed"] is True and fields["lookup_symbol"] == "main"
+    # A real file was inspected and the symbol was found there.
+    assert fields["found"] is True and fields["match_count"] == 1
+    assert fields["knowledge_applicability"]["status"] == "COMPLETE"
+    assert "knowledge_applicability" in prompts[0]
+    consumption = persisted["worker_model_context_consumption"]
+    assert consumption["physical_consumption_state"] == "PROVEN"
+    assert consumption["serialized_capability_ids"] == ["codeintel"]
+    import hashlib
+
+    assert consumption["provider_input_sha256"] == hashlib.sha256(prompts[0].encode()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "make_lookup",
+    [
+        lambda repo: {"target_symbol": "main", "search_paths": ["src/missing.py"]},
+        lambda repo: {"target_symbol": "main", "search_paths": ["../outside.py"]},
+        lambda repo: {"target_symbol": "main;x", "search_paths": ["src/lookup_target.py"]},
+        lambda repo: (
+            (repo.parent / "outside.py").write_text("def main():\n    return 1\n"),
+            (repo / "src" / "link.py").symlink_to(repo.parent / "outside.py"),
+            {"target_symbol": "main", "search_paths": ["src/link.py"]},
+        )[-1],
+        lambda repo: (
+            (repo.parent / "outdir").mkdir(),
+            (repo.parent / "outdir" / "x.py").write_text("def main():\n    return 1\n"),
+            (repo / "linkdir").symlink_to(repo.parent / "outdir"),
+            {"target_symbol": "main", "search_paths": ["linkdir/x.py"]},
+        )[-1],
+    ],
+    ids=["missing-file", "parent-escape", "bad-symbol", "symlinked-file", "symlinked-dir"],
+)
+def test_unsafe_or_empty_codeintel_lookup_never_reaches_the_executor(
+    tmp_path, monkeypatch, make_lookup
+):
+    """Codex r1 on #2556: no zero-file lookup and no read outside the worktree, even for
+    a caller that bypasses the Gateway; the executor keeps refusing."""
+    persisted, prompts, _, _ = _run_knowledge_seam(
+        tmp_path,
+        monkeypatch,
+        selected=["codeintel"],
+        hint=True,
+        real_executor=True,
+        lookup=make_lookup,
+    )
+    entry = next(
+        e
+        for e in persisted["worker_model_context_materialization"]["bundle"]["entries"]
+        if e["name"] == "codeintel"
+    )
+    assert entry["success"] is False
+    assert entry["failure_disposition"] == "refused_missing_inputs"
+    assert "knowledge_applicability" not in prompts[0]

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
@@ -84,6 +85,40 @@ def _rie_knowledge_identity(raw: Any, head: str) -> dict[str, Any]:
     return normalized
 
 
+_CODEINTEL_LOOKUP_KEYS = frozenset({"target_symbol", "search_paths"})
+_CODEINTEL_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def _codeintel_lookup(raw: Any) -> dict[str, Any]:
+    """Validate the optional codeintel lookup target (#1579).
+
+    Lets the Planner-selected codeintel executor perform its real, read-only
+    implementation lookup (it refuses without a symbol); it selects, routes and
+    gates nothing.  A dotted Python identifier (max 128) and 1-4 safe
+    repository-relative ``.py`` files to search, so a lookup always inspects
+    named files and never scans a directory.
+    """
+    invalid = _gateway().GatewayInputError("CODEINTEL_LOOKUP_INVALID")
+    if not isinstance(raw, Mapping) or not set(raw) <= _CODEINTEL_LOOKUP_KEYS:
+        raise invalid
+    symbol = raw.get("target_symbol")
+    if not isinstance(symbol, str) or len(symbol) > 128 or not _CODEINTEL_SYMBOL.fullmatch(symbol):
+        raise invalid
+    paths = raw.get("search_paths")
+    if not isinstance(paths, list) or not 1 <= len(paths) <= 4:
+        raise invalid
+    for path in paths:
+        if not isinstance(path, str) or not path.endswith(".py"):
+            raise invalid
+        try:
+            _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths")
+        except Exception as exc:  # noqa: BLE001 - one stable refusal code
+            raise invalid from exc
+    # Containment, existence and symlinks are re-checked against the leased target
+    # worktree by the task service right before the lookup.
+    return {"target_symbol": symbol, "search_paths": list(paths)}
+
+
 class _WorkerCandidateMixin(_WorkerCandidateBase):
     """Mixin base of ``UnifiedMCPGateway``; never instantiated on its own."""
 
@@ -139,7 +174,7 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             "owner_confirmation", "authority_change_candidate_confirmation",
             "workforce_demands", "workforce_admission", "planner_output",
             "task_card_path", "task_card_hash", "fail_to_pass_required",
-            "rie_knowledge_identity",
+            "rie_knowledge_identity", "codeintel_lookup",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -184,6 +219,11 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         rie_identity = (
             _rie_knowledge_identity(arguments["rie_knowledge_identity"], head)
             if "rie_knowledge_identity" in arguments
+            else None
+        )
+        codeintel_lookup = (
+            _codeintel_lookup(arguments["codeintel_lookup"])
+            if "codeintel_lookup" in arguments
             else None
         )
         contract_binding = {
@@ -372,6 +412,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         bound.update(evidence_binding)
         if rie_identity is not None:
             bound["rie_knowledge_identity"] = rie_identity
+        if codeintel_lookup is not None:
+            bound["codeintel_lookup"] = codeintel_lookup
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
         if fail_to_pass_required:
@@ -431,6 +473,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         request.update(evidence_binding)
         if rie_identity is not None:
             request["rie_knowledge_identity"] = dict(rie_identity)
+        if codeintel_lookup is not None:
+            request["codeintel_lookup"] = dict(codeintel_lookup)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
         if fail_to_pass_required:

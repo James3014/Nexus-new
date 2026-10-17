@@ -2418,6 +2418,16 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                                 "current_main_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
                             },
                         },
+                        "codeintel_lookup": {
+                            "type": "object",
+                            "description": "Optional read-only lookup target for the Planner-selected codeintel executor (#1579).",
+                            "required": ["target_symbol", "search_paths"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "target_symbol": {"type": "string", "maxLength": 128},
+                                "search_paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
+                            },
+                        },
                         "workforce_demands": {"type": "object"},
                         "workforce_admission": {"type": "object"},
                         "planner_output": {"type": "object"},
