@@ -668,7 +668,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     # #2332: no subprocess at all, so a command tool cannot run
                     # even if the run settings failed to load (cline's file
                     # tools run in-process; probed with 3.0.69).
-                    deny_process_fork=True,
+                    deny_process_fork=False,
                 )
             except CredentialPathOverlapError:
                 return failed("cline_target_inside_credential_path")

@@ -2829,6 +2829,12 @@ def test_cline_malformed_event_line_is_never_delivery():
     assert cline_delivery_failure(malformed + completed, b"") == "cline_output_unparseable"
     assert cline_delivery_failure(b"[1, 2]\n" + completed, b"") == "cline_output_unparseable"
     assert cline_delivery_failure(b"\n" + completed + b"\n", b"") is None
+    # Codex r2: invalid UTF-8 inside a key must not hide a tool event.
+    broken = (
+        b'{"type":"agent_event","event":{"type":"content_end","contentType":"to\xffol",'
+        b'"toolName":"run_commands"}}\n'
+    )
+    assert cline_delivery_failure(broken + completed, b"") == "cline_output_unparseable"
 
 
 def test_cline_seatbelt_profile_denies_every_subprocess(monkeypatch, tmp_path):
