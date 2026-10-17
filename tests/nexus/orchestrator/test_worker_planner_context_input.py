@@ -1006,14 +1006,13 @@ def test_preflight_only_codeintel_without_executor_is_never_real_success_2557(
     entry = next(e for e in bundle["entries"] if e["name"] == "codeintel")
     assert entry["invoked_stub"] is True
     assert "knowledge_applicability" not in prompts[0]
-    assert entry["status"] != "REAL_INVOKED"
+    assert entry["status"] == "STUB_INVOKED"
     assert entry["invoked_real"] is False
     assert entry["success"] is False
     assert not entry.get("consumer_payload")
     assert "codeintel" not in bundle.get("real_invoked", [])
     consumption = persisted["worker_model_context_consumption"]
     assert "codeintel" not in consumption.get("serialized_capability_ids", [])
-    assert not (
-        consumption["physical_consumption_state"] == "PROVEN"
-        and "codeintel" in consumption.get("serialized_capability_ids", [])
-    )
+    # The receipt still names codeintel as selected, but never as serialized/consumed.
+    assert consumption["selected_capability_ids"] == ["codeintel"]
+    assert consumption["serialized_evidence_ids"] == []
