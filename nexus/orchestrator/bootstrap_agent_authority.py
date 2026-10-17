@@ -22,6 +22,7 @@ outside that state, keep the existing standing-grant requirement.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -43,10 +44,15 @@ ACTOR = "AGENT"
 RECORD_SCHEMA = "nexus.bootstrap_agent_authority_record.v1"
 AUTHORIZATION_SCHEMA = "nexus.bootstrap_agent_effect_authorization.v1"
 RECORD_FILENAME = "bootstrap-agent-authority.jsonl"
+PREV_FIELD = "prev_record_hash"
 OPERATING_MODE_RELATIVE_PATH = Path("docs/governance/current_operating_mode.yaml")
 REQUIRED_MODE = "BOOTSTRAP"
 REQUIRED_CONTROLLER_BINDING = "SEPARATE"
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
+# Link of the first chained record when no legacy (unchained) record precedes it.
+GENESIS_PREV_RECORD_HASH = "0" * 64
+BASIS_BOOTSTRAP_AGENT = "bootstrap_agent"
+BASIS_OWNER_GRANT = "owner_grant"
 
 # Effects that only bind Task Card files into the separate Controller. Anything
 # that publishes or is irreversible (merge, push, release, deletion, ruleset,
@@ -137,7 +143,6 @@ def _committed_blob(source_root: Path, relative: str) -> Optional[tuple[str, byt
     # Pin git to exactly this checkout: no inherited GIT_DIR/GIT_WORK_TREE,
     # no walking up into a parent repository.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["GIT_CEILING_DIRECTORIES"] = str(Path(source_root).resolve().parent)
 
     def run(*args: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
@@ -149,6 +154,9 @@ def _committed_blob(source_root: Path, relative: str) -> Optional[tuple[str, byt
         )
 
     try:
+        # ``resolve()`` can raise (symlink loop, vanished path): that must mean
+        # "no committed blob", i.e. the grant path, never an exception.
+        env["GIT_CEILING_DIRECTORIES"] = str(Path(source_root).resolve().parent)
         top = run("rev-parse", "--show-toplevel")
         toplevel = top.stdout.decode("utf-8", errors="replace").strip()
         if top.returncode != 0 or not toplevel:
@@ -160,7 +168,7 @@ def _committed_blob(source_root: Path, relative: str) -> Optional[tuple[str, byt
         if head.returncode != 0 or not _SHA_RE.fullmatch(sha):
             return None
         blob = run("cat-file", "blob", f"{sha}:{relative}")
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return None
     if blob.returncode != 0:
         return None
@@ -172,16 +180,27 @@ def delegation_context(
     *,
     source_root: Path,
     controller_binding: Mapping[str, Optional[str]],
+    expected_source_head: Optional[str],
 ) -> Optional[dict[str, Any]]:
-    """Return the facts that admit agent authority, or ``None`` to keep the grant path."""
+    """Return the facts that admit agent authority, or ``None`` to keep the grant path.
+
+    ``expected_source_head`` is the commit the Gateway process loaded at start
+    (``SERVER_REPO_HEAD_AT_START``). The mode is only trusted when the loaded
+    tree's HEAD still equals it; a moved HEAD, or no known start HEAD, keeps
+    the grant path (#2301).
+    """
     if action not in DELEGABLE_ACTIONS:
         return None
     if controller_binding.get("status") != REQUIRED_CONTROLLER_BINDING:
         return None
     if controller_binding.get("reason") is not None:
         return None
+    if not isinstance(expected_source_head, str) or not _SHA_RE.fullmatch(expected_source_head):
+        return None
     mode = observe_operating_mode(source_root)
     if mode.get("mode") != REQUIRED_MODE:
+        return None
+    if mode.get("loaded_source_head") != expected_source_head:
         return None
     return {
         "operating_mode": mode,
@@ -192,7 +211,64 @@ def delegation_context(
     }
 
 
-def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
+def _verify_chain(raw: bytes) -> str:
+    """Verify the whole record file and return the hash the next record must link to.
+
+    Legacy records (no ``prev_record_hash``) are only valid as a prefix; the
+    first chained record links to the last legacy record's hash, or to
+    :data:`GENESIS_PREV_RECORD_HASH` when none precedes it. Any unparseable
+    line, wrong record hash, or broken link raises.
+    """
+    last_hash = GENESIS_PREV_RECORD_HASH
+    chained = False
+    for line in raw.split(b"\n"):
+        if not line:
+            continue
+        try:
+            record = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise BootstrapAgentAuthorityError(
+                "BOOTSTRAP_AGENT_AUTHORITY_CHAIN_BROKEN:UNPARSEABLE_RECORD"
+            ) from exc
+        if not isinstance(record, dict) or not isinstance(record.get("record_hash"), str):
+            raise BootstrapAgentAuthorityError(
+                "BOOTSTRAP_AGENT_AUTHORITY_CHAIN_BROKEN:MALFORMED_RECORD"
+            )
+        body = {k: v for k, v in record.items() if k != "record_hash"}
+        if canonical_autonomy_hash(body) != record["record_hash"]:
+            raise BootstrapAgentAuthorityError(
+                "BOOTSTRAP_AGENT_AUTHORITY_CHAIN_BROKEN:RECORD_HASH_MISMATCH"
+            )
+        if PREV_FIELD in record:
+            chained = True
+            if record[PREV_FIELD] != last_hash:
+                raise BootstrapAgentAuthorityError(
+                    "BOOTSTRAP_AGENT_AUTHORITY_CHAIN_BROKEN:LINK_MISMATCH"
+                )
+        elif chained:
+            raise BootstrapAgentAuthorityError(
+                "BOOTSTRAP_AGENT_AUTHORITY_CHAIN_BROKEN:UNCHAINED_AFTER_CHAINED"
+            )
+        last_hash = record["record_hash"]
+    return last_hash
+
+
+def _read_all(fd: int) -> bytes:
+    os.lseek(fd, 0, os.SEEK_SET)
+    chunks = []
+    while True:
+        chunk = os.read(fd, 1 << 20)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _append_record(directory: Path, record: Mapping[str, Any]) -> dict[str, Any]:
+    """Chain ``record`` to the verified file tail, append it durably, return it.
+
+    The file is verified end to end under an exclusive lock before the append,
+    so a tampered or forked chain refuses new agent authority.
+    """
     # Same directory chain and file rules as the standing-grant store and the
     # Owner confirmation audit next to it.
     from nexus.orchestrator import standing_grant_store as store
@@ -203,14 +279,18 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
         # O_NONBLOCK: a planted FIFO fails instead of blocking the Gateway.
         fd = os.open(
             str(target),
-            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+            os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
             0o600,
         )
         try:
             opened = os.fstat(fd)
             if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid():
                 raise OSError("authority record is not a regular file owned by this user")
-            line = (json.dumps(dict(record), sort_keys=True, ensure_ascii=False) + "\n").encode(
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            chained_record = dict(record)
+            chained_record[PREV_FIELD] = _verify_chain(_read_all(fd))
+            chained_record["record_hash"] = canonical_autonomy_hash(chained_record)
+            line = (json.dumps(chained_record, sort_keys=True, ensure_ascii=False) + "\n").encode(
                 "utf-8"
             )
             written = os.write(fd, line)
@@ -230,6 +310,14 @@ def _append_record(directory: Path, record: Mapping[str, Any]) -> None:
         raise BootstrapAgentAuthorityError(
             f"BOOTSTRAP_AGENT_AUTHORITY_RECORD_WRITE_FAILED:{type(exc).__name__}"
         ) from exc
+    return chained_record
+
+
+def authority_basis(authorization: Any) -> str:
+    """``bootstrap_agent`` for an agent-authority authorization, else ``owner_grant``."""
+    if isinstance(authorization, Mapping) and authorization.get("schema") == AUTHORIZATION_SCHEMA:
+        return BASIS_BOOTSTRAP_AGENT
+    return BASIS_OWNER_GRANT
 
 
 def authorize_bootstrap_agent_effect(
@@ -278,8 +366,7 @@ def authorize_bootstrap_agent_effect(
         "loaded_source_head": context["operating_mode"].get("loaded_source_head"),
         "recorded_at": recorded_at,
     }
-    record["record_hash"] = canonical_autonomy_hash(record)
-    _append_record(Path(record_directory), record)
+    record = _append_record(Path(record_directory), record)
     payload: dict[str, Any] = {
         "schema": AUTHORIZATION_SCHEMA,
         "action": action.value,

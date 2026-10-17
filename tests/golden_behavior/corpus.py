@@ -1125,7 +1125,7 @@ CASES: tuple[GoldenCase, ...] = (
         "Governed attempt never silently downgrades",
         "security",
         "authority_conflict",
-        "A governed attempt whose authority fails stays governed and blocks; reaching the direct sink requires an explicit lane rebind, never a silent downgrade.",
+        "A governed attempt whose authority fails stays governed and blocks, never a silent downgrade (unit-level lane-gate behavior; no merge-time lane enforcement since #2006/#2286).",
         (
             "AGENTS.md#Current self-hosting stabilization semantics",
             "docs/governance/current_operating_mode.yaml#transition",
@@ -1141,7 +1141,7 @@ CASES: tuple[GoldenCase, ...] = (
         "Stale or forged lane rebind blocks",
         "security",
         "stale_state",
-        "A lane rebind is rejected when the PR head or Task Card moved, the sender is not the Owner, the binding hash is tampered or duplicated, or a new PR lacks a typed binding.",
+        "The retired lane gate's unit behavior: a lane rebind is rejected when the PR head or Task Card moved, the sender is not the Owner, or the binding hash is tampered or duplicated (not enforced at merge since #2006/#2286).",
         ("AGENTS.md#Repository collaboration authority (GitHub)",),
         (
             "tests/ops/test_trusted_merge_lane_gate.py::test_moved_pr_head_blocks_stale_rebind",

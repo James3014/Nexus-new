@@ -1068,6 +1068,7 @@ class UnifiedMCPGateway(_ModelProbeMixin, _AssistJobsMixin, _AssistResponseMixin
             action,
             source_root=Path(LOADED_SOURCE_ROOT),
             controller_binding=_current_controller_binding(),
+            expected_source_head=SERVER_REPO_HEAD_AT_START,
         )
         if context is not None:
             try:
@@ -1286,7 +1287,9 @@ class UnifiedMCPGateway(_ModelProbeMixin, _AssistJobsMixin, _AssistResponseMixin
             "exact_card_diff": "".join(diff_lines),
             "exact_index_diff": "".join(index_diff_lines),
             "successor_execution": "NOT_STARTED",
-            "owner_confirmation": True,
+            "authority_basis": bootstrap_agent_authority.authority_basis(owner_authority),
+            "owner_confirmation": bootstrap_agent_authority.authority_basis(owner_authority)
+            == bootstrap_agent_authority.BASIS_OWNER_GRANT,
             "owner_authority": owner_authority,
         }
 
@@ -1456,7 +1459,9 @@ class UnifiedMCPGateway(_ModelProbeMixin, _AssistJobsMixin, _AssistResponseMixin
             "committed_paths": sorted(committed_paths),
             "controller_clean": True,
             "successor_execution": "READY_FOR_GOVERNED_START",
-            "owner_confirmation": True,
+            "authority_basis": bootstrap_agent_authority.authority_basis(owner_authority),
+            "owner_confirmation": bootstrap_agent_authority.authority_basis(owner_authority)
+            == bootstrap_agent_authority.BASIS_OWNER_GRANT,
             "owner_authority": owner_authority,
         }
 

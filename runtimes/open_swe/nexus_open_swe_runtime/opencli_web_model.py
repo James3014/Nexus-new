@@ -458,6 +458,57 @@ def _tool_call_id(name: str, arguments: Mapping[str, Any], raw: str) -> str:
     return "opencli_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
 
 
+_CREDENTIAL_ENV_PREFIXES = (
+    "GITHUB_",
+    "GH_",
+    "GOOGLE_",
+    "GEMINI_",
+    "OPENAI_",
+    "ANTHROPIC_",
+    "AWS_",
+)
+_CREDENTIAL_ENV_NAMES = frozenset({
+    "SSH_AUTH_SOCK",
+    "KUBECONFIG",
+    "DOCKER_AUTH_CONFIG",
+    "DATABASE_URL",
+})
+_CREDENTIAL_ENV_MARKERS = (
+    "TOKEN",
+    "API_KEY",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "KEY_ID",
+    "COOKIE",
+    "AUTHORIZATION",
+)
+_CREDENTIAL_ENV_SUFFIXES = ("_KEY", "_PAT")
+
+
+def _is_credential_env_name(name: str) -> bool:
+    """Return True for env names that look like secrets (case-insensitive).
+
+    ``OPENCLI_*`` names configure the child itself and pass unless they also match
+    a secret marker (``OPENCLI_TOKEN``, ``OPENCLI_API_KEY`` are filtered). The word
+    OPENCLI elsewhere in a name grants no exemption.
+    """
+    upper = name.upper()
+    if (
+        any(marker in upper for marker in _CREDENTIAL_ENV_MARKERS)
+        or upper.endswith(_CREDENTIAL_ENV_SUFFIXES)
+        or upper == "AUTH"
+        or "AUTH_" in upper
+        or "_AUTH" in upper
+    ):
+        return True
+    if upper.startswith("OPENCLI_"):
+        return False
+    return upper in _CREDENTIAL_ENV_NAMES or upper.startswith(_CREDENTIAL_ENV_PREFIXES)
+
+
 class OpenCLIWebChatModel(BaseChatModel):
     """LangChain chat-model bridge backed by ChatGPT Web through OpenCLI.
 
@@ -534,7 +585,7 @@ class OpenCLIWebChatModel(BaseChatModel):
         return self.bind(tools=formatted, **kwargs)
 
     def _environment(self) -> dict[str, str]:
-        env = os.environ.copy()
+        env = {k: v for k, v in os.environ.items() if not _is_credential_env_name(k)}
         if self.profile:
             env["OPENCLI_PROFILE"] = self.profile
         return env

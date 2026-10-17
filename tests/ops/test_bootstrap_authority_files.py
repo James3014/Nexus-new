@@ -298,8 +298,8 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "scripts/ops/trusted_merge_lane_gate.py" in agents
     assert "scripts/ops/trusted_merge_lane_gate.py" in contract
     assert (
-        "From PR #1061, protected-merge PRs carry `nexus.merge_lane_binding.v1`"
-        in normalized_agents
+        "Historical (retired #2006/#2258/#2286): from PR #1061 PRs carried"
+        " `nexus.merge_lane_binding.v1`" in normalized_agents
     )
     assert "Starting with PR #1061" in contract
     assert "Trusted verifier (default branch)" in agents

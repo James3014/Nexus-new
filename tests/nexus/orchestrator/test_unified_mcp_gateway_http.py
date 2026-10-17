@@ -627,3 +627,30 @@ def test_health_hmac_key_failed_write_leaves_no_temp_file(tmp_path, monkeypatch)
     with pytest.raises(mod.HealthHmacKeyError):
         mod.load_or_create_key(key_dir / "key")
     assert os.listdir(key_dir) == []
+
+
+def test_health_hmac_key_length_rule_is_exactly_64_hex_chars(tmp_path):
+    from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
+
+    good = tmp_path / "good.key"
+    good.write_text("ab" * 32 + "\n")
+    good.chmod(0o600)
+    assert len(load_or_create_key(good)) == 32
+    # 66 hex chars: even length and valid hex, so bytes.fromhex would accept it;
+    # only the exact `!= 64` rule rejects it (a `< 64` rule would not).
+    long_key = tmp_path / "long.key"
+    long_key.write_text("ab" * 33 + "\n")
+    long_key.chmod(0o600)
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(long_key)
+
+
+def test_health_hmac_key_is_fsynced_before_link(tmp_path, monkeypatch):
+    from scripts.ops import gateway_health_hmac as mod
+
+    events = []
+    real_fsync, real_link = mod.os.fsync, mod.os.link
+    monkeypatch.setattr(mod.os, "fsync", lambda fd: (events.append("fsync"), real_fsync(fd))[1])
+    monkeypatch.setattr(mod.os, "link", lambda a, b: (events.append("link"), real_link(a, b))[1])
+    mod.load_or_create_key(tmp_path / "state" / "key")
+    assert events.index("fsync") < events.index("link")

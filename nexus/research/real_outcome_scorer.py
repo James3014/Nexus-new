@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.1"
+SCORER_VERSION = "1.2.2"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -1414,6 +1414,25 @@ def _run_modules(
     return [ctx.runner.run(env, tree, tree_id, m, (), run_idx, role) for m in modules]
 
 
+def _run_failures(
+    tree: str, targets: Sequence[str], results: Sequence[RunResult], run_idx: int
+) -> list[dict[str, Any]]:
+    """Amendment A7 (diagnostic only, never changes a label): oracle-module runs that timed
+    out or were killed by a signal (negative or >128 exit code). Exit code 2 is a collection
+    error and is NOT listed: it is how an F2P module normally fails on BASE+T."""
+    return [
+        {
+            "tree": tree,
+            "target": t,
+            "run": run_idx,
+            "exit_code": r.exit_code,
+            "timed_out": r.timed_out,
+        }
+        for t, r in zip(targets, results)
+        if r.timed_out or r.exit_code < 0 or r.exit_code > 128
+    ]
+
+
 def score_task(
     task_dir: Path, ctx: ScoreContext, candidate_override: str | None = None
 ) -> dict[str, Any]:
@@ -1582,6 +1601,7 @@ def _score_task(
         # Oracle (§6.2): candidate-independent.
         tq = time.monotonic()
         base_runs, gold_runs = [], []
+        run_failure_diagnostics: list[dict[str, Any]] = []
         gold_by_module: dict[str, list[dict[str, str]]] = {m: [] for m in modules}
         for i in range(ORACLE_RUNS):
             gr = _run_modules(ctx, env, wts["gold"], gold_tree, modules, i)
@@ -1597,7 +1617,9 @@ def _score_task(
                 )
                 return _finish(receipt, timing, t0, ctx)
             gold_runs.append(_merge(gr))
-            base_runs.append(_merge(_run_modules(ctx, env, wts["baset"], baset_tree, modules, i)))
+            br = _run_modules(ctx, env, wts["baset"], baset_tree, modules, i)
+            run_failure_diagnostics += _run_failures("BASE+T", modules, br, i)
+            base_runs.append(_merge(br))
         nodes = sorted(set().union(*gold_runs, *base_runs))
         flaky = sorted(
             n
@@ -1767,6 +1789,10 @@ def _score_task(
             d_trees,
         )
         timing["candidate_seconds"] = round(time.monotonic() - tc, 1)
+        run_failure_diagnostics += evaluation.pop("cand_run_failures", [])
+        receipt["run_failure_diagnostics"] = sorted(
+            run_failure_diagnostics, key=lambda d: (d["tree"], d["target"], d["run"])
+        )
         receipt.update(evaluation)
         evaluated = evaluation["evaluated_label"]
         if evaluated == NOT_SCORABLE_ORACLE_INVALID:
@@ -1857,16 +1883,22 @@ def _evaluate_candidate(
 ) -> dict[str, Any]:
     """Spec §6.3-§6.4, plus v2 P2P(d) when ``d_targets`` is not None."""
     out: dict[str, Any] = {}
+    cand_run_failures: list[dict[str, Any]] = []
+    out["cand_run_failures"] = cand_run_failures
     flaky_dropped = set(flaky)
     goldref_tree = repo.tree_id(wts["goldref"]) if "goldref" in wts else None
+
     # 1. oracle modules on CAND+T with majority rerun.
-    runs = [_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, 0, CAND_ROLE))]
+    def cand_run(i: int) -> dict[str, str]:
+        res = _run_modules(ctx, env, wts["candt"], candt_tree, modules, i, CAND_ROLE)
+        cand_run_failures.extend(_run_failures("CAND+T", modules, res, i))
+        return _merge(res)
+
+    runs = [cand_run(0)]
     watched = list(f2p) + list(p2p_a)
     if any(_get(runs[0], n) != PASS for n in watched):
         for i in (1, 2):
-            runs.append(
-                _merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, i, CAND_ROLE))
-            )
+            runs.append(cand_run(i))
 
     def majority_pass(node: str) -> bool:
         if len(runs) == 1:
