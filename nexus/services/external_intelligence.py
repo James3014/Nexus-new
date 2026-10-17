@@ -14,6 +14,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from nexus.services.eia_source_excerpt import (
+    EXCERPT_SCHEMA,
+    ExcerptError,
+    build_python_excerpt,
+    validate_symbol_names,
+)
+
 REQUEST_SCHEMA = "external_intelligence_request.v1"
 REQUEST_SCHEMA_V1 = "external_intelligence_request.v1"
 REQUEST_SCHEMA_V2 = "external_intelligence_request.v2"
@@ -122,6 +129,35 @@ def compute_evidence_ref(entry: Mapping[str, Any]) -> str:
     return f"{kind}:{ref}@{token}"
 
 
+def _valid_excerpt_entry(entry: Mapping[str, Any]) -> bool:
+    """An excerpt entry must declare itself: Python source_file, truncated, labelled."""
+    excerpt = entry.get("excerpt")
+    if not isinstance(excerpt, Mapping) or excerpt.get("schema") != EXCERPT_SCHEMA:
+        return False
+    if entry.get("kind") != "source_file" or entry.get("truncated") is not True:
+        return False
+    if not str(entry.get("ref") or "").endswith(".py"):
+        return False
+    slices = excerpt.get("slices")
+    if not isinstance(slices, list) or not slices:
+        return False
+    content = str(entry.get("content") or "")
+    if not content.startswith("# NEXUS SOURCE EXCERPT — NOT THE WHOLE FILE\n"):
+        return False
+    if f"# full_file_sha256: {entry.get('source_sha256')}\n" not in content:
+        return False
+    for item in slices:
+        if not isinstance(item, Mapping):
+            return False
+        header = (
+            f"## SLICE {item.get('name')} ({item.get('kind')}) "
+            f"lines {item.get('start_line')}-{item.get('end_line')}\n"
+        )
+        if header not in content:
+            return False
+    return True
+
+
 def validate_context_pack(context_pack: Any) -> dict[str, Any]:
     if not isinstance(context_pack, Mapping):
         raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
@@ -166,6 +202,8 @@ def validate_context_pack(context_pack: Any) -> dict[str, Any]:
         if len(raw_bytes) != entry["included_bytes"]:
             raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
         if compute_evidence_ref(entry) != entry["evidence_ref"]:
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+        if "excerpt" in entry and not _valid_excerpt_entry(entry):
             raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
 
     material = {
@@ -322,13 +360,22 @@ def build_context_pack(
         revision = _bounded_text(source.get("revision"), "source_revision", allow_empty=True)
         provenance = _bounded_text(source.get("provenance") or "unknown", "source_provenance")
         content = str(source.get("content") or "")
-        normalized.append({
+        item: dict[str, Any] = {
             "kind": kind,
             "ref": ref,
             "revision": revision,
             "provenance": provenance,
             "content": content,
-        })
+        }
+        if source.get("excerpt_symbols") is not None:
+            # Optional symbol scope for an oversized Python contract source (#2357).
+            if kind != "source_file":
+                raise ExternalIntelligenceError("INVALID_CONTEXT_SOURCE")
+            try:
+                item["excerpt_symbols"] = validate_symbol_names(source["excerpt_symbols"])
+            except ExcerptError as exc:
+                raise ExternalIntelligenceError(str(exc)) from exc
+        normalized.append(item)
     normalized.sort(key=lambda item: (item["kind"], item["ref"], item["revision"]))
 
     # Contract entries (Task Card, mutation-path sources/absences) are budgeted
@@ -338,6 +385,38 @@ def build_context_pack(
     # The final entries order stays the deterministic (kind, ref, revision) sort.
     remaining = max_bytes
     built: dict[int, dict[str, Any]] = {}
+
+    def _budget_exceeded(
+        source: dict[str, Any], raw: bytes, remaining: int, reason: str | None
+    ) -> ExternalIntelligenceError:
+        detail: dict[str, Any] = {
+            "kind": source["kind"],
+            "ref": source["ref"],
+            "source_bytes": len(raw),
+            "remaining_bytes": remaining,
+            "max_bytes": max_bytes,
+        }
+        if reason:
+            detail["reason"] = reason
+        return ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED", detail=detail)
+
+    def _excerpt_entry(source: dict[str, Any], raw: bytes) -> dict[str, Any]:
+        # Explicit, labelled excerpt instead of a silent cut: the evidence anchor
+        # (source_sha256/source_bytes) stays the complete file at its revision.
+        symbols = source.get("excerpt_symbols") or []
+        if source["kind"] != "source_file" or not symbols:
+            raise ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED")
+        try:
+            text, excerpt = build_python_excerpt(
+                source["ref"], source["content"], symbols, full_file_sha256=_sha256(raw)
+            )
+        except ExcerptError as exc:
+            raise ExternalIntelligenceError(str(exc)) from exc
+        entry = _entry(source, text, raw)
+        entry["truncated"] = True
+        entry["excerpt"] = excerpt
+        entry["evidence_ref"] = compute_evidence_ref(entry)
+        return entry
 
     def _entry(source: dict[str, Any], clipped: str, raw: bytes) -> dict[str, Any]:
         clipped_bytes = clipped.encode("utf-8")
@@ -363,16 +442,16 @@ def build_context_pack(
     for index in contract_order:
         raw = normalized[index]["content"].encode("utf-8")
         if len(raw) > remaining:
-            raise ExternalIntelligenceError(
-                "CONTRACT_CONTEXT_BUDGET_EXCEEDED",
-                detail={
-                    "kind": normalized[index]["kind"],
-                    "ref": normalized[index]["ref"],
-                    "source_bytes": len(raw),
-                    "remaining_bytes": remaining,
-                    "max_bytes": max_bytes,
-                },
-            )
+            source = normalized[index]
+            if source["kind"] != "source_file" or not source.get("excerpt_symbols"):
+                reason = "no symbol scope" if source["kind"] == "source_file" else None
+                raise _budget_exceeded(source, raw, remaining, reason)
+            excerpt_entry = _excerpt_entry(source, raw)
+            if excerpt_entry["included_bytes"] > remaining:
+                raise _budget_exceeded(source, raw, remaining, "excerpt exceeds budget")
+            built[index] = excerpt_entry
+            remaining -= excerpt_entry["included_bytes"]
+            continue
         built[index] = _entry(normalized[index], normalized[index]["content"], raw)
         remaining -= len(raw)
     for index, source in enumerate(normalized):

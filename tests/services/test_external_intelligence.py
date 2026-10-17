@@ -1892,4 +1892,6 @@ def test_context_budget_refusal_carries_path_and_size_detail():
         "source_bytes": 60,
         "remaining_bytes": 40,
         "max_bytes": 100,
+        # #2357 step 2a: an oversized source_file with no excerpt_symbols says why.
+        "reason": "no symbol scope",
     }
