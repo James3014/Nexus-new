@@ -77,9 +77,12 @@ BYPASS_FLAG_ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
     ),
     ("nexus/executors/worker_registry.py", "--auto-approve"): (
         1,
-        "#2195 CLINE_AUTO_APPROVE_FLAG constant; argv pins it to false",
+        "#2195 CLINE_AUTO_APPROVE_FLAG constant; #2332 argv refuses it in any spelling",
     ),
-    ("nexus/executors/worker_registry.py", "--yolo"): (1, "#2195 CLINE_YOLO_FLAGS deny-list"),
+    ("nexus/executors/worker_registry.py", "--yolo"): (
+        1,
+        "#2332 CLINE_YOLO_FLAG; run settings leave only CLINE_ADMITTED_TOOLS enabled",
+    ),
     ("nexus/services/external_worker_runtime.py", "--auto-approve"): (
         1,
         "#2195 cline --auto-approve true|false bound to the request",

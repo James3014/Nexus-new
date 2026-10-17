@@ -191,9 +191,70 @@ AGY_RUN_HOME_COPIED_FILES = (
 # db/, sessions/, cache/ or hooks).  Cline refreshes the access token into the
 # disposable copy; the refresh token is not rotated, so the real file stays valid.
 CLINE_RUN_HOME_COPIED_FILES = (Path(".cline") / "data" / "settings" / "providers.json",)
-# Workspace entries cline loads on a later run in the target (hooks, rules);
-# the Seatbelt profile keeps them read-only for the worker.
-CLINE_TARGET_CUSTOMIZATION_PATHS = (".cline", ".clinerules")
+# Workspace entries cline loads on a later run in the target (hooks, rules,
+# skills); the Seatbelt profile keeps them read-only for the worker.  Probed in
+# the cline 3.0.69 bundle (#2332): ``.clinerules``, ``.cline`` and ``.agents``
+# (hooks/skills/rules/workflows) plus ``AGENTS.md``.  ``.agents`` is also in
+# ``TARGET_AGY_CUSTOMIZATION_PATHS``.  ``AGENTS.md`` stays writable on purpose:
+# it is instruction text only (never executed), repositories edit it as normal
+# work, and every change to it is part of the reviewed candidate diff.
+CLINE_TARGET_CUSTOMIZATION_PATHS = (".cline", ".clinerules", ".agents")
+# Cline tool admission (#2332, Owner ruling relayed for #2332: auto-approve
+# file-editing tools only, because cline already runs inside the Seatbelt).
+# Cline 3.0.69 has no per-tool approval on its CLI, and headless approval is
+# refused for every tool, so the run uses cline's yolo mode (all *enabled* tools
+# auto-approved; its tool set is read_files, editor, run_commands, skills and
+# submit_and_exit, no sub-agents/teams) and a global-settings file that the
+# worker cannot write disables every tool outside ``CLINE_ADMITTED_TOOLS``.
+# The delivery check also refuses any run whose event stream shows another
+# tool, so a settings file that failed to load (cline then falls back to its
+# defaults) is never delivery.
+CLINE_ADMITTED_TOOLS = frozenset({"read_files", "editor", "apply_patch", "submit_and_exit"})
+CLINE_DISABLED_TOOLS = (
+    "run_commands",
+    "fetch_web_content",
+    "skills",
+    "ask_question",
+    "search_codebase",
+)
+CLINE_SUPPORTED_VERSIONS = frozenset({"3.0.69"})
+# Run-HOME paths cline loads as code or configuration (hooks, plugins,
+# skills, rules, MCP servers).  The worker may not plant them mid-run: the
+# whole ``~/.cline`` and ``~/Documents/Cline`` trees are write-denied except
+# the data directory (sessions, db, logs, the refreshed providers.json).
+CLINE_RUN_HOME_PROTECTED_PATHS = (Path(".cline"), Path("Documents"), Path(".agents"))
+CLINE_RUN_HOME_WRITABLE_PATHS = (Path(".cline") / "data",)
+
+
+def cline_run_settings() -> dict[str, Any]:
+    """Cline global settings for one run: only the admitted tools stay enabled."""
+    return {
+        "disabledTools": list(CLINE_DISABLED_TOOLS),
+        "tools": {"web_search": {"enabled": False}},
+        "telemetryOptOut": True,
+        "autoUpdateEnabled": False,
+    }
+
+
+def write_cline_run_config(config_dir: Path) -> dict[str, str]:
+    """Write cline's per-run settings into ``config_dir``; the env pointing at them.
+
+    ``config_dir`` must lie outside every Seatbelt-writable path, so the
+    worker can neither re-enable a tool nor add an MCP server mid-run.
+    """
+    config_dir.mkdir(parents=True, exist_ok=True)
+    settings = config_dir / "global-settings.json"
+    mcp = config_dir / "cline_mcp_settings.json"
+    settings.write_text(json.dumps(cline_run_settings(), sort_keys=True), encoding="utf-8")
+    mcp.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+    for path in (settings, mcp):
+        os.chmod(path, 0o400)
+    return {
+        "CLINE_GLOBAL_SETTINGS_PATH": str(settings),
+        "CLINE_MCP_SETTINGS_PATH": str(mcp),
+    }
+
+
 AGY_RUN_HOME_SETTINGS = Path(".gemini") / "antigravity-cli" / "settings.json"
 AGY_RUN_HOME_PROJECTS = Path(".gemini") / "config" / "projects"
 
@@ -445,6 +506,9 @@ def build_seatbelt_profile(
     extra_protected_target_names: tuple[str, ...] = (),
     source_home: Optional[Path] = None,
     target_root: Optional[Path] = None,
+    extra_protected_paths: tuple[Path, ...] = (),
+    extra_reallowed_paths: tuple[Path, ...] = (),
+    deny_process_fork: bool = False,
 ) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -477,7 +541,13 @@ def build_seatbelt_profile(
         for name in extra_protected_target_names:
             entry = _sbpl_path(writable_target / name)
             deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
-    reallow: list[str] = []
+    # Absolute paths inside a writable root that stay read-only (e.g. cline's
+    # run-HOME hooks/plugins, #2332); ``extra_reallowed_paths`` re-opens a
+    # subtree of them (cline's data directory).
+    for path in extra_protected_paths:
+        entry = _sbpl_path(path)
+        deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
+    reallow: list[str] = [f'  (subpath "{_sbpl_path(path)}")' for path in extra_reallowed_paths]
     if run_home is not None:
         # The worker may not rewrite its own permission profile or the agy
         # config (hooks, MCP, plugins); only the project registry stays
@@ -485,7 +555,7 @@ def build_seatbelt_profile(
         settings = _sbpl_path(run_home / AGY_RUN_HOME_SETTINGS)
         config = _sbpl_path(run_home / ".gemini" / "config")
         deny += [f'  (literal "{settings}")', f'  (literal "{config}")', f'  (subpath "{config}")']
-        reallow = [f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")']
+        reallow.append(f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")')
     credential_denies: list[str] = []
     for home in _credential_homes(source_home):
         for relative in SOURCE_HOME_CREDENTIAL_PATHS:
@@ -524,6 +594,10 @@ def build_seatbelt_profile(
     # Reads of the real home's credential files (#1752); appended last so the
     # leading profile lines stay stable.
     lines += ["(deny file-read*", *credential_denies, ")"]
+    # A worker whose tools all run in-process (cline, #2332) may not start
+    # any process: a shell tool fails with EPERM whatever cline's settings say.
+    if deny_process_fork:
+        lines.append("(deny process-fork)")
     return "\n".join(lines) + "\n"
 
 
