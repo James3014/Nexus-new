@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
