@@ -2406,6 +2406,18 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                         "owner_confirmation": {"type": "boolean", "const": True},
                         "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
                         "fail_to_pass_required": {"type": "boolean", "default": False},
+                        "rie_knowledge_identity": {
+                            "type": "object",
+                            "description": "Optional PR identity for Planner-selected codeintel RIE knowledge applicability (#1579).",
+                            "required": ["repository", "pr_number", "base_sha"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+                                "pr_number": {"type": "integer", "minimum": 1},
+                                "base_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+                                "current_main_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+                            },
+                        },
                         "workforce_demands": {"type": "object"},
                         "workforce_admission": {"type": "object"},
                         "planner_output": {"type": "object"},

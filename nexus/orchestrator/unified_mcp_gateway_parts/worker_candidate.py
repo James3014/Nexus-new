@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
@@ -52,6 +53,35 @@ def _gateway():
     # Late binding: the gateway imports this module at its top level, so its own
     # (and its patched) names are only resolved once a method runs.
     return importlib.import_module("nexus.orchestrator.unified_mcp_gateway")
+
+
+_RIE_IDENTITY_KEYS = frozenset({"repository", "pr_number", "base_sha", "current_main_sha"})
+
+
+def _rie_knowledge_identity(raw: Any, head: str) -> dict[str, Any]:
+    """Validate the optional RIE knowledge identity hint (#1579) against the bound HEAD.
+
+    The hint is context for the Planner-selected codeintel hook only; it selects,
+    routes and gates nothing.  It is normalized here, then signed into the bound
+    request.  ``head_sha`` is never caller-supplied: the hook uses the leased
+    target revision.  ``base_sha`` must be an ancestor of the bound controller
+    HEAD, so the changed-path set RIE sees (``base_sha..HEAD``) is a real slice of
+    this repository's history.  ``current_main_sha`` is snapshot metadata only: it
+    may be on a sibling history (main moved on) and keeps the hook's default
+    (``base_sha``) when omitted, so a retry after HEAD moves keeps the same hint.
+    """
+    from nexus.services.rie_knowledge_codeintel_hook import validate_identity_hint
+
+    if not isinstance(raw, Mapping) or not set(raw) <= _RIE_IDENTITY_KEYS:
+        raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_INVALID")
+    normalized = validate_identity_hint(raw)
+    if normalized is None:
+        raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_INVALID")
+    try:
+        _gateway()._git("merge-base", "--is-ancestor", normalized["base_sha"], head)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR:base_sha") from exc
+    return normalized
 
 
 class _WorkerCandidateMixin(_WorkerCandidateBase):
@@ -109,6 +139,7 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             "owner_confirmation", "authority_change_candidate_confirmation",
             "workforce_demands", "workforce_admission", "planner_output",
             "task_card_path", "task_card_hash", "fail_to_pass_required",
+            "rie_knowledge_identity",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -150,6 +181,11 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             raise _gateway().GatewayInputError("TASK_CARD_HASH_INVALID")
         head = self._exact_hash(_gateway()._git("rev-parse", "HEAD").strip(), "expected_head", 40)
         _gateway()._require_bound_controller(head)
+        rie_identity = (
+            _rie_knowledge_identity(arguments["rie_knowledge_identity"], head)
+            if "rie_knowledge_identity" in arguments
+            else None
+        )
         contract_binding = {
             "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
             "contract_hash": None,
@@ -334,6 +370,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         bound["lifecycle_identity_required"] = True
         bound.update(readiness_binding)
         bound.update(evidence_binding)
+        if rie_identity is not None:
+            bound["rie_knowledge_identity"] = rie_identity
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
         if fail_to_pass_required:
@@ -391,6 +429,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         request["canonical_dispatch_envelope"] = canonical_dispatch_envelope
         request.update(readiness_binding)
         request.update(evidence_binding)
+        if rie_identity is not None:
+            request["rie_knowledge_identity"] = dict(rie_identity)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
         if fail_to_pass_required:
