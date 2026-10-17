@@ -15,7 +15,7 @@ _DSH_WORKFLOW = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "nexus
 def _dsh_skip_host_model_catalog(request, monkeypatch):
     """The #2477 pre-spawn model check reads the host's live Agy catalog cache; DSH tests
     that are not about it must not depend on what the host pool serves today."""
-    if request.module.__name__ != "test_nexus_dsh_model_served":
+    if not request.module.__name__.endswith("test_nexus_dsh_model_served"):
         monkeypatch.setenv("NEXUS_DSH_SKIP_MODEL_CATALOG_CHECK", "1")
 
 

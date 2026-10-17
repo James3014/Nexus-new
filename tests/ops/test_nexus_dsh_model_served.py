@@ -118,3 +118,14 @@ def test_non_agy_provider_is_not_checked(tmp_path: Path, ops_root: Path) -> None
     _catalog(ops_root, "a", SERVED)
     ctx, proc = _start(tmp_path, UNSERVED_PATCH.replace("nexus-agy-pool", "other-provider"))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_catalog_with_wrong_digest_is_ignored(tmp_path: Path, ops_root: Path) -> None:
+    _catalog(ops_root, "fresh", SERVED)
+    _catalog(ops_root, "forged", [*SERVED, "gemini-3.1-pro-high"])
+    path = ops_root / "model-catalog" / "forged.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["catalog_sha256"] = "0" * 64
+    path.write_text(json.dumps(data), encoding="utf-8")
+    ctx, proc = _start(tmp_path, UNSERVED_PATCH)
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr

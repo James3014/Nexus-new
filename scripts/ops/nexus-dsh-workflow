@@ -1532,6 +1532,9 @@ _RUFF_CONFIG_FILES = ("pyproject.toml", "ruff.toml", ".ruff.toml")
 def _materialize_base_tree(repo: Path, base: str, paths: list[str], dest: Path) -> None:
     """Write the base version of each path (if it existed) plus head ruff config."""
     for rel in paths:
+        parts = Path(rel).parts
+        if Path(rel).is_absolute() or ".." in parts or not parts:
+            continue  # never write outside the temp tree
         shown = subprocess.run(
             ["git", "show", f"{base}:{rel}"], cwd=str(repo), capture_output=True, check=False
         )

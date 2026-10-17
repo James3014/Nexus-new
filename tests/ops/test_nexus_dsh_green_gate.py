@@ -412,3 +412,24 @@ def test_missing_python_receipt_records_intended_argv(repo: Path, tmp_path: Path
     target_run = receipt.get("commands", {}).get("target_tests", [])
     assert target_run[:6] == [python_path, "-m", "pytest", "-p", "no:cacheprovider", "-q"]
     assert target_run[-1:] == receipt["contract"]["target_test_nodes"]
+
+
+def test_base_tree_materialization_never_writes_outside_the_temp_dir(
+    repo: Path, tmp_path: Path
+) -> None:
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    outside = tmp_path / "escaped.py"
+    base = _git(repo, "rev-parse", "HEAD")
+    guard._materialize_base_tree(repo, base, ["../escaped.py", str(outside), "app.py"], dest)
+    assert not outside.exists()
+    assert (dest / "app.py").is_file()
+
+
+def test_editing_the_text_of_a_legacy_debt_line_counts_as_new(repo: Path, tmp_path: Path) -> None:
+    # Identity includes the source line text, like the CI exact-base gate.
+    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
+    _fix(repo, "import os  # touched\n\n\ndef value():\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == guard.EXIT_BLOCKED
+    assert receipt["reason_codes"] == ["LINT_FAILURE"]
