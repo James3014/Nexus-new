@@ -414,6 +414,7 @@ def test_orchestrator_finalize_attaches_ctx_memory_trace_before_receipt(tmp_path
             plan=SimpleNamespace(search_symbols=["target_symbol"]),
             localized_files=[SimpleNamespace(path="target.py")],
             solve_eligible=False,
+            memory_enabled=True,
         ),
         gov=GovernanceContext(),
     )

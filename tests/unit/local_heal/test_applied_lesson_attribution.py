@@ -178,6 +178,7 @@ def test_c6p_block_renders_canonical_lesson_before_episode_rows(tmp_path, monkey
         final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
         user_prompt="fix the parser crash",
         problem_statement="fix the parser crash on empty token stream",
+        memory_enabled=True,
         retrieved_lesson_ids=[],
         _memory_influence_trace=SimpleNamespace(selected_ids=["lep:ep-9"], prompt_included=False),
     )
@@ -481,7 +482,7 @@ def test_retry_memory_off_injects_nothing_and_leaves_trace_empty(tmp_path, monke
     with pytest.raises(stop):
         _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
 
-    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert not captured.get("memory_lessons")
     assert op._memory_influence_trace.selected_ids == []
     assert not op._memory_influence_trace.prompt_included
     assert op.retrieved_lesson_ids == []
@@ -632,3 +633,82 @@ def test_canonical_query_omits_embedding_when_unsupported(tmp_path, monkeypatch)
         query_text="empty list indexing", limit=3
     )
     assert captured["called"] and [r["lesson_id"] for r in rows] == [phys]
+
+
+# --- nexus-learning#96 DROP: retry-lesson injection is OFF by default ---------------
+
+
+def _real_op(tmp_path: Path, **over):
+    from nexus.services.local_heal.context import OperationalContext
+
+    op = OperationalContext(
+        instance_id="task-retry",
+        repo_dir=tmp_path,
+        problem_statement="fix the parser crash on empty token stream",
+        user_prompt="fix the parser crash",
+        final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        **over,
+    )
+    op.retrieved_lesson_ids = []
+    return op
+
+
+def test_default_contexts_have_memory_disabled(tmp_path):
+    from nexus.services.local_heal.pipeline import HealContext
+
+    assert _real_op(tmp_path).memory_enabled is False
+    legacy = HealContext(instance_id="t", repo_dir=tmp_path, problem_statement="p")
+    assert legacy.to_v2().op.memory_enabled is False
+
+
+def test_default_context_retry_injects_no_lessons(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _real_op(tmp_path)  # memory_enabled NOT passed: default
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert not captured.get("memory_lessons")
+    assert op.retrieved_lesson_ids == []
+    assert not op._memory_influence_trace.prompt_included
+
+
+def test_explicit_memory_enabled_context_still_injects(tmp_path, monkeypatch):
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _real_op(tmp_path, memory_enabled=True)
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert title in captured["memory_lessons"]
+    assert lsn_id in op.retrieved_lesson_ids
+
+
+def test_missing_memory_enabled_attribute_is_treated_as_off(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _retry_op(tmp_path)
+    del op.memory_enabled  # stub without the field must not fall back to "on"
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert not captured.get("memory_lessons")
+
+
+def test_semantic_retry_seed_can_still_enable_memory(tmp_path):
+    from nexus.services.local_heal.pipeline import HealContext
+
+    ctx = HealContext(instance_id="t", repo_dir=tmp_path, problem_statement="p")
+    ctx.route_context = {
+        "semantic_retry_seed": {"memory_enabled": True, "memory_arm": "nexus_memory_on"}
+    }
+    op = ctx.to_v2().op
+    assert op.memory_enabled is True
+    assert op.memory_arm == "nexus_memory_on"
