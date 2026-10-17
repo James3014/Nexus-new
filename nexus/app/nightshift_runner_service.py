@@ -1485,9 +1485,11 @@ class AutoResearchNightShift:
         with open(lock_path, "a+b") as f:
             try:
                 fcntl.flock(f, fcntl.LOCK_EX)
-                f.seek(0)
-                content = f.read().decode("utf-8")
-                pending = json.loads(content) if content else []
+                if self.pending_manifest_path.exists():
+                    content = self.pending_manifest_path.read_text(encoding="utf-8")
+                    pending = json.loads(content) if content.strip() else []
+                else:
+                    pending = []
                 # Remove prior candidate for same task
                 pending = [p for p in pending if p["task"] != task_name]
                 pending.append(pending_item)
