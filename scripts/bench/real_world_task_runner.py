@@ -472,32 +472,50 @@ def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
 AGY_STAGED_SYMLINK_REFUSED = "agy_staged_symlink_refused"
 
 
-def _has_symlink(root: Path) -> bool:
-    for directory, dirnames, filenames in os.walk(root):
-        for name in (*dirnames, *filenames):
-            if (Path(directory) / name).is_symlink():
-                return True
-    return False
+def _tree_inventory(root: Path) -> set[Path] | None:
+    """Relative regular files under ``root``; ``None`` on any symlink, other
+    non-regular entry or traversal error (an unreadable directory must not
+    make its files look deleted)."""
+    files: set[Path] = set()
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    try:
+        for directory, dirnames, filenames in os.walk(root, onerror=fail):
+            for name in (*dirnames, *filenames):
+                path = Path(directory) / name
+                if path.is_symlink():
+                    return None
+            for name in filenames:
+                path = Path(directory) / name
+                if not path.is_file():
+                    return None
+                files.add(path.relative_to(root))
+    except OSError:
+        return None
+    return files
 
 
 def _sync_staged_case(staged: Path, case_dir: Path) -> str | None:
     """Mirror the agy run's regular-file edits from a staged copy back into the case dir.
 
-    Fail closed: when either tree holds any symlink nothing is mirrored and
-    ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so a symlink can neither
-    redirect a write nor hide the deletion of a file.  Writes use
-    ``O_NOFOLLOW``.  Returns ``None`` after a complete mirror.
+    Fail closed: when either tree holds any symlink or cannot be fully read,
+    nothing is mirrored and ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so a
+    symlink or an unreadable directory can neither redirect a write nor hide
+    the deletion of a file.  Writes use ``O_NOFOLLOW``.  Returns ``None``
+    after a complete mirror.
     """
-    if _has_symlink(staged) or _has_symlink(case_dir):
+    staged_files = _tree_inventory(staged)
+    case_files = _tree_inventory(case_dir)
+    if staged_files is None or case_files is None:
         return AGY_STAGED_SYMLINK_REFUSED
-    staged_files = {path.relative_to(staged) for path in staged.rglob("*") if path.is_file()}
-    for path in sorted(case_dir.rglob("*"), reverse=True):
-        if path.is_file() and path.relative_to(case_dir) not in staged_files:
-            path.unlink()
+    for rel in sorted(case_files - staged_files):
+        (case_dir / rel).unlink()
     for rel in sorted(staged_files):
         source, dest = staged / rel, case_dir / rel
         data = source.read_bytes()
-        if dest.is_file() and dest.read_bytes() == data:
+        if rel in case_files and dest.read_bytes() == data:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)

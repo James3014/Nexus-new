@@ -470,3 +470,26 @@ def test_result_observer_cannot_alter_the_receipt(bench_pool):
 
     assert receipt.exit_code == 1
     assert receipt.outcome != "EXECUTION_COMPLETED"
+
+
+def test_unreadable_staged_dir_refuses_instead_of_deleting(tmp_path):
+    # Codex r3: an unreadable staged directory must not make its files look deleted.
+    case_dir = tmp_path / "case"
+    (case_dir / "notes").mkdir(parents=True)
+    (case_dir / "notes" / "user_draft.md").write_text("draft\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    (staged / "notes").mkdir(parents=True)
+    (staged / "notes" / "user_draft.md").write_text("draft\n", encoding="utf-8")
+    real_walk = runner.os.walk
+
+    def walk(top, onerror=None, **kwargs):
+        if Path(top) == staged and onerror is not None:
+            onerror(PermissionError(13, "Permission denied", str(staged / "notes")))
+        yield from real_walk(top, onerror=onerror, **kwargs)
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(runner.os, "walk", walk):
+        assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
+
+    assert (case_dir / "notes" / "user_draft.md").read_text(encoding="utf-8") == "draft\n"
