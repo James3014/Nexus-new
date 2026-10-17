@@ -1390,6 +1390,79 @@ def test_live_verdict_core_identity_matches_real_core(live):
     assert verdict["contract_universe_identity"].startswith("sha256:")
 
 
+def test_verdict_records_core_universe_identity_matches_flag(tmp_path):
+    # #2451: the host states the one comparison that must hold, so nobody
+    # compares contract_universe_identity (a different formula) with Core's.
+    contract = _universe_contract(tmp_path)
+    ok = build_core_verdict(contract=contract, projection=_verified_projection(1))
+    assert ok["core_universe_identity_matches"] is True
+    assert ok["contract_universe_identity"] != ok["coverage"]["universe_identity"]
+    wrong = build_core_verdict(
+        contract=contract, projection=_verified_projection(1, identity="sha256:" + "3" * 64)
+    )
+    assert wrong["core_universe_identity_matches"] is False
+    assert "CORE_COVERAGE_IDENTITY_MISMATCH" in wrong["host_reason_codes"]
+    failed = build_core_verdict(contract=contract, projection=None, transport_error="BOOM")
+    assert failed["core_universe_identity_matches"] is False
+    no_coverage = _verified_projection(1)
+    no_coverage["core_response"]["verification"]["coverage"] = None
+    missing = build_core_verdict(contract=contract, projection=no_coverage)
+    assert missing["core_universe_identity_matches"] is False
+    legacy = build_core_verdict(
+        contract=SimpleNamespace(task_id="legacy"), projection=_verified_projection(1)
+    )
+    assert legacy["core_universe_identity_matches"] is None
+
+
+def test_verdict_identity_flag_is_false_when_core_response_identity_differs(tmp_path):
+    # Coverage carries the card identity, but Core's response hashes report
+    # another one: the verdict blocks and the flag must not read True.
+    projection = _verified_projection(1)
+    projection["core_response"]["hashes"] = {"universe_identity": "sha256:" + "4" * 64}
+    verdict = build_core_verdict(contract=_universe_contract(tmp_path), projection=projection)
+    assert "CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH" in verdict["host_reason_codes"]
+    assert verdict["core_universe_identity_matches"] is False
+    declared = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    projection["core_response"]["hashes"] = {"universe_identity": core_universe_identity(declared)}
+    agreeing = build_core_verdict(contract=_universe_contract(tmp_path), projection=projection)
+    assert agreeing["core_universe_identity_matches"] is True
+
+
+def test_verdict_identity_flag_is_independent_of_blocking(tmp_path):
+    # Identities agree, but an unpinned Core blocks: the flag still reads True.
+    verdict = build_core_verdict(
+        contract=_universe_contract(tmp_path),
+        projection=_verified_projection(1, "CORE_REVISION_MISMATCH"),
+    )
+    assert verdict["blocking"] is True
+    assert verdict["core_universe_identity_matches"] is True
+
+
+def test_verdict_identity_flag_is_false_when_core_identity_unavailable(tmp_path, monkeypatch):
+    from nexus.orchestrator import ambient_core
+
+    def unavailable(_universe):
+        raise RuntimeError("CORE_UNIVERSE_IDENTITY_UNAVAILABLE")
+
+    monkeypatch.setattr(ambient_core, "core_universe_identity", unavailable)
+    verdict = build_core_verdict(
+        contract=_universe_contract(tmp_path), projection=_verified_projection(1)
+    )
+    assert verdict["core_universe_identity"] is None
+    assert verdict["core_universe_identity_matches"] is False
+    assert verdict["blocking"] is True
+
+
+def test_live_receipts_record_core_universe_identity_matches(live):
+    # Real pinned Core: the verified receipt of every declared scenario.
+    for name in ("complete", "missing", "fail", "cond_missing", "duplicate"):
+        verdict = _verdict(live[name])
+        assert verdict["core_universe_identity_matches"] is True, name
+        assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]
+    # A legacy task gets no Core verdict at all (the unit test covers None).
+    assert live["legacy"]["core_verdict"] is None
+
+
 # --- cards created by nexus_task_card_create (#2218) ------------------------
 
 _CREATED_UNIVERSES = {
@@ -1594,6 +1667,26 @@ def test_live_terminal_record_carries_no_authority(live_terminal):
         assert not any(word in key.lower() for word in _AUTHORITY_WORDS), key
     # The record never becomes the receipt that gates commit or approval.
     assert live_terminal["preflight_universe"]["verified_receipt_present"] is False
+
+
+def test_live_terminal_record_records_core_universe_identity_matches(live_terminal):
+    # #2355's terminal record carries the same flag, from the real pinned Core.
+    record = live_terminal["preflight_universe"]["terminal_core_record"]
+    assert record["record_status"] == "RECORDED", record
+    verdict = record["core_verdict"]
+    assert verdict["core_universe_identity_matches"] is True
+    assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]
+    assert verdict["contract_universe_identity"] != verdict["core_universe_identity"]
+
+
+def test_terminal_record_core_failure_records_identity_flag_false(tmp_path):
+    port = _CountingPort(error=RuntimeError("BOOM: core exploded"))
+    record = _host_service(tmp_path, port)._build_terminal_core_record(
+        _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
+    )
+    assert record is not None
+    assert record["record_status"] == "FAILED"
+    assert record["core_verdict"]["core_universe_identity_matches"] is False
 
 
 def test_live_terminal_record_without_core_fails_closed(tmp_path):
