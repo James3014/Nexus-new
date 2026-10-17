@@ -518,6 +518,18 @@ def _isolate_gateway_health_hmac_key(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _agy_model_catalog_check_off_unless_requested(monkeypatch):
+    """#2388: tests that drive nexus-agy-dispatch never reach a live `agy models`.
+
+    Every test file that runs the dispatcher (in process or as a subprocess,
+    which inherits os.environ) gets the #1357 catalog check off.  Catalog tests
+    re-enable it themselves (``delenv`` or ``setenv("...", "1")``), which runs
+    after this fixture.
+    """
+    monkeypatch.setenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "0")
+
+
+@pytest.fixture(autouse=True)
 def _restore_event_bus_binding():
     bus = _event_bus_class()
     saved = (

@@ -32,8 +32,16 @@ This module reads, in order of trust:
    model's reply never goes there).  stdout is never scanned.
 
 A structured error decides alone: when one is present, stderr prose is not
-consulted.  The caps on account-wide retirements per run live with the
-callers; ``max_account_retirements`` is the shared limit.
+consulted.  Only the last ``AGY_ERROR`` line decides (#2433 N3): agy prints
+its terminal error last, so an earlier RESOURCE_EXHAUSTED followed by a
+final UNKNOWN is deliberately not treated as quota (no retirement).  The caps on
+account-wide retirements per run live with the callers;
+``max_account_retirements`` is the shared limit.
+
+The two callers treat ``RATE_LIMITED`` differently, on purpose (#2433 N2):
+``nexus-agy-dispatch`` retires the account through the pool
+(``retire_failed_claim``: account-global cooldown) and counts it toward the
+cap; the Gateway worker route only skips it for the current run.
 """
 
 from __future__ import annotations
@@ -134,26 +142,17 @@ def agy_envelope_errors(stdout: str) -> list[str]:
     Only top-level objects carrying ``conversation_id`` and ``status`` count;
     the model's ``response`` string is never read.
     """
-    decoder = json.JSONDecoder()
-    text = stdout or ""
-    errors: list[str] = []
-    index = text.find("{")
-    while index != -1:
-        try:
-            value, end = decoder.raw_decode(text, index)
-        except ValueError:
-            index = text.find("{", index + 1)
-            continue
-        if (
-            isinstance(value, dict)
-            and "conversation_id" in value
-            and value.get("status") == "ERROR"
-            and isinstance(value.get("error"), str)
-            and value["error"].strip()
-        ):
-            errors.append(value["error"])
-        index = text.find("{", end)
-    return errors
+    # #2433: one top-level JSON scanner (local import: no import cycle).
+    from nexus.executors.agy_write_admission import top_level_json_objects
+
+    return [
+        value["error"]
+        for value in top_level_json_objects(stdout or "")
+        if "conversation_id" in value
+        and value.get("status") == "ERROR"
+        and isinstance(value.get("error"), str)
+        and value["error"].strip()
+    ]
 
 
 def _int_code(value: Any) -> Optional[int]:
