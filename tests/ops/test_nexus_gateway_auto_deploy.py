@@ -6,8 +6,10 @@ touches a real Gateway, LaunchAgent or GitHub.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import contextlib
+import dataclasses
 import hashlib
 import http.server
 import json
@@ -1650,6 +1652,8 @@ def test_autoupdater_branches_count_as_pin_bumps(branch: str) -> None:
         "pull_requests": [7],
         "ignored_stale": [],
         "ignored_draft": [],
+        "ignored_parked": [],
+        "parked": [],
         "warnings": [],
     }
 
@@ -6534,3 +6538,504 @@ def test_deployer_without_pyright_entry_reports_it_unknown_and_this_source_knows
     )
     assert old != source
     assert PYRIGHT not in (ad.deployer_known_checks(old) or [])
+
+
+# ------------------------------------------------- parked pin-bump PRs (#2309)
+
+PARK_HEAD = "f" * 40
+PARK_PR = 2278
+
+
+def _park_api(
+    pulls: list[dict[str, Any]], mergeable: dict[int, Any] | None = None
+) -> Callable[[str], Any]:
+    """green_api plus ``GET pulls/<n>`` (mergeable_state); unknown PRs raise like a 404."""
+    base = green_api(open_pulls=pulls)
+
+    def get(path: str) -> Any:
+        tail = path.split("/pulls/")[1] if "/pulls/" in path else ""
+        if tail.isdigit():
+            number = int(tail)
+            if number not in (mergeable or {}):
+                raise ad.DeployError("GH_API_FAILED:404")
+            listed = next((p for p in pulls if p["number"] == number), {})
+            return {
+                "number": number,
+                "head": {"sha": (listed.get("head") or {}).get("sha")},
+                "mergeable_state": (mergeable or {})[number],
+            }
+        return base(path)
+
+    return get
+
+
+def _park_cfg(cfg: ad.Config, seconds: int | None = None) -> ad.Config:
+    if seconds is None:
+        return cfg
+    return dataclasses.replace(cfg, pin_bump_park_seconds=seconds)
+
+
+def _pins(cfg: ad.Config, api: Callable[[str], Any], now: float, **kw: Any) -> dict[str, Any]:
+    return ad.pin_bumps_in_flight(
+        api,
+        now=now,
+        park_file=cfg.pin_park_file,
+        park_seconds=cfg.pin_bump_park_seconds,
+        **kw,
+    )
+
+
+def test_fresh_mergeable_pin_pr_still_blocks(cfg: ad.Config) -> None:
+    """Positive control: a genuinely active pin bump stays IN_FLIGHT and is not parked."""
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "clean"})
+    for offset in (0, 60, ad.PIN_BUMP_PARK_SECONDS):  # exactly at the threshold still blocks
+        pins = _pins(cfg, api, NOW + offset)
+        assert pins["verdict"] == "IN_FLIGHT" and pins["pull_requests"] == [PARK_PR]
+        assert pins["ignored_parked"] == [] and pins["parked"] == []
+    host = FakeHost()
+    host.clock = NOW + ad.PIN_BUMP_PARK_SECONDS
+    assert cycle(cfg, host, FakeProber(), api)["status"] == "PIN_BUMP_IN_FLIGHT"
+    assert host.reloads == [] and host.issue_comments == []
+
+
+def test_pin_pr_holding_one_head_over_threshold_is_parked_and_deploys(cfg: ad.Config) -> None:
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "blocked"})
+    host, prober = FakeHost(), FakeProber()
+    first = cycle(cfg, host, prober, api)
+    assert first["status"] == "PIN_BUMP_IN_FLIGHT"
+    host.clock = NOW + ad.PIN_BUMP_PARK_SECONDS + 1
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == "DEPLOYED" and len(host.reloads) == 1
+    warning = f"PARKED_PIN_PR_IGNORED #{PARK_PR} (holding since {NOW_ISO})"
+    assert warning in result["warnings"] and warning in result["receipt"]["warnings"]
+    detail = {
+        "number": PARK_PR,
+        "head_sha": PARK_HEAD,
+        "holding_since": NOW_ISO,
+        "reason": "held>threshold",
+        "threshold_seconds": ad.PIN_BUMP_PARK_SECONDS,
+    }
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["pin_bumps"]["ignored_parked"] == [PARK_PR]
+    assert status["pin_bumps"]["parked"] == [detail]
+    receipt = ad.last_receipt(cfg.state_dir) or {}
+    assert receipt["pin_bumps"]["ignored_parked"] == [PARK_PR]
+    assert receipt["pin_bumps"]["parked"] == [detail]
+    assert receipt["pin_bumps_before_switch"]["ignored_parked"] == [PARK_PR]
+    assert host.comment_issues == [PARK_PR]
+    assert PARK_HEAD in host.issue_comments[0]
+    assert "stopped waiting for this pin-bump PR after 60 min" in host.issue_comments[0]
+    assert "Mark it draft while it is parked." in host.issue_comments[0]
+
+
+def test_parked_comment_is_posted_once_per_head_and_retried_on_failure(cfg: ad.Config) -> None:
+    pr = _pin_pr(PARK_PR, draft=False)
+    api = _park_api([pr], {PARK_PR: "blocked"})
+    host = FakeHost()
+    ctx = ad._Cycle(cfg, host, FakeProber(), api, {}, Path("/tool/python"))  # type: ignore[arg-type]
+    assert ctx.pin_bumps(record=True)["verdict"] == "IN_FLIGHT"
+    host.clock = NOW + ad.PIN_BUMP_PARK_SECONDS + 1
+    host.comment_fails = True
+    ctx.announce_parked(ctx.pin_bumps(record=True))
+    assert host.issue_comments == []
+    host.comment_fails = False
+    for _ in range(3):
+        pins = ctx.pin_bumps(record=True)
+        assert pins["ignored_parked"] == [PARK_PR]
+        ctx.announce_parked(pins)
+    assert host.comment_issues == [PARK_PR]
+    # A new head restarts the clock (blocks again) and earns its own comment once parked.
+    pr["head"] = {**pr["head"], "sha": "e" * 40}
+    pins = ctx.pin_bumps(record=True)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+    host.clock += ad.PIN_BUMP_PARK_SECONDS + 1
+    ctx.announce_parked(ctx.pin_bumps(record=True))
+    assert host.comment_issues == [PARK_PR, PARK_PR]
+    assert "e" * 40 in host.issue_comments[1]
+
+
+def test_new_head_push_resets_the_park_clock(cfg: ad.Config) -> None:
+    pr = _pin_pr(PARK_PR, draft=False)
+    api = _park_api([pr], {PARK_PR: "blocked"})
+    assert _pins(cfg, api, NOW)["verdict"] == "IN_FLIGHT"
+    pr["head"] = {**pr["head"], "sha": "e" * 40}
+    later = NOW + ad.PIN_BUMP_PARK_SECONDS + 1
+    pins = _pins(cfg, api, later)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+    pins = _pins(cfg, api, later + ad.PIN_BUMP_PARK_SECONDS + 1)
+    assert pins["verdict"] == "CLEAR" and pins["ignored_parked"] == [PARK_PR]
+    assert pins["parked"][0]["head_sha"] == "e" * 40
+    assert pins["parked"][0]["holding_since"] == ad._iso(later)
+
+
+def test_dirty_pin_pr_is_parked_immediately(cfg: ad.Config) -> None:
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "dirty"})
+    pins = _pins(cfg, api, NOW)
+    assert pins["verdict"] == "CLEAR" and pins["ignored_parked"] == [PARK_PR]
+    assert pins["parked"][0]["reason"] == "mergeable_state=dirty"
+    assert pins["warnings"] == [f"PARKED_PIN_PR_IGNORED #{PARK_PR} (holding since {NOW_ISO})"]
+    host = FakeHost()
+    result = cycle(cfg, host, FakeProber(), api)
+    assert result["status"] == "DEPLOYED"
+    assert host.comment_issues == [PARK_PR] and "merge conflict" in host.issue_comments[0]
+
+
+@pytest.mark.parametrize(
+    "mergeable",
+    ["clean", "blocked", "unstable", "unknown", None, "missing"],
+    ids=["clean", "blocked", "unstable", "unknown", "null", "unreadable"],
+)
+def test_only_dirty_mergeable_state_parks_at_first_sight(cfg: ad.Config, mergeable: Any) -> None:
+    states = {} if mergeable == "missing" else {PARK_PR: mergeable}
+    pins = _pins(cfg, _park_api([_pin_pr(PARK_PR, draft=False)], states), NOW)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json",
+        "[]",
+        json.dumps({"schema": "other", "prs": {str(PARK_PR): {"head_sha": PARK_HEAD}}}),
+        json.dumps({
+            "schema": ad.PIN_PARK_SCHEMA,
+            "prs": {str(PARK_PR): {"head_sha": PARK_HEAD, "first_seen_epoch": "old"}},
+        }),
+        json.dumps({
+            "schema": ad.PIN_PARK_SCHEMA,
+            "prs": {str(PARK_PR): {"head_sha": PARK_HEAD, "first_seen_epoch": NOW + 99_999}},
+        }),
+        json.dumps({
+            "schema": ad.PIN_PARK_SCHEMA,
+            "prs": {str(PARK_PR): {"head_sha": "e" * 40, "first_seen_epoch": 1.0}},
+        }),
+    ],
+    ids=["corrupt", "not-an-object", "wrong-schema", "bad-epoch", "future-epoch", "other-head"],
+)
+def test_untrustworthy_park_record_blocks(cfg: ad.Config, content: str) -> None:
+    """A bad record means "first seen now": it can delay parking, never cause it."""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.pin_park_file.write_text(content)
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "blocked"})
+    pins = _pins(cfg, api, NOW + 10 * ad.PIN_BUMP_PARK_SECONDS)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+    record = json.loads(cfg.pin_park_file.read_text())
+    assert record["prs"][str(PARK_PR)] == {
+        "head_sha": PARK_HEAD,
+        "first_seen_epoch": NOW + 10 * ad.PIN_BUMP_PARK_SECONDS,
+    }
+
+
+def test_trusted_old_park_record_parks(cfg: ad.Config) -> None:
+    """Positive control for the record test above."""
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.pin_park_file.write_text(
+        json.dumps({
+            "schema": ad.PIN_PARK_SCHEMA,
+            "prs": {str(PARK_PR): {"head_sha": PARK_HEAD, "first_seen_epoch": NOW}},
+        })
+    )
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "blocked"})
+    pins = _pins(cfg, api, NOW + ad.PIN_BUMP_PARK_SECONDS + 1)
+    assert pins["verdict"] == "CLEAR" and pins["ignored_parked"] == [PARK_PR]
+
+
+def test_missing_park_file_or_dry_run_never_parks_by_time(cfg: ad.Config) -> None:
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "blocked"})
+    for offset in (0, 10 * ad.PIN_BUMP_PARK_SECONDS):
+        assert ad.pin_bumps_in_flight(api, now=NOW + offset)["verdict"] == "IN_FLIGHT"
+        assert _pins(cfg, api, NOW + offset, record=False)["verdict"] == "IN_FLIGHT"
+    assert not cfg.pin_park_file.exists()
+
+
+def test_draft_and_stale_rules_are_unchanged_by_parking(cfg: ad.Config) -> None:
+    draft = _pin_pr(10, draft=True)
+    stale = {
+        "number": 11,
+        "title": "pin nexus-runtime old",
+        "head": {"ref": "x", "sha": "9" * 40},
+        "created_at": "2025-01-01T00:00:00Z",
+    }
+    api_base = _park_api([draft, stale], {10: "dirty", 11: "dirty"})
+
+    def api(path: str) -> Any:
+        if path.endswith("/commits/" + "9" * 40):
+            return {"commit": {"committer": {"date": "2025-01-01T00:00:00Z"}}}
+        return api_base(path)
+
+    pins = _pins(cfg, api, NOW + 10 * ad.PIN_BUMP_PARK_SECONDS)
+    assert pins["verdict"] == "CLEAR"
+    assert pins["ignored_draft"] == [10] and pins["ignored_stale"] == [11]
+    assert pins["ignored_parked"] == [] and pins["parked"] == []
+    assert pins["warnings"] == ["STALE_PIN_PR_IGNORED #11", "DRAFT_PIN_PR_IGNORED #10"]
+
+
+def test_park_threshold_is_configurable(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert ad.Config.default(cfg.state_dir).pin_bump_park_seconds == 3600
+    monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, "120")
+    assert ad.Config.default(cfg.state_dir).pin_bump_park_seconds == 120
+    for bad in ("", "abc", "0", "59", "-5", "1.5"):
+        monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, bad)
+        assert ad.Config.default(cfg.state_dir).pin_bump_park_seconds == 3600
+    assert ad._park_seconds_arg("600") == 600
+    with pytest.raises(argparse.ArgumentTypeError):
+        ad._park_seconds_arg("10")
+    short = _park_cfg(cfg, 120)
+    api = _park_api([_pin_pr(PARK_PR, draft=False)], {PARK_PR: "blocked"})
+    assert _pins(short, api, NOW)["verdict"] == "IN_FLIGHT"
+    assert _pins(short, api, NOW + 120)["verdict"] == "IN_FLIGHT"
+    assert _pins(short, api, NOW + 121)["verdict"] == "CLEAR"
+
+
+def test_new_head_before_switch_blocks_a_parked_pr(cfg: ad.Config) -> None:
+    """The pre-switch re-check applies the same rule: a fresh head blocks again."""
+    pr = _pin_pr(PARK_PR, draft=False)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.pin_park_file.write_text(
+        json.dumps({
+            "schema": ad.PIN_PARK_SCHEMA,
+            "prs": {str(PARK_PR): {"head_sha": PARK_HEAD, "first_seen_epoch": NOW - 7200}},
+        })
+    )
+
+    def push_during_spare_probe(call: dict[str, Any]) -> None:
+        if call["port"] == 50123:
+            pr["head"] = {**pr["head"], "sha": "e" * 40}
+
+    host = FakeHost()
+    before = cfg.plist.read_bytes()
+    api = _park_api([pr], {PARK_PR: "blocked"})
+    result = cycle(cfg, host, FakeProber(hook=push_during_spare_probe), api)
+    assert result["status"] == "PIN_BUMP_IN_FLIGHT"
+    assert cfg.plist.read_bytes() == before and host.reloads == []
+    assert result["receipt"]["pin_bumps"]["ignored_parked"] == [PARK_PR]
+    assert result["receipt"]["pin_bumps_before_switch"]["pull_requests"] == [PARK_PR]
+
+
+# ------------------------------------------- live worker-route preflight (#2345)
+
+
+def _preflight(status: str, *routes: tuple[str, str, str]) -> dict[str, Any]:
+    return {
+        "status": status,
+        "routes": [
+            {"route": r, "adapter": a, "preflight": p, "reason": None if p == "OK" else f"{a} off"}
+            for r, a, p in routes
+        ],
+    }
+
+
+def test_blocked_worker_route_preflight_warns_but_never_changes_the_deploy(
+    cfg: ad.Config,
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    block = _preflight(
+        "BLOCKED",
+        ("fast_bounded_implementation", "agy_flash_38", "BLOCKED"),
+        ("deep_review", "codex", "OK"),
+    )
+    prober.health = {"status": "ok", "git_head": NEW, "worker_route_preflight": block}
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    receipt = result["receipt"]
+    assert receipt["switched"] is True and receipt["rolled_back"] is False
+    assert len(host.reloads) == 1 and not cfg.hold_file.exists()
+    assert Path(os.readlink(cfg.tool_link)) == cfg.deployments / f"a1-{NEW}"
+    assert receipt["worker_route_preflight"] == block
+    assert [w for w in receipt["warnings"] if w.startswith("WORKER_ROUTE")] == [
+        "WORKER_ROUTE_PREFLIGHT_BLOCKED fast_bounded_implementation:agy_flash_38 off"
+    ]
+    assert (ad.last_receipt(cfg.state_dir) or {})["worker_route_preflight"] == block
+
+
+@pytest.mark.parametrize(
+    "health, expected",
+    [
+        ({"status": "ok", "git_head": NEW}, {"status": "UNAVAILABLE"}),
+        (
+            {"status": "ok", "worker_route_preflight": _preflight("OK", ("r", "a", "OK"))},
+            _preflight("OK", ("r", "a", "OK")),
+        ),
+        (
+            {"status": "ok", "worker_route_preflight": {"status": "WHATEVER"}},
+            {"status": "UNAVAILABLE", "reason": "MALFORMED"},
+        ),
+        (
+            ad.DeployError("connection refused"),
+            {"status": "UNAVAILABLE", "reason": "HEALTH_UNREADABLE:DeployError"},
+        ),
+    ],
+    ids=["absent", "ok", "malformed", "unreadable"],
+)
+def test_worker_route_preflight_without_blocked_route_adds_no_warning(
+    cfg: ad.Config, health: Any, expected: dict[str, Any]
+) -> None:
+    host, prober = FakeHost(), FakeProber()
+    prober.health = health
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED" and result["receipt"]["rolled_back"] is False
+    assert result["receipt"]["worker_route_preflight"] == expected
+    assert not [w for w in result["receipt"]["warnings"] if w.startswith("WORKER_ROUTE")]
+
+
+# ------------------------------------------------ self-update follow-ups (#2409)
+
+
+class DirtyTreeSelfUpdateHost(SelfUpdateHost):
+    """The freshly added candidate tree is dirty (an untracked file appears)."""
+
+    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+        result = super().run(argv, cwd=cwd, env=env, timeout=timeout)
+        if "worktree" in argv and "add" in argv:
+            (Path(argv[-2]) / ".venv").mkdir()
+        return result
+
+
+def test_self_update_refuses_a_dirty_candidate_tree(cfg: ad.Config, tmp_path: Path) -> None:
+    """N1: kills the mutant that drops the SOURCE_TREE_DIRTY refusal in self_update."""
+    old_tool = tmp_path / "old-tool"
+    old_tool.mkdir()
+    cfg.tool_link.symlink_to(old_tool)
+    api = green_api(required=[*ad.REQUIRED_CHECKS, NEW_GATE])
+    host, prober = DirtyTreeSelfUpdateHost(_deployer_source(checks=(NEW_GATE,))), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == ad.SELF_UPDATE_REFUSED_OUTCOME
+    assert result["self_update"]["verdict"] == "REFUSED"
+    link = result["receipt"]["deployer_link"]
+    assert link["moved"] is False and "SOURCE_TREE_DIRTY" in link["reason"]
+    assert Path(os.readlink(cfg.tool_link)) == old_tool
+    assert _tool_runs(host) == []  # the candidate deployer never ran
+    _no_gateway_effect(cfg, host, prober, plist)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "del REQUIRED_CHECKS[{name!r}]\n",
+        "REQUIRED_CHECKS.pop({name!r})\n",
+        "REQUIRED_CHECKS.pop({name!r}, None)\n",
+        "if True:\n    del REQUIRED_CHECKS[{name!r}]\n",
+        "REQUIRED_CHECKS[{name!r}] = 'other.yml'\n",
+        "REQUIRED_CHECKS |= {{}}\n",
+        "REQUIRED_CHECKS.update({{}})\n",
+        "PR_HEAD_STATUS_CONTEXTS = PR_HEAD_STATUS_CONTEXTS - {{{name!r}}}\n",
+        "def _drop():\n    global REQUIRED_CHECKS\n    REQUIRED_CHECKS = {{}}\n",
+        "def _drop():\n    REQUIRED_CHECKS.clear()\n",
+        "del REQUIRED_CHECKS\n",
+    ],
+    ids=[
+        "del-item",
+        "pop",
+        "pop-default",
+        "nested-del",
+        "setitem",
+        "augassign",
+        "update",
+        "rebind",
+        "global-rebind",
+        "clear-in-function",
+        "del-name",
+    ],
+)
+def test_deployer_known_checks_rejects_tables_mutated_after_the_literal(mutation: str) -> None:
+    """N2: a name removed (or changed) after the literal must not be counted: fail closed."""
+    source = _deployer_source(checks=(NEW_GATE,))
+    assert NEW_GATE in (ad.deployer_known_checks(source) or [])  # positive control
+    assert ad.deployer_known_checks(source + mutation.format(name=NEW_GATE)) is None
+
+
+def test_deployer_known_checks_allows_reads_of_the_tables() -> None:
+    """Reads (lookups, iteration, membership) are not writes: still parsed."""
+    source = _deployer_source(checks=(NEW_GATE,)) + (
+        "X = REQUIRED_CHECKS[" + repr(NEW_GATE) + "]\n"
+        "Y = [n for n in REQUIRED_CHECKS if n in PR_HEAD_STATUS_CONTEXTS]\n"
+        "Z = REQUIRED_CHECKS.get('a')\n"
+    )
+    assert NEW_GATE in (ad.deployer_known_checks(source) or [])
+
+
+def test_this_deployer_keeps_check_tables_as_literals_the_reader_parses() -> None:
+    """N6: REQUIRED_CHECKS and PR_HEAD_STATUS_CONTEXTS stay plain literals in this file."""
+    source = (REPO_ROOT / ad.DEPLOYER).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assigned: dict[str, list[ast.expr]] = {name: [] for name in ad._KNOWN_CHECK_TABLES}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in assigned:
+                    assigned[target.id].append(node.value)
+    assert len(assigned["REQUIRED_CHECKS"]) == 1
+    table = assigned["REQUIRED_CHECKS"][0]
+    assert isinstance(table, ast.Dict)
+    assert all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in table.keys)
+    assert all(isinstance(v, ast.Constant) and isinstance(v.value, str) for v in table.values)
+    assert len(assigned["PR_HEAD_STATUS_CONTEXTS"]) == 1
+    contexts = assigned["PR_HEAD_STATUS_CONTEXTS"][0]
+    assert isinstance(contexts, ast.Call) and isinstance(contexts.func, ast.Name)
+    assert contexts.func.id == "frozenset" and len(contexts.args) == 1
+    assert isinstance(contexts.args[0], ast.Set)
+    assert all(
+        isinstance(e, ast.Constant) and isinstance(e.value, str) for e in contexts.args[0].elts
+    )
+    assert not ad._check_tables_mutated(tree)
+    known = ad.deployer_known_checks(source)
+    assert known == list(ad.REQUIRED_CHECKS) + sorted(
+        set(ad.PR_HEAD_STATUS_CONTEXTS) - set(ad.REQUIRED_CHECKS)
+    )
+
+
+def test_dirty_detail_for_an_older_head_does_not_park_the_new_head(cfg: ad.Config) -> None:
+    """A lagging PR detail (dirty at the old head) must not park the listed new head."""
+    pr = _pin_pr(PARK_PR, draft=False)
+    pr["head"] = {**pr["head"], "sha": "e" * 40}
+    base = green_api(open_pulls=[pr])
+
+    def api(path: str) -> Any:
+        if path.endswith(f"/pulls/{PARK_PR}"):
+            return {"number": PARK_PR, "head": {"sha": PARK_HEAD}, "mergeable_state": "dirty"}
+        return base(path)
+
+    pins = _pins(cfg, api, NOW)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+    # Positive control: the same dirty detail for the listed head parks it.
+    pr["head"] = {**pr["head"], "sha": PARK_HEAD}
+    assert _pins(cfg, api, NOW)["ignored_parked"] == [PARK_PR]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["2h", "\u00b2", "\u0663\u0666\u0660\u0660", "abc", "59", "0"],
+    ids=["unit-suffix", "superscript-two", "arabic-indic-3600", "letters", "below-minimum", "zero"],
+)
+def test_invalid_park_env_falls_back_and_warns(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, bad)
+    loaded = ad.Config.default(cfg.state_dir.parents[2])
+    assert loaded.pin_bump_park_seconds == ad.PIN_BUMP_PARK_SECONDS
+    assert loaded.pin_bump_park_env_invalid is True
+    with pytest.raises(argparse.ArgumentTypeError):
+        ad._park_seconds_arg(bad)
+    flagged = dataclasses.replace(cfg, pin_bump_park_env_invalid=True)
+    api = _park_api([_pin_pr(9, draft=True)])
+    result = cycle(flagged, FakeHost(), FakeProber(), api)
+    assert result["status"] == "DEPLOYED"
+    assert "PIN_PARK_SECONDS_INVALID" in result["warnings"]
+    assert "PIN_PARK_SECONDS_INVALID" in result["receipt"]["warnings"]
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert "PIN_PARK_SECONDS_INVALID" in status["warnings"]
+
+
+def test_valid_or_unset_park_env_does_not_warn(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control for the invalid-env warning."""
+    for value in (None, "", "120"):
+        if value is None:
+            monkeypatch.delenv(ad.PIN_BUMP_PARK_ENV, raising=False)
+        else:
+            monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, value)
+        assert ad.Config.default(cfg.state_dir.parents[2]).pin_bump_park_env_invalid is False
+    result = cycle(cfg, FakeHost(), FakeProber(), _park_api([_pin_pr(9, draft=True)]))
+    assert "PIN_PARK_SECONDS_INVALID" not in result.get("warnings", [])
