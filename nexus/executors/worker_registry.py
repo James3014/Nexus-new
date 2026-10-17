@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -997,6 +998,7 @@ class AgyWorkerAdapter:
         canonical_root: Optional[Path | str] = None,
         use_installed_account_pool: bool = False,
         result_observer: Optional[Any] = None,
+        require_account_pool: bool = False,
     ):
         self.executable_env = executable_env
         self.project_id_env = project_id_env
@@ -1012,12 +1014,20 @@ class AgyWorkerAdapter:
         # (full stdout/stderr) this adapter produced.  The receipt keeps only
         # hashes and redacted tails; a caller that must read the model's
         # answer (the real-world bench) matches a result to the receipt by
-        # ``stdout_sha256``.  It never changes the receipt or the rotation.
+        # ``stdout_sha256``.  It never changes the receipt or the rotation; it
+        # must not raise (an exception propagates out of ``invoke``).
         self._result_observer = result_observer
+        # #2528: with ``require_account_pool`` the adapter never runs agy
+        # unless the installed pool's cross-process claim route is taken: no
+        # pool (or a pool without claims) refuses as
+        # ``agy_credentials_unavailable`` instead of using the process HOME.
+        self._require_account_pool = require_account_pool
 
     def _observe(self, result: CliWorkerResult) -> CliWorkerResult:
         if self._result_observer is not None:
-            self._result_observer(result)
+            # A shallow copy: the observer cannot alter the result the
+            # receipt and the rotation are decided from (bytes are immutable).
+            self._result_observer(copy.copy(result))
         return result
 
     def _canonical_checkout_root(self) -> Path:
@@ -1377,12 +1387,20 @@ class AgyWorkerAdapter:
             return timeout - elapsed
 
         pool = self._get_account_pool()
-
-        if (
+        claims_route = (
             self._use_installed_account_pool
             and self._injected_account_pool is None
             and _supports_cross_process_claims(pool)
-        ):
+        )
+        if self._require_account_pool and not claims_route:
+            return _agy_claim_receipt(
+                self.provider, contract, target=target, executable=executable, argv=argv,
+                started_at=started_at, result=None, outcome=WorkerOutcome.FAILED.value,
+                failure_reason=AGY_CREDENTIALS_UNAVAILABLE,
+                provider_calls=0, rotations=0, attempts=0, account_alias_hash=None,
+            )
+
+        if claims_route:
             return self._invoke_with_claims(
                 pool,
                 contract,

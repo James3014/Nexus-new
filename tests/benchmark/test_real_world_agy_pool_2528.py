@@ -318,3 +318,119 @@ def test_result_observer_sees_the_raw_result_behind_the_receipt(bench_pool):
 )
 def test_agy_bench_status_maps_worker_reasons(reason, login, expected):
     assert runner.agy_bench_status(reason, login_prompt_seen=login) == expected
+
+
+# --- Codex review r1 on #2540 -------------------------------------------------
+
+
+def test_required_pool_never_falls_back_to_the_process_home(bench_pool):
+    # The default HOME has a usable token, but the pool vanished after the
+    # bench's own check: the adapter itself must refuse.
+    token = bench_pool.tmp_path / "gateway-home" / TOKEN
+    token.parent.mkdir(parents=True)
+    token.write_text("ok", encoding="utf-8")
+    (token.parent / "installation_id").write_text("home", encoding="utf-8")
+    bench_pool.monkeypatch.setenv(
+        "NEXUS_AGY_ACCOUNT_POOL_MANAGER_PATH", str(bench_pool.tmp_path / "missing-manager")
+    )
+    _no_spawn(bench_pool)
+    target = (bench_pool.tmp_path / "target").resolve()
+    target.mkdir()
+    from types import SimpleNamespace
+
+    receipt = worker_registry.AgyWorkerAdapter(
+        use_installed_account_pool=True,
+        canonical_root=bench_pool.canonical,
+        require_account_pool=True,
+    ).invoke(
+        SimpleNamespace(task_id="no-pool", maximum_provider_calls=1),
+        SimpleNamespace(target_worktree=str(target)),
+        prompt="p",
+        worker_role="implementation",
+        timeout_seconds=60,
+    )
+
+    assert receipt.failure_reason == worker_registry.AGY_CREDENTIALS_UNAVAILABLE
+    assert receipt.provider_attempt_count == 0
+
+
+def test_failed_staged_run_does_not_write_back(bench_pool):
+    _install_pool(bench_pool, {"acc-crash": "crash"})
+
+    def crashing_worker(request, on_process_group=None):
+        (Path(request.cwd) / "AGY_TOUCHED.txt").write_text("partial\n", encoding="utf-8")
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"segmentation fault",
+            wall_time_ms=3,
+            process_group_id=None,
+            timed_out=False,
+            descendants_swept=True,
+        )
+
+    bench_pool.monkeypatch.setattr(worker_registry, "run_cli_worker", crashing_worker)
+    root = bench_pool.canonical / ".nexus" / "reports" / "cases"
+
+    row = _run(bench_pool, root=root)
+
+    assert row["agy_status"] == runner.AGY_FAILED
+    assert not (Path(row["case_dir"]) / "AGY_TOUCHED.txt").exists()
+    assert row["verified_solve"] is False
+
+
+def test_sync_never_follows_a_case_dir_symlink(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep\n", encoding="utf-8")
+    outside_dir = tmp_path / "outside-dir"
+    outside_dir.mkdir()
+    (outside_dir / "f.txt").write_text("keep\n", encoding="utf-8")
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "link.txt").symlink_to(outside)
+    (case_dir / "linkdir").symlink_to(outside_dir, target_is_directory=True)
+    staged = tmp_path / "staged"
+    (staged / "linkdir").mkdir(parents=True)
+    (staged / "link.txt").write_text("overwrite\n", encoding="utf-8")
+    (staged / "linkdir" / "f.txt").write_text("overwrite\n", encoding="utf-8")
+    (staged / "new.txt").write_text("new\n", encoding="utf-8")
+
+    runner._sync_staged_case(staged, case_dir)
+
+    assert outside.read_text(encoding="utf-8") == "keep\n"
+    assert (outside_dir / "f.txt").read_text(encoding="utf-8") == "keep\n"
+    assert (case_dir / "link.txt").is_symlink()
+    assert (case_dir / "new.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_result_observer_cannot_alter_the_receipt(bench_pool):
+    _install_pool(bench_pool, {"acc-crash": "crash"})
+    seen: list[str] = []
+    _fake_agy(bench_pool, seen)
+
+    def tamper(result):
+        result.exit_code = 0
+        result.stderr = b""
+
+    target = (bench_pool.tmp_path / "target").resolve()
+    target.mkdir()
+    from types import SimpleNamespace
+
+    receipt = worker_registry.AgyWorkerAdapter(
+        use_installed_account_pool=True,
+        canonical_root=bench_pool.canonical,
+        result_observer=tamper,
+    ).invoke(
+        SimpleNamespace(task_id="tamper", maximum_provider_calls=1),
+        SimpleNamespace(target_worktree=str(target)),
+        prompt="p",
+        worker_role="implementation",
+        timeout_seconds=60,
+    )
+
+    assert receipt.exit_code == 1
+    assert receipt.outcome != "EXECUTION_COMPLETED"

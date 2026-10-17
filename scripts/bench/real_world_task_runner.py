@@ -451,7 +451,11 @@ def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
     """(total tokens, token status, response text) from agy's ``--output-format json`` envelope."""
     from nexus.executors.agy_write_admission import top_level_json_objects
 
-    envelopes = top_level_json_objects(stdout)
+    # The result envelope carries ``status``/``response``; other JSON objects
+    # (e.g. a trailing log line) are not it.
+    envelopes = [
+        item for item in top_level_json_objects(stdout) if "response" in item or "status" in item
+    ]
     if not envelopes:
         return 0, "missing_agy_envelope", stdout
     envelope = envelopes[-1]
@@ -466,22 +470,50 @@ def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
 
 
 def _sync_staged_case(staged: Path, case_dir: Path) -> None:
-    """Mirror the agy run's regular-file edits from a staged copy back into the case dir."""
+    """Mirror the agy run's regular-file edits from a staged copy back into the case dir.
+
+    Symlinks are never followed on either side: a staged symlink is ignored,
+    and a case-dir path whose entry or any parent below the case dir is a
+    symlink is neither read, written nor deleted.
+    """
+
+    def unsafe(rel: Path) -> bool:
+        current = case_dir
+        for part in rel.parts:
+            current = current / part
+            if current.is_symlink():
+                return True
+        return False
+
     staged_files = {
         path.relative_to(staged)
         for path in staged.rglob("*")
-        if path.is_file() and not path.is_symlink()
+        if path.is_file() and not path.is_symlink() and not _unsafe_staged(staged, path)
     }
     for path in sorted(case_dir.rglob("*"), reverse=True):
         rel = path.relative_to(case_dir)
-        if path.is_file() and not path.is_symlink() and rel not in staged_files:
+        if rel not in staged_files and not unsafe(rel) and path.is_file():
             path.unlink()
     for rel in sorted(staged_files):
+        if unsafe(rel):
+            continue
         source, dest = staged / rel, case_dir / rel
         data = source.read_bytes()
         if not dest.is_file() or dest.read_bytes() != data:
             dest.parent.mkdir(parents=True, exist_ok=True)
+            if unsafe(rel):
+                continue
             dest.write_bytes(data)
+
+
+def _unsafe_staged(staged: Path, path: Path) -> bool:
+    """True when ``path`` sits below a symlinked directory inside the staged copy."""
+    current = staged
+    for part in path.relative_to(staged).parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _run_agy_pool_patch(
@@ -521,7 +553,9 @@ def _run_agy_pool_patch(
             reason="agy account pool not installed or disabled; the bench never runs agy on the default HOME",
         )
     observed: list[Any] = []
-    adapter = AgyWorkerAdapter(use_installed_account_pool=True, result_observer=observed.append)
+    adapter = AgyWorkerAdapter(
+        use_installed_account_pool=True, result_observer=observed.append, require_account_pool=True
+    )
     preflight = adapter.preflight()
     if not preflight.authorized:
         return _agy_row(AGY_RUNTIME_NOT_AUTHORIZED, reason=preflight.reason)
@@ -545,7 +579,18 @@ def _run_agy_pool_patch(
             timeout_seconds=float(timeout_sec),
             worker_role=AGY_BENCH_WORKER_ROLE,
         )
-        if staging_root is not None and observed:
+        sweep_failed = any(
+            (result.timed_out and result.process_group_killed is not True)
+            or (not result.timed_out and result.descendants_swept is not True)
+            for result in observed
+        )
+        if (
+            staging_root is not None
+            and receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+            and not receipt.timed_out
+            and not sweep_failed
+        ):
+            # Only a completed, fully swept run's edits reach the case dir.
             _sync_staged_case(target, case_real)
     except WorkerProviderUnavailable as exc:
         return _agy_row(AGY_FAILED, reason=str(exc))
@@ -553,11 +598,6 @@ def _run_agy_pool_patch(
         if staging_root is not None:
             shutil.rmtree(staging_root, ignore_errors=True)
 
-    sweep_failed = any(
-        (result.timed_out and result.process_group_killed is not True)
-        or (not result.timed_out and result.descendants_swept is not True)
-        for result in observed
-    )
     final = next((result for result in observed if result.stdout_sha256 == receipt.stdout_sha256), None)
     stdout = final.stdout.decode("utf-8", errors="replace") if final is not None else ""
     stderr = final.stderr.decode("utf-8", errors="replace") if final is not None else ""
