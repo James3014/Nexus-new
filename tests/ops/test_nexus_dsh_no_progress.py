@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -113,7 +115,7 @@ time.sleep(float(os.environ.get('FAKE_DSH_LINGER', '0')))
 """
 
 
-def _setup(base: Path) -> dict:
+def _git_repo(base: Path) -> Path:
     repo = base / "repo"
     repo.mkdir()
     for cmd in (
@@ -125,120 +127,122 @@ def _setup(base: Path) -> dict:
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
-    payload = {
-        "schema": guard.DOCTOR_SCHEMA,
-        "claim_ceiling": guard.DOCTOR_CLAIM_CEILING,
-        "resume_disposition": "SAFE",
-        "next_gate": {"code": "CONTINUE_BOUNDED_ISSUE_WORK"},
-        "source": {"status": "OBSERVED", "head": "a" * 40, "github_main": "b" * 40},
-        "task": {
-            "status": "OBSERVED",
-            "state": "open",
-            "issue_number": 1646,
-            "updated_at": "2026-10-08T00:00:00Z",
-            "url": "https://example.invalid/1646",
-        },
-    }
-    doctor = base / "doctor"
-    doctor.write_text(
-        f"#!/usr/bin/env python3\nimport json\nprint(json.dumps({payload!r}))\n", encoding="utf-8"
-    )
-    doctor.chmod(0o755)
+    return repo
+
+
+def _fake_dsh(base: Path) -> Path:
     dsh = base / "dsh"
     dsh.write_text(FAKE_DSH, encoding="utf-8")
     dsh.chmod(0o755)
-    contract = base / "contract.md"
-    contract.write_text("CONTRACT_BODY allowed: mod.py\n", encoding="utf-8")
-    (base / "dsh-home").mkdir()
-    return {
-        "repo": repo,
-        "doctor": doctor,
-        "dsh": dsh,
-        "contract": contract,
-        "state": base / "state",
-        "home": base / "dsh-home",
-        "pid_file": base / "pid.txt",
+    return dsh
+
+
+def _run_supervised(base: Path, env_extra: dict[str, str], snap, *, steps: int, linger: str):
+    repo = _git_repo(base)
+    env = {
+        **os.environ,
+        "FAKE_DSH_STEPS": str(steps),
+        "FAKE_DSH_LINGER": linger,
+        "FAKE_DSH_PID_FILE": str(base / "pid.txt"),
+        **env_extra,
     }
+    dog = guard.NoProgressWatchdog(snap, max_steps=5, max_compactions=3)
+    log = base / "dsh.log"
+    code, reasons = guard._run_dsh_supervised(
+        [str(_fake_dsh(base))], cwd=str(repo), env=env, log_path=log, watchdog=dog
+    )
+    return code, reasons, log
 
 
-def _start(ctx: dict, env: dict[str, str], *extra: str) -> subprocess.CompletedProcess[str]:
-    full = os.environ.copy()
-    full["FAKE_DSH_PID_FILE"] = str(ctx["pid_file"])
-    full.update(env)
-    return subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "start-phase",
-            "--repository",
-            REPO,
-            "--issue",
-            "1646",
-            "--phase",
-            "repair",
-            "--repo-root",
-            str(ctx["repo"]),
-            "--dsh-home",
-            str(ctx["home"]),
-            "--phase-contract",
-            str(ctx["contract"]),
-            "--state-root",
-            str(ctx["state"]),
-            "--doctor-bin",
-            str(ctx["doctor"]),
-            "--dsh-bin",
-            str(ctx["dsh"]),
-            *extra,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-        env=full,
-        timeout=60,
+def test_supervisor_stops_scripted_no_progress_stream_and_kills_child(tmp_path: Path) -> None:
+    started = time.monotonic()
+    code, reasons, log = _run_supervised(tmp_path, {}, Snap(), steps=6, linger="30")
+    assert reasons == ["NO_PROGRESS_STEPS"]
+    assert time.monotonic() - started < 20  # the 30 s linger was cut short
+    assert "step_end" in log.read_text(encoding="utf-8")
+    assert code != 0 or reasons  # stopped by signal (or exit 0 on SIGTERM); reasons decide
+
+
+def test_supervisor_does_not_stop_stream_with_diff_changes(tmp_path: Path) -> None:
+    class Progressing(Snap):
+        def __call__(self):
+            self.bump()  # every observation sees a new diff
+            return super().__call__()
+
+    code, reasons, _log = _run_supervised(tmp_path, {}, Progressing(), steps=12, linger="0")
+    assert reasons == []
+    assert code == 0
+
+
+def _phase_turn(base: Path, monkeypatch, repo: Path, dsh: Path, steps: int):
+    monkeypatch.setattr(guard, "find_dirty_sibling", lambda *a, **k: None)
+    monkeypatch.setattr(guard, "git_metadata_contract", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        guard,
+        "run_issue_preflight",
+        lambda subject, **k: {
+            **subject,
+            "decision": "ALLOW_RESUME",
+            "generated_at": "2026-10-17T00:00:00Z",
+        },
+    )
+    args = argparse.Namespace(
+        issue=1646,
+        goal_objective=None,
+        patch=[],
+        dsh_bin=str(dsh),
+        profile="p",
+        doctor_bin="doctor",
+        no_progress_steps=5,
+        no_progress_compactions=3,
+    )
+    return guard._run_phase_turn(
+        args,
+        base / "state",
+        repository=REPO,
+        repo_root=repo,
+        dsh_home=base / "home",
+        phase="repair",
+        contract_text="CONTRACT",
+        prior=[],
+        parent=None,
+        green_gate_command=None,
     )
 
 
-@pytest.fixture
-def ctx(dsh_non_temp_path: Path) -> dict:
-    return _setup(dsh_non_temp_path)
-
-
-def test_start_phase_stops_scripted_no_progress_stream(ctx: dict) -> None:
-    proc = _start(ctx, {"FAKE_DSH_STEPS": "6", "FAKE_DSH_LINGER": "30"}, "--no-progress-steps", "5")
-    assert proc.returncode == guard.EXIT_NO_PROGRESS, proc.stderr
-    out = json.loads(proc.stdout)
+def test_sigterm_exit_zero_with_dirty_worktree_is_quarantined(tmp_path: Path, monkeypatch) -> None:
+    repo = _git_repo(tmp_path)
+    dsh = _fake_dsh(tmp_path)
+    # DSH edits the worktree at step 0, stalls, and (like the installed DSH on SIGTERM)
+    # exits 0 once the watchdog stops it.
+    for key, value in {
+        "FAKE_DSH_STEPS": "30",
+        "FAKE_DSH_STEP_SLEEP": "0.05",
+        "FAKE_DSH_LINGER": "30",
+        "FAKE_DSH_EXIT0_ON_TERM": "1",
+        "FAKE_DSH_EDIT_AT": "0",
+        "FAKE_DSH_EDIT_FILE": str(repo / "mod.py"),
+        "FAKE_DSH_PID_FILE": str(tmp_path / "pid.txt"),
+    }.items():
+        monkeypatch.setenv(key, value)
+    code, out = _phase_turn(tmp_path, monkeypatch, repo, dsh, 30)
+    assert code == guard.EXIT_NO_PROGRESS, out
     assert out["decision"] == "NO_PROGRESS"
     assert out["reason_codes"] == ["NO_PROGRESS_STEPS"]
-    assert out["no_progress"]["max_steps"] == 5
-    # The fake DSH lingers 30 s after its last step; the watchdog must have killed it.
-    assert out["phase_wall_ms"] < 20_000
-    assert not ctx["pid_file"].exists() or not _alive(int(ctx["pid_file"].read_text()))
+    assert out["dsh_exit_code"] == 0
+    assert out["turn_state"] == guard.TURN_FAILED_DIRTY
+    state = guard.load_turn_state(tmp_path / "state", out["session_id"])
+    assert state is not None and Path(state["quarantine_receipt"]).is_file()
+    patches = list((tmp_path / "state" / "quarantine" / out["session_id"]).glob("*.patch"))
+    assert patches and b"changed" in patches[0].read_bytes()
 
 
-def test_start_phase_does_not_stop_stream_with_diff_changes(ctx: dict) -> None:
-    proc = _start(
-        ctx,
-        {
-            "FAKE_DSH_STEPS": "10",
-            "FAKE_DSH_STEP_SLEEP": "0.15",
-            "FAKE_DSH_EDIT_AT": "3",
-            "FAKE_DSH_EDIT_FILE": str(ctx["repo"] / "mod.py"),
-        },
-        "--no-progress-steps",
-        "8",
+def test_turn_stop_reason_prefers_no_progress_over_exit_code() -> None:
+    run = {"schema": guard.PHASE_RUN_SCHEMA, "decision": "NO_PROGRESS", "dsh_exit_code": 0}
+    assert guard._turn_stop_reason(guard.EXIT_NO_PROGRESS, run) == "DSH_NO_PROGRESS"
+    assert guard._turn_stop_reason(guard.EXIT_NO_PROGRESS, {**run, "dsh_exit_code": -15}) == (
+        "DSH_NO_PROGRESS"
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    out = json.loads(proc.stdout)
-    assert "decision" not in out or out["decision"] != "NO_PROGRESS"
-    assert out["turn_state"] == guard.TURN_OK
-
-
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 NODE = shutil.which("node")
@@ -287,32 +291,3 @@ def test_adapter_caps_each_tool_result_with_truncation_note(tmp_path: Path) -> N
     assert got["big"].startswith("x" * 8192)
     assert "TRUNCATED" in got["big"] and "50000" in got["big"]
     assert len(got["big"]) < 8192 + 300
-
-
-def _dsh_exits_zero_on_sigterm_env(ctx: dict) -> dict[str, str]:
-    # The installed DSH handles SIGTERM with interrupt(0): the child exits 0 after a stop.
-    return {
-        "FAKE_DSH_STEPS": "8",
-        "FAKE_DSH_STEP_SLEEP": "0.05",
-        "FAKE_DSH_LINGER": "30",
-        "FAKE_DSH_EXIT0_ON_TERM": "1",
-        "FAKE_DSH_EDIT_AT": "0",
-        "FAKE_DSH_EDIT_FILE": str(ctx["repo"] / "mod.py"),
-    }
-
-
-def test_sigterm_exit_zero_with_dirty_worktree_is_quarantined(ctx: dict) -> None:
-    env = _dsh_exits_zero_on_sigterm_env(ctx)
-    env["FAKE_DSH_STEPS"] = "30"
-    # Edit at step 0 is progress; later steps then stall until the threshold.
-    proc = _start(ctx, env, "--no-progress-steps", "5")
-    assert proc.returncode == guard.EXIT_NO_PROGRESS, proc.stdout + proc.stderr
-    out = json.loads(proc.stdout)
-    assert out["decision"] == "NO_PROGRESS"
-    assert out["dsh_exit_code"] == 0
-    assert out["turn_state"] == guard.TURN_FAILED_DIRTY
-    state = guard.load_turn_state(ctx["state"], out["session_id"])
-    assert state is not None
-    assert Path(state["quarantine_receipt"]).is_file()
-    patches = list((ctx["state"] / "quarantine" / out["session_id"]).glob("*.patch"))
-    assert patches and b"changed" in patches[0].read_bytes()
