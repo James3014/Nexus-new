@@ -253,6 +253,8 @@ def write_cline_run_config(config_dir: Path) -> dict[str, str]:
         "CLINE_GLOBAL_SETTINGS_PATH": str(settings),
         "CLINE_MCP_SETTINGS_PATH": str(mcp),
     }
+
+
 AGY_RUN_HOME_SETTINGS = Path(".gemini") / "antigravity-cli" / "settings.json"
 AGY_RUN_HOME_PROJECTS = Path(".gemini") / "config" / "projects"
 
