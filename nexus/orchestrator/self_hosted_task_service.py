@@ -2869,7 +2869,8 @@ class SelfHostedTaskService:
                 self._validate_claim_locked(locked_state, bound)
                 if cached is not None and cached is not bound:
                     self._validate_claim_locked(locked_state, cached)
-                self._bound_attempt_claims[bound_key] = dict(bound)
+                if bound_key is not None:
+                    self._bound_attempt_claims[bound_key] = dict(bound)
                 if persisted is None:
                     persisted_all[effective_attempt_id] = dict(bound)
                     locked_state["attempt_claim_bindings"] = persisted_all
@@ -2922,8 +2923,9 @@ class SelfHostedTaskService:
                     # Recovery hands the claim to a new attempt: re-identify it so
                     # the old attempt's binding no longer matches the claim.
                     new_ident["attempt_id"] = authorized
-                    record["identity"] = new_ident
-                    record["identity_hash"] = self._claim_hash(new_ident)
+                    stored_claim: dict[str, Any] = state["work_claim"]
+                    stored_claim["identity"] = new_ident
+                    stored_claim["identity_hash"] = self._claim_hash(new_ident)
                     state["attempt_id"] = authorized
                 rebound = self._attempt_binding(record, task_id, authorized)
                 bindings[authorized] = rebound
