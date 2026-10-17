@@ -1051,6 +1051,10 @@
     "kind": "staticmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> Optional[ExpectedEvidenceUniverse]"
    },
+   "_task_card_issue_promises": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:universe: Optional[ExpectedEvidenceUniverse]) -> Optional[IssuePromiseBinding]"
+   },
    "_task_id": {
     "kind": "staticmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str]) -> str"

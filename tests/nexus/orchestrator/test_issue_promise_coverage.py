@@ -19,15 +19,12 @@ The six G0 §4 scenarios each have a class below:
 
 plus a Core verdict that blocked or failed, which must never read COMPLETE.
 
-RED gate: these tests land before the implementation, and the required
-exact-base impact gate treats an added test that skips or xfails as not
-passed. So until the implementation PR, each RED class carries a
-``__test__ = _RED_2532`` gate and is collected only with ``NEXUS_RED_2532=1``
-(run that to see them fail). ``test_frozen_red_tests_are_unchanged`` pins the
-frozen region between the two marker comments, ignoring blank lines and the
-gate lines. The implementation PR deletes the gate lines, ``_RED_2532`` and
-its ``os`` import (all outside the region or excluded) and may reformat blank
-lines; any other edit to the region changes the hash and shows up in review.
+Frozen RED tests: they landed first (#2545) behind a ``__test__ = _RED_2532``
+gate, because the required exact-base impact gate treats an added test that
+skips or xfails as not passed. The implementation PR removed the gates.
+``test_frozen_red_tests_are_unchanged`` still pins the frozen region between
+the two marker comments (blank lines ignored), and ``test_no_red_gate_remains``
+fails if a gate comes back.
 """
 
 from __future__ import annotations
@@ -36,13 +33,10 @@ import ast
 import hashlib
 import importlib
 import inspect
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-_RED_2532 = os.environ.get("NEXUS_RED_2532") == "1"
 
 # >>> frozen #2532 RED region
 
@@ -190,8 +184,6 @@ THREE_MAP = {"P1": [ENTRY_P1], "P2": [ENTRY_P2], "P3": [ENTRY_P3]}
 class TestIssuePromiseSetFence:
     """The Issue body fence and the card block parse fail-closed."""
 
-    __test__ = _RED_2532
-
     def test_issue_body_without_fence_is_legacy(self):
         assert _contract().parse_issue_promise_set("Plain Issue body.\n") is None
 
@@ -291,8 +283,6 @@ class TestIssuePromiseSetFence:
 class TestScenario1GenericGreenEntryNotRun:
     """G0 §4 row 1: a green generic suite never covers an unexercised entry."""
 
-    __test__ = _RED_2532
-
     def test_generic_suite_pass_does_not_cover_the_promise_entry(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
         verdict = _verdict([_entry(GENERIC), _entry(ENTRY_P1, "NOT_COVERED", None)])
@@ -334,8 +324,6 @@ class TestScenario1GenericGreenEntryNotRun:
 class TestScenario2WorkerDropsSubject:
     """G0 §4 row 2: dropping or relaxing the mapped subject never covers."""
 
-    __test__ = _RED_2532
-
     def test_mapped_subject_absent_from_coverage_is_not_covered(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
         result = _project(binding, _verdict([_entry(GENERIC)]))
@@ -370,8 +358,6 @@ class TestScenario2WorkerDropsSubject:
 
 class TestScenario3TwoOfThreePromises:
     """G0 §4 row 3: delivering 2 of 3 promises is PARTIAL, whatever is claimed."""
-
-    __test__ = _RED_2532
 
     def test_two_of_three_is_partial(self):
         binding = _binding(THREE, THREE_MAP)
@@ -428,8 +414,6 @@ class TestScenario3TwoOfThreePromises:
 class TestScenario4FakePassUnfrozenTest:
     """G0 §4 row 4: a worker-added test cannot stand in for the frozen subject."""
 
-    __test__ = _RED_2532
-
     def test_unexpected_worker_subject_passing_does_not_cover(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
         verdict = _verdict(
@@ -452,8 +436,6 @@ class TestScenario4FakePassUnfrozenTest:
 
 class TestScenario5StaleBinding:
     """G0 §4 row 5: wrong commit, Issue edit or promise generation → STALE."""
-
-    __test__ = _RED_2532
 
     def _covered(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -499,8 +481,6 @@ class TestScenario5StaleBinding:
 
 class TestScenario6ForgedCloseIsProjectionOnly:
     """G0 §4 row 6: the projection grants nothing and cannot be talked into COMPLETE."""
-
-    __test__ = _RED_2532
 
     _AUTHORITY_WORDS = ("approv", "merge", "close", "closure", "authoriz", "grant", "release")
 
@@ -573,8 +553,6 @@ class TestBlockedCoreVerdictNeverCompletes:
     entry is trustworthy, so no promise is COVERED either.
     """
 
-    __test__ = _RED_2532
-
     @pytest.mark.parametrize(
         ("overrides", "any_covered_allowed"),
         [
@@ -636,6 +614,11 @@ def _frozen_source_sha256(text: str) -> str:
         if line.strip() and line.strip() != "__test__ = _RED_2532"
     ]
     return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()
+
+
+def test_no_red_gate_remains():
+    text = Path(__file__).read_text(encoding="utf-8")
+    assert "__test__ = _RED_2532" not in [line.strip() for line in text.splitlines()]
 
 
 def test_frozen_red_tests_are_unchanged():

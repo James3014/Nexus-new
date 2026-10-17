@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -371,17 +370,13 @@ def test_worker_candidate_still_rejects_a_supplied_universe(field):
 
 # --- #2532: Issue promises bound to expected-evidence subjects ------------
 #
-# Frozen RED tests (Owner decision on #2532, 2026-10-17): they land before the
-# implementation. The required exact-base impact gate treats an added test
-# that skips or xfails as not passed, so until the implementation PR the class
-# carries a ``__test__ = _RED_2532`` gate and is collected only with
-# ``NEXUS_RED_2532=1``. ``test_issue_promise_red_class_is_frozen`` pins the
-# region between the two marker comments, ignoring blank lines and the gate
-# line. The implementation PR deletes the gate line, ``_RED_2532`` and its
-# ``os`` import (outside the region) and may reformat blank lines; any other
-# edit to the region changes the hash and shows up in review.
-
-_RED_2532 = os.environ.get("NEXUS_RED_2532") == "1"
+# Frozen RED tests (Owner decision on #2532, 2026-10-17): they landed first
+# (#2545) behind a ``__test__ = _RED_2532`` gate, because the required
+# exact-base impact gate treats an added test that skips or xfails as not
+# passed. The implementation PR removed the gate.
+# ``test_issue_promise_red_class_is_frozen`` still pins the region between the
+# two marker comments (blank lines ignored); ``test_no_issue_promise_red_gate_remains``
+# fails if the gate comes back.
 
 # >>> frozen #2532 RED region
 
@@ -393,8 +388,6 @@ def _task_contract_module() -> Any:
 
 
 class TestTaskCardCreateIssuePromises:
-    __test__ = _RED_2532
-
     ENTRY = "python -m pytest tests/test_feature.py::test_real_entry"
     OTHER = "python -m pytest tests/test_feature.py::test_other_entry"
     PROMISE_UNIVERSE = {
@@ -651,6 +644,11 @@ _REGION_END = "# <<< frozen #2532 RED region"
 _FROZEN_ISSUE_PROMISE_CLASS_SHA256 = (
     "721ac42cc80284faa10b2ff93ba9cb879eb92a7ccdd04cec421f5bcbfb3c3e5e"
 )
+
+
+def test_no_issue_promise_red_gate_remains():
+    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+    assert "__test__ = _RED_2532" not in [line.strip() for line in lines]
 
 
 def test_issue_promise_red_class_is_frozen():
