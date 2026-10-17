@@ -58,29 +58,31 @@ Consistency comes from this contract plus a conformance test in each repo.
    `OPENAI_API_KEY` and `MY_SECRET` are absent from the child environment. The
    test must run on Linux in CI and must not skip.
 
-## Current conformance (origin/main, checked 2026-10-16)
+## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17)
 
 | Adapter | Prompt | Conversation | Environment | Session mode |
 | --- | --- | --- | --- | --- |
-| reviewer | argv (`opencli.py:123`); records use `safe_argv` (`:37-39`, `:125`) | always `--new` (`:123`) | full copy: `os.environ.copy()` (`:129`) | `ephemeral` (`:124`, `:167`) |
+| reviewer | argv (`opencli.py:123`); records use `safe_argv` (`:37-39`, `:125`) | always `--new` (`:123`) | denylist filter `_child_environment` (`:10-37`), used for ask/detail (`:158`) and `--version` (`:213`), same markers as open-swe; nexus-opencli-reviewer#108 (closes #105), test `tests/test_opencli_child_environment.py` | `ephemeral` (`:124`, `:167`) |
 | open-swe | argv (`opencli_web_model.py:2084`) | `--conversation` when bound, else `--new` (`:2085-2088`) | denylist filter (`:1196-1208`, markers `:979-980`); `AWS_*` and other unlisted names pass | `ephemeral` default (`:1015`), passed at `:2094` |
-| Nexus-new embedded copy | argv (`opencli_web_model.py:855`) | `--conversation` when bound, else `--new` (`:856-859`) | full copy: `os.environ.copy()` (`:537`) | `ephemeral` default (`:478`) |
+| Nexus-new embedded copy | argv (`opencli_web_model.py:855`) | `--conversation` when bound, else `--new` (`:856-859`) | denylist filter in `_environment()` (`:553-566`, markers `:461-462`), same as open-swe; test `tests/services/test_open_swe_embedded_opencli_environment.py` | `ephemeral` default (`:478`) |
 | devspace | argv (`chat-swarm-runtime.ts:1476`, `:1531`) | `--new` on the first ask (`:1480`), then `--conversation` (`:1533`) | inherits `process.env`: `spawn` at `:1681` passes no `env` | `ephemeral` (`:1443`, `:1484`, `:1537`, `:1669`) |
 
 Reading the table: argv prompt delivery is accepted (rule 1). Conversation
-policy and session mode conform everywhere. Environment is the gap.
-open-swe's denylist conforms to the minimum but not to the allowlist target.
-Rule 5 tests are not part of this document's change; each repo adds its own.
+policy and session mode conform everywhere. Environment is the gap, now closed to the
+minimum for reviewer, open-swe and the embedded copy; only devspace still
+inherits `process.env`. The three denylists conform to the minimum but not to
+the allowlist target.
+Rule 5 tests live in each repo, not in this document.
 
 ## Known non-conformances and follow-ups
 
 | Item | Owner | Reference |
 | --- | --- | --- |
-| reviewer passes the full environment | nexus-opencli-reviewer | nexus-opencli-reviewer#105 |
-| Nexus-new embedded copy passes the full environment | Nexus-new | Nexus-new#2394 |
+| ~~reviewer passes the full environment~~ fixed (denylist, rule 5 test) | nexus-opencli-reviewer | nexus-opencli-reviewer#105, PR #108 |
+| ~~Nexus-new embedded copy passes the full environment~~ fixed (denylist, rule 5 test) | Nexus-new | Nexus-new#2394 |
 | devspace inherits `process.env` | devspace, paused, not scheduled | none |
 | open-swe is a denylist, not an allowlist | nexus-open-swe-runtime, optional hardening | none |
-| No recording-fake conformance test yet (rule 5) | each repo, bundled with the fixes above | the two Issues above |
+| Rule 5 recording-fake test present for reviewer and the embedded copy; open-swe and devspace not covered here | open-swe, devspace | none |
 
 ## Earlier findings mapped to this contract
 
