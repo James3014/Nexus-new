@@ -155,7 +155,10 @@ def _replay_tree_acquisition(tmp_path: Path, entries: list[tuple[str, str]], scr
         "TRUSTED_TOKEN": "golden-replay",
         "RUNNER_TEMP": str(runner_temp),
     }
-    script = script.replace("https://github.com/$REPOSITORY.git", origin.resolve().as_uri())
+    remote = "https://github.com/$REPOSITORY.git"
+    # Never let the replay reach GitHub: the remote must be swapped for the local origin.
+    assert script.count(remote) == 1, "acquisition remote URL changed; update the replay"
+    script = script.replace(remote, origin.resolve().as_uri())
     return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
 
 

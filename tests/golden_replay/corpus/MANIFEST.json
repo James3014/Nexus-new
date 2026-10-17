@@ -94,21 +94,21 @@
     },
     {
       "family": "same_repo_doctor_state",
-      "fixture_sha256": "b26021bcb2be7439d314c8d5008704308b9c4341ffb5532ff8d71393dd12fd32",
+      "fixture_sha256": "85e4e728c7c45940932e200e569842d64e87b01734c37a6cd4d6fc0f9955329a",
       "path": "doctor/nexus_new_same_repo_canary_20261006.json",
       "pr": 1605,
       "real": true,
-      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
+      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; provider_session_id replaced by REDACTED_PROVIDER_SESSION_ID; desktop consumer ids replaced by desktop-REDACTED; agyop_ operation ids pseudonymized as agyop_ + sha256(original)[:32], applied to every occurrence of the original hex (incl. derived ids such as review_effect_id); Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
       "source": "~/.local/state/nexus-dsh-pilot/canary/doctor.json (live doctor, 2026-10-06)",
       "source_sha256": "997777f69c64705d806a55a40534254a251e10b3c3d99093da3f9c466093cfd3"
     },
     {
       "family": "cross_repo_doctor_state",
-      "fixture_sha256": "5183f8545a503dd408c6fc3511e8aef7350af6fd3251d75760561236c0a9133b",
+      "fixture_sha256": "14ffdcb7b2a8f4b66b1f3d23366c1084afd91902e93621cf2032dfade07e1fce",
       "path": "doctor/rie57_cross_repo_20261017.json",
       "pr": 1605,
       "real": true,
-      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
+      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; provider_session_id replaced by REDACTED_PROVIDER_SESSION_ID; desktop consumer ids replaced by desktop-REDACTED; agyop_ operation ids pseudonymized as agyop_ + sha256(original)[:32], applied to every occurrence of the original hex (incl. derived ids such as review_effect_id); Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
       "source": "~/.local/bin/nexus-workflow-doctor --json --repo-root ~/.local/state/dsh-rie57/standalone-20261008 --repository James3014/repository-intelligence-engine --issue 57 (live host runtime, read-only, captured 2026-10-17)",
       "source_sha256": "879872089529cbc248577a1a5b218e5a5a49e0cf32e75adb4753c6ef154fa379"
     },
@@ -160,8 +160,8 @@
       "pr": null,
       "real": true,
       "redaction": "none (committed public repository content); byte-identical copy",
-      "source": "git show afa134da15516254086900c351a2c18c58f823ba:tasks/github-issue-1032-b3-mimo-route-20260920/00-b3-mimo-route.md",
-      "source_revision": "afa134da15516254086900c351a2c18c58f823ba",
+      "source": "git show 3fb15399dd031504ddd143b0715bf0034e6d87f7:tasks/github-issue-1032-b3-mimo-route-20260920/00-b3-mimo-route.md",
+      "source_revision": "3fb15399dd031504ddd143b0715bf0034e6d87f7",
       "source_sha256": "70c10ddeb30a4daa1ef59440e03c171a00f1bcf0510c9d9575907f7e6619a88d"
     },
     {
@@ -182,8 +182,8 @@
       "pr": null,
       "real": true,
       "redaction": "none (committed public repository content); byte-identical copy",
-      "source": "git show afa134da15516254086900c351a2c18c58f823ba:tasks/issue-1384-completion-liveness-r2/00-issue-1384-main-drift-liveness-r2.md",
-      "source_revision": "afa134da15516254086900c351a2c18c58f823ba",
+      "source": "git show 3fb15399dd031504ddd143b0715bf0034e6d87f7:tasks/issue-1384-completion-liveness-r2/00-issue-1384-main-drift-liveness-r2.md",
+      "source_revision": "3fb15399dd031504ddd143b0715bf0034e6d87f7",
       "source_sha256": "a2356c735adccf65358f4df5d7a81d3797c06b66ff3c543b56b1cb7bc9f672f8"
     }
   ],

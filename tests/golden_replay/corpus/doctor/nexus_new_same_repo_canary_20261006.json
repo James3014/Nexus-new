@@ -6,7 +6,7 @@
     "layers": [
       {
         "evidence": {
-          "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6"
+          "operation_id": "agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2"
         },
         "freshness": "OBSERVED",
         "gap": null,
@@ -105,9 +105,9 @@
       },
       {
         "evidence": {
-          "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6",
+          "operation_id": "agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2",
           "review_applicable": true,
-          "review_effect_id": "ed9e626cbfce2c98675522fdbbbcfbb60eb32fe4a9e5c2f333f93595211d3f13",
+          "review_effect_id": "ac17ba6398b8eb7b57c64d0b5fa2cfd20eb32fe4a9e5c2f333f93595211d3f13",
           "review_verdict": "ACCEPT",
           "subject_stable": true
         },
@@ -129,7 +129,7 @@
     "family_unavailable": [
       {
         "account_alias_hash": "44c585e9a412",
-        "consumer_id": "desktop-cd36c312423e452ca796409fdb7dc211",
+        "consumer_id": "desktop-REDACTED",
         "lease_id_hash": "d71214a76839",
         "model_family": "claude_gpt",
         "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/44c585e9a412.family-unavailable.claude_gpt.json",
@@ -141,7 +141,7 @@
       },
       {
         "account_alias_hash": "63ef3e58e241",
-        "consumer_id": "desktop-17c3dda45930426c86a295ca2a34b638",
+        "consumer_id": "desktop-REDACTED",
         "lease_id_hash": "c7caa2a5447a",
         "model_family": "gemini",
         "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/63ef3e58e241.family-unavailable.gemini.json",
@@ -222,7 +222,7 @@
       "observed_changed_paths": [],
       "observed_model": "claude-sonnet-4-6",
       "observed_provider": "agy",
-      "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6",
+      "operation_id": "agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2",
       "permission_profile_kind": "NO_TOOL_PACKET",
       "permission_profile_sha256": "7e4bd5b2b86df40957ab41d2aa856d703a76ec433b9a325356129105182d164e",
       "phase": "TERMINAL",
@@ -233,7 +233,7 @@
       "provider_pgid": 86281,
       "provider_pid": 86281,
       "provider_process_state": "EXITED",
-      "provider_session_id": "361c2c47-aab8-4f9e-94a8-4c0b0f5130eb",
+      "provider_session_id": "REDACTED_PROVIDER_SESSION_ID",
       "provider_started_at": "2026-10-06T04:13:27.054614+00:00",
       "provider_stream_last_activity_at": "2026-10-06T04:15:04.815325+00:00",
       "quota_preflight_progress": {
@@ -253,7 +253,7 @@
       "review_changed_path_count": 4,
       "review_compact_payload_sha256": null,
       "review_compaction_schema": null,
-      "review_effect_id": "ed9e626cbfce2c98675522fdbbbcfbb60eb32fe4a9e5c2f333f93595211d3f13",
+      "review_effect_id": "ac17ba6398b8eb7b57c64d0b5fa2cfd20eb32fe4a9e5c2f333f93595211d3f13",
       "review_failure_kind": null,
       "review_launch_catalog_version": "nexus.agy_reviewer_launch_catalog.v2",
       "review_launch_mode": "plan",
@@ -263,7 +263,7 @@
       "review_packet_mode": null,
       "review_packet_sha256": "67aaedb3bfecbc623965226fc7e434f2217762deb3273acc6e106f7c00720386",
       "review_profile_version": "nexus.rdc_agy_packet_review.v1",
-      "review_receipt_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/review-receipt.json",
+      "review_receipt_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2/review-receipt.json",
       "review_receipt_sha256": "6fad2c1a67f05759c6b650ff5e4dbe0f3003afe49efe50139386df4c1aec7cf3",
       "review_repo_root_sha256": "52fb6a71feaedfd7d248966e4183209f82a344c0521041372357ab5a89649de2",
       "review_repository": "james3014/nexus-new",
@@ -279,8 +279,8 @@
       "source_baseline_sha256": "e9acc3c812870580c95c83cde38e1534db5713a463b7d54bc8a12dcf253e8e89",
       "started_at": "2026-10-06T04:12:17.646287+00:00",
       "status": "COMPLETED",
-      "stderr_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/stderr.log",
-      "stdout_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/stdout.log",
+      "stderr_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2/stderr.log",
+      "stdout_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ac17ba6398b8eb7b57c64d0b5fa2cfd2/stdout.log",
       "subject_stable": true,
       "time_to_first_effect_ms": null,
       "tool_event_count": 0,
