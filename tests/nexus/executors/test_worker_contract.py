@@ -3032,3 +3032,35 @@ def test_cline_unavailable_tool_rejected_by_cline_is_not_a_tool_run():
         + "\n"
     ).encode()
     assert cline_delivery_failure(no_id + done, b"") == "cline_unadmitted_tool"
+
+
+def test_cline_version_probe_runs_under_its_own_seatbelt(monkeypatch):
+    from nexus.executors import worker_registry
+
+    seen = []
+
+    class Done:
+        returncode = 0
+        stdout = b"3.0.69\n"
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        return Done()
+
+    monkeypatch.setattr("nexus.executors.agy_write_admission.seatbelt_available", lambda: True)
+    monkeypatch.setattr(worker_registry.subprocess, "run", fake_run)
+    assert worker_registry.cline_version_probe("/x/cline") == "3.0.69"
+    argv = seen[0]
+    assert argv[:2] == ["/usr/bin/sandbox-exec", "-p"]
+    assert "(deny file-write*)" in argv[2] and "(deny process-fork)" in argv[2]
+    assert argv[3:] == ["/x/cline", "--version"]
+
+
+def test_cline_version_probe_fails_closed_without_sandbox_exec(monkeypatch):
+    from nexus.executors import worker_registry
+
+    ran = []
+    monkeypatch.setattr("nexus.executors.agy_write_admission.seatbelt_available", lambda: False)
+    monkeypatch.setattr(worker_registry.subprocess, "run", lambda *a, **k: ran.append(a))
+    assert worker_registry.cline_version_probe("/x/cline") is None
+    assert ran == []
