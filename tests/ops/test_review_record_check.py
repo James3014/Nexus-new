@@ -1064,6 +1064,7 @@ def _delta_fetch(
     main_ahead=0,
     changed=({"filename": "elsewhere/x.py"},),
     pr_at_old=({"filename": "docs/a.md"},),
+    side_changed=({"filename": "main/other.py"},),
     api_error=False,
     compare_extra=None,
     pr_files=DOCS,
@@ -1085,8 +1086,8 @@ def _delta_fetch(
                 return delta
             if left == "main":
                 return {"status": main_status, "ahead_by": main_ahead, "behind_by": 3}
-            if left == "main" and right == R_OLD:
-                raise AssertionError(url)
+            if left == R_OLD:  # what the base gained on a side parent since the reviewed head
+                return _compare_payload([], side_changed)
             raise AssertionError(url)
         if "/commits/" in url:
             return {"sha": R_OLD}
@@ -1220,7 +1221,9 @@ def test_merge_only_delta_holds_for_the_cross_model_requirement_too():
     risky_files = RISKY
     claude_old = _c(OPUS_RECORD.replace(HEAD, R_OLD[:12]))
     codex_old = _c(CODEX_RECORD.replace(HEAD, R_OLD))
-    ok = _delta_case(pr_files=risky_files, comments=[claude_old, codex_old], changed=())
+    ok = _delta_case(
+        pr_files=risky_files, pr_at_old=RISKY, comments=[claude_old, codex_old], changed=()
+    )
     assert ok[0] == 0 and "merge-only delta verified" in ok[1]["description"]
     # the same Codex record without a verified delta does not count
     bad = _delta_case(
@@ -1290,4 +1293,64 @@ def test_a_disabled_label_does_not_fall_back_to_the_previous_claude_header():
 
 def test_a_live_codex_verdict_line_still_counts():
     record = rrc.classify_record(f"**Codex (round 2)**: ACCEPT @ {HEAD}\n", HEAD)
+    assert record is not None and record["cross_model"]
+
+
+_GATE = {"filename": "nexus/gate.py"}
+
+
+def test_an_evil_merge_that_keeps_the_reviewed_tree_is_not_accepted():
+    # parents (R, main@X) with R's tree: compare R...M is empty, but main's file X reverted
+    # shows up as a new PR path at the head
+    rc, status = _delta_case(changed=(), pr_files=DOCS + [_GATE])
+    assert rc == 1 and "older head only" in status["description"]
+
+
+def test_a_base_change_to_a_pr_path_on_the_side_parent_is_not_accepted():
+    assert _delta_case(side_changed=({"filename": "docs/a.md"},))[0] == 1
+    assert (
+        _delta_case(
+            side_changed=({"filename": "docs/gone.md"},),
+            pr_at_old=({"filename": "docs/a.md"}, {"filename": "docs/gone.md"}),
+            pr_files=DOCS + [{"filename": "docs/gone.md"}],
+        )[0]
+        == 1
+    )
+
+
+def test_a_truncated_side_parent_change_list_is_not_accepted():
+    files = tuple({"filename": f"m{i}.py"} for i in range(300))
+    assert _delta_case(side_changed=files)[0] == 1
+
+
+def test_an_honest_merge_where_main_changed_a_non_pr_file_is_accepted():
+    rc, status = _delta_case(
+        side_changed=({"filename": "main/other.py"}, {"filename": "main/more.py"}),
+        changed=({"filename": "main/other.py"}, {"filename": "main/more.py"}),
+    )
+    assert rc == 0 and "merge-only delta verified" in status["description"]
+
+
+def test_the_compare_file_list_is_read_from_page_one_only():
+    urls: list[str] = []
+
+    def fetch(url, token):
+        urls.append(url)
+        assert "page=1" in url  # later pages carry no "files" key
+        return {"files": [{"filename": "a.py"}, {"filename": "b.py", "previous_filename": "c.py"}]}
+
+    assert rrc._compare_files(fetch, "https://api.github.com/repos/o/r", TOKEN, "x", "y") == {
+        "a.py",
+        "b.py",
+        "c.py",
+    }
+    assert len(urls) == 1
+
+
+def test_gemini_with_codex_out_of_credits_aside_still_credits_cross_model():
+    line = (
+        "- Cross-model adversarial review (Gemini 3.8 Flash High via agy, Codex out of "
+        f"credits): ACCEPT @ {HEAD}"
+    )
+    record = rrc.classify_record(f"## Review record\n{line}\n", HEAD)
     assert record is not None and record["cross_model"]

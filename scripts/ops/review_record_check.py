@@ -384,6 +384,20 @@ def _not_run_label(line: str) -> bool:
     )
 
 
+def _split_label(prefix: str) -> tuple[str, str]:
+    """Split at the first colon outside parentheses: (label, text after it). A parenthetical
+    aside such as "(Gemini via agy, Codex out of credits)" stays inside the label (#2299)."""
+    depth = 0
+    for index, char in enumerate(prefix):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == ":" and depth == 0:
+            return prefix[:index], prefix[index + 1 :]
+    return prefix, ""
+
+
 def _disabled_verdict_label(label_part: str) -> bool:
     """A label part that names a model and is disabled by a not-run word ("Codex (not run):")
     contributes no family to a verdict clause that follows it (#2308)."""
@@ -497,16 +511,12 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             # The family named on the line before the token ("Claude: r1 ..., r2 ACCEPT"),
             # else the section header's.
             line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
-            label_part, _colon, status_part = line_before.partition(":")
-            if (
-                _disabled_verdict_label(before)
-                or _disabled_verdict_label(label_part if _colon else "")
-                or (
-                    bool(_colon)
-                    and bool(_MODEL_WORDS.search(label_part))
-                    and len(status_part.split()) <= 4
-                    and bool(_NOT_A_HEADER.search(_plain(status_part)))
-                )
+            label_part, status_part = _split_label(line_before)
+            if _disabled_verdict_label(label_part) or (
+                label_part != line_before
+                and bool(_MODEL_WORDS.search(label_part))
+                and len(status_part.split()) <= 4
+                and bool(_NOT_A_HEADER.search(_plain(status_part)))
             ):
                 continue  # "**Codex (not run)**: ACCEPT @ sha" names no reviewer family
             family = _family(before) or _family(line_before) or header_family
@@ -701,16 +711,15 @@ def _names(entries: list[Any]) -> set[str]:
 def _compare_files(
     fetch: Callable[[str, str], Any], base: str, token: str, left: str, right: str
 ) -> set[str]:
-    """All paths changed between two commits; raises when the list may be truncated."""
-    names: set[str] = set()
-    for page in range(1, MAX_DELTA_FILES // PER_PAGE + 1):
-        files = _compare(fetch, base, token, left, right, page).get("files")
-        if not isinstance(files, list):
-            raise CheckError("compare carries no file list")
-        names |= _names(files)
-        if len(files) < PER_PAGE:
-            return names
-    raise CheckError("compare file list may be truncated")
+    """All paths changed between two commits; raises when the list may be truncated.
+
+    The compare API returns up to 300 files on page 1 whatever ``per_page`` says and no
+    ``files`` key on later pages, so only page 1 is read and 300 files means truncated.
+    """
+    files = _compare(fetch, base, token, left, right).get("files")
+    if not isinstance(files, list) or len(files) >= MAX_DELTA_FILES:
+        raise CheckError("compare file list missing or may be truncated")
+    return _names(files)
 
 
 def merge_only_delta(
@@ -783,13 +792,19 @@ def merge_only_delta(
                 or relation.get("ahead_by") != 0
             ):
                 return False
-        changed = _compare_files(fetch, base, token, reviewed, head)
-        if changed & pr_paths:
-            return False
-        # A path the PR touched at the reviewed commit but no longer touches (reverted by
-        # the merge) is a change too; read the PR's file list as of the reviewed commit.
+        # The PR's paths as of the reviewed commit; the head must not add any (an "evil merge"
+        # that keeps the reviewed tree reverts what the base gained, and the reverted file
+        # shows up as a new PR path).
         pr_at_reviewed = _compare_files(fetch, base, token, base_ref, reviewed)
-        return not (changed & pr_at_reviewed)
+        if not pr_paths <= pr_at_reviewed:
+            return False
+        covered = pr_paths | pr_at_reviewed
+        # What the base branch gained since the reviewed commit forked from it must not
+        # touch a PR path either (the squash would otherwise land a silent revert of it).
+        for side in dict.fromkeys(side_parents):
+            if _compare_files(fetch, base, token, reviewed, side) & covered:
+                return False
+        return not (_compare_files(fetch, base, token, reviewed, head) & covered)
     except Exception:  # noqa: BLE001 - any doubt means the delta is not verified
         return False
 
