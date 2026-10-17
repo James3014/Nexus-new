@@ -261,6 +261,7 @@ TASK_CARD_ISSUE_PROMISES_FENCE = "nexus-issue-promises"
 _MAX_ISSUE_PROMISES = 64
 _PROMISE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+_PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 
 
@@ -379,6 +380,10 @@ class IssuePromiseBinding(BaseModel):
     repository: str
     issue_number: int
     issue_contract_hash: str
+    # The Nexus contract identity of the card universe this map was made for
+    # (``expected_evidence_universe_identity``); a verdict for any other
+    # universe cannot cover these promises.
+    expected_evidence_identity: str
     promise_set: IssuePromiseSet
     map: List[IssuePromiseSubjects] = Field(min_length=1, max_length=_MAX_ISSUE_PROMISES)
 
@@ -401,6 +406,13 @@ class IssuePromiseBinding(BaseModel):
     def _validate_contract_hash(cls, value: Any) -> str:
         if not isinstance(value, str) or not _SHA256_HEX_RE.fullmatch(value):
             raise ValueError("issue_contract_hash must be a lowercase 64-hex SHA-256")
+        return value
+
+    @field_validator("expected_evidence_identity")
+    @classmethod
+    def _validate_universe_identity(cls, value: Any) -> str:
+        if not isinstance(value, str) or not _PREFIXED_SHA256_RE.fullmatch(value):
+            raise ValueError("expected_evidence_identity must be sha256:<64 lowercase hex>")
         return value
 
     @model_validator(mode="after")
@@ -464,8 +476,9 @@ def _parse_single_json_fence(text: Any, fence: str, code: str) -> Optional[Any]:
         raise ValueError(f"{code}: unterminated declaration")
     try:
         return json.loads("\n".join(lines[start + 1 : end]))
-    except ValueError as exc:
-        raise ValueError(f"{code}: {exc}") from exc
+    except (ValueError, RecursionError) as exc:
+        # Deeply nested JSON raises RecursionError; it must fail closed too.
+        raise ValueError(f"{code}: {type(exc).__name__}: {exc}") from exc
 
 
 def parse_issue_promise_set(issue_body: str) -> Optional[Dict[str, Any]]:

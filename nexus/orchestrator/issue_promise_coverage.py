@@ -12,15 +12,20 @@ Per promise:
 - ``COVERED``: every mapped subject is satisfied, and at least one REQUIRED /
   APPLICABLE subject was observed with a PASS.
 - ``NOT_COVERED``: a mapped subject was not observed, was observed without a
-  PASS, or the evidence is not trustworthy (no verdict, unpinned Core).
-- ``FAILED``: a mapped subject was observed with a FAIL.
-- ``STALE``: the evidence is for another commit, universe, Issue contract or
-  promise generation, or the live Issue binding was not confirmed.
+  PASS, or the evidence is not trustworthy (no verdict, no Core status,
+  integrity other than VALID, unpinned Core, no coverage).
+- ``FAILED``: a mapped subject was observed with a FAIL (in any category).
+- ``STALE``: the evidence is for another commit, card universe, Issue
+  contract or promise generation, or the live Issue binding was not confirmed.
 - ``PENDING_EXTERNAL_WITNESS``: a POST_MERGE or HIGH-risk promise whose
   pre-merge part holds; only a #2453 live witness can finish it.
 
-Overall: ``BLOCKED`` when the binding is invalid or any promise is FAILED or
-STALE, ``COMPLETE`` when every promise is COVERED, otherwise ``PARTIAL``.
+Overall: ``BLOCKED`` when the binding is invalid, the verdict's integrity is
+not VALID, or any promise is FAILED or STALE; ``COMPLETE`` only when every
+promise is COVERED *and* Core VERIFIED the candidate with ``blocking`` false.
+Every promise COVERED under a verdict that Core failed or the host blocked
+is ``BLOCKED`` (something outside the promises failed). Otherwise
+``PARTIAL``.
 """
 
 from __future__ import annotations
@@ -72,6 +77,8 @@ def _stale_reasons(
             reasons.append("EVIDENCE_HEAD_MISMATCH")
         if verdict.get("core_universe_identity_matches") is not True:
             reasons.append("CORE_UNIVERSE_IDENTITY_MISMATCH")
+        if verdict.get("contract_universe_identity") != binding.expected_evidence_identity:
+            reasons.append("CARD_UNIVERSE_MISMATCH")
     return reasons
 
 
@@ -79,6 +86,10 @@ def _untrusted_reasons(verdict: Mapping[str, Any] | None) -> list[str]:
     if verdict is None:
         return ["CORE_VERDICT_MISSING"]
     reasons: list[str] = []
+    if not isinstance(verdict.get("core_status"), str) or not verdict.get("core_status"):
+        reasons.append("CORE_STATUS_MISSING")
+    if verdict.get("integrity") != "VALID":
+        reasons.append("CORE_INTEGRITY_NOT_VALID")
     provenance = verdict.get("core_provenance")
     if not isinstance(provenance, Mapping) or provenance.get("status") != _PINNED:
         reasons.append("CORE_PROVENANCE_NOT_PINNED")
@@ -122,7 +133,8 @@ def _pre_merge_status(
             continue
         category = entry.get("category")
         observed = entry.get("observed_status")
-        if category == "COVERED" and observed == "FAIL":
+        if observed == "FAIL":
+            # A failing observation is a failure whatever its category.
             failed.append(sid)
         elif category == "COVERED" and observed == "PASS":
             if (
@@ -144,11 +156,24 @@ def _pre_merge_status(
     return COVERED, []
 
 
-def _overall(statuses: list[str]) -> str:
+def _verdict_accepted(verdict: Mapping[str, Any] | None) -> bool:
+    """Core VERIFIED the candidate, integrity is VALID and the host did not block."""
+    return (
+        verdict is not None
+        and verdict.get("core_status") == "VERIFIED"
+        and verdict.get("integrity") == "VALID"
+        and verdict.get("blocking") is False
+    )
+
+
+def _overall(statuses: list[str], verdict: Mapping[str, Any] | None, untrusted: list[str]) -> str:
     if any(status in (FAILED, STALE) for status in statuses):
         return BLOCKED
+    if "CORE_INTEGRITY_NOT_VALID" in untrusted:
+        return BLOCKED
     if statuses and all(status == COVERED for status in statuses):
-        return COMPLETE
+        # The promises held, but COMPLETE also needs the whole verdict to.
+        return COMPLETE if _verdict_accepted(verdict) else BLOCKED
     return PARTIAL
 
 
@@ -176,6 +201,7 @@ def project_issue_promise_coverage(
         "repository": None,
         "issue_number": None,
         "issue_contract_hash": None,
+        "expected_evidence_identity": None,
         "promise_set_generation": None,
         "promise_set_identity": None,
         "promises": [],
@@ -195,6 +221,7 @@ def project_issue_promise_coverage(
         "repository": binding.repository,
         "issue_number": binding.issue_number,
         "issue_contract_hash": binding.issue_contract_hash,
+        "expected_evidence_identity": binding.expected_evidence_identity,
         "promise_set_generation": binding.promise_set.promise_set_generation,
         "promise_set_identity": binding.promise_set.identity,
     })
@@ -238,6 +265,9 @@ def project_issue_promise_coverage(
     result["pending_external_witness"] = [
         item["promise_id"] for item in promises if item["status"] == PENDING_EXTERNAL_WITNESS
     ]
-    result["reason_codes"] = sorted({code for item in promises for code in item["reason_codes"]})
-    result["overall"] = _overall(statuses)
+    reason_codes = {code for item in promises for code in item["reason_codes"]}
+    if verdict is not None and not stale and not untrusted and not _verdict_accepted(verdict):
+        reason_codes.add("CORE_VERDICT_NOT_ACCEPTED")
+    result["reason_codes"] = sorted(reason_codes)
+    result["overall"] = _overall(statuses, verdict, untrusted)
     return result

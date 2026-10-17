@@ -160,6 +160,7 @@ Pass `issue_promises` to `nexus_task_card_create`, together with
 ```json
 {"repository": "James3014/Nexus-new", "issue_number": 1234,
  "issue_contract_hash": "<Core issue_contract_hash of the Issue>",
+ "expected_evidence_identity": "<expected_evidence_universe_identity(expected_evidence)>",
  "promise_set": {"promise_set_generation": 1, "promises": [ … copied from the Issue … ]},
  "map": [{"promise_id": "P1", "subject_ids": ["python -m pytest tests/test_x.py::test_real_entry"]},
          {"promise_id": "P2", "subject_ids": ["…"]}]}
@@ -172,9 +173,14 @@ creation refuses, with no file written and no authority recorded, when:
 - a promise of the set is not mapped, or the map names a promise that is not
   in the set;
 - a mapped subject is not a `logical_subject_id` of this card's universe;
+- `expected_evidence_identity` is not this card's universe identity;
 - a promise has no `REQUIRED` / `APPLICABLE` subject;
 - `issue_promises` is given without `expected_evidence`;
-- the objective or verifier text smuggles a `nexus-issue-promises` block.
+- the objective or verifier text smuggles a `nexus-issue-promises` block
+  (including one so deeply nested that `json.loads` raises `RecursionError`).
+
+All of these checks run before the Owner authority is checked or recorded,
+so a refused card leaves no authority record either.
 
 Workers cannot supply or change the map: `nexus_worker_candidate` rejects the
 field, and only the hashed card carries it.
@@ -198,15 +204,36 @@ per promise and an `overall` of `COMPLETE`, `PARTIAL` or `BLOCKED`:
 | Status | Meaning |
 |---|---|
 | `COVERED` | every mapped subject is satisfied and at least one REQUIRED / APPLICABLE subject was observed with `PASS` |
-| `NOT_COVERED` | a mapped subject was not observed or had no `PASS`; or no verdict, unpinned Core provenance, missing coverage |
-| `FAILED` | a mapped subject was observed with `FAIL` |
-| `STALE` | `evidence_head` ≠ `expected_head`, `core_universe_identity_matches` is not `true`, or `live_issue` (`issue_contract_hash`, `promise_set_identity`) is missing or differs |
+| `NOT_COVERED` | a mapped subject was not observed or had no `PASS`; or no verdict, no `core_status`, `integrity` other than `VALID`, unpinned Core provenance, missing coverage |
+| `FAILED` | a mapped subject was observed with `FAIL`, in any coverage category |
+| `STALE` | `evidence_head` ≠ `expected_head`, `core_universe_identity_matches` is not `true`, the verdict's `contract_universe_identity` is not the binding's `expected_evidence_identity`, or `live_issue` (`issue_contract_hash`, `promise_set_identity`) is missing or differs |
 | `PENDING_EXTERNAL_WITNESS` | a `POST_MERGE` promise, or a `HIGH` promise whose pre-merge evidence holds; it waits for a #2453 live witness |
 
-`overall` is `BLOCKED` for an invalid block or any `FAILED` / `STALE` promise,
-`COMPLETE` only when every promise is `COVERED`, and `PARTIAL` otherwise.
+`overall` is `BLOCKED` for an invalid block, an `integrity` other than
+`VALID`, or any `FAILED` / `STALE` promise. It is `COMPLETE` only when every
+promise is `COVERED` **and** the verdict itself was accepted (`core_status`
+`VERIFIED`, `integrity` `VALID`, `blocking` false). Every promise `COVERED`
+under a verdict that Core failed or the host blocked is `BLOCKED`: something
+outside the promises failed. Otherwise it is `PARTIAL`.
 `coverage_complete`, `claimed_items` and similar flags in the verdict are
 ignored; only Core coverage entries count.
+
+#### What the reader (#2453's closer) must supply
+
+The projection is only as fresh as its inputs. The reader must:
+
+- compute `live_issue.issue_contract_hash` from the **live** Issue (Core's
+  `issue_contract_hash` over the current title, body, state and author), and
+  `live_issue.promise_set_identity` with
+  `issue_promise_set_identity(parse_issue_promise_set(<live Issue body>))`.
+  Never take either from the card or the binding: that would compare the
+  card with itself;
+- take `evidence_head` from the receipt that holds the `core_verdict` (the
+  Candidate commit it verified), never echo `expected_head`;
+- pass `expected_head` as the exact PR head it is about to act on;
+- pass `promise_block` from the committed card
+  (`parse_task_card_issue_promises` on the hashed card text), not from a tool
+  argument.
 
 The result grants nothing: it has no approve, merge or close field, and
 `claim_ceiling` is `ISSUE_PROMISE_COVERAGE_PROJECTION_ONLY`. #2453's closer,

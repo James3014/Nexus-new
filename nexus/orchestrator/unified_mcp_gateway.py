@@ -1231,11 +1231,6 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
         if promises is not None:
             # ...and to the exact Issue promise -> subject map (#2532).
             effect["issue_promises_identity"] = promises.binding_identity
-        owner_authority = self._require_owner_effect_authority(
-            AutonomyActionClass.TASK_CARD_CREATE,
-            effect,
-            key=owner_key,
-        )
         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
         index_path = campaign_root / "INDEX.md"
         card_path = campaign_root / f"00-{task_id}.md"
@@ -1284,6 +1279,13 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
             raise GatewayInputError("TASK_CARD_CREATE_ISSUE_PROMISES_INVALID:card text declares a malformed block") from exc
         if declared_promises != (None if promises is None else promises.model_dump(mode="json")):
             raise GatewayInputError("TASK_CARD_CREATE_ISSUE_PROMISES_INVALID:card text does not round-trip")
+        # Authority is checked (and recorded) only for a card that passed every
+        # validation above, so a rejected card never consumes or records it.
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.TASK_CARD_CREATE,
+            effect,
+            key=owner_key,
+        )
         index = "\n".join([
             f"# Campaign Index: {campaign}", "", "artifact_authority: current", "owner: James Chen",
             "status: active, governed and sequential", "AUTO_CHAIN: false", "", "## Objective", "", objective,
@@ -1371,6 +1373,8 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
         except ValueError as exc:
             reason = " ".join(str(exc).split())[:500]
             raise GatewayInputError(f"{prefix}:{reason}") from exc
+        if binding.expected_evidence_identity != universe.universe_identity:
+            raise GatewayInputError(f"{prefix}:expected_evidence_identity is not this card's universe")
         subjects = {subject.logical_subject_id: subject for subject in universe.subjects}
         for entry in binding.map:
             unknown = [sid for sid in entry.subject_ids if sid not in subjects]
@@ -2564,11 +2568,12 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                                 "written into the hashed card as one nexus-issue-promises block."
                             ),
                             "additionalProperties": False,
-                            "required": ["repository", "issue_number", "issue_contract_hash", "promise_set", "map"],
+                            "required": ["repository", "issue_number", "issue_contract_hash", "expected_evidence_identity", "promise_set", "map"],
                             "properties": {
                                 "repository": {"type": "string"},
                                 "issue_number": {"type": "integer", "minimum": 1},
                                 "issue_contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "expected_evidence_identity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
                                 "promise_set": {
                                     "type": "object",
                                     "additionalProperties": False,
@@ -2603,7 +2608,7 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                                         "required": ["promise_id", "subject_ids"],
                                         "properties": {
                                             "promise_id": {"type": "string"},
-                                            "subject_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                                            "subject_ids": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "string"}},
                                         },
                                     },
                                 },
