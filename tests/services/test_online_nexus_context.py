@@ -476,3 +476,17 @@ def test_local_stage_forwardable_truth_table() -> None:
     assert local_stage_forwardable({**ok, "status": "FAILED"}) is False
     assert local_stage_forwardable({"status": "SUCCEEDED"}) is False
     assert local_stage_forwardable(None) is False
+
+
+def test_preflight_codeintel_invoker_is_a_stub_never_real_success_2557():
+    """#2557: the preflight compaction performs no lookup; the runtime and bundle must
+    classify it as a stub (not REAL_INVOKED success) even with a non-empty context."""
+    from nexus_runtime.kernel.capabilities import _capability_stage
+
+    invoker = build_codeintel_preflight_invoker()
+    out = invoker({"task_id": "t-1", "codeintel": {"allowed_files": ["a.py"]}})
+    assert out["stub"] is True and out["preflight_only"] is True
+    assert out["outcome_contributed"] is False
+    stage = _capability_stage("codeintel", "t-1", out)
+    assert stage["simulated"] is True
+    assert stage["response"]["stub"] is True
