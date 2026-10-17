@@ -31,7 +31,10 @@ class OperationalContext:
     task_id: str = ""
 
     # Memory control (BMF5: memory_enabled flag)
-    memory_enabled: bool = True  # Set to False for nexus_memory_off arm
+    # Default OFF since nexus-learning#96 (fresh-task confirmation: lessons injected into
+    # retries were slightly harmful, 91/128 on vs 100/128 off, verdict DROP). Experiment
+    # runners and the nexus_memory_on arm opt in explicitly with memory_enabled=True.
+    memory_enabled: bool = False
     memory_arm: str = ""  # Explicit arm: "nexus_memory_on" or "nexus_memory_off"
     artifact_output_root: str = (
         "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"  # Configurable output root

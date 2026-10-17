@@ -1,8 +1,8 @@
 {
-  "historical_case_count": 12,
-  "cases_with_2plus_candidates": 12,
+  "historical_case_count": 10,
+  "cases_with_2plus_candidates": 10,
   "selection_changed_count": 5,
-  "selection_changed_rate": 0.4166666666666667,
+  "selection_changed_rate": 0.5,
   "popularity_trap_detected_count": 2,
   "p5_fail_closed_count": 0,
   "metadata_consistency_rate": 1.0,
@@ -12,39 +12,17 @@
   "cases": [
     {
       "case_id": "historical_0",
-      "candidate_count": 2,
+      "candidate_count": 3,
       "selection_changed": false,
       "p5_off_selected_index": 0,
       "p5_on_selected_index": 0,
       "p5_popularity_trap_detected": false,
       "p5_fail_closed": false,
-      "trace_event_count": 5,
-      "fuzzy_function_count": 2
+      "trace_event_count": 6,
+      "fuzzy_function_count": 3
     },
     {
       "case_id": "historical_1",
-      "candidate_count": 3,
-      "selection_changed": false,
-      "p5_off_selected_index": 0,
-      "p5_on_selected_index": 0,
-      "p5_popularity_trap_detected": false,
-      "p5_fail_closed": false,
-      "trace_event_count": 6,
-      "fuzzy_function_count": 3
-    },
-    {
-      "case_id": "historical_2",
-      "candidate_count": 3,
-      "selection_changed": false,
-      "p5_off_selected_index": 0,
-      "p5_on_selected_index": 0,
-      "p5_popularity_trap_detected": false,
-      "p5_fail_closed": false,
-      "trace_event_count": 6,
-      "fuzzy_function_count": 3
-    },
-    {
-      "case_id": "historical_3",
       "candidate_count": 3,
       "selection_changed": true,
       "p5_off_selected_index": 0,
@@ -55,7 +33,7 @@
       "fuzzy_function_count": 3
     },
     {
-      "case_id": "historical_4",
+      "case_id": "historical_2",
       "candidate_count": 3,
       "selection_changed": true,
       "p5_off_selected_index": 0,
@@ -66,7 +44,7 @@
       "fuzzy_function_count": 3
     },
     {
-      "case_id": "historical_5",
+      "case_id": "historical_3",
       "candidate_count": 2,
       "selection_changed": true,
       "p5_off_selected_index": 0,
@@ -77,7 +55,7 @@
       "fuzzy_function_count": 2
     },
     {
-      "case_id": "historical_6",
+      "case_id": "historical_4",
       "candidate_count": 4,
       "selection_changed": true,
       "p5_off_selected_index": 0,
@@ -88,12 +66,34 @@
       "fuzzy_function_count": 4
     },
     {
-      "case_id": "historical_7",
+      "case_id": "historical_5",
       "candidate_count": 2,
       "selection_changed": false,
       "p5_off_selected_index": 0,
       "p5_on_selected_index": 0,
       "p5_popularity_trap_detected": false,
+      "p5_fail_closed": false,
+      "trace_event_count": 5,
+      "fuzzy_function_count": 2
+    },
+    {
+      "case_id": "historical_6",
+      "candidate_count": 2,
+      "selection_changed": false,
+      "p5_off_selected_index": 0,
+      "p5_on_selected_index": 0,
+      "p5_popularity_trap_detected": false,
+      "p5_fail_closed": false,
+      "trace_event_count": 5,
+      "fuzzy_function_count": 2
+    },
+    {
+      "case_id": "historical_7",
+      "candidate_count": 2,
+      "selection_changed": false,
+      "p5_off_selected_index": 0,
+      "p5_on_selected_index": 0,
+      "p5_popularity_trap_detected": true,
       "p5_fail_closed": false,
       "trace_event_count": 5,
       "fuzzy_function_count": 2
@@ -111,28 +111,6 @@
     },
     {
       "case_id": "historical_9",
-      "candidate_count": 2,
-      "selection_changed": false,
-      "p5_off_selected_index": 0,
-      "p5_on_selected_index": 0,
-      "p5_popularity_trap_detected": true,
-      "p5_fail_closed": false,
-      "trace_event_count": 5,
-      "fuzzy_function_count": 2
-    },
-    {
-      "case_id": "historical_10",
-      "candidate_count": 2,
-      "selection_changed": false,
-      "p5_off_selected_index": 0,
-      "p5_on_selected_index": 0,
-      "p5_popularity_trap_detected": false,
-      "p5_fail_closed": false,
-      "trace_event_count": 5,
-      "fuzzy_function_count": 2
-    },
-    {
-      "case_id": "historical_11",
       "candidate_count": 3,
       "selection_changed": true,
       "p5_off_selected_index": 0,

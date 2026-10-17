@@ -409,7 +409,7 @@ class HealOrchestrator:
                     self._attach_memory_influence_trace(ctx)
                 except Exception:
                     pass
-            if not getattr(ctx.op, "memory_enabled", True):
+            if not getattr(ctx.op, "memory_enabled", False):
                 return "", []
 
             from nexus.services.local_heal.memory_retrieval_adapter import (
@@ -1272,7 +1272,7 @@ class HealOrchestrator:
         if getattr(ctx.op, "_memory_influence_trace", None):
             return
         # MEMORY-EVAL-3: Check memory_enabled flag
-        if not getattr(ctx.op, "memory_enabled", True):
+        if not getattr(ctx.op, "memory_enabled", False):
             from nexus.services.local_heal.memory_trace import get_empty_trace
 
             ctx.op._memory_influence_trace = get_empty_trace()
@@ -1571,7 +1571,7 @@ class HealOrchestrator:
 
             # MEMORY-EVAL-3B: Explicit arm from ctx.op.memory_arm, else trace-based
             explicit_arm = getattr(op, "memory_arm", "")
-            memory_enabled = getattr(op, "memory_enabled", True)
+            memory_enabled = getattr(op, "memory_enabled", False)
             mem_trace = getattr(op, "_memory_influence_trace", None)
             if explicit_arm in {"nexus_memory_on", "nexus_memory_off"}:
                 arm = explicit_arm
