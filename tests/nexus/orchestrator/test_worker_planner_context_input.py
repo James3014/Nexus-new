@@ -906,9 +906,7 @@ def test_production_codeintel_without_lookup_target_refuses_and_drops_knowledge(
     assert "knowledge_applicability" not in prompts[0]
 
 
-def test_production_codeintel_real_lookup_delivers_knowledge_to_the_prompt(
-    tmp_path, monkeypatch
-):
+def test_production_codeintel_real_lookup_delivers_knowledge_to_the_prompt(tmp_path, monkeypatch):
     """#1579: a signed codeintel_lookup lets the real executor perform its lookup, so the
     Planner-selected stage succeeds on its own terms and carries knowledge evidence."""
     persisted, prompts, stub, _ = _run_knowledge_seam(
