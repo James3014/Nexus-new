@@ -31,6 +31,19 @@ from nexus.executors import codex_run_boundary as boundary  # noqa: E402
 ESCAPE_EXIT = 6
 
 
+class _Untracked:
+    """Stand-in tracker when ``track_run`` failed: no pids, probe failed."""
+
+    probe_failed = True
+
+    @staticmethod
+    def stop() -> set[int]:
+        return set()
+
+
+_UNTRACKED = _Untracked()
+
+
 def run_in_own_group(
     command: list[str], env: dict[str, str], work_dir: Optional[Path] = None
 ) -> int:
@@ -98,8 +111,12 @@ def run_in_own_group(
         state["group"] = -1
         try:
             status = child.wait()
-            if tracker is not None:
-                clean = cli_worker.sweep_run(run_tag, tracker, baseline, roots)
+            # Without a tracker the tag and cwd sweeps still run; the
+            # verdict is then never clean.
+            clean = (
+                cli_worker.sweep_run(run_tag, tracker or _UNTRACKED, baseline, roots)
+                and tracker is not None
+            )
         finally:
             if tracker is not None:
                 tracker.stop()

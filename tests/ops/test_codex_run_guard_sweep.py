@@ -200,3 +200,29 @@ def test_codex_guard_forwards_a_signal_that_arrives_during_launch(tmp_path, monk
 
     assert status == 128 + signal.SIGTERM
     assert time.monotonic() - started < 20, "the queued SIGTERM was never forwarded"
+
+
+def test_codex_guard_still_sweeps_when_tracking_fails(tmp_path, monkeypatch):
+    guard = _load_guard()
+    swept: list[object] = []
+
+    def failing_track_run(run_tag, pid):
+        raise RuntimeError("tracker thread could not start")
+
+    def recording_sweep_run(run_tag, tracker, baseline, roots):
+        swept.append(tracker)
+        return True
+
+    monkeypatch.setattr(guard.cli_worker, "track_run", failing_track_run)
+    monkeypatch.setattr(guard.cli_worker, "sweep_run", recording_sweep_run)
+    work = tmp_path / "work"
+    work.mkdir()
+    try:
+        guard.run_in_own_group([sys.executable, "-I", "-c", "pass"], dict(os.environ), work)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("a tracker start failure must not pass silently")
+
+    assert len(swept) == 1, "the tag/cwd sweep did not run after the tracker failed"
+    assert swept[0].probe_failed
