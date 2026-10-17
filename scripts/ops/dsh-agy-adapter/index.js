@@ -251,8 +251,32 @@ function withRequiredDescription(entry, args) {
   return { ...args, description: 'agy outer action: ' + entry.semantic_label }
 }
 
+// Each tool result fed back to the model is capped so one huge bash output (a 50 KB
+// `git log -p`) cannot trigger compaction churn (Nexus-new#2537).
+export const TOOL_RESULT_CAP_CHARS = 8192
+
+function capText(text) {
+  if (typeof text !== 'string' || text.length <= TOOL_RESULT_CAP_CHARS) return text
+  return text.slice(0, TOOL_RESULT_CAP_CHARS)
+    + '\n[TRUNCATED by Nexus: tool output was ' + String(text.length)
+    + ' chars, showing the first ' + String(TOOL_RESULT_CAP_CHARS)
+    + '; narrow the command (grep, head, --stat) to see the rest]'
+}
+
+export function capToolResultMessages(messages) {
+  return messages.map(message => {
+    if (message?.role !== 'tool' || !Array.isArray(message.content)) return message
+    return {
+      ...message,
+      content: message.content.map(block =>
+        block && block.type === 'text' ? { ...block, text: capText(block.text) } : block),
+    }
+  })
+}
+
 function promptFor(options, actionCatalog) {
-  const conversation = (options.messages ?? []).filter(message => message?.role !== 'system')
+  const conversation = capToolResultMessages(options.messages ?? [])
+    .filter(message => message?.role !== 'system')
   const actionInstructions = actionCatalog.length > 0
     ? [
         'The following JSON object contains outer_action_catalog with every permitted outer DSH action.',

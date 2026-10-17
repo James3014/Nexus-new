@@ -129,6 +129,8 @@ def _turn(tmp_path: Path, monkeypatch, patch_text: str):
         raise _Spawned
 
     monkeypatch.setattr(guard.subprocess, "run", _spawn)
+    # start-phase now spawns DSH through the no-progress supervisor (Popen).
+    monkeypatch.setattr(guard.subprocess, "Popen", _spawn)
     args = argparse.Namespace(
         issue=2477,
         goal_objective=None,
