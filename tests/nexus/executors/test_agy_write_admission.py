@@ -2520,3 +2520,252 @@ if os.environ.get("NEXUS_LOCAL_PHYSICAL_WITNESS") == "1":
         )
         assert result.exit_code == 0, result.stderr
         assert result.stdout.strip() == b"DENIED,READ,DENIED,DENIED"
+
+
+# ---------------------------------------------------------------------------
+# #2541: shared .git/config churn vs code-bearing config
+# ---------------------------------------------------------------------------
+
+
+def _repo_with_origin(tmp_path: Path) -> Path:
+    """Canonical repo with a fetched ``origin`` so upstream bookkeeping is real."""
+    upstream = _repo(tmp_path, "upstream")
+    canonical = _repo(tmp_path)
+    _git(canonical, "remote", "add", "origin", str(upstream))
+    _git(canonical, "fetch", "-q", "origin")
+    return canonical
+
+
+def _upstream_branch(canonical: Path) -> str:
+    return _git(canonical, "rev-parse", "--abbrev-ref", "HEAD").strip()
+
+
+def _config_churn(kind: str, canonical: Path, scratch: Path) -> None:
+    """What concurrent sessions do to the shared common dir's ``config``."""
+    branch = _upstream_branch(canonical)
+    if kind == "set_upstream_to":
+        _git(canonical, "branch", "--set-upstream-to", f"origin/{branch}")
+    elif kind == "worktree_add_b":
+        _git(
+            canonical,
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "tmp-2541",
+            str(scratch / "other-wt"),
+            f"origin/{branch}",
+        )
+    elif kind == "new_branch_entries":
+        for index in range(20):
+            name = f"feat/x.{index}"
+            _git(canonical, "config", f"branch.{name}.remote", "origin")
+            _git(canonical, "config", f"branch.{name}.merge", f"refs/heads/{name}")
+            _git(canonical, "config", f"branch.{name}.description", "work")
+    elif kind == "remote_fetch_refspec":
+        _git(canonical, "config", "--add", "remote.origin.fetch", "+refs/pull/*:refs/pr/*")
+    else:  # branch_section_removed
+        _git(canonical, "config", f"branch.{branch}.remote", "origin")
+        before_removal = admission.checkout_fingerprint(canonical)
+        _git(canonical, "config", "--remove-section", f"branch.{branch}")
+        assert admission.checkout_fingerprint(canonical) == before_removal
+
+
+CONFIG_CHURN = [
+    "set_upstream_to",
+    "worktree_add_b",
+    "new_branch_entries",
+    "remote_fetch_refspec",
+    "branch_section_removed",
+]
+
+
+@pytest.mark.parametrize("kind", CONFIG_CHURN)
+def test_fingerprint_ignores_shared_config_bookkeeping_churn(tmp_path, kind):
+    canonical = _repo_with_origin(tmp_path)
+    before = admission.checkout_fingerprint(canonical)
+    assert before is not None
+    config_before = (canonical / ".git" / "config").read_bytes()
+    _config_churn(kind, canonical, tmp_path)
+    assert admission.checkout_fingerprint(canonical) == before
+    if kind != "branch_section_removed":
+        # The raw file did change: the old whole-file hash would have failed.
+        assert (canonical / ".git" / "config").read_bytes() != config_before
+
+
+@pytest.mark.parametrize("kind", CONFIG_CHURN)
+def test_concurrent_config_churn_during_run_does_not_fail_it(monkeypatch, tmp_path, agy_home, kind):
+    _ready(monkeypatch)
+    canonical = _repo_with_origin(tmp_path)
+    target = _target(tmp_path)
+
+    def fake_worker(request, on_process_group=None):
+        _config_churn(kind, canonical, tmp_path)
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=canonical), target)
+
+    assert receipt.failure_reason != "canonical_checkout_integrity_violation"
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def _code_bearing_change(kind: str, canonical: Path, scratch: Path) -> None:
+    if kind == "core_hookspath":
+        _git(canonical, "config", "core.hooksPath", str(scratch / "evil-hooks"))
+    elif kind == "filter_clean":
+        _git(canonical, "config", "filter.x.clean", "sh -c 'touch /tmp/pwned'")
+    elif kind == "alias":
+        _git(canonical, "config", "alias.st", "!sh -c 'touch /tmp/pwned'")
+    elif kind == "include_path":
+        _git(canonical, "config", "include.path", str(scratch / "evil.gitconfig"))
+    elif kind == "include_if":
+        _git(canonical, "config", "includeIf.gitdir:/.path", str(scratch / "evil.gitconfig"))
+    elif kind == "remote_url":
+        _git(canonical, "config", "remote.origin.url", "https://evil.example/repo.git")
+    elif kind == "remote_pushurl":
+        _git(canonical, "config", "remote.origin.pushurl", "https://evil.example/repo.git")
+    elif kind == "credential_helper":
+        _git(canonical, "config", "credential.helper", "!sh -c 'cat >/tmp/creds'")
+    elif kind == "url_insteadof":
+        _git(canonical, "config", "url.https://evil.example/.insteadOf", "https://github.com/")
+    elif kind == "diff_textconv":
+        _git(canonical, "config", "diff.evil.textconv", "sh -c 'touch /tmp/pwned'")
+    elif kind == "merge_driver":
+        _git(canonical, "config", "merge.evil.driver", "sh -c 'touch /tmp/pwned'")
+    elif kind == "branch_merge_options":
+        # Not named bookkeeping, so it stays covered even under branch.*.
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.mergeOptions", "--strategy=evil")
+    elif kind == "branch_top_level":
+        _git(canonical, "config", "branch.autoSetupMerge", "always")
+    elif kind == "remote_new_var":
+        _git(canonical, "config", "remote.origin.uploadpack", "sh -c 'touch /tmp/pwned'")
+    elif kind == "unknown_new_key":
+        _git(canonical, "config", "futuregit.newcodekey", "sh -c 'touch /tmp/pwned'")
+    elif kind == "unknown_subsection_key":
+        _git(canonical, "config", "futuregit.sub.fetch", "value")
+    elif kind == "worktree_config":
+        _git(canonical, "config", "extensions.worktreeConfig", "true")
+        before = admission.checkout_fingerprint(canonical)
+        _git(canonical, "config", "--worktree", "core.fsmonitor", "evil")
+        assert admission.checkout_fingerprint(canonical) != before
+    else:  # hook_file
+        hook = canonical / ".git" / "hooks" / "pre-commit-2541"
+        hook.write_text("#!/bin/sh\ntouch /tmp/pwned\n", encoding="utf-8")
+
+
+CODE_BEARING_CHANGES = [
+    "core_hookspath",
+    "filter_clean",
+    "alias",
+    "include_path",
+    "include_if",
+    "remote_url",
+    "remote_pushurl",
+    "credential_helper",
+    "url_insteadof",
+    "diff_textconv",
+    "merge_driver",
+    "branch_merge_options",
+    "branch_top_level",
+    "remote_new_var",
+    "unknown_new_key",
+    "unknown_subsection_key",
+    "worktree_config",
+    "hook_file",
+]
+
+
+@pytest.mark.parametrize("kind", CODE_BEARING_CHANGES)
+def test_fingerprint_still_covers_code_bearing_config(tmp_path, kind):
+    canonical = _repo_with_origin(tmp_path)
+    before = admission.checkout_fingerprint(canonical)
+    assert before is not None
+    _code_bearing_change(kind, canonical, tmp_path)
+    after = admission.checkout_fingerprint(canonical)
+    assert after is not None
+    assert after != before
+
+
+@pytest.mark.parametrize(
+    "kind", ["core_hookspath", "filter_clean", "alias", "include_path", "remote_url", "hook_file"]
+)
+def test_code_bearing_config_change_during_run_still_fails_it(
+    monkeypatch, tmp_path, agy_home, kind
+):
+    _ready(monkeypatch)
+    canonical = _repo_with_origin(tmp_path)
+    target = _target(tmp_path)
+
+    def fake_worker(request, on_process_group=None):
+        _config_churn("worktree_add_b", canonical, tmp_path)  # benign churn alongside
+        _code_bearing_change(kind, canonical, tmp_path)
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=canonical), target)
+
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason == "canonical_checkout_integrity_violation"
+
+
+def test_bookkeeping_key_matcher_is_a_narrow_allow_list():
+    bookkeeping = admission._config_key_is_bookkeeping
+    assert bookkeeping("branch.main.remote")
+    assert bookkeeping("branch.feat/a.b.c.merge")
+    assert bookkeeping("remote.origin.fetch")
+    assert bookkeeping("remote.my.fork.fetch")
+    for covered in (
+        "branch.autosetupmerge",
+        "branch.main.mergeoptions",
+        "branch..merge",
+        "remote.origin.url",
+        "remote.origin.pushurl",
+        "remote.fetch",
+        "core.hookspath",
+        "include.path",
+        "includeif.gitdir:/x/.path",
+        "submodule.lib.update",
+        "alias.fetch",
+        "url.x.insteadof",
+        "futuregit.sub.fetch",
+        "futuregit.sub.merge",
+    ):
+        assert not bookkeeping(covered), covered
+
+
+def test_unparseable_config_fails_closed(tmp_path):
+    canonical = _repo(tmp_path)
+    assert admission.checkout_fingerprint(canonical) is not None
+    with (canonical / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write('[branch "unterminated\n\tmerge = x\n')
+    assert admission.code_bearing_git_config(canonical / ".git" / "config") is None
+    assert admission.checkout_fingerprint(canonical) is None
+
+
+def test_unparseable_config_before_run_refuses_it(monkeypatch, tmp_path, agy_home):
+    _ready(monkeypatch)
+    canonical = _repo(tmp_path)
+    (canonical / ".git" / "config").write_text("[core\n\thooksPath = /x\n", encoding="utf-8")
+    _no_spawn(monkeypatch)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=canonical), _target(tmp_path))
+    assert receipt.failure_reason == "canonical_checkout_snapshot_unavailable"
+
+
+def test_config_corrupted_during_run_fails_closed(monkeypatch, tmp_path, agy_home):
+    _ready(monkeypatch)
+    canonical = _repo(tmp_path)
+    target = _target(tmp_path)
+
+    def fake_worker(request, on_process_group=None):
+        (canonical / ".git" / "config").write_text("[core\n", encoding="utf-8")
+        return _result(request, stdout=_OK)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    receipt = _invoke(AgyWorkerAdapter(canonical_root=canonical), target)
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason in {
+        "canonical_snapshot_failed",
+        "canonical_checkout_integrity_violation",
+    }
