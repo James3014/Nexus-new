@@ -1,7 +1,8 @@
 """Failed-outcome-pattern producer for MemPalace belief constraints.
 
 Fed by real skill outcomes (CrystallizationService.persist_outcome). When the same
-(skill_id, domain) fails N times in a row, a ``forbid`` belief is upserted into the
+(skill_id, domain) fails N times in a row (at most one failure per task_id; retries of one
+task are not independent evidence), a ``forbid`` belief is upserted into the
 LanceDB table ``nexus_soul_palace`` (the table MemPalace reads constraints from). A later
 success for that pair marks the belief ``inactive`` so the constraint is lifted.
 
@@ -28,6 +29,8 @@ STREAK_ENV = "NEXUS_BELIEF_FORBID_STREAK"
 DEFAULT_STREAK = 3
 STATE_REL = Path(".nexus") / "state" / "outcome_failure_streaks.json"
 _DOMAIN_KEYS = ("task_type", "domain", "active_domain")
+# Bound on remembered task ids per streak (retries of one task count once; see #2375).
+MAX_TRACKED_TASKS = 50
 
 
 def forbid_belief_id(skill_id: str, domain: str) -> str:
@@ -119,11 +122,19 @@ class BeliefConstraintProducer:
                         return  # keep ``active`` so the lift is retried on the next success
                 state.pop(key, None)
             else:
+                task_id = str(payload.get("task_id") or "").strip()
+                seen = [str(t) for t in entry.get("tasks", []) if isinstance(t, str)]
+                if task_id and task_id in seen:
+                    return  # retry of an already counted task: not independent evidence
+                if task_id:
+                    seen = (seen + [task_id])[-MAX_TRACKED_TASKS:]
                 streak += 1
                 active = active or streak >= self.threshold
                 if streak >= self.threshold:
                     self._note(self._write_forbid(skill_id, domain, streak, stamp))
                 state[key] = {"streak": streak, "active": active}
+                if seen:
+                    state[key]["tasks"] = seen
             self._save_state(state)
         except Exception as exc:
             self.last_write_status = "unavailable"
