@@ -326,3 +326,85 @@ def test_automation_blocked_record_names_no_symbol_scope(tmp_path):
     assert result["error_code"] == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
     assert result["error_detail"]["reason"] == "no symbol scope"
     assert result["error_detail"]["ref"] == "nexus/a.py"
+
+
+@pytest.mark.parametrize("separator", ["\x0c", " ", "\x85", "\x1c"])
+def test_excerpt_slices_follow_python_line_numbers_not_str_splitlines(separator):
+    # These characters are line breaks for str.splitlines() but not for the
+    # Python tokenizer; a splitlines-based slicer would label the wrong lines.
+    content = (
+        (
+            "import os\n"
+            f"NOTE = 'a{separator}b{separator}c'\n"
+            f"# comment with {separator} inside\n"
+            "def other():\n    return 'OTHER_BODY'\n\n"
+            "def target():\n    return 'TARGET_BODY'\n"
+        )
+        + "#" * (DEFAULT_CONTEXT_BUDGET + 10)
+        + "\n"
+    )
+    pack = _pack(content, ["target"])
+    entry = next(e for e in pack["entries"] if e["kind"] == "source_file")
+    s = entry["excerpt"]["slices"][0]
+    assert (s["start_line"], s["end_line"]) == (7, 8)
+    body = entry["content"].split("## SLICE target (def) lines 7-8\n", 1)[1]
+    assert body.startswith("def target():\n    return 'TARGET_BODY'\n## END SLICE target\n")
+    assert "OTHER_BODY" not in entry["content"]
+
+
+def test_excerpt_slice_head_self_check_fails_closed():
+    from nexus.services import eia_source_excerpt as ex
+
+    symbol = ex._Symbol("target", "def", 1, 2, 1)
+    assert ex._head_matches("def target():\n", symbol)
+    assert ex._head_matches("async def target():\n", symbol)
+    assert not ex._head_matches("def other():\n", symbol)
+    assert ex._head_matches("A = target = 1\n", ex._Symbol("target", "assign", 1, 1, 1))
+    assert not ex._head_matches("x = 1\n", ex._Symbol("target", "assign", 1, 1, 1))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def target():\n    return 1\n\ntarget = staticmethod(target)\n",
+        "def target():\n    return 1\n\ndef target():\n    return 2\n",
+        "from typing import overload\n\n@overload\ndef target(x: int) -> int: ...\n"
+        "@overload\ndef target(x: str) -> str: ...\ndef target(x):\n    return x\n",
+        "def target():\n    return 1\n\nif True:\n    def target():\n        return 2\n",
+        "def target():\n    return 1\n\ntry:\n    target = 3\nexcept Exception:\n    pass\n",
+        "def target():\n    return 1\n\nfor target in range(2):\n    pass\n",
+        "from os import target\n\ndef target():\n    return 1\n",
+    ],
+)
+def test_ambiguous_symbol_binding_fails_closed(source):
+    content = source + "#" * (DEFAULT_CONTEXT_BUDGET + 10) + "\n"
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_EXCERPT_SYMBOL_AMBIGUOUS"):
+        _pack(content, ["target"])
+
+
+def test_ambiguous_method_binding_fails_closed():
+    content = (
+        ("class Big:\n    def method(self):\n        return 1\n    method = property(method)\n")
+        + "#" * (DEFAULT_CONTEXT_BUDGET + 10)
+        + "\n"
+    )
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_EXCERPT_SYMBOL_AMBIGUOUS"):
+        _pack(content, ["Big.method"])
+
+
+def test_validator_rejects_excerpt_without_leading_header():
+    pack = _pack(_big_module(), ["target"])
+    tampered = json.loads(json.dumps(pack))
+    from nexus.services import external_intelligence as ei
+
+    for entry in tampered["entries"]:
+        if "excerpt" in entry:
+            entry["content"] = "preamble\n" + entry["content"]
+            raw = entry["content"].encode("utf-8")
+            entry["included_sha256"] = hashlib.sha256(raw).hexdigest()
+            entry["included_bytes"] = len(raw)
+            entry["evidence_ref"] = compute_evidence_ref(entry)
+    material = {k: tampered[k] for k in ("schema", "max_bytes", "per_source_bytes", "entries")}
+    tampered["context_pack_sha256"] = ei._sha256(ei._canonical_json(material))
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_CONTEXT_PACK"):
+        validate_context_pack(tampered)

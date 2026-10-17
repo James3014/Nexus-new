@@ -14,6 +14,7 @@ named symbol that does not exist raise ``ExcerptError`` with a reason code.
 from __future__ import annotations
 
 import ast
+import io
 import re
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -33,6 +34,7 @@ class _Symbol:
     kind: str
     start_line: int
     end_line: int
+    head_line: int
 
 
 def _symbol_kind(node: ast.AST) -> str | None:
@@ -61,6 +63,55 @@ def _span(node: ast.AST) -> tuple[int, int]:
     return start, end
 
 
+def _bound_names(node: ast.AST, out: list[str]) -> None:
+    """Every name a statement binds in its own scope (not inside nested defs)."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        out.append(node.name)
+        return
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        for alias in node.names:
+            out.append((alias.asname or alias.name).split(".")[0])
+        return
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        out.append(node.id)
+        return
+    for child in ast.iter_child_nodes(node):
+        _bound_names(child, out)
+
+
+def _binding_counts(body: Sequence[ast.stmt]) -> dict[str, int]:
+    names: list[str] = []
+    for stmt in body:
+        _bound_names(stmt, names)
+    counts: dict[str, int] = {}
+    for name in names:
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _is_ambiguous(tree: ast.Module, name: str) -> bool:
+    """True when ``name`` is bound more than once in its scope (redefinition,
+    ``f = wrap(f)``, ``@overload``, or a binding inside a compound block)."""
+    if "." in name:
+        class_name, member = name.split(".", 1)
+        classes = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name]
+        if len(classes) != 1:
+            return True
+        return _binding_counts(classes[0].body).get(member, 0) != 1
+    return _binding_counts(tree.body).get(name, 0) != 1
+
+
+def _head_matches(line: str, symbol: _Symbol) -> bool:
+    leaf = re.escape(symbol.name.rsplit(".", 1)[-1])
+    if symbol.kind == "class":
+        pattern = rf"\s*class\s+{leaf}\b"
+    elif symbol.kind in ("def", "async def"):
+        pattern = rf"\s*(async\s+)?def\s+{leaf}\b"
+    else:
+        pattern = rf"(.*\W)?{leaf}\s*[:=]"
+    return re.match(pattern, line) is not None
+
+
 def _index(tree: ast.Module) -> list[_Symbol]:
     symbols: list[_Symbol] = []
     for node in tree.body:
@@ -68,7 +119,7 @@ def _index(tree: ast.Module) -> list[_Symbol]:
         start, end = _span(node)
         if kind is not None:
             name = getattr(node, "name")
-            symbols.append(_Symbol(name, kind, start, end))
+            symbols.append(_Symbol(name, kind, start, end, int(getattr(node, "lineno"))))
             if isinstance(node, ast.ClassDef):
                 for child in node.body:
                     child_kind = _symbol_kind(child)
@@ -76,11 +127,17 @@ def _index(tree: ast.Module) -> list[_Symbol]:
                         continue
                     c_start, c_end = _span(child)
                     symbols.append(
-                        _Symbol(f"{name}.{getattr(child, 'name')}", child_kind, c_start, c_end)
+                        _Symbol(
+                            f"{name}.{getattr(child, 'name')}",
+                            child_kind,
+                            c_start,
+                            c_end,
+                            int(getattr(child, "lineno")),
+                        )
                     )
             continue
         for assigned in _assigned_names(node):
-            symbols.append(_Symbol(assigned, "assign", start, end))
+            symbols.append(_Symbol(assigned, "assign", start, end, start))
     return symbols
 
 
@@ -117,15 +174,26 @@ def build_python_excerpt(
         tree = ast.parse(content, filename=ref)
     except (SyntaxError, ValueError) as exc:
         raise ExcerptError("CONTRACT_EXCERPT_PARSE_FAILED") from exc
-    lines = content.splitlines(keepends=True)
+    # Same line breaks as the Python tokenizer (\n, \r\n, \r) so ast line numbers
+    # index this list; str.splitlines would also split on \x0c, U+2028, etc.
+    lines = io.StringIO(content, newline="").readlines()
     index = _index(tree)
-    by_name: dict[str, _Symbol] = {}
+    by_name: dict[str, list[_Symbol]] = {}
     for symbol in index:
-        # A later top-level redefinition wins, as at import time.
-        by_name[symbol.name] = symbol
+        by_name.setdefault(symbol.name, []).append(symbol)
     missing = [name for name in names if name not in by_name]
     if missing:
         raise ExcerptError("CONTRACT_EXCERPT_SYMBOL_NOT_FOUND")
+    for name in names:
+        # Never pick one of several bindings silently: that would drop bodies.
+        if len(by_name[name]) != 1 or _is_ambiguous(tree, name):
+            raise ExcerptError("CONTRACT_EXCERPT_SYMBOL_AMBIGUOUS")
+        symbol = by_name[name][0]
+        if not (
+            0 < symbol.head_line <= len(lines)
+            and _head_matches(lines[symbol.head_line - 1], symbol)
+        ):
+            raise ExcerptError("CONTRACT_EXCERPT_SLICE_MISMATCH")
 
     def _text(start: int, end: int) -> str:
         return "".join(lines[start - 1 : end])
@@ -133,7 +201,7 @@ def build_python_excerpt(
     import_spans = [
         _span(node) for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
     ]
-    selected = sorted({by_name[name] for name in names}, key=lambda s: (s.start_line, s.name))
+    selected = sorted({by_name[name][0] for name in names}, key=lambda s: (s.start_line, s.name))
 
     parts = [
         "# NEXUS SOURCE EXCERPT — NOT THE WHOLE FILE\n",

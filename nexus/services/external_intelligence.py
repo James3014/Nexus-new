@@ -142,6 +142,8 @@ def _valid_excerpt_entry(entry: Mapping[str, Any]) -> bool:
     if not isinstance(slices, list) or not slices:
         return False
     content = str(entry.get("content") or "")
+    if not content.startswith("# NEXUS SOURCE EXCERPT — NOT THE WHOLE FILE\n"):
+        return False
     if f"# full_file_sha256: {entry.get('source_sha256')}\n" not in content:
         return False
     for item in slices:
