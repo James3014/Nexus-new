@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nexus.contracts.fail_closed import Decision, decide
 from nexus.research.experiment_run_guard import (
     ExperimentRunContract,
     ExperimentRunGuard,
@@ -24,7 +25,7 @@ from nexus.research.experiment_run_guard import (
 )
 
 _RUNNING_STATES = {"RUNNING", "QUEUED"}
-_TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
+_TERMINAL_STATES: frozenset[str] = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _UNKNOWN_STATE = "OUTCOME_UNKNOWN"
 
 
@@ -176,22 +177,25 @@ class ExperimentEffectController:
             self._lease.mark_outcome_unknown(operation_id=operation_id)
             raise ExperimentEffectOutcomeUnknown("PROVIDER_OPERATION_IDENTITY_MISMATCH")
 
-        status = observed.get("status")
-        if status == _UNKNOWN_STATE:
-            self._lease.mark_outcome_unknown(operation_id=operation_id)
-            raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_OUTCOME_UNKNOWN")
-        if status in _RUNNING_STATES:
-            self._lease.mark_outcome_unknown(operation_id=operation_id)
-            reason = (
-                "PROVIDER_EFFECT_STILL_RUNNING_AFTER_RECONCILE"
-                if reconciled
-                else "PROVIDER_EFFECT_NOT_TERMINAL"
-            )
-            raise ExperimentEffectOutcomeUnknown(reason)
-        if status not in _TERMINAL_STATES:
-            self._lease.mark_outcome_unknown(operation_id=operation_id)
-            raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_STATUS_UNRECOGNIZED")
-        return observed
+        # #2454: the terminal check goes through the shared fail-closed helper; every
+        # BLOCK reason is translated back to this module's existing error codes.
+        result = decide(observed.get("status"), success=_TERMINAL_STATES)
+        if result.decision is Decision.ALLOW:
+            return observed
+        self._lease.mark_outcome_unknown(operation_id=operation_id)
+        raise ExperimentEffectOutcomeUnknown(_terminal_block_code(result.reason, reconciled))
+
+
+def _terminal_block_code(reason: str, reconciled: bool) -> str:
+    if reason == f"INDETERMINATE:{_UNKNOWN_STATE}":
+        return "PROVIDER_EFFECT_OUTCOME_UNKNOWN"
+    if reason in {f"INDETERMINATE:{state}" for state in _RUNNING_STATES}:
+        return (
+            "PROVIDER_EFFECT_STILL_RUNNING_AFTER_RECONCILE"
+            if reconciled
+            else "PROVIDER_EFFECT_NOT_TERMINAL"
+        )
+    return "PROVIDER_EFFECT_STATUS_UNRECOGNIZED"
 
 
 def run_guarded_effect(
