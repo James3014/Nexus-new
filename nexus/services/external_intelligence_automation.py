@@ -933,8 +933,21 @@ class ExternalIntelligenceAutomation:
         except ExternalIntelligenceError as exc:
             raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
+    def _excerpt_base_hashes(self, item: IssueWorkItem, task_card_text: str) -> dict[str, str]:
+        """Whole-file sha256 of every contract source the pack carried as an excerpt."""
+        pack = build_context_pack(self._sources(item, task_card_text))
+        return {
+            str(entry["ref"]): str(entry["source_sha256"])
+            for entry in pack["entries"]
+            if entry.get("kind") == "source_file" and "excerpt" in entry
+        }
+
     def _c_units(
-        self, item: IssueWorkItem, intelligence: Mapping[str, Any]
+        self,
+        item: IssueWorkItem,
+        intelligence: Mapping[str, Any],
+        *,
+        excerpt_base_hashes: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         request = intelligence.get("request")
         if not isinstance(request, Mapping):
@@ -966,6 +979,14 @@ class ExternalIntelligenceAutomation:
             }
             if unit_worker:
                 unit_data["selected_worker"] = dict(unit_worker)
+            unit_excerpts = {
+                path: digest
+                for path, digest in (excerpt_base_hashes or {}).items()
+                if path in unit["mutation_paths"]
+            }
+            if unit_excerpts:
+                # Fanout refuses dispatch/Candidate when the base file differs (#2357).
+                unit_data["excerpt_base_hashes"] = unit_excerpts
             if core_authority is not None:
                 # Authority inputs only; fanout mints the per-attempt Core binding.
                 # Not part of unit identity, so existing attempts/receipts are unchanged.
@@ -1376,7 +1397,11 @@ class ExternalIntelligenceAutomation:
                 **completed_state,
             )
 
-            units = self._c_units(item, intelligence)
+            units = self._c_units(
+                item,
+                intelligence,
+                excerpt_base_hashes=self._excerpt_base_hashes(item, task_card_text),
+            )
             if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
                 return self.state_store.save(
                     item,

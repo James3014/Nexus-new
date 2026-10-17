@@ -2583,3 +2583,94 @@ def test_repair_continuation_without_pinned_observed_model_is_outcome_unknown(tm
     attempt = json.loads(attempt_file.read_text(encoding="utf-8"))
     assert attempt["state"] == "OUTCOME_UNKNOWN"
     assert attempt["transport_status"] == "OBSERVED_MODEL_ATTESTATION_MISMATCH"
+
+
+# --- #2357 step 2b: excerpt evidence binds the whole base file ---------------
+
+
+def _excerpt_unit(tmp_path: Path, digest: str | None, **updates) -> tuple[Path, ExecutionUnit]:
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base)
+    extra = {} if digest is None else {"excerpt_base_hashes": {"a.py": digest}}
+    extra.update(updates)
+    return repo, ExecutionUnit.from_mapping(
+        unit(base, envelope, envelope_sha, "ua", ["a.py"], **extra)
+    )
+
+
+def _a_py_sha(repo: Path) -> str:
+    return hashlib.sha256((repo / "a.py").read_bytes()).hexdigest()
+
+
+def test_excerpt_base_hashes_absent_keeps_unit_identity_unchanged(tmp_path):
+    _, plain = _excerpt_unit(tmp_path, None)
+    assert "excerpt_base_hashes" not in plain.identity()
+    assert plain.excerpt_base_hashes is None
+
+
+def test_excerpt_base_hashes_are_part_of_unit_identity(tmp_path):
+    repo, bound = _excerpt_unit(tmp_path, "0" * 64)
+    assert bound.identity()["excerpt_base_hashes"] == {"a.py": "0" * 64}
+    other = ExecutionUnit.from_mapping({
+        **bound.identity(),
+        "excerpt_base_hashes": {"a.py": "1" * 64},
+    })
+    assert other.identity_sha256 != bound.identity_sha256
+
+
+@pytest.mark.parametrize(
+    "value",
+    [{}, {"b.py": "0" * 64}, {"a.py": "xyz"}, {"../a.py": "0" * 64}, ["a.py"]],
+)
+def test_excerpt_base_hashes_invalid_shapes_fail_closed(tmp_path, value):
+    with pytest.raises(FanoutError, match="INVALID_EXCERPT_BASE_HASHES|PATH"):
+        _excerpt_unit(tmp_path, None, excerpt_base_hashes=value)
+
+
+def test_allocator_refuses_dispatch_when_excerpt_base_file_hash_differs(tmp_path):
+    repo, bound = _excerpt_unit(tmp_path, "0" * 64)
+    with pytest.raises(FanoutError, match="EXCERPT_BASE_FILE_HASH_MISMATCH"):
+        GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(bound)
+
+
+def test_allocator_admits_dispatch_when_excerpt_base_file_hash_matches(tmp_path):
+    repo, _ = _excerpt_unit(tmp_path, None)
+    good = ExecutionUnit.from_mapping({
+        **_excerpt_unit_identity(repo, tmp_path),
+        "excerpt_base_hashes": {"a.py": _a_py_sha(repo)},
+    })
+    lease = GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(good)
+    assert _git(Path(lease.path), "rev-parse", "HEAD") == good.expected_base_sha
+
+
+def _excerpt_unit_identity(repo: Path, tmp_path: Path) -> dict:
+    base = _git(repo, "rev-parse", "HEAD")
+    envelope = tmp_path / "envelope.json"
+    return unit(base, envelope, make_envelope(envelope, base), "ua", ["a.py"])
+
+
+def test_candidate_refused_when_excerpt_base_file_hash_differs(tmp_path):
+    from nexus.services.external_intelligence_fanout import _capture_candidate
+
+    repo, plain = _excerpt_unit(tmp_path, None)
+    lease = GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(plain)
+    (Path(lease.path) / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+    good_sha = _a_py_sha(repo)
+    stale = ExecutionUnit.from_mapping({
+        **plain.identity(),
+        "excerpt_base_hashes": {"a.py": "f" * 64},
+    })
+    with pytest.raises(FanoutError, match="EXCERPT_BASE_FILE_HASH_MISMATCH"):
+        _capture_candidate(stale, lease, expected_head=plain.expected_base_sha)
+    assert _git(Path(lease.path), "rev-parse", "HEAD") == plain.expected_base_sha
+
+    bound = ExecutionUnit.from_mapping({
+        **plain.identity(),
+        "excerpt_base_hashes": {"a.py": good_sha},
+    })
+    _git(Path(lease.path), "config", "user.email", "nexus-test@example.invalid")
+    _git(Path(lease.path), "config", "user.name", "Nexus Test")
+    captured = _capture_candidate(bound, lease, expected_head=plain.expected_base_sha)
+    assert captured["changed_paths"] == ["a.py"]
+    assert captured["parent_commit"] == plain.expected_base_sha

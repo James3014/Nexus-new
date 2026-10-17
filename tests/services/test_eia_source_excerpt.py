@@ -278,3 +278,63 @@ def test_automation_without_symbol_scope_still_blocks_oversized_source(tmp_path)
 
     assert result["state"] == "BLOCKED"
     assert sidecar.calls == []
+
+
+def test_fanout_units_carry_whole_file_hash_only_for_excerpted_paths(tmp_path):
+    from tests.services.test_external_intelligence_automation import FakeC
+
+    repo, card, _, _, store = _setup(tmp_path)
+    big = repo / "nexus" / "a.py"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text(_big_module(), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "big"], cwd=repo, capture_output=True, check=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
+    contract["execution_units"][0]["excerpt_symbols"] = {"nexus/a.py": ["target"]}
+    c = FakeC()
+    automation = _automation(tmp_path, repo, store, c=c)
+
+    automation.run_issue("o/r", 2357, "title", _body(contract))
+
+    units = {u["unit_id"]: u for u in c.calls[0][0]}
+    assert units["u1"]["excerpt_base_hashes"] == {
+        "nexus/a.py": hashlib.sha256(big.read_bytes()).hexdigest()
+    }
+    assert "excerpt_base_hashes" not in units["u2"]
+
+
+def test_fanout_units_have_no_excerpt_hash_when_source_fit_whole(tmp_path):
+    from tests.services.test_external_intelligence_automation import FakeC
+
+    repo, card, _, _, store = _setup(tmp_path)
+    small = repo / "nexus" / "a.py"
+    small.parent.mkdir(parents=True, exist_ok=True)
+    small.write_text("def target():\n    return 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "small"], cwd=repo, capture_output=True, check=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
+    contract["execution_units"][0]["excerpt_symbols"] = {"nexus/a.py": ["target"]}
+    c = FakeC()
+    automation = _automation(tmp_path, repo, store, c=c)
+
+    automation.run_issue("o/r", 2357, "title", _body(contract))
+
+    assert all("excerpt_base_hashes" not in u for u in c.calls[0][0])
