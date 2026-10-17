@@ -1672,7 +1672,28 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
                              outcome={"error": "ArtifactGateLocalExecutor not importable"})
     try:
         inst = cls()
-        ctx = {"task_id": plan.task_id, "task_statement": task_desc or "", "plan_id": plan.plan_id}
+        # #2361: the executor reads attributes (ctx.evidence_refs), so pass its context type.
+        from nexus.services.local_heal.local_model_capability_context import (
+            LocalModelCapabilityContext,
+        )
+
+        constraints = plan.constraints if isinstance(plan.constraints, Mapping) else {}
+        anchor = constraints.get("source_anchor")
+        raw_refs = constraints.get("evidence_refs")
+        # Non-list evidence_refs are rejected (no str() coercion of arbitrary values).
+        refs = tuple(r for r in raw_refs if isinstance(r, str)) if isinstance(raw_refs, list) else ()
+        ctx: Any = LocalModelCapabilityContext(
+            task_id=plan.task_id,
+            source_root="",
+            problem_statement=task_desc or "",
+            target_file="",
+            target_symbol="",
+            selected_capabilities=("artifact_gate",),
+            execution_topology="",
+            evidence_refs=refs,
+            source_anchor=dict(anchor) if isinstance(anchor, Mapping) else {},
+        )
+        result: Any = None
         if hasattr(inst, "execute"):
             try:
                 result = inst.execute(ctx)
@@ -1685,7 +1706,17 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         # executor result must carry a validated verifier artifact/status and a typed source hash.
         from nexus.core.claim_gate_binding import claim_gate_binding_reasons
 
-        binding_reasons = claim_gate_binding_reasons(dict(result) if isinstance(result, Mapping) else {})
+        if isinstance(result, Mapping):
+            binding_payload = dict(result)
+        elif hasattr(result, "gate_passed") and hasattr(result, "evidence_present"):
+            # CapabilityExecutionResult dataclass: only the executor's own payload may carry
+            # verifier evidence (#1869). Nothing is synthesized from plan.constraints, so a result
+            # without verifier_status/source_hash in its payload stays unbound (fail-closed).
+            payload = getattr(result, "payload", None)
+            binding_payload = dict(payload) if isinstance(payload, Mapping) else {}
+        else:
+            binding_payload = {}
+        binding_reasons = claim_gate_binding_reasons(binding_payload)
         outcome: dict[str, Any] = {"action": "execute", "result": str(result)[:200]}
         if binding_reasons:
             outcome["binding_blockers"] = binding_reasons
