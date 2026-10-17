@@ -209,8 +209,8 @@ NON_ROUTING_CAPABILITIES = [
 ]
 
 
-# Retired and deleted 2026-10-16 (#2359, nexus-core-rs bridge) and 2026-10-17 (#2475 and
-# #2491, dead-code batches B4 and B3). Their cases keep their test ids and assert the module is gone,
+# Retired and deleted 2026-10-16 (#2359, nexus-core-rs bridge) and 2026-10-17 (#2475,
+# #2491 and #2514, dead-code batches B4, B3 and B2). Their cases keep their test ids and assert the module is gone,
 # so a re-add is a deliberate change.
 RETIRED_MODULES = frozenset({
     "nexus.bridge.cutover_manager",
@@ -231,6 +231,9 @@ RETIRED_MODULES = frozenset({
     "nexus.services.local_heal.linear_replay_runner",
     "nexus.services.local_heal.sandbox",
     "nexus.services.local_heal.swarm_committee_bridge",
+    # B2 (#2514): ARCHIVED_2026-10-17_deadcode_b2.md
+    "nexus.services.local_heal.p3_provider_readiness",
+    "nexus.services.local_heal.p5_memory_bridge",
 })
 
 

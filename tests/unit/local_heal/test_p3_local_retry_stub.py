@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
-import pytest
+
 from nexus.services.local_heal.p3_local_retry_stub import (
-    P3LocalRetryStubResult,
     compute_p3_local_retry,
     p3_retry_stub_to_dict,
 )
@@ -171,9 +171,7 @@ def test_metadata_json_serializable():
 # ============================================================
 
 
-def test_p3_d_still_works():
-    from nexus.services.local_heal.p3_local_cheap_verifier import compute_p3_cheap_verifier
-    result = compute_p3_cheap_verifier(
-        cloud_stub_metadata={"p3_cloud_stub_candidate_generated": True, "p3_cloud_stub_canonical_candidate_available": True},
-    )
-    assert result.full_verifier_required is True
+def test_p3_d_still_works() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
