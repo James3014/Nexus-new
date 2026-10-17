@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -309,6 +310,56 @@ def _validate_existing_autonomy_binding(
 FAIL_TO_PASS_EVIDENCE_TOKEN = "fail_to_pass_base_verifier"
 FAIL_TO_PASS_PROBE_SCHEMA = "nexus.fail_to_pass_probe.v1"
 _FAIL_TO_PASS_BLOCKED_STATUSES = frozenset({"BASE_ALREADY_PASS", "BASE_NOT_PHYSICAL_FAIL"})
+
+
+_PYTEST_VALUE_OPTIONS = frozenset({
+    "-k", "-m", "-c", "-p", "-o", "--rootdir", "--ignore", "--deselect", "--junitxml",
+    "--confcutdir", "--basetemp", "--ignore-glob", "--maxfail", "-n",
+})
+_PYTEST_TEST_PATH = re.compile(r"^[\w./-]+\.py(::.*)?$")
+
+
+def _pytest_named_paths(command: str) -> list[str] | None:
+    """Test paths named by a pytest-shaped command; None when it is not pytest-shaped."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    if Path(argv[0]).name in {"pytest", "py.test"}:
+        rest = argv[1:]
+    elif "-m" in argv[:-1] and argv[argv.index("-m") + 1] == "pytest":
+        rest = argv[argv.index("-m") + 2 :]
+    else:
+        return None
+    paths: list[str] = []
+    for index, token in enumerate(rest):
+        if token.startswith("-") or not _PYTEST_TEST_PATH.match(token):
+            continue
+        if index and rest[index - 1] in _PYTEST_VALUE_OPTIONS:
+            continue
+        paths.append(token.split("::", 1)[0])
+    return paths
+
+
+def _base_run_collected_nothing(evidence, checkout: Path) -> str | None:
+    """Reason when a pytest-shaped base run proves nothing ran, else None (#2387).
+
+    pytest exit 4 (usage error / file not found) or 5 (no tests collected), or a
+    named test path absent from the base checkout, is not a real base failure:
+    the worker may add that very test file, so base never exercised the oracle.
+    Non-pytest verifiers keep the plain exit-code meaning.
+    """
+    for item in evidence:
+        paths = _pytest_named_paths(item.command)
+        if paths is None:
+            continue
+        if any(not (checkout / path).exists() for path in paths):
+            return "base_test_path_missing"
+        if item.exit_code in (4, 5):
+            return "base_collected_no_tests"
+    return None
 
 
 def _fail_to_pass_blocked(state: Mapping[str, Any]) -> bool:
@@ -4899,6 +4950,9 @@ class SelfHostedTaskService:
                 probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
             elif passed:
                 probe["status"] = "BASE_ALREADY_PASS"
+            elif (nothing_ran := _base_run_collected_nothing(evidence, checkout)) is not None:
+                probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+                probe["reason"] = nothing_ran
             elif any(item.exit_code != 0 for item in evidence):
                 probe["status"] = "VERIFIED"
         except Exception as exc:  # noqa: BLE001 - infrastructure errors fail closed
