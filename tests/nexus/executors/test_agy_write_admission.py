@@ -2563,7 +2563,9 @@ def _config_churn(kind: str, canonical: Path, scratch: Path) -> None:
             _git(canonical, "config", f"branch.{name}.merge", f"refs/heads/{name}")
             _git(canonical, "config", f"branch.{name}.description", "work")
     elif kind == "remote_fetch_refspec":
-        _git(canonical, "config", "--add", "remote.origin.fetch", "+refs/pull/*:refs/pr/*")
+        _git(canonical, "remote", "set-branches", "--add", "origin", "feat/x.1")
+    elif kind == "local_upstream":
+        _git(canonical, "branch", "-q", "--track", "tmp-2541-local", branch)
     else:  # branch_section_removed
         _git(canonical, "config", f"branch.{branch}.remote", "origin")
         before_removal = admission.checkout_fingerprint(canonical)
@@ -2576,6 +2578,7 @@ CONFIG_CHURN = [
     "worktree_add_b",
     "new_branch_entries",
     "remote_fetch_refspec",
+    "local_upstream",
     "branch_section_removed",
 ]
 
@@ -2641,6 +2644,38 @@ def _code_bearing_change(kind: str, canonical: Path, scratch: Path) -> None:
         _git(canonical, "config", "branch.autoSetupMerge", "always")
     elif kind == "remote_new_var":
         _git(canonical, "config", "remote.origin.uploadpack", "sh -c 'touch /tmp/pwned'")
+    elif kind == "branch_remote_url":
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.remote", "https://evil.example/repo.git")
+    elif kind == "branch_pushremote_path":
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.pushRemote", str(scratch / "exfil.git"))
+    elif kind == "branch_remote_undefined_name":
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.remote", "evil")
+    elif kind == "branch_merge_not_a_ref":
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.merge", "../../evil")
+    elif kind == "branch_rebase_odd_value":
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", f"branch.{branch}.rebase", "exec")
+    elif kind == "fetch_refspec_redirect":
+        branch = _upstream_branch(canonical)
+        _git(
+            canonical,
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            f"+refs/pull/1/head:refs/remotes/origin/{branch}",
+        )
+    elif kind == "fetch_refspec_cross_remote":
+        _git(canonical, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/up/*")
+    elif kind == "worktree_config_bookkeeping_key":
+        _git(canonical, "config", "extensions.worktreeConfig", "true")
+        branch = _upstream_branch(canonical)
+        before = admission.checkout_fingerprint(canonical)
+        _git(canonical, "config", "--worktree", f"branch.{branch}.remote", "origin")
+        assert admission.checkout_fingerprint(canonical) != before
     elif kind == "unknown_new_key":
         _git(canonical, "config", "futuregit.newcodekey", "sh -c 'touch /tmp/pwned'")
     elif kind == "unknown_subsection_key":
@@ -2670,6 +2705,14 @@ CODE_BEARING_CHANGES = [
     "branch_merge_options",
     "branch_top_level",
     "remote_new_var",
+    "branch_remote_url",
+    "branch_pushremote_path",
+    "branch_remote_undefined_name",
+    "branch_merge_not_a_ref",
+    "branch_rebase_odd_value",
+    "fetch_refspec_redirect",
+    "fetch_refspec_cross_remote",
+    "worktree_config_bookkeeping_key",
     "unknown_new_key",
     "unknown_subsection_key",
     "worktree_config",
@@ -2769,3 +2812,32 @@ def test_config_corrupted_during_run_fails_closed(monkeypatch, tmp_path, agy_hom
         "canonical_snapshot_failed",
         "canonical_checkout_integrity_violation",
     }
+
+
+def test_bookkeeping_entry_requires_bookkeeping_shaped_value():
+    entry = admission._config_entry_is_bookkeeping
+    remotes = frozenset({"origin", "my.fork"})
+    assert entry("branch.main.remote", "origin", remotes)
+    assert entry("branch.main.remote", ".", remotes)
+    assert entry("branch.main.pushremote", "my.fork", remotes)
+    assert entry("branch.main.merge", "refs/heads/main", remotes)
+    assert entry("branch.main.rebase", "true", remotes)
+    assert entry("branch.main.description", "anything at all", remotes)
+    assert entry("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*", remotes)
+    assert entry("remote.my.fork.fetch", "+refs/heads/a/b:refs/remotes/my.fork/a/b", remotes)
+    for key, value in (
+        ("branch.main.remote", "https://evil.example/x.git"),
+        ("branch.main.remote", "/tmp/evil"),
+        ("branch.main.remote", "evil"),
+        ("branch.main.pushremote", "ssh://evil/x"),
+        ("branch.main.merge", "main"),
+        ("branch.main.merge", "refs/heads/../x"),
+        ("branch.main.rebase", "exec"),
+        ("branch.main.remote", None),
+        ("remote.origin.fetch", "+refs/pull/1/head:refs/remotes/origin/main"),
+        ("remote.origin.fetch", "+refs/heads/*:refs/remotes/other/*"),
+        ("remote.origin.fetch", "+refs/heads/a:refs/remotes/origin/b"),
+        ("remote.origin.fetch", "+refs/heads/main:refs/heads/main"),
+        ("remote.origin.url", "https://github.com/x/y"),
+    ):
+        assert not entry(key, value, remotes), (key, value)
