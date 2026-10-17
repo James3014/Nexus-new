@@ -687,7 +687,10 @@ def test_multiprocess_concurrency_fencing(test_db_path: Path, sample_payloads):
     payload_tuple = sample_payloads
     ikey = "concurrent-idempotency-key"
 
-    with multiprocessing.Pool(processes=2) as pool:
+    # spawn, not the Linux default fork: in the full nightly the parent already runs
+    # background threads (e.g. LanceDB's event loop), and a forked worker can inherit a
+    # lock held by one of them and hang until pytest-timeout (nightly 38992991190, #2380).
+    with multiprocessing.get_context("spawn").Pool(processes=2) as pool:
         results = pool.starmap(
             _worker_concurrent_append,
             [
