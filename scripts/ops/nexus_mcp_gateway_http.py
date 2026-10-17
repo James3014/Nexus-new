@@ -8,8 +8,10 @@ import http.server
 import ipaddress
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -89,6 +91,80 @@ def _redacted_github_observer(observer: Mapping[str, Any]) -> dict[str, Any]:
     return redacted
 
 
+WORKER_ROUTE_PREFLIGHT_TTL_SECONDS = 60.0
+_WORKER_ROUTE_PREFLIGHT_CACHE: dict[str, Any] = {"at": None, "value": None}
+
+
+def _public_preflight_reason(reason: object) -> str:
+    """Short, path-free reason: only a ``NEXUS_*`` variable name or a fixed code."""
+    text = str(reason or "").strip()
+    if text == "ready":
+        return ""
+    if re.fullmatch(r"NEXUS_[A-Z0-9_]+=1 is required", text):
+        return text
+    if text.startswith("executable not found"):
+        return "executable not found"
+    return "preflight not ready"
+
+
+def _compute_worker_route_preflight() -> dict[str, Any]:
+    """Run each default worker route's adapter ``preflight()`` (env + PATH lookup only)."""
+    try:
+        from nexus.executors.worker_registry import WorkerRegistry
+        from nexus.services.model_workforce_policy import (
+            WorkforcePolicyLoader,  # pyright: ignore[reportAttributeAccessIssue]
+        )
+
+        snapshot = WorkforcePolicyLoader().load()
+        online = snapshot.routing.get("online", {})
+        defaults = online.get("route_defaults", {})
+        if not defaults:
+            return {"status": "UNKNOWN", "routes": [], "reason": "no default routes"}
+        registry = WorkerRegistry.default()
+        routes: list[dict[str, str]] = []
+        for role in sorted(defaults):
+            worker_id = str(defaults[role].get("current_default", ""))
+            worker = snapshot.workers.get(worker_id)
+            if worker is None:
+                ok, reason = False, "unknown adapter"
+            else:
+                try:
+                    result = registry.preflight(str(worker.provider))
+                    ok = bool(result.ready)
+                    reason = "" if ok else _public_preflight_reason(result.reason)
+                except Exception as exc:  # one broken adapter must not hide the rest
+                    ok, reason = False, f"preflight error: {type(exc).__name__}"
+            routes.append({
+                "route": str(role),
+                "adapter": worker_id,
+                "preflight": "OK" if ok else "BLOCKED",
+                "reason": reason,
+            })
+        status = "BLOCKED" if any(r["preflight"] == "BLOCKED" for r in routes) else "OK"
+        return {"status": status, "routes": routes}
+    except Exception as exc:  # /health must never fail because of this probe
+        return {
+            "status": "UNKNOWN",
+            "routes": [],
+            "reason": f"compute failed: {type(exc).__name__}",
+        }
+
+
+def worker_route_preflight() -> dict[str, Any]:
+    """Cached (~60 s) default worker-route preflight summary for ``/health`` (#2345)."""
+    now = time.monotonic()
+    cached_at = _WORKER_ROUTE_PREFLIGHT_CACHE["at"]
+    if (
+        cached_at is not None
+        and now - cached_at < WORKER_ROUTE_PREFLIGHT_TTL_SECONDS
+        and _WORKER_ROUTE_PREFLIGHT_CACHE["value"] is not None
+    ):
+        return dict(_WORKER_ROUTE_PREFLIGHT_CACHE["value"])
+    value = _compute_worker_route_preflight()
+    _WORKER_ROUTE_PREFLIGHT_CACHE.update(at=now, value=value)
+    return dict(value)
+
+
 def runtime_identity(
     gateway: UnifiedMCPGateway | None = None, *, include_paths: bool = False
 ) -> dict[str, Any]:
@@ -138,6 +214,7 @@ def runtime_identity(
         "tool_manifest_revision": TOOL_MANIFEST_REVISION,
         "tool_count": len(UnifiedMCPGateway.tool_specs()),
         "github_observer": github_observer,
+        "worker_route_preflight": worker_route_preflight(),
         # Unauthenticated: status and revisions only; paths and error text
         # stay in the authenticated nexus_gateway_status.
         "core_provenance": public_core_provenance(),

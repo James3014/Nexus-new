@@ -654,3 +654,163 @@ def test_health_hmac_key_is_fsynced_before_link(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.os, "link", lambda a, b: (events.append("link"), real_link(a, b))[1])
     mod.load_or_create_key(tmp_path / "state" / "key")
     assert events.index("fsync") < events.index("link")
+
+
+def _health_payload():
+    server, thread = _server()
+    try:
+        response = urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_port}/health", timeout=3
+        )
+        assert response.status == 200
+        return json.loads(response.read())
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def _fresh_route_preflight_cache():
+    import scripts.ops.nexus_mcp_gateway_http as http_module
+
+    http_module._WORKER_ROUTE_PREFLIGHT_CACHE.update(at=None, value=None)
+    return http_module
+
+
+def _fake_agy(tmp_path, monkeypatch):
+    import os
+
+    exe = tmp_path / "bin" / "agy"
+    exe.parent.mkdir()
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{exe.parent}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_EXECUTABLE", str(exe))
+    return exe
+
+
+def test_health_worker_route_preflight_blocked_without_agy_authorization(tmp_path, monkeypatch):
+    _fake_agy(tmp_path, monkeypatch)
+    monkeypatch.delenv("NEXUS_AGY_RUNTIME_AUTHORIZED", raising=False)
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    _fresh_route_preflight_cache()
+    block = _health_payload()["worker_route_preflight"]
+    assert block["status"] == "BLOCKED"
+    route = {r["route"]: r for r in block["routes"]}["fast_bounded_implementation"]
+    assert route["adapter"] == "agy_flash_38"
+    assert route["preflight"] == "BLOCKED"
+    assert route["reason"] == "NEXUS_AGY_RUNTIME_AUTHORIZED=1 is required"
+    assert set(route) == {"route", "adapter", "preflight", "reason"}
+
+
+def test_health_worker_route_preflight_ok_with_agy_authorization(tmp_path, monkeypatch):
+    _fake_agy(tmp_path, monkeypatch)
+    monkeypatch.setenv("NEXUS_AGY_RUNTIME_AUTHORIZED", "1")
+    _fresh_route_preflight_cache()
+    block = _health_payload()["worker_route_preflight"]
+    assert block["status"] == "OK"
+    route = {r["route"]: r for r in block["routes"]}["fast_bounded_implementation"]
+    assert route == {
+        "route": "fast_bounded_implementation",
+        "adapter": "agy_flash_38",
+        "preflight": "OK",
+        "reason": "",
+    }
+
+
+def test_health_worker_route_preflight_exception_is_unknown_and_health_stays_200(monkeypatch):
+    import nexus.executors.worker_registry as registry_module
+
+    def boom(cls):
+        raise RuntimeError("secret-value-should-not-leak")
+
+    monkeypatch.setattr(registry_module.WorkerRegistry, "default", classmethod(boom))
+    _fresh_route_preflight_cache()
+    block = _health_payload()["worker_route_preflight"]
+    assert block["status"] == "UNKNOWN"
+    assert block["routes"] == []
+    assert "secret-value-should-not-leak" not in json.dumps(block)
+    _fresh_route_preflight_cache()
+
+
+def test_health_worker_route_preflight_is_cached(monkeypatch):
+    http_module = _fresh_route_preflight_cache()
+    calls = []
+
+    def fake():
+        calls.append(1)
+        return {"status": "OK", "routes": []}
+
+    monkeypatch.setattr(http_module, "_compute_worker_route_preflight", fake)
+    http_module.worker_route_preflight()
+    http_module.worker_route_preflight()
+    assert len(calls) == 1
+    http_module._WORKER_ROUTE_PREFLIGHT_CACHE["at"] -= 61
+    http_module.worker_route_preflight()
+    assert len(calls) == 2
+    _fresh_route_preflight_cache()
+
+
+def test_health_worker_route_preflight_missing_executable_hides_path(tmp_path, monkeypatch):
+    missing = tmp_path / "nowhere" / "agy-missing"
+    monkeypatch.setenv("NEXUS_AGY_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setenv("NEXUS_AGY_EXECUTABLE", str(missing))
+    _fresh_route_preflight_cache()
+    raw = json.dumps(_health_payload()["worker_route_preflight"])
+    block = json.loads(raw)
+    route = {r["route"]: r for r in block["routes"]}["fast_bounded_implementation"]
+    assert route["preflight"] == "BLOCKED"
+    assert route["reason"] == "executable not found"
+    assert str(missing) not in raw
+    assert str(tmp_path) not in raw
+    _fresh_route_preflight_cache()
+
+
+def test_public_preflight_reason_only_passes_variable_name_form():
+    import scripts.ops.nexus_mcp_gateway_http as http_module
+
+    f = http_module._public_preflight_reason
+    assert f("NEXUS_AGY_RUNTIME_AUTHORIZED=1 is required") == (
+        "NEXUS_AGY_RUNTIME_AUTHORIZED=1 is required"
+    )
+    assert f("NEXUS_AGY_EXECUTABLE=/Users/x/bin/agy is required") == "preflight not ready"
+    assert f("ready") == ""
+
+
+def test_health_worker_route_preflight_empty_defaults_is_unknown(monkeypatch):
+    import nexus.services.model_workforce_policy as policy_module
+
+    real = policy_module.WorkforcePolicyLoader
+
+    class _Loader:
+        def load(self):
+            snap = real().load()
+            routing = {**snap.routing, "online": {**snap.routing["online"], "route_defaults": {}}}
+            return type("Snap", (), {"routing": routing, "workers": snap.workers})()
+
+    monkeypatch.setattr(policy_module, "WorkforcePolicyLoader", _Loader)
+    http_module = _fresh_route_preflight_cache()
+    block = http_module._compute_worker_route_preflight()
+    assert block == {"status": "UNKNOWN", "routes": [], "reason": "no default routes"}
+
+
+def test_health_worker_route_preflight_one_adapter_raises_other_still_reported(monkeypatch):
+    import nexus.executors.worker_registry as registry_module
+
+    class _Result:
+        ready = True
+        reason = "ready"
+
+    class _Registry:
+        def preflight(self, provider):
+            raise RuntimeError("/secret/path")
+
+    monkeypatch.setattr(
+        registry_module.WorkerRegistry, "default", classmethod(lambda cls: _Registry())
+    )
+    http_module = _fresh_route_preflight_cache()
+    block = http_module._compute_worker_route_preflight()
+    assert block["status"] == "BLOCKED"
+    assert len(block["routes"]) >= 2
+    assert all(r["reason"] == "preflight error: RuntimeError" for r in block["routes"])
+    assert "/secret/path" not in json.dumps(block)
