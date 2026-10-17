@@ -58,20 +58,40 @@ Consistency comes from this contract plus a conformance test in each repo.
    `OPENAI_API_KEY` and `MY_SECRET` are absent from the child environment. The
    test must run on Linux in CI and must not skip.
 
+### Hardened filter (reviewer and embedded copy, 2026-10-17)
+
+This goes beyond the open-swe reference filter. It is case-insensitive (name
+upper-cased once) and drops a variable when its name:
+
+- contains `TOKEN`, `API_KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`,
+  `PRIVATE_KEY`, `KEY_ID`, `COOKIE` or `AUTHORIZATION`, ends in `_KEY` or
+  `_PAT`, or has `AUTH` as a word (`AUTH`, `AUTH_*`, `*_AUTH*`);
+- starts with `GITHUB_`, `GH_`, `GOOGLE_`, `GEMINI_`, `OPENAI_`, `ANTHROPIC_` or
+  `AWS_`;
+- is exactly `SSH_AUTH_SOCK`, `KUBECONFIG`, `DOCKER_AUTH_CONFIG` or `DATABASE_URL`.
+
+`OPENCLI_*` names (such as `OPENCLI_PROFILE`) stay, unless they also match a
+secret marker (`OPENCLI_TOKEN`, `OPENCLI_API_KEY` are dropped). The word
+`OPENCLI` elsewhere in a name no longer exempts it, and the reference's
+`PROVIDER` exemption is dropped (its only history, commit 7f834e2, gives no
+reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
+
 ## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17)
 
 | Adapter | Prompt | Conversation | Environment | Session mode |
 | --- | --- | --- | --- | --- |
-| reviewer | argv (`opencli.py:123`); records use `safe_argv` (`:37-39`, `:125`) | always `--new` (`:123`) | denylist filter `_child_environment` (`:10-37`), used for ask/detail (`:158`) and `--version` (`:213`), same markers as open-swe; nexus-opencli-reviewer#108 (closes #105), test `tests/test_opencli_child_environment.py` | `ephemeral` (`:124`, `:167`) |
+| reviewer | argv (`opencli.py:123`); records use `safe_argv` (`:37-39`, `:125`) | always `--new` (`:123`) | hardened denylist `child_environment()` (`opencli.py:10-68`) on every opencli spawn: transport ask/detail/`--version`, `service_cli._opencli_json`/`_opencli_browser`/`_daemon_restart`, `OpenCLIPreflight._run`; nexus-opencli-reviewer#108 (closes #105), tests in `tests/test_opencli_child_environment.py` | `ephemeral` (`:124`, `:167`) |
 | open-swe | argv (`opencli_web_model.py:2084`) | `--conversation` when bound, else `--new` (`:2085-2088`) | denylist filter (`:1196-1208`, markers `:979-980`); `AWS_*` and other unlisted names pass | `ephemeral` default (`:1015`), passed at `:2094` |
-| Nexus-new embedded copy | argv (`opencli_web_model.py:855`) | `--conversation` when bound, else `--new` (`:856-859`) | denylist filter in `_environment()` (`:553-566`, markers `:461-462`), same as open-swe; test `tests/services/test_open_swe_embedded_opencli_environment.py` | `ephemeral` default (`:478`) |
+| Nexus-new embedded copy | argv (`opencli_web_model.py:855`) | `--conversation` when bound, else `--new` (`:856-859`) | hardened denylist in `_environment()` (`:587`, filter `:461-510`); test `tests/services/test_open_swe_embedded_opencli_environment.py` | `ephemeral` default (`:478`) |
 | devspace | argv (`chat-swarm-runtime.ts:1476`, `:1531`) | `--new` on the first ask (`:1480`), then `--conversation` (`:1533`) | inherits `process.env`: `spawn` at `:1681` passes no `env` | `ephemeral` (`:1443`, `:1484`, `:1537`, `:1669`) |
 
 Reading the table: argv prompt delivery is accepted (rule 1). Conversation
 policy and session mode conform everywhere. Environment is the gap, now closed to the
 minimum for reviewer, open-swe and the embedded copy; only devspace still
 inherits `process.env`. The three denylists conform to the minimum but not to
-the allowlist target.
+the allowlist target. The reviewer and the embedded copy use the hardened
+filter described below; open-swe still has the older reference filter
+(nexus-open-swe-runtime#151 asks it to adopt the hardened one).
 Rule 5 tests live in each repo, not in this document.
 
 ## Known non-conformances and follow-ups

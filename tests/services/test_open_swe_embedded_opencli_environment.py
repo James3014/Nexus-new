@@ -28,12 +28,35 @@ MODULE_PATH = (
 SENTINELS = {
     "GITHUB_TOKEN": "ghs-sentinel",
     "GH_TOKEN": "gh-sentinel",
+    "github_token": "lower-sentinel",
+    "Token": "mixed-sentinel",
     "OPENAI_API_KEY": "sk-sentinel",
     "ANTHROPIC_API_KEY": "ant-sentinel",
     "MY_SECRET": "secret-sentinel",
     "DB_PASSWORD": "pw-sentinel",
     "SERVICE_CREDENTIAL": "cred-sentinel",
     "SOME_TOKEN": "tok-sentinel",
+    "PROVIDER_TOKEN": "prov-sentinel",
+    "OPENCLI_TOKEN": "oc-tok-sentinel",
+    "OPENCLI_API_KEY": "oc-key-sentinel",
+    "AWS_ACCESS_KEY_ID": "aws-sentinel",
+    "STRIPE_KEY": "stripe-sentinel",
+    "SSH_AUTH_SOCK": "/tmp/agent.sock",
+    "AUTHORIZATION": "Bearer x",
+    "SESSION_COOKIE": "cookie-sentinel",
+    "GITLAB_PAT": "pat-sentinel",
+    "DATABASE_URL": "postgres://u:p@h/db",
+    "KUBECONFIG": "/tmp/kube",
+    "GH_OPENCLI_HOST": "x",
+}
+KEPT = {
+    "HOME": "/home/kept",
+    "LANG": "C.UTF-8",
+    "TMPDIR": "/tmp/kept",
+    "OPENCLI_KEEP_ME": "kept",
+    "AUTHOR_NAME": "kept",
+    "PROVIDER_NAME": "kept",
+    "MONKEY_COUNT": "3",
 }
 
 
@@ -107,9 +130,8 @@ def test_embedded_opencli_child_environment_excludes_credentials(
     module = _load_embedded_module(monkeypatch)
     bin_dir, dump = _recording_opencli(tmp_path)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    for name, value in SENTINELS.items():
+    for name, value in {**SENTINELS, **KEPT}.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setenv("OPENCLI_KEEP_ME", "kept")
     monkeypatch.delenv("OPENCLI_PROFILE", raising=False)
 
     model = module.OpenCLIWebChatModel(profile="lab")
@@ -118,8 +140,8 @@ def test_embedded_opencli_child_environment_excludes_credentials(
     lines = dump.read_text().splitlines()
     assert len(lines) == 1
     child_env = json.loads(lines[0])
-    for name in SENTINELS:
-        assert name not in child_env
+    assert not {name for name in SENTINELS if name in child_env}
+    for name, value in KEPT.items():
+        assert child_env[name] == value
     assert str(bin_dir) in child_env["PATH"]
     assert child_env["OPENCLI_PROFILE"] == "lab"
-    assert child_env["OPENCLI_KEEP_ME"] == "kept"
