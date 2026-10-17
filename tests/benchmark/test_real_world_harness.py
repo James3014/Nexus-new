@@ -1,8 +1,18 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.bench.real_world_eval import compare
 from scripts.bench import real_world_task_runner
 from scripts.bench.real_world_task_runner import load_tasks, run_task
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _run_from_repo_root(monkeypatch):
+    # Task files are addressed repo-relative; make the tests independent of the caller's cwd (#2317).
+    monkeypatch.chdir(_REPO_ROOT)
 
 
 def test_real_world_task_loader_reads_default_schema():
@@ -732,3 +742,58 @@ def test_real_world_stage1_sweep_failure_detector_covers_production_markers():
     assert detect({"result": {"errors": ["x", "agy_descendant_sweep_failed: y"]}}) is True
     assert detect({"result": {"status": "FAILED", "error": "stage1_no_passing_candidate"}}) is False
     assert detect({"agy_sweep_failed": False, "descendants_swept": True}) is False
+
+
+def test_real_world_fixture_tests_use_current_interpreter_not_path(tmp_path: Path, monkeypatch):
+    # #2317: `uv run pytest` spawned a `pytest` that only exists on some hosts' PATH.
+    import sys
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    task = next(task for task in load_tasks("scripts/bench/real_world_tasks_v1.json") if task.fixture_kind == "flag_normalization")
+    monkeypatch.chdir(tmp_path)
+    assert real_world_task_runner._fixture_test_cmd()[:3] == [sys.executable, "-m", "pytest"]
+    _, cmd, cwd = real_world_task_runner.materialize_fixture(tmp_path / "fx", task)
+    assert cmd[0] == sys.executable
+    assert cwd.is_dir()
+
+
+def _hermetic_bin_host(tmp_path: Path, monkeypatch) -> Path:
+    home = tmp_path / "host"
+    home.mkdir()
+    monkeypatch.setenv("NEXUS_BENCH_HOME", str(home))
+    monkeypatch.delenv("NEXUS_GEMINI_BIN", raising=False)
+    monkeypatch.setattr(real_world_task_runner.shutil, "which", lambda name, *a, **k: None)
+    # Hide host-wide fallbacks (/opt/homebrew, /usr/local): only paths under tmp_path exist.
+    monkeypatch.setattr(Path, "exists", lambda self: str(self).startswith(str(tmp_path)) and self.is_file())
+    return home
+
+
+def _fake_exe(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_real_world_resolve_gemini_bin_order_home_then_which_then_env(tmp_path: Path, monkeypatch):
+    home = _hermetic_bin_host(tmp_path, monkeypatch)
+    env_bin = _fake_exe(tmp_path / "envbin" / "gemini")
+    which_bin = _fake_exe(tmp_path / "whichbin" / "gemini")
+    monkeypatch.setenv("NEXUS_GEMINI_BIN", env_bin)
+    monkeypatch.setattr(
+        real_world_task_runner.shutil, "which", lambda name, *a, **k: which_bin if name == "gemini" else None
+    )
+    # explicit override beats PATH lookup
+    assert real_world_task_runner._resolve_gemini_bin() == env_bin
+    monkeypatch.delenv("NEXUS_GEMINI_BIN")
+    assert real_world_task_runner._resolve_gemini_bin() == which_bin
+    # an agy under the host home beats both
+    agy = _fake_exe(home / ".local" / "bin" / "agy")
+    assert real_world_task_runner._resolve_gemini_bin() == agy
+
+
+def test_real_world_resolve_gemini_bin_fails_closed_without_user_name(tmp_path: Path, monkeypatch):
+    _hermetic_bin_host(tmp_path, monkeypatch)
+    with pytest.raises(FileNotFoundError) as excinfo:
+        real_world_task_runner._resolve_gemini_bin()
+    assert "jameschen" not in str(excinfo.value)

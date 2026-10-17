@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -158,11 +159,16 @@ def materialize_fixture(root: Path, task: RealWorldTask) -> tuple[Path, list[str
         )
     else:
         raise ValueError(f"unknown_fixture_kind:{task.fixture_kind}")
-    return case_dir, ["uv", "run", "pytest", "-q", "tests"], case_dir
+    return case_dir, _fixture_test_cmd(), case_dir
+
+
+def _fixture_test_cmd() -> list[str]:
+    """Run fixture tests with this interpreter; ``uv run pytest`` needs pytest on PATH (#2317)."""
+    return [sys.executable, "-m", "pytest", "-q", "tests"]
 
 
 def _run_tests(case_dir: Path, timeout_sec: int) -> bool:
-    res = subprocess.run(["uv", "run", "pytest", "-q", "tests"], cwd=case_dir, text=True, capture_output=True, timeout=timeout_sec)
+    res = subprocess.run(_fixture_test_cmd(), cwd=case_dir, text=True, capture_output=True, timeout=timeout_sec)
     return res.returncode == 0
 
 
