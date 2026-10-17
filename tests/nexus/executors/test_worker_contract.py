@@ -246,6 +246,9 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     monkeypatch.setattr(
         "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
     )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: resolved
+    )
     captured = {}
 
     def fake_worker(request, on_process_group=None):
@@ -1962,6 +1965,9 @@ def _cline_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
     )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: resolved
+    )
 
 
 def _cline_run(monkeypatch, tmp_path, *, stdout, side_effect=None, target=None, contract=None):
@@ -2853,3 +2859,160 @@ def test_seatbelt_profile_allows_fork_unless_asked(tmp_path):
     assert build_seatbelt_profile(
         run_root=tmp_path, writable_target=None, deny_process_fork=True
     ).rstrip().endswith("(deny process-fork)")
+
+
+def _fake_macho(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 16)
+    path.chmod(0o755)
+    return path
+
+
+def test_cline_launch_binary_resolves_the_native_binary(tmp_path):
+    import os
+
+    from nexus.executors.worker_registry import cline_launch_binary
+
+    # npm layout: lib/node_modules/cline/bin/cline (a node wrapper that spawns).
+    package = tmp_path / "lib" / "node_modules" / "cline"
+    native = _fake_macho(package / "node_modules" / "@cline" / "cli-darwin-arm64" / "bin" / "cline")
+    wrapper = package / "bin" / "cline"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text("#!/usr/bin/env node\nrequire('child_process').spawnSync()\n")
+    link = tmp_path / "bin" / "cline"
+    link.parent.mkdir()
+    os.symlink(wrapper, link)
+    assert cline_launch_binary(str(link)) == os.path.realpath(native)
+    # A small shell wrapper naming the binary by absolute path.
+    shell = tmp_path / "local" / "cline"
+    shell.parent.mkdir()
+    shell.write_text(f'#!/bin/sh\nexec /usr/bin/arch -arm64 {native} "$@"\n')
+    assert cline_launch_binary(str(shell)) == os.path.realpath(native)
+    # The binary itself.
+    assert cline_launch_binary(str(native)) == os.path.realpath(native)
+
+
+def test_cline_launch_binary_refuses_anything_else(tmp_path):
+    from nexus.executors.worker_registry import cline_launch_binary
+
+    script = tmp_path / "cline"
+    script.write_text('#!/bin/sh\nexec /opt/other/cline "$@"\n')
+    assert cline_launch_binary(str(script)) is None
+    # A named path that is not a Mach-O binary is refused.
+    fake = tmp_path / "x" / "@cline" / "cli-darwin-arm64" / "bin" / "cline"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("not a binary")
+    script.write_text(f"#!/bin/sh\nexec {fake}\n")
+    assert cline_launch_binary(str(script)) is None
+    assert cline_launch_binary(None) is None
+    assert cline_launch_binary(str(tmp_path / "missing")) is None
+
+
+def test_cline_unresolvable_native_binary_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    monkeypatch.setattr("nexus.executors.worker_registry.cline_launch_binary", lambda resolved: None)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+        type("Contract", (), {"task_id": "cline-2332"})(),
+        type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    assert launched == []
+    assert receipt.failure_reason == "cline_native_binary_unavailable"
+
+
+def test_cline_launches_the_native_binary(monkeypatch, tmp_path):
+    native = _fake_macho(tmp_path / "native" / "cline")
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    assert calls[0].executable == str(tmp_path / "cline")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: str(native)
+    )
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    launched = []
+
+    def fake_worker(request, on_process_group=None):
+        launched.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=_CLINE_OK,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    target = tmp_path / "target2"
+    target.mkdir()
+    ClineWorkerAdapter(canonical_root=_cline_git_repo(tmp_path / "canonical2")).invoke(
+        type("Contract", (), {"task_id": "cline-2332"})(),
+        type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    assert launched[0].executable == str(native)
+
+
+def test_cline_unavailable_tool_rejected_by_cline_is_not_a_tool_run():
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # Observed 2026-10-17 (real cline 3.0.69, #2459): the model called the
+    # disabled run_commands; cline skipped it before execution.
+    def event(kind, call_id, output=None, name="run_commands"):
+        body = {"type": kind, "contentType": "tool", "toolName": name, "toolCallId": call_id}
+        if output is not None:
+            body["output"] = output
+        return (json.dumps({"type": "agent_event", "event": body}) + "\n").encode()
+
+    rejected = {
+        "error": "Tool call run_commands was rejected before execution: AI_NoSuchToolError: "
+        "Model tried to call unavailable tool 'run_commands'."
+    }
+    done = b'{"type":"run_result","finishReason":"completed"}\n'
+    ok = event("content_start", "c1") + event("content_end", "c1", rejected) + done
+    assert cline_delivery_failure(ok, b"") is None
+    # A start without cline's rejection end, or a successful end, is a tool run.
+    assert cline_delivery_failure(event("content_start", "c2") + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    ran = event("content_end", "c3", [{"query": "ls", "result": "a.txt", "success": True}])
+    assert cline_delivery_failure(ran + done, b"") == "cline_unadmitted_tool"
+    # The rejection text must name the same tool and sit in cline's error field.
+    other = {"error": rejected["error"].replace("run_commands", "editor", 1)}
+    assert cline_delivery_failure(event("content_end", "c4", other) + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    in_result = {"result": rejected["error"]}
+    assert cline_delivery_failure(event("content_end", "c5", in_result) + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    # No call id: never tolerated.
+    no_id = (
+        json.dumps(
+            {
+                "type": "agent_event",
+                "event": {
+                    "type": "content_start",
+                    "contentType": "tool",
+                    "toolName": "run_commands",
+                },
+            }
+        )
+        + "\n"
+    ).encode()
+    assert cline_delivery_failure(no_id + done, b"") == "cline_unadmitted_tool"

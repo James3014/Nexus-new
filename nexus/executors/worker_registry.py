@@ -403,27 +403,56 @@ def _cline_structured_denial(value: Any) -> bool:
     )
 
 
-def _cline_tool_names(value: Any) -> set[str]:
-    """Tool names of the tool events in one cline ``--json`` line (#2332).
+def _cline_tool_events(value: Any) -> list[dict[str, Any]]:
+    """The tool events in one cline ``--json`` line (#2332).
 
     Only structural tool events count: ``content_start``/``content_end``
     with ``contentType: tool``, at any nesting depth, never inside
     model-authored tool arguments.
     """
-    names: set[str] = set()
+    events: list[dict[str, Any]] = []
     if isinstance(value, list):
         for item in value:
-            names |= _cline_tool_names(item)
-        return names
+            events += _cline_tool_events(item)
+        return events
     if not isinstance(value, dict):
-        return names
+        return events
     if value.get("type") in ("content_start", "content_end") and value.get("contentType") == "tool":
-        name = value.get("toolName")
-        names.add(name if isinstance(name, str) else "")
+        events.append(value)
     for key, item in value.items():
         if key not in _CLINE_MODEL_ARGUMENT_KEYS:
-            names |= _cline_tool_names(item)
+            events += _cline_tool_events(item)
+    return events
+
+
+def _cline_tool_names(value: Any) -> set[str]:
+    """Tool names of the tool events in one cline ``--json`` line (#2332)."""
+    names: set[str] = set()
+    for event in _cline_tool_events(value):
+        name = event.get("toolName")
+        names.add(name if isinstance(name, str) else "")
     return names
+
+
+def _cline_rejected_before_execution(event: dict[str, Any]) -> bool:
+    """A ``content_end`` cline itself skipped before running the tool.
+
+    cline 3.0.69 emits ``Tool call <name> was rejected before execution: ...``
+    as the tool error when the model calls a tool that does not exist in the
+    run (``AI_NoSuchToolError``) or with unparseable input; the tool never
+    executes.  Only cline's own error field is read, never model text.
+    """
+    if event.get("type") != "content_end":
+        return False
+    name = event.get("toolName")
+    if not isinstance(name, str) or not name:
+        return False
+    prefix = f"Tool call {name} was rejected before execution:"
+    output = event.get("output")
+    errors = [output.get("error")] if isinstance(output, dict) else []
+    if "result" in (output if isinstance(output, dict) else {}) or event.get("isError") is False:
+        return False
+    return any(isinstance(item, str) and item.startswith(prefix) for item in errors)
 
 
 def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
@@ -439,10 +468,16 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     err = stderr.decode("utf-8", errors="replace").lower()
     if any(marker in err for marker in _CLINE_DENIAL_MARKERS):
         return "cline_permission_denied"
-    text = stdout.decode("utf-8", errors="replace")
+    # Strict decode (#2459 Codex r2): a replaced byte could break a key such
+    # as ``contentType`` and hide a tool event.
+    try:
+        text = stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return "cline_output_unparseable"
     results: list[dict[str, Any]] = []
     denied = False
     unadmitted: set[str] = set()
+    refused_calls: set[str] = set()
     unparseable = False
     for line in text.splitlines():
         if not line.strip():
@@ -458,10 +493,22 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
             unparseable = True
             continue
         denied = denied or _cline_structured_denial(value)
-        unadmitted |= _cline_tool_names(value) - CLINE_ADMITTED_TOOLS
+        for event in _cline_tool_events(value):
+            name = event.get("toolName")
+            if isinstance(name, str) and name in CLINE_ADMITTED_TOOLS:
+                continue
+            call_id = event.get("toolCallId")
+            key = call_id if isinstance(call_id, str) and call_id else f"#{len(unadmitted)}"
+            if _cline_rejected_before_execution(event):
+                refused_calls.add(key)
+            else:
+                unadmitted.add(key)
         if value.get("type") == "run_result":
             results.append(value)
-    if unadmitted:
+    # An unadmitted tool call is tolerated only when every event of that call
+    # is cline's own "rejected before execution" end (a model that called a
+    # tool the run does not have); anything else is never delivery.
+    if unadmitted - refused_calls or any(key.startswith("#") for key in unadmitted):
         return "cline_unadmitted_tool"
     if denied:
         return "cline_permission_denied"
@@ -505,6 +552,49 @@ def cline_permission_bypass(argv: tuple[str, ...]) -> bool:
     ):
         return True
     return options.count(CLINE_YOLO_FLAG) != 1
+
+
+_MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+_CLINE_PLATFORM_BINARY = re.compile(r"(/[^\s\"']*/@cline/cli-darwin-[a-z0-9]+/bin/cline)")
+
+
+def _is_macho(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(4) in _MACHO_MAGICS
+    except OSError:
+        return False
+
+
+def cline_launch_binary(resolved: Optional[str]) -> Optional[str]:
+    """The native cline binary behind ``resolved``; ``None`` when not found (#2332).
+
+    The cline Seatbelt profile denies process-fork, and both installed
+    launchers start the native binary through a child process (the npm
+    ``bin/cline`` node wrapper spawns it) or an exec chain, so the adapter
+    launches the native binary itself.  Accepted: the binary itself, the npm
+    package's node wrapper (sibling ``node_modules/@cline/cli-darwin-*``), or
+    a small shell wrapper naming the binary by absolute path.
+    """
+    if not resolved:
+        return None
+    real = Path(os.path.realpath(resolved))
+    if _is_macho(real):
+        return str(real)
+    candidates: list[Path] = []
+    if real.name == "cline" and real.parent.name == "bin":
+        candidates += sorted((real.parent.parent / "node_modules" / "@cline").glob("cli-darwin-*/bin/cline"))
+    try:
+        if real.stat().st_size <= 4096:
+            text = real.read_text(encoding="utf-8", errors="replace")
+            candidates += [Path(match) for match in _CLINE_PLATFORM_BINARY.findall(text)]
+    except OSError:
+        pass
+    for candidate in candidates:
+        native = Path(os.path.realpath(candidate))
+        if _is_macho(native):
+            return str(native)
+    return None
 
 
 def cline_version_probe(executable: str) -> Optional[str]:
@@ -602,9 +692,10 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         # The tool restriction and the denial/finish parsing are pinned to the
         # probed cline version; an unknown version could add a tool or change
         # the event shape (#2332 item 1).
-        if cline_version_probe(preflight.executable or self.executable) not in (
-            CLINE_SUPPORTED_VERSIONS
-        ):
+        launch_binary = cline_launch_binary(preflight.executable)
+        if launch_binary is None:
+            return failed("cline_native_binary_unavailable")
+        if cline_version_probe(launch_binary) not in CLINE_SUPPORTED_VERSIONS:
             return failed("cline_version_unsupported")
         # Same rule as Agy: a required lease is never skipped because the
         # contract lacks the attribute (it then fails the lease check).
@@ -639,7 +730,11 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         # #2332: the run settings (tool restriction, empty MCP list) live
         # outside every Seatbelt-writable path, so the worker cannot change
         # them mid-run.
-        config_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-cline-cfg-")))
+        try:
+            config_tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-cline-cfg-")))
+        except OSError:
+            shutil.rmtree(run_tmp, ignore_errors=True)
+            return failed("cline_run_config_unavailable")
         seatbelt_sha256 = ""
         try:
             run_home = run_tmp / "home"
@@ -668,7 +763,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     # #2332: no subprocess at all, so a command tool cannot run
                     # even if the run settings failed to load (cline's file
                     # tools run in-process; probed with 3.0.69).
-                    deny_process_fork=False,
+                    deny_process_fork=True,
                 )
             except CredentialPathOverlapError:
                 return failed("cline_target_inside_credential_path")
@@ -676,7 +771,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                 return failed("cline_seatbelt_profile_unrepresentable")
             seatbelt_sha256 = hashlib.sha256(seatbelt.encode("utf-8")).hexdigest()
             request = CliWorkerRequest(
-                executable=self.executable,
+                executable=launch_binary,
                 argv=argv,
                 cwd=str(target_path),
                 timeout_seconds=timeout_seconds or 900.0,
