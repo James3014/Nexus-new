@@ -6466,3 +6466,68 @@ def test_replay_2026_10_16_old_deployer_self_updates_to_the_2370_deployer(
     subset = result["receipt"]["self_update"]["bindable_checks"]
     assert subset["verdict"] == "GREEN"
     assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+
+
+# ------------------------- #2460: Exact-base Pyright gate required on main (2026-10-17)
+
+
+PYRIGHT = "Exact-base Pyright regression gate"
+# GET repos/James3014/Nexus-new/rulesets/20697077 on 2026-10-17, in its order.
+LIVE_REQUIRED_2026_10_17 = [
+    "Deletion guard",
+    TRUSTED_IMPACT,
+    "Full published Git history secret audit",
+    TRUSTED_DEPENDENCY,
+    "Bindings preflight (default branch)",
+    "Review record present (advisory)",
+    PYRIGHT,
+]
+
+
+def _live_2026_10_17_api(*, pyright_path: str | None = None) -> Callable[[str], Any]:
+    """Today's ruleset; PR-target checks only on the PR head, as on real main."""
+
+    def path_for(suite: int) -> str:
+        name = next(n for n, s in SUITES.items() if s == suite % 10_000)
+        if name == PYRIGHT and pyright_path is not None:
+            return pyright_path
+        return ad.REQUIRED_CHECKS[name]
+
+    base = green_api(required=LIVE_REQUIRED_2026_10_17, workflow_path=path_for)
+
+    def api(path: str) -> Any:
+        if "check-runs" in path and f"/commits/{NEW}/" in path:
+            name = urllib.parse.unquote_plus(path.split("check_name=")[1].split("&")[0])
+            if name in PR_TARGET_ONLY:
+                return {"check_runs": []}
+        return base(path)
+
+    return api
+
+
+def test_pyright_gate_is_known_and_bound_to_its_workflow() -> None:
+    workflow = ad.REQUIRED_CHECKS[PYRIGHT]
+    assert workflow == ".github/workflows/typecheck.yml"
+    text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
+    # job name, and it runs on pushes to main, so it binds on the main commit itself
+    assert f"name: {PYRIGHT}" in text and "push:" in text
+    assert PYRIGHT not in ad.PR_TARGET_ONLY_CHECKS
+
+
+def test_live_ruleset_2026_10_17_all_success_from_bound_workflows_is_green() -> None:
+    result = ad.required_checks(_live_2026_10_17_api(), NEW)
+    assert result["verdict"] == "GREEN", result
+    assert result["checks"][PYRIGHT]["sha"] == NEW
+    assert PYRIGHT in result["checks"]
+
+
+def test_live_ruleset_2026_10_17_green_candidate_deploys(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, _live_2026_10_17_api())["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize("path", [".github/workflows/pytest.yml", ".github/workflows/stray.yml"])
+def test_pyright_gate_from_another_workflow_is_not_green(path: str) -> None:
+    result = ad.required_checks(_live_2026_10_17_api(pyright_path=path), NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [PYRIGHT]
