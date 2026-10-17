@@ -1,0 +1,1 @@
+{"conversation_id": "REDACTED_CONVERSATION_ID", "duration_seconds": 2.879645, "num_turns": 1, "response": "```json\n{\"ok\": true, \"token\": \"ISSUE_1384_PROBE_OK\"}\n```\n", "status": "SUCCESS", "usage": {"cache_read_tokens": 9651, "input_tokens": 5809, "output_tokens": 69, "thinking_tokens": 0, "total_tokens": 5878}}
