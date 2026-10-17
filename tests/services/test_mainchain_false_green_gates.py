@@ -4554,3 +4554,33 @@ def test_e1_json_evidence_parse_failure_blocks(tmp_path: Path) -> None:
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("evidence_file_not_valid_json" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_preflight_only_codeintel_cannot_satisfy_required_codeintel_receipt_2557() -> None:
+    """#2557: with codeintel required and only the real preflight invoker (no physical
+    executor), the receipt must not complete and the bundle must not say REAL_INVOKED."""
+    from nexus.services.online_nexus_context import build_codeintel_preflight_invoker
+
+    planner = _Planner(selected=["codeintel"], required=["codeintel"])
+    receipt = UnifiedRuntime(planner=planner).run(
+        UnifiedRuntimeRequest(
+            task_id="preflight-only-1",
+            workspace_revision="wr",
+            task_statement="preflight only codeintel",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+            codeintel={"allowed_files": ["a.py"], "verify_commands": ["pytest"]},
+        ),
+        online_invoker=_online,
+        capability_invokers={"codeintel": build_codeintel_preflight_invoker()},
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt["receipt_complete"] is False
+    assert receipt.get("capability_closure_complete") is False
+    entries = receipt["capability_evidence_bundle"]["entries"]
+    entry = next(e for e in entries if e["name"] == "codeintel")
+    assert entry["status"] == "STUB_INVOKED" and entry["success"] is False

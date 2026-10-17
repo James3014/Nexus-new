@@ -842,8 +842,15 @@ def _run_knowledge_seam(
 def test_codeintel_selected_knowledge_applicability_reaches_package_and_receipt(
     tmp_path, monkeypatch
 ):
+    # #2557: knowledge evidence only counts through the physical executor (a real lookup);
+    # the preflight-only fallback is a stub and is covered by its own test below.
     persisted, prompts, stub, head = _run_knowledge_seam(
-        tmp_path, monkeypatch, selected=["codeintel"], hint=True
+        tmp_path,
+        monkeypatch,
+        selected=["codeintel"],
+        hint=True,
+        real_executor=True,
+        lookup={"target_symbol": "main", "search_paths": ["src/lookup_target.py"]},
     )
     assert stub.engine_calls == 1
     bundle = persisted["worker_model_context_materialization"]["bundle"]
@@ -879,7 +886,12 @@ def test_codeintel_selected_without_hint_carries_not_applicable_never_current(
     tmp_path, monkeypatch
 ):
     persisted, prompts, stub, _ = _run_knowledge_seam(
-        tmp_path, monkeypatch, selected=["codeintel"], hint=False
+        tmp_path,
+        monkeypatch,
+        selected=["codeintel"],
+        hint=False,
+        real_executor=True,
+        lookup={"target_symbol": "main", "search_paths": ["src/lookup_target.py"]},
     )
     assert stub.engine_calls == 0
     text = json.dumps(persisted["worker_model_context_materialization"]["bundle"])
@@ -978,3 +990,29 @@ def test_unsafe_or_empty_codeintel_lookup_never_reaches_the_executor(
     assert entry["success"] is False
     assert entry["failure_disposition"] == "refused_missing_inputs"
     assert "knowledge_applicability" not in prompts[0]
+
+
+def test_preflight_only_codeintel_without_executor_is_never_real_success_2557(
+    tmp_path, monkeypatch
+):
+    """#2557: no physical codeintel executor (build_real_executor_invoker -> None) means only
+    the preflight compaction runs.  It performs no lookup, so the bundle entry must not be
+    REAL_INVOKED/success, carry no consumer payload, and the consumption receipt must not be
+    PROVEN for codeintel.  Drives the real runtime seam (no faked stage classification)."""
+    persisted, prompts, _, _ = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["codeintel"], hint=True, real_executor=False
+    )
+    bundle = persisted["worker_model_context_materialization"]["bundle"]
+    entry = next(e for e in bundle["entries"] if e["name"] == "codeintel")
+    assert entry["invoked_stub"] is True
+    assert "knowledge_applicability" not in prompts[0]
+    assert entry["status"] == "STUB_INVOKED"
+    assert entry["invoked_real"] is False
+    assert entry["success"] is False
+    assert not entry.get("consumer_payload")
+    assert "codeintel" not in bundle.get("real_invoked", [])
+    consumption = persisted["worker_model_context_consumption"]
+    assert "codeintel" not in consumption.get("serialized_capability_ids", [])
+    # The receipt still names codeintel as selected, but never as serialized/consumed.
+    assert consumption["selected_capability_ids"] == ["codeintel"]
+    assert consumption["serialized_evidence_ids"] == []

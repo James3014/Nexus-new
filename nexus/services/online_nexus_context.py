@@ -1030,7 +1030,14 @@ def build_codeintel_preflight_invoker(
             "task_id": task_id,
             "invoked": True,
             "gate_passed": present,
-            "outcome_contributed": present,
+            # Preflight only compacts supplied context; it performs no scan, impact or
+            # risk lookup, so it is never a real codeintel execution (#2557): flagged
+            # as a stub so the runtime/bundle cannot classify it REAL_INVOKED success,
+            # and it contributes no outcome. The compact evidence stays available to
+            # prompt assembly.
+            "stub": True,
+            "preflight_only": True,
+            "outcome_contributed": False,
             "evidence": evidence,
             "evidence_refs": [f"capability:codeintel:{task_id}:preflight"],
             "physical_callable": "online_nexus_context.build_codeintel_preflight_invoker",
