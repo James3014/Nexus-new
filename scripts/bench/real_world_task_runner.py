@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nexus.contracts.model_output_json import parse_model_json
 from scripts.bench.real_world_eval import compare
 
 
@@ -252,11 +253,10 @@ def _parse_gemini_payload(stdout: str) -> dict[str, Any]:
         candidates.insert(0, fenced.group(1).strip())
     for candidate in candidates:
         try:
-            payload = json.loads(candidate)
+            payload = parse_model_json(candidate, expect="object", mode="strict")
         except Exception:
             continue
-        if isinstance(payload, dict):
-            return payload
+        return payload
     return {"files": [], "root_cause": "", "added_regression_test": False}
 
 
