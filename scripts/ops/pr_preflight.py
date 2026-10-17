@@ -5,8 +5,9 @@ Runs the ceremony checks that most often fail a PR in CI, before the push:
 
 1. ``bindings``: PR body ``NEXUS_CORE_ISSUE`` marker, ``Closes #N`` and the
    ``NEXUS_ISSUE_INTENT_V1`` block, using the trusted gate's own validators.
-2. ``merge_lane``: whether a ``NEXUS_MERGE_LANE_V1`` block is present and passes
-   the trusted lane gate. Preflight never mints a lane binding or hash.
+2. ``merge_lane``: lane blocks are retired (#2006/#2286), so no block is PASS;
+   a block that is present is still validated by the trusted lane gate.
+   Preflight never mints a lane binding or hash.
 3. ``issue``: the bound Issue is open and carries the evidence-universe marker
    that the pinned ``nexus-certify markers --check`` expects. ``nexus-certify``
    is resolved at the ref Nexus-new pins (``nexus-certify-ref``), never from
@@ -72,6 +73,7 @@ EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
 MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
 GOLDEN_CORPUS_UNVERIFIABLE = "GOLDEN_CORPUS_UNVERIFIABLE"
 MERGE_LANE_BINDING_MISSING = "MERGE_LANE_BINDING_MISSING"
+LANE_BLOCKS_RETIRED_NOTE = "lane blocks retired (#2006/#2286)"
 STATIC_NEW_REGRESSION = "NEW_REGRESSION"
 STATIC_TOOL_MISSING = "STATIC_TOOL_MISSING"
 
@@ -126,8 +128,8 @@ STATIC_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 LANE_FIX = (
-    "the Owner/authority path adds NEXUS_MERGE_LANE_V1 (#1749/#1817); preflight "
-    "never mints it. Pass --lane-owner-pending to record that this is intended."
+    "fix or remove the NEXUS_MERGE_LANE_V1 block (lane blocks are retired, "
+    "#2006/#2286); preflight never mints it."
 )
 
 
@@ -300,21 +302,18 @@ def check_merge_lane(ctx: Context) -> CheckResult:
     name = "merge_lane"
     if ctx.body is None:
         return CheckResult(name, SKIP, detail="no PR body", fix="pass --body-file FILE or --pr N")
+    if "NEXUS_MERGE_LANE_V1" not in ctx.body:
+        return CheckResult(
+            name,
+            PASS,
+            LANE_BLOCKS_RETIRED_NOTE,
+            "no NEXUS_MERGE_LANE_V1 block; lane blocks retired (#2006/#2286)",
+            data={"present": False},
+        )
     try:
         gate = _load_trusted_module(ctx, TRUSTED_LANE_GATE_PATH)
     except PreflightError as exc:
         return CheckResult(name, SKIP, detail=str(exc), fix="fetch the base ref and rerun")
-    present = gate.START_MARKER in ctx.body or gate.END_MARKER in ctx.body
-    if not present:
-        status = SKIP if ctx.lane_owner_pending else FAIL
-        return CheckResult(
-            name,
-            status,
-            MERGE_LANE_BINDING_MISSING,
-            "no NEXUS_MERGE_LANE_V1 block; the Trusted controller will BLOCK until one is added",
-            LANE_FIX,
-            {"present": False},
-        )
     try:
         gate.extract_binding(ctx.body)
     except gate.LaneBindingError as exc:

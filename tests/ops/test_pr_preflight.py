@@ -201,11 +201,12 @@ def test_no_body_skips_body_checks(repo, tmp_path, capsys):
 
 
 def test_missing_lane_block_fails_without_minting(repo, tmp_path, capsys):
+    # Lane blocks were retired (#2006/#2286): a missing block is no longer a FAIL.
     code, report = _report(capsys, _run(repo, tmp_path, "--only", "merge_lane", body=_body()))
     check = _check(report, "merge_lane")
-    assert code == 1
-    assert check["status"] == "FAIL"
-    assert check["code"] == pf.MERGE_LANE_BINDING_MISSING
+    assert code == 0
+    assert check["status"] == "PASS"
+    assert check["code"] == pf.LANE_BLOCKS_RETIRED_NOTE
     assert "binding_hash" not in json.dumps(report)
 
 
@@ -213,7 +214,7 @@ def test_missing_lane_block_is_skip_when_owner_pending(repo, tmp_path, capsys):
     argv = _run(repo, tmp_path, "--only", "merge_lane", "--lane-owner-pending", body=_body())
     code, report = _report(capsys, argv)
     assert code == 0
-    assert _check(report, "merge_lane")["status"] == "SKIP"
+    assert _check(report, "merge_lane")["status"] == "PASS"
 
 
 def test_malformed_lane_block_fails(repo, tmp_path, capsys):
