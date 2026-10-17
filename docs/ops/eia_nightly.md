@@ -2,8 +2,10 @@
 
 `scripts/ops/eia_nightly.py` runs External Intelligence Automation (EIA) unattended overnight on
 the M4 host. The ChatGPT web transport is cleanest in the early morning. The scheduler never
-merges anything. Card PRs and candidate PRs both go to the merge-queue session through
-`coord`, and that session reviews and merges them under its normal rules.
+merges anything. Since the merge queue was retired (#2365), authors self-merge after an
+independent review and green required checks. The scheduler cannot review its own PRs, so a
+separate review job does it (see "Review job" below). The scheduler tells `coordinator`
+through `coord` about each card PR and candidate PR.
 
 ## Queue an Issue
 
@@ -67,14 +69,35 @@ in `issues.json`), an Issue gets `eia:escalate` and is no longer scheduled.
 Cards use plain `python3`. Closure runs verifiers with the daemon's environment, so the
 operator must put the Nexus venv `bin` first on `PATH` in
 `~/Library/LaunchAgents/com.nexus.external-intelligence.plist`. `start` checks this by running
-`env -i PATH=<plist PATH> python3 -c 'import nexus, pytest'` in the daemon checkout. If the
-check fails, the night is `START_FAILED` and nothing is armed.
+`env -i PATH=<plist PATH> python3 -c 'import nexus, pytest, pydantic'` in the daemon
+checkout. If the check fails, the night is `START_FAILED` and nothing is armed.
+
+Sync that venv the way CI does: `uv sync --frozen --all-groups --all-extras`. A plain
+`uv sync --frozen` leaves out the `legacy` extra (pydantic, PyYAML), and most verifiers then
+fail at import.
+
+## Review job
+
+`com.nexus.eia-nightly-review` (17:00, 21:00 and 08:30) runs headless Claude Code on the M4.
+It only looks at open bot PRs on `eia-nightly/cards-*` and `eia/*` branches.
+
+- **Card PR:** it checks that the diff only adds files under `tasks/eia-nightly/`, gets an
+  independent Claude review, posts the review record for the head and self-merges once the
+  required checks pass.
+- **Candidate PR:** the code is untrusted. It needs an independent Claude review and a
+  cross-model review (Codex, or Gemini when Codex is unavailable). It merges only when both
+  accept and every check is green. Otherwise it comments on the PR, labels the Issue
+  `eia:escalate` for a Claude session, and leaves the PR open.
+
+It reports to coordinator as `m4-eia-review`, logs to
+`~/Workspace/nexus-self-hosted-state/eia-nightly/review-*.log`, and honours the same `PAUSE`
+file.
 
 ## Nightly flow
 
 | When | Command | What it does |
 | --- | --- | --- |
-| 16:00, re-checked at 20:00 | `prepare` | Takes up to 4 queued Issues. It renders `tasks/eia-nightly/<night>/issue-<N>.md` and validates each card with the daemon's own validators (`parse_issue_contract`, `_task_card`, `_validate_task_card_authority`, Core lane and capability checks). It opens one card PR, using the KEEP_OPEN tracking Issue "EIA nightly task cards", and sends READY to merge-queue. Later runs record the merge sha and each card's blob id. |
+| 16:00, re-checked at 20:00 | `prepare` | Takes up to 4 queued Issues. It renders `tasks/eia-nightly/<night>/issue-<N>.md` and validates each card with the daemon's own validators (`parse_issue_contract`, `_task_card`, `_validate_task_card_authority`, Core lane and capability checks). It opens one card PR, using the KEEP_OPEN tracking Issue "EIA nightly task cards", and tells coordinator. Later runs record the merge sha and each card's blob id. |
 | 23:30 | `start` | If the card PR has not merged, it skips the night and tells coordinator. Otherwise it starts a bounded `caffeinate -dimsu`, opens Chrome and the `ibase` profile window when the Browser Bridge is not connected, bootstraps or kickstarts `com.nexus.external-intelligence`, and runs `eia-healthcheck`. |
 | every 5 min | `dispatch` | Arms one Issue at a time before 06:00. It re-checks trust, appends the contract to the body (the original text is kept), confirms a byte-identical read-back, and adds `nexus:external-intelligence` last. It then follows the daemon state file for that exact identity. On every tick it re-reads the Issue, and disarms and escalates if the body changed or `eia:queue` was removed. |
 | 07:30, safety net at 09:05 | `stop` | Arms nothing new. A running Issue may finish until 09:00. Then it runs `launchctl bootout` on the daemon (which stays off during the day), kills caffeinate, writes `<night>-report.md`, sends the report to coordinator and posts a macOS notification. |
@@ -109,7 +132,7 @@ acts on that result as follows:
   values ever reach the PR body or coord messages. A branch lookup only considers PRs
   that are not cross-repository and whose head owner is `James3014`; such a PR is reused only
   if it is OPEN, based on `main`, and at that exact head. A newly created PR is read back the
-  same way before READY is sent. If the new PR is not visible yet, the tick is retried, and
+  same way before coordinator is told. If the new PR is not visible yet, the tick is retried, and
   the next tick finds the PR by branch. A different PR, base or head is refused. The PR number is saved before labels change. A failed or
   partial label edit leaves the Issue `CANDIDATE_PR` with labels pending (never `WITHDRAWN`),
   and every tick retries the labels. The scheduler writes no local refs: a raw ref writer
@@ -121,7 +144,7 @@ acts on that result as follows:
   is gone too, that night's `prepare` starts over. A missing candidate commit is an infra
   failure, so the normal retry or escalation applies, and no other SHA is ever substituted. The scheduler then pushes that exact commit as
   `eia/<N>-<revision>` with the bot credential, opens a PR (`Closes #N`, Core marker, CLOSE
-  intent, receipt summary) and sends READY to merge-queue. Labels become `eia:candidate-pr`;
+  intent, receipt summary) and tells coordinator. Labels become `eia:candidate-pr`;
   `eia:queue` and `nexus:external-intelligence` are removed. A GitHub error is retried on the
   next tick, and a receipt that fails these checks is escalated.
 - **Infra failure:** a reconcile-only state, an `OPENCLI_*`, transport or `OUTCOME_UNKNOWN`

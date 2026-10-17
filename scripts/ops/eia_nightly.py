@@ -4,17 +4,17 @@
 Subcommands (each idempotent, serialised by a lock, one state file per night):
 
   prepare   afternoon: render one Task Card per ``eia:queue`` Issue, validate it with the
-            daemon's own validators, open ONE card PR and hand it to merge-queue (coord).
+            daemon's own validators, open ONE card PR and tell coordinator (coord).
   start     23:30: caffeinate, Chrome + ibase Browser Bridge, health check, start the daemon.
             Skips the night when the card PR is not merged.
   dispatch  every 5 min: arm one Issue at a time (contract appended, label added LAST);
-            turn COMPLETE into a candidate PR handed to merge-queue; retry infra failures with
+            turn COMPLETE into a candidate PR and tell coordinator; retry infra failures with
             a new revision/unit (max 2); escalate model failures.
   stop      07:30 (hard stop 09:00): arm nothing new, boot the daemon out, kill caffeinate,
             write the morning report, send it to coordinator, post a macOS notification.
   status    print the night state.
 
-It never merges anything.  It only writes to Issues that carry ``eia:queue`` (queued and
+It never merges anything (the separate M4 review job does).  It only writes to Issues that carry ``eia:queue`` (queued and
 authored by a trusted actor); the one exception is removing ``nexus:external-intelligence``,
 which it added itself, when the queue label is withdrawn mid-run.  Every decision fails
 closed.  See docs/ops/eia_nightly.md.
@@ -1050,11 +1050,12 @@ class Nightly:
         self._queue_msg(
             night,
             f"ready-cards-{number}",
-            "merge-queue",
-            f"READY Nexus-new#{number} head {head}; EIA nightly Task Cards for night "
+            "coordinator",
+            f"FYI Nexus-new#{number} head {head}; EIA nightly Task Cards for night "
             f"{night_id} (only {CARD_DIR}/{night_id}/*.md, {len(picked)} cards, validated "
-            "with the daemon validators); high-risk no; please review/merge per normal "
-            "rules before 23:30. Sent by m4-eia-nightly (unattended).",
+            "with the daemon validators); high-risk no; the M4 review job "
+            "(com.nexus.eia-nightly-review) reviews and self-merges it before 23:30. "
+            "Sent by m4-eia-nightly (unattended).",
         )
         self._event(night, "card_pr_opened", number=number, head=head)
         self.save(night)
@@ -1377,7 +1378,7 @@ class Nightly:
             raise NightlyError("DAEMON_PLIST_PATH_UNREADABLE") from exc
         argv = ["/usr/bin/env", "-i", f"PATH={path}", f"HOME={HOME}", "python3", "-c"]
         if self.run(
-            [*argv, "import nexus, pytest"], cwd=str(self.daemon_repo), timeout=60
+            [*argv, "import nexus, pytest, pydantic"], cwd=str(self.daemon_repo), timeout=60
         ).returncode:
             raise NightlyError("DAEMON_PYTHON3_CANNOT_IMPORT_NEXUS")
 
@@ -1672,7 +1673,10 @@ class Nightly:
         view = self._view_issue(issue)
         blocked = self._not_armable(view)
         if blocked:  # closed, unqueued or taken over meanwhile: withdraw, do not escalate
-            return self._withdraw(night, entry, blocked, has_label=L_EIA in view["label_names"])
+            # Our label is only ever added after this point, so without it nothing ran and
+            # the attempt counts toward neither the retry budget nor the cross-night cap.
+            has_label = L_EIA in view["label_names"]
+            return self._withdraw(night, entry, blocked, has_label=has_label, ran=has_label)
         if not trusted or not self._issue_matches(view, record):
             return self._escalate(night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}")
         if L_EIA not in view["label_names"]:
@@ -1719,14 +1723,24 @@ class Nightly:
         return f"BLOCKING_LABEL:{','.join(blocking)}" if blocking else ""
 
     def _withdraw(
-        self, night: dict[str, Any], entry: dict[str, Any], reason: str, has_label: bool = True
+        self,
+        night: dict[str, Any],
+        entry: dict[str, Any],
+        reason: str,
+        has_label: bool = True,
+        ran: bool = True,
     ) -> None:
-        """Someone else took the Issue over: only undo our own daemon label."""
+        """Someone else took the Issue over: only undo our own daemon label.  ``ran=False``
+        records the attempt as ``not_armed`` (never handed to the daemon)."""
         issue = _issue_number(entry["issue"])
         if has_label:
             self._labels(issue, remove=[L_EIA])
         if entry.get("attempts"):
-            entry["attempts"][-1].update(result="withdrawn", reason=reason, finished_at=self._iso())
+            entry["attempts"][-1].update(
+                result="withdrawn" if ran else "not_armed",
+                reason=reason,
+                finished_at=self._iso(),
+            )
         entry["status"] = "WITHDRAWN"
         self._event(night, "withdrawn", issue=issue, reason=reason)
 
@@ -1992,11 +2006,13 @@ class Nightly:
         self._queue_msg(
             night,
             f"ready-candidate-{number}",
-            "merge-queue",
-            f"READY Nexus-new#{number} head {sha}; EIA candidate for #{issue} "
+            "coordinator",
+            f"FYI Nexus-new#{number} head {sha}; EIA candidate for #{issue} "
             f"(WHOLE_TASK_PASS, packet {facts['packet_sha'][:12]}); "
-            "NOT reviewed yet: needs independent review (+ cross-model if high-risk) per "
-            "normal rules. Sent by m4-eia-nightly (unattended).",
+            "NOT reviewed yet: the M4 review job (com.nexus.eia-nightly-review) runs an "
+            "independent Claude + cross-model review and self-merges only if both accept "
+            "and checks are green, else labels eia:escalate. Sent by m4-eia-nightly "
+            "(unattended).",
         )
         self._event(night, "candidate_pr", issue=issue, pr=number, head=sha)
         self._finish_candidate_labels(night, entry)

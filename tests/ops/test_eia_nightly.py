@@ -468,7 +468,8 @@ def test_prepare_opens_one_card_pr_and_hands_it_to_merge_queue(env) -> None:
     card = _git(env["repo"], "show", f"{commit}:{changed}")
     assert "\npython3 -m pytest -q tests/test_mod.py\n" in card
     (msg,) = env["sys"].coord()
-    assert "msg merge-queue" in msg and f"Nexus-new#{pr['number']}" in msg and commit in msg
+    assert "msg coordinator" in msg and f"Nexus-new#{pr['number']}" in msg and commit in msg
+    assert "merge-queue" not in msg
     # Idempotent: a second run opens nothing new and records the merge once it lands.
     writes = len(gh.writes)
     app.prepare()
@@ -631,7 +632,7 @@ def test_complete_becomes_candidate_pr_for_merge_queue(env) -> None:
         "nexus:external-intelligence",
     }
     assert any(
-        "msg merge-queue" in m and f"Nexus-new#{pr['number']} head {sha}" in m
+        "msg coordinator" in m and f"Nexus-new#{pr['number']} head {sha}" in m
         for m in env["sys"].coord()
     )
 
@@ -1929,3 +1930,36 @@ def test_arm_readback_race_with_takeover_withdraws_not_escalates(env, change, re
     assert entry["status"] == "WITHDRAWN" and entry["attempts"][-1]["reason"] == reason
     assert "escalation" not in entry and not env["gh"].issues[11]["comments"]
     assert "nexus:external-intelligence" not in env["gh"].issues[11]["labels"]
+
+
+def test_arm_readback_takeover_before_label_is_not_a_counted_attempt(env) -> None:
+    _started(env)
+    real = env["gh"].__call__
+    seen = {"edited": False, "views": 0}
+
+    def racing(argv):
+        if argv[1:3] == ["issue", "edit"] and "--body-file" in argv:
+            seen["edited"] = True
+        if argv[1:3] == ["issue", "view"] and seen["edited"]:
+            seen["views"] += 1
+            if seen["views"] == 2:  # the final re-check right before the label
+                env["gh"].issues[11]["labels"].discard("eia:queue")
+        return real(argv)
+
+    env["sys"].gh = racing
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "WITHDRAWN"
+    assert entry["attempts"][-1]["result"] == "not_armed"
+    assert en.counted_attempts(entry) == []
+    env["app"]._update_ledger(night)
+    ledger = json.loads((env["app"].state_dir / "issues.json").read_text())
+    assert ledger["11"]["nights"] == []
+
+
+def test_start_python_check_requires_pydantic(env) -> None:
+    _prepared(env)
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    env["app"].start()
+    checks = [c for c in env["sys"].calls if "-c" in c and c[0] == "/usr/bin/env"]
+    assert checks and checks[0][-1] == "import nexus, pytest, pydantic"
