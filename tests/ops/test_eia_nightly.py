@@ -1791,6 +1791,20 @@ def test_arming_with_label_on_is_promoted_and_monitored(env, at) -> None:
     assert night["issues"]["11"]["status"] == "ESCALATED"  # harvested normally
 
 
+def test_arming_recovery_after_label_request_counts_even_if_label_is_gone(env) -> None:
+    night = _crash_after_label(env)
+    assert night["issues"]["11"]["attempts"][-1].get("label_requested_at")
+    env["gh"].issues[11]["labels"].discard("nexus:external-intelligence")
+    night = _dispatch(env, "2026-10-17T06:30:00")  # after the cutoff: deferred
+    entry = night["issues"]["11"]
+    assert entry["status"] == "RETRY_PENDING"
+    assert entry["attempts"][-1]["result"] == "withdrawn"
+    assert len(en.counted_attempts(entry)) == 1
+    env["app"]._update_ledger(night)
+    ledger = json.loads((env["app"].state_dir / "issues.json").read_text())
+    assert ledger["11"]["nights"] == [NIGHT]
+
+
 def test_arming_recovery_with_older_night_pending_still_monitors(env) -> None:
     _crash_after_label(env)
     old = {

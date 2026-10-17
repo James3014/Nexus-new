@@ -215,8 +215,11 @@ An interrupted arming (state `ARMING`) is reconciled on every tick before the ga
 - **Label off**: arming resumes if the gate allows; otherwise the entry becomes
   `RETRY_PENDING`.
 
-An entry is never left in `ARMING`. Attempts that the gate deferred (`not_armed`) count toward neither the 2
-infra retries nor the 3-night cap.
+An entry is never left in `ARMING`. Attempts recorded as `not_armed` count toward neither the
+2 infra retries nor the 3-night cap. An attempt is `not_armed` when the gate deferred it, or
+when the Issue was taken over at the final read-back, but only if the daemon label was never
+requested. The scheduler persists `label_requested_at` before it adds the label, so after a
+crash in that window the attempt still counts, even if the label is gone by recovery.
 
 ## Install (operator only)
 

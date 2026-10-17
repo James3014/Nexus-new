@@ -524,8 +524,9 @@ def validate_contract(
 
 
 def counted_attempts(entry: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Attempts that really ran; gate-deferred ones (``not_armed``) count toward neither the
-    infra retry budget nor the cross-night cap."""
+    """Attempts that really ran; ``not_armed`` ones (gate-deferred, or taken over before the
+    daemon label was ever requested) count toward neither the infra retry budget nor the
+    cross-night cap."""
     return [a for a in entry.get("attempts") or [] if a.get("result") != "not_armed"]
 
 
@@ -1521,7 +1522,9 @@ class Nightly:
             )
         reason = self._arm_gate(night, entry)
         if reason:
-            att.update(result="not_armed", reason=f"GATE:{reason}", finished_at=self._iso())
+            # A label request may have reached GitHub before the crash: count that attempt.
+            result = "withdrawn" if att.get("label_requested_at") else "not_armed"
+            att.update(result=result, reason=f"GATE:{reason}", finished_at=self._iso())
             entry["status"] = "RETRY_PENDING"
             self._event(night, "arming_deferred", issue=issue, reason=reason)
             return
@@ -1676,10 +1679,16 @@ class Nightly:
             # Our label is only ever added after this point, so without it nothing ran and
             # the attempt counts toward neither the retry budget nor the cross-night cap.
             has_label = L_EIA in view["label_names"]
-            return self._withdraw(night, entry, blocked, has_label=has_label, ran=has_label)
+            ran = has_label or bool(record.get("label_requested_at"))
+            return self._withdraw(night, entry, blocked, has_label=has_label, ran=ran)
         if not trusted or not self._issue_matches(view, record):
             return self._escalate(night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}")
         if L_EIA not in view["label_names"]:
+            # Persisted first: after a crash past this point the daemon may already have
+            # picked the Issue up, so recovery must count the attempt even if the label is
+            # gone by then.
+            record["label_requested_at"] = self._iso()
+            self.save(night)
             self._labels(issue, add=[L_EIA])  # the arming mutation, always last
         record["armed_at"] = self._iso()
         entry["status"] = "ARMED"
