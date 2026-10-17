@@ -31,7 +31,7 @@ NODE = "test_mod.py::test_value"
 # Each invocation consumes the next step of FAKE_DSH_PLAN: optional file writes, a
 # session id and an exit code. Every argv is appended to FAKE_DSH_CALLS.
 FAKE_DSH = """#!/usr/bin/env python3
-import json, os, sys
+import json, os, signal, sys, time
 from pathlib import Path
 calls = Path(os.environ['FAKE_DSH_CALLS'])
 seen = json.loads(calls.read_text()) if calls.exists() else []
@@ -45,6 +45,12 @@ if step.get('goal'):
         'objective': 'FIX_1678', 'maxGoalRounds': 1}}}))
 for rel, text in step.get('write', {}).items():
     Path(rel).write_text(text)
+if step.get('term0'):
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+for i in range(step.get('steps', 0)):
+    print(json.dumps({'type': 'status', 'phase': 'step_end', 'turn': 2, 'step': i}), flush=True)
+    time.sleep(0.02)
+time.sleep(step.get('linger', 0))
 sys.exit(step.get('exit', 0))
 """
 
@@ -463,3 +469,19 @@ def test_red_phase_with_green_contract_gets_header_but_no_gate(tmp_path: Path) -
         ctx, plan, "--green-contract", str(ctx["green"]), "--auto-repair", "1", phase="red"
     )
     assert json.loads(redo.stdout)["reason_code"] == "START_PHASE_ARGUMENT_INVALID"
+
+
+def test_no_progress_stop_in_chain_mode_is_dsh_no_progress_and_quarantined(
+    tmp_path: Path,
+) -> None:
+    ctx = _setup(tmp_path)
+    # DSH edits the worktree, goes quiet, and (like the installed DSH on SIGTERM) exits 0.
+    plan = [{"session": "s-np", "write": _value(2), "steps": 6, "linger": 30, "term0": True}]
+    proc = _start(ctx, plan, "--green-contract", str(ctx["green"]), "--no-progress-steps", "5")
+    assert proc.returncode == guard.EXIT_NO_PROGRESS, proc.stdout + proc.stderr
+    out = _chain(ctx, proc)
+    assert out["stop_reason"] == "DSH_NO_PROGRESS"
+    run = out["phases"][-1]["run"]
+    assert run["decision"] == "NO_PROGRESS" and run["dsh_exit_code"] == 0
+    assert run["turn_state"] == guard.TURN_FAILED_DIRTY
+    assert len(_calls(ctx)) == 1  # no auto-repair after a no-progress stop

@@ -97,8 +97,10 @@ def test_garbage_lines_are_ignored() -> None:
 
 
 FAKE_DSH = """#!/usr/bin/env python3
-import json, os, sys, time
+import json, os, signal, sys, time
 from pathlib import Path
+if os.environ.get('FAKE_DSH_EXIT0_ON_TERM'):
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 print(json.dumps({'type': 'session', 'sessionId': 'sess-np', 'cwd': os.getcwd()}), flush=True)
 edit = os.environ.get('FAKE_DSH_EDIT_AT')
 for i in range(int(os.environ['FAKE_DSH_STEPS'])):
@@ -285,3 +287,32 @@ def test_adapter_caps_each_tool_result_with_truncation_note(tmp_path: Path) -> N
     assert got["big"].startswith("x" * 8192)
     assert "TRUNCATED" in got["big"] and "50000" in got["big"]
     assert len(got["big"]) < 8192 + 300
+
+
+def _dsh_exits_zero_on_sigterm_env(ctx: dict) -> dict[str, str]:
+    # The installed DSH handles SIGTERM with interrupt(0): the child exits 0 after a stop.
+    return {
+        "FAKE_DSH_STEPS": "8",
+        "FAKE_DSH_STEP_SLEEP": "0.05",
+        "FAKE_DSH_LINGER": "30",
+        "FAKE_DSH_EXIT0_ON_TERM": "1",
+        "FAKE_DSH_EDIT_AT": "0",
+        "FAKE_DSH_EDIT_FILE": str(ctx["repo"] / "mod.py"),
+    }
+
+
+def test_sigterm_exit_zero_with_dirty_worktree_is_quarantined(ctx: dict) -> None:
+    env = _dsh_exits_zero_on_sigterm_env(ctx)
+    env["FAKE_DSH_STEPS"] = "30"
+    # Edit at step 0 is progress; later steps then stall until the threshold.
+    proc = _start(ctx, env, "--no-progress-steps", "5")
+    assert proc.returncode == guard.EXIT_NO_PROGRESS, proc.stdout + proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["decision"] == "NO_PROGRESS"
+    assert out["dsh_exit_code"] == 0
+    assert out["turn_state"] == guard.TURN_FAILED_DIRTY
+    state = guard.load_turn_state(ctx["state"], out["session_id"])
+    assert state is not None
+    assert Path(state["quarantine_receipt"]).is_file()
+    patches = list((ctx["state"] / "quarantine" / out["session_id"]).glob("*.patch"))
+    assert patches and b"changed" in patches[0].read_bytes()

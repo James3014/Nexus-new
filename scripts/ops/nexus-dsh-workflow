@@ -3989,12 +3989,12 @@ def _run_phase_turn(
         session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
         turn_subject = {**subject, "session_id": session_id}
         forced = "SESSION_NOT_OBSERVED"
-    if proc.returncode != 0 or forced:
+    if proc.returncode != 0 or forced or no_progress_reasons:
         turn = record_failed_turn(
             root,
             turn_subject,
             pre=pre_turn,
-            exit_code=proc.returncode,
+            exit_code=EXIT_NO_PROGRESS if no_progress_reasons else proc.returncode,
             force_dirty_reason=forced,
         )
     else:
@@ -4189,6 +4189,9 @@ def _run_internal_red_gate(
 def _turn_stop_reason(code: int, run: dict[str, Any]) -> str | None:
     if run.get("schema") != PHASE_RUN_SCHEMA:
         return "PHASE_PREFLIGHT_BLOCKED"
+    if run.get("decision") == "NO_PROGRESS":
+        # The watchdog stopped DSH; DSH may have exited 0 on SIGTERM, so check this first.
+        return "DSH_NO_PROGRESS"
     if run["dsh_exit_code"] != 0:
         # Failed turns are never auto-repaired; quarantine rules already applied.
         return "DSH_TURN_FAILED"
@@ -4620,6 +4623,8 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         return 0
     if chain["stop_reason"] == "DSH_TURN_FAILED":
         return int(chain["phases"][-1]["dsh_exit_code"])
+    if chain["stop_reason"] == "DSH_NO_PROGRESS":
+        return EXIT_NO_PROGRESS
     return EXIT_BLOCKED
 
 
