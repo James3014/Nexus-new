@@ -443,12 +443,19 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
     results: list[dict[str, Any]] = []
     denied = False
     unadmitted: set[str] = set()
+    unparseable = False
     for line in text.splitlines():
+        if not line.strip():
+            continue
+        # #2332: cline's --json stdout is one JSON object per line; a line
+        # that is not one could hide a tool event, so it is never delivery.
         try:
             value = json.loads(line)
         except ValueError:
+            unparseable = True
             continue
         if not isinstance(value, dict):
+            unparseable = True
             continue
         denied = denied or _cline_structured_denial(value)
         unadmitted |= _cline_tool_names(value) - CLINE_ADMITTED_TOOLS
@@ -458,7 +465,7 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
         return "cline_unadmitted_tool"
     if denied:
         return "cline_permission_denied"
-    if not results:
+    if unparseable or not results:
         return "cline_output_unparseable"
     finish = str(results[-1].get("finishReason") or "").lower()
     if finish not in _CLINE_DELIVERED_FINISH_REASONS:
@@ -595,7 +602,9 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
         # The tool restriction and the denial/finish parsing are pinned to the
         # probed cline version; an unknown version could add a tool or change
         # the event shape (#2332 item 1).
-        if cline_version_probe(self.executable) not in CLINE_SUPPORTED_VERSIONS:
+        if cline_version_probe(preflight.executable or self.executable) not in (
+            CLINE_SUPPORTED_VERSIONS
+        ):
             return failed("cline_version_unsupported")
         # Same rule as Agy: a required lease is never skipped because the
         # contract lacks the attribute (it then fails the lease check).
@@ -656,6 +665,10 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     extra_reallowed_paths=tuple(
                         run_home / path for path in CLINE_RUN_HOME_WRITABLE_PATHS
                     ),
+                    # #2332: no subprocess at all, so a command tool cannot run
+                    # even if the run settings failed to load (cline's file
+                    # tools run in-process; probed with 3.0.69).
+                    deny_process_fork=True,
                 )
             except CredentialPathOverlapError:
                 return failed("cline_target_inside_credential_path")

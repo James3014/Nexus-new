@@ -2135,9 +2135,12 @@ def test_cline_markers_in_model_text_are_not_a_denial():
         b'"execution-denied / Tool execution denied by user."}}\n'
         b'{"type":"tool_result","is_error":false,"result":"grep: execution denied, denied by user"}\n'
         b'{"type":"tool-call","input":{"type":"execution-denied"}}\n'
-        b"plain log line: execution-denied\n"
     )
     assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
+    # #2332: a non-JSON stdout line is never delivery (it could hide a tool
+    # event), whatever it says.
+    plain = b"plain log line: execution-denied\n"
+    assert cline_delivery_failure(quoted + plain + _CLINE_OK, b"") == "cline_output_unparseable"
 
 
 def test_cline_structured_denial_events_are_non_delivery():
@@ -2814,3 +2817,33 @@ def test_seatbelt_extra_protected_paths_deny_then_reallow(tmp_path):
     assert profile.index(f'(subpath "{protected}")', deny) > deny
     reallow = profile.index("(allow file-write*\n", deny)
     assert profile.index(f'(subpath "{reopened}")', reallow) > reallow
+
+
+def test_cline_malformed_event_line_is_never_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # Codex r1 on #2459: a truncated run_commands event followed by a clean
+    # run_result must not read as delivery.
+    malformed = b'{"type":"agent_event","event":{"type":"content_end","toolName":"run_commands"\n'
+    completed = b'{"type":"run_result","finishReason":"completed"}\n'
+    assert cline_delivery_failure(malformed + completed, b"") == "cline_output_unparseable"
+    assert cline_delivery_failure(b"[1, 2]\n" + completed, b"") == "cline_output_unparseable"
+    assert cline_delivery_failure(b"\n" + completed + b"\n", b"") is None
+
+
+def test_cline_seatbelt_profile_denies_every_subprocess(monkeypatch, tmp_path):
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    profile = calls[0].seatbelt_profile
+    # Last rule wins in SBPL: nothing after it may re-allow process-fork.
+    assert profile.rstrip().endswith("(deny process-fork)")
+    assert "(allow process-fork" not in profile
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_seatbelt_profile_allows_fork_unless_asked(tmp_path):
+    from nexus.executors.agy_write_admission import build_seatbelt_profile
+
+    assert "process-fork" not in build_seatbelt_profile(run_root=tmp_path, writable_target=None)
+    assert build_seatbelt_profile(
+        run_root=tmp_path, writable_target=None, deny_process_fork=True
+    ).rstrip().endswith("(deny process-fork)")

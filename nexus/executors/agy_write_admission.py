@@ -506,6 +506,7 @@ def build_seatbelt_profile(
     target_root: Optional[Path] = None,
     extra_protected_paths: tuple[Path, ...] = (),
     extra_reallowed_paths: tuple[Path, ...] = (),
+    deny_process_fork: bool = False,
 ) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -591,6 +592,10 @@ def build_seatbelt_profile(
     # Reads of the real home's credential files (#1752); appended last so the
     # leading profile lines stay stable.
     lines += ["(deny file-read*", *credential_denies, ")"]
+    # A worker whose tools all run in-process (cline, #2332) may not start
+    # any process: a shell tool fails with EPERM whatever cline's settings say.
+    if deny_process_fork:
+        lines.append("(deny process-fork)")
     return "\n".join(lines) + "\n"
 
 
