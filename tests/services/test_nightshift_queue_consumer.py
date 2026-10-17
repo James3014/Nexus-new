@@ -264,3 +264,33 @@ def test_policy_module_import_failure_blocks_instead_of_name_error(tmp_path: Pat
     assert len(seen) == 1
     assert seen[0].route["workforce_bindings"] == {}
     assert [entry["status"] for entry in result] == ["BLOCK"]
+
+
+def test_concurrent_append_during_consume_keeps_both_effects(tmp_path: Path):
+    dispatched = []
+    producer = AutoResearchNightShift(project_root=tmp_path, task="task-b")
+
+    def _dispatcher(item):
+        producer._append_to_pending_manifest("task-b", "target.py", "bbb222", 0.9, str(tmp_path))
+        dispatched.append(item)
+
+    consumer = NightshiftQueueConsumer(
+        lambda _request: {
+            "workforce_admission": {"overall_decision": "ALLOW"},
+            "gateway_invocation_authority": {"status": "ALLOW", "gate_passed": True},
+        },
+        _dispatcher,
+        project_root=tmp_path,
+    )
+    path = tmp_path / ".nexus/nightshift/pending.json"
+    path.parent.mkdir(parents=True)
+    item_a = _item(task="task-a", commit_sha="aaa111")
+    path.write_text(json.dumps([item_a]), encoding="utf-8")
+
+    consumer.consume_file(path)
+
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert len(stored) == 2
+    entry_a = next(entry for entry in stored if entry.get("task") == "task-a")
+    assert entry_a["disposition"] == "DISPATCHED"
+    assert any(entry.get("task") == "task-b" for entry in stored)
