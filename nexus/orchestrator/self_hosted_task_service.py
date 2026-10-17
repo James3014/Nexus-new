@@ -759,22 +759,52 @@ def _task_deadline(contract: ArchitectTaskContract, submitted_at: Optional[str])
     return started + budget if started is not None and budget > 0 else None
 
 
-def _codeintel_lookup_context(raw: Any) -> dict[str, Any]:
-    """Codeintel executor inputs from the signed ``codeintel_lookup`` (#1579).
+_CODEINTEL_LOOKUP_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
-    Validated at the Gateway; anything malformed here yields no lookup inputs,
-    so the executor keeps refusing instead of guessing.
+
+def _codeintel_lookup_context(raw: Any, workspace_root: Any) -> dict[str, Any]:
+    """Codeintel executor inputs from ``codeintel_lookup`` (#1579), or nothing.
+
+    Re-validated here against the leased target worktree whatever the caller:
+    a dotted identifier (max 128) and 1-4 ``.py`` paths that are relative, contain
+    no symlink component, resolve inside the worktree and are existing regular
+    files.  Any doubt yields no lookup inputs, so the executor keeps refusing
+    instead of reading outside the worktree or "looking up" in zero files.
     """
-    if not isinstance(raw, Mapping):
+    if not isinstance(raw, Mapping) or not workspace_root:
         return {}
     symbol = raw.get("target_symbol")
-    if not isinstance(symbol, str) or not symbol:
+    if (
+        not isinstance(symbol, str)
+        or len(symbol) > 128
+        or not _CODEINTEL_LOOKUP_SYMBOL.fullmatch(symbol)
+    ):
         return {}
-    context: dict[str, Any] = {"target_symbol": symbol}
     paths = raw.get("search_paths")
-    if isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths):
-        context["search_paths"] = tuple(paths)
-    return context
+    if not isinstance(paths, list) or not 1 <= len(paths) <= 4:
+        return {}
+    try:
+        root = Path(str(workspace_root)).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return {}
+    for rel in paths:
+        if not isinstance(rel, str) or not rel.endswith(".py"):
+            return {}
+        parts = Path(rel).parts
+        if not parts or Path(rel).is_absolute() or any(part in ("", ".", "..") for part in parts):
+            return {}
+        current = root
+        for part in parts:
+            current = current / part
+            if current.is_symlink():
+                return {}
+        try:
+            resolved = current.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return {}
+        if root not in resolved.parents or not resolved.is_file():
+            return {}
+    return {"target_symbol": symbol, "search_paths": tuple(paths)}
 
 
 def _validated_action_request(
@@ -4010,7 +4040,9 @@ class SelfHostedTaskService(_ReadProjectionMixin, _InventoryMixin, _ClaimsMixin)
                         )
                         if key in request
                     },
-                    **_codeintel_lookup_context(request.get("codeintel_lookup")),
+                    **_codeintel_lookup_context(
+                        request.get("codeintel_lookup"), target_worktree
+                    ),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,

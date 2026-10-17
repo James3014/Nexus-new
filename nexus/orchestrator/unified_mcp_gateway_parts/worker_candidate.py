@@ -94,8 +94,9 @@ def _codeintel_lookup(raw: Any) -> dict[str, Any]:
 
     Lets the Planner-selected codeintel executor perform its real, read-only
     implementation lookup (it refuses without a symbol); it selects, routes and
-    gates nothing.  A dotted Python identifier (max 128) and at most 4 safe
-    repository-relative search paths.
+    gates nothing.  A dotted Python identifier (max 128) and 1-4 safe
+    repository-relative ``.py`` files to search, so a lookup always inspects
+    named files and never scans a directory.
     """
     invalid = _gateway().GatewayInputError("CODEINTEL_LOOKUP_INVALID")
     if not isinstance(raw, Mapping) or not set(raw) <= _CODEINTEL_LOOKUP_KEYS:
@@ -103,20 +104,19 @@ def _codeintel_lookup(raw: Any) -> dict[str, Any]:
     symbol = raw.get("target_symbol")
     if not isinstance(symbol, str) or len(symbol) > 128 or not _CODEINTEL_SYMBOL.fullmatch(symbol):
         raise invalid
-    normalized: dict[str, Any] = {"target_symbol": symbol}
-    if "search_paths" in raw:
-        paths = raw["search_paths"]
-        if not isinstance(paths, list) or not 1 <= len(paths) <= 4:
+    paths = raw.get("search_paths")
+    if not isinstance(paths, list) or not 1 <= len(paths) <= 4:
+        raise invalid
+    for path in paths:
+        if not isinstance(path, str) or not path.endswith(".py"):
             raise invalid
-        for path in paths:
-            if not isinstance(path, str):
-                raise invalid
-            try:
-                _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths")
-            except Exception as exc:  # noqa: BLE001 - one stable refusal code
-                raise invalid from exc
-        normalized["search_paths"] = list(paths)
-    return normalized
+        try:
+            _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths")
+        except Exception as exc:  # noqa: BLE001 - one stable refusal code
+            raise invalid from exc
+    # Containment, existence and symlinks are re-checked against the leased target
+    # worktree by the task service right before the lookup.
+    return {"target_symbol": symbol, "search_paths": list(paths)}
 
 
 class _WorkerCandidateMixin(_WorkerCandidateBase):

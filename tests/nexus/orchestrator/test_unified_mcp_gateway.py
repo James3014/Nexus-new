@@ -6533,7 +6533,7 @@ def test_worker_candidate_codeintel_lookup_schema_is_optional_and_closed():
     assert "codeintel_lookup" not in schema["required"]
     prop = schema["properties"]["codeintel_lookup"]
     assert prop["type"] == "object" and prop["additionalProperties"] is False
-    assert prop["required"] == ["target_symbol"]
+    assert prop["required"] == ["target_symbol", "search_paths"]
     assert set(prop["properties"]) == {"target_symbol", "search_paths"}
 
 
@@ -6572,19 +6572,23 @@ def test_worker_candidate_without_codeintel_lookup_binds_nothing(monkeypatch):
     [
         "main",
         {},
-        {"target_symbol": ""},
-        {"target_symbol": "a b"},
-        {"target_symbol": "x;rm"},
-        {"target_symbol": "a" * 129},
+        {"target_symbol": "", "search_paths": ["a.py"]},
+        {"target_symbol": "a b", "search_paths": ["a.py"]},
+        {"target_symbol": "x;rm", "search_paths": ["a.py"]},
+        {"target_symbol": "a" * 129, "search_paths": ["a.py"]},
         {"target_symbol": "main", "search_paths": "nexus/a.py"},
         {"target_symbol": "main", "search_paths": ["../etc/passwd"]},
         {"target_symbol": "main", "search_paths": ["/abs.py"]},
         {"target_symbol": "main", "search_paths": ["a.py"] * 5},
-        {"target_symbol": "main", "extra": 1},
+        {"target_symbol": "main", "search_paths": ["a.py"], "extra": 1},
+        {"target_symbol": "main"},
+        {"target_symbol": "main", "search_paths": []},
+        {"target_symbol": "main", "search_paths": ["nexus/services"]},
     ],
     ids=[
         "not-object", "empty", "blank-symbol", "space", "shell", "too-long", "paths-not-list",
-        "parent-escape", "absolute", "too-many", "unknown-key",
+        "parent-escape", "absolute", "too-many", "unknown-key", "missing-paths", "empty-paths",
+        "directory",
     ],
 )
 def test_worker_candidate_rejects_invalid_codeintel_lookup_before_preflight(monkeypatch, lookup):
@@ -6604,10 +6608,10 @@ def test_worker_candidate_codeintel_lookup_tamper_is_rejected(monkeypatch):
 
     gateway, service, _ = _rie_gateway(monkeypatch)
     args = _worker_args("codeintel-lookup-tamper")
-    args["codeintel_lookup"] = {"target_symbol": "main"}
+    args["codeintel_lookup"] = {"target_symbol": "main", "search_paths": ["a.py"]}
     _call_worker_candidate(gateway, args)
     original = service.submitted[0]
-    forged = {"target_symbol": "other"}
+    forged = {"target_symbol": "other", "search_paths": ["a.py"]}
     request = dict(original)
     request["bound_action_request"] = {**original["bound_action_request"], "codeintel_lookup": forged}
     with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):

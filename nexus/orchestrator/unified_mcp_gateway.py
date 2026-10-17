@@ -2421,7 +2421,7 @@ class UnifiedMCPGateway(_CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCand
                         "codeintel_lookup": {
                             "type": "object",
                             "description": "Optional read-only lookup target for the Planner-selected codeintel executor (#1579).",
-                            "required": ["target_symbol"],
+                            "required": ["target_symbol", "search_paths"],
                             "additionalProperties": False,
                             "properties": {
                                 "target_symbol": {"type": "string", "maxLength": 128},
