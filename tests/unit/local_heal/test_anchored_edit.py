@@ -1,10 +1,10 @@
+import importlib.util
 import os
-import pytest
-from pathlib import Path
+
 from nexus.services.local_heal.anchored_edit import AnchoredEdit
-from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchIntent
-from nexus.services.local_heal.errors import MatchAuthority, PatchErrorKind, PatchError
-from nexus.services.local_heal.runbook_compliance import check_lane_classification
+from nexus.services.local_heal.errors import MatchAuthority, PatchError, PatchErrorKind
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
 
 def test_anchored_edit_success():
     source = "def calc(x):\n    # original code\n    return x * 2\n"
@@ -154,15 +154,10 @@ def test_protocol_parse_anchored_edit_mode():
             del os.environ["NEXUS_PROTOCOL_MODE"]
 
 
-def test_runbook_compliance_accepts_control_plane_verbatim():
-    # 測試 compliance checker 對 control_plane_verbatim 的接受
-    receipt = {
-        "final_lane": "verifier_passed_by_execution",
-        "match_authority": "control_plane_verbatim",
-        "export_classification": "model_patch_success_candidate"
-    }
-    violations = check_lane_classification(receipt)
-    assert "direct_patch_lane_wrong_authority" not in violations
+def test_runbook_compliance_accepts_control_plane_verbatim() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.runbook_compliance") is None
 
 
 # ─── P9: Anchor Provenance Tests ──────────────────────────────────────────────
@@ -376,27 +371,13 @@ def test_parser_rejects_bullet_list_replacement():
 
 # ─── P9: Compliance Checker Tests ─────────────────────────────────────────────
 
-def test_compliance_checker_rejects_prose_contaminated_replacement():
-    """Compliance checker must reject prose-contaminated accepted replacement."""
-    receipt = {
-        "final_lane": "verifier_passed_by_execution",
-        "match_authority": "control_plane_verbatim",
-        "export_classification": "model_patch_success_candidate",
-        "replacement_has_prose": True,
-    }
-    # This should be caught by the compliance checker
-    violations = check_lane_classification(receipt)
-    # The compliance checker should flag prose contamination
-    assert isinstance(violations, list)
+def test_compliance_checker_rejects_prose_contaminated_replacement() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.runbook_compliance") is None
 
 
-def test_compliance_checker_accepts_clean_replacement():
-    """Compliance checker must accept clean code-only replacement."""
-    receipt = {
-        "final_lane": "verifier_passed_by_execution",
-        "match_authority": "control_plane_verbatim",
-        "export_classification": "model_patch_success_candidate",
-        "replacement_has_prose": False,
-    }
-    violations = check_lane_classification(receipt)
-    assert "direct_patch_lane_wrong_authority" not in violations
+def test_compliance_checker_accepts_clean_replacement() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.runbook_compliance") is None
