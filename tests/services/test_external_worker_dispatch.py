@@ -764,14 +764,14 @@ def test_claude_popen_failure_is_pre_effect_and_account_reusable(
     journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
         tmp_path, monkeypatch, "true"
     )
-    real_popen = subprocess.Popen
+    real_execute_child = subprocess.Popen._execute_child
 
-    def failing_popen(argv, *args, **kwargs):
-        if "--output-format" in list(argv):
-            raise OSError("exec failed")
-        return real_popen(argv, *args, **kwargs)
+    def failing_execute_child(self, args, *rest, **kwargs):
+        if "--output-format" in list(args):
+            raise OSError("fork failed")
+        return real_execute_child(self, args, *rest, **kwargs)
 
-    monkeypatch.setattr(dispatch.subprocess, "Popen", failing_popen)
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", failing_execute_child)
     try:
         assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
         current = journal.read(operation_id)
@@ -950,26 +950,28 @@ class _InterruptedDuringPopen(BaseException):
     """Stands in for e.g. KeyboardInterrupt raised inside Popen.__init__ after fork."""
 
 
-def test_claude_non_oserror_inside_popen_is_unknown_and_holds_lease(
+def test_claude_exception_inside_popen_after_fork_kills_child_and_holds_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#2389 item 4: only OSError/SubprocessError from Popen prove no child exists."""
+    """#2389 item 4: Popen raising after the fork must not free the lease of a live child."""
 
     import json
 
     from nexus.services.claude_account_pool import set_claude_account_pool_manager
 
     journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
-        tmp_path, monkeypatch, "true"
+        tmp_path, monkeypatch, "sleep 30"
     )
-    real_popen = subprocess.Popen
+    real_execute_child = subprocess.Popen._execute_child
+    forked: list[int] = []
 
-    def interrupted_popen(argv, *args, **kwargs):
-        if "--output-format" in list(argv):
+    def interrupted_after_fork(self, args, *rest, **kwargs):
+        real_execute_child(self, args, *rest, **kwargs)
+        if "--output-format" in list(args):
+            forked.append(self.pid)
             raise _InterruptedDuringPopen()
-        return real_popen(argv, *args, **kwargs)
 
-    monkeypatch.setattr(dispatch.subprocess, "Popen", interrupted_popen)
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", interrupted_after_fork)
     try:
         assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
     finally:
@@ -977,5 +979,42 @@ def test_claude_non_oserror_inside_popen_is_unknown_and_holds_lease(
     current = journal.read(operation_id)
     assert current["status"] == "OUTCOME_UNKNOWN"
     assert current["failure_kind"].endswith("_InterruptedDuringPopen")
+    (child_pid,) = forked
+    with pytest.raises(ProcessLookupError):
+        os.killpg(child_pid, 0)
     (lease,) = json.loads((pool_root / "state.json").read_text())["leases"].values()
     assert lease["unknown_outcome"] is True
+
+
+def test_claude_real_exec_failure_after_fork_is_pre_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 4: a child that failed to exec was reaped by CPython; no hold needed."""
+
+    import json
+
+    from nexus.services.claude_account_pool import (
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    real_execute_child = subprocess.Popen._execute_child
+
+    def missing_binary(self, args, *rest, **kwargs):
+        if "--output-format" in list(args):
+            args = [str(tmp_path / "missing-claude"), *list(args)[1:]]
+        return real_execute_child(self, args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", missing_binary)
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+        current = journal.read(operation_id)
+        assert current["status"] == "FAILED"
+        assert current["failure_kind"] == "PROVIDER_START_FAILED:FileNotFoundError"
+        assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+        assert get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32).lease_id
+    finally:
+        set_claude_account_pool_manager(None)

@@ -161,6 +161,25 @@ def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
         pass
 
 
+class _TrackedPopen(subprocess.Popen):
+    """Popen that hands back its object even when ``__init__`` raises after fork.
+
+    #2389 item 4: an exception inside ``Popen.__init__`` after the fork (for
+    example a KeyboardInterrupt, or an OSError closing pipes or reading the exec
+    error pipe) would otherwise leave a running child we hold no handle to.
+    ``self.pid`` is set only once the fork succeeded, so every forked child is
+    appended to ``started``; a child CPython already reaped (exec failure) has a
+    ``returncode``.
+    """
+
+    def __init__(self, *args: Any, started: list[subprocess.Popen[bytes]], **kwargs: Any) -> None:
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            if getattr(self, "pid", None) is not None:
+                started.append(self)
+
+
 def _retry_account_write(
     write: Any, *, attempts: int = 3, delay: float = 0.2
 ) -> BaseException | None:
@@ -448,14 +467,13 @@ def _run_operation(
                 )
             return 1
 
-        popen_entered = False
+        started_children: list[subprocess.Popen[bytes]] = []
         try:
             with (
                 stdout_path.open("ab", buffering=0) as out_fh,
                 stderr_path.open("ab", buffering=0) as err_fh,
             ):
-                popen_entered = True
-                proc = subprocess.Popen(
+                proc = _TrackedPopen(
                     list(command.argv),
                     cwd=cwd,
                     env=dict(command.env),
@@ -464,6 +482,7 @@ def _run_operation(
                     stderr=err_fh,
                     start_new_session=True,
                     close_fds=True,
+                    started=started_children,
                 )
                 attach = getattr(account_adapter, "attach_provider", None)
                 if attach is not None:
@@ -502,17 +521,13 @@ def _run_operation(
                         last_heartbeat = now
                     time.sleep(0.25)
         except BaseException as exc:
+            if proc is None and started_children and started_children[0].returncode is None:
+                # #2389 item 4: Popen raised after the fork and the child was not
+                # reaped, so it may be running. Treat it like a started provider.
+                proc = started_children[0]
+                if mark_pending is None:
+                    _kill_and_reap(proc)
             if proc is not None and mark_pending is not None:
-                return _fail_closed_after_start(exc)
-            if (
-                popen_entered
-                and mark_pending is not None
-                and not isinstance(exc, (OSError, subprocess.SubprocessError))
-            ):
-                # #2389 item 4: CPython raises OSError/SubprocessError from Popen only
-                # when fork failed or the child failed to exec and was reaped. Any
-                # other exception (e.g. KeyboardInterrupt while reading the exec
-                # error pipe) may leave a running child we hold no handle to.
                 return _fail_closed_after_start(exc)
             # No child exists (Popen never succeeded): known pre-effect failure.
             confirm_start_failure = getattr(account_adapter, "confirm_terminal", None)
@@ -612,8 +627,6 @@ def _run_operation(
                     failure_kind=outcome.failure_kind,
                 )
             except BaseException as exc:
-                if mark_pending is None:
-                    raise
                 # #2389 item 1: never leave a launched attempt without a terminal record.
                 return _fail_closed_after_start(exc)
             try:
