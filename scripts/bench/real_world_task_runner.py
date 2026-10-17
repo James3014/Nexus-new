@@ -469,51 +469,41 @@ def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
     return int(total), ("measured" if total > 0 else "missing_agy_usage"), response
 
 
-def _sync_staged_case(staged: Path, case_dir: Path) -> None:
+AGY_STAGED_SYMLINK_REFUSED = "agy_staged_symlink_refused"
+
+
+def _has_symlink(root: Path) -> bool:
+    for directory, dirnames, filenames in os.walk(root):
+        for name in (*dirnames, *filenames):
+            if (Path(directory) / name).is_symlink():
+                return True
+    return False
+
+
+def _sync_staged_case(staged: Path, case_dir: Path) -> str | None:
     """Mirror the agy run's regular-file edits from a staged copy back into the case dir.
 
-    Symlinks are never followed on either side: a staged symlink is ignored,
-    and a case-dir path whose entry or any parent below the case dir is a
-    symlink is neither read, written nor deleted.
+    Fail closed: when either tree holds any symlink nothing is mirrored and
+    ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so a symlink can neither
+    redirect a write nor hide the deletion of a file.  Writes use
+    ``O_NOFOLLOW``.  Returns ``None`` after a complete mirror.
     """
-
-    def unsafe(rel: Path) -> bool:
-        current = case_dir
-        for part in rel.parts:
-            current = current / part
-            if current.is_symlink():
-                return True
-        return False
-
-    staged_files = {
-        path.relative_to(staged)
-        for path in staged.rglob("*")
-        if path.is_file() and not path.is_symlink() and not _unsafe_staged(staged, path)
-    }
+    if _has_symlink(staged) or _has_symlink(case_dir):
+        return AGY_STAGED_SYMLINK_REFUSED
+    staged_files = {path.relative_to(staged) for path in staged.rglob("*") if path.is_file()}
     for path in sorted(case_dir.rglob("*"), reverse=True):
-        rel = path.relative_to(case_dir)
-        if rel not in staged_files and not unsafe(rel) and path.is_file():
+        if path.is_file() and path.relative_to(case_dir) not in staged_files:
             path.unlink()
     for rel in sorted(staged_files):
-        if unsafe(rel):
-            continue
         source, dest = staged / rel, case_dir / rel
         data = source.read_bytes()
-        if not dest.is_file() or dest.read_bytes() != data:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if unsafe(rel):
-                continue
-            dest.write_bytes(data)
-
-
-def _unsafe_staged(staged: Path, path: Path) -> bool:
-    """True when ``path`` sits below a symlinked directory inside the staged copy."""
-    current = staged
-    for part in path.relative_to(staged).parts[:-1]:
-        current = current / part
-        if current.is_symlink():
-            return True
-    return False
+        if dest.is_file() and dest.read_bytes() == data:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+    return None
 
 
 def _run_agy_pool_patch(
@@ -553,6 +543,7 @@ def _run_agy_pool_patch(
             reason="agy account pool not installed or disabled; the bench never runs agy on the default HOME",
         )
     observed: list[Any] = []
+    sync_refusal: str | None = None
     adapter = AgyWorkerAdapter(
         use_installed_account_pool=True, result_observer=observed.append, require_account_pool=True
     )
@@ -591,7 +582,7 @@ def _run_agy_pool_patch(
             and not sweep_failed
         ):
             # Only a completed, fully swept run's edits reach the case dir.
-            _sync_staged_case(target, case_real)
+            sync_refusal = _sync_staged_case(target, case_real)
     except WorkerProviderUnavailable as exc:
         return _agy_row(AGY_FAILED, reason=str(exc))
     finally:
@@ -622,6 +613,14 @@ def _run_agy_pool_patch(
             reason="agy_descendant_sweep_failed: worker descendants may survive",
             model_calls=model_calls,
             token_capture_status="sweep_failed",
+            returncode=receipt.exit_code,
+            **common,
+        )
+    if sync_refusal is not None:
+        return _agy_row(
+            AGY_FAILED,
+            reason=sync_refusal,
+            model_calls=model_calls,
             returncode=receipt.exit_code,
             **common,
         )

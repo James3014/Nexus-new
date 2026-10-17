@@ -399,12 +399,48 @@ def test_sync_never_follows_a_case_dir_symlink(tmp_path):
     (staged / "linkdir" / "f.txt").write_text("overwrite\n", encoding="utf-8")
     (staged / "new.txt").write_text("new\n", encoding="utf-8")
 
-    runner._sync_staged_case(staged, case_dir)
+    assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
 
     assert outside.read_text(encoding="utf-8") == "keep\n"
     assert (outside_dir / "f.txt").read_text(encoding="utf-8") == "keep\n"
     assert (case_dir / "link.txt").is_symlink()
-    assert (case_dir / "new.txt").read_text(encoding="utf-8") == "new\n"
+    assert not (case_dir / "new.txt").exists()
+
+
+def test_staged_symlink_cannot_hide_a_deleted_case_file(tmp_path):
+    # Codex r2: agy replaces notes/user_draft.md with a symlink to another
+    # staged file; the original note must not be deleted.
+    case_dir = tmp_path / "case"
+    (case_dir / "notes").mkdir(parents=True)
+    (case_dir / "notes" / "user_draft.md").write_text("draft\n", encoding="utf-8")
+    (case_dir / "app.py").write_text("x = 1\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    (staged / "notes").mkdir(parents=True)
+    (staged / "app.py").write_text("x = 2\n", encoding="utf-8")
+    (staged / "notes" / "user_draft.md").symlink_to(staged / "app.py")
+
+    assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
+
+    assert (case_dir / "notes" / "user_draft.md").read_text(encoding="utf-8") == "draft\n"
+    assert (case_dir / "app.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_sync_mirrors_edits_creations_and_deletions(tmp_path):
+    case_dir = tmp_path / "case"
+    (case_dir / "pkg").mkdir(parents=True)
+    (case_dir / "pkg" / "a.py").write_text("old\n", encoding="utf-8")
+    (case_dir / "gone.py").write_text("bye\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    (staged / "pkg").mkdir(parents=True)
+    (staged / "pkg" / "a.py").write_text("new\n", encoding="utf-8")
+    (staged / "tests").mkdir()
+    (staged / "tests" / "test_a.py").write_text("t\n", encoding="utf-8")
+
+    assert runner._sync_staged_case(staged, case_dir) is None
+
+    assert (case_dir / "pkg" / "a.py").read_text(encoding="utf-8") == "new\n"
+    assert (case_dir / "tests" / "test_a.py").read_text(encoding="utf-8") == "t\n"
+    assert not (case_dir / "gone.py").exists()
 
 
 def test_result_observer_cannot_alter_the_receipt(bench_pool):
