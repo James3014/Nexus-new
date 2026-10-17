@@ -473,6 +473,12 @@ def _agy_model_catalog_fetch(env: dict[str, str], timeout: float) -> tuple[int |
             proc.wait(timeout=5)
         except BaseException:
             pass
+        # #2388: close our end of the pipe explicitly.
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except OSError:
+            pass
         if isinstance(exc, subprocess.TimeoutExpired):
             return None, "", "CATALOG_TIMEOUT"
         raise
@@ -484,6 +490,7 @@ def _agy_model_catalog_snapshot(
     env: dict[str, str],
     account_alias_hash: str,
     now: float | None = None,
+    max_fetch_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Account-scoped catalog snapshot (#1357); DEGRADED never blocks and is not cached."""
     now = time.time() if now is None else now
@@ -491,6 +498,9 @@ def _agy_model_catalog_snapshot(
     timeout = _env_positive_float(
         "NEXUS_AGY_MODEL_CATALOG_TIMEOUT_SEC", AGY_MODEL_CATALOG_TIMEOUT_DEFAULT_SEC
     )
+    if max_fetch_seconds is not None:
+        # #2388: the fetch is spent from the operation's total deadline.
+        timeout = max(1.0, min(timeout, float(max_fetch_seconds)))
     env_binding = _agy_model_catalog_env_binding(env)
     path = _agy_model_catalog_cache_path(account_alias_hash, env_binding)
     cached = _agy_model_catalog_read_cache(path, now=now, ttl=ttl, env_binding=env_binding)
@@ -532,6 +542,7 @@ def _agy_model_catalog_admission(
     effort: str | None,
     env: dict[str, str],
     account_alias_hash: str,
+    max_fetch_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Decide fixed-model admission; returns the durable ``model_catalog`` projection."""
     resolved = canonicalize_agy_model(model) if model else None
@@ -553,7 +564,9 @@ def _agy_model_catalog_admission(
     if os.getenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "1").strip() == "0":
         catalog["status"] = "DISABLED"
         return base
-    snap = _agy_model_catalog_snapshot(env=env, account_alias_hash=account_alias_hash)
+    snap = _agy_model_catalog_snapshot(
+        env=env, account_alias_hash=account_alias_hash, max_fetch_seconds=max_fetch_seconds
+    )
     catalog.update({
         "checked_at": snap["checked_at"],
         "catalog_sha256": snap["catalog_sha256"],
@@ -564,9 +577,18 @@ def _agy_model_catalog_admission(
         catalog["mismatch_reason"] = snap["reason"]
         return base
     ids = set(snap["ids"])
+    tiers = ("low", "medium", "high")
     # Agy receives --model <resolved> --effort <effort>; accept catalogs that
     # encode the effort in the id (e.g. claude-sonnet-5-5-medium) as well.
-    if resolved in ids or (effort and f"{resolved}-{effort}" in ids):
+    # #2388: with an explicit effort, a bare id is admitted only when the
+    # catalog encodes no effort tiers for it; otherwise <resolved>-<effort>
+    # itself must be served.
+    if effort:
+        tiered = any(f"{resolved}-{tier}" in ids for tier in tiers)
+        if f"{resolved}-{effort}" in ids or (resolved in ids and not tiered):
+            catalog["status"] = "OK"
+            return base
+    elif resolved in ids:
         catalog["status"] = "OK"
         return base
     # Without an explicit effort Agy resolves a bare alias (e.g.
@@ -579,6 +601,14 @@ def _agy_model_catalog_admission(
     catalog["mismatch_reason"] = "MODEL_NOT_IN_ACCOUNT_CATALOG"
     base["admitted"] = False
     return base
+
+
+def _model_effort_suffix(model: str | None) -> str | None:
+    """The effort tier an id encodes (``gemini-3.8-flash-medium`` -> ``medium``)."""
+    for tier in ("low", "medium", "high"):
+        if (model or "").strip().lower().endswith(f"-{tier}"):
+            return tier
+    return None
 
 
 def _model_family(model: str | None) -> str:
@@ -1384,29 +1414,6 @@ def _has_permission_failure_signal(text: str) -> bool:
     return any(marker in lowered for marker in _PERMISSION_FAILURE_MARKERS)
 
 
-_AGY_ERROR_LINE_RE = re.compile(r"(?m)^AGY_ERROR:\s*(?P<payload>\{.*\})\s*$")
-
-
-def _has_structured_quota_error(stderr: str) -> bool:
-    """agy's ``AGY_ERROR`` JSON reporting RESOURCE_EXHAUSTED or HTTP 429."""
-    for match in _AGY_ERROR_LINE_RE.finditer(stderr):
-        try:
-            payload = json.loads(match.group("payload"))
-        except ValueError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        status = str(payload.get("status") or "").upper()
-        if status == "RESOURCE_EXHAUSTED" or payload.get("error_code") in (429, "429"):
-            return True
-    return False
-
-
-def _has_provider_quota_signal(stderr: str) -> bool:
-    """#2202: quota markers or agy's structured ``AGY_ERROR`` quota failure."""
-    return _has_quota_failure_signal(stderr) or _has_structured_quota_error(stderr)
-
-
 def _permission_scan_text(text: str, run_homes: list[Path]) -> str:
     """#2202: drop Seatbelt's expected EPERM lines for agy's own run-HOME writes.
 
@@ -1451,7 +1458,9 @@ def classify_failure(
     )
     if structured_kind is not None:
         return structured_kind
-    if not structured and _has_provider_quota_signal(stderr):
+    # #2433: without a parsed AGY_ERROR line only the quota markers remain
+    # (agy_structured_failure already reads every AGY_ERROR payload).
+    if not structured and _has_quota_failure_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
     if (
         "invalid model selection" in text
@@ -4307,6 +4316,10 @@ def dispatch_run(
         elif (
             stripped_model in ("claude-opus-4-6", "claude-3-opus", "claude-opus")
             and effort is not None
+        ) or (
+            # #2388: an effort-suffixed id names its own effort.
+            effort is not None
+            and _model_effort_suffix(stripped_model) not in (None, effort)
         ):
             model_failure = (
                 f"DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:{model}:{effort}"
@@ -4887,6 +4900,11 @@ def dispatch_run(
                 effort=effort,
                 env=dict(claim.lease.execution_env),
                 account_alias_hash=claim.account_alias_hash,
+                # #2388: a fresh `agy models` fetch (up to 30 s) is charged to
+                # the total deadline and leaves room for one attempt.
+                max_fetch_seconds=(
+                    total_deadline - _monotonic() - TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
+                ),
             )
             _operation_hook(
                 operation_hook,
@@ -5002,7 +5020,11 @@ def dispatch_run(
             if _budget_exhausted() or (
                 # #2432: capability checks ran before the first attempt; do not
                 # start the provider past the deadline (Codex r2 on #2435).
-                capability_skipped
+                # #2388: the same holds after a fresh catalog fetch.
+                (
+                    capability_skipped
+                    or catalog_decision["model_catalog"].get("source") == "FRESH"
+                )
                 and total_deadline - _monotonic() < TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS
             ):
                 return _emit_total_deadline_exhausted()
@@ -5469,6 +5491,12 @@ def dispatch_run(
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
+            # #2433 (N2, documented difference): this route retires RATE_LIMITED
+            # through the pool (account-global cooldown, the pool's contract in
+            # retire_failed_claim) and counts it toward the outage cap, so
+            # concurrent dispatches avoid the account.  The Gateway worker route
+            # (worker_registry._invoke_with_claims) only skips a rate-limited
+            # account for its own run and never retires or counts it.
             if is_account_global_retirement(kind, scoped_model_family):
                 account_retirements += 1
                 if account_retirements >= retirement_cap:

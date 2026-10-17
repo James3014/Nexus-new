@@ -342,3 +342,27 @@ def test_pool_busy_after_quota_mentions_the_quota(pool_env):
     assert receipt.failure_reason == (
         f"{AGY_POOL_BUSY}: after quota exhaustion on 1 account(s), earliest reset in 22h03m37s"
     )
+
+
+def test_token_less_accounts_do_not_count_toward_the_cap(pool_env):
+    """#2433 (N1): a token-less account is a local fact, not a provider outage.
+
+    With a cap of 2, one provider-reported outage plus token-less accounts
+    before and after it must still rotate to the healthy account.  A mutant
+    that counts token-less refusals reaches the cap and stops as upstream
+    unavailable.
+    """
+    pool_env.monkeypatch.setenv("NEXUS_AGY_MAX_ACCOUNT_RETIREMENTS", "2")
+    _install_pool(
+        pool_env,
+        {"no-token-a": None, "down": "outage", "no-token-b": None, "up": "ok"},
+    )
+    seen: list[str] = []
+    _fake_agy(pool_env, seen)
+
+    receipt = _invoke(pool_env)
+
+    assert seen == ["outage", "ok"]
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert receipt.failure_reason is None
+    assert _retired(pool_env) == {_hash("no-token-a"), _hash("down"), _hash("no-token-b")}
