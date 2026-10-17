@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
@@ -63,25 +64,23 @@ def _rie_knowledge_identity(raw: Any, head: str) -> dict[str, Any]:
     The hint is context for the Planner-selected codeintel hook only; it selects,
     routes and gates nothing.  It is normalized here, then signed into the bound
     request.  ``head_sha`` is never caller-supplied: the hook uses the leased
-    target revision.  ``base_sha`` and ``current_main_sha`` (default: HEAD) must be
-    ancestors of the bound controller HEAD, so the changed-path set RIE sees is a
-    real slice of this repository's history.
+    target revision.  ``base_sha`` must be an ancestor of the bound controller
+    HEAD, so the changed-path set RIE sees (``base_sha..HEAD``) is a real slice of
+    this repository's history.  ``current_main_sha`` is snapshot metadata only: it
+    may be on a sibling history (main moved on) and keeps the hook's default
+    (``base_sha``) when omitted, so a retry after HEAD moves keeps the same hint.
     """
     from nexus.services.rie_knowledge_codeintel_hook import validate_identity_hint
 
     if not isinstance(raw, Mapping) or not set(raw) <= _RIE_IDENTITY_KEYS:
         raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_INVALID")
-    candidate = dict(raw)
-    if candidate.get("current_main_sha") is None:
-        candidate["current_main_sha"] = head
-    normalized = validate_identity_hint(candidate)
+    normalized = validate_identity_hint(raw)
     if normalized is None:
         raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_INVALID")
-    for field in ("base_sha", "current_main_sha"):
-        try:
-            _gateway()._git("merge-base", "--is-ancestor", normalized[field], head)
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise _gateway().GatewayInputError(f"RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR:{field}") from exc
+    try:
+        _gateway()._git("merge-base", "--is-ancestor", normalized["base_sha"], head)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        raise _gateway().GatewayInputError("RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR:base_sha") from exc
     return normalized
 
 

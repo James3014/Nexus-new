@@ -6394,7 +6394,8 @@ def test_worker_candidate_rie_identity_is_normalized_and_bound_into_signed_reque
         "repository": "James3014/Nexus-new",
         "pr_number": 2381,
         "base_sha": _RIE_BASE,
-        "current_main_sha": _RIE_HEAD,
+        # The hook's own default; never the moving controller HEAD (Codex r1).
+        "current_main_sha": _RIE_BASE,
     }
     assert request["rie_knowledge_identity"] == expected
     assert request["bound_action_request"]["rie_knowledge_identity"] == expected
@@ -6450,15 +6451,45 @@ def test_worker_candidate_rejects_invalid_rie_identity_before_preflight(monkeypa
     assert preflight_calls == []
 
 
-@pytest.mark.parametrize("field", ["base_sha", "current_main_sha"])
-def test_worker_candidate_rejects_rie_identity_not_in_controller_history(monkeypatch, field):
+def test_worker_candidate_rejects_rie_identity_not_in_controller_history(monkeypatch):
     gateway, service, _ = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, _RIE_HEAD})
     args = _worker_args("rie-identity-unrelated")
-    args["rie_knowledge_identity"] = _rie_hint(**{field: "2" * 40})
+    args["rie_knowledge_identity"] = _rie_hint(base_sha="2" * 40)
     response = _call_worker_candidate(gateway, args)
     assert response["result"]["isError"] is True
-    assert "RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR" in json.dumps(response)
+    assert "RIE_KNOWLEDGE_IDENTITY_NOT_ANCESTOR:base_sha" in json.dumps(response)
     assert service.submitted == []
+
+
+def test_worker_candidate_rie_identity_main_may_be_on_a_sibling_history(monkeypatch):
+    """Codex r1: main moving on after the PR branched is a valid identity."""
+    gateway, service, calls = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, _RIE_HEAD})
+    args = _worker_args("rie-identity-sibling-main")
+    args["rie_knowledge_identity"] = _rie_hint(current_main_sha="2" * 40)
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is False, response
+    assert service.submitted[0]["rie_knowledge_identity"]["current_main_sha"] == "2" * 40
+    assert not any(call[:2] == ("merge-base", "--is-ancestor") and call[2] == "2" * 40 for call in calls)
+
+
+def test_worker_candidate_rie_identity_is_stable_when_controller_head_moves(monkeypatch):
+    """Codex r1: the bound hint never embeds the controller HEAD, so a retry after
+    HEAD moves carries the same task semantics."""
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    hints = []
+    for head in (_RIE_HEAD, "b" * 40):
+        gateway, service, _ = _rie_gateway(monkeypatch, ancestors={_RIE_BASE, head})
+        monkeypatch.setattr(
+            gateway_module,
+            "_git",
+            lambda *args, _head=head, **kwargs: "" if args[:2] == ("merge-base", "--is-ancestor") else _head,
+        )
+        args = _worker_args("rie-identity-head-moves")
+        args["rie_knowledge_identity"] = _rie_hint()
+        assert _call_worker_candidate(gateway, args)["result"]["isError"] is False
+        hints.append(service.submitted[0]["bound_action_request"]["rie_knowledge_identity"])
+    assert hints[0] == hints[1]
 
 
 def test_worker_candidate_rie_identity_tamper_is_rejected(monkeypatch):
