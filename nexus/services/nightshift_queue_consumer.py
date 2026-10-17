@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import tempfile
@@ -134,18 +135,43 @@ class NightshiftQueueConsumer:
                     item["disposition_task"] = identity[0]
                     changed = True
         if changed:
-            fd, temporary = tempfile.mkstemp(
-                prefix="pending.", suffix=".json", dir=str(manifest_path.parent)
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, indent=2)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, manifest_path)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+            lock_path = manifest_path.with_suffix(".lock")
+            with open(lock_path, "a+b") as lock_file:
+                try:
+                    fcntl.flock(lock_file, fcntl.LOCK_EX)
+                    try:
+                        content = manifest_path.read_text(encoding="utf-8")
+                        fresh_payload = json.loads(content)
+                        if not isinstance(fresh_payload, list):
+                            fresh_payload = payload
+                    except (OSError, json.JSONDecodeError):
+                        fresh_payload = payload
+                    for item in fresh_payload:
+                        if not isinstance(item, dict):
+                            continue
+                        identity = (
+                            str(item.get("task") or ""),
+                            str(item.get("commit_sha") or ""),
+                        )
+                        if identity in dispatched_ids:
+                            item["disposition"] = "DISPATCHED"
+                            item["disposition_task"] = (
+                                item.get("disposition_task") or identity[0]
+                            )
+                    fd, temporary = tempfile.mkstemp(
+                        prefix="pending.", suffix=".json", dir=str(manifest_path.parent)
+                    )
+                    try:
+                        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                            json.dump(fresh_payload, handle, indent=2)
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        os.replace(temporary, manifest_path)
+                    finally:
+                        if os.path.exists(temporary):
+                            os.unlink(temporary)
+                finally:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
         return results
 
     def _consume_item(self, item: Any) -> dict[str, Any]:
