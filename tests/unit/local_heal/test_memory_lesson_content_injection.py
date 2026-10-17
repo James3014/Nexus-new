@@ -4,6 +4,8 @@ Ensures retry prompt includes actual lesson summaries, not just IDs.
 """
 from __future__ import annotations
 
+import importlib.util
+
 
 def test_provenance_bound_memory_context_includes_lineage_and_receipt_hash():
     from nexus.services.local_heal.memory_retrieval_adapter import (
@@ -249,73 +251,10 @@ def test_provenance_bound_memory_context_fails_closed_on_tamper_or_stale_receipt
     )
 
 
-def test_p5_p6_fails_closed_when_binding_invalid(monkeypatch):
-    """P5/P6 memory context must drop all lessons if receipt binding fails."""
-    from dataclasses import replace
-
-    from nexus.services.local_heal.memory_retrieval_adapter import (
-        MemoryRetrievalAdapter,
-        RetrievedLesson,
-        _build_existing_retrieval_receipt,
-    )
-    from nexus.services.local_heal.p5_p6_memory_context import build_p5_p6_memory_context
-
-    lesson = RetrievedLesson(
-        finding_id="lep:lesson-p5",
-        summary="lesson for p5/p6",
-        relevance_score=1.0,
-        provenance="receipt://p5",
-        source="canonical_episodic_memory",
-        pattern_type="success",
-        task_id="task-p5",
-        episode_id="lep:lesson-p5",
-        attempt_id="attempt-p5",
-        action_id="action-p5",
-        qualification_status="QUALIFIED",
-        validity_state="active",
-        evidence_ref="receipt://p5",
-    )
-
-    # Valid case
-    def fake_retrieve_reranked_valid(self, *args, **kwargs):
-        receipt, receipt_hash, lineage = _build_existing_retrieval_receipt("p5 query", [lesson])
-        self.last_metadata = {
-            "retrieval_receipt": receipt,
-            "retrieval_receipt_hash": receipt_hash,
-            "selected_lesson_lineage": lineage,
-            "accepted": 1,
-            "selected_ids": [lesson.finding_id],
-            "memory_evidence_ids": [lesson.finding_id],
-            "query_text_hash": "abc",
-        }
-        return [lesson]
-
-    monkeypatch.setattr(MemoryRetrievalAdapter, "retrieve_reranked", fake_retrieve_reranked_valid)
-    ctx_valid = build_p5_p6_memory_context(adapter_enabled=True, query_text="p5 query")
-    assert len(ctx_valid.retrieved_lessons) == 1
-    assert ctx_valid.reason == "hits_available"
-
-    # Tampered / invalid binding case
-    def fake_retrieve_reranked_tampered(self, *args, **kwargs):
-        receipt, receipt_hash, lineage = _build_existing_retrieval_receipt("p5 query", [lesson])
-        # Return tampered lesson where attempt_id was modified after receipt creation
-        tampered = replace(lesson, attempt_id="tampered-attempt")
-        self.last_metadata = {
-            "retrieval_receipt": receipt,
-            "retrieval_receipt_hash": receipt_hash,
-            "selected_lesson_lineage": lineage,
-            "accepted": 1,
-            "selected_ids": [tampered.finding_id],
-            "memory_evidence_ids": [tampered.finding_id],
-            "query_text_hash": "abc",
-        }
-        return [tampered]
-
-    monkeypatch.setattr(MemoryRetrievalAdapter, "retrieve_reranked", fake_retrieve_reranked_tampered)
-    ctx_tampered = build_p5_p6_memory_context(adapter_enabled=True, query_text="p5 query")
-    assert ctx_tampered.retrieved_lessons == []
-    assert ctx_tampered.memory_sources == []
-    assert ctx_tampered.reason == "binding_failed"
+def test_p5_p6_fails_closed_when_binding_invalid() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p5_p6_memory_context") is None
 
 
 def test_retrieved_presented_does_not_become_applied_automatically():

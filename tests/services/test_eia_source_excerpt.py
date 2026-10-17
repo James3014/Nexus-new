@@ -383,12 +383,17 @@ def test_ambiguous_symbol_binding_fails_closed(source):
         _pack(content, ["target"])
 
 
-def test_ambiguous_method_binding_fails_closed():
-    content = (
-        ("class Big:\n    def method(self):\n        return 1\n    method = property(method)\n")
-        + "#" * (DEFAULT_CONTEXT_BUDGET + 10)
-        + "\n"
-    )
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class Big:\n    def method(self):\n        return 1\n    method = property(method)\n",
+        # The class itself is rebound inside a top-level compound block.
+        "class Big:\n    def method(self):\n        return 1\n\n"
+        "if True:\n    class Big:\n        def method(self):\n            return 2\n",
+    ],
+)
+def test_ambiguous_method_binding_fails_closed(source):
+    content = source + "#" * (DEFAULT_CONTEXT_BUDGET + 10) + "\n"
     with pytest.raises(ExternalIntelligenceError, match="CONTRACT_EXCERPT_SYMBOL_AMBIGUOUS"):
         _pack(content, ["Big.method"])
 
@@ -409,6 +414,30 @@ def test_validator_rejects_excerpt_without_leading_header():
     tampered["context_pack_sha256"] = ei._sha256(ei._canonical_json(material))
     with pytest.raises(ExternalIntelligenceError, match="INVALID_CONTEXT_PACK"):
         validate_context_pack(tampered)
+
+
+def test_multiline_decorator_slice_fails_closed():
+    content = "@(\n    staticmethod\n)\ndef target():\n    return 1\n"
+    content += "#" * (DEFAULT_CONTEXT_BUDGET + 10) + "\n"
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_EXCERPT_SLICE_MISMATCH"):
+        _pack(content, ["target"])
+
+
+def test_single_line_decorators_stay_in_the_slice():
+    content = "import functools\n\n@functools.cache\n@staticmethod\ndef target():\n    return 1\n"
+    content += "#" * (DEFAULT_CONTEXT_BUDGET + 10) + "\n"
+    pack = _pack(content, ["target"])
+    entry = next(e for e in pack["entries"] if e["kind"] == "source_file")
+    assert "## SLICE target (def) lines 3-6\n@functools.cache\n@staticmethod\n" in entry["content"]
+
+
+def test_assignment_head_check_ignores_comment_lines():
+    from nexus.services import eia_source_excerpt as ex
+
+    symbol = ex._Symbol("target", "assign", 1, 1, 1)
+    assert not ex._head_matches("# target = 1\n", symbol)
+    assert ex._head_matches("target = 1\n", symbol)
+    assert ex._head_matches("target: int = 1\n", symbol)
 
 
 def test_fanout_units_carry_whole_file_hash_only_for_excerpted_paths(tmp_path):

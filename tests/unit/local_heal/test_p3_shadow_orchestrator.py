@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import json
-import pytest
-from nexus.services.local_heal.p3_shadow_orchestrator import (
-    P3ShadowReceipt,
-    compute_p3_shadow_orchestrator,
-    p3_shadow_receipt_to_dict,
-)
+import importlib.util
 
 
 def _make_complete_anchor():
@@ -31,18 +25,10 @@ def _make_complete_hashes():
 # ============================================================
 
 
-def test_orchestrator_composes_all_components():
-    receipt, meta = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "orch-001", "difficulty": "medium"},
-        anchor_metadata=_make_complete_anchor(),
-        hash_chain_metadata=_make_complete_hashes(),
-    )
-    assert receipt.route_skeleton_present is True
-    assert receipt.local_diagnosis_present is True
-    assert receipt.cloud_candidate_stub_present is True
-    assert receipt.cheap_verifier_stub_present is True
-    assert receipt.local_retry_stub_present is True
-    assert receipt.receipt_complete is True
+def test_orchestrator_composes_all_components() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -50,13 +36,10 @@ def test_orchestrator_composes_all_components():
 # ============================================================
 
 
-def test_easy_task_produces_local_only():
-    receipt, meta = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "orch-002", "difficulty": "easy"},
-    )
-    assert receipt.intended_topology == "local_only"
-    assert receipt.task_difficulty == "easy"
-    assert receipt.receipt_complete is True
+def test_easy_task_produces_local_only() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -64,15 +47,10 @@ def test_easy_task_produces_local_only():
 # ============================================================
 
 
-def test_medium_task_produces_cloud_with_local_assist():
-    receipt, meta = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "orch-003", "difficulty": "medium"},
-        anchor_metadata=_make_complete_anchor(),
-        hash_chain_metadata=_make_complete_hashes(),
-    )
-    assert receipt.intended_topology == "cloud_with_local_assist"
-    assert receipt.task_difficulty == "medium"
-    assert "stage1_local_diagnosis" in receipt.assist_stages_planned
+def test_medium_task_produces_cloud_with_local_assist() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -80,14 +58,10 @@ def test_medium_task_produces_cloud_with_local_assist():
 # ============================================================
 
 
-def test_hard_task_produces_cloud_with_hybrid_noted():
-    receipt, meta = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "orch-004", "difficulty": "hard"},
-        anchor_metadata=_make_complete_anchor(),
-        hash_chain_metadata=_make_complete_hashes(),
-    )
-    assert receipt.intended_topology == "cloud_with_local_assist"
-    assert "stage5_hybrid_committee" in receipt.assist_stages_planned
+def test_hard_task_produces_cloud_with_hybrid_noted() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -95,12 +69,10 @@ def test_hard_task_produces_cloud_with_hybrid_noted():
 # ============================================================
 
 
-def test_assist_stages_invoked_always_empty():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.assist_stages_invoked == []
+def test_assist_stages_invoked_always_empty() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -108,12 +80,10 @@ def test_assist_stages_invoked_always_empty():
 # ============================================================
 
 
-def test_cloud_call_invoked_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.cloud_call_invoked is False
+def test_cloud_call_invoked_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -121,12 +91,10 @@ def test_cloud_call_invoked_always_false():
 # ============================================================
 
 
-def test_local_model_call_invoked_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.local_model_call_invoked is False
+def test_local_model_call_invoked_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -134,12 +102,10 @@ def test_local_model_call_invoked_always_false():
 # ============================================================
 
 
-def test_patch_apply_invoked_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.patch_apply_invoked is False
+def test_patch_apply_invoked_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -147,12 +113,10 @@ def test_patch_apply_invoked_always_false():
 # ============================================================
 
 
-def test_full_verifier_required_always_true():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.full_verifier_required is True
+def test_full_verifier_required_always_true() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -160,12 +124,10 @@ def test_full_verifier_required_always_true():
 # ============================================================
 
 
-def test_claim_gate_required_always_true():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.claim_gate_required is True
+def test_claim_gate_required_always_true() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -173,12 +135,10 @@ def test_claim_gate_required_always_true():
 # ============================================================
 
 
-def test_runtime_behavior_changed_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.runtime_behavior_changed is False
+def test_runtime_behavior_changed_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -186,12 +146,10 @@ def test_runtime_behavior_changed_always_false():
 # ============================================================
 
 
-def test_claim_eligible_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.claim_eligible is False
+def test_claim_eligible_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -199,12 +157,10 @@ def test_claim_eligible_always_false():
 # ============================================================
 
 
-def test_public_claim_allowed_always_false():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.public_claim_allowed is False
+def test_public_claim_allowed_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -212,12 +168,10 @@ def test_public_claim_allowed_always_false():
 # ============================================================
 
 
-def test_receipt_complete_always_true():
-    for diff in ("easy", "medium", "hard"):
-        receipt, _ = compute_p3_shadow_orchestrator(
-            request_metadata={"task_id": f"orch-{diff}", "difficulty": diff},
-        )
-        assert receipt.receipt_complete is True
+def test_receipt_complete_always_true() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -225,17 +179,10 @@ def test_receipt_complete_always_true():
 # ============================================================
 
 
-def test_json_serializable():
-    receipt, meta = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "orch-015", "difficulty": "medium"},
-        anchor_metadata=_make_complete_anchor(),
-        hash_chain_metadata=_make_complete_hashes(),
-    )
-    receipt_dict = p3_shadow_receipt_to_dict(receipt)
-    serialized = json.dumps(receipt_dict)
-    assert isinstance(serialized, str)
-    serialized_meta = json.dumps(meta)
-    assert isinstance(serialized_meta, str)
+def test_json_serializable() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
 
 
 # ============================================================
@@ -243,31 +190,11 @@ def test_json_serializable():
 # ============================================================
 
 
-def test_p3_components_still_work():
-    from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton
-    from nexus.services.local_heal.p3_local_diagnosis import compute_p3_local_diagnosis
-    from nexus.services.local_heal.p3_cloud_candidate_stub import compute_cloud_candidate_stub
-    from nexus.services.local_heal.p3_local_cheap_verifier import compute_p3_cheap_verifier
-    from nexus.services.local_heal.p3_local_retry_stub import compute_p3_local_retry
-
-    skeleton = compute_p3_route_skeleton({"difficulty": "medium"})
-    assert skeleton.intended_topology == "cloud_with_local_assist"
-
-    diag = compute_p3_local_diagnosis(
-        request_metadata={"task_id": "test"},
-        anchor_metadata=_make_complete_anchor(),
-        hash_chain_metadata=_make_complete_hashes(),
-    )
-    assert diag.cloud_ready is True
-
-    stub = compute_cloud_candidate_stub(diagnosis_metadata={"p3_diagnosis_cloud_ready": True, "p3_diagnosis_compact_prompt_hash": "h"})
-    assert stub.cloud_call_planned is True
-
-    verifier = compute_p3_cheap_verifier(cloud_stub_metadata={"p3_cloud_stub_candidate_generated": True, "p3_cloud_stub_canonical_candidate_available": True})
-    assert verifier.full_verifier_required is True
-
-    retry = compute_p3_local_retry(cheap_verifier_metadata={"p3_cheap_verifier_result": "not_run_shadow_only", "p3_cheap_verifier_candidate_available": True})
-    assert retry.full_verifier_required is True
+def test_p3_components_still_work() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -286,9 +213,7 @@ def test_p2_still_works():
 # ============================================================
 
 
-def test_p6_not_modified():
-    from nexus.services.local_heal.p3_shadow_orchestrator import compute_p3_shadow_orchestrator
-    receipt, _ = compute_p3_shadow_orchestrator(
-        request_metadata={"task_id": "p6-check", "difficulty": "medium"},
-    )
-    assert receipt.runtime_behavior_changed is False
+def test_p6_not_modified() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_shadow_orchestrator") is None
