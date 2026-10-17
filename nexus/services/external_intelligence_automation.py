@@ -407,6 +407,35 @@ def compute_publication_id(
     return _sha256_json(body)
 
 
+_REASON_CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
+_REASON_DETAIL_KEYS = ("kind", "ref", "source_bytes", "remaining_bytes", "max_bytes")
+
+
+def _error_reason_fields(exc: BaseException) -> dict[str, Any]:
+    """Expose an ExternalIntelligenceError's reason code in the automation record.
+
+    Only a well-formed upper-case reason code and a fixed set of bounded detail
+    keys are copied; anything else stays out of the record (#2357).
+    """
+    if not isinstance(exc, ExternalIntelligenceError):
+        return {}
+    code = str(exc)
+    if not _REASON_CODE_RE.fullmatch(code):
+        return {}
+    fields: dict[str, Any] = {"error_code": code}
+    detail = {
+        key: exc.detail[key]
+        for key in _REASON_DETAIL_KEYS
+        if key in exc.detail
+        and isinstance(exc.detail[key], (str, int))
+        and not isinstance(exc.detail[key], bool)
+        and len(str(exc.detail[key])) <= 1024
+    }
+    if detail:
+        fields["error_detail"] = detail
+    return fields
+
+
 class AutomationStateStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -1475,11 +1504,16 @@ class ExternalIntelligenceAutomation:
                     intelligence_effect_id=current.get("intelligence_effect_id"),
                     worker_binding=self._worker_binding or current.get("worker_binding"),
                     error=type(exc).__name__,
+                    **_error_reason_fields(exc),
                     reconcile_only=True,
                     semantic_dispatched=dispatched,
                 )
             return self.state_store.save(
-                item, "BLOCKED", error=type(exc).__name__, semantic_dispatched=dispatched
+                item,
+                "BLOCKED",
+                error=type(exc).__name__,
+                **_error_reason_fields(exc),
+                semantic_dispatched=dispatched,
             )
 
 

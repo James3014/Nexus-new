@@ -4954,13 +4954,15 @@ def _parse_direct_patch_json(raw_text: str) -> tuple[dict[str, Any], str]:
         output_text = re.sub(r"^```(?:json)?\s*", "", output_text)
         output_text = re.sub(r"\s*```$", "", output_text).strip()
     try:
-        payload = json.loads(output_text)
-    except json.JSONDecodeError:
+        payload = parse_model_json(output_text, expect="object", mode="strict")
+    except ModelOutputShapeError:
+        raise
+    except ModelOutputParseError:
         start = output_text.find("{")
         end = output_text.rfind("}")
         if start == -1 or end == -1:
             raise
-        payload = json.loads(output_text[start : end + 1])
+        payload = parse_model_json(output_text[start : end + 1], expect="object", mode="strict")
     payload.setdefault("tokens_used", 0)
     payload.setdefault("token_capture_status", "missing_gateway_stats")
     payload.setdefault("gateway_stats_present", False)

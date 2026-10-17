@@ -1,5 +1,7 @@
-import pytest
+import importlib.util
+
 from nexus.services.local_heal.matcher import Normalizer, SlidingWindowMatcher
+
 
 def test_normalizer_quotes_and_whitespace():
     norm = Normalizer()
@@ -19,43 +21,14 @@ def test_sliding_window_matcher_exact_and_fuzzy():
     assert verbatim == matched_sub
 
 
-def test_parser_aider_format_parsed_correctly():
-    from nexus.services.local_heal.parser import SearchReplaceParser
-    parser = SearchReplaceParser()
-    
-    llm_output = (
-        "Here is the fix:\n\n"
-        "FILE: math_utils.py\n"
-        "<<<<<<< SEARCH\n"
-        "def add(a, b):\n"
-        "    return a - b\n"
-        "=======\n"
-        "def add(a, b):\n"
-        "    return a + b\n"
-        ">>>>>>> REPLACE\n"
-    )
-    
-    blocks = parser.parse_blocks(llm_output)
-    assert len(blocks) == 1
-    assert blocks[0]["file"] == "math_utils.py"
-    assert "return a - b" in blocks[0]["search"]
-    assert "return a + b" in blocks[0]["replace"]
+def test_parser_aider_format_parsed_correctly() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.parser") is None
 
 
-def test_parser_create_file_block_parsed_as_create_operation():
-    from nexus.services.local_heal.parser import SearchReplaceParser
-    parser = SearchReplaceParser()
-
-    blocks = parser.parse_blocks(
-        "CREATE FILE: pkg/new_transform.py\n"
-        "<<<<<<< CONTENT\n"
-        "def transform():\n"
-        "    return 'created'\n"
-        ">>>>>>> CONTENT\n"
-    )
-
-    assert len(blocks) == 1
-    assert blocks[0]["operation"] == "create"
-    assert blocks[0]["file"] == "pkg/new_transform.py"
-    assert "def transform" in blocks[0]["replace"]
+def test_parser_create_file_block_parsed_as_create_operation() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.parser") is None
 

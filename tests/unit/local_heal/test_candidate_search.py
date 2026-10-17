@@ -1,10 +1,9 @@
-import pytest
-from pathlib import Path
-from nexus.services.local_heal.candidate_search import CandidatePatchSearcher, CandidatePatch
-from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchIntent
+import importlib.util
+
+from nexus.services.local_heal.candidate_search import CandidatePatchSearcher
 from nexus.services.local_heal.interface import LocalizedFile
-from nexus.services.local_heal.errors import PatchError, PatchErrorKind
-from nexus.services.local_heal.runbook_compliance import ComplianceResult
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
 
 # Stub PatchApplier
 class StubPatchApplier:
@@ -27,12 +26,6 @@ class StubVerifier:
         return self.success, "log"
 
 # Stub Compliance Checker
-class StubComplianceChecker:
-    def __init__(self, is_pass: bool = True):
-        self.is_pass = is_pass
-
-    def check_compliance(self, intent, apply_res):
-        return ComplianceResult(compliance_status="COMPLIANCE_PASS" if self.is_pass else "FAILED")
 
 
 def test_candidate_search_first_success(tmp_path):
@@ -80,31 +73,10 @@ def test_candidate_search_first_success(tmp_path):
     assert candidates[1].selected is True
 
 
-def test_candidate_search_compliance_blocking(tmp_path):
-    parser = SolidSearchReplaceProtocol()
-    applier = StubPatchApplier(success=True)
-    verifier = StubVerifier(success=True)
-    compliance = StubComplianceChecker(is_pass=False) # compliance failed
-    
-    searcher = CandidatePatchSearcher(parser, applier, verifier)
-    
-    raw_outputs = [
-        ("FILE: math.py\n<<<<<<< SEARCH\nanchor\n=======\nval\n>>>>>>> REPLACE", "v1", "call1")
-    ]
-    
-    selected, candidates = searcher.search_best_candidate(
-        raw_outputs=raw_outputs,
-        anchor_text="anchor",
-        repo_dir=tmp_path,
-        localized_files=[LocalizedFile(path="math.py", content="anchor")],
-        model="7b",
-        compliance_checker=compliance
-    )
-    
-    assert selected is None
-    assert len(candidates) == 1
-    assert candidates[0].failure_stage == "compliance_fail"
-    assert candidates[0].selected is False
+def test_candidate_search_compliance_blocking() -> None:
+    # Retired in #2491 (ARCHIVED_2026-10-17_deadcode_b3.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.runbook_compliance") is None
 
 
 def test_candidate_search_no_verifier_blocks_success(tmp_path):

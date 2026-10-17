@@ -2604,3 +2604,42 @@ def test_extract_verifier_paths_ignores_option_values_and_strips_node_ids():
         "tests/a_test.py",
         "tests/c_test.py",
     ]
+
+
+def test_oversized_contract_source_blocked_record_names_reason_code_and_path(tmp_path):
+    repo, card, _, _, store = _setup(tmp_path)
+    big = repo / "nexus" / "a.py"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text("x = 1\n" * 40_000, encoding="utf-8")  # 240 KB > 200 KB budget
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "big"], cwd=repo, capture_output=True, check=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    body = _body(_contract("tasks/x.md", _sha(card), main_sha=head_sha))
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+
+    result = automation.run_issue("o/r", 2357, "title", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["semantic_dispatched"] is False
+    assert result["error_code"] == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
+    detail = result["error_detail"]
+    assert detail["kind"] == "source_file"
+    assert detail["ref"] == "nexus/a.py"
+    assert detail["source_bytes"] == 240_000
+    assert detail["max_bytes"] == 200_000
+    assert detail["remaining_bytes"] < detail["source_bytes"]
+    assert sidecar.calls == []
+    persisted = json.loads(
+        next((tmp_path / "state").rglob("issue-2357-*.json")).read_text(encoding="utf-8")
+    )
+    assert persisted["error_code"] == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
+    assert persisted["error_detail"]["ref"] == "nexus/a.py"

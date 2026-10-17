@@ -78,7 +78,16 @@ _HEX64 = frozenset("0123456789abcdef")
 
 
 class ExternalIntelligenceError(RuntimeError):
-    pass
+    """Fail-closed error whose message is a stable reason code.
+
+    ``detail`` optionally carries bounded, non-secret facts about the refusal
+    (e.g. which contract path exceeded the context budget) so callers can
+    record why a task was refused without parsing the message (#2357).
+    """
+
+    def __init__(self, *args: object, detail: Mapping[str, Any] | None = None) -> None:
+        super().__init__(*args)
+        self.detail: dict[str, Any] = dict(detail) if detail else {}
 
 
 class IntakeDisposition(str, Enum):
@@ -354,7 +363,16 @@ def build_context_pack(
     for index in contract_order:
         raw = normalized[index]["content"].encode("utf-8")
         if len(raw) > remaining:
-            raise ExternalIntelligenceError("CONTRACT_CONTEXT_BUDGET_EXCEEDED")
+            raise ExternalIntelligenceError(
+                "CONTRACT_CONTEXT_BUDGET_EXCEEDED",
+                detail={
+                    "kind": normalized[index]["kind"],
+                    "ref": normalized[index]["ref"],
+                    "source_bytes": len(raw),
+                    "remaining_bytes": remaining,
+                    "max_bytes": max_bytes,
+                },
+            )
         built[index] = _entry(normalized[index], normalized[index]["content"], raw)
         remaining -= len(raw)
     for index, source in enumerate(normalized):
