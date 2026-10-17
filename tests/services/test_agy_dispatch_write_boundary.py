@@ -357,7 +357,8 @@ def test_accept_edits_attempt_runs_in_disposable_home_with_profile(
     # the leased account HOME is never touched, and the run root is gone
     assert not (home / admission.AGY_RUN_HOME_SETTINGS).exists()
     assert not boundary.run_root.exists()
-    assert _effective_write(boundary.profile, log) == "allow"
+    # #2314: the attestation log is relayed by the dispatcher, never granted
+    assert _effective_write(boundary.profile, log) == "deny"
     assert _effective_write(boundary.profile, target / ".git") == "deny"
     assert coordinator.claim.released is True
 
@@ -814,10 +815,12 @@ def test_attestation_log_replaced_by_symlink_refuses_next_attempt(
         coordinator=coordinator,
         run_agy_fn=runner,
     )
-    metas = _metas(capsys.readouterr().err)
-    assert attempts == [1]
-    assert code == 64
-    assert metas[-1]["failure_kind"].endswith("extra_path_is_symlink")
+    _metas(capsys.readouterr().err)
+    # #2314: the log is no longer a Seatbelt grant, so a swapped log cannot
+    # redirect the next attempt's grant; the rotation proceeds and the victim
+    # is never written.
+    assert len(attempts) > 1
+    assert code != 0
     assert victim.read_text() == "{}"
 
 
@@ -1170,7 +1173,8 @@ def test_every_production_agy_launcher_is_wrapped_or_plan_only():
             ):
                 assert needle in text, (relative, needle)
             # exactly one raw agy Popen site, and it launches launch_argv
-            assert text.count("subprocess.Popen(\n        launch_argv,") == 1
+            # (#2314: the launch sits in a try that tears down the log relay)
+            assert len(re.findall(r"subprocess\.Popen\(\n +launch_argv,", text)) == 1
         elif kind == PLAN_ONLY:
             assert modes and set(modes) == {"plan"}, (relative, modes)
             assert "accept-edits" not in text, relative

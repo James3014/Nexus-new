@@ -261,7 +261,12 @@ def test_strict_cli_defaults_to_no_hidden_feedback(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(runner, "build_public_benchmark_preflight", stop)
 
     def run(*flags: str) -> str:
-        monkeypatch.delenv("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", raising=False)
+        # Plain pop, not monkeypatch.delenv: main() sets this key directly, so from the
+        # second call on monkeypatch would record the first run's "1" as the value to
+        # restore, and its undo runs after _restore_environ, leaking the switch into
+        # later files (tests/benchmark/test_capability_ab_runner.py hidden retry, #2380).
+        # _restore_environ puts os.environ back after the test.
+        os.environ.pop("NEXUS_BENCH_NO_HIDDEN_FEEDBACK", None)
         monkeypatch.setattr(
             sys,
             "argv",

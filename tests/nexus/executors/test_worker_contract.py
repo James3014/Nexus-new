@@ -243,6 +243,12 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     monkeypatch.setattr(
         "nexus.executors.worker_registry._default_canonical_checkout_root", lambda: canonical
     )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
+    )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: resolved
+    )
     captured = {}
 
     def fake_worker(request, on_process_group=None):
@@ -284,10 +290,9 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
         "--cwd",
         str(target.resolve()),
         "--json",
-        "--auto-approve",
-        "false",
+        "--yolo",
         "--model",
-        "glm-5.2",
+        "cline-free/mimo-v2.6-flash",
         "bounded candidate",
     )
     assert captured["request"].cwd == str(target.resolve())
@@ -1956,6 +1961,13 @@ def _cline_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "nexus.executors.worker_registry.shutil.which", lambda name: str(tmp_path / "cline")
     )
+    # #2332: the adapter refuses an unprobed cline version before launch.
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_version_probe", lambda executable: "3.0.69"
+    )
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: resolved
+    )
 
 
 def _cline_run(monkeypatch, tmp_path, *, stdout, side_effect=None, target=None, contract=None):
@@ -2006,7 +2018,13 @@ def test_cline_permission_bypass_detects_every_auto_approve_shape():
     assert (
         cline_permission_bypass(("--json", "--model", "m", "p")) is True
     )  # default is auto-approve
-    assert cline_permission_bypass(("--json", "--yolo", "--model", "m", "p")) is True
+    # #2332: yolo mode (exactly once) is the admitted shape; the run settings
+    # leave only the file tools enabled.
+    assert cline_permission_bypass(("--json", "--yolo", "--model", "m", "p")) is False
+    assert cline_permission_bypass(("--json", "--yolo", "--yolo", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "-y", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "--auto-approve", "false", "p")) is True
+    assert cline_permission_bypass(("--json", "--yolo", "--autoapprove", "p")) is True
     assert cline_permission_bypass(("--json", "-y", "--auto-approve", "false", "p")) is True
     assert cline_permission_bypass(("--json", "--auto-approve", "true", "p")) is True
     assert cline_permission_bypass(("--json", "--auto-approve=false", "p")) is True
@@ -2041,10 +2059,11 @@ def test_cline_successful_run_on_isolated_target_is_delivery(monkeypatch, tmp_pa
     receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
 
     assert len(calls) == 1
-    assert "--yolo" not in calls[0].argv
-    assert calls[0].argv[calls[0].argv.index("--auto-approve") + 1] == "false"
+    # #2332: yolo mode once, never an auto-approve flag.
+    assert calls[0].argv.count("--yolo") == 1
+    assert "--auto-approve" not in calls[0].argv
     assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
-    assert receipt.provider_permission_mode == "auto_approve_false"
+    assert receipt.provider_permission_mode == "file_tools_auto_approved"
     assert receipt.failure_reason is None
 
 
@@ -2122,9 +2141,12 @@ def test_cline_markers_in_model_text_are_not_a_denial():
         b'"execution-denied / Tool execution denied by user."}}\n'
         b'{"type":"tool_result","is_error":false,"result":"grep: execution denied, denied by user"}\n'
         b'{"type":"tool-call","input":{"type":"execution-denied"}}\n'
-        b"plain log line: execution-denied\n"
     )
     assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
+    # #2332: a non-JSON stdout line is never delivery (it could hide a tool
+    # event), whatever it says.
+    plain = b"plain log line: execution-denied\n"
+    assert cline_delivery_failure(quoted + plain + _CLINE_OK, b"") == "cline_output_unparseable"
 
 
 def test_cline_structured_denial_events_are_non_delivery():
@@ -2381,7 +2403,7 @@ def test_cline_tty_denial_text_in_model_output_is_not_a_denial():
         b'{"type":"agent_event","event":{"type":"content_end","contentType":"text",'
         b'"text":"requires approval in a TTY session"}}\n'
         b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool",'
-        b'"toolName":"read_file","output":{"result":"requires approval in a TTY session"}}}\n'
+        b'"toolName":"read_files","output":{"result":"requires approval in a TTY session"}}}\n'
     )
     assert cline_delivery_failure(quoted + _CLINE_OK, b"") is None
 
@@ -2563,7 +2585,7 @@ def test_cline_skip_suffix_in_tool_result_or_model_text_is_not_a_denial():
         "event": {
             "type": "content_end",
             "contentType": "tool",
-            "toolName": "read_file",
+            "toolName": "read_files",
             "output": {"result": suffix},
         },
     }
@@ -2619,3 +2641,426 @@ def test_cline_structured_or_truncated_skip_reason_is_a_denial(shape):
         event["output"] = {"error": "Tool was not executed"}
     stdout = (json.dumps({"type": "agent_event", "event": event}) + "\n").encode() + _CLINE_OK
     assert cline_delivery_failure(stdout, b"") == "cline_permission_denied"
+
+
+# ---------------------------------------------------------------------------
+# #2332: cline auto-approves file tools only (yolo mode + run settings that the
+# worker cannot write); any other tool in the event stream is non-delivery
+# ---------------------------------------------------------------------------
+
+
+def _cline_tool_event(name, output=None):
+    import json
+
+    return (
+        json.dumps(
+            {
+                "type": "agent_event",
+                "event": {
+                    "type": "content_end",
+                    "contentType": "tool",
+                    "toolName": name,
+                    "output": output if output is not None else [{"success": True}],
+                },
+            }
+        ).encode()
+        + b"\n"
+    )
+
+
+def test_cline_run_settings_leave_only_the_admitted_file_tools():
+    from nexus.executors.agy_write_admission import (
+        CLINE_ADMITTED_TOOLS,
+        CLINE_DISABLED_TOOLS,
+        cline_run_settings,
+    )
+
+    settings = cline_run_settings()
+    assert set(settings["disabledTools"]) == set(CLINE_DISABLED_TOOLS)
+    # Every non-file tool cline 3.0.69 offers in yolo/act mode is disabled.
+    assert {"run_commands", "fetch_web_content", "skills", "ask_question"} <= set(
+        settings["disabledTools"]
+    )
+    assert settings["tools"] == {"web_search": {"enabled": False}}
+    assert not CLINE_ADMITTED_TOOLS & set(CLINE_DISABLED_TOOLS)
+    assert CLINE_ADMITTED_TOOLS == {"read_files", "editor", "apply_patch", "submit_and_exit"}
+
+
+def test_cline_unadmitted_tool_in_the_event_stream_is_non_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # A settings file that failed to load would leave run_commands enabled and
+    # auto-approved: the run must never count as delivery.
+    for name in ("run_commands", "fetch_web_content", "skills", "team_spawn_teammate", ""):
+        stdout = _cline_tool_event("editor") + _cline_tool_event(name) + _CLINE_OK
+        assert cline_delivery_failure(stdout, b"") == "cline_unadmitted_tool", name
+    nested = (
+        b'{"type":"agent_event","event":{"content":[{"type":"content_start",'
+        b'"contentType":"tool","toolName":"run_commands"}]}}\n'
+    )
+    assert cline_delivery_failure(nested + _CLINE_OK, b"") == "cline_unadmitted_tool"
+    missing_name = b'{"type":"agent_event","event":{"type":"content_end","contentType":"tool"}}\n'
+    assert cline_delivery_failure(missing_name + _CLINE_OK, b"") == "cline_unadmitted_tool"
+
+
+def test_cline_admitted_file_tools_and_model_arguments_are_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    stdout = (
+        _cline_tool_event("read_files")
+        + _cline_tool_event("editor", {"result": "Edited a.txt", "success": True})
+        + _cline_tool_event("submit_and_exit", "Submission recorded")
+        # A tool-shaped object inside model-authored arguments is not a tool event.
+        + b'{"type":"agent_event","event":{"type":"content_start","contentType":"tool",'
+        + b'"toolName":"editor","input":{"type":"content_end","contentType":"tool",'
+        + b'"toolName":"run_commands"}}}\n'
+        + b'{"type":"run_result","finishReason":"completed"}\n'
+    )
+    assert cline_delivery_failure(stdout, b"") is None
+
+
+def test_cline_unprobed_version_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    for version in ("3.0.70", "", None):
+        monkeypatch.setattr(
+            "nexus.executors.worker_registry.cline_version_probe",
+            lambda executable, version=version: version,
+        )
+        receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+            type("Contract", (), {"task_id": "cline-2332"})(),
+            type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+            prompt="bounded",
+        )
+        assert receipt.failure_reason == "cline_version_unsupported", version
+        assert receipt.provider_calls == 0
+    assert launched == []
+
+
+def test_cline_version_probe_reads_the_binary_output(tmp_path):
+    from nexus.executors.worker_registry import cline_version_probe
+
+    fake = tmp_path / "cline"
+    fake.write_text("#!/bin/sh\necho 3.0.69\n", encoding="utf-8")
+    fake.chmod(0o755)
+    from nexus.executors.agy_write_admission import seatbelt_available
+
+    # The probe itself runs under a no-write, no-fork Seatbelt; without
+    # sandbox-exec it fails closed.
+    expected = "3.0.69" if seatbelt_available() else None
+    assert cline_version_probe(str(fake)) == expected
+    failing = tmp_path / "cline-bad"
+    failing.write_text("#!/bin/sh\necho 3.0.69\nexit 3\n", encoding="utf-8")
+    failing.chmod(0o755)
+    assert cline_version_probe(str(failing)) is None
+    assert cline_version_probe(str(tmp_path / "missing")) is None
+
+
+def test_cline_run_settings_are_outside_every_writable_path(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    request = calls[0]
+    settings_path = Path(request.env["CLINE_GLOBAL_SETTINGS_PATH"])
+    mcp_path = Path(request.env["CLINE_MCP_SETTINGS_PATH"])
+    profile = request.seatbelt_profile
+    allow_block = profile.split("(deny file-write*)", 1)[1].split(")\n", 1)[0]
+    for path in (settings_path, mcp_path):
+        # Not under the target or the run root (the only writable subpaths).
+        for root in request.sweep_roots:
+            assert not str(path).startswith(root.rstrip("/") + "/"), (path, root)
+        assert str(path.parent) not in allow_block
+    run_root = Path(request.sweep_roots[1])
+    run_home = run_root / "home"
+    # Hooks, plugins, rules and skills in the run HOME are write-denied; only
+    # cline's data directory is re-opened.
+    assert f'(subpath "{run_home / ".cline"}")' in profile
+    assert f'(subpath "{run_home / "Documents"}")' in profile
+    assert f'(subpath "{run_home / ".agents"}")' in profile
+    deny_at = profile.index(f'(subpath "{run_home / ".cline"}")')
+    reallow_at = profile.index(f'(subpath "{run_home / ".cline" / "data"}")')
+    assert deny_at < reallow_at
+    target = Path(request.cwd)
+    for name in (".cline", ".clinerules", ".agents"):
+        assert f'(subpath "{target / name}")' in profile
+    # The files are removed after the run; their content was the tool restriction.
+    assert not settings_path.exists()
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_cline_run_settings_file_carries_the_tool_restriction(tmp_path):
+    import json
+    from pathlib import Path
+
+    from nexus.executors.agy_write_admission import cline_run_settings, write_cline_run_config
+
+    env = write_cline_run_config(tmp_path / "cfg")
+    settings = Path(env["CLINE_GLOBAL_SETTINGS_PATH"])
+    assert json.loads(settings.read_text(encoding="utf-8")) == cline_run_settings()
+    assert json.loads(Path(env["CLINE_MCP_SETTINGS_PATH"]).read_text(encoding="utf-8")) == {
+        "mcpServers": {}
+    }
+    assert settings.stat().st_mode & 0o777 == 0o400
+
+
+def test_seatbelt_extra_protected_paths_deny_then_reallow(tmp_path):
+    from nexus.executors.agy_write_admission import build_seatbelt_profile
+
+    run_root = tmp_path / "run"
+    protected = run_root / "home" / ".cline"
+    reopened = protected / "data"
+    profile = build_seatbelt_profile(
+        run_root=run_root,
+        writable_target=None,
+        extra_protected_paths=(protected,),
+        extra_reallowed_paths=(reopened,),
+    )
+    deny = profile.index("(deny file-write*\n")
+    assert profile.index(f'(subpath "{protected}")', deny) > deny
+    reallow = profile.index("(allow file-write*\n", deny)
+    assert profile.index(f'(subpath "{reopened}")', reallow) > reallow
+
+
+def test_cline_malformed_event_line_is_never_delivery():
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # Codex r1 on #2459: a truncated run_commands event followed by a clean
+    # run_result must not read as delivery.
+    malformed = b'{"type":"agent_event","event":{"type":"content_end","toolName":"run_commands"\n'
+    completed = b'{"type":"run_result","finishReason":"completed"}\n'
+    assert cline_delivery_failure(malformed + completed, b"") == "cline_output_unparseable"
+    assert cline_delivery_failure(b"[1, 2]\n" + completed, b"") == "cline_output_unparseable"
+    assert cline_delivery_failure(b"\n" + completed + b"\n", b"") is None
+    # Codex r2: invalid UTF-8 inside a key must not hide a tool event.
+    broken = (
+        b'{"type":"agent_event","event":{"type":"content_end","contentType":"to\xffol",'
+        b'"toolName":"run_commands"}}\n'
+    )
+    assert cline_delivery_failure(broken + completed, b"") == "cline_output_unparseable"
+
+
+def test_cline_seatbelt_profile_denies_every_subprocess(monkeypatch, tmp_path):
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    profile = calls[0].seatbelt_profile
+    # Last rule wins in SBPL: nothing after it may re-allow process-fork.
+    assert profile.rstrip().endswith("(deny process-fork)")
+    assert "(allow process-fork" not in profile
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_seatbelt_profile_allows_fork_unless_asked(tmp_path):
+    from nexus.executors.agy_write_admission import build_seatbelt_profile
+
+    assert "process-fork" not in build_seatbelt_profile(run_root=tmp_path, writable_target=None)
+    assert build_seatbelt_profile(
+        run_root=tmp_path, writable_target=None, deny_process_fork=True
+    ).rstrip().endswith("(deny process-fork)")
+
+
+def _fake_macho(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 16)
+    path.chmod(0o755)
+    return path
+
+
+def test_cline_launch_binary_resolves_the_native_binary(tmp_path):
+    import os
+
+    from nexus.executors.worker_registry import cline_launch_binary
+
+    # npm layout: lib/node_modules/cline/bin/cline (a node wrapper that spawns).
+    package = tmp_path / "lib" / "node_modules" / "cline"
+    native = _fake_macho(package / "node_modules" / "@cline" / "cli-darwin-arm64" / "bin" / "cline")
+    wrapper = package / "bin" / "cline"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text("#!/usr/bin/env node\nrequire('child_process').spawnSync()\n")
+    link = tmp_path / "bin" / "cline"
+    link.parent.mkdir()
+    os.symlink(wrapper, link)
+    assert cline_launch_binary(str(link)) == os.path.realpath(native)
+    # A small shell wrapper naming the binary by absolute path.
+    shell = tmp_path / "local" / "cline"
+    shell.parent.mkdir()
+    shell.write_text(f'#!/bin/sh\nexec /usr/bin/arch -arm64 {native} "$@"\n')
+    assert cline_launch_binary(str(shell)) == os.path.realpath(native)
+    # The binary itself.
+    assert cline_launch_binary(str(native)) == os.path.realpath(native)
+
+
+def test_cline_launch_binary_refuses_anything_else(tmp_path):
+    from nexus.executors.worker_registry import cline_launch_binary
+
+    script = tmp_path / "cline"
+    script.write_text('#!/bin/sh\nexec /opt/other/cline "$@"\n')
+    assert cline_launch_binary(str(script)) is None
+    # A binary named only in a comment is never used (#2459 Codex r3).
+    native = _fake_macho(tmp_path / "n" / "@cline" / "cli-darwin-arm64" / "bin" / "cline")
+    script.write_text(f'#!/bin/sh\n# exec {native} "$@"\nexec /opt/other/cline "$@"\n')
+    assert cline_launch_binary(str(script)) is None
+    # A named path that is not a Mach-O binary is refused.
+    fake = tmp_path / "x" / "@cline" / "cli-darwin-arm64" / "bin" / "cline"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("not a binary")
+    script.write_text(f"#!/bin/sh\nexec {fake}\n")
+    assert cline_launch_binary(str(script)) is None
+    assert cline_launch_binary(None) is None
+    assert cline_launch_binary(str(tmp_path / "missing")) is None
+
+
+def test_cline_unresolvable_native_binary_is_refused_before_launch(monkeypatch, tmp_path):
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    _cline_ready(monkeypatch, tmp_path)
+    monkeypatch.setattr("nexus.executors.worker_registry.cline_launch_binary", lambda resolved: None)
+    canonical = _cline_git_repo(tmp_path / "canonical")
+    target = tmp_path / "target"
+    target.mkdir()
+    launched = []
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: launched.append(request),
+    )
+    receipt = ClineWorkerAdapter(canonical_root=canonical).invoke(
+        type("Contract", (), {"task_id": "cline-2332"})(),
+        type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    assert launched == []
+    assert receipt.failure_reason == "cline_native_binary_unavailable"
+
+
+def test_cline_launches_the_native_binary(monkeypatch, tmp_path):
+    native = _fake_macho(tmp_path / "native" / "cline")
+    receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+    assert calls[0].executable == str(tmp_path / "cline")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.cline_launch_binary", lambda resolved: str(native)
+    )
+    from nexus.executors.worker_registry import ClineWorkerAdapter
+
+    launched = []
+
+    def fake_worker(request, on_process_group=None):
+        launched.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=_CLINE_OK,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    target = tmp_path / "target2"
+    target.mkdir()
+    ClineWorkerAdapter(canonical_root=_cline_git_repo(tmp_path / "canonical2")).invoke(
+        type("Contract", (), {"task_id": "cline-2332"})(),
+        type("Lease", (), {"task_id": "cline-2332", "target_worktree": str(target)})(),
+        prompt="bounded",
+    )
+    assert launched[0].executable == str(native)
+
+
+def test_cline_unavailable_tool_rejected_by_cline_is_not_a_tool_run():
+    import json
+
+    from nexus.executors.worker_registry import cline_delivery_failure
+
+    # Observed 2026-10-17 (real cline 3.0.69, #2459): the model called the
+    # disabled run_commands; cline skipped it before execution.
+    def event(kind, call_id, output=None, name="run_commands"):
+        body = {"type": kind, "contentType": "tool", "toolName": name, "toolCallId": call_id}
+        if output is not None:
+            body["output"] = output
+        return (json.dumps({"type": "agent_event", "event": body}) + "\n").encode()
+
+    rejected = {
+        "error": "Tool call run_commands was rejected before execution: AI_NoSuchToolError: "
+        "Model tried to call unavailable tool 'run_commands'."
+    }
+    done = b'{"type":"run_result","finishReason":"completed"}\n'
+    ok = event("content_start", "c1") + event("content_end", "c1", rejected) + done
+    assert cline_delivery_failure(ok, b"") is None
+    # A start without cline's rejection end, or a successful end, is a tool run.
+    assert cline_delivery_failure(event("content_start", "c2") + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    ran = event("content_end", "c3", [{"query": "ls", "result": "a.txt", "success": True}])
+    assert cline_delivery_failure(ran + done, b"") == "cline_unadmitted_tool"
+    # The rejection text must name the same tool and sit in cline's error field.
+    other = {"error": rejected["error"].replace("run_commands", "editor", 1)}
+    assert cline_delivery_failure(event("content_end", "c4", other) + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    in_result = {"result": rejected["error"]}
+    assert cline_delivery_failure(event("content_end", "c5", in_result) + done, b"") == (
+        "cline_unadmitted_tool"
+    )
+    # One rejected end must not mask a successful end of the same call.
+    masked = (
+        event("content_start", "c6")
+        + event("content_end", "c6", [{"query": "ls", "result": "a.txt", "success": True}])
+        + event("content_end", "c6", rejected)
+    )
+    assert cline_delivery_failure(masked + done, b"") == "cline_unadmitted_tool"
+    # No call id: never tolerated.
+    no_id = (
+        json.dumps(
+            {
+                "type": "agent_event",
+                "event": {
+                    "type": "content_start",
+                    "contentType": "tool",
+                    "toolName": "run_commands",
+                },
+            }
+        )
+        + "\n"
+    ).encode()
+    assert cline_delivery_failure(no_id + done, b"") == "cline_unadmitted_tool"
+
+
+def test_cline_version_probe_runs_under_its_own_seatbelt(monkeypatch):
+    from nexus.executors import worker_registry
+
+    seen = []
+
+    class Done:
+        returncode = 0
+        stdout = b"3.0.69\n"
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        return Done()
+
+    monkeypatch.setattr("nexus.executors.agy_write_admission.seatbelt_available", lambda: True)
+    monkeypatch.setattr(worker_registry.subprocess, "run", fake_run)
+    assert worker_registry.cline_version_probe("/x/cline") == "3.0.69"
+    argv = seen[0]
+    assert argv[:2] == ["/usr/bin/sandbox-exec", "-p"]
+    assert "(deny file-write*)" in argv[2] and "(deny process-fork)" in argv[2]
+    assert argv[3:] == ["/x/cline", "--version"]
+
+
+def test_cline_version_probe_fails_closed_without_sandbox_exec(monkeypatch):
+    from nexus.executors import worker_registry
+
+    ran = []
+    monkeypatch.setattr("nexus.executors.agy_write_admission.seatbelt_available", lambda: False)
+    monkeypatch.setattr(worker_registry.subprocess, "run", lambda *a, **k: ran.append(a))
+    assert worker_registry.cline_version_probe("/x/cline") is None
+    assert ran == []

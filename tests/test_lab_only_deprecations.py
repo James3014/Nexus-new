@@ -1,5 +1,6 @@
 """Modules with no production caller warn on import; production paths do not (#1740)."""
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,11 @@ LAB_ONLY = [
     "nexus.federation.fleet_manager",
 ]
 
+# Lab-only, then physically deleted 2026-10-17 (#2475, dead-code batch B4,
+# ARCHIVED_2026-10-17_deadcode_b4.md). The case keeps its test id and asserts the
+# module can no longer be imported.
+DELETED = frozenset({"nexus.services.aos_oracle"})
+
 
 def _import_warnings(module: str) -> str:
     proc = subprocess.run(
@@ -33,6 +39,9 @@ def _import_warnings(module: str) -> str:
 
 @pytest.mark.parametrize("module", LAB_ONLY)
 def test_lab_only_module_warns_on_import(module):
+    if module in DELETED:
+        assert importlib.util.find_spec(module) is None, f"{module} was deleted (#2475)"
+        return
     assert "#1740" in _import_warnings(module)
 
 

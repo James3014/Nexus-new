@@ -140,6 +140,10 @@ def test_worker_registry_contract_maps_exact_targets_without_fallback():
     assert details.targets == [
         "tests/nexus/executors/test_worker_contract.py",
         "tests/services/test_agy_account_pool.py",
+        # #2433 (N5): the #2403 / #2415 worker route tests
+        "tests/nexus/executors/test_agy_worker_claim_rotation_2403.py",
+        "tests/nexus/executors/test_agy_worker_pool_route_2403.py",
+        "tests/nexus/executors/test_agy_worker_outage_cap_2415.py",
         "tests/services/test_policy_gate.py",
     ]
     assert details.unmatched_paths == []

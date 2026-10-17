@@ -183,7 +183,7 @@ TARGET_SNAPSHOT="$(python3 -I "$GUARD" snapshot "$WORK_DIR")" || exit 2
 
 echo "[nexus-enforced] invoke codex-nexus (enforced)"
 set +e
-python3 -I "$GUARD" exec "$RUN_HOME" -- "$CODEX_BIN" exec --ephemeral --json -C "$WORK_DIR" -m "$MODEL" \
+python3 -I "$GUARD" exec "$RUN_HOME" "$WORK_DIR" -- "$CODEX_BIN" exec --ephemeral --json -C "$WORK_DIR" -m "$MODEL" \
   --sandbox "$SANDBOX_MODE" -c 'approval_policy="never"' \
   -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
   -c sandbox_workspace_write.exclude_slash_tmp=true \

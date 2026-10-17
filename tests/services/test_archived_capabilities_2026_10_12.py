@@ -37,8 +37,13 @@ ARCHIVED_MODULES = {
     "nexus.engine.federation": "nexus/engine/federation.py",
     "nexus.federation.fleet_manager": "nexus/federation/fleet_manager.py",
     "nexus.core.self_evolve_engine": "nexus/core/self_evolve_engine.py",
-    "nexus.services.aos_oracle": "nexus/services/aos_oracle.py",
     "nexus.engine.red_team_audit": "nexus/engine/red_team_audit.py",
+}
+
+# Archived here first, then physically deleted 2026-10-17 (#2475, dead-code batch B4,
+# ARCHIVED_2026-10-17_deadcode_b4.md): no longer importable at all.
+DELETED_MODULES = {
+    "nexus.services.aos_oracle": "nexus/services/aos_oracle.py",
 }
 
 
@@ -89,7 +94,7 @@ def test_benchmark_receipt_has_no_synthetic_numbers():
 
 def test_archived_modules_warn_on_import():
     code = (
-        "import importlib, warnings\n"
+        "import importlib, importlib.util, warnings\n"
         "warnings.simplefilter('always')\n"
         f"mods = {sorted(ARCHIVED_MODULES)!r}\n"
         "missing = []\n"
@@ -99,13 +104,17 @@ def test_archived_modules_warn_on_import():
         "        importlib.import_module(m)\n"
         "    if not any('ARCHIVED 2026-10-12' in str(x.message) for x in w):\n"
         "        missing.append(m)\n"
+        f"deleted = {sorted(DELETED_MODULES)!r}\n"
+        "importable = [m for m in deleted if importlib.util.find_spec(m) is not None]\n"
         "print('MISSING', missing)\n"
+        "print('IMPORTABLE', importable)\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=180
     )
     assert proc.returncode == 0, proc.stderr
     assert "MISSING []" in proc.stdout, proc.stdout
+    assert "IMPORTABLE []" in proc.stdout, proc.stdout
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -135,17 +144,21 @@ def test_no_live_code_imports_archived_modules():
         ROOT / "scripts/engine/commands/stress_test.py",
         ROOT / "scripts/engine/commands/ui_explorer.py",
     }
-    archived = set(ARCHIVED_MODULES) | {
-        "nexus.federation",
-        "nexus.federation.config",
-        "nexus.federation.node_launcher",
-        "nexus.federation.node_registry",
-        "nexus.oracle.promote",
-        "scripts.ops.federated_engine_v09",
-        "scripts.ops.evolution_engine_v08",
-        "scripts.engine.commands.stress_test",
-        "scripts.engine.commands.ui_explorer",
-    }
+    archived = (
+        set(ARCHIVED_MODULES)
+        | set(DELETED_MODULES)
+        | {
+            "nexus.federation",
+            "nexus.federation.config",
+            "nexus.federation.node_launcher",
+            "nexus.federation.node_registry",
+            "nexus.oracle.promote",
+            "scripts.ops.federated_engine_v09",
+            "scripts.ops.evolution_engine_v08",
+            "scripts.engine.commands.stress_test",
+            "scripts.engine.commands.ui_explorer",
+        }
+    )
     offenders: list[str] = []
     for top in ("nexus", "scripts"):
         for path in (ROOT / top).rglob("*.py"):

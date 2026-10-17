@@ -1311,8 +1311,10 @@ def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypa
     assert timed_out is False
     argv = captured["argv"]
     assert "--log-file" in argv
-    assert argv[argv.index("--log-file") + 1] == str(log)
+    # #2314: agy is handed a relay FIFO; only the dispatcher writes the log
+    assert argv[argv.index("--log-file") + 1] != str(log)
     assert log.parent.is_dir()
+    assert log.read_text(encoding="utf-8").startswith(dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER)
 
 
 def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
@@ -6822,3 +6824,111 @@ def test_catalog_admits_bare_alias_without_effort_only_when_a_tier_is_served(
     assert bare["admitted"] is True
     assert unserved["admitted"] is False
     assert unserved["model_catalog"]["status"] == "MODEL_CAPABILITY_UNAVAILABLE"
+
+
+# --- #1681: background pool-busy exits persist AGY_ACCOUNT_POOL_BUSY ------------
+
+
+def _run_background_with_real_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    coordinator: object,
+    runner: object = None,
+) -> dict[str, object]:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "pool busy probe")
+    real_dispatch_run = dispatch.dispatch_run
+    extra: dict[str, object] = {"coordinator": coordinator}
+    if runner is not None:
+        extra["run_agy_fn"] = runner
+    monkeypatch.setattr(
+        dispatch,
+        "dispatch_run",
+        lambda **kwargs: real_dispatch_run(**kwargs, **extra),
+    )
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=3,
+        pool_wait_timeout=0.05,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=60,
+    )
+    record = dispatch.AgyOperationJournal(root).read(operation_id)
+    assert code == 75
+    return record
+
+
+def test_background_pool_busy_records_failure_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+
+    class BusyOnRotate(_WriteScopeCoordinator):
+        def rotate_claim(self, **kwargs):
+            kwargs["current_claim"].release()
+            raise dispatch.AgyAccountPoolBusyError("all accounts leased elsewhere")
+
+    def runner(**_kwargs):
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+
+    record = _run_background_with_real_dispatch(
+        work, monkeypatch, coordinator=BusyOnRotate(tmp_path / "home"), runner=runner
+    )
+
+    assert record["status"] == "FAILED"
+    assert record["failure_kind"] == "AGY_ACCOUNT_POOL_BUSY"
+    assert record["first_effect_at"] is None
+
+
+def test_background_capability_check_pool_busy_records_failure_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        dispatch,
+        "_agy_model_catalog_admission",
+        lambda **_kw: {
+            "admitted": False,
+            "requested_model": "gemini-test",
+            "resolved_model": None,
+            "model_catalog": {"state": "MISSING"},
+        },
+    )
+
+    class BusyOnSecondAcquire(_WriteScopeCoordinator):
+        def acquire_claim(self, **kwargs):
+            self.acquire_count += 1
+            if self.acquire_count == 1:
+                return self.claim
+            raise dispatch.AgyAccountPoolBusyError("remaining accounts leased elsewhere")
+
+    record = _run_background_with_real_dispatch(
+        tmp_path, monkeypatch, coordinator=BusyOnSecondAcquire(tmp_path / "home")
+    )
+
+    assert record["status"] == "FAILED"
+    assert record["failure_kind"] == "AGY_ACCOUNT_POOL_BUSY"
+    assert record["first_effect_at"] is None

@@ -209,9 +209,22 @@ NON_ROUTING_CAPABILITIES = [
 ]
 
 
-# Retired and deleted 2026-10-16 (#2359, nexus-core-rs bridge). Their cases keep their
-# test ids and assert the module is gone, so a re-add is a deliberate change.
-RETIRED_MODULES = frozenset({"nexus.bridge.cutover_manager", "nexus.bridge.rust_kernel"})
+# Retired and deleted 2026-10-16 (#2359, nexus-core-rs bridge) and 2026-10-17 (#2475,
+# dead-code batch B4). Their cases keep their test ids and assert the module is gone,
+# so a re-add is a deliberate change.
+RETIRED_MODULES = frozenset({
+    "nexus.bridge.cutover_manager",
+    "nexus.bridge.rust_kernel",
+    # B4 (#2475): ARCHIVED_2026-10-17_deadcode_b4.md
+    "nexus.services.ambiguity_guard",
+    "nexus.services.aos_oracle",
+    "nexus.services.construction_service",
+    "nexus.services.fp_bridge_v2",
+    "nexus.services.normalization_engine",
+    "nexus.services.predictive_audit",
+    "nexus.services.s2t_repair",
+    "nexus.services.shannon_audit",
+})
 
 
 def _assert_retired(module_path: str) -> None:
