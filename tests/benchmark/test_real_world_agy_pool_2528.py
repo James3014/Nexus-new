@@ -506,3 +506,23 @@ def test_file_dir_type_change_refuses_before_touching_the_case(tmp_path):
 
     assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
     assert (case_dir / "x" / "f").read_text(encoding="utf-8") == "keep\n"
+
+
+@pytest.mark.parametrize("staged_is_file", [True, False])
+def test_empty_dir_file_type_change_refuses(tmp_path, staged_is_file):
+    # Codex confirmation at 10f73748e: an *empty* directory on either side.
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "keep.py").write_text("keep\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    if staged_is_file:
+        (case_dir / "x").mkdir()
+        (staged / "x").write_text("file\n", encoding="utf-8")
+    else:
+        (case_dir / "x").write_text("file\n", encoding="utf-8")
+        (staged / "x").mkdir()
+
+    assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
+    assert (case_dir / "keep.py").read_text(encoding="utf-8") == "keep\n"
+    assert (case_dir / "x").is_dir() is staged_is_file

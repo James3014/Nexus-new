@@ -472,11 +472,12 @@ def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
 AGY_STAGED_SYMLINK_REFUSED = "agy_staged_symlink_refused"
 
 
-def _tree_inventory(root: Path) -> set[Path] | None:
-    """Relative regular files under ``root``; ``None`` on any symlink, other
-    non-regular entry or traversal error (an unreadable directory must not
-    make its files look deleted)."""
+def _tree_inventory(root: Path) -> tuple[set[Path], set[Path]] | None:
+    """(regular files, directories) under ``root``, relative; ``None`` on any
+    symlink, other non-regular entry or traversal error (an unreadable
+    directory must not make its files look deleted)."""
     files: set[Path] = set()
+    dirs: set[Path] = set()
 
     def fail(error: OSError) -> None:
         raise error
@@ -484,9 +485,10 @@ def _tree_inventory(root: Path) -> set[Path] | None:
     try:
         for directory, dirnames, filenames in os.walk(root, onerror=fail):
             for name in (*dirnames, *filenames):
-                path = Path(directory) / name
-                if path.is_symlink():
+                if (Path(directory) / name).is_symlink():
                     return None
+            for name in dirnames:
+                dirs.add((Path(directory) / name).relative_to(root))
             for name in filenames:
                 path = Path(directory) / name
                 if not path.is_file():
@@ -494,26 +496,25 @@ def _tree_inventory(root: Path) -> set[Path] | None:
                 files.add(path.relative_to(root))
     except OSError:
         return None
-    return files
+    return files, dirs
 
 
 def _sync_staged_case(staged: Path, case_dir: Path) -> str | None:
     """Mirror the agy run's regular-file edits from a staged copy back into the case dir.
 
     Fail closed: when either tree holds any symlink or cannot be fully read,
-    nothing is mirrored and ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so a
-    symlink or an unreadable directory can neither redirect a write nor hide
-    the deletion of a file.  Writes use ``O_NOFOLLOW``.  Returns ``None``
-    after a complete mirror.
+    or a path is a file in one tree and a directory in the other, nothing is
+    mirrored and ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so neither a
+    symlink, an unreadable directory nor a type change can redirect a write
+    or hide the deletion of a file.  Writes use ``O_NOFOLLOW``.  Returns
+    ``None`` after a complete mirror.
     """
-    staged_files = _tree_inventory(staged)
-    case_files = _tree_inventory(case_dir)
-    if staged_files is None or case_files is None:
+    staged_inventory = _tree_inventory(staged)
+    case_inventory = _tree_inventory(case_dir)
+    if staged_inventory is None or case_inventory is None:
         return AGY_STAGED_SYMLINK_REFUSED
-    # A path that is a file in one tree and a directory (prefix) in the other
-    # cannot be mirrored atomically: refuse before touching anything.
-    staged_dirs = {parent for rel in staged_files for parent in rel.parents}
-    case_dirs = {parent for rel in case_files for parent in rel.parents}
+    staged_files, staged_dirs = staged_inventory
+    case_files, case_dirs = case_inventory
     if staged_files & case_dirs or case_files & staged_dirs:
         return AGY_STAGED_SYMLINK_REFUSED
     for rel in sorted(case_files - staged_files):
