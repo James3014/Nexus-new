@@ -6466,3 +6466,71 @@ def test_replay_2026_10_16_old_deployer_self_updates_to_the_2370_deployer(
     subset = result["receipt"]["self_update"]["bindable_checks"]
     assert subset["verdict"] == "GREEN"
     assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+
+
+# ---------------- 2026-10-17: Exact-base Pyright regression gate became required
+
+PYRIGHT = "Exact-base Pyright regression gate"
+# GET repos/James3014/Nexus-new/rulesets/20697077 after the Owner's edit (2026-10-17 08:29+08:00).
+LIVE_REQUIRED_2026_10_17_SEVEN = [*LIVE_REQUIRED_2026_10_16_SIX, PYRIGHT]
+
+
+def _live_seven_api() -> Callable[[str], Any]:
+    base = _live_six_api()
+
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            if "page=" in path and not path.endswith("page=1"):
+                return []
+            return _branch_rules(LIVE_REQUIRED_2026_10_17_SEVEN)
+        return base(path)
+
+    return api
+
+
+def test_pyright_gate_is_known_and_bound_to_its_push_workflow() -> None:
+    import yaml
+
+    workflow = ad.REQUIRED_CHECKS[PYRIGHT]
+    assert workflow == ".github/workflows/typecheck.yml"
+    text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
+    assert f"name: {PYRIGHT}" in text
+    assert "push" in yaml.safe_load(text)[True]
+    assert PYRIGHT not in ad.PR_TARGET_ONLY_CHECKS
+    assert PYRIGHT not in ad.PR_HEAD_STATUS_CONTEXTS
+
+
+def test_live_ruleset_seven_checks_all_success_is_green() -> None:
+    result = ad.required_checks(_live_seven_api(), NEW)
+    assert result["verdict"] == "GREEN", result
+    assert result["checks"][PYRIGHT]["sha"] == NEW
+
+
+def test_live_ruleset_seven_checks_green_candidate_deploys(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, _live_seven_api())["status"] == "DEPLOYED"
+
+
+def test_live_ruleset_seven_checks_blocks_on_red_pyright() -> None:
+    base = _live_seven_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "check-runs" in path and "Pyright" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+
+
+def test_deployer_without_pyright_entry_reports_it_unknown_and_this_source_knows_it() -> None:
+    """The live deployer before this change cannot bind the new required name; a
+    candidate carrying this source is what the #2402 self-update path needs."""
+    source = (REPO_ROOT / ad.DEPLOYER).read_text(encoding="utf-8")
+    assert PYRIGHT in (ad.deployer_known_checks(source) or [])
+    old = source.replace(
+        '    "Exact-base Pyright regression gate": ".github/workflows/typecheck.yml",\n', ""
+    )
+    assert old != source
+    assert PYRIGHT not in (ad.deployer_known_checks(old) or [])
