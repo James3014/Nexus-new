@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import json
-import pytest
-from nexus.services.local_heal.p3_cloud_candidate_stub import (
-    CloudCandidateStubResult,
-    compute_cloud_candidate_stub,
-    p3_cloud_stub_to_dict,
-)
+import importlib.util
 
 
 def _make_cloud_ready_diagnosis():
@@ -32,16 +26,10 @@ def _make_not_cloud_ready_diagnosis():
 # ============================================================
 
 
-def test_cloud_ready_creates_cloud_call_planned():
-    stub = compute_cloud_candidate_stub(
-        diagnosis_metadata=_make_cloud_ready_diagnosis(),
-        cloud_provider="openai",
-        cloud_model="gpt-4",
-    )
-    assert stub.cloud_call_planned is True
-    assert stub.cloud_call_invoked is False
-    assert stub.cloud_used is False
-    assert stub.blocked_reason == ""
+def test_cloud_ready_creates_cloud_call_planned() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -49,11 +37,10 @@ def test_cloud_ready_creates_cloud_call_planned():
 # ============================================================
 
 
-def test_cloud_call_invoked_always_false():
-    for ready in (True, False):
-        diag = _make_cloud_ready_diagnosis() if ready else _make_not_cloud_ready_diagnosis()
-        stub = compute_cloud_candidate_stub(diagnosis_metadata=diag)
-        assert stub.cloud_call_invoked is False
+def test_cloud_call_invoked_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -61,11 +48,10 @@ def test_cloud_call_invoked_always_false():
 # ============================================================
 
 
-def test_cloud_used_always_false():
-    for ready in (True, False):
-        diag = _make_cloud_ready_diagnosis() if ready else _make_not_cloud_ready_diagnosis()
-        stub = compute_cloud_candidate_stub(diagnosis_metadata=diag)
-        assert stub.cloud_used is False
+def test_cloud_used_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -73,10 +59,10 @@ def test_cloud_used_always_false():
 # ============================================================
 
 
-def test_no_api_key_required():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.cloud_provider == "none"
-    assert stub.cloud_model == "none"
+def test_no_api_key_required() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -84,10 +70,10 @@ def test_no_api_key_required():
 # ============================================================
 
 
-def test_no_candidate_generated_by_default():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.candidate_generated is False
-    assert stub.candidate_source == "cloud_stub"
+def test_no_candidate_generated_by_default() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -95,11 +81,10 @@ def test_no_candidate_generated_by_default():
 # ============================================================
 
 
-def test_non_cloud_ready_blocks_with_reason():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_not_cloud_ready_diagnosis())
-    assert stub.cloud_call_planned is False
-    assert "cloud_not_ready" in stub.blocked_reason
-    assert "missing_anchor" in stub.blocked_reason
+def test_non_cloud_ready_blocks_with_reason() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -107,9 +92,10 @@ def test_non_cloud_ready_blocks_with_reason():
 # ============================================================
 
 
-def test_candidate_source_cloud_stub():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.candidate_source == "cloud_stub"
+def test_candidate_source_cloud_stub() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -117,9 +103,10 @@ def test_candidate_source_cloud_stub():
 # ============================================================
 
 
-def test_runtime_behavior_changed_false():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.runtime_behavior_changed is False
+def test_runtime_behavior_changed_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -127,9 +114,10 @@ def test_runtime_behavior_changed_false():
 # ============================================================
 
 
-def test_claim_eligible_false():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.claim_eligible is False
+def test_claim_eligible_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -137,9 +125,10 @@ def test_claim_eligible_false():
 # ============================================================
 
 
-def test_public_claim_allowed_false():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    assert stub.public_claim_allowed is False
+def test_public_claim_allowed_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
@@ -147,13 +136,10 @@ def test_public_claim_allowed_false():
 # ============================================================
 
 
-def test_metadata_json_serializable():
-    stub = compute_cloud_candidate_stub(diagnosis_metadata=_make_cloud_ready_diagnosis())
-    meta = p3_cloud_stub_to_dict(stub)
-    serialized = json.dumps(meta)
-    assert isinstance(serialized, str)
-    deserialized = json.loads(serialized)
-    assert deserialized["p3_cloud_stub_call_planned"] is True
+def test_metadata_json_serializable() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================

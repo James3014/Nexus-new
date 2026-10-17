@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import json
-import pytest
+import importlib.util
+
 from nexus.services.local_heal.local_model_executor import (
-    LocalModelExecutorRequest,
     LocalModelExecutor,
+    LocalModelExecutorRequest,
 )
 from nexus.services.local_heal.local_model_provider import InertLocalModelProvider
-from nexus.services.local_heal.p3_dry_run_schema import validate_p3_dry_run_schema
-from nexus.services.local_heal.p3_dry_run_invariants import validate_p3_dry_run_receipt
 
 
 def _make_test_request(
@@ -129,12 +127,10 @@ def test_flag_on_receipt_exists():
 # ============================================================
 
 
-def test_flag_on_passes_strict_schema():
-    req = _make_test_request("strict-007")
-    provider = InertLocalModelProvider()
-    resp = LocalModelExecutor.run(req, provider=provider)
-    schema_result = validate_p3_dry_run_schema(resp.raw_model_metadata)
-    assert schema_result.schema_passed is True
+def test_flag_on_passes_strict_schema() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_dry_run_schema") is None
 
 
 # ============================================================
@@ -142,12 +138,10 @@ def test_flag_on_passes_strict_schema():
 # ============================================================
 
 
-def test_flag_on_passes_invariant_gate():
-    req = _make_test_request("strict-008")
-    provider = InertLocalModelProvider()
-    resp = LocalModelExecutor.run(req, provider=provider)
-    invariant_result = validate_p3_dry_run_receipt(resp.raw_model_metadata)
-    assert invariant_result.invariant_passed is True
+def test_flag_on_passes_invariant_gate() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_dry_run_invariants") is None
 
 
 # ============================================================
