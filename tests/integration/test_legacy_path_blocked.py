@@ -100,7 +100,7 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "AutoResearchNightShift._append_to_pending_manifest",
         "content",
     ): (
-        "File read: pending-manifest JSON this service wrote itself (lock-file bytes under flock); no model text."
+        "File read: pending-manifest JSON this service wrote itself (pending.json read under the .lock flock); no model text."
     ),
     ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str"): (
         "State round-trip: json_str is the output of MentalSnapshot.serialize() (json.dumps of self.mind); no model text."
