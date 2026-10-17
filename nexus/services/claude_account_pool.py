@@ -501,17 +501,11 @@ class ClaudeAccountPoolManager:
             self._unlock(lock)
 
     # -- leases ---------------------------------------------------------
-    @staticmethod
-    def _pgid_alive(pgid: object) -> bool:
-        if not isinstance(pgid, int) or pgid <= 0:
-            return False
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+    # No process-group liveness probe here on purpose (#2389 item 3). A
+    # `killpg(pgid, 0)` probe can match an unrelated group that reused the id, so
+    # it may only ever keep a lease held, never free one. Launched leases are not
+    # reclaimed by liveness at all: they are freed only by a confirmed terminal
+    # release or reconcile_release (see _lease_live).
 
     @classmethod
     def _lease_live(cls, record: dict[str, Any]) -> bool:
@@ -581,6 +575,37 @@ class ClaudeAccountPoolManager:
                 account["last_failure_reason"] = failure_kind.value
                 state["updated_at"] = now
                 self._write_state(state)
+        finally:
+            self._unlock(lock)
+
+    def confirm_terminal_failure(
+        self, lease: ClaudeLease, failure_kind: AccountFailureKind
+    ) -> None:
+        """Release after a known terminal failure, cooling per-person limits atomically.
+
+        The cooldown and the lease removal are one state write. If that write
+        fails, the lease stays held (fail closed) instead of freeing an account
+        whose cooldown was lost (#2389 item 2).
+        """
+
+        lock = self._lock()
+        try:
+            state = self._load_state()
+            self._assert_host_binding(state)
+            self._prune_dead_leases(state)
+            record = self._record_for(state, lease)
+            if record.get("unknown_outcome"):
+                return
+            now = time.time()
+            if failure_kind in _NO_ROTATION_KINDS:
+                account = state["accounts"].get(str(record.get("alias") or ""))
+                if isinstance(account, dict):
+                    account["cooldown_until"] = now + self.cooldown_seconds
+                    account["last_failure_timestamp"] = now
+                    account["last_failure_reason"] = failure_kind.value
+            state["leases"].pop(lease.lease_id, None)
+            state["updated_at"] = now
+            self._write_state(state)
         finally:
             self._unlock(lock)
 
