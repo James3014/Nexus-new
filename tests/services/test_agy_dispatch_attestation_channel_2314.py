@@ -508,3 +508,61 @@ def test_runner_accepts_matches_parameters_not_locals():
     assert dispatch._runner_accepts(local_only, "write_boundary") is False
     assert dispatch._runner_accepts(dispatch.run_agy, "write_boundary") is True
     assert dispatch._runner_accepts(object(), "write_boundary") is False
+
+
+def test_attempt_marker_starts_a_line_after_an_attempt_killed_mid_line(tmp_path):
+    """A partial last line from a killed attempt must not swallow the next marker."""
+    log = tmp_path / "op" / "agy.log"
+    log.parent.mkdir()
+    first = dispatch._AgyLogRelay(log)
+    writer = os.open(first.fifo, os.O_WRONLY)
+    os.write(
+        writer,
+        (
+            f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}-old"\n'
+            f"I1 server.go:1199] Created conversation {FORGED_CONVERSATION}\n"
+            "I1 printmode.go:1] killed mid-li"
+        ).encode(),
+    )
+    os.close(writer)
+    assert first.finish(timeout=5) is True
+    # simulate a sink that a previous writer left without a final newline
+    with open(log, "ab") as handle:
+        handle.write(b"partial")
+    second = dispatch._AgyLogRelay(log)
+    writer = os.open(second.fifo, os.O_WRONLY)
+    os.write(
+        writer,
+        (
+            f'I2 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+            f"I2 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+        ).encode(),
+    )
+    os.close(writer)
+    assert second.finish(timeout=5) is True
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert "attestation_failure" not in attestation
+    assert attestation["observed_model"] == MODEL
+    assert attestation["provider_session_id"] == GENUINE_CONVERSATION
+
+
+def test_a_fifo_at_the_attestation_log_path_is_refused_without_hanging(tmp_path):
+    log = tmp_path / "agy.log"
+    os.mkfifo(log)
+    started = time.monotonic()
+    with pytest.raises(dispatch.AgyAttestationLogUnwritable):
+        dispatch._AgyLogRelay(log)
+    assert time.monotonic() - started < 5
+
+
+def test_incomplete_marker_mid_line_in_agy_text_is_not_a_tamper_signal(tmp_path):
+    log = tmp_path / "agy.log"
+    log.write_text(
+        f"{dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER} {'1' * 32}\n"
+        f"I1 foo.go:1] path /x/{dispatch.AGY_LOG_RELAY_INCOMPLETE_MARKER}:y\n"
+        f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+        f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n",
+        encoding="utf-8",
+    )
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert attestation["observed_model"] == MODEL

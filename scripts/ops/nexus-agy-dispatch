@@ -1560,6 +1560,7 @@ class AgyAttestationLogUnwritable(RuntimeError):
 
 
 _AGY_LOG_RELAY_MARKER_PREFIX = b"NEXUS_AGY_LOG_RELAY"
+_AGY_LOG_RELAY_INCOMPLETE_RE = re.compile(rf"(?m)^{AGY_LOG_RELAY_INCOMPLETE_MARKER}:")
 _AGY_LOG_RELAY_ATTEMPT_RE = re.compile(
     rf"(?m)^{AGY_LOG_RELAY_ATTEMPT_MARKER} [0-9a-f]{{32}}$"
 )
@@ -1601,7 +1602,11 @@ class _AgyLogRelay:
             self.dir.mkdir(mode=0o700)
             os.mkfifo(self.fifo, 0o600)
             # Dispatcher-written attempt boundary: corroboration is per agy run.
-            self._append_sink(f"{AGY_LOG_RELAY_ATTEMPT_MARKER} {uuid.uuid4().hex}\n".encode())
+            # It always starts a line, even after an attempt killed mid-line.
+            lead = "\n" if self._sink_needs_newline() else ""
+            self._append_sink(
+                f"{lead}{AGY_LOG_RELAY_ATTEMPT_MARKER} {uuid.uuid4().hex}\n".encode()
+            )
         except OSError as exc:
             self.sink_error = self.sink_error or type(exc).__name__
         if self.sink_error is not None:
@@ -1613,11 +1618,42 @@ class _AgyLogRelay:
         self._thread.start()
 
     def _open_sink(self) -> int:
-        return os.open(
+        """Open the attestation log: a regular file, never a symlink or FIFO."""
+        import stat as _stat
+
+        fd = os.open(
             self.sink,
-            os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            os.O_WRONLY
+            | os.O_APPEND
+            | os.O_CREAT
+            | os.O_NONBLOCK
+            | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
+        if not _stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise OSError(21, "attestation log is not a regular file")
+        return fd
+
+    def _sink_needs_newline(self) -> bool:
+        """True when a regular, non-empty sink does not end in a newline."""
+        import stat as _stat
+
+        try:
+            fd = os.open(
+                self.sink, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+            )
+        except OSError:
+            return False
+        try:
+            info = os.fstat(fd)
+            if not _stat.S_ISREG(info.st_mode) or info.st_size == 0:
+                return False
+            return os.pread(fd, 1, info.st_size - 1) != b"\n"
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
 
     def _append_sink(self, data: bytes) -> None:
         try:
@@ -1668,7 +1704,8 @@ class _AgyLogRelay:
     def _run(self) -> None:
         try:
             source = os.open(self.fifo, os.O_RDONLY)
-        except OSError:
+        except OSError as exc:
+            self.sink_error = f"RELAY_OPEN_FAILED:{type(exc).__name__}"
             self._remove_endpoint()
             return
         self._opened.set()
@@ -1694,7 +1731,7 @@ class _AgyLogRelay:
                         sink_fd, b"".join(self._escape(line) + b"\n" for line in lines)
                     )
             if pending and sink_fd is not None:
-                sink_fd = self._relay_write(sink_fd, self._escape(pending))
+                sink_fd = self._relay_write(sink_fd, self._escape(pending) + b"\n")
         except OSError as exc:
             self.sink_error = self.sink_error or type(exc).__name__
         finally:
@@ -1725,7 +1762,7 @@ class _AgyLogRelay:
                 # Something besides agy still holds the write end: the log can
                 # no longer be attested.
                 self._append_sink(
-                    f"{AGY_LOG_RELAY_INCOMPLETE_MARKER}:WRITER_OUTLIVED_AGY\n".encode()
+                    f"\n{AGY_LOG_RELAY_INCOMPLETE_MARKER}:WRITER_OUTLIVED_AGY\n".encode()
                 )
         return not self._thread.is_alive() and self.sink_error is None
 
@@ -1778,7 +1815,7 @@ def _parse_agy_attestation(
     # when one relayed attempt resolved the requested alias to more than one
     # model or created more than one conversation (zero cases in 1846 real
     # operation logs), or the relay saw a writer outlive agy.
-    if AGY_LOG_RELAY_INCOMPLETE_MARKER in text or any(
+    if _AGY_LOG_RELAY_INCOMPLETE_RE.search(text) or any(
         _attempt_attestation_disagrees(segment, requested_model=requested_model)
         for segment in segments
     ):
