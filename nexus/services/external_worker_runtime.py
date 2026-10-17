@@ -1083,6 +1083,15 @@ class ClaudeAccountAdapter:
     ) -> None:
         self.manager.note_terminal_failure(self._lease_for(binding), failure_kind)
 
+    def confirm_terminal_failure(
+        self, binding: AccountBinding, failure_kind: AccountFailureKind
+    ) -> None:
+        """Atomically cool (per-person limits) and release after a known terminal failure."""
+
+        lease = self._lease_for(binding)
+        self.manager.confirm_terminal_failure(lease, failure_kind)
+        self._leases.pop(binding.lease_id_hash or "", None)
+
     def hold_unknown_outcome(self, binding: AccountBinding) -> None:
         """Keep this account leased (UNKNOWN_OUTCOME) until explicit reconciliation."""
 
