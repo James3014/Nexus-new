@@ -1,0 +1,60 @@
+{
+  "advance_report": {
+    "advanced": [],
+    "failures": [
+      {
+        "error": "route_already_frozen",
+        "error_type": "ValueError",
+        "phase": "ADMITTED",
+        "task_key": "James3014/Nexus-new#1511"
+      }
+    ],
+    "schema": "nexus.hybrid_replication.daemon_advance.v1"
+  },
+  "control_task_key": "James3014/Nexus-new#1511",
+  "ingest_report": {
+    "expected_count": 2,
+    "mirrored_count": 2,
+    "missing_admission": [
+      "James3014/repository-intelligence-engine#45"
+    ],
+    "missing_capture": [],
+    "schema": "nexus.hybrid_replication.daemon_ingest.v1",
+    "watchdog": {
+      "backfilled": [],
+      "missing": [],
+      "schema": "nexus.hybrid_replication.intake_reconciliation.v1",
+      "status": "COMPLETE"
+    }
+  },
+  "live_readiness_verdict": {
+    "blockers": [
+      "MISSING_ADMISSION",
+      "ADVANCE_FAILURE_PRESENT",
+      "CONTROL_NOT_SCORED"
+    ],
+    "claim_ceiling": "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT",
+    "control_phase": "RAW_SEALED",
+    "control_score_error": null,
+    "control_score_valid": false,
+    "control_task_key": "James3014/Nexus-new#1511",
+    "expected_count": 2,
+    "launchd_label": "com.nexus.hybrid-replication",
+    "launchd_loaded": true,
+    "mirrored_count": 2,
+    "schema": "nexus.hybrid_replication.automatic_capture_readiness.v1",
+    "service_observation": {
+      "label": "com.nexus.hybrid-replication",
+      "loaded": true,
+      "observed_at": "2026-10-06T23:40:52Z",
+      "schema": "nexus.hybrid_replication.service_observation.v1"
+    },
+    "status": "NOT_READY"
+  },
+  "service_observation": {
+    "label": "com.nexus.hybrid-replication",
+    "loaded": true,
+    "observed_at": "2026-10-06T23:40:52Z",
+    "schema": "nexus.hybrid_replication.service_observation.v1"
+  }
+}

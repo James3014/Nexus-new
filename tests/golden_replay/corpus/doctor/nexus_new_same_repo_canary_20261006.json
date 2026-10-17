@@ -1,0 +1,750 @@
+{
+  "advisory_observers": [],
+  "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
+  "completion_matrix": {
+    "claim_ceiling": "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY",
+    "layers": [
+      {
+        "evidence": {
+          "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6"
+        },
+        "freshness": "OBSERVED",
+        "gap": null,
+        "layer": "Implementation",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "27140d8ac7630654a9dff2648f7fabd1aff20e6d",
+        "source": "direct_operation",
+        "status": "PASS"
+      },
+      {
+        "evidence": {
+          "gate_policy_state": null,
+          "required_gate_count": 0
+        },
+        "freshness": "UNKNOWN",
+        "gap": "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN",
+        "layer": "Source verification",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "merged": false,
+          "merged_at": null,
+          "pr_number": null
+        },
+        "freshness": "UNKNOWN",
+        "gap": "MERGED_INTEGRATION_NOT_PROVEN",
+        "layer": "Integration",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "alignment": "ALIGNED",
+          "alignment_basis": "CONTENT_EQUIVALENT_LAST_SYNC",
+          "binding_basis": "EXACT_SUBJECT_REVISION",
+          "state": "INSTALLED",
+          "subject_revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc"
+        },
+        "freshness": "CURRENT",
+        "gap": null,
+        "layer": "Install/package",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "nexus_host_sync",
+        "status": "PASS"
+      },
+      {
+        "evidence": {
+          "component_count": 13,
+          "state": "INSTALLED",
+          "verified_component_count": 13
+        },
+        "freshness": "CURRENT",
+        "gap": null,
+        "layer": "Runtime",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "nexus_host_sync",
+        "status": "PASS"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "DEPLOYMENT_EVIDENCE_NOT_PROJECTED",
+        "layer": "Deployment",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "b18ce319e6a6eb9437b2d7161b443c5dd7b481f1",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "NATIVE_ENTRYPOINT_WITNESS_NOT_PROJECTED",
+        "layer": "Native / real entrypoint",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "AUTHORIZATION_AUTHORITY_NOT_PROJECTED",
+        "layer": "Authorization",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6",
+          "review_applicable": true,
+          "review_effect_id": "ed9e626cbfce2c98675522fdbbbcfbb60eb32fe4a9e5c2f333f93595211d3f13",
+          "review_verdict": "ACCEPT",
+          "subject_stable": true
+        },
+        "freshness": "STALE",
+        "gap": "REVIEW_SUBJECT_NOT_CURRENT",
+        "layer": "Independent acceptance",
+        "observed_at": "2026-10-06T13:11:30.778103+00:00",
+        "revision": "27140d8ac7630654a9dff2648f7fabd1aff20e6d",
+        "source": "direct_operation_review",
+        "status": "UNKNOWN"
+      }
+    ],
+    "subject_revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc"
+  },
+  "generated_at": "2026-10-06T13:11:30.778103+00:00",
+  "host": "REDACTED_HOST",
+  "leases": {
+    "active": [],
+    "family_unavailable": [
+      {
+        "account_alias_hash": "44c585e9a412",
+        "consumer_id": "desktop-cd36c312423e452ca796409fdb7dc211",
+        "lease_id_hash": "d71214a76839",
+        "model_family": "claude_gpt",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/44c585e9a412.family-unavailable.claude_gpt.json",
+        "pid": 59089,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791258226.567931,
+        "unavailable_until": 1791274116.0
+      },
+      {
+        "account_alias_hash": "63ef3e58e241",
+        "consumer_id": "desktop-17c3dda45930426c86a295ca2a34b638",
+        "lease_id_hash": "c7caa2a5447a",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/63ef3e58e241.family-unavailable.gemini.json",
+        "pid": 58229,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791288271.560085,
+        "unavailable_until": 1791675211.0
+      },
+      {
+        "account_alias_hash": "986a1b7135f4",
+        "consumer_id": "review-coordinator",
+        "model_family": "claude_gpt",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/986a1b7135f4.family-unavailable.claude_gpt.json",
+        "pid": 0,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791257170.0,
+        "unavailable_until": 1791535080.0
+      }
+    ],
+    "quarantined": [],
+    "root": "/Users/REDACTED/.nexus/agy-account-pool/leases"
+  },
+  "next_gate": {
+    "code": "NO_PENDING_GATE",
+    "reason": "No non-terminal workflow blocker was observed."
+  },
+  "operation": {
+    "active": [],
+    "all_active_count": 0,
+    "latest_terminal": {
+      "acceptance_contract_sha256": "9af1739177e1b784f9c3868b7c3f52058af35ef12d141a7a7381c2f22aed12b7",
+      "account_alias_hash": "d034504225b1",
+      "attempt_id": "attempt_55477a9acbfd421a8f3b9596542cea08",
+      "attempts": 2,
+      "auto_approve": null,
+      "base_head": "27140d8ac7630654a9dff2648f7fabd1aff20e6d",
+      "candidate_digest": "6674f2b114793557a1b424fb8f5d19e6c41ef48bdb5894a76bf2f878487f3e02",
+      "cli_version": null,
+      "command_sha256": null,
+      "continuation_role": null,
+      "created_at": "2026-10-06T04:12:17.587511+00:00",
+      "current_candidate_digest": null,
+      "cwd": "/Users/REDACTED/workspace/Nexus-new",
+      "dispatcher_heartbeat_at": "2026-10-06T04:15:06.396146+00:00",
+      "effective_permissions": {
+        "allow": [],
+        "deny": [
+          "command(*)",
+          "read_file(*)",
+          "write_file(*)"
+        ]
+      },
+      "effort": null,
+      "evidence_refs": [],
+      "exit_code": 0,
+      "failure_kind": "ACCOUNT_UNAVAILABLE",
+      "finish_reason": null,
+      "finished_at": "2026-10-06T04:15:06.396146+00:00",
+      "first_effect_at": null,
+      "first_pass_receipt_linkage": null,
+      "first_stream_activity_at": "2026-10-06T04:14:30.579823+00:00",
+      "first_tool_activity_at": null,
+      "handoff_hash": null,
+      "has_unresolved_external_effect": false,
+      "host_id": "REDACTED_HOST",
+      "input_delivery_source": null,
+      "input_delivery_state": "UNKNOWN",
+      "input_delivery_truncations": [],
+      "last_heartbeat_at": "2026-10-06T04:15:06.396146+00:00",
+      "last_output_at": null,
+      "last_progress_activity_at": null,
+      "lease_id_hash": "c339f2cd3eae",
+      "liveness_policy": null,
+      "mode": "plan",
+      "model": "claude-sonnet-4-6",
+      "observed_changed_paths": [],
+      "observed_model": "claude-sonnet-4-6",
+      "observed_provider": "agy",
+      "operation_id": "agyop_ed9e626cbfce2c98675522fdbbbcfbb6",
+      "permission_profile_kind": "NO_TOOL_PACKET",
+      "permission_profile_sha256": "7e4bd5b2b86df40957ab41d2aa856d703a76ec433b9a325356129105182d164e",
+      "phase": "TERMINAL",
+      "pid": 85372,
+      "predecessor_attempt_id": null,
+      "predecessor_operation_id": null,
+      "provider": "agy",
+      "provider_pgid": 86281,
+      "provider_pid": 86281,
+      "provider_process_state": "EXITED",
+      "provider_session_id": "361c2c47-aab8-4f9e-94a8-4c0b0f5130eb",
+      "provider_started_at": "2026-10-06T04:13:27.054614+00:00",
+      "provider_stream_last_activity_at": "2026-10-06T04:15:04.815325+00:00",
+      "quota_preflight_progress": {
+        "account_alias_hash": "d034504225b1",
+        "admission_state": "KNOWN_ELIGIBLE",
+        "phase": "PREFLIGHT_ADMITTED",
+        "probe_state": "PROBE_OK",
+        "quota_state": "weekly"
+      },
+      "reconciled_at": null,
+      "reconciliation": null,
+      "repo_root": "/Users/REDACTED/workspace/Nexus-new",
+      "require_free": null,
+      "review_applicable": true,
+      "review_base_revision": "99773ff287aeaa0d54feccfa5abe345d3e91d1dd",
+      "review_candidate_head": "27140d8ac7630654a9dff2648f7fabd1aff20e6d",
+      "review_changed_path_count": 4,
+      "review_compact_payload_sha256": null,
+      "review_compaction_schema": null,
+      "review_effect_id": "ed9e626cbfce2c98675522fdbbbcfbb60eb32fe4a9e5c2f333f93595211d3f13",
+      "review_failure_kind": null,
+      "review_launch_catalog_version": "nexus.agy_reviewer_launch_catalog.v2",
+      "review_launch_mode": "plan",
+      "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v2",
+      "review_launch_profile_sha256": "c8ca992df2d63bc1ed986a2da0da246f214352c295cf745558cb89514ff7e4b4",
+      "review_launch_requested_effort": null,
+      "review_packet_mode": null,
+      "review_packet_sha256": "67aaedb3bfecbc623965226fc7e434f2217762deb3273acc6e106f7c00720386",
+      "review_profile_version": "nexus.rdc_agy_packet_review.v1",
+      "review_receipt_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/review-receipt.json",
+      "review_receipt_sha256": "6fad2c1a67f05759c6b650ff5e4dbe0f3003afe49efe50139386df4c1aec7cf3",
+      "review_repo_root_sha256": "52fb6a71feaedfd7d248966e4183209f82a344c0521041372357ab5a89649de2",
+      "review_repository": "james3014/nexus-new",
+      "review_role": "Issue #1355 Stale failure_kind after rotation success Packet Reviewer",
+      "review_state": "TERMINAL",
+      "review_verdict": "ACCEPT",
+      "rotations": 1,
+      "runtime_revision": "99773ff287aeaa0d54feccfa5abe345d3e91d1dd",
+      "schema": "nexus.agy_operation.v1",
+      "scope_validation_state": "UNCONSTRAINED",
+      "scope_violations": [],
+      "source_attribution_state": "ATTRIBUTED",
+      "source_baseline_sha256": "e9acc3c812870580c95c83cde38e1534db5713a463b7d54bc8a12dcf253e8e89",
+      "started_at": "2026-10-06T04:12:17.646287+00:00",
+      "status": "COMPLETED",
+      "stderr_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/stderr.log",
+      "stdout_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_ed9e626cbfce2c98675522fdbbbcfbb6/stdout.log",
+      "subject_stable": true,
+      "time_to_first_effect_ms": null,
+      "tool_event_count": 0,
+      "total_cost": null,
+      "transition_role": null,
+      "write_paths": []
+    },
+    "requested_id": null,
+    "selected": null,
+    "selected_error": null
+  },
+  "pr": {
+    "pr_number": null,
+    "status": "NOT_REQUESTED"
+  },
+  "quota": {
+    "account_count": 12,
+    "accounts": [
+      {
+        "account": "google-02",
+        "checked_at": "2026-10-06T11:57:27.115604+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 69.0,
+              "reset_at": "2026-10-12T23:37:16Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 83.0,
+              "reset_at": "2026-10-10T23:23:27Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-03",
+        "checked_at": "2026-10-06T11:57:27.115604+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T09:53:00Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 96.0,
+              "reset_at": "2026-10-06T14:27:47Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 73.0,
+              "reset_at": "2026-10-08T14:56:47Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-05",
+        "checked_at": "2026-10-06T06:10:19.692149+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-13T06:10:29Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 98.0,
+              "reset_at": "2026-10-11T18:00:41Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-06",
+        "checked_at": "2026-10-06T06:10:19.692149+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T08:09:53Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 64.0,
+              "reset_at": "2026-10-06T09:42:17Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 78.0,
+              "reset_at": "2026-10-11T13:40:26Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-07",
+        "checked_at": "2026-10-06T06:10:19.692149+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T10:00:11Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-08T03:03:30Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-08",
+        "checked_at": "2026-10-06T06:10:19.692149+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T08:13:56Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 94.0,
+              "reset_at": "2026-10-06T09:01:58Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 84.0,
+              "reset_at": "2026-10-08T01:44:41Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-09",
+        "checked_at": "2026-10-06T12:04:26.241983+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-13T12:04:31Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T23:33:31Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-10",
+        "checked_at": "2026-10-06T10:47:12.848188+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 99.0,
+              "reset_at": "2026-10-10T17:26:40Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-13T10:47:15Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-11",
+        "checked_at": "2026-10-06T04:13:22.926233+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-13T04:13:26Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 87.0,
+              "reset_at": "2026-10-11T18:06:58Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-12",
+        "checked_at": "2026-10-06T09:51:34.840180+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-13T09:51:39Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 74.0,
+              "reset_at": "2026-10-11T18:20:16Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-13",
+        "checked_at": "2026-10-04T22:41:38.857140+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-11T22:42:06Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-10T23:33:55Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "primary",
+        "checked_at": "2026-10-06T03:08:16.406987+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": null,
+              "reset_at": null,
+              "status": "disabled"
+            },
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-10T08:38:00Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 37.0,
+              "reset_at": "2026-10-06T04:23:57Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 7.0,
+              "reset_at": "2026-10-08T19:50:22Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      }
+    ],
+    "age_seconds": 374.698302,
+    "checked_at": "2026-10-06T13:05:17.286426+00:00",
+    "path": "/Users/REDACTED/.nexus/agy-account-pool/quota-snapshot.json",
+    "status": "OBSERVED"
+  },
+  "required_gates": [],
+  "resume_disposition": "SAFE",
+  "runtime": {
+    "components": {
+      "agy_account_manager": {
+        "expected": {
+          "archive_sha256": "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c",
+          "package": "agy-cli-manager",
+          "version": "0.2.1"
+        },
+        "observed": {
+          "archive_sha256": "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c",
+          "manager_actual_sha256_b64": "1hoD9iLWMXUIrfoQ0FwDq_t2UfLG8l3DINPeeyB0vH0",
+          "manager_record_sha256_b64": "1hoD9iLWMXUIrfoQ0FwDq_t2UfLG8l3DINPeeyB0vH0",
+          "module_integrity": "VERIFIED",
+          "python": "/Users/REDACTED/.nexus/agy-account-pool/manager-venv-py313/bin/python",
+          "status": "OBSERVED",
+          "version": "0.2.1"
+        },
+        "status": "VERIFIED"
+      },
+      "agy_dispatch": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-agy-dispatch",
+        "sha256": "d2de9f351cc4751a9530f69029378c9a205e330db040211465af5e9989a7243e",
+        "status": "VERIFIED"
+      },
+      "agy_quota": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-agy-quota",
+        "sha256": "0fc3464133a81553ede81ca296a28d2d4d79f2a2b4fa986132cdecbecd28d4ee",
+        "status": "VERIFIED"
+      },
+      "external_worker_dispatch": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-external-worker-dispatch",
+        "sha256": "92b595234d6df27b64d08be6fb76a083b50821c915740029d2176684d6b47d32",
+        "status": "VERIFIED"
+      },
+      "grok_accounts": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-grok-accounts",
+        "sha256": "b7c737cced7a723b9b0d2b22f119a8258e1fad896931242407212c9b55134ca7",
+        "status": "VERIFIED"
+      },
+      "hcom_agy_safe": {
+        "entrypoint": "/Users/REDACTED/.local/bin/hcom-agy-safe",
+        "sha256": "9d2fba4ef493b5bc47723dc397ea5f9d96774f33f55c319620e98edef18358f4",
+        "status": "VERIFIED"
+      },
+      "hermes_continuation_controller": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-continuation-controller",
+        "sha256": "ff4479c386a714567d322c6f4c899f359f60316b97d80aa6b29ff508b0f55a28",
+        "status": "VERIFIED"
+      },
+      "hermes_controller_guard": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-controller-guard",
+        "sha256": "d3fb6ad51154ab704d6aeab33cbcfd42906c160cc024ad7effaa0e9ce68ae87e",
+        "status": "VERIFIED"
+      },
+      "hermes_launchd": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-launchd",
+        "sha256": "5061d86131a24b84ad0cba0859cefa6e2816151f666879c8e3410694d3b98bb7",
+        "status": "VERIFIED"
+      },
+      "host_sync": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-host-sync",
+        "status": "VERIFIED"
+      },
+      "manifest": {
+        "bundle_sha256": "5fc670f01dc1bdfa95b7fe28c5295ac07866f8d9101f3a6115516c4433b851a0",
+        "sha256": "6f7f6cd03fe928f013a4bea3e61f154a7f9f300e53238f3af315dfae0b7ed6e0",
+        "status": "VERIFIED"
+      },
+      "workflow_doctor": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-workflow-doctor",
+        "sha256": "a898582a3a0c45b0707c521347f852e5d8009bb9590547751f09b986a2dcae09",
+        "status": "VERIFIED"
+      },
+      "workflow_source_binding": {
+        "origin_remote": "https://github.com/James3014/Nexus-new.git",
+        "path": "/Users/REDACTED/.local/share/nexus-host-runtime/source-binding.json",
+        "repo_root": "/Users/REDACTED/workspace/Nexus-new",
+        "repository": "james3014/nexus-new",
+        "status": "VERIFIED"
+      }
+    },
+    "current_main_alignment": {
+      "basis": "CONTENT_EQUIVALENT_LAST_SYNC",
+      "current_main": "b18ce319e6a6eb9437b2d7161b443c5dd7b481f1",
+      "installed_bundle_sha256": "5fc670f01dc1bdfa95b7fe28c5295ac07866f8d9101f3a6115516c4433b851a0",
+      "installed_revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+      "status": "ALIGNED"
+    },
+    "desired_revision": null,
+    "entrypoint": "/Users/REDACTED/.local/bin/nexus-host-sync",
+    "host": "REDACTED_HOST",
+    "installed_bundle_sha256": "5fc670f01dc1bdfa95b7fe28c5295ac07866f8d9101f3a6115516c4433b851a0",
+    "installed_revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+    "last_sync": {
+      "checked_at": "2026-10-06T13:03:46.544957+00:00",
+      "desired_bundle_sha256": "5fc670f01dc1bdfa95b7fe28c5295ac07866f8d9101f3a6115516c4433b851a0",
+      "desired_revision": "b18ce319e6a6eb9437b2d7161b443c5dd7b481f1",
+      "installed_bundle_sha256": "5fc670f01dc1bdfa95b7fe28c5295ac07866f8d9101f3a6115516c4433b851a0",
+      "installed_revision": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+      "schema": "nexus.host_sync_observation.v1",
+      "state": "ALIGNED"
+    },
+    "source_revision_match": true,
+    "state": "INSTALLED",
+    "status": "OBSERVED"
+  },
+  "schema": "nexus.workflow_doctor.v1",
+  "source": {
+    "branch": "fix/issue-1355-routing-r2",
+    "default_branch": "main",
+    "dirty": true,
+    "dirty_entry_count": 1,
+    "github_main": "b18ce319e6a6eb9437b2d7161b443c5dd7b481f1",
+    "github_observation_error": null,
+    "head": "3bdc41c2b9a449b67c7ecf808319e9db9facc0cc",
+    "head_is_github_main": false,
+    "origin_main": "b18ce319e6a6eb9437b2d7161b443c5dd7b481f1",
+    "repo_root": "/Users/REDACTED/workspace/Nexus-new",
+    "repository": "James3014/Nexus-new",
+    "status": "OBSERVED"
+  },
+  "task": {
+    "issue_number": null,
+    "status": "NOT_REQUESTED"
+  },
+  "unknown_policy_checks": []
+}

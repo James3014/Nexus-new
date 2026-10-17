@@ -1,0 +1,866 @@
+{
+  "advisory_observers": [],
+  "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
+  "completion_matrix": {
+    "claim_ceiling": "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY",
+    "layers": [
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "CURRENT_IMPLEMENTATION_EVIDENCE_NOT_OBSERVED",
+        "layer": "Implementation",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "gate_policy_state": null,
+          "required_gate_count": 0
+        },
+        "freshness": "UNKNOWN",
+        "gap": "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN",
+        "layer": "Source verification",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "merged": false,
+          "merged_at": null,
+          "pr_number": null
+        },
+        "freshness": "UNKNOWN",
+        "gap": "MERGED_INTEGRATION_NOT_PROVEN",
+        "layer": "Integration",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "alignment": "NOT_APPLICABLE",
+          "alignment_basis": "CROSS_REPOSITORY_SOURCE_BINDING",
+          "binding_basis": null,
+          "state": "INSTALLED",
+          "subject_revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2"
+        },
+        "freshness": "UNKNOWN",
+        "gap": "CURRENT_INSTALL_BINDING_NOT_PROVEN",
+        "layer": "Install/package",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "809a1666037b989f61d72479b32a27e551b3ada6",
+        "source": "nexus_host_sync",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "component_count": 17,
+          "state": "INSTALLED",
+          "verified_component_count": 17
+        },
+        "freshness": "UNKNOWN",
+        "gap": "CURRENT_RUNTIME_WITNESS_NOT_PROVEN",
+        "layer": "Runtime",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "809a1666037b989f61d72479b32a27e551b3ada6",
+        "source": "nexus_host_sync",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "DEPLOYMENT_EVIDENCE_NOT_PROJECTED",
+        "layer": "Deployment",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "aa6d8be9ffda7399a267e858f703b468b21a416f",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "NATIVE_ENTRYPOINT_WITNESS_NOT_PROJECTED",
+        "layer": "Native / real entrypoint",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {},
+        "freshness": "UNKNOWN",
+        "gap": "AUTHORIZATION_AUTHORITY_NOT_PROJECTED",
+        "layer": "Authorization",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      },
+      {
+        "evidence": {
+          "operation_id": "agyop_72c7ea0a86174c4ca8eb2dcd7eba8ad8",
+          "review_applicable": null,
+          "review_effect_id": null,
+          "review_verdict": null,
+          "subject_stable": null
+        },
+        "freshness": "UNKNOWN",
+        "gap": "INDEPENDENT_ACCEPTANCE_EVIDENCE_NOT_OBSERVED",
+        "layer": "Independent acceptance",
+        "observed_at": "2026-10-17T10:43:06.649442+00:00",
+        "revision": null,
+        "source": "workflow_doctor",
+        "status": "UNKNOWN"
+      }
+    ],
+    "subject_revision": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2"
+  },
+  "generated_at": "2026-10-17T10:43:06.649442+00:00",
+  "host": "REDACTED_HOST",
+  "leases": {
+    "active": [
+      {
+        "account_alias_hash": "44c585e9a412",
+        "acquired_at": 1792233122.773385,
+        "claimed_at": 1792233122.773385,
+        "consumer_id": "desktop-f0ef451c7cd24a8eaa66a212686c003c",
+        "lease_id_hash": "f0ebfc53af8e",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/44c585e9a412.receipt.json",
+        "pid": 25554,
+        "status": "OBSERVED"
+      },
+      {
+        "account_alias_hash": "986a1b7135f4",
+        "acquired_at": 1792233102.5060349,
+        "claimed_at": 1792233102.5060349,
+        "consumer_id": "desktop-cfdfe0407dd64e97a6386c5e4daab8ff",
+        "lease_id_hash": "45980a38dfef",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/986a1b7135f4.receipt.json",
+        "pid": 17943,
+        "status": "OBSERVED"
+      },
+      {
+        "account_alias_hash": "b342e984c538",
+        "acquired_at": 1792233020.224826,
+        "claimed_at": 1792233020.224826,
+        "consumer_id": "desktop-74b86d497a1b496b901fc00b7f30d282",
+        "lease_id_hash": "585866429e02",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/b342e984c538.receipt.json",
+        "pid": 4061,
+        "status": "OBSERVED"
+      }
+    ],
+    "family_unavailable": [
+      {
+        "account_alias_hash": "4dcaafa917e1",
+        "consumer_id": "desktop-f266707b50854bbeb8576d4ebf0eb56b",
+        "lease_id_hash": "515abcad86f7",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/4dcaafa917e1.family-unavailable.gemini.json",
+        "pid": 26171,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791852827.939082,
+        "unavailable_until": 1792347616.0
+      },
+      {
+        "account_alias_hash": "63ef3e58e241",
+        "consumer_id": "desktop-05734be3ddf546d0967b6774f23dde97",
+        "lease_id_hash": "901cafe3da1c",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/63ef3e58e241.family-unavailable.gemini.json",
+        "pid": 95022,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791855107.587966,
+        "unavailable_until": 1792392299.0
+      },
+      {
+        "account_alias_hash": "8b1d759a713c",
+        "consumer_id": "desktop-e611d2b4c235413890cc53cd685397aa",
+        "lease_id_hash": "1852e66b8151",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/8b1d759a713c.family-unavailable.gemini.json",
+        "pid": 27749,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791791597.471425,
+        "unavailable_until": 1792384472.0
+      },
+      {
+        "account_alias_hash": "a7e334c8690a",
+        "consumer_id": "desktop-29baa7d616f3401ea57034c7b8057b29",
+        "lease_id_hash": "3fef4545accd",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/a7e334c8690a.family-unavailable.gemini.json",
+        "pid": 91041,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791800856.6905951,
+        "unavailable_until": 1792389999.0
+      },
+      {
+        "account_alias_hash": "d034504225b1",
+        "consumer_id": "desktop-f8a1d90a12054e03b5f94fa05a16a344",
+        "lease_id_hash": "e8ceb87647dc",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/d034504225b1.family-unavailable.gemini.json",
+        "pid": 22334,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1791783482.626061,
+        "unavailable_until": 1792346818.0
+      },
+      {
+        "account_alias_hash": "f822666a4e08",
+        "consumer_id": "worker:i2403-repro",
+        "lease_id_hash": "7c6c9d3b00dc",
+        "model_family": "gemini",
+        "path": "/Users/REDACTED/.nexus/agy-account-pool/leases/f822666a4e08.family-unavailable.gemini.json",
+        "pid": 72294,
+        "reason": "QUOTA_EXHAUSTED",
+        "status": "OBSERVED",
+        "unavailable_at": 1792160493.7556129,
+        "unavailable_until": 1792346440.7555578
+      }
+    ],
+    "quarantined": [],
+    "root": "/Users/REDACTED/.nexus/agy-account-pool/leases"
+  },
+  "next_gate": {
+    "code": "NO_PENDING_GATE",
+    "reason": "No non-terminal workflow blocker was observed."
+  },
+  "operation": {
+    "active": [],
+    "all_active_count": 3,
+    "latest_terminal": {
+      "acceptance_contract_sha256": null,
+      "account_alias_hash": "b342e984c538",
+      "attempt_id": "attempt_19476583cccd46ffa4dcf79ed1c3c3dc",
+      "attempts": 1,
+      "auto_approve": null,
+      "base_head": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+      "candidate_digest": null,
+      "cli_version": null,
+      "command_sha256": null,
+      "continuation_role": null,
+      "created_at": "2026-10-07T23:09:00.545536+00:00",
+      "current_candidate_digest": null,
+      "cwd": "/Users/REDACTED/.local/state/dsh-rie57/standalone-20261008",
+      "dispatcher_heartbeat_at": "2026-10-07T23:10:49.074947+00:00",
+      "effective_permissions": {
+        "allow": [],
+        "deny": [
+          "command(*)",
+          "read_file(*)",
+          "write_file(*)"
+        ]
+      },
+      "effort": "high",
+      "evidence_refs": [],
+      "excluded_account_hashes": [],
+      "exit_code": 0,
+      "failure_kind": null,
+      "finish_reason": null,
+      "finished_at": "2026-10-07T23:10:49.074947+00:00",
+      "first_effect_at": null,
+      "first_pass_receipt_linkage": null,
+      "first_stream_activity_at": "2026-10-07T23:09:04.928101+00:00",
+      "first_tool_activity_at": "2026-10-07T23:09:30.238217+00:00",
+      "handoff_hash": null,
+      "has_unresolved_external_effect": false,
+      "host_id": "REDACTED_HOST",
+      "input_delivery_source": null,
+      "input_delivery_state": "UNKNOWN",
+      "input_delivery_truncations": [],
+      "last_heartbeat_at": "2026-10-07T23:10:49.074947+00:00",
+      "last_output_at": null,
+      "last_progress_activity_at": "2026-10-07T23:10:25.644518+00:00",
+      "lease_id_hash": "81a12a9c24fd",
+      "liveness_policy": {
+        "coding_progress_required": false,
+        "pre_effect_max_seconds": 90.0,
+        "pre_effect_max_tool_events": 24,
+        "provider_stall_seconds": 90.0,
+        "stream_no_progress_seconds": 120.0
+      },
+      "mode": null,
+      "model": "gemini-3.1-pro-high",
+      "model_catalog": null,
+      "observed_changed_paths": [],
+      "observed_model": "gemini-3.1-pro-high",
+      "observed_provider": "agy",
+      "operation_id": "agyop_72c7ea0a86174c4ca8eb2dcd7eba8ad8",
+      "permission_profile_kind": "NO_TOOL_PACKET",
+      "permission_profile_sha256": "7e4bd5b2b86df40957ab41d2aa856d703a76ec433b9a325356129105182d164e",
+      "phase": "TERMINAL",
+      "pid": 10577,
+      "predecessor_attempt_id": null,
+      "predecessor_operation_id": null,
+      "provider": "agy",
+      "provider_pgid": 10636,
+      "provider_pid": 10636,
+      "provider_process_state": "EXITED",
+      "provider_session_id": "aa6c878b-63dd-4c8f-8010-00b30980cfdc",
+      "provider_started_at": "2026-10-07T23:09:01.174198+00:00",
+      "provider_stream_last_activity_at": "2026-10-07T23:10:48.682557+00:00",
+      "quota_preflight_decision": null,
+      "quota_preflight_progress": {
+        "account_alias_hash": "b342e984c538",
+        "admission_state": "KNOWN_ELIGIBLE",
+        "phase": "PREFLIGHT_ADMITTED",
+        "probe_state": "PROBE_OK",
+        "quota_state": "five_hour"
+      },
+      "reconciled_at": null,
+      "reconciliation": null,
+      "repo_root": "/Users/REDACTED/.local/state/dsh-rie57/standalone-20261008",
+      "requested_model": null,
+      "require_free": null,
+      "resolved_model": null,
+      "review_applicable": null,
+      "review_base_revision": null,
+      "review_candidate_head": null,
+      "review_changed_path_count": null,
+      "review_compact_payload_sha256": null,
+      "review_compaction_schema": null,
+      "review_effect_id": null,
+      "review_failure_kind": null,
+      "review_launch_catalog_version": null,
+      "review_launch_mode": null,
+      "review_launch_profile_id": null,
+      "review_launch_profile_sha256": null,
+      "review_launch_requested_effort": null,
+      "review_packet_mode": null,
+      "review_packet_sha256": null,
+      "review_profile_version": null,
+      "review_receipt_path": null,
+      "review_receipt_sha256": null,
+      "review_repo_root_sha256": null,
+      "review_repository": null,
+      "review_role": null,
+      "review_state": null,
+      "review_verdict": null,
+      "rotations": 0,
+      "runtime_revision": "b74189f1dc7f79fc8a7d8709da9be65859f8514f",
+      "schema": "nexus.agy_operation.v1",
+      "scope_validation_state": "UNCONSTRAINED",
+      "scope_violations": [],
+      "source_attribution_state": "ATTRIBUTED",
+      "source_baseline_sha256": "08e2ea0b763b6c811511ccb5d9ff9570e031634ef3d558b075bc178799745e8d",
+      "started_at": "2026-10-07T23:09:00.597713+00:00",
+      "status": "COMPLETED",
+      "stderr_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_72c7ea0a86174c4ca8eb2dcd7eba8ad8/stderr.log",
+      "stdout_path": "/Users/REDACTED/.local/state/nexus-agy-operations/operations/agyop_72c7ea0a86174c4ca8eb2dcd7eba8ad8/stdout.log",
+      "subject_stable": null,
+      "time_to_first_effect_ms": null,
+      "tool_event_count": 4,
+      "total_cost": null,
+      "transition_role": null,
+      "write_paths": []
+    },
+    "requested_id": null,
+    "selected": null,
+    "selected_error": null
+  },
+  "pr": {
+    "pr_number": null,
+    "status": "NOT_REQUESTED"
+  },
+  "quota": {
+    "account_count": 12,
+    "accounts": [
+      {
+        "account": "google-02",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-23T16:19:45Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-24T00:18:17Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-03",
+        "checked_at": "2026-10-17T10:32:02.819752+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T15:32:06Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 50.0,
+              "reset_at": "2026-10-23T16:19:36Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 86.0,
+              "reset_at": "2026-10-17T11:34:00Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 85.0,
+              "reset_at": "2026-10-23T22:57:07Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-05",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 67.0,
+              "reset_at": "2026-10-23T16:19:48Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-23T23:47:03Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-06",
+        "checked_at": "2026-10-17T10:30:20.381500+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T15:30:25Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 49.0,
+              "reset_at": "2026-10-23T16:19:39Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 85.0,
+              "reset_at": "2026-10-17T10:36:42Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 85.0,
+              "reset_at": "2026-10-24T00:36:42Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-07",
+        "checked_at": "2026-10-17T10:21:25.749404+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T15:21:31Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 69.0,
+              "reset_at": "2026-10-23T16:37:50Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 90.0,
+              "reset_at": "2026-10-17T14:52:06Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 82.0,
+              "reset_at": "2026-10-23T23:52:06Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-08",
+        "checked_at": "2026-10-17T09:28:34.469668+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T14:28:40Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 75.0,
+              "reset_at": "2026-10-23T10:58:50Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T11:14:54Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 93.0,
+              "reset_at": "2026-10-23T23:52:05Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-09",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 30.0,
+              "reset_at": "2026-10-23T16:19:51Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 99.0,
+              "reset_at": "2026-10-23T23:54:50Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-10",
+        "checked_at": "2026-10-17T09:56:31.599385+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T14:56:35Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 49.0,
+              "reset_at": "2026-10-23T16:19:43Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 90.0,
+              "reset_at": "2026-10-17T14:37:05Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 81.0,
+              "reset_at": "2026-10-23T23:37:05Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-11",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-23T16:33:32Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-23T23:47:13Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-12",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 0.0,
+              "reset_at": "2026-10-23T16:33:34Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 99.0,
+              "reset_at": "2026-10-23T23:47:48Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "google-13",
+        "checked_at": "2026-10-17T00:18:12.761255+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "weekly": {
+              "remaining_pct": 77.0,
+              "reset_at": "2026-10-23T16:33:34Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "weekly": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-24T00:19:02Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      },
+      {
+        "account": "primary",
+        "checked_at": "2026-10-17T10:31:42.552097+00:00",
+        "error": null,
+        "groups": {
+          "Claude and GPT models": {
+            "5h": {
+              "remaining_pct": 100.0,
+              "reset_at": "2026-10-17T15:31:47Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 46.0,
+              "reset_at": "2026-10-23T16:12:26Z",
+              "status": "known"
+            }
+          },
+          "Gemini Models": {
+            "5h": {
+              "remaining_pct": 91.0,
+              "reset_at": "2026-10-17T14:45:50Z",
+              "status": "known"
+            },
+            "weekly": {
+              "remaining_pct": 78.0,
+              "reset_at": "2026-10-23T22:42:47Z",
+              "status": "known"
+            }
+          }
+        },
+        "ok": true
+      }
+    ],
+    "age_seconds": 665.759963,
+    "checked_at": "2026-10-17T10:32:02.819752+00:00",
+    "path": "/Users/REDACTED/.nexus/agy-account-pool/quota-snapshot.json",
+    "status": "OBSERVED"
+  },
+  "required_gates": [],
+  "resume_disposition": "SAFE",
+  "runtime": {
+    "components": {
+      "agy_account_manager": {
+        "expected": {
+          "archive_sha256": "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c",
+          "package": "agy-cli-manager",
+          "version": "0.2.1"
+        },
+        "observed": {
+          "archive_sha256": "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c",
+          "manager_actual_sha256_b64": "1hoD9iLWMXUIrfoQ0FwDq_t2UfLG8l3DINPeeyB0vH0",
+          "manager_record_sha256_b64": "1hoD9iLWMXUIrfoQ0FwDq_t2UfLG8l3DINPeeyB0vH0",
+          "module_integrity": "VERIFIED",
+          "python": "/Users/REDACTED/.nexus/agy-account-pool/manager-venv-py313/bin/python",
+          "status": "OBSERVED",
+          "version": "0.2.1"
+        },
+        "status": "VERIFIED"
+      },
+      "agy_dispatch": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-agy-dispatch",
+        "sha256": "9ba9e78f03e229aba6394334a8572372b642a4dd5c8efd27337ec67364a60043",
+        "status": "VERIFIED"
+      },
+      "agy_quota": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-agy-quota",
+        "sha256": "9741844bb67ec62b930ae61b94e591ddd0972f427864ab6e9e6bd17d82156869",
+        "status": "VERIFIED"
+      },
+      "core_issue_check_local": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-core-issue-check-local",
+        "sha256": "ee089166f268ba1e746d85477280fe7c8e8b75e0a93ab9eee433bf7fb8a54a44",
+        "status": "VERIFIED"
+      },
+      "dsh_agy_adapter": {
+        "entrypoint": "/Users/REDACTED/.local/share/dsh-runtime/node_modules/@nexus/dsh-llm-agy-pilot",
+        "generation": "/Users/REDACTED/.local/share/dsh-runtime/node_modules/@nexus/.dsh-llm-agy-pilot-c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+        "index_sha256": "f37fe085628458397e3ca2f19add75da3cdcb0bf2b55395d48c24c8192545ee4",
+        "package_sha256": "8c078236ac375c990eee5bf0661ff71bbf4a5996435c610b8b8f385e96e5b305",
+        "status": "VERIFIED"
+      },
+      "dsh_workflow_guard": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-dsh-workflow",
+        "sha256": "febb60bac68ed0baa488911b2e4ba781085f1a47c10a24ef63817a538904d5e9",
+        "status": "VERIFIED"
+      },
+      "external_worker_dispatch": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-external-worker-dispatch",
+        "sha256": "7ea47257c8098c0455abb60ac25b49d6a95cc304ad70e49c4523ecfa61690d4e",
+        "status": "VERIFIED"
+      },
+      "grok_accounts": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-grok-accounts",
+        "sha256": "c2476780b64cbd303a908953b32d7bfe02cd244b97c1259da169f3b277d28914",
+        "status": "VERIFIED"
+      },
+      "hcom_agy_safe": {
+        "entrypoint": "/Users/REDACTED/.local/bin/hcom-agy-safe",
+        "sha256": "9d2fba4ef493b5bc47723dc397ea5f9d96774f33f55c319620e98edef18358f4",
+        "status": "VERIFIED"
+      },
+      "hermes_continuation_controller": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-continuation-controller",
+        "sha256": "9a6ef6dbb256ec1bd7fd94c7a60f4e2defc9685a77ec616af43ed29bb51629b6",
+        "status": "VERIFIED"
+      },
+      "hermes_controller_guard": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-controller-guard",
+        "sha256": "d3fb6ad51154ab704d6aeab33cbcfd42906c160cc024ad7effaa0e9ce68ae87e",
+        "status": "VERIFIED"
+      },
+      "hermes_core_completion": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-core-completion",
+        "sha256": "af1ac1c9f14a3ff9d0ff27a6f34527e00103233d50fe1e305477e70a4b7403ec",
+        "status": "VERIFIED"
+      },
+      "hermes_launchd": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-hermes-launchd",
+        "sha256": "5061d86131a24b84ad0cba0859cefa6e2816151f666879c8e3410694d3b98bb7",
+        "status": "VERIFIED"
+      },
+      "host_sync": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-host-sync",
+        "status": "VERIFIED"
+      },
+      "manifest": {
+        "bundle_sha256": "c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+        "sha256": "ba9610521626049866a3e0e4ae1c2c23d89ffc8d93c07de34d3a9b9da003dc6b",
+        "status": "VERIFIED"
+      },
+      "workflow_doctor": {
+        "entrypoint": "/Users/REDACTED/.local/bin/nexus-workflow-doctor",
+        "sha256": "a898582a3a0c45b0707c521347f852e5d8009bb9590547751f09b986a2dcae09",
+        "status": "VERIFIED"
+      },
+      "workflow_source_binding": {
+        "origin_remote": "https://github.com/James3014/Nexus-new.git",
+        "path": "/Users/REDACTED/.local/share/nexus-host-runtime/source-binding.json",
+        "repo_root": "/Users/REDACTED/workspace/Nexus-new",
+        "repository": "james3014/nexus-new",
+        "status": "VERIFIED"
+      }
+    },
+    "current_main_alignment": {
+      "basis": "CROSS_REPOSITORY_SOURCE_BINDING",
+      "current_main": null,
+      "installed_bundle_sha256": "c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+      "installed_revision": "809a1666037b989f61d72479b32a27e551b3ada6",
+      "runtime_source_repository": "james3014/nexus-new",
+      "source_revision_match": true,
+      "status": "NOT_APPLICABLE",
+      "target_repository": "James3014/repository-intelligence-engine"
+    },
+    "desired_revision": null,
+    "entrypoint": "/Users/REDACTED/.local/bin/nexus-host-sync",
+    "host": "REDACTED_HOST",
+    "installed_bundle_sha256": "c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+    "installed_revision": "809a1666037b989f61d72479b32a27e551b3ada6",
+    "last_sync": {
+      "checked_at": "2026-10-17T10:41:13.455245+00:00",
+      "desired_bundle_sha256": "c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+      "desired_revision": "4b6ad25ec4a0acf541edf2ae4566aa3535b9b9ed",
+      "installed_bundle_sha256": "c83dbb186d4a3f0cd8b4051c10a812583c59854c8c3531c39f3d2895d35c5762",
+      "installed_revision": "809a1666037b989f61d72479b32a27e551b3ada6",
+      "schema": "nexus.host_sync_observation.v1",
+      "state": "ALIGNED"
+    },
+    "source_revision_match": true,
+    "state": "INSTALLED",
+    "status": "OBSERVED"
+  },
+  "schema": "nexus.workflow_doctor.v1",
+  "source": {
+    "branch": "dsh/rie57-20261008-v2",
+    "default_branch": "main",
+    "dirty": true,
+    "dirty_entry_count": 2,
+    "github_main": "aa6d8be9ffda7399a267e858f703b468b21a416f",
+    "github_observation_error": null,
+    "head": "c6f6d7f226af3aa1338913d4f1d91b06e52ff1c2",
+    "head_is_github_main": false,
+    "origin_main": "88285acf570688befbc8e36eb73f46987171bd4e",
+    "repo_root": "/Users/REDACTED/.local/state/dsh-rie57/standalone-20261008",
+    "repository": "James3014/repository-intelligence-engine",
+    "status": "OBSERVED"
+  },
+  "task": {
+    "issue_number": 57,
+    "state": "closed",
+    "status": "OBSERVED",
+    "title": "Implement deterministic guard semantic delta evidence",
+    "updated_at": "2026-10-08T04:51:03Z",
+    "url": "https://github.com/James3014/repository-intelligence-engine/issues/57"
+  },
+  "unknown_policy_checks": []
+}

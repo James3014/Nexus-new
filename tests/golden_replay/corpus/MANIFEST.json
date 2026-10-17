@@ -1,0 +1,193 @@
+{
+  "captured_at": "2026-10-17",
+  "fixtures": [
+    {
+      "family": "agy_fenced_json_reply",
+      "fixture_sha256": "9444843a11a3e293d58dd46b0555b64544fc6dd0586630f99244c7f3463e6d4d",
+      "path": "agy_probe/probe-1566815808944e8eb8da035bc955c622.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "gemini-3.1-pro-high",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-1566815808944e8eb8da035bc955c622.stdout",
+      "source_job": "NEXUS-1473-CANONICAL-POOLED-AGY-LONGTURN-R5.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "291a66259e9fc4601c3966c79e4dcf410b16eaa38968ccd2e2c74205686bd3aa"
+    },
+    {
+      "family": "agy_plain_json_reply",
+      "fixture_sha256": "6bc82618837baac7585565528ec68b91ca687cd7effbbd4a582963e777420935",
+      "path": "agy_probe/probe-24baf01b3c9a412a85a509dc916a3b59.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "Gemini 3.8 Flash (Medium)",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-24baf01b3c9a412a85a509dc916a3b59.stdout",
+      "source_job": "NEXUS-1467-T06-GEMINI38FLASH-MEDIUM-B2-R1.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "e44462a0e7469469efc2890f49ce9af06d204c6a901d84bbfaa08779cefbc407"
+    },
+    {
+      "family": "agy_fenced_json_reply",
+      "fixture_sha256": "c6a20fc99ad067bdc59bb99368b54069c4f60ff2b02d00adbcf9bea7dac873db",
+      "path": "agy_probe/probe-31904669a4c24ce788c685ae077bb829.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "gemini-3.7-flash-medium",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-31904669a4c24ce788c685ae077bb829.stdout",
+      "source_job": "issue-1384-v2-model-probe-4.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "9309ead0cb23949489f05a331caa45a2c6263df8eb40005fe2beb815ad32d8ee"
+    },
+    {
+      "family": "agy_fenced_json_reply",
+      "fixture_sha256": "ecf751eb34b1da63bb1ade7b5bd07f2c8f65ac2ef83599c9d52383b1273e48e4",
+      "path": "agy_probe/probe-5209c1d993c34c9cb306fd62aaf98ffd.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "gemini-3.1-pro-high",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-5209c1d993c34c9cb306fd62aaf98ffd.stdout",
+      "source_job": "NEXUS-1473-CANONICAL-POOLED-AGY-LONGTURN-R4.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "70a4521a9ecef406210fa871886ecdb93316e1d901397a40a6d52d22f0890e04"
+    },
+    {
+      "family": "agy_plain_json_reply",
+      "fixture_sha256": "1d034ca5bf6700b8d1b1c36d5c834e69839140c3ee125457a3454fd29e3315d9",
+      "path": "agy_probe/probe-57a7fcd8fcee4b00a5bfb70625a78070.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "gemini-3.8-flash-medium",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-57a7fcd8fcee4b00a5bfb70625a78070.stdout",
+      "source_job": "i2218-run2-probe-agy-flash38-1.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "c926237ccd9f98b08b8426afcd8fe5af989a0cdb7813fe1bbf04f0e4029ab20e"
+    },
+    {
+      "family": "agy_fenced_json_reply",
+      "fixture_sha256": "12feffe5e4c84559cd242a142dee443d1f93149b4e2ab3f12c75318d411c8fd5",
+      "path": "agy_probe/probe-6f4f6a41b870450daf9af7f43394201c.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "gemini-3.6-flash-high",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-6f4f6a41b870450daf9af7f43394201c.stdout",
+      "source_job": "issue-1384-v2-model-probe-36high.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "8ae1e3a4fa79128dab9f3d1b28c565626e41c0573e3c1602148e5770f15e7c80"
+    },
+    {
+      "family": "agy_fenced_json_reply",
+      "fixture_sha256": "1b330050449d01308d8fc8053935105970ff958d19509c1af4b1bfac5bd82256",
+      "path": "agy_probe/probe-cd823c32da454223a4b5abb406f9d512.json",
+      "pr": 1472,
+      "real": true,
+      "redaction": "conversation_id replaced by REDACTED_CONVERSATION_ID; JSON re-serialized with sorted keys",
+      "resolved_model": "claude-sonnet-4-6",
+      "source": "~/.local/state/Nexus-new-self-hosted-state/assisted_provider_jobs/probe-cd823c32da454223a4b5abb406f9d512.stdout",
+      "source_job": "issue-1384-v2-model-probe-claude.json",
+      "source_mtime_note": "captured by the live gateway model probe",
+      "source_sha256": "2acaa7b3e9b0c0f3142dcde2cb9f9d9999a986186309dc3bb2f4eb84c4e8e99d"
+    },
+    {
+      "family": "same_repo_doctor_state",
+      "fixture_sha256": "b26021bcb2be7439d314c8d5008704308b9c4341ffb5532ff8d71393dd12fd32",
+      "path": "doctor/nexus_new_same_repo_canary_20261006.json",
+      "pr": 1605,
+      "real": true,
+      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
+      "source": "~/.local/state/nexus-dsh-pilot/canary/doctor.json (live doctor, 2026-10-06)",
+      "source_sha256": "997777f69c64705d806a55a40534254a251e10b3c3d99093da3f9c466093cfd3"
+    },
+    {
+      "family": "cross_repo_doctor_state",
+      "fixture_sha256": "5183f8545a503dd408c6fc3511e8aef7350af6fd3251d75760561236c0a9133b",
+      "path": "doctor/rie57_cross_repo_20261017.json",
+      "pr": 1605,
+      "real": true,
+      "redaction": "home directory prefix replaced by /Users/REDACTED; host name replaced by REDACTED_HOST; Agy pool aliases and lease hashes are already non-secret aliases/hashes and kept",
+      "source": "~/.local/bin/nexus-workflow-doctor --json --repo-root ~/.local/state/dsh-rie57/standalone-20261008 --repository James3014/repository-intelligence-engine --issue 57 (live host runtime, read-only, captured 2026-10-17)",
+      "source_sha256": "879872089529cbc248577a1a5b218e5a5a49e0cf32e75adb4753c6ef154fa379"
+    },
+    {
+      "family": "git_executable_mode",
+      "fixture_sha256": "a34bc2164d6c8dd00ba3f6ba438327d9e35503fcfe2a44c8db46038ee2de3bad",
+      "path": "git_tree/pr1901_merge_trusted_impact_sources.lstree",
+      "pr": 1901,
+      "real": true,
+      "redaction": "none (public repository tree metadata)",
+      "source": "git ls-tree ee2e165cc4bb60edf6552ef9656683cef1844f79 -- <6 trusted impact gate sources> (James3014/Nexus-new)",
+      "source_revision": "ee2e165cc4bb60edf6552ef9656683cef1844f79",
+      "source_sha256": "a34bc2164d6c8dd00ba3f6ba438327d9e35503fcfe2a44c8db46038ee2de3bad"
+    },
+    {
+      "family": "hybrid_readiness_state",
+      "fixture_sha256": "2188762b1c6ae69cb3e20a9b252e474701ddbc15c256f5da400c45bf762442fa",
+      "path": "readiness/v6_stage1_reports.json",
+      "pr": 1514,
+      "real": true,
+      "redaction": "none needed (no paths/credentials); the three JSON documents of the log were split into named keys",
+      "source": "~/.local/state/nexus-hybrid-deployment-replication-20260930/live/readiness-control-v6/receipts/readiness-control-stage1.log + service-observation-current.json",
+      "source_sha256": "726c535f839b94afbcae7bb48a0295fe41f84b2e3cd80449949b7012f56c03c9"
+    },
+    {
+      "family": "hybrid_readiness_state",
+      "fixture_sha256": "28af9f66d2e5a2e409433cc328d763d20a43394b124a7101aad3caba2ab2de13",
+      "path": "readiness/v6_store/tasks/James3014__Nexus-new--1511/state.json",
+      "pr": 1514,
+      "real": true,
+      "redaction": "none (public Issue snapshot + hashes only); byte-identical copy",
+      "source": "~/.local/state/nexus-hybrid-deployment-replication-20260930/live/readiness-control-v6/store/tasks/James3014__Nexus-new--1511/state.json",
+      "source_sha256": "28af9f66d2e5a2e409433cc328d763d20a43394b124a7101aad3caba2ab2de13"
+    },
+    {
+      "family": "hybrid_readiness_state",
+      "fixture_sha256": "4463b7eff0b2a1374598fbd09489f07aaf232e070f3c2116942e19f07fa05560",
+      "path": "readiness/v6_store/tasks/James3014__repository-intelligence-engine--45/state.json",
+      "pr": 1514,
+      "real": true,
+      "redaction": "none (public Issue snapshot + hashes only); byte-identical copy",
+      "source": "~/.local/state/nexus-hybrid-deployment-replication-20260930/live/readiness-control-v6/store/tasks/James3014__repository-intelligence-engine--45/state.json",
+      "source_sha256": "4463b7eff0b2a1374598fbd09489f07aaf232e070f3c2116942e19f07fa05560"
+    },
+    {
+      "family": "task_card_bundle",
+      "fixture_sha256": "70c10ddeb30a4daa1ef59440e03c171a00f1bcf0510c9d9575907f7e6619a88d",
+      "path": "task_cards/github-issue-1032-b3-mimo-route-20260920__00-b3-mimo-route.md",
+      "pr": null,
+      "real": true,
+      "redaction": "none (committed public repository content); byte-identical copy",
+      "source": "git show afa134da15516254086900c351a2c18c58f823ba:tasks/github-issue-1032-b3-mimo-route-20260920/00-b3-mimo-route.md",
+      "source_revision": "afa134da15516254086900c351a2c18c58f823ba",
+      "source_sha256": "70c10ddeb30a4daa1ef59440e03c171a00f1bcf0510c9d9575907f7e6619a88d"
+    },
+    {
+      "card_hash_verified": "2c191a9a24d51efe924d3f277ff25fbef04e061ba0a8b55932e6b279ea2655b2",
+      "family": "task_card_bundle",
+      "fixture_sha256": "2c191a9a24d51efe924d3f277ff25fbef04e061ba0a8b55932e6b279ea2655b2",
+      "path": "task_cards/i2403-live-run4-20261016__00-i2403-run4-runbook-core-pin-section.md",
+      "pr": null,
+      "real": true,
+      "redaction": "none; card text reconstructed from the gateway's exact_card_diff and verified against the gateway-reported card_hash (sha256)",
+      "source": "live MCP Gateway nexus_task_card_create result ~/workspace/.scratch/20261016-2403-live/run4/create-out.json (exact_card_diff)",
+      "source_sha256": "105c3b33f3666c266b104553144fc404c9d1a0ce6935aaa24ff01687ecadda96"
+    },
+    {
+      "family": "task_card_bundle",
+      "fixture_sha256": "a2356c735adccf65358f4df5d7a81d3797c06b66ff3c543b56b1cb7bc9f672f8",
+      "path": "task_cards/issue-1384-completion-liveness-r2__00-issue-1384-main-drift-liveness-r2.md",
+      "pr": null,
+      "real": true,
+      "redaction": "none (committed public repository content); byte-identical copy",
+      "source": "git show afa134da15516254086900c351a2c18c58f823ba:tasks/issue-1384-completion-liveness-r2/00-issue-1384-main-drift-liveness-r2.md",
+      "source_revision": "afa134da15516254086900c351a2c18c58f823ba",
+      "source_sha256": "a2356c735adccf65358f4df5d7a81d3797c06b66ff3c543b56b1cb7bc9f672f8"
+    }
+  ],
+  "issue": "James3014/Nexus-new#2455",
+  "policy": "Fixtures are immutable real captures. Never edit; add a new fixture instead. Synthetic data is never admitted.",
+  "schema": "nexus.golden_replay_corpus.manifest.v1"
+}
