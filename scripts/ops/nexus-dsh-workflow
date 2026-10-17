@@ -1512,6 +1512,156 @@ def _run_ruff(
     return out
 
 
+def _exact_base_gate() -> Any:
+    """Load the CI exact-base finding classifier that sits beside this script."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parent / "exact_base_tool_gate.py"
+    spec = importlib.util.spec_from_file_location("exact_base_tool_gate_for_dsh", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - broken install
+        raise DshWorkflowError("EXACT_BASE_GATE_MISSING", f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("exact_base_tool_gate_for_dsh", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+_RUFF_CONFIG_FILES = ("pyproject.toml", "ruff.toml", ".ruff.toml")
+
+
+def _materialize_base_tree(repo: Path, base: str, paths: list[str], dest: Path) -> None:
+    """Write the base version of each path (if it existed) plus head ruff config."""
+    for rel in paths:
+        shown = subprocess.run(
+            ["git", "show", f"{base}:{rel}"], cwd=str(repo), capture_output=True, check=False
+        )
+        if shown.returncode != 0:
+            continue  # new file at head: nothing existed at base
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(shown.stdout)
+    for name in _RUFF_CONFIG_FILES:
+        if (repo / name).is_file():
+            shutil.copyfile(repo / name, dest / name)
+
+
+def _ruff_json(cwd: Path, python: str, paths: list[str], timeout: float) -> tuple[Any, str]:
+    argv = [python, "-m", "ruff", "check", "--no-cache", "--output-format", "json", *paths]
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        proc = subprocess.run(
+            argv, cwd=str(cwd), env=env, capture_output=True, timeout=timeout, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except OSError:
+        return None, "environment"
+    if proc.returncode not in (0, 1):
+        return None, "environment"
+    try:
+        return json.loads(proc.stdout.decode("utf-8", "replace") or "[]"), "ok"
+    except ValueError:
+        return None, "environment"
+
+
+def _run_ruff_check_new_only(
+    repo: Path, python: str, paths: list[str], base: str, timeout: float
+) -> dict[str, Any]:
+    """ruff check where only findings new against the base block (exact-base identity)."""
+    gate = _exact_base_gate()
+    out: dict[str, Any] = {
+        "command": [python, "-m", "ruff", "check", "--no-cache", "--output-format", "json", *paths],
+        "exit_code": 0,
+        "output": "",
+        "status": "ok",
+        "mode": "new_findings_against_base",
+    }
+    head_json, head_status = _ruff_json(repo, python, paths, timeout)
+    if head_json is None:
+        out["status"] = head_status
+        out["exit_code"] = None
+        return out
+    with tempfile.TemporaryDirectory(prefix="dsh-lint-base-") as tmp:
+        base_root = Path(tmp)
+        _materialize_base_tree(repo, base, paths, base_root)
+        base_paths = [p for p in paths if (base_root / p).is_file()]
+        base_json: Any = []
+        if base_paths:
+            base_json, base_status = _ruff_json(base_root, python, base_paths, timeout)
+            if base_json is None:
+                out["status"] = base_status
+                out["exit_code"] = None
+                return out
+        try:
+            classified = gate.classify_findings(
+                gate.parse_ruff_json(base_json, root=base_root),
+                gate.parse_ruff_json(head_json, root=repo),
+                base_root=base_root,
+                head_root=repo,
+            )
+        except ValueError:
+            out["status"] = "environment"
+            out["exit_code"] = None
+            return out
+    if classified.new_findings:
+        out["status"] = "violation"
+        out["exit_code"] = 1
+        out["output"] = _truncate(
+            "\n".join(
+                f"{f.path}:{f.line}:{f.column}: {f.rule_id} {f.message}  [{gate.fix_hint(f)}]"
+                for f in classified.new_findings
+            )
+        )
+    out["legacy_findings_ignored"] = len(classified.head_findings) - len(classified.new_findings)
+    return out
+
+
+def _run_ruff_format_new_only(
+    repo: Path, python: str, paths: list[str], base: str, timeout: float
+) -> dict[str, Any]:
+    """ruff format --check where files already unformatted at base do not block.
+
+    Files are checked one by one so attribution does not depend on the output
+    wording of a particular ruff version.
+    """
+    args = ["format", "--check", "--preview", "--no-cache"]
+    run = _run_ruff(repo, python, args, paths, timeout)
+    run["mode"] = "new_findings_against_base"
+    if run["status"] != "violation":
+        return run
+    unformatted: list[str] = []
+    for rel in paths:
+        single = _run_ruff(repo, python, args, [rel], timeout)
+        if single["status"] == "violation":
+            unformatted.append(rel)
+        elif single["status"] != "ok":
+            return run  # cannot attribute: stay strict
+    if not unformatted:
+        return run
+    legacy: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="dsh-fmt-base-") as tmp:
+        base_root = Path(tmp)
+        _materialize_base_tree(repo, base, unformatted, base_root)
+        for rel in unformatted:
+            if not (base_root / rel).is_file():
+                continue
+            single = _run_ruff(base_root, python, args, [rel], timeout)
+            if single["status"] == "violation":
+                legacy.append(rel)
+            elif single["status"] != "ok":
+                return run  # base unusable: stay strict
+    new = [p for p in unformatted if p not in legacy]
+    if new:
+        run["output"] = _truncate("\n".join(f"Would reformat: {p}" for p in new))
+        return run
+    run["status"] = "ok"
+    run["exit_code"] = 0
+    run["legacy_findings_ignored"] = len(legacy)
+    run["output"] = ""
+    return run
+
+
 def _run_green_lint(
     repo: Path,
     python: str,
@@ -1519,6 +1669,7 @@ def _run_green_lint(
     changed: list[str],
     timeout: float,
     codes: set[str],
+    base: str | None = None,
 ) -> dict[str, Any]:
     existing = [p for p in changed if (repo / p).is_file()]
     py_files = [p for p in existing if p.endswith(".py")]
@@ -1543,12 +1694,18 @@ def _run_green_lint(
         if not flag or not paths:
             continue
         if name == "ruff_check":
-            run = _run_ruff(repo, python, ["check", "--no-cache"], paths, timeout)
+            if base:
+                run = _run_ruff_check_new_only(repo, python, paths, base, timeout)
+            else:
+                run = _run_ruff(repo, python, ["check", "--no-cache"], paths, timeout)
             violation_code = "LINT_FAILURE"
         else:
-            run = _run_ruff(
-                repo, python, ["format", "--check", "--preview", "--no-cache"], paths, timeout
-            )
+            if base:
+                run = _run_ruff_format_new_only(repo, python, paths, base, timeout)
+            else:
+                run = _run_ruff(
+                    repo, python, ["format", "--check", "--preview", "--no-cache"], paths, timeout
+                )
             violation_code = "FORMAT_FAILURE"
         report[name] = run
         if run["status"] == "violation":
@@ -2039,7 +2196,7 @@ def run_green_gate(
                     "message": _truncate(case["message"]),
                 })
 
-    lint_report = _run_green_lint(repo, python, contract["lint"], changed, timeout, codes)
+    lint_report = _run_green_lint(repo, python, contract["lint"], changed, timeout, codes, base)
 
     reason_codes = sorted(codes)
     ready = not reason_codes
@@ -3336,6 +3493,60 @@ def run_route_classifier(prompt: str, timeout: float) -> tuple[str | None, str |
             shutil.rmtree(scratch, ignore_errors=True)
 
 
+MODEL_CATALOG_CHECK_ENV_OFF = "NEXUS_DSH_SKIP_MODEL_CATALOG_CHECK"
+
+
+def _model_catalog_ttl() -> float:
+    try:
+        value = float(os.environ.get("NEXUS_AGY_MODEL_CATALOG_TTL_SEC", "900"))
+    except ValueError:
+        return 900.0
+    return value if value > 0 else 900.0
+
+
+def check_model_served(model: str | None, *, now: float | None = None) -> dict[str, Any] | None:
+    """Pre-spawn guard (#2477): ``None`` unless the pool provably does not serve ``model``.
+
+    Reads the dispatcher's per-account catalog cache without refreshing it. It blocks only
+    when at least one intact catalog is fresh (within the dispatcher TTL) and no intact
+    catalog, fresh or stale, lists the model. Unknown or all-stale catalogs fail open to
+    the canonical dispatcher, which still decides admission.
+    """
+    if not model or os.environ.get(MODEL_CATALOG_CHECK_ENV_OFF) == "1":
+        return None
+    root = Path(
+        os.environ.get(
+            "NEXUS_AGY_OPERATION_ROOT", str(Path.home() / ".local/state/nexus-agy-operations")
+        )
+    )
+    now = time.time() if now is None else now
+    ttl = _model_catalog_ttl()
+    fresh = 0
+    served: set[str] = set()
+    try:
+        files = sorted((root / "model-catalog").glob("*.json"))
+    except OSError:
+        return None
+    for path in files:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            ids = data["ids"]
+            epoch = float(data["checked_at_epoch"])
+            if not (isinstance(ids, list) and ids and all(isinstance(i, str) for i in ids)):
+                continue
+            digest = hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
+            if data.get("catalog_sha256") != digest:
+                continue
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        served.update(ids)
+        if 0 <= now - epoch < ttl:
+            fresh += 1
+    if fresh == 0 or model in served:
+        return None
+    return {"model": model, "served_models": sorted(served), "fresh_catalogs": fresh}
+
+
 def _route_off(default: dict[str, str | None]) -> dict[str, Any]:
     return {
         "mode": "off",
@@ -3564,6 +3775,33 @@ def _run_phase_turn(
         )
         if route["derived_patch_path"]:
             patches.append(route["derived_patch_path"])
+    effective_default = default_model_from_patches(patches)
+    effective_model = route["model"] or effective_default["model"]
+    effective_provider = (
+        ROUTE_PROVIDER if route["derived_patch_path"] else effective_default["provider"]
+    )
+    unserved = (
+        check_model_served(effective_model)
+        if effective_provider in (None, ROUTE_PROVIDER)
+        else None
+    )
+    if unserved is not None:
+        blocked = _blocked_preflight(
+            subject,
+            reason_code="SESSION_MODEL_NOT_SERVED",
+            detail=(
+                f"model {unserved['model']} is not served by any Agy pool account "
+                f"(served: {', '.join(unserved['served_models'])}); change the session "
+                f"default or route table. Nothing was spawned and no model was substituted. "
+                f"Set {MODEL_CATALOG_CHECK_ENV_OFF}=1 to bypass if the catalog cache is wrong."
+            ),
+        )
+        blocked["invocation"] = "start-phase"
+        blocked["phase"] = phase
+        blocked["unserved_model"] = unserved
+        blocked["route"] = route
+        blocked_path = persist_preflight(root, blocked)
+        return EXIT_BLOCKED, {**blocked, "receipt_path": str(blocked_path)}
     dsh_argv = [args.dsh_bin, "--profile", args.profile]
     for patch in patches:
         dsh_argv.extend(["--patch", patch])

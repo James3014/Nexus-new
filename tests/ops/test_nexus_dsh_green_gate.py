@@ -210,6 +210,63 @@ def test_lint_violation_blocks(repo: Path, tmp_path: Path) -> None:
     assert "F401" in receipt["lint_output"]["ruff_check"]
 
 
+def _commit_legacy_debt(repo: Path, body: str) -> None:
+    (repo / "app.py").write_text(body, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "legacy debt")
+
+
+def test_legacy_lint_debt_in_changed_file_does_not_block(repo: Path, tmp_path: Path) -> None:
+    # Base already has an unused import; the change itself is clean (#2476).
+    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
+    _fix(repo, "import os\n\n\ndef value():\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
+    assert "LINT_FAILURE" not in receipt["reason_codes"]
+    assert receipt["lint_output"]["ruff_check"] == ""
+
+
+def test_legacy_debt_moved_by_unrelated_edit_does_not_block(repo: Path, tmp_path: Path) -> None:
+    # The debt line shifts down; identity is rule+message+line text, not line number.
+    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
+    _fix(repo, "# note\n# note\nimport os\n\n\ndef value():\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
+
+
+def test_new_lint_finding_on_top_of_legacy_debt_blocks(repo: Path, tmp_path: Path) -> None:
+    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
+    _fix(repo, "import os\nimport sys\n\n\ndef value():\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == guard.EXIT_BLOCKED
+    assert receipt["reason_codes"] == ["LINT_FAILURE"]
+    output = receipt["lint_output"]["ruff_check"]
+    assert "sys" in output
+    assert "`os`" not in output  # repair feedback lists only the new finding
+
+
+def test_new_file_with_lint_finding_blocks(repo: Path, tmp_path: Path) -> None:
+    _fix(repo)
+    (repo / "extra.py").write_text("import os\n", encoding="utf-8")
+    code, receipt = _gate(repo, tmp_path, _contract(allowed_change_globs=["app.py", "extra.py"]))
+    assert code == guard.EXIT_BLOCKED
+    assert "LINT_FAILURE" in receipt["reason_codes"]
+
+
+def test_legacy_unformatted_file_does_not_block_format(repo: Path, tmp_path: Path) -> None:
+    _commit_legacy_debt(repo, "def value( ):\n    return 1\n")
+    _fix(repo, "def value( ):\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
+
+
+def test_file_formatted_at_base_and_unformatted_at_head_blocks(repo: Path, tmp_path: Path) -> None:
+    _fix(repo, "def value( ):\n    return 2\n")
+    code, receipt = _gate(repo, tmp_path)
+    assert code == guard.EXIT_BLOCKED
+    assert "FORMAT_FAILURE" in receipt["reason_codes"]
+
+
 def test_missing_python_is_environment_failure(repo: Path, tmp_path: Path) -> None:
     _fix(repo)
     code, receipt = _gate(repo, tmp_path, python=str(tmp_path / "no-such-python"))
