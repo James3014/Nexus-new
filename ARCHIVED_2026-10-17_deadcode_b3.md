@@ -118,13 +118,17 @@ Edited (every test id kept; test functions that exercised a deleted module now a
 - `tests/unit/test_local_heal_decoupled.py` (2 `parser` cases of 4),
 - `tests/unit/test_swe_integration.py` (6 `parser` cases of 8),
 - `tests/unit/local_heal/test_candidate_search.py` (1 of 3),
-- `tests/unit/test_local_resolver.py` (2 of 3; the file is `--ignore`d by `pytest.ini`),
 - `tests/effects/test_p5_branch_replay_memory_arms.py`, `tests/unit/local_heal/test_g_track.py`:
   drop an unused import of a deleted module,
 - `tests/integration/test_capability_existence_155.py`: 6 B3 modules join `RETIRED_MODULES`,
 - `tests/services/test_archived_capabilities_2026_10_13.py`: `linear_replay_runner` moves from
   `ARCHIVED_MODULES` to `DELETED_MODULES` (must not be importable; still in the no-import scan).
 Imports that became unused were removed and import blocks re-sorted (ruff F401/I001).
+
+Pre-existing broken test, left as is: `tests/unit/test_local_resolver.py` imports the deleted
+`local_heal.sandbox` and `local_heal.evaluator` inside two test functions, but the file already
+fails to import on base (`from nexus.services.local_heal.localizer import Localizer`: no such name)
+and is `--ignore`d by `pytest.ini`, so it is never collected. It is unchanged here (out of scope).
 
 The proof listed `test_h7_capability_receipt_denial_fields.py`, `test_p5_branch_replay_memory_arms.py`,
 `test_fuzzy_spec_registry_paw.py`, `test_anchored_edit.py`, `test_env_taxonomy_and_preflight.py`,
