@@ -24,7 +24,7 @@ def test_formal_report_emits_markdown_when_evidence_chain_is_complete():
         asi_constraints=[{"blocked_pattern": "flow:retry_delay", "evidence_refs": ["pytest.log"]}],
         judge_votes=[{"judge": "fake", "ranking": ["B", "A"], "reason": "better evidence"}],
         verification=[{"command": "uv run pytest tests/engine/test_autoreason_service.py", "status": "PASS"}],
-        route_receipts=[{"name": "llm_judge_panel", "evidence_present": True, "gate_passed": True}],
+        route_receipts=[{"name": "artifact_gate", "evidence_present": True, "gate_passed": True}],
     )
 
     assert out["status"] == "READY"
@@ -56,3 +56,32 @@ def test_formal_report_writer_persists_markdown_under_repo(tmp_path):
 
     assert rel == ".nexus/reports/formal/test.md"
     assert (tmp_path / rel).read_text(encoding="utf-8").startswith("# ASI experiment")
+
+
+def _status_for(route_receipts):
+    return FormalReportService().build(
+        title="t",
+        hypothesis="h",
+        asi_constraints=[],
+        judge_votes=[{"judge": "fake", "ranking": ["A"]}],
+        verification=[{"command": "pytest", "status": "PASS"}],
+        route_receipts=route_receipts,
+    )["status"]
+
+
+def test_formal_report_non_claim_adapter_receipts_do_not_make_ready():
+    """#2361: llm_judge_panel / autoreason are not bound claim gates."""
+    rows = [
+        {"name": "llm_judge_panel", "evidence_present": True, "gate_passed": True},
+        {"name": "autoreason", "evidence_present": True, "gate_passed": True},
+    ]
+    assert _status_for(rows) == "CLAIM_BLOCKED"
+
+
+def test_formal_report_bound_claim_gate_receipt_makes_ready():
+    rows = [
+        {"name": "llm_judge_panel", "evidence_present": True, "gate_passed": True},
+        {"name": "artifact_gate", "evidence_present": True, "gate_passed": True},
+    ]
+    assert _status_for(rows) == "READY"
+    assert _status_for([{"name": "artifact_gate", "evidence_present": True, "gate_passed": False}]) == "CLAIM_BLOCKED"

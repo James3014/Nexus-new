@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
+from nexus.core.claim_gate_binding import BOUND_CLAIM_GATE_NAMES
 from nexus.core.layer_ports import registered_ports, resolve_port
 
 logger = logging.getLogger(__name__)
@@ -236,7 +237,7 @@ NON_CLAIM_EXECUTION_HEALTH_RECEIPTS: frozenset[str] = frozenset(
         "prompt_compression",
     }
 )
-BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = frozenset({"artifact_gate"})
+BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = BOUND_CLAIM_GATE_NAMES
 
 
 def _make_receipt(
@@ -1672,7 +1673,24 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
                              outcome={"error": "ArtifactGateLocalExecutor not importable"})
     try:
         inst = cls()
-        ctx = {"task_id": plan.task_id, "task_statement": task_desc or "", "plan_id": plan.plan_id}
+        # #2361: the executor reads attributes (ctx.evidence_refs), so pass its context type.
+        from nexus.services.local_heal.local_model_capability_context import (
+            LocalModelCapabilityContext,
+        )
+
+        constraints = plan.constraints if isinstance(plan.constraints, Mapping) else {}
+        anchor = constraints.get("source_anchor")
+        ctx: Any = LocalModelCapabilityContext(
+            task_id=plan.task_id,
+            source_root="",
+            problem_statement=task_desc or "",
+            target_file="",
+            target_symbol="",
+            selected_capabilities=("artifact_gate",),
+            execution_topology="",
+            evidence_refs=tuple(str(r) for r in (constraints.get("evidence_refs") or ())),
+            source_anchor=dict(anchor) if isinstance(anchor, Mapping) else {},
+        )
         if hasattr(inst, "execute"):
             try:
                 result = inst.execute(ctx)
@@ -1685,7 +1703,19 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         # executor result must carry a validated verifier artifact/status and a typed source hash.
         from nexus.core.claim_gate_binding import claim_gate_binding_reasons
 
-        binding_reasons = claim_gate_binding_reasons(dict(result) if isinstance(result, Mapping) else {})
+        if isinstance(result, Mapping):
+            binding_payload = dict(result)
+        elif hasattr(result, "gate_passed") and hasattr(result, "evidence_present"):
+            # CapabilityExecutionResult dataclass: verifier status from its own verdict, source hash
+            # from the context's source anchor. Anything missing stays unbound (fail-closed).
+            passed = bool(result.gate_passed and result.evidence_present)
+            binding_payload = {
+                "verifier_status": "pass" if passed else "fail",
+                "source_hash": ctx.source_anchor.get("hash"),
+            }
+        else:
+            binding_payload = {}
+        binding_reasons = claim_gate_binding_reasons(binding_payload)
         outcome: dict[str, Any] = {"action": "execute", "result": str(result)[:200]}
         if binding_reasons:
             outcome["binding_blockers"] = binding_reasons

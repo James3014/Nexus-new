@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from nexus.core.claim_gate_binding import BOUND_CLAIM_GATE_NAMES
+
 
 class FormalReportService:
     """Build an auditable Markdown report from runtime evidence receipts."""
@@ -78,7 +80,7 @@ class FormalReportService:
         has_route = any(
             bool(item.get("evidence_present") and item.get("gate_passed"))
             for item in route_receipts
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("name") in BOUND_CLAIM_GATE_NAMES
         )
         return bool(has_judge and has_pass and has_route)
 

@@ -90,3 +90,31 @@ def test_registry_artifact_gate_fails_closed_without_artifact_and_source_hash() 
 def test_registry_artifact_gate_passes_with_artifact_and_source_hash() -> None:
     receipt = _run_artifact_gate({"verifier_status": "pass", "source_hash": "sha256:" + "c" * 64})
     assert receipt.gate_passed is True
+
+
+def _real_executor_receipt(constraints: dict):
+    from nexus.services.local_heal.local_model_capability_executors import ArtifactGateLocalExecutor
+
+    plan = CapabilityExecutionPlan(task_id="t1", plan_id="p1", constraints=constraints)
+    with mock.patch.object(reg, "_try_import_class", return_value=ArtifactGateLocalExecutor):
+        return reg._exec_artifact_gate(plan, "task")
+
+
+def test_registry_artifact_gate_real_executor_valid_run_reaches_bound_true_path() -> None:
+    receipt = _real_executor_receipt({
+        "evidence_refs": ["ev1"],
+        "source_anchor": {"present": True, "hash": "sha256:" + "d" * 64},
+    })
+    assert "error" not in receipt.outcome, receipt.outcome
+    assert receipt.gate_passed is True
+
+
+def test_registry_artifact_gate_real_executor_invalid_run_is_false_without_exception() -> None:
+    no_evidence = _real_executor_receipt({})
+    assert no_evidence.gate_passed is False
+    assert "error" not in no_evidence.outcome, no_evidence.outcome
+    # evidence but no source hash: executor passes, binding still unmet
+    no_hash = _real_executor_receipt({"evidence_refs": ["ev1"]})
+    assert no_hash.gate_passed is False
+    assert "error" not in no_hash.outcome
+    assert "missing_source_hash" in no_hash.outcome["binding_blockers"]
