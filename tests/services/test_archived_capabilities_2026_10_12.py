@@ -144,17 +144,21 @@ def test_no_live_code_imports_archived_modules():
         ROOT / "scripts/engine/commands/stress_test.py",
         ROOT / "scripts/engine/commands/ui_explorer.py",
     }
-    archived = set(ARCHIVED_MODULES) | set(DELETED_MODULES) | {
-        "nexus.federation",
-        "nexus.federation.config",
-        "nexus.federation.node_launcher",
-        "nexus.federation.node_registry",
-        "nexus.oracle.promote",
-        "scripts.ops.federated_engine_v09",
-        "scripts.ops.evolution_engine_v08",
-        "scripts.engine.commands.stress_test",
-        "scripts.engine.commands.ui_explorer",
-    }
+    archived = (
+        set(ARCHIVED_MODULES)
+        | set(DELETED_MODULES)
+        | {
+            "nexus.federation",
+            "nexus.federation.config",
+            "nexus.federation.node_launcher",
+            "nexus.federation.node_registry",
+            "nexus.oracle.promote",
+            "scripts.ops.federated_engine_v09",
+            "scripts.ops.evolution_engine_v08",
+            "scripts.engine.commands.stress_test",
+            "scripts.engine.commands.ui_explorer",
+        }
+    )
     offenders: list[str] = []
     for top in ("nexus", "scripts"):
         for path in (ROOT / top).rglob("*.py"):
