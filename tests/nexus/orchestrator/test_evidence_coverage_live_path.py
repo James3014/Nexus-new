@@ -1684,6 +1684,7 @@ def test_terminal_record_core_failure_records_identity_flag_false(tmp_path):
     record = _host_service(tmp_path, port)._build_terminal_core_record(
         _terminal_state(tmp_path), contract=_universe_contract(tmp_path)
     )
+    assert record is not None
     assert record["record_status"] == "FAILED"
     assert record["core_verdict"]["core_universe_identity_matches"] is False
 
