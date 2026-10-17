@@ -126,7 +126,8 @@ def test_codex_guard_kills_the_group_before_reaping_the_leader(tmp_path, monkeyp
 
     def recording_popen(*args, **kwargs):
         child = real_popen(*args, **kwargs)
-        holder["pid"] = child.pid
+        if kwargs.get("start_new_session"):
+            holder["pid"] = child.pid  # the codex launch, not the sweep's ps probes
         return child
 
     monkeypatch.setattr(guard.os, "killpg", recording_killpg)
@@ -163,3 +164,29 @@ def test_codex_guard_installs_signal_handlers_before_launch(tmp_path, monkeypatc
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         assert seen[signum] is not previous[signum], f"{signum!r} handler installed after Popen"
         assert callable(seen[signum])
+
+
+def test_codex_guard_forwards_a_signal_that_arrives_during_launch(tmp_path, monkeypatch):
+    guard = _load_guard()
+    real_popen = subprocess.Popen
+
+    def signalled_popen(*args, **kwargs):
+        if kwargs.get("start_new_session"):
+            os.kill(os.getpid(), signal.SIGTERM)  # arrives before the group is known
+        return real_popen(*args, **kwargs)
+
+    previous = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    monkeypatch.setattr(guard.subprocess, "Popen", signalled_popen)
+    work = tmp_path / "work"
+    work.mkdir()
+    started = time.monotonic()
+    try:
+        status = guard.run_in_own_group(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"], dict(os.environ), work
+        )
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+    assert status == 128 + signal.SIGTERM
+    assert time.monotonic() - started < 20, "the queued SIGTERM was never forwarded"
