@@ -132,8 +132,14 @@ def test_direct_gemini_bad_input_raises(output_text):
 
 
 def test_reversed_braces_fail_closed_in_all_slice_parsers() -> None:
-    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
-    # asserts the module it exercised is gone.
+    """Text with a closing brace before the opening one (start > end) yields an empty slice."""
+    raw = "} {"
+    assert _parse_automem_response(raw) == []
+    data, returned_raw = _parse(raw)
+    assert returned_raw == raw
+    assert "Parse Error" in str(data)
+    # The two local_heal slice parsers were retired in #2514
+    # (ARCHIVED_2026-10-17_deadcode_b2.md); assert their modules are gone.
     assert (
         importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier_runtime")
         is None
