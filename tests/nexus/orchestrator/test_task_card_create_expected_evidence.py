@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import inspect
 import json
 import os
 from pathlib import Path
@@ -376,10 +375,15 @@ def test_worker_candidate_still_rejects_a_supplied_universe(field):
 # implementation. The required exact-base impact gate treats an added test
 # that skips or xfails as not passed, so until the implementation PR the class
 # carries a ``__test__ = _RED_2532`` gate and is collected only with
-# ``NEXUS_RED_2532=1``. The implementation PR deletes that gate line and
-# nothing else; ``test_issue_promise_red_class_is_frozen`` pins the class.
+# ``NEXUS_RED_2532=1``. ``test_issue_promise_red_class_is_frozen`` pins the
+# region between the two marker comments, ignoring blank lines and the gate
+# line. The implementation PR deletes the gate line, ``_RED_2532`` and its
+# ``os`` import (outside the region) and may reformat blank lines; any other
+# edit to the region changes the hash and shows up in review.
 
 _RED_2532 = os.environ.get("NEXUS_RED_2532") == "1"
+
+# >>> frozen #2532 RED region
 
 
 def _task_contract_module() -> Any:
@@ -415,6 +419,9 @@ class TestTaskCardCreateIssuePromises:
             "repository": "James3014/Nexus-new",
             "issue_number": 4242,
             "issue_contract_hash": "c" * 64,
+            "expected_evidence_identity": expected_evidence_universe_identity(
+                self.PROMISE_UNIVERSE
+            ),
             "promise_set": {
                 "promise_set_generation": 1,
                 # Deliberately unsorted: the card holds the canonical form.
@@ -441,12 +448,6 @@ class TestTaskCardCreateIssuePromises:
         # Zero writes: no authority recorded, no campaign directory.
         assert owner_effects == []
         assert not (tmp_path / "tasks").exists()
-
-    def test_null_issue_promises_equals_absent(self, owner_effects, tmp_path):
-        result = _create({**BASE_ARGUMENTS, "issue_promises": None})
-        assert result["isError"] is False, result
-        assert _card(tmp_path, result["structuredContent"]) == LEGACY_CARD.encode("utf-8")
-        assert "issue_promises_identity" not in owner_effects[0]
 
     def test_universe_only_card_has_no_promise_block(self, owner_effects, tmp_path):
         result = _create({**BASE_ARGUMENTS, "expected_evidence": UNIVERSE})
@@ -510,6 +511,31 @@ class TestTaskCardCreateIssuePromises:
         binding = self._binding({"P1": [self.ENTRY], "P2": ["review:security"]})
         self._assert_rejected(_create(self._arguments(binding)), owner_effects, tmp_path, "P2")
 
+    def test_binding_for_another_universe_is_rejected(self, owner_effects, tmp_path):
+        binding = {**self._valid(), "expected_evidence_identity": "sha256:" + "f" * 64}
+        self._assert_rejected(
+            _create(self._arguments(binding)), owner_effects, tmp_path, "expected_evidence_identity"
+        )
+
+    def test_deeply_nested_smuggled_block_fails_closed(self, owner_effects, tmp_path, monkeypatch):
+        contract = _task_contract_module()
+
+        def explode(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(contract.json, "loads", explode)
+        smuggled = "\n".join([
+            "```",
+            "```" + contract.TASK_CARD_ISSUE_PROMISES_FENCE,
+            "[[[]]]",
+            "```",
+        ])
+        result = _create({**BASE_ARGUMENTS, "objective": smuggled})
+        assert result["isError"] is True
+        assert "TASK_CARD_CREATE_ISSUE_PROMISES_INVALID" in result["structuredContent"]["error"]
+        assert owner_effects == []
+        assert not (tmp_path / "tasks").exists()
+
     def test_promises_without_a_universe_are_rejected(self, owner_effects, tmp_path):
         arguments = {**BASE_ARGUMENTS, "issue_promises": self._valid()}
         self._assert_rejected(_create(arguments), owner_effects, tmp_path, "expected_evidence")
@@ -558,6 +584,8 @@ class TestTaskCardCreateIssuePromises:
         result = _create(arguments)
         assert result["isError"] is True
         assert "TASK_CARD_CREATE_ISSUE_PROMISES_INVALID" in result["structuredContent"]["error"]
+        # Rejected before any Owner authority is checked or recorded.
+        assert owner_effects == []
         assert not (tmp_path / "tasks" / "coverage-campaign").exists()
 
     def test_schema_declares_issue_promises_on_the_card_creator_only(self):
@@ -574,8 +602,19 @@ class TestTaskCardCreateIssuePromises:
             assert "issue_promises" not in properties, spec["name"]
 
 
+# <<< frozen #2532 RED region
+
+
+def test_control_null_issue_promises_equals_absent(owner_effects, tmp_path):
+    # Control, not RED: green before and after #2532.
+    result = _create({**BASE_ARGUMENTS, "issue_promises": None})
+    assert result["isError"] is False, result
+    assert _card(tmp_path, result["structuredContent"]) == LEGACY_CARD.encode("utf-8")
+    assert "issue_promises_identity" not in owner_effects[0]
+
+
 def test_worker_candidate_rejects_supplied_issue_promises():
-    # Characterization (green before #2532 lands): a worker can never supply
+    # Control, not RED (green before #2532 lands): a worker can never supply
     # or override the promise binding; only the hashed card carries it.
     service = MagicMock()
     response = UnifiedMCPGateway(service=service).handle({
@@ -604,17 +643,23 @@ def test_worker_candidate_rejects_supplied_issue_promises():
     service.submit_task.assert_not_called()
 
 
-# sha256 of TestTaskCardCreateIssuePromises' source without its gate line.
+_REGION_START = "# >>> frozen #2532 RED region"
+_REGION_END = "# <<< frozen #2532 RED region"
+# sha256 of the frozen region without blank lines and the gate line, each
+# line stripped, so deleting the gate and reformatting blank lines keep it.
 _FROZEN_ISSUE_PROMISE_CLASS_SHA256 = (
-    "e0c59b50caed9596f96544436362bae44ac59b5ac2fe9bdb171a4e4781e9b8c8"
+    "721ac42cc80284faa10b2ff93ba9cb879eb92a7ccdd04cec421f5bcbfb3c3e5e"
 )
 
 
 def test_issue_promise_red_class_is_frozen():
-    lines = [
-        line
-        for line in inspect.getsource(TestTaskCardCreateIssuePromises).splitlines()
-        if line.strip() != "__test__ = _RED_2532"
+    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+    start = lines.index(_REGION_START)
+    end = lines.index(_REGION_END)
+    kept = [
+        line.strip()
+        for line in lines[start + 1 : end]
+        if line.strip() and line.strip() != "__test__ = _RED_2532"
     ]
-    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()
     assert digest == _FROZEN_ISSUE_PROMISE_CLASS_SHA256

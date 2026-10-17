@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -746,16 +747,144 @@ def _tree_files(root: Path) -> Iterable[tuple[str, bytes]]:
                 yield relative, b"unreadable"
 
 
+# #2541: the common dir's ``config`` is shared by every worktree and is
+# rewritten whenever another session creates a branch or worktree.  Only the
+# keys named here are excluded from the fingerprint, and only while their
+# value has the shape Git's own bookkeeping writes; every other key, known or
+# unknown, stays covered (``core.hooksPath``, ``include*``, ``filter.*``,
+# ``alias.*``, ``remote.*.url`` ...).  Keys are matched exactly on the
+# lower-cased section and variable name that ``git config --list`` prints.
+_CONFIG_BOOKKEEPING_BRANCH_VARS: frozenset[str] = frozenset({
+    "remote",
+    "pushremote",
+    "merge",
+    "rebase",
+    "description",
+    "vscode-merge-base",
+    "gh-merge-base",
+})
+_CONFIG_BOOKKEEPING_REMOTE_VARS: frozenset[str] = frozenset({"fetch"})
+_CONFIG_REBASE_VALUES: frozenset[str] = frozenset({
+    "true",
+    "false",
+    "merges",
+    "interactive",
+    "i",
+    "m",
+})
+_REF_NAME_RE = re.compile(r"refs/[A-Za-z0-9._/+@-]+")
+_FETCH_REFSPEC_RE = re.compile(r"\+?refs/heads/([A-Za-z0-9._/*+@-]+):refs/remotes/(.+)")
+
+
+def _split_config_key(key: str) -> Optional[tuple[str, str, str]]:
+    """``(section, subsection, variable)`` of a three-level key, else ``None``."""
+    section, dot, rest = key.partition(".")
+    subsection, dot2, variable = rest.rpartition(".")
+    if not dot or not dot2 or not subsection:
+        return None
+    return section, subsection, variable
+
+
+def _config_key_is_bookkeeping(key: str) -> bool:
+    """True only for the named ``branch.<name>.<var>`` / ``remote.<name>.fetch`` keys."""
+    parts = _split_config_key(key)
+    if parts is None:
+        return False  # two-level keys (``branch.autosetupmerge``) stay covered
+    section, _, variable = parts
+    if section == "branch":
+        return variable in _CONFIG_BOOKKEEPING_BRANCH_VARS
+    if section == "remote":
+        return variable in _CONFIG_BOOKKEEPING_REMOTE_VARS
+    return False
+
+
+def _config_entry_is_bookkeeping(key: str, value: Optional[str], remotes: frozenset[str]) -> bool:
+    """A named bookkeeping key whose value cannot redirect Git elsewhere.
+
+    ``branch.*.remote`` / ``pushremote`` must name a remote whose URL is in
+    the same file (or ``.``, the local repository): a URL or path value
+    stays covered.  ``merge`` and the merge-base keys must be ref names,
+    ``rebase`` one of Git's values, and ``remote.<name>.fetch`` the standard
+    ``refs/heads/X:refs/remotes/<name>/X`` mapping.
+    """
+    if value is None or not _config_key_is_bookkeeping(key):
+        return False
+    parts = _split_config_key(key)
+    assert parts is not None
+    section, subsection, variable = parts
+    if section == "remote":
+        match = _FETCH_REFSPEC_RE.fullmatch(value)
+        return bool(match) and match.group(2) == f"{subsection}/{match.group(1)}"
+    if variable in {"remote", "pushremote"}:
+        return value == "." or value in remotes
+    if variable in {"merge", "vscode-merge-base", "gh-merge-base"}:
+        return bool(_REF_NAME_RE.fullmatch(value)) and ".." not in value
+    if variable == "rebase":
+        return value.lower() in _CONFIG_REBASE_VALUES
+    return variable == "description"
+
+
+def code_bearing_git_config(
+    config_path: Path, *, exclude_bookkeeping: bool = True
+) -> Optional[bytes]:
+    """Code-bearing entries of one Git config file; ``None`` if unparseable.
+
+    Parsed by Git itself (``git config --file <path> --no-includes --list
+    -z``) so the fingerprint sees exactly the keys Git will act on, in file
+    order.  ``include.path`` / ``includeIf.*.path`` keys are covered as
+    values.  A missing file reads as ``b"missing"``; a file Git refuses to
+    parse fails closed.  ``exclude_bookkeeping=False`` keeps every entry
+    (used for the per-worktree ``config.worktree``, which nobody else writes).
+    """
+    if not os.path.lexists(config_path):
+        return b"missing"
+    listing = _git_output(
+        config_path.parent,
+        "config",
+        "--file",
+        str(config_path),
+        "--no-includes",
+        "--list",
+        "-z",
+    )
+    if listing is None:
+        return None
+    entries: list[tuple[str, Optional[str], bytes]] = []
+    for entry in listing.split(b"\0"):
+        if not entry:
+            continue
+        raw_key, newline, raw_value = entry.partition(b"\n")
+        key = raw_key.decode("utf-8", errors="surrogateescape")
+        value = raw_value.decode("utf-8", errors="surrogateescape") if newline else None
+        entries.append((key, value, entry))
+    remotes = frozenset(
+        parts[1]
+        for key, value, _ in entries
+        if value
+        and (parts := _split_config_key(key))
+        and parts[0] == "remote"
+        and parts[2] == "url"
+    )
+    kept: list[bytes] = []
+    for key, value, entry in entries:
+        if exclude_bookkeeping and _config_entry_is_bookkeeping(key, value, remotes):
+            continue
+        kept.append(len(entry).to_bytes(8, "big") + entry)
+    return b"".join(kept)
+
+
 def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> Optional[str]:
     """Fingerprint one protected checkout; ``None`` when it cannot be read.
 
     Covers HEAD, porcelain status, the tracked diff, untracked file bytes, a
     stat of every ignored path (``--directory`` collapsed, so ``.venv/`` is
     one entry: deep writes inside ignored directories are left to Seatbelt),
-    and the Git common dir's code-bearing metadata: ``config``, ``hooks/``
-    and ``info/``.  Refs and ``packed-refs`` are deliberately excluded: the
-    common dir is shared with concurrent sessions that fetch and branch, and
-    Seatbelt already denies the worker any write there.
+    and the Git common dir's code-bearing metadata: ``config`` (minus the
+    bookkeeping keys named in ``_CONFIG_BOOKKEEPING_*`` with bookkeeping-shaped
+    values), the per-worktree ``config.worktree`` (unfiltered), ``hooks/`` and ``info/``.  Refs and ``packed-refs``
+    are deliberately excluded: the common dir is shared with concurrent
+    sessions that fetch and branch, and Seatbelt already denies the worker
+    any write there.  Unparseable config fails closed (``None``).
     """
     path = Path(os.path.realpath(root))
     toplevel = _git_output(path, "rev-parse", "--show-toplevel")
@@ -774,10 +903,11 @@ def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> O
         else b""
     )
     common = _git_output(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if None in (head, status, diff, ignored, common):
+    git_dir = _git_output(path, "rev-parse", "--absolute-git-dir")
+    if None in (head, status, diff, ignored, common, git_dir):
         return None
     assert head is not None and status is not None and diff is not None
-    assert ignored is not None and common is not None
+    assert ignored is not None and common is not None and git_dir is not None
     digest = hashlib.sha256()
     _update(digest, b"head", head)
     _update(digest, b"status", status)
@@ -801,11 +931,15 @@ def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> O
             stamp = b"missing"
         _update(digest, b"ignored:" + entry, stamp)
     common_dir = Path(common.decode("utf-8", errors="surrogateescape").strip())
-    try:
-        config = (common_dir / "config").read_bytes()
-    except OSError:
-        config = b"missing"
+    config = code_bearing_git_config(common_dir / "config")
+    git_dir_path = Path(git_dir.decode("utf-8", errors="surrogateescape").strip())
+    worktree_config = code_bearing_git_config(
+        git_dir_path / "config.worktree", exclude_bookkeeping=False
+    )
+    if config is None or worktree_config is None:
+        return None
     _update(digest, b"common:config", config)
+    _update(digest, b"gitdir:config.worktree", worktree_config)
     for name in ("hooks", "info"):
         for relative, content in _tree_files(common_dir / name):
             _update(digest, f"common:{name}/{relative}".encode("utf-8", "surrogateescape"), content)

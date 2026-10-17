@@ -435,7 +435,7 @@ def test_repair_task_whose_base_test_file_collects_nothing_is_not_verified(tmp_p
 
 
 def test_repair_task_whose_base_lacks_the_named_test_node_is_not_verified(tmp_path, monkeypatch):
-    # #2532 G0 unknown: the test file exists on base but the named node id
+    # Control, not RED (#2532 G0 unknown): the test file exists on base but the named node id
     # does not. pytest exits 4 ("not found"), which is not a real base failure:
     # the worker could be adding exactly that test. It must not count as F2P.
     state, _result, _error, _controller, _head = _run(
