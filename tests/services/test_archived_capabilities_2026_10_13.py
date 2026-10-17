@@ -64,12 +64,17 @@ ARCHIVED_MODULES = {
     "nexus.core.web_dom_mapper": "nexus/core/web_dom_mapper.py",
     "nexus.core.web_action_executor": "nexus/core/web_action_executor.py",
     "nexus.engine.replay_runner": "nexus/engine/replay_runner.py",
-    "nexus.services.local_heal.linear_replay_runner": (
-        "nexus/services/local_heal/linear_replay_runner.py"
-    ),
     "nexus.core.planner_auditor": "nexus/core/planner_auditor.py",
     "nexus.core.capability_gate": "nexus/core/capability_gate.py",
     "nexus.orchestrator.integration_manager": "nexus/orchestrator/integration_manager.py",
+}
+
+# Archived here first, then physically deleted 2026-10-17 (#2491, dead-code batch B3,
+# ARCHIVED_2026-10-17_deadcode_b3.md): no longer importable at all.
+DELETED_MODULES = {
+    "nexus.services.local_heal.linear_replay_runner": (
+        "nexus/services/local_heal/linear_replay_runner.py"
+    ),
 }
 
 # Already-archived first-batch files that still import a second-batch module.
@@ -145,7 +150,7 @@ def test_kept_surfaces_behind_retired_keys_still_work():
 
 def test_archived_modules_warn_on_import():
     code = (
-        "import importlib, warnings\n"
+        "import importlib, importlib.util, warnings\n"
         f"mods = {sorted(ARCHIVED_MODULES)!r}\n"
         "missing = []\n"
         "for m in mods:\n"
@@ -154,13 +159,17 @@ def test_archived_modules_warn_on_import():
         "        importlib.import_module(m)\n"
         "    if not any('ARCHIVED 2026-10-13' in str(x.message) for x in w):\n"
         "        missing.append(m)\n"
+        f"deleted = {sorted(DELETED_MODULES)!r}\n"
+        "importable = [m for m in deleted if importlib.util.find_spec(m) is not None]\n"
         "print('MISSING', missing)\n"
+        "print('IMPORTABLE', importable)\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=180
     )
     assert proc.returncode == 0, proc.stderr
     assert "MISSING []" in proc.stdout, proc.stdout
+    assert "IMPORTABLE []" in proc.stdout, proc.stdout
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -181,7 +190,7 @@ def _imported_modules(path: Path) -> set[str]:
 def test_no_live_code_imports_archived_modules():
     allowed = {ROOT / rel for rel in ARCHIVED_MODULES.values()}
     allowed |= {ROOT / rel for rel in FIRST_BATCH_ARCHIVED_IMPORTERS}
-    archived = set(ARCHIVED_MODULES)
+    archived = set(ARCHIVED_MODULES) | set(DELETED_MODULES)
     offenders: list[str] = []
     for top in ("nexus", "scripts"):
         for path in (ROOT / top).rglob("*.py"):
