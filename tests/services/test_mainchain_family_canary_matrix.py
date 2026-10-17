@@ -674,6 +674,7 @@ def _run_family_canary(
                 ],
                 "formal_route_receipts": [
                     {
+                        "name": "artifact_gate",
                         "route": "mainchain",
                         "evidence_present": True,
                         "gate_passed": True,

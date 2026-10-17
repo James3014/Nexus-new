@@ -74,6 +74,7 @@ def test_formal_report_non_claim_adapter_receipts_do_not_make_ready():
     rows = [
         {"name": "llm_judge_panel", "evidence_present": True, "gate_passed": True},
         {"name": "autoreason", "evidence_present": True, "gate_passed": True},
+        {"route": "mainchain", "evidence_present": True, "gate_passed": True},
     ]
     assert _status_for(rows) == "CLAIM_BLOCKED"
 

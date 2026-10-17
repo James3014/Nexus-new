@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
-from nexus.core.claim_gate_binding import BOUND_CLAIM_GATE_NAMES
 from nexus.core.layer_ports import registered_ports, resolve_port
 
 logger = logging.getLogger(__name__)
@@ -237,7 +236,7 @@ NON_CLAIM_EXECUTION_HEALTH_RECEIPTS: frozenset[str] = frozenset(
         "prompt_compression",
     }
 )
-BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = BOUND_CLAIM_GATE_NAMES
+BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = frozenset({"artifact_gate"})
 
 
 def _make_receipt(
@@ -1680,6 +1679,9 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
 
         constraints = plan.constraints if isinstance(plan.constraints, Mapping) else {}
         anchor = constraints.get("source_anchor")
+        raw_refs = constraints.get("evidence_refs")
+        # Non-list evidence_refs are rejected (no str() coercion of arbitrary values).
+        refs = tuple(r for r in raw_refs if isinstance(r, str)) if isinstance(raw_refs, list) else ()
         ctx: Any = LocalModelCapabilityContext(
             task_id=plan.task_id,
             source_root="",
@@ -1688,9 +1690,10 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
             target_symbol="",
             selected_capabilities=("artifact_gate",),
             execution_topology="",
-            evidence_refs=tuple(str(r) for r in (constraints.get("evidence_refs") or ())),
+            evidence_refs=refs,
             source_anchor=dict(anchor) if isinstance(anchor, Mapping) else {},
         )
+        result: Any = None
         if hasattr(inst, "execute"):
             try:
                 result = inst.execute(ctx)
@@ -1706,13 +1709,11 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         if isinstance(result, Mapping):
             binding_payload = dict(result)
         elif hasattr(result, "gate_passed") and hasattr(result, "evidence_present"):
-            # CapabilityExecutionResult dataclass: verifier status from its own verdict, source hash
-            # from the context's source anchor. Anything missing stays unbound (fail-closed).
-            passed = bool(result.gate_passed and result.evidence_present)
-            binding_payload = {
-                "verifier_status": "pass" if passed else "fail",
-                "source_hash": ctx.source_anchor.get("hash"),
-            }
+            # CapabilityExecutionResult dataclass: only the executor's own payload may carry
+            # verifier evidence (#1869). Nothing is synthesized from plan.constraints, so a result
+            # without verifier_status/source_hash in its payload stays unbound (fail-closed).
+            payload = getattr(result, "payload", None)
+            binding_payload = dict(payload) if isinstance(payload, Mapping) else {}
         else:
             binding_payload = {}
         binding_reasons = claim_gate_binding_reasons(binding_payload)

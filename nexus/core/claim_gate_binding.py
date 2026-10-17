@@ -8,10 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# Receipt names that are bound claim gates (verifier artifact + source hash). Non-claim adapters
-# (llm_judge_panel, autoreason, ...) are not claim evidence (#1869, #2361).
-BOUND_CLAIM_GATE_NAMES: frozenset[str] = frozenset({"artifact_gate"})
-
 
 def _looks_like_verifier_artifact(value: Any) -> bool:
     """True only for sha256:<64 hex> or bare 64-hex — never arbitrary strings."""
