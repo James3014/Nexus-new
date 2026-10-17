@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import pytest
-from nexus_runtime.execution_coordination import EffectAuthorization
+from nexus_runtime.execution_coordination import EffectAuthorization, EffectAuthorizationError
 
 from nexus.orchestrator import effect_authority as ea
 from nexus.orchestrator import runtime_coordination_bridge as bridge
@@ -106,3 +106,35 @@ def test_shadow_never_raises(monkeypatch):
 
 def test_shadow_skips_when_no_request():
     assert bridge._record_effect_authority_shadow("t1", "a1", None) is None
+
+
+def test_record_backed_port_refuses_mismatch_and_accepts_exact():
+    # M9: verify through the port itself, not only evaluate_authorization.
+    port = ea.record_backed_port(_lookup(_record(repository="James3014/other")))
+    with pytest.raises(EffectAuthorizationError):
+        port.verify(_auth())
+    ea.record_backed_port(_lookup(_record())).verify(_auth())
+
+
+def test_execute_calls_effect_authority_shadow(monkeypatch):
+    # M12: the shadow hook must sit on the real execute() path.
+    calls = []
+
+    class _Service:
+        def _bridge_validate_claim(self, *_a, **_k):
+            return None
+
+    class _Stop(Exception):
+        pass
+
+    def fake_shadow(task_id, attempt_id, request):
+        calls.append((task_id, attempt_id, request))
+
+    def stop(self, *_a, **_k):
+        raise _Stop
+
+    monkeypatch.setattr(bridge, "_record_effect_authority_shadow", fake_shadow)
+    monkeypatch.setattr(bridge.RuntimeCoordinationBridge, "_coordinator", stop)
+    with pytest.raises(_Stop):
+        bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
+    assert calls == [("t1", "a1", {"k": 1})]
