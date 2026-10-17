@@ -1110,6 +1110,22 @@ def test_approval_requirements_input_reasons(changes: dict[str, Any], reason: st
     assert result["completeness"] == "INCOMPLETE"
 
 
+@pytest.mark.parametrize("source", ["promotion_packet", "verified_receipt"])
+@pytest.mark.parametrize(
+    "findings",
+    ["c" * 40, "c" * 63, "c" * 65, "C" * 64, "g" * 64, " " + "c" * 63],
+)
+def test_approval_requirements_findings_hash_must_be_64_lowercase_hex(
+    source: str, findings: str
+) -> None:
+    # pins the authority_findings_sha256 pattern ([0-9a-f]{64}, full match)
+    state = _required_state()
+    state[source] = {**state[source], "authority_findings_sha256": findings}
+    result = _requirements(state)
+    assert result["reasons"] == [f"invalid_format:{source}.authority_findings_sha256"]
+    assert result["status"] == "NOT_APPROVABLE"
+
+
 def test_approval_requirements_str_subclass_is_an_invalid_type() -> None:
     class Sha(str):
         pass
