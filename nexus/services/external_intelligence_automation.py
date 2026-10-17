@@ -15,6 +15,7 @@ from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
     build_canonical_planner_admission,
 )
+from nexus.services.eia_source_excerpt import ExcerptError, validate_symbol_names
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
@@ -253,6 +254,29 @@ def _validate_verifier_specs(specs: Any, field: str) -> None:
             raise AutomationError(f"ISSUE_CONTRACT_{field}_UNSCOPED_GIT_DIFF")
 
 
+def _validate_excerpt_symbols(value: Any, mutation_paths: set[str]) -> dict[str, list[str]]:
+    """Optional per-unit symbol scope ``{path: [names]}`` for oversized .py sources (#2357).
+
+    Each path must be one of the unit's own mutation paths; names are top-level
+    symbols or ``Class.method``.  Absent → oversized sources keep failing closed.
+    """
+    if not isinstance(value, dict) or not value:
+        raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID")
+    result: dict[str, list[str]] = {}
+    for path, names in value.items():
+        try:
+            norm = _validate_relative_path(path)
+        except AutomationError as exc:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID") from exc
+        if norm not in mutation_paths or not norm.endswith(".py") or norm in result:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID")
+        try:
+            result[norm] = validate_symbol_names(names)
+        except ExcerptError as exc:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID") from exc
+    return result
+
+
 def parse_issue_contract(body: str) -> dict[str, Any]:
     matches = FENCE_RE.findall(body or "")
     if len(matches) != 1:
@@ -309,6 +333,7 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             "priority",
             "allow_deletions",
             "selected_worker",
+            "excerpt_symbols",
         }
         if set(unit) - allowed_unit:
             raise AutomationError("ISSUE_CONTRACT_UNIT_KEYS_INVALID")
@@ -325,6 +350,10 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             if normalized in normalized_paths:
                 raise AutomationError("ISSUE_CONTRACT_MUTATION_PATHS_INVALID")
             normalized_paths.add(normalized)
+        if "excerpt_symbols" in unit:
+            unit["excerpt_symbols"] = _validate_excerpt_symbols(
+                unit["excerpt_symbols"], normalized_paths
+            )
         for key in ("dependencies_ready", "allow_deletions"):
             if key in unit and not isinstance(unit[key], bool):
                 raise AutomationError(f"ISSUE_CONTRACT_UNIT_{key.upper()}_INVALID")
@@ -731,21 +760,27 @@ class ExternalIntelligenceAutomation:
         ]
 
         seen_paths: set[str] = set()
+        excerpt_scope: dict[str, set[str]] = {}
         for unit in item.contract.get("execution_units", []):
             for path in unit.get("mutation_paths", []):
                 norm = _validate_relative_path(path)
                 if norm not in seen_paths:
                     seen_paths.add(norm)
+            for path, names in (unit.get("excerpt_symbols") or {}).items():
+                excerpt_scope.setdefault(_validate_relative_path(path), set()).update(names)
 
         for path in sorted(seen_paths):
             exists, content = self._read_git_blob(main_sha, path)
-            sources.append({
+            source: dict[str, Any] = {
                 "kind": "source_file" if exists else "source_absence",
                 "ref": path,
                 "revision": main_sha,
                 "provenance": f"git:{main_sha}",
                 "content": content,
-            })
+            }
+            if exists and path in excerpt_scope:
+                source["excerpt_symbols"] = sorted(excerpt_scope[path])
+            sources.append(source)
 
         verifier_paths = self._extract_verifier_paths(item.contract)
         for path in sorted(verifier_paths):
