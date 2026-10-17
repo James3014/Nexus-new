@@ -161,6 +161,44 @@ def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
         pass
 
 
+class _TrackedPopen(subprocess.Popen):
+    """Popen that hands back its object even when ``__init__`` raises after fork.
+
+    #2389 item 4: an exception inside ``Popen.__init__`` after the fork (for
+    example a KeyboardInterrupt, or an OSError closing pipes or reading the exec
+    error pipe) would otherwise leave a running child we hold no handle to.
+    ``self.pid`` is set only once the fork succeeded, so every forked child is
+    appended to ``started``; a child CPython already reaped (exec failure) has a
+    ``returncode``.
+    """
+
+    def __init__(self, *args: Any, started: list[subprocess.Popen[bytes]], **kwargs: Any) -> None:
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            if getattr(self, "pid", None) is not None:
+                started.append(self)
+
+
+def _retry_account_write(
+    write: Any, *, attempts: int = 3, delay: float = 0.2
+) -> BaseException | None:
+    """Run an account-state write, retrying transient failures; return the last error."""
+
+    last: BaseException | None = None
+    for attempt in range(attempts):
+        try:
+            write()
+            return None
+        except Exception as exc:
+            last = exc
+        except BaseException as exc:
+            return exc
+        if attempt + 1 < attempts:
+            time.sleep(delay * (attempt + 1))
+    return last
+
+
 def _spawn_background(
     *,
     provider: str,
@@ -329,16 +367,37 @@ def _run_operation(
                 )
             return 1
 
-        journal.heartbeat(
-            operation_id,
-            phase="PROVIDER_STARTING",
-            attempts=attempts,
-            rotations=rotations,
-            account_alias_hash=binding.account_alias_hash,
-            lease_id_hash=binding.lease_id_hash,
-            cli_version=command.cli_version,
-            command_sha256=_command_hash(command.argv),
-        )
+        try:
+            journal.heartbeat(
+                operation_id,
+                phase="PROVIDER_STARTING",
+                attempts=attempts,
+                rotations=rotations,
+                account_alias_hash=binding.account_alias_hash,
+                lease_id_hash=binding.lease_id_hash,
+                cli_version=command.cli_version,
+                command_sha256=_command_hash(command.argv),
+            )
+        except BaseException as exc:
+            # Pre-effect: launch_pending is not set yet and nothing was started.
+            try:
+                account_adapter.release(binding)
+            finally:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=None,
+                    failure_kind=f"JOURNAL_HEARTBEAT_FAILED:{type(exc).__name__}",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "NO_PROVIDER_PROCESS_STARTED",
+                        "retry_permitted": False,
+                    },
+                )
+            return 1
 
         stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
         stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
@@ -384,28 +443,37 @@ def _run_operation(
                 except BaseException as hold_exc:
                     failure += f":HOLD_FAILED:{type(hold_exc).__name__}"
                     print(f"ERROR {failure}", file=sys.stderr)
-            journal.mark_terminal(
-                operation_id,
-                status="OUTCOME_UNKNOWN",
-                exit_code=None,
-                failure_kind=failure,
-                cwd=cwd,
-                attempts=attempts,
-                rotations=rotations,
-                reconciliation={
-                    "at": utc_now(),
-                    "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
-                    "retry_permitted": False,
-                },
-            )
+            try:
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN",
+                    exit_code=None,
+                    failure_kind=failure,
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_SUPERVISION_FAILED_AFTER_START",
+                        "retry_permitted": False,
+                    },
+                )
+            except BaseException as journal_exc:
+                # The lease is already held; the journal stays non-terminal and the
+                # operator reconciles from the unknown-outcome lease listing.
+                print(
+                    f"ERROR {failure}:JOURNAL_TERMINAL_WRITE_FAILED:{type(journal_exc).__name__}",
+                    file=sys.stderr,
+                )
             return 1
 
+        started_children: list[subprocess.Popen[bytes]] = []
         try:
             with (
                 stdout_path.open("ab", buffering=0) as out_fh,
                 stderr_path.open("ab", buffering=0) as err_fh,
             ):
-                proc = subprocess.Popen(
+                proc = _TrackedPopen(
                     list(command.argv),
                     cwd=cwd,
                     env=dict(command.env),
@@ -414,6 +482,7 @@ def _run_operation(
                     stderr=err_fh,
                     start_new_session=True,
                     close_fds=True,
+                    started=started_children,
                 )
                 attach = getattr(account_adapter, "attach_provider", None)
                 if attach is not None:
@@ -452,6 +521,12 @@ def _run_operation(
                         last_heartbeat = now
                     time.sleep(0.25)
         except BaseException as exc:
+            if proc is None and started_children and started_children[0].returncode is None:
+                # #2389 item 4: Popen raised after the fork and the child was not
+                # reaped, so it may be running. For every adapter: kill its group,
+                # never release, record OUTCOME_UNKNOWN.
+                proc = started_children[0]
+                return _fail_closed_after_start(exc)
             if proc is not None and mark_pending is not None:
                 return _fail_closed_after_start(exc)
             # No child exists (Popen never succeeded): known pre-effect failure.
@@ -543,13 +618,17 @@ def _run_operation(
             and rotations < max_rotations
         )
         if can_rotate:
-            journal.heartbeat(
-                operation_id,
-                phase="ACCOUNT_ROTATING",
-                attempts=attempts,
-                rotations=rotations,
-                failure_kind=outcome.failure_kind,
-            )
+            try:
+                journal.heartbeat(
+                    operation_id,
+                    phase="ACCOUNT_ROTATING",
+                    attempts=attempts,
+                    rotations=rotations,
+                    failure_kind=outcome.failure_kind,
+                )
+            except BaseException as exc:
+                # #2389 item 1: never leave a launched attempt without a terminal record.
+                return _fail_closed_after_start(exc)
             try:
                 replacement = account_adapter.report_failure(binding, failure_enum)
             except BaseException as exc:
@@ -576,6 +655,7 @@ def _run_operation(
                 continue
 
         hold_failed = False
+        account_release: str | None = None
         if outcome.status == "OUTCOME_UNKNOWN":
             hold = getattr(account_adapter, "hold_unknown_outcome", None)
             if hold is not None:
@@ -587,7 +667,23 @@ def _run_operation(
                         f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
                         file=sys.stderr,
                     )
-        if not hold_failed:
+        confirm_failure = getattr(account_adapter, "confirm_terminal_failure", None)
+        if (
+            not hold_failed
+            and confirm_failure is not None
+            and failure_enum is not None
+            and outcome.status == "FAILED"
+        ):
+            # #2389 item 2: cooldown and release are one write; if it keeps failing
+            # the lease stays held (fail closed) rather than freeing an uncooled account.
+            write_error = _retry_account_write(lambda: confirm_failure(binding, failure_enum))
+            if write_error is not None:
+                account_release = "LEASE_HELD_COOLDOWN_PERSIST_FAILED"
+                print(
+                    f"ERROR {account_release}:{type(write_error).__name__}",
+                    file=sys.stderr,
+                )
+        elif not hold_failed:
             note = getattr(account_adapter, "note_terminal_failure", None)
             if note is not None and failure_enum is not None and outcome.status == "FAILED":
                 try:
@@ -625,6 +721,7 @@ def _run_operation(
                 "rotation_budget_exhausted": bool(
                     outcome.retry_permitted and rotations >= max_rotations
                 ),
+                **({"account_release": account_release} if account_release else {}),
             },
         )
         return 0 if outcome.status == "COMPLETED" else (exit_code or 1)

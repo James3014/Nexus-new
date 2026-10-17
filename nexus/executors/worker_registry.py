@@ -863,13 +863,8 @@ def _agy_result_failure(result: CliWorkerResult) -> Optional[str]:
     return reason
 
 
-# #2403: agy without usable credentials prints an interactive OAuth login
-# prompt, waits 60 s for a pasted code and exits 1.  These markers name it.
-AGY_LOGIN_PROMPT_MARKERS = (
-    "Authentication required. Please visit the URL to log in",
-    "Waiting for authentication",
-    "authentication failed or timed out",
-)
+# #2403: agy's interactive OAuth login prompt markers live in
+# nexus.services.agy_failure_signals.AGY_LOGIN_PROMPT_MARKERS (#2433).
 AGY_AUTHENTICATION_REQUIRED = "agy_authentication_required"
 AGY_CREDENTIALS_UNAVAILABLE = "agy_credentials_unavailable"
 _POOL_SWITCH_ON = ("1", "true", "yes")
@@ -1933,7 +1928,9 @@ class AgyWorkerAdapter:
                     failure_reason = f"non-eligible account failure: {kind.value}"
                     break
                 # A rate limit is transient: rotate away for this run without
-                # retiring the account for everyone else.
+                # retiring the account for everyone else.  (#2433 N2: unlike
+                # nexus-agy-dispatch, which retires it through the pool and
+                # counts it toward the outage cap; documented, not aligned.)
                 retire_kind = None if kind is AccountFailureKind.RATE_LIMITED else kind
                 excluded.add(claim.account_alias_hash)
                 if kind is AccountFailureKind.QUOTA_EXHAUSTED:

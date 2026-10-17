@@ -118,7 +118,7 @@ def pool_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     catalogs: dict[str, list[str]] = {}
     catalog_checks: list[str] = []
 
-    def snapshot(*, env, account_alias_hash, now=None):
+    def snapshot(*, env, account_alias_hash, now=None, max_fetch_seconds=None):
         name = Path(env["HOME"]).name.removeprefix("home-")
         catalog_checks.append(name)
         ids = catalogs[name]
