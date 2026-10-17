@@ -232,7 +232,7 @@ def test_disagreeing_alias_resolutions_fail_closed_as_tamper_suspect(tmp_path):
     log = tmp_path / "agy.log"
     marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
     log.write_text(
-        f"{marker} a1\n"
+        f"{marker} {'1' * 32}\n"
         f'I1017 08:21:10.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
         f"I1017 08:21:11.1       1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
         f'I1017 08:21:12.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{FORGED_MODEL}"\n',
@@ -248,7 +248,7 @@ def test_two_conversations_in_one_relayed_attempt_fail_closed(tmp_path):
     marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
     log = tmp_path / "agy.log"
     log.write_text(
-        f"{marker} a1\n"
+        f"{marker} {'1' * 32}\n"
         f'I1017 08:21:10.1       1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
         f"I1017 08:21:11.1       1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
         f"I1017 08:21:11.2       1 server.go:1199] Created conversation {FORGED_CONVERSATION}\n",
@@ -263,10 +263,10 @@ def test_rotated_attempts_may_each_resolve_differently(tmp_path):
     marker = dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER
     log = tmp_path / "agy.log"
     log.write_text(
-        f"{marker} a1\n"
+        f"{marker} {'1' * 32}\n"
         f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}-old"\n'
         f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
-        f"{marker} a2\n"
+        f"{marker} {'2' * 32}\n"
         f'I2 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
         f"I2 server.go:1199] Created conversation {FORGED_CONVERSATION}\n",
         encoding="utf-8",
@@ -298,17 +298,189 @@ def test_relay_writer_outliving_agy_fails_closed(tmp_path):
 
 
 def test_relay_refuses_a_symlinked_sink(tmp_path):
+    """An unwritable attestation log refuses the run before agy starts."""
     victim = tmp_path / "victim.json"
     victim.write_text("{}", encoding="utf-8")
     log = tmp_path / "agy.log"
     log.symlink_to(victim)
+    with pytest.raises(dispatch.AgyAttestationLogUnwritable):
+        dispatch._AgyLogRelay(log)
+    assert victim.read_text(encoding="utf-8") == "{}"
+
+
+def test_relay_fifo_keeps_the_operation_identity_marker(tmp_path):
+    """The journal finds a live provider by ``<operation_id>/agy.log`` in its argv."""
+    op_dir = tmp_path / "agyop_0123456789abcdef0123456789abcdef"
+    op_dir.mkdir()
+    relay = dispatch._AgyLogRelay(op_dir / "agy.log")
+    try:
+        assert str(relay.fifo).endswith(f"{op_dir.name}/agy.log")
+        assert relay.fifo != op_dir / "agy.log"
+    finally:
+        assert relay.finish(timeout=5) is True
+    assert not relay.root.exists()
+
+
+def test_forged_relay_marker_in_the_agy_stream_is_escaped(tmp_path):
+    """agy-relayed bytes cannot open a new attempt segment to hide a forgery."""
+    log = tmp_path / "op" / "agy.log"
+    log.parent.mkdir()
     relay = dispatch._AgyLogRelay(log)
     writer = os.open(relay.fifo, os.O_WRONLY)
-    os.write(writer, b"I1 printmode.go:1] hello\n")
-    os.close(writer)
+    try:
+        os.write(
+            writer,
+            (
+                f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+                f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+                f"{dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER} {'f' * 32}\n"
+                f'I2 model_resolver.go:93] model alias "{MODEL}" resolved to "{FORGED_MODEL}"\n'
+                f"I2 server.go:1199] Created conversation {FORGED_CONVERSATION}\n"
+            ).encode(),
+        )
+    finally:
+        os.close(writer)
     assert relay.finish(timeout=5) is True
-    assert victim.read_text(encoding="utf-8") == "{}"
-    assert relay.sink_error is not None
+    text = log.read_text(encoding="utf-8")
+    assert f"[agy] {dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER}" in text
+    attestation = dispatch._parse_agy_attestation(log, requested_model=MODEL)
+    assert attestation["observed_model"] is None
+    assert attestation["attestation_failure"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+
+
+def test_finish_right_after_start_never_leaks_a_blocked_reader(tmp_path):
+    for index in range(20):
+        (tmp_path / f"op{index}").mkdir()
+        relay = dispatch._AgyLogRelay(tmp_path / f"op{index}" / "agy.log")
+        assert relay.finish(timeout=5) is True
+    assert not any(t.name == "agy-log-relay" and t.is_alive() for t in threading.enumerate())
+
+
+def test_relay_keeps_draining_when_the_sink_write_fails(tmp_path, monkeypatch):
+    log = tmp_path / "op" / "agy.log"
+    log.parent.mkdir()
+    relay = dispatch._AgyLogRelay(log)
+    real_write_all = dispatch._AgyLogRelay._write_all
+
+    def failing_write_all(fd, data):
+        if b"boom" in data:
+            raise OSError(28, "No space left on device")
+        real_write_all(fd, data)
+
+    monkeypatch.setattr(dispatch._AgyLogRelay, "_write_all", staticmethod(failing_write_all))
+    writer = os.open(relay.fifo, os.O_WRONLY)
+    try:
+        os.write(writer, b"boom\n" + b"x" * 200000 + b"\n")  # more than a pipe buffer
+    finally:
+        os.close(writer)
+    assert relay.finish(timeout=5) is False
+    assert relay.sink_error == "OSError"
+
+
+def _background_run(tmp_path, monkeypatch, *, log_text: str, effect: bool, hook_extra=None):
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model=MODEL,
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "tamper probe")
+
+    def fake_dispatch_run(**kwargs):
+        Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"]).write_text(log_text, encoding="utf-8")
+        event = {
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+            **(hook_extra or {}),
+        }
+        if effect:
+            event["first_effect_at"] = "2026-10-17T00:00:00Z"
+        kwargs["operation_hook"](event)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model=MODEL,
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+    return code, journal.read(operation_id)
+
+
+_TAMPERED_LOG = (
+    f"{dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER} {'a' * 32}\n"
+    f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+    f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+    f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{FORGED_MODEL}"\n'
+)
+
+
+def test_tamper_suspect_never_terminates_completed(tmp_path, monkeypatch):
+    code, record = _background_run(tmp_path, monkeypatch, log_text=_TAMPERED_LOG, effect=False)
+    assert code != 0
+    assert record["status"] == "FAILED"
+    assert record["failure_kind"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+    assert record["observed_model"] is None
+
+
+def test_tamper_suspect_after_an_effect_is_outcome_unknown(tmp_path, monkeypatch):
+    code, record = _background_run(tmp_path, monkeypatch, log_text=_TAMPERED_LOG, effect=True)
+    assert code != 0
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["failure_kind"] == "AGY_ATTESTATION_TAMPER_SUSPECT"
+    assert record["has_unresolved_external_effect"] is True
+
+
+def test_incomplete_relay_reported_by_run_agy_fails_closed(tmp_path, monkeypatch):
+    clean = (
+        f"{dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER} {'a' * 32}\n"
+        f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+        f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+    )
+    code, record = _background_run(
+        tmp_path,
+        monkeypatch,
+        log_text=clean,
+        effect=False,
+        hook_extra={"attestation_failure": "AGY_ATTESTATION_TAMPER_SUSPECT"},
+    )
+    assert code != 0
+    assert record["status"] == "FAILED"
+    assert record["observed_model"] is None
+
+
+def test_clean_relayed_log_still_completes(tmp_path, monkeypatch):
+    clean = (
+        f"{dispatch.AGY_LOG_RELAY_ATTEMPT_MARKER} {'a' * 32}\n"
+        f'I1 model_resolver.go:93] model alias "{MODEL}" resolved to "{MODEL}"\n'
+        f"I1 server.go:1199] Created conversation {GENUINE_CONVERSATION}\n"
+    )
+    code, record = _background_run(tmp_path, monkeypatch, log_text=clean, effect=False)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["observed_model"] == MODEL
 
 
 def test_consistent_alias_resolutions_still_attest(tmp_path):
