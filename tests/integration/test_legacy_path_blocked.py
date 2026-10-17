@@ -36,7 +36,7 @@ MODEL_OUTPUT_NAMES = frozenset({
     "raw_completion",
     "raw_reply",
 })
-MODEL_OUTPUT_KEYS = frozenset({"response", "generated_text"})
+MODEL_OUTPUT_KEYS = frozenset({"response", "generated_text", "content", "output", "text"})
 
 # Call sites that match the model-output heuristic but parse something that is
 # NOT model text. Key: (path, enclosing qualname, unparsed json.load(s) argument).
@@ -130,7 +130,185 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
     ("nexus/services/s2t_strict.py", "S2T3BAdvisor._advise_via_ollama", "raw_body"): (
         'HTTP envelope: Ollama /api/generate body; the model text from payload["response"] goes through robust_json_parse.'
     ),
+    # scripts/** (#2342): sites below parse structured data or CLI/HTTP envelopes, not model text,
+    # unless the reason starts with "TODO route".
+    (
+        "scripts/archive/2026-10/bench/rebuild_bf_probe.py",
+        "step_bf2",
+        "response.read().decode('utf-8')",
+    ): (
+        "HTTP envelope: Ollama /api/tags inventory probe (model names only) in an archived one-off script (scripts/archive)."
+    ),
+    (
+        "scripts/archive/2026-10/bench/run_real_local_only_pilot.py",
+        "run_one",
+        "Path(response.receipt_path).read_text(encoding='utf-8')",
+    ): (
+        "File read: local_assist receipt JSON written by the executor, in an archived one-off script (scripts/archive)."
+    ),
+    ("scripts/archive/2026-10/ops/eval_1_5b_rigorous.py", "run_eval", "clean_response"): (
+        "Archived one-off eval script (scripts/archive), frozen and never imported; not routed. TODO route: only if the script is revived."
+    ),
+    ("scripts/archive/2026-10/ops/eval_router_final.py", "run_router_eval", "clean"): (
+        "Archived one-off eval script (scripts/archive), frozen and never imported; not routed. TODO route: only if the script is revived."
+    ),
+    ("scripts/archive/2026-10/ops/eval_router_v3.py", "run_router_eval_v3", "clean"): (
+        "Archived one-off eval script (scripts/archive), frozen and never imported; not routed. TODO route: only if the script is revived."
+    ),
+    ("scripts/archive/2026-10/scratch/run_m3_m6_c13453.py", "main", "response_3b"): (
+        "Archived one-off scratch script (scripts/archive), frozen and never imported; not routed. TODO route: only if the script is revived."
+    ),
+    ("scripts/archive/2026-10/scratch/run_x4_c13453.py", "main", "response_3b"): (
+        "Archived one-off scratch script (scripts/archive), frozen and never imported; not routed. TODO route: only if the script is revived."
+    ),
+    ("scripts/bench/capability_ab_runner.py", "main", "record.read_text(encoding='utf-8')"): (
+        "File read: bench record file written by this runner; no model text."
+    ),
+    ("scripts/bench/capability_ab_runner.py", "_parse_direct_gemini_json", "raw_stdout"): (
+        "CLI envelope: `gemini --output-format json` stdout; the model text is then parsed through parse_model_json below."
+    ),
+    ("scripts/bench/capability_ab_runner.py", "_extract_json_payload", "candidate"): (
+        "CLI stdout: JSON printed by the Nexus command under test (status/result/route/timing envelope), not model text."
+    ),
+    ("scripts/bench/capability_ab_runner.py", "_extract_json_payload", "text"): (
+        "CLI stdout: JSON printed by the Nexus command under test (status/result/route/timing envelope), not model text."
+    ),
+    ("scripts/bench/capability_ab_runner.py", "load_tasks", "raw_text"): (
+        "File read: bench task manifest JSON checked into the repo; no model text."
+    ),
+    ("scripts/bench/capability_file_task_runner.py", "_extract_code_from_gemini_stdout", "text"): (
+        "CLI envelope: `gemini --output-format json` stdout; code text is read from its response/output field, never json-parsed."
+    ),
+    ("scripts/bench/s2t_shadow_eval.py", "query_ollama", "res_body"): (
+        "HTTP envelope: Ollama /api/chat body; message.content is returned as plain text, never json-parsed here."
+    ),
+    (
+        "scripts/bench/treatment_lane.py",
+        "derive_runner_candidates",
+        "response_path.read_text(encoding='utf-8')",
+    ): (
+        "File read: local_assist response.json receipt written by the executor, not raw model text."
+    ),
+    (
+        "scripts/engine/commands/local_assist_actions.py",
+        "run_local_assist_command",
+        "Path(response.receipt_path).read_text(encoding='utf-8')",
+    ): (
+        "File read: local_assist response.json receipt written by the executor, not raw model text."
+    ),
+    (
+        "scripts/eval/run_memory_ab_v1.py",
+        "_local_exec_receipt",
+        "path.read_text(encoding='utf-8')",
+    ): ("File read: local execution receipt JSON written by the executor, not raw model text."),
+    ("scripts/eval/run_memory_ab_v1.py", "preflight_model", "response.read().decode('utf-8')"): (
+        "HTTP envelope: Ollama /api/tags inventory probe (model names only)."
+    ),
+    ("scripts/flash_ingest_v2.py", "main", "item['metadata']"): (
+        "Round-trip: item['metadata'] is json.dumps(m) built a few lines above from our own metadata dict; no model text."
+    ),
+    ("scripts/idea_check_v2.py", "reality_check_v2", "match.group(0)"): (
+        "CLI envelope: agent run stdout (result.payloads[].text); the model text is read from the payload field and written to the report as plain text."
+    ),
+    ("scripts/mock_gemini_cli.py", "main", "response.read().decode('utf-8')"): (
+        'HTTP envelope: Ollama /api/generate body in the mock Gemini CLI; resp_data["response"] is used as plain text, never json-parsed.'
+    ),
+    ("scripts/nexus_sentinel_proxy.py", "_call_gemini", "raw"): (
+        "HTTP envelope: Gemini generateContent body; model text is then read from candidates[].parts[].text as plain text."
+    ),
+    (
+        "scripts/ops/agent_protocol_check.py",
+        "<module>",
+        "Path(args.completion_bindings).read_text(encoding='utf-8')",
+    ): (
+        "File read: completion bindings/snapshot JSON files passed on the command line; structured evidence, not model text."
+    ),
+    (
+        "scripts/ops/agent_protocol_check.py",
+        "<module>",
+        "Path(args.completion_snapshot).read_text(encoding='utf-8')",
+    ): (
+        "File read: completion bindings/snapshot JSON files passed on the command line; structured evidence, not model text."
+    ),
+    ("scripts/ops/agent_protocol_check.py", "_load_task_card_overlay", "match.group(1)"): (
+        "Structured block: JSON overlay embedded in a Task Card markdown file written by us; not model text."
+    ),
+    ("scripts/ops/break_glass_recovery.py", "_fetch_issue_comments", "raw.decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    ("scripts/ops/break_glass_recovery.py", "_fetch_json_object", "raw.decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    (
+        "scripts/ops/canary_issue29_physical_local_online.py",
+        "call_physical_gemini",
+        "resp.read().decode('utf-8')",
+    ): (
+        "HTTP envelope: Gemini generateContent body; model text is read from candidates[].parts[].text, a canary that measures the transport."
+    ),
+    ("scripts/ops/capability_wiring_audit.py", "probe_model", "response.read().decode('utf-8')"): (
+        "HTTP envelope: Ollama /api/tags reachability probe (model names only)."
+    ),
+    ("scripts/ops/deletion_guard.py", "_get_json", "response.read().decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    ("scripts/ops/fast_start_v2.py", "GitHubReadClient.get", "response.read().decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    (
+        "scripts/ops/fast_start_v2_github.py",
+        "GitHubMetadataClient.request",
+        "raw.decode('utf-8')",
+    ): ("HTTP body: GitHub API JSON (structured), not model text."),
+    ("scripts/ops/mcp_gateway_durable.py", "_http_json", "response.read().decode('utf-8')"): (
+        "HTTP body: local Nexus MCP Gateway JSON-RPC response (structured), not raw model text."
+    ),
+    (
+        "scripts/ops/nexus_gateway_auto_deploy.py",
+        "Prober._http",
+        "response.read(8 * 1024 * 1024).decode('utf-8')",
+    ): ("HTTP body: Gateway /health and probe JSON (structured), not model text."),
+    ("scripts/ops/review_record_check.py", "_post_json", "response.read().decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    ("scripts/ops/review_record_check.py", "_get_json", "response.read().decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    ("scripts/ops/rie_pr_comment.py", "GitHubClient.request", "raw.decode('utf-8')"): (
+        "HTTP body: GitHub API JSON (structured), not model text."
+    ),
+    (
+        "scripts/ops/run_golden_behavior_eval.py",
+        "_fetch_gateway_health",
+        "response.read(1024 * 1024).decode('utf-8')",
+    ): ("HTTP body: Gateway /health JSON (structured), not model text."),
+    (
+        "scripts/ops/unified_runtime_scenarios.py",
+        "_run_nexus",
+        "local_receipt_path.read_text(encoding='utf-8')",
+    ): ("File read: local execution receipt JSON written by the executor, not raw model text."),
+    (
+        "scripts/ops/unified_runtime_scenarios.py",
+        "_verifier.verify",
+        "local_receipt_path.read_text(encoding='utf-8')",
+    ): ("File read: local execution receipt JSON written by the executor, not raw model text."),
+    ("scripts/train/smoke_test_adapter.py", "run_physical_smoke", "clean_response"): (
+        "TODO route: model text parsed under `except json.JSONDecodeError` and non-object values reach validate_json_schema's own message; routing through parse_model_json would change the exception type and that message."
+    ),
+    ("nexus/core/drone_engine.py", "LocalBonsaiBrain.ask_structured", "text"): (
+        "TODO route: model text (Ollama format-constrained reply); today a non-object JSON value is returned as-is, while parse_model_json(expect='object') would turn it into the Malformed-output FAIL dict."
+    ),
 }
+
+
+def _scripts_files_to_scan() -> list[Path]:
+    """scripts/**/*.py minus test trees and vendored dirs (#2342)."""
+    skipped = {"tests", "vendor", "vendored", "node_modules", "site-packages", ".venv"}
+    return sorted(
+        path
+        for path in (REPO_ROOT / "scripts").glob("**/*.py")
+        if not skipped & set(path.relative_to(REPO_ROOT / "scripts").parts)
+    )
 
 
 def _name_tokens(identifier: str) -> set[str]:
@@ -307,9 +485,11 @@ class TestLegacyPathBlocked(unittest.TestCase):
         )
         self.assertEqual(find_model_output_json_parses(file_read, "synthetic/file_read.py"), [])
 
-        files_to_check = sorted(REPO_ROOT.glob("nexus/**/*.py")) + [
-            REPO_ROOT / "run_1_simulator.py"
-        ]
+        files_to_check = (
+            sorted(REPO_ROOT.glob("nexus/**/*.py"))
+            + _scripts_files_to_scan()
+            + [REPO_ROOT / "run_1_simulator.py"]
+        )
         found: list[tuple[str, str, str, int]] = []
         for file_path in files_to_check:
             rel_path = file_path.relative_to(REPO_ROOT).as_posix()
@@ -354,6 +534,17 @@ class TestLegacyPathBlocked(unittest.TestCase):
             source = f"import json\ndef f(path):\n    {quiet} = path.read_bytes()\n    return json.loads({quiet})\n"
             with self.subTest(quiet=quiet):
                 self.assertEqual(find_model_output_json_parses(source, "synthetic/q.py"), [])
+
+    def test_scanner_covers_scripts_and_envelope_keys(self):
+        """#2342: scripts/ is scanned (tests/vendored excluded) and content/output/text keys taint."""
+        scanned = {p.relative_to(REPO_ROOT).as_posix() for p in _scripts_files_to_scan()}
+        self.assertIn("scripts/bench/capability_ab_runner.py", scanned)
+        self.assertIn("scripts/ops/review_record_check.py", scanned)
+        self.assertFalse([p for p in scanned if "/tests/" in p or "/vendor" in p])
+        for key in ("content", "output", "text"):
+            source = f"import json\ndef f(envelope):\n    return json.loads(envelope['{key}'])\n"
+            with self.subTest(key=key):
+                self.assertTrue(find_model_output_json_parses(source, "synthetic/key.py"))
 
     def test_allowlist_entries_are_real_and_justified(self):
         """#2174: every entry has a specific reason, names a real function, and a json parse on its argument."""

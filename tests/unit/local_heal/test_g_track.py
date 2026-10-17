@@ -4,22 +4,13 @@ ARCHIVED 2026-10-13 (#1906): linear_replay_runner is archived (ARCHIVED_2026-10-
 its tests here are kept until the deletion PR removes both.
 """
 import hashlib
-import pytest
 from nexus.services.local_heal.agentless_pipeline import (
     AgentlessCandidatePipeline,
-    PipelineCandidate,
-    PipelineResult,
     CandidateStage,
 )
 from nexus.services.local_heal.semantic_anchor_selection import (
     AnchorCandidateGenerator,
     SemanticAnchorScorer,
-    select_semantic_anchor,
-)
-from nexus.services.local_heal.linear_replay_runner import (
-    LinearReplayRunner,
-    ReplayTask,
-    ReplayResult,
 )
 from nexus.services.local_heal.structured_verifier_feedback import (
     StructuredVerifierFeedback,
@@ -27,8 +18,6 @@ from nexus.services.local_heal.structured_verifier_feedback import (
 )
 from nexus.services.local_heal.backend_resource_policy import (
     BackendResourcePolicy,
-    ModelTier,
-    ResourcePolicy,
 )
 
 

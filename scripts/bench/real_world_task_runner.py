@@ -7,11 +7,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nexus.contracts.model_output_json import parse_model_json
 from scripts.bench.real_world_eval import compare
 
 
@@ -158,11 +160,16 @@ def materialize_fixture(root: Path, task: RealWorldTask) -> tuple[Path, list[str
         )
     else:
         raise ValueError(f"unknown_fixture_kind:{task.fixture_kind}")
-    return case_dir, ["uv", "run", "pytest", "-q", "tests"], case_dir
+    return case_dir, _fixture_test_cmd(), case_dir
+
+
+def _fixture_test_cmd() -> list[str]:
+    """Run fixture tests with this interpreter; ``uv run pytest`` needs pytest on PATH (#2317)."""
+    return [sys.executable, "-m", "pytest", "-q", "tests"]
 
 
 def _run_tests(case_dir: Path, timeout_sec: int) -> bool:
-    res = subprocess.run(["uv", "run", "pytest", "-q", "tests"], cwd=case_dir, text=True, capture_output=True, timeout=timeout_sec)
+    res = subprocess.run(_fixture_test_cmd(), cwd=case_dir, text=True, capture_output=True, timeout=timeout_sec)
     return res.returncode == 0
 
 
@@ -246,11 +253,10 @@ def _parse_gemini_payload(stdout: str) -> dict[str, Any]:
         candidates.insert(0, fenced.group(1).strip())
     for candidate in candidates:
         try:
-            payload = json.loads(candidate)
+            payload = parse_model_json(candidate, expect="object", mode="strict")
         except Exception:
             continue
-        if isinstance(payload, dict):
-            return payload
+        return payload
     return {"files": [], "root_cause": "", "added_regression_test": False}
 
 
