@@ -962,8 +962,36 @@ class ExternalIntelligenceAutomation:
         except ExternalIntelligenceError as exc:
             raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
+    def _excerpt_base_hashes(
+        self,
+        item: IssueWorkItem,
+        task_card_text: str,
+        intelligence: Mapping[str, Any],
+    ) -> dict[str, str]:
+        """Whole-file sha256 of every contract source the pack carried as an excerpt.
+
+        The rebuilt pack must be the one the semantic request was bound to;
+        otherwise the hashes could describe a different pack (fail closed).
+        """
+        pack = build_context_pack(self._sources(item, task_card_text))
+        hashes = {
+            str(entry["ref"]): str(entry["source_sha256"])
+            for entry in pack["entries"]
+            if entry.get("kind") == "source_file" and "excerpt" in entry
+        }
+        if hashes:
+            request = intelligence.get("request")
+            bound = request.get("context_pack_sha256") if isinstance(request, Mapping) else None
+            if not bound or bound != pack["context_pack_sha256"]:
+                raise AutomationError("EXCERPT_CONTEXT_PACK_MISMATCH")
+        return hashes
+
     def _c_units(
-        self, item: IssueWorkItem, intelligence: Mapping[str, Any]
+        self,
+        item: IssueWorkItem,
+        intelligence: Mapping[str, Any],
+        *,
+        excerpt_base_hashes: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         request = intelligence.get("request")
         if not isinstance(request, Mapping):
@@ -995,6 +1023,14 @@ class ExternalIntelligenceAutomation:
             }
             if unit_worker:
                 unit_data["selected_worker"] = dict(unit_worker)
+            unit_excerpts = {
+                path: digest
+                for path, digest in (excerpt_base_hashes or {}).items()
+                if path in unit["mutation_paths"]
+            }
+            if unit_excerpts:
+                # Fanout refuses dispatch/Candidate when the base file differs (#2357).
+                unit_data["excerpt_base_hashes"] = unit_excerpts
             if core_authority is not None:
                 # Authority inputs only; fanout mints the per-attempt Core binding.
                 # Not part of unit identity, so existing attempts/receipts are unchanged.
@@ -1210,7 +1246,11 @@ class ExternalIntelligenceAutomation:
         return {
             "status": "COMPLETED",
             "receipt_id": str(receipt.get("receipt_id") or ""),
-            "request": {"request_sha256": str(request["request_sha256"])},
+            "request": {
+                "request_sha256": str(request["request_sha256"]),
+                # Lets resume bind excerpt base hashes to this exact pack (#2357).
+                "context_pack_sha256": str(context_pack["context_pack_sha256"]),
+            },
             "envelope_sha256": envelope_sha,
         }
 
@@ -1405,7 +1445,11 @@ class ExternalIntelligenceAutomation:
                 **completed_state,
             )
 
-            units = self._c_units(item, intelligence)
+            units = self._c_units(
+                item,
+                intelligence,
+                excerpt_base_hashes=self._excerpt_base_hashes(item, task_card_text, intelligence),
+            )
             if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
                 return self.state_store.save(
                     item,
