@@ -1029,3 +1029,328 @@ def test_a_header_whose_parenthetical_starts_with_a_not_run_word_opens_no_sectio
 def test_a_not_run_word_anywhere_in_the_headers_own_parenthetical_opens_no_section(header):
     body = f"Head reviewed: {HEAD}\n**Claude review**: ACCEPT\n{header}\nVerdict: ACCEPT @ {HEAD}\n"
     assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "MISSING_CROSS_MODEL"
+
+
+# -- #2308: merge-only delta, widened not-run words, same-line not-run header ----------------
+
+R_OLD = "1e9f3d4ec" + "0" * 31  # the reviewed head
+M_HEAD = HEAD  # the head after the author merged main
+MAIN_PARENT = "a" * 40  # a commit already on main
+FOREIGN = "b" * 40  # a non-merge commit that is not on main
+SPINE_MID = "c" * 40
+
+
+def _commit(sha, *parents):
+    return {"sha": sha, "parents": [{"sha": p} for p in parents]}
+
+
+def _compare_payload(commits, files=(), status="ahead", behind_by=0, **extra):
+    payload = {
+        "status": status,
+        "ahead_by": len(commits),
+        "behind_by": behind_by,
+        "total_commits": len(commits),
+        "commits": list(commits),
+        "files": list(files),
+    }
+    payload.update(extra)
+    return payload
+
+
+def _delta_fetch(
+    *,
+    commits=None,
+    main_status="behind",
+    main_ahead=0,
+    changed=({"filename": "elsewhere/x.py"},),
+    pr_at_old=({"filename": "docs/a.md"},),
+    side_changed=({"filename": "main/other.py"},),
+    api_error=False,
+    compare_extra=None,
+    pr_files=DOCS,
+    comments=None,
+    reviews=(),
+):
+    commits = commits if commits is not None else [_commit(M_HEAD, R_OLD, MAIN_PARENT)]
+    comments = comments if comments is not None else [_c(OPUS_RECORD.replace(HEAD, R_OLD[:12]))]
+    delta = _compare_payload(commits, changed, **(compare_extra or {}))
+    base_fetch = _fake(files=pr_files, comments=comments, reviews=reviews)
+
+    def fetch(url, token):
+        if "/compare/" in url:
+            if api_error:
+                raise urllib.error.URLError("compare down")
+            spec = url.split("/compare/", 1)[1].split("?", 1)[0]
+            left, right = spec.split("...")
+            if left == R_OLD and right == M_HEAD:
+                return delta
+            if left == "main":
+                return {"status": main_status, "ahead_by": main_ahead, "behind_by": 3}
+            if left == R_OLD:  # what the base gained on a side parent since the reviewed head
+                return _compare_payload([], side_changed)
+            raise AssertionError(url)
+        if "/commits/" in url:
+            return {"sha": R_OLD}
+        return base_fetch(url, token)
+
+    return fetch
+
+
+def _delta_fetch_with_old_pr_files(pr_at_old, **kw):
+    inner = _delta_fetch(**kw)
+
+    def fetch(url, token):
+        if "/compare/main...%s" % R_OLD in url:
+            return _compare_payload([], pr_at_old)
+        return inner(url, token)
+
+    return fetch
+
+
+def _run_delta(fetch):
+    posted, post = _posts()
+    rc = rrc.run("o/r", 7, TOKEN, fetch, post)
+    return rc, posted[0][1]
+
+
+def _pull_main():
+    return {"head": {"sha": HEAD}, "base": {"ref": "main"}}
+
+
+def _delta_case(**kw):
+    kw.setdefault("pr_at_old", ({"filename": "docs/a.md"},))
+    fetch = _delta_fetch_with_old_pr_files(kw.pop("pr_at_old"), **kw)
+
+    def wrapped(url, token):
+        if url.endswith("/pulls/7"):
+            return _pull_main()
+        return fetch(url, token)
+
+    return _run_delta(wrapped)
+
+
+def test_merge_only_delta_accepts_the_record_at_the_reviewed_head():
+    rc, status = _delta_case()
+    assert rc == 0 and status["state"] == "success"
+    assert f"record at {R_OLD[:9]}, merge-only delta verified" in status["description"]
+
+
+def test_merge_only_delta_rejects_a_changed_pr_path():
+    rc, status = _delta_case(changed=({"filename": "docs/a.md"},))
+    assert rc == 1 and status["state"] == "failure" and "older head only" in status["description"]
+
+
+def test_merge_only_delta_rejects_a_renamed_pr_path():
+    changed = ({"filename": "elsewhere/new.py", "previous_filename": "docs/a.md"},)
+    assert _delta_case(changed=changed)[0] == 1
+
+
+def test_merge_only_delta_rejects_a_path_the_pr_touched_at_the_reviewed_head():
+    # the merge reverted a file the review covered: it is gone from the PR list now
+    rc, _ = _delta_case(
+        changed=({"filename": "scripts/gone.py"},), pr_at_old=({"filename": "scripts/gone.py"},)
+    )
+    assert rc == 1
+
+
+def test_merge_only_delta_rejects_a_non_merge_commit_on_the_spine():
+    assert _delta_case(commits=[_commit(M_HEAD, R_OLD)])[0] == 1
+
+
+def test_merge_only_delta_rejects_a_foreign_commit_not_on_main():
+    commits = [_commit(M_HEAD, SPINE_MID, MAIN_PARENT), _commit(SPINE_MID, R_OLD, FOREIGN)]
+    # the first side parent (main) is on main, FOREIGN is not
+    inner = _delta_fetch(commits=commits)
+
+    def fetch(url, token):
+        if url.endswith("/pulls/7"):
+            return _pull_main()
+        if f"/compare/main...{FOREIGN}" in url:
+            return {"status": "ahead", "ahead_by": 1, "behind_by": 0}
+        if f"/compare/main...{R_OLD}" in url:
+            return _compare_payload([], [{"filename": "docs/a.md"}])
+        return inner(url, token)
+
+    assert _run_delta(fetch)[0] == 1
+
+
+def test_merge_only_delta_accepts_a_chain_of_merges():
+    commits = [_commit(M_HEAD, SPINE_MID, MAIN_PARENT), _commit(SPINE_MID, R_OLD, "d" * 40)]
+    rc, status = _delta_case(commits=commits)
+    assert rc == 0 and "merge-only delta verified" in status["description"]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"status": "diverged"},
+        {"status": "behind"},
+        {"behind_by": 1},
+        {"ahead_by": 7},
+        {"total_commits": 250},
+        {"total_commits": "2"},
+    ],
+)
+def test_merge_only_delta_rejects_a_non_ahead_or_truncated_compare(extra):
+    assert _delta_case(compare_extra=extra)[0] == 1
+
+
+def test_merge_only_delta_rejects_a_truncated_file_list():
+    files = tuple({"filename": f"f{i}.py"} for i in range(300))
+    assert _delta_case(changed=files)[0] == 1
+
+
+def test_merge_only_delta_rejects_when_the_compare_api_errors():
+    rc, status = _delta_case(api_error=True)
+    assert rc == 1 and "older head only" in status["description"]
+
+
+def test_merge_only_delta_rejects_a_side_parent_not_on_main():
+    assert _delta_case(main_status="ahead", main_ahead=2)[0] == 1
+    assert _delta_case(main_status="diverged")[0] == 1
+
+
+def test_merge_only_delta_never_runs_when_the_head_is_already_recorded():
+    calls: list[str] = []
+    fetch = _fake(files=DOCS, comments=[_c(OPUS_RECORD)], calls=calls)
+    assert rrc.run("o/r", 7, TOKEN, fetch, _posts()[1]) == 0
+    assert not any("/compare/" in u for u in calls)
+
+
+def test_merge_only_delta_holds_for_the_cross_model_requirement_too():
+    risky_files = RISKY
+    claude_old = _c(OPUS_RECORD.replace(HEAD, R_OLD[:12]))
+    codex_old = _c(CODEX_RECORD.replace(HEAD, R_OLD))
+    ok = _delta_case(
+        pr_files=risky_files, pr_at_old=RISKY, comments=[claude_old, codex_old], changed=()
+    )
+    assert ok[0] == 0 and "merge-only delta verified" in ok[1]["description"]
+    # the same Codex record without a verified delta does not count
+    bad = _delta_case(
+        pr_files=risky_files,
+        comments=[claude_old, codex_old],
+        changed=({"filename": "scripts/ops/pr_impact_gate.py"},),
+    )
+    assert bad[0] == 1
+
+
+def test_evaluate_uses_a_delta_verified_head_only_when_told_to():
+    old = _c(OPUS_RECORD.replace(HEAD, R_OLD))
+    assert rrc.evaluate(HEAD, DOCS, [old], [])["status"] == "MISSING_RECORD"
+    report = rrc.evaluate(HEAD, DOCS, [old], [], (R_OLD,))
+    assert report["status"] == "OK" and report["delta_verified_heads"] == [R_OLD]
+
+
+def test_delta_verified_record_does_not_rescue_a_missing_cross_model_requirement():
+    old = _c(OPUS_RECORD.replace(HEAD, R_OLD))
+    assert rrc.evaluate(HEAD, RISKY, [old], [], (R_OLD,))["status"] == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "**Codex review (awaiting)**",
+        "**Codex review (in progress)**",
+        "**Codex review (queued)**",
+        "**Codex review (running)**",
+        "**Codex review awaiting**",
+        "**Codex review in progress**",
+        "**Codex review queued**",
+        "**Codex review running**",
+        "Codex: queued",
+        "Codex adversarial review: awaiting",
+    ],
+)
+def test_not_run_words_do_not_open_a_cross_model_section(header):
+    assert rrc._label_family(header) is None
+    body = f"## Review record — Claude Opus, head {HEAD}\nVerdict: ACCEPT\n\n{header}\nACCEPT\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] and not record["cross_model"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"**Codex (not run)**: ACCEPT @ {HEAD}",
+        f"**Codex review (awaiting)**: ACCEPT @ {HEAD}",
+        f"**Codex (queued)**: r2 ACCEPT@{HEAD}",
+        f"**Gemini (unavailable)**: r1 REJECT, r2 ACCEPT @ {HEAD}",
+        f"Codex: queued — ACCEPT @ {HEAD}",
+    ],
+)
+def test_a_disabled_label_on_the_verdict_line_names_no_family(line):
+    record = rrc.classify_record(f"## Review record\n{line}\n", HEAD)
+    assert record is None or not record["cross_model"]
+    report = rrc.evaluate(HEAD, RISKY, [_c(OPUS_RECORD), _c(line)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_disabled_label_does_not_fall_back_to_the_previous_claude_header():
+    body = f"## Claude review\n**Codex (not run)**: ACCEPT @ {HEAD}\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and not record["claude"] and not record["cross_model"]
+
+
+def test_a_live_codex_verdict_line_still_counts():
+    record = rrc.classify_record(f"**Codex (round 2)**: ACCEPT @ {HEAD}\n", HEAD)
+    assert record is not None and record["cross_model"]
+
+
+_GATE = {"filename": "nexus/gate.py"}
+
+
+def test_an_evil_merge_that_keeps_the_reviewed_tree_is_not_accepted():
+    # parents (R, main@X) with R's tree: compare R...M is empty, but main's file X reverted
+    # shows up as a new PR path at the head
+    rc, status = _delta_case(changed=(), pr_files=DOCS + [_GATE])
+    assert rc == 1 and "older head only" in status["description"]
+
+
+def test_a_base_change_to_a_pr_path_on_the_side_parent_is_not_accepted():
+    assert _delta_case(side_changed=({"filename": "docs/a.md"},))[0] == 1
+    assert (
+        _delta_case(
+            side_changed=({"filename": "docs/gone.md"},),
+            pr_at_old=({"filename": "docs/a.md"}, {"filename": "docs/gone.md"}),
+            pr_files=DOCS + [{"filename": "docs/gone.md"}],
+        )[0]
+        == 1
+    )
+
+
+def test_a_truncated_side_parent_change_list_is_not_accepted():
+    files = tuple({"filename": f"m{i}.py"} for i in range(300))
+    assert _delta_case(side_changed=files)[0] == 1
+
+
+def test_an_honest_merge_where_main_changed_a_non_pr_file_is_accepted():
+    rc, status = _delta_case(
+        side_changed=({"filename": "main/other.py"}, {"filename": "main/more.py"}),
+        changed=({"filename": "main/other.py"}, {"filename": "main/more.py"}),
+    )
+    assert rc == 0 and "merge-only delta verified" in status["description"]
+
+
+def test_the_compare_file_list_is_read_from_page_one_only():
+    urls: list[str] = []
+
+    def fetch(url, token):
+        urls.append(url)
+        assert "page=1" in url  # later pages carry no "files" key
+        return {"files": [{"filename": "a.py"}, {"filename": "b.py", "previous_filename": "c.py"}]}
+
+    assert rrc._compare_files(fetch, "https://api.github.com/repos/o/r", TOKEN, "x", "y") == {
+        "a.py",
+        "b.py",
+        "c.py",
+    }
+    assert len(urls) == 1
+
+
+def test_gemini_with_codex_out_of_credits_aside_still_credits_cross_model():
+    line = (
+        "- Cross-model adversarial review (Gemini 3.8 Flash High via agy, Codex out of "
+        f"credits): ACCEPT @ {HEAD}"
+    )
+    record = rrc.classify_record(f"## Review record\n{line}\n", HEAD)
+    assert record is not None and record["cross_model"]

@@ -393,6 +393,9 @@ transport/evidence capability gap rather than treating Candidate recreation as a
 safe fallback.
 
 
+> **Historical:** the lane-binding paragraphs below were retired (#2006/#2286);
+> no PR lane block is enforced at merge now.
+
 A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
 remains the effective merge-lane contract until the Owner explicitly changes it.
 Starting with PR #1061, every newly opened protected-merge PR must publish exactly
