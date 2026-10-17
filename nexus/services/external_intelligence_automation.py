@@ -1246,7 +1246,11 @@ class ExternalIntelligenceAutomation:
         return {
             "status": "COMPLETED",
             "receipt_id": str(receipt.get("receipt_id") or ""),
-            "request": {"request_sha256": str(request["request_sha256"])},
+            "request": {
+                "request_sha256": str(request["request_sha256"]),
+                # Lets resume bind excerpt base hashes to this exact pack (#2357).
+                "context_pack_sha256": str(context_pack["context_pack_sha256"]),
+            },
             "envelope_sha256": envelope_sha,
         }
 

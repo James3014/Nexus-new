@@ -548,3 +548,40 @@ def test_excerpt_hashes_refused_when_request_pack_differs(tmp_path, pack_sha):
     assert result["state"] == "BLOCKED"
     assert result["error"] == "EXCERPT_CONTEXT_PACK_MISMATCH"
     assert c.calls == []
+
+
+def test_resume_from_fanout_dispatching_keeps_excerpt_pack_binding(tmp_path):
+    from nexus.services.external_intelligence_automation import IssueWorkItem
+    from tests.services.test_external_intelligence_automation import (
+        FakeC,
+        FakeD,
+        _install_completed_receipt,
+    )
+
+    repo, store, contract = _big_repo_contract(tmp_path)
+    card = repo / "tasks" / "x.md"
+    body = _body(contract)
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+    item = IssueWorkItem("o/r", 7, "title", body, parse_issue_contract(body))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(
+        item, "FANOUT_DISPATCHING", intelligence_effect_id=effect_id, worker_binding=binding
+    )
+    _install_completed_receipt(automation, item, card, store)
+
+    result = automation.run_issue("o/r", 7, "title", body)
+
+    assert result.get("error") != "EXCERPT_CONTEXT_PACK_MISMATCH", result
+    assert result["state"] == "COMPLETE"
+    assert sidecar.calls == []
+    units = {u["unit_id"]: u for u in c.calls[0][0]}
+    assert units["u1"]["excerpt_base_hashes"] == {
+        "nexus/a.py": hashlib.sha256((repo / "nexus" / "a.py").read_bytes()).hexdigest()
+    }
