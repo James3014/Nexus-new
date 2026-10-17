@@ -239,7 +239,8 @@ def test_automation_runs_oversized_py_mutation_path_with_named_symbols(tmp_path)
     )
     contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
     contract["execution_units"][0]["excerpt_symbols"] = {"nexus/a.py": ["target"]}
-    sidecar = FakeSidecar(store)
+    # Real requests carry context_pack_sha256; step 2b binds excerpt hashes to it.
+    sidecar = _PackBoundSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
 
     result = automation.run_issue("o/r", 2357, "title", _body(contract))
@@ -431,7 +432,7 @@ def test_fanout_units_carry_whole_file_hash_only_for_excerpted_paths(tmp_path):
     contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
     contract["execution_units"][0]["excerpt_symbols"] = {"nexus/a.py": ["target"]}
     c = FakeC()
-    automation = _automation(tmp_path, repo, store, c=c)
+    automation = _automation(tmp_path, repo, store, sidecar=_PackBoundSidecar(store), c=c)
 
     automation.run_issue("o/r", 2357, "title", _body(contract))
 
@@ -468,3 +469,53 @@ def test_fanout_units_have_no_excerpt_hash_when_source_fit_whole(tmp_path):
     automation.run_issue("o/r", 2357, "title", _body(contract))
 
     assert all("excerpt_base_hashes" not in u for u in c.calls[0][0])
+
+
+class _PackBoundSidecar(FakeSidecar):
+    """FakeSidecar whose request carries the context_pack_sha256 it was given."""
+
+    def __init__(self, store, *, pack_sha=None):
+        super().__init__(store)
+        self.pack_sha = pack_sha
+
+    def analyze(self, record, sources, selected_worker=None):
+        result = super().analyze(record, sources, selected_worker=selected_worker)
+        sha = self.pack_sha or build_context_pack(list(sources))["context_pack_sha256"]
+        return {**result, "request": {**result["request"], "context_pack_sha256": sha}}
+
+
+def _big_repo_contract(tmp_path):
+    repo, card, _, _, store = _setup(tmp_path)
+    big = repo / "nexus" / "a.py"
+    big.parent.mkdir(parents=True, exist_ok=True)
+    big.write_text(_big_module(), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "big"], cwd=repo, capture_output=True, check=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    contract = _contract("tasks/x.md", _sha(card), main_sha=head_sha)
+    contract["execution_units"][0]["excerpt_symbols"] = {"nexus/a.py": ["target"]}
+    return repo, store, contract
+
+
+@pytest.mark.parametrize("pack_sha", ["0" * 64, None])
+def test_excerpt_hashes_refused_when_request_pack_differs(tmp_path, pack_sha):
+    from tests.services.test_external_intelligence_automation import FakeC
+
+    repo, store, contract = _big_repo_contract(tmp_path)
+    sidecar = _PackBoundSidecar(store, pack_sha=pack_sha) if pack_sha else FakeSidecar(store)
+    c = FakeC()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+
+    result = automation.run_issue("o/r", 2357, "title", _body(contract))
+
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "EXCERPT_CONTEXT_PACK_MISMATCH"
+    assert c.calls == []

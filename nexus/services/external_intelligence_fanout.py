@@ -3071,6 +3071,7 @@ class AdaptiveWorkerFanoutRuntime:
             "selected_worker": previous_receipt.get("selected_worker"),
             "provider": previous_receipt.get("provider", PROVIDER),
             "model": previous_receipt.get("model", MODEL),
+            "excerpt_base_hashes": previous_receipt.get("excerpt_base_hashes"),
         })
         if worker["status"] == "BLOCKED":
             receipt = self._build_receipt(
@@ -3176,6 +3177,10 @@ class AdaptiveWorkerFanoutRuntime:
         }
         if unit.selected_worker is not None:
             receipt["selected_worker"] = dict(unit.selected_worker)
+        if unit.excerpt_base_hashes:
+            # Only when set, so receipts of units without excerpts stay byte-identical;
+            # repair rebuilds the unit from this receipt and re-checks the base (#2357).
+            receipt["excerpt_base_hashes"] = dict(sorted(unit.excerpt_base_hashes.items()))
         if _attempt_core_hashes(attempt) is not None:
             # The receipt's envelope_sha256 stays the semantic identity; the bound
             # envelope and the runtime-attested Core identity are added alongside.

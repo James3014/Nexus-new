@@ -962,14 +962,29 @@ class ExternalIntelligenceAutomation:
         except ExternalIntelligenceError as exc:
             raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
-    def _excerpt_base_hashes(self, item: IssueWorkItem, task_card_text: str) -> dict[str, str]:
-        """Whole-file sha256 of every contract source the pack carried as an excerpt."""
+    def _excerpt_base_hashes(
+        self,
+        item: IssueWorkItem,
+        task_card_text: str,
+        intelligence: Mapping[str, Any],
+    ) -> dict[str, str]:
+        """Whole-file sha256 of every contract source the pack carried as an excerpt.
+
+        The rebuilt pack must be the one the semantic request was bound to;
+        otherwise the hashes could describe a different pack (fail closed).
+        """
         pack = build_context_pack(self._sources(item, task_card_text))
-        return {
+        hashes = {
             str(entry["ref"]): str(entry["source_sha256"])
             for entry in pack["entries"]
             if entry.get("kind") == "source_file" and "excerpt" in entry
         }
+        if hashes:
+            request = intelligence.get("request")
+            bound = request.get("context_pack_sha256") if isinstance(request, Mapping) else None
+            if not bound or bound != pack["context_pack_sha256"]:
+                raise AutomationError("EXCERPT_CONTEXT_PACK_MISMATCH")
+        return hashes
 
     def _c_units(
         self,
@@ -1429,7 +1444,7 @@ class ExternalIntelligenceAutomation:
             units = self._c_units(
                 item,
                 intelligence,
-                excerpt_base_hashes=self._excerpt_base_hashes(item, task_card_text),
+                excerpt_base_hashes=self._excerpt_base_hashes(item, task_card_text, intelligence),
             )
             if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
                 return self.state_store.save(
