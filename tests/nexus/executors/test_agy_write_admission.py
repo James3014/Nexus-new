@@ -2161,7 +2161,13 @@ def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path,
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t",
+        task_id="t",
+        prompt="p",
+        visible_tests=[],
+        files=[],
+        root_cause="",
+        target_file="x.py",
     )
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
@@ -2349,7 +2355,13 @@ def test_bench_runner_refuses_a_target_inside_a_credential_path(tmp_path, monkey
     monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     task = SimpleNamespace(
-        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t",
+        task_id="t",
+        prompt="p",
+        visible_tests=[],
+        files=[],
+        root_cause="",
+        target_file="x.py",
     )
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
     assert row["agy_failure_reason"] == "agy_target_inside_credential_path"
@@ -2370,7 +2382,13 @@ def test_bench_runner_reports_an_unrepresentable_profile_as_a_typed_error(tmp_pa
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t",
+        task_id="t",
+        prompt="p",
+        visible_tests=[],
+        files=[],
+        root_cause="",
+        target_file="x.py",
     )
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
     assert row["agy_failure_reason"] == "agy_seatbelt_profile_unrepresentable"
@@ -2437,7 +2455,13 @@ def test_bench_runner_passes_source_home_to_the_seatbelt_profile(tmp_path, monke
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t",
+        task_id="t",
+        prompt="p",
+        visible_tests=[],
+        files=[],
+        root_cause="",
+        target_file="x.py",
     )
     with pytest.raises(RuntimeError, match="profile spy"):
         runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")

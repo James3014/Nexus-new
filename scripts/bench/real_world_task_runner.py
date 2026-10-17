@@ -510,6 +510,12 @@ def _sync_staged_case(staged: Path, case_dir: Path) -> str | None:
     case_files = _tree_inventory(case_dir)
     if staged_files is None or case_files is None:
         return AGY_STAGED_SYMLINK_REFUSED
+    # A path that is a file in one tree and a directory (prefix) in the other
+    # cannot be mirrored atomically: refuse before touching anything.
+    staged_dirs = {parent for rel in staged_files for parent in rel.parents}
+    case_dirs = {parent for rel in case_files for parent in rel.parents}
+    if staged_files & case_dirs or case_files & staged_dirs:
+        return AGY_STAGED_SYMLINK_REFUSED
     for rel in sorted(case_files - staged_files):
         (case_dir / rel).unlink()
     for rel in sorted(staged_files):

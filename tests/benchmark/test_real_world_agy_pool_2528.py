@@ -493,3 +493,16 @@ def test_unreadable_staged_dir_refuses_instead_of_deleting(tmp_path):
         assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
 
     assert (case_dir / "notes" / "user_draft.md").read_text(encoding="utf-8") == "draft\n"
+
+
+def test_file_dir_type_change_refuses_before_touching_the_case(tmp_path):
+    # Claude review at c51abf9ed: case dir x/ with x/f, staged regular file x.
+    case_dir = tmp_path / "case"
+    (case_dir / "x").mkdir(parents=True)
+    (case_dir / "x" / "f").write_text("keep\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "x").write_text("file\n", encoding="utf-8")
+
+    assert runner._sync_staged_case(staged, case_dir) == runner.AGY_STAGED_SYMLINK_REFUSED
+    assert (case_dir / "x" / "f").read_text(encoding="utf-8") == "keep\n"
