@@ -1,23 +1,32 @@
 from __future__ import annotations
-
+import argparse
 import ast
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
-import tempfile
 import time
+from nexus.services.nightshift_queue_consumer import NIGHTSHIFT_JUDGE_ROLE, NIGHTSHIFT_ONLINE_ROLE
+import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
-from nexus.core.context_hub import ContextHub
-from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
+from nexus.research.runtime.runtime_resilience import (
+    compute_time_budget,
+    classify_infra_block,
+    get_retry_delay,
+    RetryParams,
+)
+from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
-from nexus.services.nightshift_queue_consumer import NIGHTSHIFT_JUDGE_ROLE, NIGHTSHIFT_ONLINE_ROLE
+from nexus.core.context_hub import ContextHub
 from nexus.services.workspace import WorkspaceManager
+from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
 
 # Mock FeynmanBridge if scripts import fails in nexus/app/
 try:
