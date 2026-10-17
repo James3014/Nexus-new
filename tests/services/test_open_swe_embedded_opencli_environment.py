@@ -47,6 +47,7 @@ SENTINELS = {
     "GITLAB_PAT": "pat-sentinel",
     "DATABASE_URL": "postgres://u:p@h/db",
     "KUBECONFIG": "/tmp/kube",
+    "BASIC_AUTH": "x",
     "GH_OPENCLI_HOST": "x",
 }
 KEPT = {
