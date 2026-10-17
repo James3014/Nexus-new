@@ -48,9 +48,10 @@ def _python_verifier(code: str) -> str:
 class _StubAdapter:
     """Worker stub that edits the leased Target and reports completion."""
 
-    def __init__(self, provider: str, content: str):
+    def __init__(self, provider: str, content: str, extra_files: dict | None = None):
         self.provider = provider
         self.content = content
+        self.extra_files = extra_files or {}
 
     def preflight(self):
         return WorkerPreflight(
@@ -65,6 +66,10 @@ class _StubAdapter:
 
     def invoke(self, contract, lease, *, prompt, **options):
         (Path(lease.target_worktree) / "bounded.txt").write_text(self.content, encoding="utf-8")
+        for rel, body in self.extra_files.items():
+            path = Path(lease.target_worktree) / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
@@ -89,14 +94,26 @@ class _StubAdapter:
         )
 
 
-def _run(tmp_path: Path, monkeypatch, task_id: str, verifier_commands: list[str], **extra):
+def _run(
+    tmp_path: Path,
+    monkeypatch,
+    task_id: str,
+    verifier_commands: list[str],
+    *,
+    base_files: dict | None = None,
+    worker_files: dict | None = None,
+    **extra,
+):
     controller = tmp_path / "controller"
     controller.mkdir()
     _git(controller, "init", "-b", "main")
     _git(controller, "config", "user.name", "F2P Test")
     _git(controller, "config", "user.email", "f2p@example.test")
     (controller / "bounded.txt").write_text("broken\n", encoding="utf-8")
-    _git(controller, "add", "bounded.txt")
+    for rel, body in (base_files or {}).items():
+        (controller / rel).parent.mkdir(parents=True, exist_ok=True)
+        (controller / rel).write_text(body, encoding="utf-8")
+    _git(controller, "add", "-A")
     _git(controller, "commit", "-m", "base")
     head = _git(controller, "rev-parse", "HEAD")
     targets = tmp_path / "targets"
@@ -104,7 +121,7 @@ def _run(tmp_path: Path, monkeypatch, task_id: str, verifier_commands: list[str]
     # tmp roots are otherwise redirected next to the CWD; keep targets in tmp_path.
     monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(targets))
     registry = WorkerRegistry({
-        provider: _StubAdapter(provider, "fixed\n")
+        provider: _StubAdapter(provider, "fixed\n", worker_files)
         for provider in ("codex", "gemini", "opencode", "mimo", "ollama")
     })
     service = SelfHostedTaskService(
@@ -369,3 +386,113 @@ def test_probe_with_a_timed_out_base_command_is_not_verified(monkeypatch, tmp_pa
     probe = service_module.SelfHostedTaskService._run_fail_to_pass_probe(manager, contract)
     assert probe["status"] == "BASE_NOT_PHYSICAL_FAIL"
     assert any(call[:2] == ["worktree", "remove"] for call in calls)
+
+
+_FIXED_TEST = "def test_fixed():\n    assert open('bounded.txt').read().startswith('fixed')\n"
+
+
+def _pytest_verifier(target: str) -> str:
+    return f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider {target}"
+
+
+def test_repair_task_whose_base_test_file_is_missing_is_not_verified(tmp_path, monkeypatch):
+    # The worker adds the very test file the verifier names; base never ran it.
+    state, _result, _error, controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-missing-test",
+        [_pytest_verifier("tests/test_new.py")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt", "tests/test_new.py"],
+        worker_files={"tests/test_new.py": _FIXED_TEST},
+    )
+
+    assert not _promoted(state)
+    assert state["promotion_status"] == "NOT_CREATED"
+    assert state["fail_to_pass"]["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert state["fail_to_pass"]["reason"] == "base_test_path_missing"
+    assert state["fail_to_pass"]["base_exit_codes"] == [4]
+    assert state.get("recovery_action") != "recover_verified_uncommitted_candidate"
+    assert "nexus-f2p-base-" not in _git(controller, "worktree", "list")
+
+
+def test_repair_task_whose_base_test_file_collects_nothing_is_not_verified(tmp_path, monkeypatch):
+    state, _result, _error, _controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-empty-test",
+        [_pytest_verifier("tests/test_new.py")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt", "tests/test_new.py"],
+        base_files={"tests/test_new.py": "# no tests yet\n"},
+        worker_files={"tests/test_new.py": _FIXED_TEST},
+    )
+
+    assert not _promoted(state)
+    assert state["fail_to_pass"]["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert state["fail_to_pass"]["reason"] == "base_collected_no_tests"
+    assert state["fail_to_pass"]["base_exit_codes"] == [5]
+
+
+def test_repair_task_with_a_real_failing_base_pytest_is_promoted(tmp_path, monkeypatch):
+    state, _result, error, _controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-real-pytest",
+        [_pytest_verifier("tests/test_fixed.py")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt"],
+        base_files={"tests/test_fixed.py": _FIXED_TEST},
+    )
+
+    assert error is None
+    assert state["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert state["fail_to_pass"]["status"] == "VERIFIED"
+    assert state["fail_to_pass"]["base_exit_codes"] == [1]
+    assert "reason" not in state["fail_to_pass"]
+
+
+def test_pytest_command_shapes_are_recognised_and_others_are_not():
+    from nexus.orchestrator.self_hosted_task_service import _pytest_named_paths as parse
+
+    assert parse("PYTHONDONTWRITEBYTECODE=1 pytest tests/a.py::t") == ["tests/a.py"]
+    assert parse("uv run pytest -q tests/a.py") == ["tests/a.py"]
+    assert parse("uv run python -m pytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -mpytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -m coverage run -m pytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -m pytest -k x.py tests/b.py") == ["tests/b.py"]
+    assert parse("python -c 'print(1)'") is None
+    assert parse("\x00pytest tests/a.py") is None
+    assert parse("") is None
+
+
+def test_repair_task_with_env_prefixed_pytest_and_missing_base_file_is_not_verified(
+    tmp_path, monkeypatch
+):
+    state, _result, _error, _controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-env-prefix",
+        ["PYTHONDONTWRITEBYTECODE=1 " + _pytest_verifier("tests/test_new.py")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt", "tests/test_new.py"],
+        worker_files={"tests/test_new.py": _FIXED_TEST},
+    )
+
+    assert not _promoted(state)
+    assert state["fail_to_pass"]["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert state["fail_to_pass"]["reason"] == "base_test_path_missing"
+
+
+def test_base_probe_path_outside_checkout_fails_closed(tmp_path):
+    from types import SimpleNamespace
+
+    from nexus.orchestrator.self_hosted_task_service import _base_run_collected_nothing
+
+    outside = tmp_path / "worker_tree_test.py"
+    outside.write_text("def test_x():\n    assert False\n", encoding="utf-8")
+    checkout = tmp_path / "base"
+    checkout.mkdir()
+    for target in (str(outside), "../worker_tree_test.py"):
+        item = SimpleNamespace(command=f"pytest {target}", exit_code=1)
+        assert _base_run_collected_nothing([item], checkout) == "base_test_path_outside_checkout"
