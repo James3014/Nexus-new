@@ -628,8 +628,12 @@ def test_expected_packet_id_substitution_blocks_before_online_provider() -> None
         source_hash="source-id",
         execution_world=str(identity["execution_world"]),
     ).to_dict()
+    # nexus-runtime#214 (Nexus-new#2245): the VAP pre-provider gate binds only
+    # a forwardable Local stage (success status, gate_passed True).
     stage = {
         "invoked": True,
+        "status": "SUCCEEDED",
+        "gate_passed": True,
         "verified_assist_packet_expected_hash": packet["packet_hash"],
         "verified_assist_packet_id": "substituted-id",
         "response": {"task_id": "vap-bind-id", "verified_assist_packet": packet},
@@ -724,8 +728,12 @@ def test_runtime_preprovider_gate_blocks_custom_invoker_for_missing_vap() -> Non
         custom,
         {
             "task_id": request.task_id,
+            # Forwardable Local stage (nexus-runtime#214): only such a stage
+            # can declare VAP consumption and so reach the pre-provider gate.
             "local": {
                 "invoked": True,
+                "status": "SUCCEEDED",
+                "gate_passed": True,
                 "response": {"task_id": request.task_id, "consume_verified_assist": True},
             },
             "source_hash": "source-5",
