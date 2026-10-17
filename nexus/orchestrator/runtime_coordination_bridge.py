@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
+import logging
 import os
 import subprocess
 import sys
@@ -20,6 +22,8 @@ from .self_hosted_task_service import (
     check_fast_lane_eligible,
     validate_workforce_dispatch_binding,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _State:
@@ -453,6 +457,53 @@ class _WorkerInvocationModelCallGate:
         }
 
 
+def _effect_authority_kwargs():
+    """Strict effect authority only when the operator enabled it (#2344).
+
+    Default (shadow): no port is attached, so the runtime keeps its existing
+    integrity-only behaviour and nothing new is refused. With
+    ``NEXUS_EFFECT_AUTHORITY_STRICT=1`` the record-backed port is attached and
+    ``require_effect_authority`` is set, so a self-signed or broader
+    authorization is refused.
+    """
+    from nexus.orchestrator import effect_authority
+
+    if not effect_authority.strict_enabled():
+        return {}
+    return {
+        "effect_authority": effect_authority.record_backed_port(),
+        "require_effect_authority": True,
+    }
+
+
+def _record_effect_authority_shadow(task_id, attempt_id, request):
+    """Log what strict mode would decide, without enforcing it (#2344).
+
+    Observation only: any error here is swallowed so the shadow can never
+    change an execution's outcome.
+    """
+    if request is None:
+        return None
+    try:
+        from nexus.orchestrator import effect_authority
+
+        decision = effect_authority.shadow_decision(request)
+        decision.update({
+            "task_id": str(task_id),
+            "attempt_id": str(attempt_id),
+            "mode": "STRICT" if effect_authority.strict_enabled() else "SHADOW",
+        })
+        logger.info(
+            "%s %s",
+            effect_authority.SHADOW_FIELD,
+            json.dumps(decision, sort_keys=True, ensure_ascii=False),
+        )
+        return decision
+    except Exception as exc:  # observation must never break execution
+        logger.warning("effect_authority_shadow_failed %s", type(exc).__name__)
+        return None
+
+
 class RuntimeCoordinationBridge:
     def __init__(self, service):
         self.service = service
@@ -474,6 +525,7 @@ class RuntimeCoordinationBridge:
             finalization,
             preparation=_Preparation(self.service),
             model_call_gate=_WorkerInvocationModelCallGate(),
+            **_effect_authority_kwargs(),
         )
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
@@ -493,6 +545,7 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
+        _record_effect_authority_shadow(task_id, attempt_id, request)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)
