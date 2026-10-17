@@ -1876,3 +1876,20 @@ def test_context_pack_fails_closed_when_contract_entries_exceed_total_budget():
     ]
     with pytest.raises(ExternalIntelligenceError, match="CONTRACT_CONTEXT_BUDGET_EXCEEDED"):
         build_context_pack(srcs, max_bytes=100, per_source_bytes=100)
+
+
+def test_context_budget_refusal_carries_path_and_size_detail():
+    srcs = [
+        _pack_source("task_card", "tasks/t.md", "c" * 60),
+        _pack_source("source_file", "nexus/a.py", "a" * 60),
+    ]
+    with pytest.raises(ExternalIntelligenceError, match="CONTRACT_CONTEXT_BUDGET_EXCEEDED") as info:
+        build_context_pack(srcs, max_bytes=100, per_source_bytes=100)
+    assert str(info.value) == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
+    assert info.value.detail == {
+        "kind": "source_file",
+        "ref": "nexus/a.py",
+        "source_bytes": 60,
+        "remaining_bytes": 40,
+        "max_bytes": 100,
+    }
