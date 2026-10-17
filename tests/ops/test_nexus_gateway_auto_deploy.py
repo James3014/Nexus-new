@@ -133,6 +133,7 @@ class RieOrigin:
     path: Path
     pin: str
     broken: str
+    writer: str
 
 
 RIE = RieOrigin()
@@ -153,6 +154,15 @@ def _rie_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
     _fixture_git(repo, "add", ".")
     _fixture_git(repo, "commit", "-q", "-m", "rie engine")
     RIE.path, RIE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
+    # An engine that writes into its own checkout when imported.
+    (repo / "repository_intelligence" / "cli.py").write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).with_name('written.txt').write_text('x')\n"
+        "def main():\n    return 0\n"
+    )
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "rie writer")
+    RIE.writer = _fixture_git(repo, "rev-parse", "HEAD")
 
 
 def _rie_pin_source(revision: str) -> str:
@@ -7380,3 +7390,46 @@ def test_rie_prune_failure_never_fails_the_cycle(
     host.rie_pin = RIE.pin
     assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
     assert cycle(cfg, host, prober)["status"] == "IN_SYNC"
+
+
+def test_rie_ignored_bytecode_in_the_checkout_is_dirty(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_rie(cfg, FakeHost(), RIE.pin)["root"])
+    cache = checkout / "repository_intelligence" / "__pycache__"
+    cache.mkdir()
+    (cache / "cli.cpython-314.pyc").write_bytes(b"planted")
+    assert _fixture_git(checkout, "status", "--porcelain") == ""  # ignored by .gitignore
+    problem = ad.rie_checkout_problem(FakeHost(), checkout, RIE.pin)
+    assert problem is not None and problem.startswith("RIE_TREE_DIRTY")
+
+
+def test_rie_engine_that_writes_into_its_checkout_is_not_verified(
+    cfg: ad.Config, tmp_path: Path
+) -> None:
+    root = tmp_path / "candidate"
+    (root / ad.RIE_PIN_FILE).parent.mkdir(parents=True)
+    (root / ad.RIE_PIN_FILE).write_text(_rie_pin_source(RIE.writer))
+    result = ad.rie_engine(cfg, FakeHost(), root, Path(sys.executable))
+    assert result["status"] == "UNAVAILABLE"
+    assert result["error"].startswith("RIE_ENGINE_CHECK_WROTE"), result
+
+
+def test_prune_keeps_a_retained_non_live_deployment_rie_pin(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    retained = cfg.deployments / f"a1-{'c' * 40}"
+    (retained / ad.RIE_PIN_FILE).parent.mkdir(parents=True)
+    (retained / ad.RIE_PIN_FILE).write_text(_rie_pin_source(RIE.broken))
+    kept = Path(ad.materialize_rie(cfg, FakeHost(), RIE.broken)["root"])
+    assert ad.prune_rie(cfg, FakeHost(), []) == []
+    assert kept.is_dir() and (cfg.rie_checkouts / RIE.pin).is_dir()
+
+
+def test_cycle_retention_prunes_unreferenced_rie_checkouts(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    stale = Path(ad.materialize_rie(cfg, FakeHost(), RIE.broken)["root"])
+    assert cycle(cfg, host, prober)["status"] == "IN_SYNC"
+    assert not stale.exists()
+    assert (cfg.rie_checkouts / RIE.pin).is_dir()
