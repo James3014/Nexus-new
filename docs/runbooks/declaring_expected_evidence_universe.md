@@ -107,7 +107,9 @@ open because of it.
 Read `core_universe_identity_matches` instead (#2451). The host computes it as
 `core_universe_identity == coverage.universe_identity`:
 
-- `true`: Core's coverage is bound to exactly the declared universe;
+- `true`: the two Core identities are equal. This says nothing else: the
+  generation, subject list, completeness and provenance are checked
+  separately, so read `blocking` and `host_reason_codes` for those;
 - `false`: the identities differ, or one side is missing (Core unavailable,
   no coverage). The verdict then also blocks with a host reason such as
   `CORE_COVERAGE_IDENTITY_MISMATCH`;

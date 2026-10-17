@@ -1414,6 +1414,16 @@ def test_verdict_records_core_universe_identity_matches_flag(tmp_path):
     assert legacy["core_universe_identity_matches"] is None
 
 
+def test_verdict_identity_flag_is_independent_of_blocking(tmp_path):
+    # Identities agree, but an unpinned Core blocks: the flag still reads True.
+    verdict = build_core_verdict(
+        contract=_universe_contract(tmp_path),
+        projection=_verified_projection(1, "CORE_REVISION_MISMATCH"),
+    )
+    assert verdict["blocking"] is True
+    assert verdict["core_universe_identity_matches"] is True
+
+
 def test_verdict_identity_flag_is_false_when_core_identity_unavailable(tmp_path, monkeypatch):
     from nexus.orchestrator import ambient_core
 
