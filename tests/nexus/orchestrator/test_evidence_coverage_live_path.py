@@ -1414,6 +1414,20 @@ def test_verdict_records_core_universe_identity_matches_flag(tmp_path):
     assert legacy["core_universe_identity_matches"] is None
 
 
+def test_verdict_identity_flag_is_false_when_core_response_identity_differs(tmp_path):
+    # Coverage carries the card identity, but Core's response hashes report
+    # another one: the verdict blocks and the flag must not read True.
+    projection = _verified_projection(1)
+    projection["core_response"]["hashes"] = {"universe_identity": "sha256:" + "4" * 64}
+    verdict = build_core_verdict(contract=_universe_contract(tmp_path), projection=projection)
+    assert "CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH" in verdict["host_reason_codes"]
+    assert verdict["core_universe_identity_matches"] is False
+    declared = {"universe_generation": 1, "subjects": [DIFF_CHECK]}
+    projection["core_response"]["hashes"] = {"universe_identity": core_universe_identity(declared)}
+    agreeing = build_core_verdict(contract=_universe_contract(tmp_path), projection=projection)
+    assert agreeing["core_universe_identity_matches"] is True
+
+
 def test_verdict_identity_flag_is_independent_of_blocking(tmp_path):
     # Identities agree, but an unpinned Core blocks: the flag still reads True.
     verdict = build_core_verdict(
@@ -1441,7 +1455,7 @@ def test_verdict_identity_flag_is_false_when_core_identity_unavailable(tmp_path,
 
 def test_live_receipts_record_core_universe_identity_matches(live):
     # Real pinned Core: the verified receipt of every declared scenario.
-    for name in ("complete", "missing", "fail"):
+    for name in ("complete", "missing", "fail", "cond_missing", "duplicate"):
         verdict = _verdict(live[name])
         assert verdict["core_universe_identity_matches"] is True, name
         assert verdict["core_universe_identity"] == verdict["coverage"]["universe_identity"]

@@ -104,13 +104,16 @@ different formulas:
 **by design**. That difference is not a mismatch. Never block or keep an Issue
 open because of it.
 
-Read `core_universe_identity_matches` instead (#2451). The host computes it as
-`core_universe_identity == coverage.universe_identity`:
+Read `core_universe_identity_matches` instead (#2451). The host sets it to
+`true` only when `core_universe_identity` is present, equals
+`coverage.universe_identity`, and also equals `core_response.hashes.universe_identity`
+when Core reports one:
 
-- `true`: the two Core identities are equal. This says nothing else: the
-  generation, subject list, completeness and provenance are checked
-  separately, so read `blocking` and `host_reason_codes` for those;
+- `true`: the Core identities agree. This says nothing else: the generation,
+  subject list, completeness and provenance are checked separately, so read
+  `blocking` and `host_reason_codes` for those;
 - `false`: the identities differ, or one side is missing (Core unavailable,
   no coverage). The verdict then also blocks with a host reason such as
-  `CORE_COVERAGE_IDENTITY_MISMATCH`;
-- `null`: a legacy task with no declared universe.
+  `CORE_COVERAGE_IDENTITY_MISMATCH` or `CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH`;
+- `null`: no universe is declared. A legacy task's receipt normally has no
+  `core_verdict` at all (`null`), so check that first.

@@ -314,11 +314,23 @@ def build_core_verdict(
         host_reasons.append("CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH")
     blocking = bool(host_reasons)
     # The one comparison that must hold (#2451): the card universe under Core's
-    # formula against the identity Core's coverage carries. None for a legacy
-    # task, which declares no universe; False whenever either side is missing.
+    # formula against the identity Core's coverage carries (and the identity
+    # Core's response hashes report, when present). None for a legacy task,
+    # which declares no universe; False whenever a side is missing or differs.
     coverage_identity = coverage.get("universe_identity") if isinstance(coverage, Mapping) else None
+    response_identity_agrees = (
+        response_hashes is None
+        or "universe_identity" not in response_hashes
+        or response_hashes.get("universe_identity") == card_identity
+    )
     identity_matches = (
-        (card_identity is not None and coverage_identity == card_identity) if declared else None
+        (
+            card_identity is not None
+            and coverage_identity == card_identity
+            and response_identity_agrees
+        )
+        if declared
+        else None
     )
     return {
         "schema": CORE_VERDICT_SCHEMA,
