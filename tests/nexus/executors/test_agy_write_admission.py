@@ -2672,10 +2672,19 @@ def _code_bearing_change(kind: str, canonical: Path, scratch: Path) -> None:
         _git(canonical, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/up/*")
     elif kind == "worktree_config_bookkeeping_key":
         _git(canonical, "config", "extensions.worktreeConfig", "true")
+        _git(canonical, "config", "--worktree", "core.sparsecheckout", "false")
         branch = _upstream_branch(canonical)
         before = admission.checkout_fingerprint(canonical)
-        _git(canonical, "config", "--worktree", f"branch.{branch}.remote", "origin")
+        # "." and a ref name are bookkeeping-shaped: a filtered file would drop them.
+        _git(canonical, "config", "--worktree", f"branch.{branch}.remote", ".")
+        _git(canonical, "config", "--worktree", f"branch.{branch}.merge", "refs/heads/x")
         assert admission.checkout_fingerprint(canonical) != before
+    elif kind == "branch_remote_fetch_only_remote":
+        # A remote with only a standard fetch refspec and no URL is not a known
+        # remote: Git would treat "evil" as a path.
+        branch = _upstream_branch(canonical)
+        _git(canonical, "config", "remote.evil.fetch", "+refs/heads/*:refs/remotes/evil/*")
+        _git(canonical, "config", f"branch.{branch}.remote", "evil")
     elif kind == "unknown_new_key":
         _git(canonical, "config", "futuregit.newcodekey", "sh -c 'touch /tmp/pwned'")
     elif kind == "unknown_subsection_key":
@@ -2713,6 +2722,7 @@ CODE_BEARING_CHANGES = [
     "fetch_refspec_redirect",
     "fetch_refspec_cross_remote",
     "worktree_config_bookkeeping_key",
+    "branch_remote_fetch_only_remote",
     "unknown_new_key",
     "unknown_subsection_key",
     "worktree_config",
