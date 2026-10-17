@@ -271,9 +271,7 @@ def test_concurrent_append_during_consume_keeps_both_effects(tmp_path: Path):
     producer = AutoResearchNightShift(project_root=tmp_path, task="task-b")
 
     def _dispatcher(item):
-        producer._append_to_pending_manifest(
-            "task-b", "target.py", "bbb222", 0.9, str(tmp_path)
-        )
+        producer._append_to_pending_manifest("task-b", "target.py", "bbb222", 0.9, str(tmp_path))
         dispatched.append(item)
 
     consumer = NightshiftQueueConsumer(

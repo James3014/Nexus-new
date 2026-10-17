@@ -155,9 +155,7 @@ class NightshiftQueueConsumer:
                         )
                         if identity in dispatched_ids:
                             item["disposition"] = "DISPATCHED"
-                            item["disposition_task"] = (
-                                item.get("disposition_task") or identity[0]
-                            )
+                            item["disposition_task"] = item.get("disposition_task") or identity[0]
                     fd, temporary = tempfile.mkstemp(
                         prefix="pending.", suffix=".json", dir=str(manifest_path.parent)
                     )
