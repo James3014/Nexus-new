@@ -127,6 +127,38 @@ def _core_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
     CORE.path, CORE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
 
 
+class RieOrigin:
+    """A local stand-in for James3014/repository-intelligence-engine (#1579)."""
+
+    path: Path
+    pin: str
+    broken: str
+
+
+RIE = RieOrigin()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _rie_origin(tmp_path_factory: pytest.TempPathFactory) -> None:
+    repo = tmp_path_factory.mktemp("rie-origin")
+    _fixture_git(repo, "init", "-q", "-b", "main")
+    (repo / "repository_intelligence").mkdir()
+    (repo / "repository_intelligence" / "__init__.py").write_text("")
+    (repo / "repository_intelligence" / "cli.py").write_text("raise SystemExit('broken engine')\n")
+    (repo / ".gitignore").write_text("__pycache__/\n*.pyc\n")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "rie broken")
+    RIE.broken = _fixture_git(repo, "rev-parse", "HEAD")
+    (repo / "repository_intelligence" / "cli.py").write_text("def main():\n    return 0\n")
+    _fixture_git(repo, "add", ".")
+    _fixture_git(repo, "commit", "-q", "-m", "rie engine")
+    RIE.path, RIE.pin = repo, _fixture_git(repo, "rev-parse", "HEAD")
+
+
+def _rie_pin_source(revision: str) -> str:
+    return f'"""rie"""\n\nPINNED_RIE_ENGINE_REVISION = "{revision}"\nOTHER = 1\n'
+
+
 def _pin_source(revision: str) -> str:
     return f'"""transport"""\n\nCANONICAL_CORE_REVISION = "{revision}"\nOTHER = 1\n'
 
@@ -163,6 +195,9 @@ class FakeHost(ad.Host):
         self.r1_append_attempts: list[bool] = []
         self.after_r1_check: Callable[[], None] | None = None
         self.core_pin: str = CORE.pin
+        # RIE engine (#1579): no pin in the candidate tree unless a test sets one.
+        self.rie_pin: str | None = None
+        self.rie_fetch_fails = False
         self.core_fetch_fails = False
         self.digest_runs = 0
         # Task quiescence (#2227): CLEAR unless a test says otherwise.
@@ -254,11 +289,29 @@ class FakeHost(ad.Host):
         }
         return ad.Host.run(self, argv, cwd=cwd, env=env, timeout=timeout)
 
+    def rie_git(self, argv, cwd, timeout):
+        """RIE git effects run for real against the local fixture origin."""
+        if "fetch" in argv and self.rie_fetch_fails:
+            return _done(code=128, stderr="fatal: unable to access github.com")
+        env = {
+            **GIT_ENV,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{RIE.path}.insteadOf",
+            "GIT_CONFIG_VALUE_0": ad.RIE_REPOSITORY_URL,
+        }
+        return ad.Host.run(self, argv, cwd=cwd, env=env, timeout=timeout)
+
     def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
         self.calls.append(list(argv))
         self.envs.append(env)
         if argv[:1] == ["git"] and any("gateway-direct/core" in str(a) for a in argv):
             return self.core_git(argv, cwd, timeout)
+        if argv[:1] == ["git"] and any("gateway-direct/rie" in str(a) for a in argv):
+            return self.rie_git(argv, cwd, timeout)
+        if ad.RIE_ENGINE_CHECK_CODE in argv:
+            # The engine import check runs for real against the fixture checkout.
+            real = [sys.executable, *argv[1:]]
+            return ad.Host.run(self, real, cwd=cwd, env={**GIT_ENV, **(env or {})}, timeout=timeout)
         if argv[:1] == ["uv"]:
             if self.sync_fails:
                 return _done(code=1, stderr="network down")
@@ -300,6 +353,9 @@ class FakeHost(ad.Host):
             (root / ad.ENTRYPOINT).write_text("")
             (root / ad.CORE_PIN_FILE).parent.mkdir(parents=True)
             (root / ad.CORE_PIN_FILE).write_text(_pin_source(self.core_pin))
+            if self.rie_pin is not None:
+                (root / ad.RIE_PIN_FILE).parent.mkdir(parents=True, exist_ok=True)
+                (root / ad.RIE_PIN_FILE).write_text(_rie_pin_source(self.rie_pin))
             return _done()
         if "worktree" in argv and "remove" in argv:
             return _done()
@@ -7039,3 +7095,240 @@ def test_valid_or_unset_park_env_does_not_warn(
         assert ad.Config.default(cfg.state_dir.parents[2]).pin_bump_park_env_invalid is False
     result = cycle(cfg, FakeHost(), FakeProber(), _park_api([_pin_pr(9, draft=True)]))
     assert "PIN_PARK_SECONDS_INVALID" not in result.get("warnings", [])
+
+
+# --- #1579: the deployer materializes the pinned RIE engine for the Gateway -------------
+
+
+def _live_command(cfg: ad.Config) -> str:
+    return plistlib.loads(cfg.plist.read_bytes())["ProgramArguments"][2]
+
+
+def test_rie_pin_is_read_from_the_real_applicability_module() -> None:
+    from nexus.services import rie_knowledge_applicability as ka
+
+    assert ad.read_rie_pin(REPO_ROOT) == ka.PINNED_RIE_ENGINE_REVISION
+    assert ad.RIE_PIN_FILE == "nexus/services/rie_knowledge_applicability.py"
+    assert (ad.RIE_ENV_ENGINE_ROOT, ad.RIE_ENV_PYTHON_BIN) == (
+        ka.ENV_ENGINE_ROOT,
+        ka.ENV_PYTHON_BIN,
+    )
+
+
+def test_rie_pin_absent_or_malformed_is_unreadable(tmp_path: Path) -> None:
+    with pytest.raises(ad.DeployError, match="RIE_PIN_UNREADABLE"):
+        ad.read_rie_pin(tmp_path)
+    (tmp_path / ad.RIE_PIN_FILE).parent.mkdir(parents=True)
+    for bad in (
+        'PINNED_RIE_ENGINE_REVISION = "main"\n',
+        f'PINNED_RIE_ENGINE_REVISION = "{"a" * 40}"\n' * 2,
+        f'PINNED_RIE_ENGINE_REVISION = "{"A" * 40}"\n',
+        "OTHER = 1\n",
+    ):
+        (tmp_path / ad.RIE_PIN_FILE).write_text(bad)
+        with pytest.raises(ad.DeployError, match="RIE_PIN_UNREADABLE"):
+            ad.read_rie_pin(tmp_path)
+
+
+def test_deploy_exports_verified_rie_engine_after_the_env_file(cfg: ad.Config) -> None:
+    cfg.env_file.write_text(
+        cfg.env_file.read_text()
+        + 'export NEXUS_RIE_ENGINE_ROOT="/elsewhere"\nexport NEXUS_RIE_PYTHON_BIN="/bin/false"\n'
+    )
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    rie = ad.last_receipt(cfg.state_dir)["rie"]
+    checkout = cfg.rie_checkouts / RIE.pin
+    python = cfg.venvs / f"a1-{NEW}" / "bin" / "python"
+    assert rie == {
+        "status": "VERIFIED",
+        "revision": RIE.pin,
+        "root": str(checkout),
+        "repository": ad.RIE_REPOSITORY_URL,
+        "tree": _fixture_git(RIE.path, "rev-parse", f"{RIE.pin}^{{tree}}"),
+        "python": str(python),
+    }
+    exports = (
+        f'export NEXUS_RIE_ENGINE_ROOT="{checkout}" ; export NEXUS_RIE_PYTHON_BIN="{python}" ; '
+    )
+    for command in (host.started[0], _live_command(cfg)):
+        assert exports in command
+        # Exported after the env file, so the env file cannot redirect the engine.
+        assert command.index(exports) > command.index(f'source "{cfg.env_file}"')
+        assert command.index(exports) < command.index("exec ")
+    assert _fixture_git(checkout, "rev-parse", "HEAD") == RIE.pin
+    # The engine check wrote nothing into the pinned checkout.
+    assert _fixture_git(checkout, "status", "--porcelain", "--ignored") == ""
+    # A second deploy reuses the verified checkout without fetching again.
+    assert ad.materialize_rie(cfg, host, RIE.pin)["root"] == str(checkout)
+
+
+@pytest.mark.parametrize(
+    ("setup", "status", "error"),
+    [
+        (lambda h: setattr(h, "rie_pin", None), "UNAVAILABLE", "RIE_PIN_UNREADABLE"),
+        (lambda h: setattr(h, "rie_pin", "f" * 40), "UNAVAILABLE", "RIE_COMMIT_NOT_FOUND"),
+        (
+            lambda h: (setattr(h, "rie_pin", RIE.pin), setattr(h, "rie_fetch_fails", True)),
+            "UNAVAILABLE",
+            "RIE_FETCH_FAILED",
+        ),
+        (lambda h: setattr(h, "rie_pin", RIE.broken), "UNAVAILABLE", "RIE_ENGINE_CHECK_FAILED"),
+    ],
+    ids=["not-pinned", "unknown-commit", "fetch-fails", "engine-broken"],
+)
+def test_rie_problems_never_block_the_deploy_and_export_nothing(
+    cfg: ad.Config, setup: Any, status: str, error: str | None
+) -> None:
+    cfg.env_file.write_text(cfg.env_file.read_text() + 'export NEXUS_RIE_ENGINE_ROOT="/stale"\n')
+    host, prober = FakeHost(), FakeProber()
+    setup(host)
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    rie = ad.last_receipt(cfg.state_dir)["rie"]
+    assert rie["status"] == status
+    if error is not None:
+        assert rie["error"].startswith(error), rie
+    unset = "unset NEXUS_RIE_ENGINE_ROOT NEXUS_RIE_PYTHON_BIN ; "
+    for command in (host.started[0], _live_command(cfg)):
+        assert "export NEXUS_RIE_ENGINE_ROOT" not in command
+        # A stale env-file value cannot reach the Gateway either.
+        assert unset in command
+        assert command.index(unset) > command.index(f'source "{cfg.env_file}"')
+
+
+def test_rie_bare_repo_origin_must_be_the_engine(cfg: ad.Config) -> None:
+    ad.materialize_rie(cfg, FakeHost(), RIE.pin)
+    _fixture_git(cfg.rie_bare_repo, "remote", "set-url", "origin", "https://evil.example/r.git")
+    with pytest.raises(ad.DeployError, match="RIE_ORIGIN_MISMATCH"):
+        ad.materialize_rie(cfg, FakeHost(), RIE.pin)
+
+
+def test_dirty_rie_checkout_is_rebuilt_when_not_in_use(cfg: ad.Config) -> None:
+    checkout = Path(ad.materialize_rie(cfg, FakeHost(), RIE.pin)["root"])
+    (checkout / "repository_intelligence" / "cli.py").write_text("raise SystemExit(1)\n")
+    result = ad.materialize_rie(cfg, FakeHost(), RIE.pin)
+    assert result["rebuilt"].startswith("RIE_TREE_DIRTY")
+    assert _fixture_git(checkout, "status", "--porcelain", "--ignored") == ""
+
+
+def test_dirty_rie_checkout_in_use_by_the_live_gateway_is_not_touched(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    checkout = cfg.rie_checkouts / RIE.pin
+    planted = checkout / "repository_intelligence" / "planted.py"
+    planted.write_text("x = 1\n")
+    with pytest.raises(ad.DeployError, match="RIE_IN_USE_UNHEALTHY"):
+        ad.materialize_rie(cfg, FakeHost(), RIE.pin)
+    assert planted.exists()
+
+
+def test_rie_paths_through_symlinks_are_refused(cfg: ad.Config, tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cfg.gateway_root.mkdir(parents=True, exist_ok=True)
+    cfg.rie_checkouts.symlink_to(elsewhere)
+    with pytest.raises(ad.DeployError, match="RIE_PATH_SYMLINKED"):
+        ad.materialize_rie(cfg, FakeHost(), RIE.pin)
+
+
+def test_wrapper_rie_export_rejects_unsafe_paths(cfg: ad.Config) -> None:
+    root, python = Path("/d/a1-x"), Path("/v/bin/python")
+    command = ad.wrapper_command(cfg, root, python, rie=(Path("/g/rie/abc"), python))
+    assert 'export NEXUS_RIE_ENGINE_ROOT="/g/rie/abc" ; ' in command
+    assert command.endswith(f'exec "{python}" "{root / ad.ENTRYPOINT}"')
+    with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
+        ad.wrapper_command(cfg, root, python, rie=(Path('/g/rie/"; rm -rf ~'), python))
+
+
+def test_wrapper_rie_engine_reaches_gateway_process_env(tmp_path: Path) -> None:
+    """Run the rendered wrapper for real: the exec'd process sees the deployer's
+    engine root even when the env file names another one."""
+    cfg = ad.Config.default(tmp_path / "home")
+    root = tmp_path / "deploy"
+    root.mkdir()
+    cfg.env_file.parent.mkdir(parents=True)
+    cfg.env_file.write_text('export NEXUS_RIE_ENGINE_ROOT="/stale"\n')
+    dump = tmp_path / "env.json"
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os\n"
+        f"open({str(dump)!r}, 'w').write(json.dumps(dict(os.environ)))\n"
+    )
+    fake_python.chmod(0o755)
+    engine = tmp_path / "rie" / ("a" * 40)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("NEXUS_")}
+    command = ad.wrapper_command(cfg, root, fake_python, rie=(engine, fake_python))
+    subprocess.run([_wrapper_shell(), "-c", command], env=env, check=True, timeout=60)
+    seen = json.loads(dump.read_text())
+    assert seen["NEXUS_RIE_ENGINE_ROOT"] == str(engine)
+    assert seen["NEXUS_RIE_PYTHON_BIN"] == str(fake_python)
+    subprocess.run(
+        [_wrapper_shell(), "-c", ad.wrapper_command(cfg, root, fake_python)],
+        env=env,
+        check=True,
+        timeout=60,
+    )
+    seen = json.loads(dump.read_text())
+    assert "NEXUS_RIE_ENGINE_ROOT" not in seen and "NEXUS_RIE_PYTHON_BIN" not in seen
+
+
+def test_rie_fetch_outage_reuses_the_verified_same_pin_checkout(
+    cfg: ad.Config, tmp_path: Path
+) -> None:
+    root = tmp_path / "candidate"
+    (root / ad.RIE_PIN_FILE).parent.mkdir(parents=True)
+    (root / ad.RIE_PIN_FILE).write_text(_rie_pin_source(RIE.pin))
+    python = Path(sys.executable)
+    first = ad.rie_engine(cfg, FakeHost(), root, python)
+    assert first["status"] == "VERIFIED", first
+    offline = FakeHost()
+    offline.rie_fetch_fails = True
+    again = ad.rie_engine(cfg, offline, root, python)
+    assert again["status"] == "VERIFIED" and again["root"] == first["root"]
+    assert not any("fetch" in c for c in offline.calls)
+    # Without a previous checkout the same outage leaves the engine unavailable.
+    fresh = ad.Config.default(tmp_path / "other-home")
+    missing = ad.rie_engine(fresh, offline, root, python)
+    assert missing["status"] == "UNAVAILABLE" and missing["error"].startswith("RIE_FETCH_FAILED")
+
+
+def test_rie_fetch_timeout_never_fails_the_deploy(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    original = host.rie_git
+
+    def slow(argv, cwd, timeout):
+        if "fetch" in argv:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return original(argv, cwd, timeout)
+
+    host.rie_git = slow  # type: ignore[method-assign]
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    rie = ad.last_receipt(cfg.state_dir)["rie"]
+    assert rie["status"] == "UNAVAILABLE"
+    assert "unset NEXUS_RIE_ENGINE_ROOT NEXUS_RIE_PYTHON_BIN ; " in _live_command(cfg)
+
+
+def test_prune_keeps_live_and_retained_rie_checkouts_only(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    stale = Path(ad.materialize_rie(cfg, FakeHost(), RIE.broken)["root"])
+    assert stale.is_dir()
+    assert ad.prune_rie(cfg, FakeHost(), []) == [RIE.broken]
+    assert not stale.exists()
+    assert (cfg.rie_checkouts / RIE.pin).is_dir()
+    # The live wrapper's engine survives even with no deployment pinning it.
+    for child in cfg.deployments.iterdir():
+        if (child / ad.RIE_PIN_FILE).exists():
+            (child / ad.RIE_PIN_FILE).unlink()
+    assert ad.prune_rie(cfg, FakeHost(), []) == []
+    assert (cfg.rie_checkouts / RIE.pin).is_dir()
+
+
+def test_rie_deployer_change_leaves_required_checks_and_pin_files_alone() -> None:
+    assert ad.RIE_PIN_FILE not in getattr(ad, "PIN_FILES", ())
+    assert not any("rie" in name.lower() for name in ad.REQUIRED_CHECKS)
