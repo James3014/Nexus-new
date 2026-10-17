@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.contracts.fail_closed import Decision, decide
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
 from nexus.core.layer_ports import registered_ports, resolve_port
 
@@ -3406,6 +3407,9 @@ def _exec_benchmark(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     return _archived_receipt("benchmark", plan, task_desc)
 
 
+_COMMITTEE_PASS_STATUSES: frozenset[str] = frozenset({"VERIFIED"})
+
+
 def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     if not (
@@ -3526,7 +3530,17 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             if getattr(v, "passed", False)
         }
         winner_verified = bool(winner_id) and winner_id in verified_ids
-        ok = len(candidates) >= 2 and bool(verdicts) and winner_verified
+        # #2454: the pass decision goes through the shared fail-closed helper; only an
+        # exact "VERIFIED" status allows (abstain and unverified both block).
+        committee_status = (
+            "VERIFIED" if winner_verified else ("ABSTAIN" if explicit_abstain else "NOT_VERIFIED")
+        )
+        committee_decision = decide(committee_status, success=_COMMITTEE_PASS_STATUSES)
+        ok = (
+            len(candidates) >= 2
+            and bool(verdicts)
+            and committee_decision.decision is Decision.ALLOW
+        )
         verdict_rows = [
             {
                 "verifier": str(getattr(v, "verifier_name", "") or getattr(v, "critic_name", "")),
