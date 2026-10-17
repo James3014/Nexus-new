@@ -15,6 +15,7 @@ from typing import Any
 
 from scripts.bench.capability_ab_runner import CapabilityTask, _materialize_fixture, load_tasks, select_tasks
 from scripts.bench.ab_eval import compare_datasets
+from nexus.contracts.model_output_json import parse_model_json
 
 
 @dataclass(frozen=True)
@@ -164,9 +165,7 @@ def _extract_written_file_from_stdout(stdout: str) -> Path | None:
         candidates.append(payload)
     if isinstance(response, str):
         try:
-            response_payload = json.loads(response)
-            if isinstance(response_payload, dict):
-                candidates.append(response_payload)
+            candidates.append(parse_model_json(response, expect="object", mode="strict"))
         except Exception:
             pass
     for item in candidates:
