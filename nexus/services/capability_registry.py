@@ -3355,6 +3355,26 @@ def _with_knowledge_applicability(
     return out
 
 
+def _codeintel_lookup_refused(out: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The codeintel executor's "no target symbol, no lookup" refusal, else None (#1579).
+
+    Only that exact refusal qualifies; any other failure stays a failed stage.
+    """
+    response = out.get("response")
+    outcome = response.get("outcome") if isinstance(response, Mapping) else None
+    if (
+        isinstance(outcome, Mapping)
+        and outcome.get("error") == "TARGET_SYMBOL_REQUIRED"
+        and outcome.get("lookup_performed") is False
+    ):
+        return {
+            "error": "TARGET_SYMBOL_REQUIRED",
+            "lookup_performed": False,
+            "physical_callable": str(out.get("physical_callable") or ""),
+        }
+    return None
+
+
 def build_default_mainchain_invokers(
     *,
     codeintel: Mapping[str, Any] | None = None,
@@ -3381,7 +3401,20 @@ def build_default_mainchain_invokers(
     if real_codeintel is not None:
         def _codeintel_production(context: Mapping[str, Any]) -> Mapping[str, Any]:
             # Prefer physical engine; merge preflight compact evidence when present.
-            out = _with_knowledge_applicability(dict(real_codeintel(context)), context)
+            raw = dict(real_codeintel(context))
+            refused = _codeintel_lookup_refused(raw)
+            if refused is not None:
+                # #1579: with no target symbol the engine performs no lookup at all
+                # (governed worker contexts carry none).  Use the same preflight path
+                # as a host without the executor, so Planner-selected evidence is not
+                # dropped with a refused stage; the refusal stays on the record and no
+                # lookup is ever claimed.
+                out = _with_knowledge_applicability(dict(preflight_codeintel(context)), context)
+                evidence = out.get("evidence")
+                if evidence is None or isinstance(evidence, Mapping):
+                    out["evidence"] = {**(evidence or {}), "physical_lookup": refused}
+                return out
+            out = _with_knowledge_applicability(raw, context)
             try:
                 pf = preflight_codeintel(context)
                 if isinstance(pf, Mapping) and pf.get("evidence"):

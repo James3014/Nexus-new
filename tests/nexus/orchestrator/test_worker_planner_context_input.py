@@ -726,7 +726,9 @@ def test_both_canonical_fields_missing_with_workforce_binding_denies(tmp_path):
         )
 
 
-def _run_knowledge_seam(tmp_path, monkeypatch, *, selected, hint, engine_configured=True):
+def _run_knowledge_seam(
+    tmp_path, monkeypatch, *, selected, hint, engine_configured=True, real_executor=False
+):
     """Drive the real codeintel invoker through the #472 materialization seam (#1579)."""
     from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
     from nexus.services import capability_registry as cr
@@ -749,7 +751,8 @@ def _run_knowledge_seam(tmp_path, monkeypatch, *, selected, hint, engine_configu
         monkeypatch.setenv(ka.ENV_ENGINE_ROOT, "/engine")
     else:
         monkeypatch.delenv(ka.ENV_ENGINE_ROOT, raising=False)
-    monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: None)
+    if not real_executor:
+        monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: None)
     if hint:
         request["rie_knowledge_identity"] = identity(base)
     request["planner_output"]["selected_capabilities"] = selected
@@ -870,3 +873,29 @@ def test_codeintel_selected_without_hint_carries_not_applicable_never_current(
     assert "NOT_APPLICABLE" in text
     assert "REVISION_IDENTITY_UNAVAILABLE" in text
     assert '"CURRENT": 1' not in text and '"status": "CURRENT"' not in text
+
+
+def test_production_codeintel_executor_without_target_symbol_still_delivers_knowledge(
+    tmp_path, monkeypatch
+):
+    """#1579 live run: the real codeintel executor refuses with TARGET_SYMBOL_REQUIRED on
+    the Gateway path (no target symbol in the worker context).  The stage must fall
+    back to the same preflight path a host without the executor uses, so the
+    knowledge evidence reaches the prompt instead of being dropped with a FAILED stage."""
+    from nexus.services import capability_registry as cr
+
+    assert cr.build_real_executor_invoker("codeintel") is not None
+    persisted, prompts, stub, _ = _run_knowledge_seam(
+        tmp_path, monkeypatch, selected=["codeintel"], hint=True, real_executor=True
+    )
+    assert stub.engine_calls == 1
+    bundle = persisted["worker_model_context_materialization"]["bundle"]
+    entry = next(e for e in bundle["entries"] if e["name"] == "codeintel")
+    text = json.dumps(bundle, sort_keys=True)
+    assert "knowledge_applicability" in text, entry
+    assert "knowledge_applicability" in prompts[0]
+    # No lookup is ever presented as performed.
+    assert '"lookup_performed": true' not in json.dumps(persisted, sort_keys=True)
+    consumption = persisted["worker_model_context_consumption"]
+    assert consumption["physical_consumption_state"] == "PROVEN"
+    assert consumption["serialized_capability_ids"] == ["codeintel"]

@@ -322,3 +322,51 @@ if os.environ.get(ka.ENV_ENGINE_ROOT):
         proj = out["knowledge_applicability"]
         assert proj["relation_counts"]["STALE_EXACT_SOURCE"] >= 1, proj
         assert re.fullmatch(r"[0-9a-f]{64}", proj["report_hash"])
+
+
+def _production_codeintel(monkeypatch, real_out):
+    from nexus.services import capability_registry as cr
+
+    monkeypatch.setattr(cr, "build_real_executor_invoker", lambda name: (lambda ctx: dict(real_out)))
+    return cr.build_default_mainchain_invokers()["codeintel"]
+
+
+def _refused(error="TARGET_SYMBOL_REQUIRED", performed=False):
+    return {
+        "status": "FAILED",
+        "physical_callable": "capability_executor_registry:codeintel",
+        "response": {
+            "status": "FAILED",
+            "outcome": {"error": error, "lookup_performed": performed, "semantic_status": "BLOCKED"},
+        },
+    }
+
+
+def test_symbolless_refusal_falls_back_to_preflight_and_records_it(tmp_path, monkeypatch):
+    """#1579: the executor's no-symbol refusal uses the preflight path, keeps the
+    refusal on the evidence and carries knowledge applicability."""
+    invoke = _production_codeintel(monkeypatch, _refused())
+    out = invoke({"task_id": "t", "workspace_root": str(tmp_path)})
+    assert out.get("status") != "FAILED"
+    assert out["evidence"]["physical_lookup"] == {
+        "error": "TARGET_SYMBOL_REQUIRED",
+        "lookup_performed": False,
+        "physical_callable": "capability_executor_registry:codeintel",
+    }
+    assert out["evidence"]["knowledge_applicability"]["status"] == "NOT_APPLICABLE"
+
+
+@pytest.mark.parametrize(
+    "real_out",
+    [
+        _refused(error="PythonCodeSkeletonProvider not importable"),
+        _refused(performed=True),
+        {"status": "FAILED", "response": {"outcome": {"error": "boom"}}},
+    ],
+    ids=["other-error", "lookup-performed", "plain-failure"],
+)
+def test_other_codeintel_failures_stay_failed(tmp_path, monkeypatch, real_out):
+    invoke = _production_codeintel(monkeypatch, real_out)
+    out = invoke({"task_id": "t", "workspace_root": str(tmp_path)})
+    assert out["status"] == "FAILED"
+    assert "physical_lookup" not in (out.get("evidence") or {})
