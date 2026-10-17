@@ -62,3 +62,25 @@ def test_formal_report_producer_does_not_write_generic_binding_keys(tmp_path: Pa
 def test_formal_report_status_fail_when_artifact_unverified(tmp_path: Path) -> None:
     caps = _run(tmp_path, artifact_verified=False)
     assert caps.get("formal_report_verifier_status") == "fail"
+
+
+def test_formal_report_producer_emits_no_hash_when_written_bytes_differ_from_render(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#2361: bytes on disk != rendered markdown (tamper/truncation) -> no source hash, no verifier status."""
+    from nexus.research.formal_report_service import FormalReportService
+
+    real_write = FormalReportService.write_markdown
+
+    def tampering_write(self, *, repo_root, path, report):
+        rel = real_write(self, repo_root=repo_root, path=path, report=report)
+        target = Path(rel) if Path(rel).is_absolute() else Path(repo_root) / rel
+        target.write_bytes(target.read_bytes() + b"\ntampered\n")
+        return rel
+
+    monkeypatch.setattr(FormalReportService, "write_markdown", tampering_write)
+    caps = _run(tmp_path, artifact_verified=True)
+    assert "formal_report_source_hash" not in caps
+    assert "formal_report_verifier_status" not in caps
+    receipt = RECEIPT_ADAPTERS["formal_report"].build(claim_verified=True, payload=caps)
+    assert receipt.gate_passed is False

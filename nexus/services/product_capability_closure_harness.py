@@ -158,7 +158,12 @@ def _task_fixture(
             {"status": "PASS", "evidence": f"isolated-verifier:{task_id}"}
         ],
         "formal_route_receipts": [
-            {"route": "mainchain", "evidence_present": True, "gate_passed": True}
+            {
+                "name": "artifact_gate",
+                "route": "mainchain",
+                "evidence_present": True,
+                "gate_passed": True,
+            }
         ],
         "meta_opt_episode": {
             "task_id": task_id,

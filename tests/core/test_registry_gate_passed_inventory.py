@@ -90,3 +90,66 @@ def test_registry_artifact_gate_fails_closed_without_artifact_and_source_hash() 
 def test_registry_artifact_gate_passes_with_artifact_and_source_hash() -> None:
     receipt = _run_artifact_gate({"verifier_status": "pass", "source_hash": "sha256:" + "c" * 64})
     assert receipt.gate_passed is True
+
+
+def _real_executor_receipt(constraints: dict):
+    from nexus.services.local_heal.local_model_capability_executors import ArtifactGateLocalExecutor
+
+    plan = CapabilityExecutionPlan(task_id="t1", plan_id="p1", constraints=constraints)
+    with mock.patch.object(reg, "_try_import_class", return_value=ArtifactGateLocalExecutor):
+        return reg._exec_artifact_gate(plan, "task")
+
+
+_HASH = "sha256:" + "d" * 64
+
+
+def test_registry_artifact_gate_real_executor_runs_but_claim_binding_stays_false() -> None:
+    """#2361: ctx type fixed (no exception); the executor result carries no verifier evidence."""
+    receipt = _real_executor_receipt({
+        "evidence_refs": ["ev1"],
+        "source_anchor": {"present": True, "hash": _HASH},
+    })
+    assert "error" not in receipt.outcome, receipt.outcome
+    assert receipt.gate_passed is False
+    assert "missing_source_hash" in receipt.outcome["binding_blockers"]
+
+
+def test_registry_artifact_gate_does_not_forge_binding_from_plan_constraints() -> None:
+    forged = {
+        "evidence_refs": ["ev1"],
+        "source_anchor": {"present": True, "hash": _HASH},
+        "verifier_status": "pass",
+        "source_hash": _HASH,
+        "payload": {"verifier_status": "pass", "source_hash": _HASH},
+    }
+    assert _real_executor_receipt(forged).gate_passed is False
+    anchor_only = _real_executor_receipt({"source_anchor": {"present": True, "hash": _HASH}})
+    assert anchor_only.gate_passed is False
+    assert "error" not in anchor_only.outcome
+
+
+def test_registry_artifact_gate_rejects_non_list_evidence_refs() -> None:
+    for bad in ("ev1", {"a": 1}, 5):
+        receipt = _real_executor_receipt({"evidence_refs": bad})
+        assert receipt.gate_passed is False
+        assert "error" not in receipt.outcome
+
+
+def test_registry_artifact_gate_binds_when_executor_result_payload_carries_evidence() -> None:
+    from nexus.services.local_heal.local_model_capability_context import CapabilityExecutionResult
+
+    class _Own:
+        def execute(self, ctx):
+            return CapabilityExecutionResult(
+                name="artifact_gate",
+                selected=True,
+                invoked=True,
+                gate_passed=True,
+                outcome_contributed=True,
+                evidence_present=True,
+                payload={"verifier_status": "pass", "source_hash": _HASH},
+            )
+
+    plan = CapabilityExecutionPlan(task_id="t1", plan_id="p1")
+    with mock.patch.object(reg, "_try_import_class", return_value=_Own):
+        assert reg._exec_artifact_gate(plan, "task").gate_passed is True
