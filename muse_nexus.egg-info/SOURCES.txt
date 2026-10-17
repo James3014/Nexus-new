@@ -169,7 +169,6 @@ nexus/services/git.py
 nexus/services/linter.py
 nexus/services/memory.py
 nexus/services/memory_repository.py
-nexus/services/mock_llm.py
 nexus/services/patcher.py
 nexus/services/predictor.py
 nexus/services/prompt_builder.py
