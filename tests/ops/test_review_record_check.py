@@ -249,6 +249,48 @@ def test_governance_and_tool_config_files_are_high_risk(path):
     assert rrc.high_risk_paths([{"filename": path}]) == [path]
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "nexus/orchestrator/self_hosted_task_service.py",
+        "nexus/orchestrator/self_hosted_task_service_parts/__init__.py",
+        "nexus/orchestrator/self_hosted_task_service_parts/sub/mixin.py",
+        "nexus/orchestrator/unified_mcp_gateway.py",
+        "nexus/orchestrator/unified_mcp_gateway_parts/__init__.py",
+        "nexus/orchestrator/unified_mcp_gateway_parts/assist_jobs.py",
+    ],
+)
+def test_big_file_split_surfaces_are_high_risk(path):
+    assert rrc.high_risk_paths([{"filename": path}]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "nexus/orchestrator/unified_mcp_gateway_helpers.py",
+        "nexus/orchestrator/self_hosted_task_service_v2.py",
+        "nexus/orchestrator/unified_mcp_gateway_parts_old/x.py",
+        "nexus/orchestrator/self_hosted_task_service_parts.py",
+        "nexus/orchestrator/unified_mcp_gateway_parts",
+        "tests/orchestrator/unified_mcp_gateway_parts/test_x.py",
+    ],
+)
+def test_split_surface_near_misses_are_not_high_risk(path):
+    # Segment-exact by construction: the module entries end in ".py" and the package
+    # entries end in "/", so startswith() cannot reach sibling names.
+    assert rrc.high_risk_paths([{"filename": path}]) == []
+
+
+def test_moving_code_out_of_a_split_surface_counts_by_its_old_name():
+    moved = [
+        {
+            "filename": "nexus/orchestrator/gateway_helpers.py",
+            "previous_filename": "nexus/orchestrator/unified_mcp_gateway_parts/helpers.py",
+        }
+    ]
+    assert rrc.high_risk_paths(moved) == ["nexus/orchestrator/unified_mcp_gateway_parts/helpers.py"]
+
+
 def test_ordinary_paths_are_not_high_risk():
     files = [{"filename": "tests/ops/test_x.py"}, {"filename": "docs/a.md"}, {"status": "removed"}]
     assert rrc.high_risk_paths(files) == []
