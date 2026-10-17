@@ -559,3 +559,147 @@ def test_two_different_issues_claim_independently(tmp_path):
     assert res_130["status"] == "CLAIMED"
     assert res_129["claim"]["identity"]["issue"] == "129"
     assert res_130["claim"]["identity"]["issue"] == "130"
+
+
+# ---------------------------------------------------------------------------
+# #2374: the stale fence is a durable binding, not a per-process cache
+# ---------------------------------------------------------------------------
+def _seed_claimed_attempt(state_dir: Path, task_id: str):
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "attempt-1",
+            "status": "SUBMITTED",
+            "contract": {
+                "task_id": task_id,
+                "target_base_revision": "b" * 40,
+                "controller_revision": "s" * 64,
+                "target_worktree_root": str(state_dir / "targets"),
+            },
+        },
+    )
+    first = service.acquire_work_claim(_claim_request(task_id=task_id, attempt_id="attempt-1"))
+    assert first["status"] == "CLAIMED"
+    service._bridge_validate_claim(task_id, "attempt-1", operation="RUN_OWNED_ATTEMPT")
+    recover_request = {
+        **_claim_request(task_id=task_id, attempt_id="attempt-1"),
+        "claim_id": first["claim"]["claim_id"],
+        "generation": 1,
+        "fencing_token": first["claim"]["fencing_token"],
+    }
+    return service, recover_request
+
+
+def test_stale_attempt_rejected_by_fresh_service_instance_after_recovery(tmp_path):
+    state_dir = tmp_path / "state"
+    task_id = "task-xproc-stale"
+    service_a, recover_request = _seed_claimed_attempt(state_dir, task_id)
+
+    recovered = service_a.recover_work_claim(recover_request, reason="timeout_recovery")
+    assert recovered["claim"]["generation"] == 2
+
+    # A fresh service object (another process / restart) has an empty cache.
+    service_b = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    assert service_b._bound_attempt_claims == {}
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_STALE_FENCE"):
+        service_b._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+
+
+def test_recovery_authorized_continuation_accepted_in_same_process(tmp_path):
+    state_dir = tmp_path / "state"
+    task_id = "task-continuation"
+    service, recover_request = _seed_claimed_attempt(state_dir, task_id)
+
+    service.recover_work_claim(
+        recover_request, reason="timeout_recovery", authorized_attempt_id="attempt-1"
+    )
+
+    service._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+    # The re-bound generation is durable: a fresh service accepts it too.
+    fresh = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    fresh._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+    assert fresh.read_work_claim({"task_id": task_id})["claim"]["generation"] == 2
+
+
+def _acquire_only(state_dir: Path, task_id: str):
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "attempt-1",
+            "status": "SUBMITTED",
+            "contract": {
+                "task_id": task_id,
+                "target_base_revision": "b" * 40,
+                "controller_revision": "s" * 64,
+                "target_worktree_root": str(state_dir / "targets"),
+            },
+        },
+    )
+    first = service.acquire_work_claim(_claim_request(task_id=task_id, attempt_id="attempt-1"))
+    assert first["status"] == "CLAIMED"
+    recover_request = {
+        **_claim_request(task_id=task_id, attempt_id="attempt-1"),
+        "claim_id": first["claim"]["claim_id"],
+        "generation": 1,
+        "fencing_token": first["claim"]["fencing_token"],
+    }
+    return service, recover_request
+
+
+def test_attempt_recovered_past_before_first_validation_is_fenced_in_fresh_service(tmp_path):
+    state_dir = tmp_path / "state"
+    task_id = "task-no-first-validate"
+    service_a, recover_request = _acquire_only(state_dir, task_id)
+    # No _bridge_validate_claim here: the binding must come from acquisition.
+    service_a.recover_work_claim(recover_request, reason="timeout_recovery")
+
+    service_b = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_STALE_FENCE"):
+        service_b._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+
+
+def test_recovery_to_new_attempt_fences_old_attempt_and_accepts_new(tmp_path):
+    state_dir = tmp_path / "state"
+    task_id = "task-new-attempt"
+    service, recover_request = _acquire_only(state_dir, task_id)
+    service.recover_work_claim(
+        recover_request, reason="TERMINAL_RETRY", authorized_attempt_id="attempt-2"
+    )
+
+    fresh = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    fresh._bridge_validate_claim(task_id, "attempt-2", operation="TARGET_LEASE")
+    for svc in (service, fresh):
+        with pytest.raises(RuntimeError, match="WORK_CLAIM_(STALE_FENCE|FENCE_MISMATCH)"):
+            svc._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+
+    # read_work_claim is a read-only observer: it never raises on a stale default attempt.
+    observed = fresh.read_work_claim({"task_id": task_id})
+    assert observed["status"] == "FOUND"
+    assert observed["claim"]["generation"] == 2
+
+
+def test_cache_only_binding_is_persisted_and_corrupt_bindings_fail_closed(tmp_path):
+    state_dir = tmp_path / "state"
+    task_id = "task-cache-persist"
+    service, recover_request = _acquire_only(state_dir, task_id)
+    # Simulate a legacy state: drop the persisted binding, keep only the cache.
+    state = json.loads(service._state_path(task_id).read_text(encoding="utf-8"))
+    state.pop("attempt_claim_bindings")
+    service._write_state(task_id, state)
+    service._bound_attempt_claims[(task_id, "attempt-1")] = {
+        **service._attempt_binding(state["work_claim"], task_id, "attempt-1")
+    }
+    service._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")
+    persisted = json.loads(service._state_path(task_id).read_text(encoding="utf-8"))
+    assert persisted["attempt_claim_bindings"]["attempt-1"]["generation"] == 1
+
+    persisted["attempt_claim_bindings"] = ["corrupt"]
+    service._write_state(task_id, persisted)
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_BINDINGS_CORRUPT"):
+        service.recover_work_claim(recover_request)
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_BINDINGS_CORRUPT"):
+        service._bridge_validate_claim(task_id, "attempt-1", operation="TARGET_LEASE")

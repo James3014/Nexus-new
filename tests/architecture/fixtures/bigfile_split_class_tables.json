@@ -49,6 +49,14 @@
     "kind": "staticmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any], POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], POSITIONAL_OR_KEYWORD:binding: Optional[Mapping[str, Any]], KEYWORD_ONLY:active_provider: Optional[str] = None) -> None"
    },
+   "_attempt_binding": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:record: Mapping[str, Any], POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> dict[str, Any]"
+   },
+   "_bindings_of": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> dict[str, Any]"
+   },
    "_bound_custom_runner_values": {
     "kind": "classmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:values: Mapping[str, Any]) -> dict[str, Any]"
@@ -619,7 +627,7 @@
    },
    "recover_work_claim": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:reason: str = 'RECOVERY') -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any], KEYWORD_ONLY:reason: str = 'RECOVERY', KEYWORD_ONLY:authorized_attempt_id: str | None = None) -> dict[str, Any]"
    },
    "rehydrate_project_entry": {
     "kind": "function",
