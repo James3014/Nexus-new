@@ -133,6 +133,9 @@ REQUIRED_CHECKS = {
     "Trusted dependency contract (default branch)": (
         ".github/workflows/trusted-dependency-contract.yml"
     ),
+    # Required on main since 2026-10-17 (false-completion council K5); runs on
+    # push to main, so it binds on the main commit like Exact-base impact gate.
+    "Exact-base Pyright regression gate": ".github/workflows/typecheck.yml",
 }
 # Checks whose workflow runs only on pull_request_target (trusted default-branch
 # workflow code).  A merged-PR-head run of these from a ``pull_request`` event
