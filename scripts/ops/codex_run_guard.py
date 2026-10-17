@@ -50,6 +50,8 @@ def run_in_own_group(
         if state["group"] is None:
             state["pending"].append(signum)  # launch still in progress
             return
+        if state["group"] < 0:
+            return  # leader reaped: its group id is no longer ours
         try:
             os.killpg(state["group"], signum)
         except (ProcessLookupError, PermissionError):
@@ -72,8 +74,11 @@ def run_in_own_group(
     state["group"] = child.pid
     for signum in state["pending"]:
         forward(signum, None)
-    tracker = cli_worker.track_run(run_tag, child.pid)
+    tracker = None
+    clean = False
+    status = 1
     try:
+        tracker = cli_worker.track_run(run_tag, child.pid)
         # Wait without reaping: the zombie leader pins its PID and group id.
         while True:
             try:
@@ -81,17 +86,24 @@ def run_in_own_group(
                 break
             except InterruptedError:
                 continue
+    finally:
+        # Also when tracking or waiting raised: never leave the group running.
         try:
             os.killpg(child.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             # macOS reports EPERM for a group whose only member is the
             # zombie leader; any live member is still swept below.
             pass
-        status = child.wait()
-        clean = cli_worker.sweep_run(run_tag, tracker, baseline, roots)
-    finally:
-        tracker.stop()
-        cli_worker.release_run(run_tag)
+        # From here the group id may be reused: forward no more signals.
+        state["group"] = -1
+        try:
+            status = child.wait()
+            if tracker is not None:
+                clean = cli_worker.sweep_run(run_tag, tracker, baseline, roots)
+        finally:
+            if tracker is not None:
+                tracker.stop()
+            cli_worker.release_run(run_tag)
     if not clean:
         print(
             "[nexus-enforced] codex_descendant_sweep_unclean: a codex descendant could not "

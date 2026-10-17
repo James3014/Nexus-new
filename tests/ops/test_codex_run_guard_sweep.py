@@ -20,7 +20,8 @@ from pathlib import Path
 _GUARD = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "codex_run_guard.py"
 
 # Forks; the grandchild leaves the process group with setsid(), waits until
-# the guard has returned, then writes into the work copy (its cwd).  The
+# the guard process has exited (polling its pid, so a slow sweep cannot make
+# the write early), then writes into the work copy (its cwd).  The
 # direct child exits at once, so codex "finishes" immediately.  With
 # "clear", the grandchild re-executes itself with an empty environment (so
 # the run tag is gone) before waiting; only its cwd still ties it to the run.
@@ -29,15 +30,24 @@ _ESCAPER = textwrap.dedent(
     import os, sys, time
     work, mode = sys.argv[1], sys.argv[2]
     if mode == "late":
-        time.sleep(1.5)
+        guard = int(sys.argv[3])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                os.kill(guard, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        time.sleep(0.2)
         with open(os.path.join(work, "late-write.txt"), "w") as handle:
             handle.write("written after the guard returned\\n")
         os._exit(0)
+    guard = os.getppid()
     if os.fork() == 0:
         os.setsid()
         os.chdir(work)
         env = {} if mode == "clear" else dict(os.environ)
-        os.execve(sys.executable, [sys.executable, "-I", sys.argv[0], work, "late"], env)
+        os.execve(sys.executable, [sys.executable, "-I", sys.argv[0], work, "late", str(guard)], env)
     os._exit(0)
     """
 )
@@ -73,7 +83,7 @@ def _run_escaper(tmp_path: Path, guard_args: list[str], mode: str):
         text=True,
         timeout=60,
     )
-    time.sleep(3)
+    time.sleep(1.5)  # a surviving grandchild writes ~0.25 s after the guard exits
     return res, work
 
 
