@@ -3368,8 +3368,11 @@ def test_commit_run_must_be_a_push_to_main() -> None:
 
     result = ad.required_checks(api, NEW)
     # The relabelled runs on the main commit do not count; only the merged PR's
-    # head runs (bound to that PR) can satisfy the checks.
-    assert {c["sha"] for c in result["checks"].values()} == {PR_HEAD}
+    # head runs (bound to that PR) can satisfy the checks, except push-only ones,
+    # which then have no bound run at all.
+    checks = result["checks"]
+    assert {c["sha"] for n, c in checks.items() if n not in ad.PUSH_ONLY_CHECKS} == {PR_HEAD}
+    assert {n for n, c in checks.items() if c["state"] == "MISSING"} == set(ad.PUSH_ONLY_CHECKS)
 
 
 @pytest.mark.parametrize(
@@ -6616,3 +6619,41 @@ def test_installed_deployer_without_pyright_self_updates_to_this_source(
     subset = result["receipt"]["self_update"]["bindable_checks"]
     assert subset["verdict"] == "GREEN"
     assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+
+
+@pytest.mark.parametrize("event", ["pull_request", "pull_request_target"])
+def test_pyright_gate_never_binds_through_the_merged_pr_head(cfg: ad.Config, event: str) -> None:
+    """#2464 Codex review: a green PR-head run (PR-controlled workflow code) cannot
+    stand in for a missing push run of the Pyright gate on the merge commit."""
+    assert PYRIGHT_GATE in ad.PUSH_ONLY_CHECKS
+    base = _live_seven_api()
+    pr_suite = SUITES[PYRIGHT_GATE] + PR_SUITE_OFFSET
+
+    def api(path: str) -> Any:
+        if f"/commits/{NEW}/check-runs?" in path and "Exact-base+Pyright" in path:
+            return {"check_runs": []}
+        if f"/commits/{PR_HEAD}/check-runs?" in path and "Exact-base+Pyright" in path:
+            raise AssertionError("push-only check looked up on the PR head")
+        payload = base(path)
+        if path.endswith(f"check_suite_id={pr_suite}"):
+            for run in payload["workflow_runs"]:
+                run["event"] = event
+        return payload
+
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [PYRIGHT_GATE]
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] != "DEPLOYED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_push_only_checks_are_bound_push_workflows() -> None:
+    import yaml
+
+    assert ad.PUSH_ONLY_CHECKS <= set(ad.REQUIRED_CHECKS)
+    assert not ad.PUSH_ONLY_CHECKS & ad.PR_TARGET_ONLY_CHECKS
+    for name in ad.PUSH_ONLY_CHECKS:
+        on = yaml.safe_load((REPO_ROOT / ad.REQUIRED_CHECKS[name]).read_text("utf-8"))[True]
+        assert "main" in on["push"]["branches"]
+        assert "paths" not in on["push"] and "paths-ignore" not in on["push"]

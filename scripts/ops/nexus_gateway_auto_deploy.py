@@ -146,6 +146,11 @@ PR_TARGET_ONLY_CHECKS = frozenset({
     "Trusted impact gate (default branch)",
     "Trusted dependency contract (default branch)",
 })
+# Checks that bind only from the ``push`` run on the candidate commit itself:
+# never through the merged PR head, whose ``pull_request`` run executes the
+# PR's own workflow code (#2464 Codex review).  Their workflow runs on every
+# push to main without path filters or cancellation, so the push run exists.
+PUSH_ONLY_CHECKS = frozenset({"Exact-base Pyright regression gate"})
 # Required contexts that are commit STATUSES posted only on PR heads by
 # pull_request_target workflows (#2365): GitHub's ruleset enforces them at merge
 # time and they never appear on main commits, so the deployer cannot re-verify
@@ -1019,7 +1024,7 @@ def _bind_required(
         for name, issuer in required.items():
             runs = _bound_runs(api_get, repo, sha, name, origin=push_origin, integration_id=issuer)
             source = sha
-            if not runs:
+            if not runs and name not in PUSH_ONLY_CHECKS:
                 if merged_prs is None:
                     merged_prs = [
                         {
