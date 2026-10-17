@@ -8,6 +8,7 @@ import http.server
 import ipaddress
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -99,8 +100,8 @@ def _public_preflight_reason(reason: object) -> str:
     text = str(reason or "").strip()
     if text == "ready":
         return ""
-    if text.startswith("NEXUS_") and text.endswith("is required") and "=" in text:
-        return text[:120]
+    if re.fullmatch(r"NEXUS_[A-Z0-9_]+=1 is required", text):
+        return text
     if text.startswith("executable not found"):
         return "executable not found"
     return "preflight not ready"
@@ -110,30 +111,35 @@ def _compute_worker_route_preflight() -> dict[str, Any]:
     """Run each default worker route's adapter ``preflight()`` (env + PATH lookup only)."""
     try:
         from nexus.executors.worker_registry import WorkerRegistry
-        from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+        from nexus.services.model_workforce_policy import (
+            WorkforcePolicyLoader,  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
         snapshot = WorkforcePolicyLoader().load()
         online = snapshot.routing.get("online", {})
         defaults = online.get("route_defaults", {})
+        if not defaults:
+            return {"status": "UNKNOWN", "routes": [], "reason": "no default routes"}
         registry = WorkerRegistry.default()
         routes: list[dict[str, str]] = []
         for role in sorted(defaults):
             worker_id = str(defaults[role].get("current_default", ""))
             worker = snapshot.workers.get(worker_id)
-            try:
-                result = registry.preflight(str(worker.provider))
-                ok = bool(result.ready)
-                reason = "" if ok else _public_preflight_reason(result.reason)
-            except Exception as exc:  # one broken adapter must not hide the rest
-                ok, reason = False, f"preflight error: {type(exc).__name__}"
-            routes.append(
-                {
-                    "route": str(role),
-                    "adapter": worker_id,
-                    "preflight": "OK" if ok else "BLOCKED",
-                    "reason": reason,
-                }
-            )
+            if worker is None:
+                ok, reason = False, "unknown adapter"
+            else:
+                try:
+                    result = registry.preflight(str(worker.provider))
+                    ok = bool(result.ready)
+                    reason = "" if ok else _public_preflight_reason(result.reason)
+                except Exception as exc:  # one broken adapter must not hide the rest
+                    ok, reason = False, f"preflight error: {type(exc).__name__}"
+            routes.append({
+                "route": str(role),
+                "adapter": worker_id,
+                "preflight": "OK" if ok else "BLOCKED",
+                "reason": reason,
+            })
         status = "BLOCKED" if any(r["preflight"] == "BLOCKED" for r in routes) else "OK"
         return {"status": status, "routes": routes}
     except Exception as exc:  # /health must never fail because of this probe
