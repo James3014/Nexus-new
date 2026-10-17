@@ -1,4 +1,5 @@
 import hashlib
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -173,3 +174,49 @@ def test_real_git_conflict_and_forged_cleanup_are_fail_closed(tmp_path: Path):
     )
     assert result["performed"] is False
     assert target.exists()
+
+
+def _spaced_verifier_state(tmp_path: Path, expression: str) -> tuple[tuple[str, ...], dict]:
+    """Sealed evidence for a verifier whose one argument contains spaces (#2307)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_path.resolve()
+    executable = tmp_path / "python3"
+    executable.symlink_to(Path(sys.executable))
+    argv = ["-c", expression]
+    command = shlex.join(["python3", *argv])
+    state = {"verified_receipt": {"verifier_evidence": [{
+        "command": command, "status": "COMPLETED", "exit_code": 0,
+        "executable_identity": str(executable), "argv": argv,
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "env": bounded_environment_receipt({"PYTHONDONTWRITEBYTECODE": "1"}),
+        "timed_out": False, "process_group_killed": False,
+    }]}}
+    manifest = ControlledIntegrationManager._admitted_manifest(state, {"verifier_commands": [command]})
+    state["integration_verifier_manifest"] = [dict(item) for item in manifest]
+    return ("python3", *argv), state
+
+
+def test_verifier_argument_with_spaces_is_approved_when_it_matches_and_refused_otherwise(tmp_path: Path):
+    root, base, candidate = make_repo(tmp_path)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    argv, state = _spaced_verifier_state(tmp_path / "match-ev", "assert 1 + 1 == 2")
+    staged = TargetIntegrationLifecycle.transactional_integration(
+        task_id="task-1", canonical_root=root, candidate_commit=candidate,
+        expected_canonical_head=base, expected_status_hash=status_hash(root),
+        staging_root=str(tmp_path / "match-stage"),
+        verifier_commands=(argv,), lifecycle_state=state,
+        external_acceptance=receipt, authorization=auth,
+    )
+    assert staged.staged is True
+    # The approved argv is not the one the sealed evidence recorded: refuse.
+    other_argv, _ = _spaced_verifier_state(tmp_path / "other-ev", "assert 1 + 1 == 3")
+    with pytest.raises(RuntimeError, match="staging verifier (command|argv) mismatch"):
+        TargetIntegrationLifecycle.transactional_integration(
+            task_id="task-1", canonical_root=root, candidate_commit=candidate,
+            expected_canonical_head=base, expected_status_hash=status_hash(root),
+            staging_root=str(tmp_path / "mismatch-stage"),
+            verifier_commands=(other_argv,), lifecycle_state=state,
+            external_acceptance=receipt, authorization=auth,
+        )
+    assert git(root, "rev-parse", "HEAD") == base

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import shlex
 from typing import Any, Iterable, Mapping, Sequence
 
 from nexus.contracts.target_integration_lifecycle import (
@@ -32,6 +34,20 @@ def _canonical_json(value: Any) -> str:
 
 def _hash(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode()).hexdigest()
+
+
+def _render_command(argv: Sequence[str]) -> str:
+    """Render argv as the human-readable command string the contract carries.
+
+    Tokens stay bare unless they hold whitespace, quotes or a backslash, so a
+    command that already worked renders byte-identically; a token that would
+    be re-split downstream (#2307) is shell-quoted so the contract string
+    lexes back to exactly the same argv the sealed evidence recorded.
+    """
+    return " ".join(
+        token if token and not re.search(r"[\s'\"\\]", token) else shlex.quote(token)
+        for token in argv
+    )
 
 
 class TargetIntegrationLifecycle:
@@ -391,7 +407,7 @@ class TargetIntegrationLifecycle:
             "contract": {
                 **dict(state.get("contract") or {}),
                 "controller_repo_root": auth.canonical_root,
-                "verifier_commands": [" ".join(command) for command in verifier_commands],
+                "verifier_commands": [_render_command(command) for command in verifier_commands],
             },
         })
         manager = integration_manager or ControlledIntegrationManager(integration_root=auth.canonical_root)
