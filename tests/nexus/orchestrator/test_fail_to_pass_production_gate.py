@@ -450,3 +450,49 @@ def test_repair_task_with_a_real_failing_base_pytest_is_promoted(tmp_path, monke
     assert state["fail_to_pass"]["status"] == "VERIFIED"
     assert state["fail_to_pass"]["base_exit_codes"] == [1]
     assert "reason" not in state["fail_to_pass"]
+
+
+def test_pytest_command_shapes_are_recognised_and_others_are_not():
+    from nexus.orchestrator.self_hosted_task_service import _pytest_named_paths as parse
+
+    assert parse("PYTHONDONTWRITEBYTECODE=1 pytest tests/a.py::t") == ["tests/a.py"]
+    assert parse("uv run pytest -q tests/a.py") == ["tests/a.py"]
+    assert parse("uv run python -m pytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -mpytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -m coverage run -m pytest tests/a.py") == ["tests/a.py"]
+    assert parse("python -m pytest -k x.py tests/b.py") == ["tests/b.py"]
+    assert parse("python -c 'print(1)'") is None
+    assert parse("\x00pytest tests/a.py") is None
+    assert parse("") is None
+
+
+def test_repair_task_with_env_prefixed_pytest_and_missing_base_file_is_not_verified(
+    tmp_path, monkeypatch
+):
+    state, _result, _error, _controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-env-prefix",
+        ["PYTHONDONTWRITEBYTECODE=1 " + _pytest_verifier("tests/test_new.py")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt", "tests/test_new.py"],
+        worker_files={"tests/test_new.py": _FIXED_TEST},
+    )
+
+    assert not _promoted(state)
+    assert state["fail_to_pass"]["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert state["fail_to_pass"]["reason"] == "base_test_path_missing"
+
+
+def test_base_probe_path_outside_checkout_fails_closed(tmp_path):
+    from types import SimpleNamespace
+
+    from nexus.orchestrator.self_hosted_task_service import _base_run_collected_nothing
+
+    outside = tmp_path / "worker_tree_test.py"
+    outside.write_text("def test_x():\n    assert False\n", encoding="utf-8")
+    checkout = tmp_path / "base"
+    checkout.mkdir()
+    for target in (str(outside), "../worker_tree_test.py"):
+        item = SimpleNamespace(command=f"pytest {target}", exit_code=1)
+        assert _base_run_collected_nothing([item], checkout) == "base_test_path_outside_checkout"

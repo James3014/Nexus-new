@@ -319,19 +319,41 @@ _PYTEST_VALUE_OPTIONS = frozenset({
 _PYTEST_TEST_PATH = re.compile(r"^[\w./-]+\.py(::.*)?$")
 
 
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _pytest_argv_tail(argv: list[str]) -> list[str] | None:
+    """Arguments after pytest when argv is pytest-shaped, else None."""
+    while argv and _ENV_ASSIGNMENT.match(argv[0]):
+        argv = argv[1:]
+    if argv[:2] == ["uv", "run"]:
+        argv = argv[2:]
+        while argv and argv[0].startswith("-") and argv[0] != "-m":
+            argv = argv[1:]
+    if not argv:
+        return None
+    try:
+        program = Path(argv[0]).name
+    except ValueError:
+        return None
+    if program in {"pytest", "py.test"}:
+        return argv[1:]
+    for index, token in enumerate(argv[:-1]):
+        if token == "-m" and argv[index + 1] == "pytest":
+            return argv[index + 2 :]
+    for index, token in enumerate(argv):
+        if token == "-mpytest":
+            return argv[index + 1 :]
+    return None
+
+
 def _pytest_named_paths(command: str) -> list[str] | None:
     """Test paths named by a pytest-shaped command; None when it is not pytest-shaped."""
     try:
-        argv = shlex.split(command)
+        rest = _pytest_argv_tail(shlex.split(command))
     except ValueError:
         return None
-    if not argv:
-        return None
-    if Path(argv[0]).name in {"pytest", "py.test"}:
-        rest = argv[1:]
-    elif "-m" in argv[:-1] and argv[argv.index("-m") + 1] == "pytest":
-        rest = argv[argv.index("-m") + 2 :]
-    else:
+    if rest is None:
         return None
     paths: list[str] = []
     for index, token in enumerate(rest):
@@ -346,15 +368,20 @@ def _pytest_named_paths(command: str) -> list[str] | None:
 def _base_run_collected_nothing(evidence, checkout: Path) -> str | None:
     """Reason when a pytest-shaped base run proves nothing ran, else None (#2387).
 
-    pytest exit 4 (usage error / file not found) or 5 (no tests collected), or a
-    named test path absent from the base checkout, is not a real base failure:
-    the worker may add that very test file, so base never exercised the oracle.
-    Non-pytest verifiers keep the plain exit-code meaning.
+    pytest exit 4 (usage error / file not found) or 5 (no tests collected), a
+    named test path absent from the base checkout, or one that is absolute or
+    escapes the checkout (could point into the worker tree), is not a real base
+    failure: the worker may add that very test file, so base never exercised the
+    oracle.  Non-pytest verifiers keep the plain exit-code meaning.
     """
+    root = checkout.resolve()
     for item in evidence:
         paths = _pytest_named_paths(item.command)
         if paths is None:
             continue
+        for path in paths:
+            if Path(path).is_absolute() or not (checkout / path).resolve().is_relative_to(root):
+                return "base_test_path_outside_checkout"
         if any(not (checkout / path).exists() for path in paths):
             return "base_test_path_missing"
         if item.exit_code in (4, 5):
