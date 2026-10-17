@@ -182,3 +182,56 @@ def test_unreadable_store_reports_unavailable_not_silent_empty(tmp_path, monkeyp
     assert verdict["constraints_source"] == "unavailable"
     assert "db corrupted" in verdict["constraints_unavailable_reason"]
     assert verdict["forbidden_skills_rules"] == []
+
+
+def test_single_task_retries_count_as_one_failure(tmp_path):
+    """#2375: one task failing all 3 retries is streak 1, not a forbid belief."""
+    producer = BeliefConstraintProducer(tmp_path)
+    for _ in range(3):
+        producer.record_outcome(_outcome(False, n=0))
+
+    state = producer._load_state()
+    assert [e["streak"] for e in state.values()] == [1]
+    assert not any(e["active"] for e in state.values())
+    assert not (tmp_path / ".nexus" / "vector_db").exists() or not [
+        r for r in _rows(tmp_path) if r["type"] == "belief"
+    ]
+
+
+def test_distinct_tasks_still_forbid_and_streak_survives_restart(tmp_path):
+    for i in range(3):
+        # fresh producer each time: dedupe state must persist
+        BeliefConstraintProducer(tmp_path).record_outcome(_outcome(False, n=i))
+        BeliefConstraintProducer(tmp_path).record_outcome(_outcome(False, n=i))  # retry
+    beliefs = [r for r in _rows(tmp_path) if r["type"] == "belief"]
+    assert len(beliefs) == 1
+    assert beliefs[0]["status"] == "active"
+
+
+def test_retries_through_persist_outcome_do_not_forbid(tmp_path):
+    service = _service(tmp_path)
+    for _ in range(3):
+        service.persist_outcome(_outcome(False, n=0))
+    assert _verdict(tmp_path)["forbidden_skills_rules"] == []
+
+    for i in (1, 2):
+        service.persist_outcome(_outcome(False, n=i))
+    assert len(_verdict(tmp_path)["forbidden_skills_rules"]) == 1
+
+
+def test_missing_task_id_keeps_legacy_counting(tmp_path):
+    producer = BeliefConstraintProducer(tmp_path)
+    for _ in range(3):
+        payload = _outcome(False, n=0)
+        payload.pop("task_id")
+        producer.record_outcome(payload)
+    assert [e["streak"] for e in producer._load_state().values()] == [3]
+
+
+def test_tracked_task_ids_are_bounded(tmp_path):
+    producer = BeliefConstraintProducer(tmp_path, threshold=10**6)
+    for i in range(80):
+        producer.record_outcome(_outcome(False, n=i))
+    entry = next(iter(producer._load_state().values()))
+    assert entry["streak"] == 80
+    assert len(entry["tasks"]) == 50
