@@ -17,13 +17,17 @@ The six G0 §4 scenarios each have a class below:
 5. wrong commit, Issue edit or promise generation → STALE
 6. an author-forged CLOSE: the output is projection-only
 
+plus a Core verdict that blocked or failed, which must never read COMPLETE.
+
 RED gate: these tests land before the implementation, and the required
 exact-base impact gate treats an added test that skips or xfails as not
 passed. So until the implementation PR, each RED class carries a
 ``__test__ = _RED_2532`` gate and is collected only with ``NEXUS_RED_2532=1``
-(run that to see them fail). The implementation PR deletes those gate lines
-and nothing else; ``test_frozen_red_tests_are_unchanged`` pins the rest of
-this file, so any other edit shows up as a changed hash in review.
+(run that to see them fail). ``test_frozen_red_tests_are_unchanged`` pins the
+frozen region between the two marker comments, ignoring blank lines and the
+gate lines. The implementation PR deletes the gate lines, ``_RED_2532`` and
+its ``os`` import (all outside the region or excluded) and may reformat blank
+lines; any other edit to the region changes the hash and shows up in review.
 """
 
 from __future__ import annotations
@@ -40,11 +44,16 @@ import pytest
 
 _RED_2532 = os.environ.get("NEXUS_RED_2532") == "1"
 
+# >>> frozen #2532 RED region
+
 HEAD = "1" * 40
 OTHER_HEAD = "2" * 40
 ISSUE_CONTRACT_HASH = "c" * 64
 REPOSITORY = "James3014/Nexus-new"
 ISSUE_NUMBER = 4242
+# The Nexus contract identity of the card universe the binding was made for.
+CARD_UNIVERSE_IDENTITY = "sha256:" + "a" * 64
+OTHER_UNIVERSE_IDENTITY = "sha256:" + "f" * 64
 
 GENERIC = "python -m pytest tests/"
 ENTRY_P1 = "python -m pytest tests/test_feature.py::test_real_entry_p1"
@@ -79,6 +88,7 @@ def _binding(promise_set: dict[str, Any], mapping: dict[str, list[str]]) -> dict
         "repository": REPOSITORY,
         "issue_number": ISSUE_NUMBER,
         "issue_contract_hash": ISSUE_CONTRACT_HASH,
+        "expected_evidence_identity": CARD_UNIVERSE_IDENTITY,
         "promise_set": promise_set,
         "map": [{"promise_id": pid, "subject_ids": sids} for pid, sids in mapping.items()],
     }
@@ -107,22 +117,26 @@ def _entry(
 def _verdict(
     entries: list[dict[str, Any]],
     *,
-    core_status: str = "VERIFIED",
+    core_status: str | None = "VERIFIED",
     provenance: str = "CORE_REVISION_PINNED",
     identity_matches: bool | None = True,
     unexpected: list[dict[str, Any]] | None = None,
+    integrity: str | None = "VALID",
+    blocking: bool | None = None,
+    host_reason_codes: list[str] | None = None,
+    contract_universe_identity: str = CARD_UNIVERSE_IDENTITY,
 ) -> dict[str, Any]:
     """A durable ``core_verdict`` shaped like ``ambient_core.build_core_verdict``."""
     return {
         "schema": "nexus.ambient_core_verdict.v1",
         "core_status": core_status,
         "reason_codes": [],
-        "integrity": "VALID",
-        "host_reason_codes": [],
-        "blocking": core_status != "VERIFIED",
+        "integrity": integrity,
+        "host_reason_codes": host_reason_codes or [],
+        "blocking": (core_status != "VERIFIED") if blocking is None else blocking,
         "universe_declared": True,
         "universe_generation": 1,
-        "contract_universe_identity": "sha256:" + "a" * 64,
+        "contract_universe_identity": contract_universe_identity,
         "core_universe_identity": "sha256:" + "b" * 64,
         "core_universe_identity_matches": identity_matches,
         "coverage": {
@@ -247,6 +261,31 @@ class TestIssuePromiseSetFence:
             model.model_validate(_binding(THREE, {**THREE_MAP, "P4": [ENTRY_P1]}))
         with pytest.raises(ValueError):
             model.model_validate(_binding(THREE, {**THREE_MAP, "P1": []}))
+        with pytest.raises(ValueError, match="expected_evidence_identity"):
+            model.model_validate({
+                **_binding(THREE, THREE_MAP),
+                "expected_evidence_identity": "not-an-identity",
+            })
+
+    @pytest.mark.parametrize(
+        "parse_name", ["parse_issue_promise_set", "parse_task_card_issue_promises"]
+    )
+    def test_deeply_nested_json_fails_closed_not_with_recursion_error(
+        self, monkeypatch, parse_name
+    ):
+        contract = _contract()
+        fence = (
+            contract.ISSUE_PROMISE_SET_FENCE
+            if parse_name == "parse_issue_promise_set"
+            else contract.TASK_CARD_ISSUE_PROMISES_FENCE
+        )
+
+        def explode(*_args, **_kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(contract.json, "loads", explode)
+        with pytest.raises(ValueError, match="INVALID"):
+            getattr(contract, parse_name)("```" + fence + "\n[[[[]]]]\n```\n")
 
 
 class TestScenario1GenericGreenEntryNotRun:
@@ -277,6 +316,13 @@ class TestScenario1GenericGreenEntryNotRun:
         result = _project(binding, verdict)
         assert _statuses(result) == {"P1": "FAILED"}
         assert result["overall"] == "BLOCKED"
+
+    def test_a_fail_observation_in_any_category_is_failed(self):
+        binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
+        verdict = _verdict(
+            [_entry(ENTRY_P1, "NOT_COVERED", "FAIL")], core_status="FAILED_VERIFICATION"
+        )
+        assert _statuses(_project(binding, verdict)) == {"P1": "FAILED"}
 
     def test_honest_non_execution_is_not_covered(self):
         binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
@@ -433,6 +479,11 @@ class TestScenario5StaleBinding:
         live = _live(_promise_set(_promise("P1"), generation=2))
         assert _statuses(_project(binding, verdict, live=live)) == {"P1": "STALE"}
 
+    def test_a_verdict_for_another_card_universe_is_stale(self):
+        binding = _binding(_promise_set(_promise("P1")), {"P1": [ENTRY_P1]})
+        verdict = _verdict([_entry(ENTRY_P1)], contract_universe_identity=OTHER_UNIVERSE_IDENTITY)
+        assert _statuses(_project(binding, verdict)) == {"P1": "STALE"}
+
     def test_unconfirmed_live_issue_is_stale(self):
         binding, verdict = self._covered()
         result = _projection_module().project_issue_promise_coverage(
@@ -514,21 +565,75 @@ class TestScenario6ForgedCloseIsProjectionOnly:
         assert (repr(binding), repr(verdict)) == before
 
 
+class TestBlockedCoreVerdictNeverCompletes:
+    """A Core verdict that blocked, failed or lost integrity never reads COMPLETE.
+
+    The promise's own subjects all PASS here; what failed is the rest of the
+    verdict. Integrity other than VALID (or no Core status at all) means no
+    entry is trustworthy, so no promise is COVERED either.
+    """
+
+    __test__ = _RED_2532
+
+    @pytest.mark.parametrize(
+        ("overrides", "any_covered_allowed"),
+        [
+            ({"core_status": "FAILED_VERIFICATION"}, True),
+            ({"core_status": "UNVERIFIABLE"}, True),
+            ({"blocking": True, "host_reason_codes": ["CORE_COVERAGE_UNEXPECTED_SUBJECTS"]}, True),
+            ({"integrity": "INVALID"}, False),
+            ({"integrity": "MALFORMED", "core_status": "UNVERIFIABLE"}, False),
+            ({"integrity": None}, False),
+            ({"core_status": None}, False),
+        ],
+        ids=[
+            "failed-verification",
+            "unverifiable",
+            "host-blocking",
+            "integrity-invalid",
+            "integrity-malformed",
+            "integrity-missing",
+            "core-status-missing",
+        ],
+    )
+    def test_blocked_verdict_is_never_complete(self, overrides, any_covered_allowed):
+        binding = _binding(THREE, THREE_MAP)
+        verdict = _verdict([_entry(ENTRY_P1), _entry(ENTRY_P2), _entry(ENTRY_P3)], **overrides)
+        result = _project(binding, verdict)
+        assert result["overall"] != "COMPLETE"
+        if not any_covered_allowed:
+            assert "COVERED" not in _statuses(result).values()
+
+    def test_blocking_verdict_with_every_promise_passing_is_blocked(self):
+        binding = _binding(THREE, THREE_MAP)
+        verdict = _verdict(
+            [_entry(ENTRY_P1), _entry(ENTRY_P2), _entry(ENTRY_P3)],
+            core_status="FAILED_VERIFICATION",
+        )
+        assert _project(binding, verdict)["overall"] == "BLOCKED"
+
+
+# <<< frozen #2532 RED region
+
+
 # --- freeze guard (always collected) -------------------------------------
 
-# sha256 of this file with every ``__test__ = _RED_2532`` gate line and this
-# assignment line removed. The implementation PR deletes the gate lines and
-# nothing else; any other edit to the frozen tests changes this hash and must
-# be justified in review.
-_FROZEN_SOURCE_SHA256 = "69cd153ae56ff72233ed73d1f01dda487fe88d6af0c0361a48d33493021dfe37"
+_REGION_START = "# >>> frozen #2532 RED region"
+_REGION_END = "# <<< frozen #2532 RED region"
+# sha256 of the frozen region (between the two marker lines), without blank
+# lines, without the ``__test__ = _RED_2532`` gate lines and with each line
+# stripped, so deleting the gates and reformatting blank lines keep it.
+_FROZEN_SOURCE_SHA256 = "c11c3e2c02b1a77063c362b51111159f93e1dcab7c5dd379a1cff03a61dc7c28"
 
 
 def _frozen_source_sha256(text: str) -> str:
+    lines = text.splitlines()
+    start = lines.index(_REGION_START)
+    end = lines.index(_REGION_END)
     kept = [
-        line
-        for line in text.splitlines()
-        if line.strip() != "__test__ = _RED_2532"
-        and not line.startswith("_FROZEN_SOURCE_SHA256 = ")
+        line.strip()
+        for line in lines[start + 1 : end]
+        if line.strip() and line.strip() != "__test__ = _RED_2532"
     ]
     return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()
 
