@@ -434,6 +434,27 @@ def test_repair_task_whose_base_test_file_collects_nothing_is_not_verified(tmp_p
     assert state["fail_to_pass"]["base_exit_codes"] == [5]
 
 
+def test_repair_task_whose_base_lacks_the_named_test_node_is_not_verified(tmp_path, monkeypatch):
+    # Control, not RED (#2532 G0 unknown): the test file exists on base but the named node id
+    # does not. pytest exits 4 ("not found"), which is not a real base failure:
+    # the worker could be adding exactly that test. It must not count as F2P.
+    state, _result, _error, _controller, _head = _run(
+        tmp_path,
+        monkeypatch,
+        "f2p-missing-node",
+        [_pytest_verifier("tests/test_new.py::test_fixed")],
+        fail_to_pass_required=True,
+        allowed_files=["bounded.txt", "tests/test_new.py"],
+        base_files={"tests/test_new.py": "def test_other():\n    pass\n"},
+        worker_files={"tests/test_new.py": "def test_other():\n    pass\n\n\n" + _FIXED_TEST},
+    )
+
+    assert not _promoted(state)
+    assert state["fail_to_pass"]["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert state["fail_to_pass"]["reason"] == "base_collected_no_tests"
+    assert state["fail_to_pass"]["base_exit_codes"] == [4]
+
+
 def test_repair_task_with_a_real_failing_base_pytest_is_promoted(tmp_path, monkeypatch):
     state, _result, error, _controller, _head = _run(
         tmp_path,
