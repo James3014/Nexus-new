@@ -105,7 +105,9 @@ class _Service(SelfHostedTaskService):
         return {"task_id": task_id, "status": kwargs["disposition"]}
 
     def adopt_external_candidate(self, raw_request):
-        request: Any = raw_request  # the gateway hands over a validated ExternalCandidateAdoptionRequest
+        request: Any = (
+            raw_request  # the gateway hands over a validated ExternalCandidateAdoptionRequest
+        )
         self.events.append(("service.adopt_external_candidate", request.task_id))
         self.calls["adopt_external_candidate"] = (request,)
         return _adoption_result(request)
@@ -126,7 +128,9 @@ def controller_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def probes(monkeypatch, events, controller_root):
     """Replace the authority/permission collaborators on the gateway facade."""
-    ctx = SimpleNamespace(identity_error=None, guard_error=None, separate_head=HEAD, git_heads=[HEAD], branch="main")
+    ctx = SimpleNamespace(
+        identity_error=None, guard_error=None, separate_head=HEAD, git_heads=[HEAD], branch="main"
+    )
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", controller_root)
 
     def require_bound_controller(expected_head=None):
@@ -155,7 +159,11 @@ def probes(monkeypatch, events, controller_root):
     class _Integration:
         @staticmethod
         def separate_controller_integration_head(root, branch):
-            events.append(("separate_controller_integration_head", Path(root) == controller_root, branch))
+            events.append((
+                "separate_controller_integration_head",
+                Path(root) == controller_root,
+                branch,
+            ))
             if isinstance(ctx.separate_head, Exception):
                 raise ctx.separate_head
             return ctx.separate_head
@@ -176,7 +184,9 @@ def probes(monkeypatch, events, controller_root):
 
 
 def _gateway(tmp_path: Path, events: list[tuple], state: Any = None) -> UnifiedMCPGateway:
-    gateway = UnifiedMCPGateway(service=_Service(tmp_path / "state", events, _state() if state is None else state))
+    gateway = UnifiedMCPGateway(
+        service=_Service(tmp_path / "state", events, _state() if state is None else state)
+    )
 
     def owner_effect_key(arguments):
         events.append(("_owner_effect_key", arguments.get("authority_goal_id")))
@@ -230,22 +240,33 @@ def test_approve_call_order_and_payload(tmp_path, events, probes) -> None:
     kwargs = probes.approval_kwargs
     assert kwargs["attempt_id"] == "attempt-1"
     assert kwargs["contract_kind"] == ContractKind.TRACKED_TASK_CARD.value
-    assert (kwargs["tool_manifest_hash"], kwargs["full_tool_schema_hash"], kwargs["permission_policy_hash"]) == (
-        TOOL_MANIFEST_REVISION, FULL_TOOL_SCHEMA_HASH, PERMISSION_POLICY_HASH)
-    assert (kwargs["lifecycle_revision"], kwargs["server_instance_id"]) == (LIFECYCLE_REVISION, SERVER_INSTANCE_ID)
+    assert (
+        kwargs["tool_manifest_hash"],
+        kwargs["full_tool_schema_hash"],
+        kwargs["permission_policy_hash"],
+    ) == (TOOL_MANIFEST_REVISION, FULL_TOOL_SCHEMA_HASH, PERMISSION_POLICY_HASH)
+    assert (kwargs["lifecycle_revision"], kwargs["server_instance_id"]) == (
+        LIFECYCLE_REVISION,
+        SERVER_INSTANCE_ID,
+    )
     action = probes.action
     assert action.task_id == "cand-1" and action.expected_head == HEAD
     assert action.permission_profile is PermissionProfile.CANDIDATE
     assert action.mutation_domain is MutationDomain.LIFECYCLE_STATE
     assert action.allowed_paths == () and action.mutation is True
     assert action.tool_manifest_hash == probes.guard_manifest == TOOL_MANIFEST_REVISION
-    assert action.request_hash == canonical_request_hash(
-        {**_approve_args(), "source_attempt_id": "attempt-1", "candidate_binding": PACKET}
-    )
+    assert action.request_hash == canonical_request_hash({
+        **_approve_args(),
+        "source_attempt_id": "attempt-1",
+        "candidate_binding": PACKET,
+    })
     assert probes.guard_request == {}
     task_id, call = _service(gateway).calls["approve_promotion"]
     assert {key: call[key] for key in PACKET} == PACKET
-    assert call["approval_context"] == {"grant_id": "g-1", "validation_receipt": payload["approval_receipt"]}
+    assert call["approval_context"] == {
+        "grant_id": "g-1",
+        "validation_receipt": payload["approval_receipt"],
+    }
     assert payload["operation"] == "candidate_approve"
     assert payload["guard_receipt"] == {"gate_passed": True, "head": HEAD}
     assert payload["approval_receipt"]["approval_receipt"] == "ok"
@@ -255,28 +276,38 @@ def test_approve_call_order_and_payload(tmp_path, events, probes) -> None:
 def test_approve_binding_falls_back_to_state_fields(tmp_path, events, probes) -> None:
     gateway = _gateway(tmp_path, events, _state(promotion_packet=None, **PACKET))
     gateway._candidate_approve(_approve_args())
-    assert probes.action.request_hash == canonical_request_hash(
-        {**_approve_args(), "source_attempt_id": "attempt-1", "candidate_binding": PACKET}
-    )
+    assert probes.action.request_hash == canonical_request_hash({
+        **_approve_args(),
+        "source_attempt_id": "attempt-1",
+        "candidate_binding": PACKET,
+    })
 
 
-@pytest.mark.parametrize(("field", "value"), [
-    ("candidate_commit_sha", "A" * 40),
-    ("candidate_tree_sha", "a" * 39),
-    ("candidate_state_hash", "b" * 40),
-    ("verified_receipt_hash", None),
-])
-def test_approve_rejects_inexact_hashes_before_reading_state(tmp_path, events, probes, field, value) -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("candidate_commit_sha", "A" * 40),
+        ("candidate_tree_sha", "a" * 39),
+        ("candidate_state_hash", "b" * 40),
+        ("verified_receipt_hash", None),
+    ],
+)
+def test_approve_rejects_inexact_hashes_before_reading_state(
+    tmp_path, events, probes, field, value
+) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match=field):
         gateway._candidate_approve(_approve_args(**{field: value}))
     assert _names(events) == ["_require_bound_controller"]
 
 
-@pytest.mark.parametrize(("state", "code"), [
-    (None, "^CANDIDATE_TASK_STATE_REQUIRED$"),
-    (_state(controller_revision="abc"), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
-])
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [
+        (None, "^CANDIDATE_TASK_STATE_REQUIRED$"),
+        (_state(controller_revision="abc"), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
+    ],
+)
 def test_approve_rejects_missing_state_or_revision(tmp_path, events, probes, state, code) -> None:
     gateway = _gateway(tmp_path, events, state if state is not None else "missing")
     with pytest.raises(GatewayInputError, match=code):
@@ -292,12 +323,22 @@ def test_approve_maps_identity_errors(tmp_path, events, probes) -> None:
     assert _names(events)[-1] == "resolve_contract_identity"
 
 
-@pytest.mark.parametrize(("identity", "code"), [
-    ({"task_card_hash": "short"}, "^CANDIDATE_TASK_CARD_HASH_REQUIRED$"),
-    ({"contract_kind": ContractKind.OWNER_INLINE.value, "contract_hash": ""}, "^CANDIDATE_OWNER_INLINE_CONTRACT_REQUIRED$"),
-])
-def test_approve_requires_contract_hashes(tmp_path, events, probes, monkeypatch, identity, code) -> None:
-    monkeypatch.setitem(IDENTITY, "contract_kind", identity.get("contract_kind", IDENTITY["contract_kind"]))
+@pytest.mark.parametrize(
+    ("identity", "code"),
+    [
+        ({"task_card_hash": "short"}, "^CANDIDATE_TASK_CARD_HASH_REQUIRED$"),
+        (
+            {"contract_kind": ContractKind.OWNER_INLINE.value, "contract_hash": ""},
+            "^CANDIDATE_OWNER_INLINE_CONTRACT_REQUIRED$",
+        ),
+    ],
+)
+def test_approve_requires_contract_hashes(
+    tmp_path, events, probes, monkeypatch, identity, code
+) -> None:
+    monkeypatch.setitem(
+        IDENTITY, "contract_kind", identity.get("contract_kind", IDENTITY["contract_kind"])
+    )
     for key in ("task_card_hash", "contract_hash"):
         if key in identity:
             monkeypatch.setitem(IDENTITY, key, identity[key])
@@ -366,8 +407,12 @@ def test_bind_call_order_and_payload(tmp_path, events, probes) -> None:
     assert action.mutation_domain is MutationDomain.LIFECYCLE_STATE
     assert action.allowed_paths == ("README.md",) and action.mutation is True
     assert action.request_hash == canonical_request_hash({
-        "task_id": "cand-1", "integration_branch": "nexus/integration/main", "expected_canonical_head": HEAD,
-        "external_acceptance": ACCEPTANCE, "approval": {"grant_id": "g-2"}, "source_attempt_id": "attempt-1",
+        "task_id": "cand-1",
+        "integration_branch": "nexus/integration/main",
+        "expected_canonical_head": HEAD,
+        "external_acceptance": ACCEPTANCE,
+        "approval": {"grant_id": "g-2"},
+        "source_attempt_id": "attempt-1",
         "candidate_binding": PACKET,
     })
     assert probes.guard_request == {"allowed_files": ["README.md"]}
@@ -375,7 +420,10 @@ def test_bind_call_order_and_payload(tmp_path, events, probes) -> None:
     assert isinstance(call["external_acceptance"], ExternalAcceptanceReceipt)
     assert call["external_acceptance"].to_dict() == ACCEPTANCE
     assert call["approval"] == {"grant_id": "g-2"}
-    assert call["expected_canonical_head"] == HEAD and call["integration_branch"] == "nexus/integration/main"
+    assert (
+        call["expected_canonical_head"] == HEAD
+        and call["integration_branch"] == "nexus/integration/main"
+    )
     assert call["runtime_identity"] == {
         **IDENTITY,
         "tool_manifest_hash": TOOL_MANIFEST_REVISION,
@@ -390,7 +438,10 @@ def test_bind_call_order_and_payload(tmp_path, events, probes) -> None:
 
 
 def test_bind_uses_the_contract_controller_root_and_git_head_without_separate_controller(
-    tmp_path, events, probes, monkeypatch,
+    tmp_path,
+    events,
+    probes,
+    monkeypatch,
 ) -> None:
     other_root = (tmp_path / "other-controller").resolve()
     other_root.mkdir()
@@ -402,8 +453,14 @@ def test_bind_uses_the_contract_controller_root_and_git_head_without_separate_co
         return SimpleNamespace(returncode=0, stdout=OTHER_HEAD + "\n")
 
     monkeypatch.setattr(gateway_module.subprocess, "run", run)
-    gateway = _gateway(tmp_path, events, _state(contract={"allowed_files": ["a.py"], "controller_repo_root": str(other_root)}))
-    gateway._candidate_bind_integration(_bind_args(expected_canonical_head=OTHER_HEAD, integration_branch=" feature/x "))
+    gateway = _gateway(
+        tmp_path,
+        events,
+        _state(contract={"allowed_files": ["a.py"], "controller_repo_root": str(other_root)}),
+    )
+    gateway._candidate_bind_integration(
+        _bind_args(expected_canonical_head=OTHER_HEAD, integration_branch=" feature/x ")
+    )
     assert runs == [(("git", "rev-parse", "HEAD"), other_root)]
     assert ("separate_controller_integration_head", False, "feature/x") in events
     assert probes.action.expected_head == OTHER_HEAD
@@ -413,7 +470,11 @@ def test_bind_uses_the_contract_controller_root_and_git_head_without_separate_co
 @pytest.mark.parametrize(("returncode", "stdout"), [(1, HEAD), (0, OTHER_HEAD)])
 def test_bind_refuses_head_drift(tmp_path, events, probes, monkeypatch, returncode, stdout) -> None:
     probes.separate_head = None
-    monkeypatch.setattr(gateway_module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=returncode, stdout=stdout))
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=returncode, stdout=stdout),
+    )
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match="^CANDIDATE_BIND_HEAD_DRIFT$"):
         gateway._candidate_bind_integration(_bind_args())
@@ -431,28 +492,39 @@ def test_bind_maps_separate_controller_errors_and_drift(tmp_path, events, probes
     assert "pre_action_guard" not in _names(events)
 
 
-@pytest.mark.parametrize(("overrides", "code"), [
-    ({"integration_authorization": {}}, "^CLOSURE_SCHEMA_CLOSED$"),
-    ({"shell": "x"}, "^CLOSURE_SCHEMA_CLOSED$"),
-    ({"expected_canonical_head": "abc"}, "^expected_canonical_head is invalid$"),
-    ({"integration_branch": "-x"}, "^integration_branch is invalid$"),
-    ({"integration_branch": "a\nb"}, "^integration_branch is invalid$"),
-    ({"approval": "yes"}, "^typed external_acceptance and approval are required$"),
-    ({"external_acceptance": {**ACCEPTANCE, "passed": False}}, "^EXTERNAL_ACCEPTANCE_INVALID: only a passed external acceptance may authorize integration$"),
-    ({"external_acceptance": {**ACCEPTANCE, "extra": 1}}, "^EXTERNAL_ACCEPTANCE_INVALID: "),
-])
-def test_bind_rejects_bad_requests_before_reading_state(tmp_path, events, probes, overrides, code) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"integration_authorization": {}}, "^CLOSURE_SCHEMA_CLOSED$"),
+        ({"shell": "x"}, "^CLOSURE_SCHEMA_CLOSED$"),
+        ({"expected_canonical_head": "abc"}, "^expected_canonical_head is invalid$"),
+        ({"integration_branch": "-x"}, "^integration_branch is invalid$"),
+        ({"integration_branch": "a\nb"}, "^integration_branch is invalid$"),
+        ({"approval": "yes"}, "^typed external_acceptance and approval are required$"),
+        (
+            {"external_acceptance": {**ACCEPTANCE, "passed": False}},
+            "^EXTERNAL_ACCEPTANCE_INVALID: only a passed external acceptance may authorize integration$",
+        ),
+        ({"external_acceptance": {**ACCEPTANCE, "extra": 1}}, "^EXTERNAL_ACCEPTANCE_INVALID: "),
+    ],
+)
+def test_bind_rejects_bad_requests_before_reading_state(
+    tmp_path, events, probes, overrides, code
+) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match=code):
         gateway._candidate_bind_integration(_bind_args(**overrides))
     assert _names(events) == ["_require_bound_controller"]
 
 
-@pytest.mark.parametrize(("state", "code"), [
-    ("missing", "^CANDIDATE_TASK_STATE_REQUIRED$"),
-    (_state(controller_revision=""), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
-    (_state(contract={"allowed_files": [" "]}), "^CANDIDATE_ALLOWED_PATHS_REQUIRED$"),
-])
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [
+        ("missing", "^CANDIDATE_TASK_STATE_REQUIRED$"),
+        (_state(controller_revision=""), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
+        (_state(contract={"allowed_files": [" "]}), "^CANDIDATE_ALLOWED_PATHS_REQUIRED$"),
+    ],
+)
 def test_bind_rejects_unusable_state(tmp_path, events, probes, state, code) -> None:
     gateway = _gateway(tmp_path, events, state)
     with pytest.raises(GatewayInputError, match=code):
@@ -500,47 +572,86 @@ def test_dispose_call_order_owner_effect_and_payload(tmp_path, events, probes) -
         **PACKET,
     }
     action = probes.action
-    assert action.action_type is LifecycleActionType.CANDIDATE_DISPOSE and action.expected_head == HEAD
+    assert (
+        action.action_type is LifecycleActionType.CANDIDATE_DISPOSE and action.expected_head == HEAD
+    )
     assert action.permission_profile is PermissionProfile.CANDIDATE
     assert action.mutation_domain is MutationDomain.CANDIDATE_REF
     assert action.allowed_paths == () and action.mutation is True
-    assert action.request_hash == canonical_request_hash(
-        {**_dispose_args(), "source_attempt_id": "attempt-1", "candidate_binding": PACKET}
+    assert action.request_hash == canonical_request_hash({
+        **_dispose_args(),
+        "source_attempt_id": "attempt-1",
+        "candidate_binding": PACKET,
+    })
+    assert _service(gateway).calls["dispose_candidate"] == (
+        "cand-1",
+        {"disposition": "REJECTED", "superseded_by": None},
     )
-    assert _service(gateway).calls["dispose_candidate"] == ("cand-1", {"disposition": "REJECTED", "superseded_by": None})
     assert payload["operation"] == "candidate_dispose"
-    assert payload["owner_authority"] == {"authority": "OWNER", "action": AutonomyActionClass.CANDIDATE_REJECT.value}
+    assert payload["owner_authority"] == {
+        "authority": "OWNER",
+        "action": AutonomyActionClass.CANDIDATE_REJECT.value,
+    }
     assert payload["guard_receipt"]["gate_passed"] is True
 
 
 def test_dispose_superseded_uses_the_supersede_authority(tmp_path, events, probes) -> None:
     gateway = _gateway(tmp_path, events)
     gateway._candidate_dispose(_dispose_args(disposition=" Superseded ", superseded_by="cand-2"))
-    assert ("_require_owner_effect_authority", AutonomyActionClass.CANDIDATE_SUPERSEDE.value, "KEY") in events
+    assert (
+        "_require_owner_effect_authority",
+        AutonomyActionClass.CANDIDATE_SUPERSEDE.value,
+        "KEY",
+    ) in events
     assert _owner_effect(gateway)["superseded_by"] == "cand-2"
-    assert _service(gateway).calls["dispose_candidate"] == ("cand-1", {"disposition": "SUPERSEDED", "superseded_by": "cand-2"})
+    assert _service(gateway).calls["dispose_candidate"] == (
+        "cand-1",
+        {"disposition": "SUPERSEDED", "superseded_by": "cand-2"},
+    )
 
 
-@pytest.mark.parametrize(("overrides", "code", "probed"), [
-    ({"shell": "x"}, "^unknown arguments: shell$", []),
-    ({"authority_goal_id": ""}, "^OWNER_AUTHORITY_KEY_REQUIRED:probe$", ["_owner_effect_key"]),
-    ({"task_id": ""}, "^task_id is required$", ["_owner_effect_key"]),
-    ({"disposition": "APPROVED"}, "^disposition must be REJECTED or SUPERSEDED$", ["_owner_effect_key"]),
-    ({"disposition": "SUPERSEDED"}, "^superseded_by is required for SUPERSEDED$", ["_owner_effect_key"]),
-    ({"disposition": "SUPERSEDED", "superseded_by": "../x"}, "superseded_by", ["_owner_effect_key"]),
-])
-def test_dispose_rejects_bad_requests_before_reading_state(tmp_path, events, probes, overrides, code, probed) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "code", "probed"),
+    [
+        ({"shell": "x"}, "^unknown arguments: shell$", []),
+        ({"authority_goal_id": ""}, "^OWNER_AUTHORITY_KEY_REQUIRED:probe$", ["_owner_effect_key"]),
+        ({"task_id": ""}, "^task_id is required$", ["_owner_effect_key"]),
+        (
+            {"disposition": "APPROVED"},
+            "^disposition must be REJECTED or SUPERSEDED$",
+            ["_owner_effect_key"],
+        ),
+        (
+            {"disposition": "SUPERSEDED"},
+            "^superseded_by is required for SUPERSEDED$",
+            ["_owner_effect_key"],
+        ),
+        (
+            {"disposition": "SUPERSEDED", "superseded_by": "../x"},
+            "superseded_by",
+            ["_owner_effect_key"],
+        ),
+    ],
+)
+def test_dispose_rejects_bad_requests_before_reading_state(
+    tmp_path, events, probes, overrides, code, probed
+) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match=code):
         gateway._candidate_dispose(_dispose_args(**overrides))
     assert _names(events) == probed
 
 
-@pytest.mark.parametrize(("state", "code"), [
-    ("missing", "^CANDIDATE_TASK_STATE_REQUIRED$"),
-    (_state(controller_revision="A" * 40), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
-])
-def test_dispose_rejects_unusable_state_before_owner_authority(tmp_path, events, probes, state, code) -> None:
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [
+        ("missing", "^CANDIDATE_TASK_STATE_REQUIRED$"),
+        (_state(controller_revision="A" * 40), "^CANDIDATE_CONTROLLER_REVISION_REQUIRED$"),
+    ],
+)
+def test_dispose_rejects_unusable_state_before_owner_authority(
+    tmp_path, events, probes, state, code
+) -> None:
     gateway = _gateway(tmp_path, events, state)
     with pytest.raises(GatewayInputError, match=code):
         gateway._candidate_dispose(_dispose_args())
@@ -569,26 +680,36 @@ def test_dispose_guard_failure_stops_before_the_service(tmp_path, events, probes
 def _adoption_receipt(request) -> dict[str, Any]:
     return {
         "schema": "nexus.external_candidate_adoption_receipt.v1",
-        "task_id": request.task_id, "attempt_id": request.attempt_id,
-        "action_id": request.action_id, "idempotency_key": request.idempotency_key,
+        "task_id": request.task_id,
+        "attempt_id": request.attempt_id,
+        "action_id": request.action_id,
+        "idempotency_key": request.idempotency_key,
         "adoption_request_hash": request.semantic_hash(),
-        "task_card_path": request.task_card_path, "task_card_hash": request.task_card_hash,
-        "contract_hash": "2" * 64, "controller_revision": request.controller_revision,
+        "task_card_path": request.task_card_path,
+        "task_card_hash": request.task_card_hash,
+        "contract_hash": "2" * 64,
+        "controller_revision": request.controller_revision,
         "target_base_revision": request.target_base_revision,
         "candidate_commit_sha": request.candidate_commit_sha,
         "candidate_tree_sha": request.candidate_tree_sha,
         "candidate_diff_sha256": request.candidate_diff_sha256,
-        "candidate_state_hash": "3" * 64, "verified_receipt_hash": "4" * 64,
+        "candidate_state_hash": "3" * 64,
+        "verified_receipt_hash": "4" * 64,
         "validation_receipt_sha256": request.validation_receipt_sha256,
         "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
         "repository_contract_policy_revision_hash": "5" * 64,
-        "derived_contract_projection": {}, "forbidden_repository_patterns": [],
+        "derived_contract_projection": {},
+        "forbidden_repository_patterns": [],
         "reviewer_id": "independent-reviewer",
         "candidate_ref": f"refs/nexus-candidates/{request.task_id}/{request.candidate_commit_sha}",
-        "promotion_packet_hash": "6" * 64, "worker_invocations": 0,
-        "candidate_rewritten": False, "approval_performed": False,
-        "integration_performed": False, "merge_performed": False,
-        "push_performed": False, "public_claim_allowed": False,
+        "promotion_packet_hash": "6" * 64,
+        "worker_invocations": 0,
+        "candidate_rewritten": False,
+        "approval_performed": False,
+        "integration_performed": False,
+        "merge_performed": False,
+        "push_performed": False,
+        "public_claim_allowed": False,
         "production_ready": False,
         "claim_ceiling": ["CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"],
         "issued_at": "2026-10-17T00:00:00+00:00",
@@ -596,23 +717,30 @@ def _adoption_receipt(request) -> dict[str, Any]:
 
 
 def _receipt_hash(receipt: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def _adoption_result(request, **overrides: Any) -> dict[str, Any]:
     receipt = _adoption_receipt(request)
     result: dict[str, Any] = {
-        "task_id": request.task_id, "status": "PENDING_HUMAN_APPROVAL",
+        "task_id": request.task_id,
+        "status": "PENDING_HUMAN_APPROVAL",
         "promotion_status": "PENDING_HUMAN_APPROVAL",
         "candidate_commit_sha": request.candidate_commit_sha,
         "candidate_tree_sha": request.candidate_tree_sha,
         "candidate_state_hash": receipt["candidate_state_hash"],
         "verified_receipt_hash": receipt["verified_receipt_hash"],
         "candidate_ref": receipt["candidate_ref"],
-        "approved_binding": None, "integration_authorization": None,
-        "integration_receipt": None, "merge_performed": False,
-        "push_performed": False, "public_claim_allowed": False,
-        "production_ready": False, "adoption_receipt": receipt,
+        "approved_binding": None,
+        "integration_authorization": None,
+        "integration_receipt": None,
+        "merge_performed": False,
+        "push_performed": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "adoption_receipt": receipt,
         "adoption_receipt_hash": _receipt_hash(receipt),
     }
     result.update(overrides)
@@ -627,46 +755,82 @@ def _adoption_arguments(controller_root: Path, **overrides: Any) -> dict[str, An
     base = {
         "schema": "nexus.external_candidate_adoption_request.v1",
         "repository": gateway_module.GITHUB_REPOSITORY.repository_id,
-        "task_id": "adopt-g10", "attempt_id": "attempt-1", "action_id": "action-1",
-        "idempotency_key": "idem-1", "task_card_path": "tasks/test/adopt-g10.md", "task_card_hash": "c" * 64,
-        "controller_revision": HEAD, "tool_manifest_hash": TOOL_MANIFEST_REVISION,
-        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH, "permission_policy_hash": PERMISSION_POLICY_HASH,
-        "lifecycle_revision": LIFECYCLE_REVISION, "server_instance_id": SERVER_INSTANCE_ID,
-        "target_base_revision": "b" * 40, "candidate_commit_sha": "d" * 40, "candidate_tree_sha": "e" * 40,
-        "candidate_diff_sha256": "1" * 64, "validation_receipt_sha256": hashlib.sha256(validation).hexdigest(),
+        "task_id": "adopt-g10",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "idempotency_key": "idem-1",
+        "task_card_path": "tasks/test/adopt-g10.md",
+        "task_card_hash": "c" * 64,
+        "controller_revision": HEAD,
+        "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+        "permission_policy_hash": PERMISSION_POLICY_HASH,
+        "lifecycle_revision": LIFECYCLE_REVISION,
+        "server_instance_id": SERVER_INSTANCE_ID,
+        "target_base_revision": "b" * 40,
+        "candidate_commit_sha": "d" * 40,
+        "candidate_tree_sha": "e" * 40,
+        "candidate_diff_sha256": "1" * 64,
+        "validation_receipt_sha256": hashlib.sha256(validation).hexdigest(),
         "acceptance_receipt_sha256": hashlib.sha256(acceptance_bytes).hexdigest(),
         "validation_receipt_b64": base64.b64encode(validation).decode(),
         "acceptance_receipt_b64": base64.b64encode(acceptance_bytes).decode(),
-        "allowed_files": ("README.md",), "verifier_commands": ("git diff --check",),
-        "forbidden_files": (), "authorized_deletions": (), "protected_contracts": (),
+        "allowed_files": ("README.md",),
+        "verifier_commands": ("git diff --check",),
+        "forbidden_files": (),
+        "authorized_deletions": (),
+        "protected_contracts": (),
     }
-    semantic_hash = ExternalCandidateAdoptionRequest.model_construct(**base, action=None).semantic_hash()
+    semantic_hash = ExternalCandidateAdoptionRequest.model_construct(
+        **base, action=None
+    ).semantic_hash()
     action = build_action_envelope(
-        task_id=base["task_id"], action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
-        request={"adoption_request_hash": semantic_hash}, tool_manifest_hash=TOOL_MANIFEST_REVISION,
-        expected_head=HEAD, allowed_paths=["README.md"], mutation=True,
-        task_card_path=base["task_card_path"], task_card_hash=base["task_card_hash"],
-        contract_kind=ContractKind.TRACKED_TASK_CARD, permission_profile=PermissionProfile.CANDIDATE,
-        approval_scope=ApprovalScope.ALLOW_ACTION_ONCE, mutation_domain=MutationDomain.CANDIDATE_REF,
-        attempt_id=base["attempt_id"], action_id=base["action_id"], idempotency_key=base["idempotency_key"],
+        task_id=base["task_id"],
+        action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash},
+        tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        expected_head=HEAD,
+        allowed_paths=["README.md"],
+        mutation=True,
+        task_card_path=base["task_card_path"],
+        task_card_hash=base["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD,
+        permission_profile=PermissionProfile.CANDIDATE,
+        approval_scope=ApprovalScope.ALLOW_ACTION_ONCE,
+        mutation_domain=MutationDomain.CANDIDATE_REF,
+        attempt_id=base["attempt_id"],
+        action_id=base["action_id"],
+        idempotency_key=base["idempotency_key"],
     ).model_dump(mode="json")
     arguments = {
-        **base, **AUTHORITY_ARGS, "action": action,
-        "controller_repo_root": str(controller_root), "controller_branch": "main", "controller_head": HEAD,
+        **base,
+        **AUTHORITY_ARGS,
+        "action": action,
+        "controller_repo_root": str(controller_root),
+        "controller_branch": "main",
+        "controller_head": HEAD,
     }
     arguments.update(overrides)
     return arguments
 
 
-def test_adopt_call_order_owner_effect_and_payload(tmp_path, events, probes, controller_root) -> None:
+def test_adopt_call_order_owner_effect_and_payload(
+    tmp_path, events, probes, controller_root
+) -> None:
     gateway = _gateway(tmp_path, events)
-    payload = gateway._call_tool("nexus_candidate_adopt_external", _adoption_arguments(controller_root))
+    payload = gateway._call_tool(
+        "nexus_candidate_adopt_external", _adoption_arguments(controller_root)
+    )
     assert events == [
         ("_require_bound_controller",),
         ("_git", "branch", "--show-current"),
         ("_git", "rev-parse", "HEAD"),
         ("_owner_effect_key", "goal-g10"),
-        ("_require_owner_effect_authority", AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL.value, "KEY"),
+        (
+            "_require_owner_effect_authority",
+            AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL.value,
+            "KEY",
+        ),
         ("_git", "branch", "--show-current"),
         ("_git", "rev-parse", "HEAD"),
         ("service.adopt_external_candidate", "adopt-g10"),
@@ -674,21 +838,34 @@ def test_adopt_call_order_owner_effect_and_payload(tmp_path, events, probes, con
     (request,) = _service(gateway).calls["adopt_external_candidate"]
     effect = _owner_effect(gateway)
     assert effect["adoption_request_hash"] == request.semantic_hash()
-    assert (effect["controller_repo_root"], effect["controller_branch"], effect["controller_head"]) == (
-        str(controller_root), "main", HEAD)
-    assert (effect["server_instance_id"], effect["lifecycle_revision"], effect["tool_manifest_hash"]) == (
-        SERVER_INSTANCE_ID, LIFECYCLE_REVISION, TOOL_MANIFEST_REVISION)
-    assert (effect["full_tool_schema_hash"], effect["permission_policy_hash"]) == (FULL_TOOL_SCHEMA_HASH, PERMISSION_POLICY_HASH)
+    assert (
+        effect["controller_repo_root"],
+        effect["controller_branch"],
+        effect["controller_head"],
+    ) == (str(controller_root), "main", HEAD)
+    assert (
+        effect["server_instance_id"],
+        effect["lifecycle_revision"],
+        effect["tool_manifest_hash"],
+    ) == (SERVER_INSTANCE_ID, LIFECYCLE_REVISION, TOOL_MANIFEST_REVISION)
+    assert (effect["full_tool_schema_hash"], effect["permission_policy_hash"]) == (
+        FULL_TOOL_SCHEMA_HASH,
+        PERMISSION_POLICY_HASH,
+    )
     assert "campaign_id" not in effect
     assert payload["schema"] == "nexus.candidate_adoption_gateway_result.v1"
     assert payload["operation"] == "candidate_adopt_external"
     assert payload["status"] == payload["promotion_status"] == "PENDING_HUMAN_APPROVAL"
-    assert payload["owner_authority"]["action"] == AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL.value
+    assert (
+        payload["owner_authority"]["action"] == AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL.value
+    )
     assert payload["adoption_receipt_hash"] == _receipt_hash(payload["adoption_receipt"])
     assert payload["claim_ceiling"][0] == "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"
 
 
-def test_adopt_legacy_metadata_is_bound_into_the_owner_effect(tmp_path, events, probes, controller_root) -> None:
+def test_adopt_legacy_metadata_is_bound_into_the_owner_effect(
+    tmp_path, events, probes, controller_root
+) -> None:
     gateway = _gateway(tmp_path, events)
     legacy = {
         "campaign_id": gateway_module._LEGACY_EPB_CAMPAIGN_ID,
@@ -699,17 +876,25 @@ def test_adopt_legacy_metadata_is_bound_into_the_owner_effect(tmp_path, events, 
     assert {key: _owner_effect(gateway)[key] for key in legacy} == legacy
 
 
-@pytest.mark.parametrize(("overrides", "code"), [
-    ({"shell": "x"}, "^CANDIDATE_ADOPTION_SCHEMA_CLOSED$"),
-    ({"server_instance_id": "other"}, "^CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH$"),
-    ({"lifecycle_revision": "other"}, "^CANDIDATE_ADOPTION_LIFECYCLE_REVISION_MISMATCH$"),
-    ({"full_tool_schema_hash": "other"}, "^CANDIDATE_ADOPTION_TOOL_SCHEMA_MISMATCH$"),
-    ({"permission_policy_hash": "other"}, "^CANDIDATE_ADOPTION_PERMISSION_POLICY_MISMATCH$"),
-    ({"campaign_id": "c"}, "^CANDIDATE_ADOPTION_LEGACY_METADATA_INCOMPLETE$"),
-    ({"campaign_id": "c", "spec_id": "s", "spec_sha256": "0" * 64}, "^CANDIDATE_ADOPTION_LEGACY_METADATA_MISMATCH$"),
-    ({"repository": "other/repo"}, "^CANDIDATE_ADOPTION_REPOSITORY_MISMATCH$"),
-])
-def test_adopt_rejects_runtime_binding_mismatches_before_git(tmp_path, events, probes, controller_root, overrides, code) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"shell": "x"}, "^CANDIDATE_ADOPTION_SCHEMA_CLOSED$"),
+        ({"server_instance_id": "other"}, "^CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH$"),
+        ({"lifecycle_revision": "other"}, "^CANDIDATE_ADOPTION_LIFECYCLE_REVISION_MISMATCH$"),
+        ({"full_tool_schema_hash": "other"}, "^CANDIDATE_ADOPTION_TOOL_SCHEMA_MISMATCH$"),
+        ({"permission_policy_hash": "other"}, "^CANDIDATE_ADOPTION_PERMISSION_POLICY_MISMATCH$"),
+        ({"campaign_id": "c"}, "^CANDIDATE_ADOPTION_LEGACY_METADATA_INCOMPLETE$"),
+        (
+            {"campaign_id": "c", "spec_id": "s", "spec_sha256": "0" * 64},
+            "^CANDIDATE_ADOPTION_LEGACY_METADATA_MISMATCH$",
+        ),
+        ({"repository": "other/repo"}, "^CANDIDATE_ADOPTION_REPOSITORY_MISMATCH$"),
+    ],
+)
+def test_adopt_rejects_runtime_binding_mismatches_before_git(
+    tmp_path, events, probes, controller_root, overrides, code
+) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match=code):
         gateway._candidate_adopt_external(_adoption_arguments(controller_root, **overrides))
@@ -721,28 +906,45 @@ def test_adopt_requires_every_runtime_binding(tmp_path, events, probes, controll
     for key in ("controller_branch", "authority_goal_id"):
         arguments.pop(key)
     gateway = _gateway(tmp_path, events)
-    with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_RUNTIME_BINDING_REQUIRED:authority_goal_id,controller_branch$"):
+    with pytest.raises(
+        GatewayInputError,
+        match="^CANDIDATE_ADOPTION_RUNTIME_BINDING_REQUIRED:authority_goal_id,controller_branch$",
+    ):
         gateway._candidate_adopt_external(arguments)
 
 
 def test_adopt_rejects_controller_mismatches(tmp_path, events, probes, controller_root) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_ROOT_MISMATCH$"):
-        gateway._candidate_adopt_external(_adoption_arguments(controller_root, controller_repo_root=str(tmp_path)))
+        gateway._candidate_adopt_external(
+            _adoption_arguments(controller_root, controller_repo_root=str(tmp_path))
+        )
     assert _names(events) == ["_require_bound_controller"]
     with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_BRANCH_MISMATCH$"):
-        gateway._candidate_adopt_external(_adoption_arguments(controller_root, controller_branch="dev"))
+        gateway._candidate_adopt_external(
+            _adoption_arguments(controller_root, controller_branch="dev")
+        )
     with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_HEAD_MISMATCH$"):
-        gateway._candidate_adopt_external(_adoption_arguments(controller_root, controller_head=OTHER_HEAD))
-    with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_REVISION_MISMATCH$"):
-        gateway._candidate_adopt_external(_adoption_arguments(controller_root, controller_revision=OTHER_HEAD))
+        gateway._candidate_adopt_external(
+            _adoption_arguments(controller_root, controller_head=OTHER_HEAD)
+        )
+    with pytest.raises(
+        GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_REVISION_MISMATCH$"
+    ):
+        gateway._candidate_adopt_external(
+            _adoption_arguments(controller_root, controller_revision=OTHER_HEAD)
+        )
     assert "_require_owner_effect_authority" not in _names(events)
 
 
-def test_adopt_rejects_invalid_requests_and_action_bindings(tmp_path, events, probes, controller_root, monkeypatch) -> None:
+def test_adopt_rejects_invalid_requests_and_action_bindings(
+    tmp_path, events, probes, controller_root, monkeypatch
+) -> None:
     gateway = _gateway(tmp_path, events)
     with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_REQUEST_INVALID:"):
-        gateway._candidate_adopt_external(_adoption_arguments(controller_root, candidate_commit_sha="nope"))
+        gateway._candidate_adopt_external(
+            _adoption_arguments(controller_root, candidate_commit_sha="nope")
+        )
     arguments = _adoption_arguments(controller_root)
     arguments["action"] = {**arguments["action"], "expected_head": OTHER_HEAD}
     with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_REQUEST_INVALID:"):
@@ -754,19 +956,31 @@ def test_adopt_rejects_invalid_requests_and_action_bindings(tmp_path, events, pr
     assert "_require_owner_effect_authority" not in _names(events)
 
 
-def test_adopt_refuses_controller_drift_after_authority(tmp_path, events, probes, controller_root) -> None:
+def test_adopt_refuses_controller_drift_after_authority(
+    tmp_path, events, probes, controller_root
+) -> None:
     probes.git_heads = [HEAD, OTHER_HEAD]
     gateway = _gateway(tmp_path, events)
-    with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_DRIFT_AFTER_AUTHORITY$"):
+    with pytest.raises(
+        GatewayInputError, match="^CANDIDATE_ADOPTION_CONTROLLER_DRIFT_AFTER_AUTHORITY$"
+    ):
         gateway._candidate_adopt_external(_adoption_arguments(controller_root))
     assert _names(events)[-3:] == ["_require_owner_effect_authority", "_git", "_git"]
     assert "service.adopt_external_candidate" not in _names(events)
 
 
-def test_adopt_validates_the_service_result(tmp_path, events, probes, controller_root, monkeypatch) -> None:
+def test_adopt_validates_the_service_result(
+    tmp_path, events, probes, controller_root, monkeypatch
+) -> None:
     gateway = _gateway(tmp_path, events)
-    monkeypatch.setattr(_service(gateway), "adopt_external_candidate", lambda request: _adoption_result(request, merge_performed=True))
-    with pytest.raises(GatewayInputError, match="^CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD$"):
+    monkeypatch.setattr(
+        _service(gateway),
+        "adopt_external_candidate",
+        lambda request: _adoption_result(request, merge_performed=True),
+    )
+    with pytest.raises(
+        GatewayInputError, match="^CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD$"
+    ):
         gateway._candidate_adopt_external(_adoption_arguments(controller_root))
 
 
@@ -774,14 +988,19 @@ def _request(controller_root: Path):
     from nexus.contracts.lifecycle_action import ExternalCandidateAdoptionRequest
 
     arguments = _adoption_arguments(controller_root)
-    return ExternalCandidateAdoptionRequest.model_validate(
-        {key: arguments[key] for key in ExternalCandidateAdoptionRequest.model_fields if key in arguments}
-    )
+    return ExternalCandidateAdoptionRequest.model_validate({
+        key: arguments[key]
+        for key in ExternalCandidateAdoptionRequest.model_fields
+        if key in arguments
+    })
 
 
 def test_validate_adoption_result_accepts_a_pending_receipt(controller_root) -> None:
     request = _request(controller_root)
-    assert UnifiedMCPGateway._validate_external_adoption_result(_adoption_result(request), request) is None
+    assert (
+        UnifiedMCPGateway._validate_external_adoption_result(_adoption_result(request), request)
+        is None
+    )
     assert UnifiedMCPGateway._validate_external_adoption_result(_adoption_result(request)) is None
 
 
@@ -789,26 +1008,48 @@ def _mutate_receipt(request, **changes: Any) -> dict[str, Any]:
     receipt = {**_adoption_receipt(request), **changes}
     for key in [key for key, value in changes.items() if value is KeyError]:
         receipt.pop(key)
-    return _adoption_result(request, adoption_receipt=receipt, adoption_receipt_hash=_receipt_hash(receipt))
+    return _adoption_result(
+        request, adoption_receipt=receipt, adoption_receipt_hash=_receipt_hash(receipt)
+    )
 
 
-@pytest.mark.parametrize(("build", "code"), [
-    (lambda r: [], "RESULT_INVALID"),
-    (lambda r: _adoption_result(r, status="APPROVED"), "RESULT_NOT_PENDING"),
-    (lambda r: _adoption_result(r, adoption_receipt_hash="x"), "RESULT_RECEIPT_REQUIRED"),
-    (lambda r: _adoption_result(r, adoption_receipt_hash="0" * 64), "RESULT_RECEIPT_HASH_MISMATCH"),
-    (lambda r: _mutate_receipt(r, issued_at=KeyError), "RESULT_RECEIPT_FIELDS_INVALID"),
-    (lambda r: _mutate_receipt(r, worker_invocations=1), "RESULT_RECEIPT_SEMANTICS_INVALID"),
-    (lambda r: _mutate_receipt(r, task_id="other"), "RESULT_RECEIPT_SUBJECT_MISMATCH"),
-    (lambda r: _mutate_receipt(r, contract_hash="short"), "RESULT_RECEIPT_HASH_FIELD_INVALID"),
-    (lambda r: _adoption_result(r, candidate_ref="refs/other"), "RESULT_RECEIPT_STATE_MISMATCH"),
-    (lambda r: _mutate_receipt(r, derived_contract_projection={"x": 1}, reviewer_id="r", forbidden_repository_patterns=["approved_x"]), None),
-    (lambda r: _adoption_result(r, release_receipt={}), "RESULT_UNEXPECTED_DOWNSTREAM_FIELD"),
-    (lambda r: _adoption_result(r, integration_receipt={"x": 1}), "RESULT_UNEXPECTED_DOWNSTREAM_FIELD"),
-    (lambda r: _adoption_result(r, push_performed=None), "RESULT_DOWNSTREAM_EFFECT"),
-    (lambda r: _adoption_result(r, claim_ceiling=["MERGE_READY"]), "RESULT_CLAIM_CEILING"),
-    (lambda r: _adoption_result(r, claim_ceiling="NONE"), "RESULT_CLAIM_CEILING"),
-])
+@pytest.mark.parametrize(
+    ("build", "code"),
+    [
+        (lambda r: [], "RESULT_INVALID"),
+        (lambda r: _adoption_result(r, status="APPROVED"), "RESULT_NOT_PENDING"),
+        (lambda r: _adoption_result(r, adoption_receipt_hash="x"), "RESULT_RECEIPT_REQUIRED"),
+        (
+            lambda r: _adoption_result(r, adoption_receipt_hash="0" * 64),
+            "RESULT_RECEIPT_HASH_MISMATCH",
+        ),
+        (lambda r: _mutate_receipt(r, issued_at=KeyError), "RESULT_RECEIPT_FIELDS_INVALID"),
+        (lambda r: _mutate_receipt(r, worker_invocations=1), "RESULT_RECEIPT_SEMANTICS_INVALID"),
+        (lambda r: _mutate_receipt(r, task_id="other"), "RESULT_RECEIPT_SUBJECT_MISMATCH"),
+        (lambda r: _mutate_receipt(r, contract_hash="short"), "RESULT_RECEIPT_HASH_FIELD_INVALID"),
+        (
+            lambda r: _adoption_result(r, candidate_ref="refs/other"),
+            "RESULT_RECEIPT_STATE_MISMATCH",
+        ),
+        (
+            lambda r: _mutate_receipt(
+                r,
+                derived_contract_projection={"x": 1},
+                reviewer_id="r",
+                forbidden_repository_patterns=["approved_x"],
+            ),
+            None,
+        ),
+        (lambda r: _adoption_result(r, release_receipt={}), "RESULT_UNEXPECTED_DOWNSTREAM_FIELD"),
+        (
+            lambda r: _adoption_result(r, integration_receipt={"x": 1}),
+            "RESULT_UNEXPECTED_DOWNSTREAM_FIELD",
+        ),
+        (lambda r: _adoption_result(r, push_performed=None), "RESULT_DOWNSTREAM_EFFECT"),
+        (lambda r: _adoption_result(r, claim_ceiling=["MERGE_READY"]), "RESULT_CLAIM_CEILING"),
+        (lambda r: _adoption_result(r, claim_ceiling="NONE"), "RESULT_CLAIM_CEILING"),
+    ],
+)
 def test_validate_adoption_result_error_codes(controller_root, build, code) -> None:
     request = _request(controller_root)
     if code is None:
