@@ -279,6 +279,24 @@ PIN_BUMP_PR = re.compile(
 )
 PIN_FILES = ("uv.lock", "pyproject.toml", "requirements/canonical-runtime.txt")
 PIN_BUMP_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
+# Parked pin bumps (#2309).  A non-draft, non-stale pin-bump PR blocks deploys
+# only while it could plausibly merge soon.  It is PARKED (listed in
+# ``ignored_parked``, warned, and no longer blocking) when either
+#   * GitHub reports ``mergeable_state == "dirty"`` (a merge conflict: it cannot
+#     merge as is), reason ``mergeable_state=dirty``; or
+#   * it has held deploys at the SAME head SHA for more than the park threshold
+#     (default ``PIN_BUMP_PARK_SECONDS``), reason ``held>threshold``.
+# The holding clock is the first cycle that saw (PR number, head SHA) blocking,
+# kept in ``pin-bump-park.json`` in the state dir.  A new head push restarts it;
+# a missing, corrupt or future-dated record restarts it too (fail toward
+# blocking, never toward parking).  The threshold can be raised or lowered only
+# by explicitly setting ``PIN_BUMP_PARK_ENV`` or ``--pin-bump-park-seconds``.
+PIN_BUMP_PARK_SECONDS = 60 * 60
+PIN_BUMP_PARK_MIN_SECONDS = 60
+PIN_BUMP_PARK_ENV = "NEXUS_GATEWAY_AUTO_DEPLOY_PIN_PARK_SECONDS"
+PIN_PARK_SCHEMA = "nexus.gateway.auto_deploy.pin_park.v1"
+PIN_PARK_REASON_DIRTY = "mergeable_state=dirty"
+PIN_PARK_REASON_HELD = "held>threshold"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 # RFC 3339 date-time with an explicit offset; fractions up to microseconds (#2169).
 _RFC3339 = re.compile(
@@ -418,6 +436,15 @@ class DeployError(RuntimeError):
 RECONCILE_FAILED_HOLD = "auto-hold: RECONCILE_FAILED"
 
 
+def _park_seconds_or_none(value: Any) -> Optional[int]:
+    """A park threshold override in whole seconds (>= the minimum), else None."""
+    text = str(value).strip()
+    if not text.isdigit():
+        return None
+    seconds = int(text)
+    return seconds if seconds >= PIN_BUMP_PARK_MIN_SECONDS else None
+
+
 @dataclass(frozen=True)
 class Config:
     gateway_root: Path
@@ -436,6 +463,7 @@ class Config:
     gh: str = "gh"
     quiescence_warn_after_seconds: int = QUIESCENCE_WARN_AFTER_SECONDS
     alert_issue: int = QUIESCENCE_ALERT_ISSUE
+    pin_bump_park_seconds: int = PIN_BUMP_PARK_SECONDS
 
     @classmethod
     def default(cls, home: Optional[Path] = None, **overrides: Any) -> "Config":
@@ -452,6 +480,9 @@ class Config:
             "env_file": support / "mcp-gateway.env",
             "canonical_state_dir": home / ".local/state/Nexus-new-self-hosted-state",
         }
+        park = _park_seconds_or_none(os.environ.get(PIN_BUMP_PARK_ENV, ""))
+        if park is not None:
+            values["pin_bump_park_seconds"] = park
         values.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**values)
 
@@ -530,6 +561,11 @@ class Config:
     def quiescence_file(self) -> Path:
         """The current deferral episode (#2227); absent when nothing is deferred."""
         return self.state_dir / "quiescence.json"
+
+    @property
+    def pin_park_file(self) -> Path:
+        """When each blocking pin-bump PR head was first seen (#2309)."""
+        return self.state_dir / "pin-bump-park.json"
 
     @property
     def controller_alert_file(self) -> Path:
@@ -1090,11 +1126,16 @@ def deployer_known_checks(source: str) -> Optional[List[str]]:
     union ``PR_HEAD_STATUS_CONTEXTS`` (at most one module-level literal set or
     ``frozenset({...})`` of str; absent means none, as before #2370).  Anything
     else (a syntax error, a computed value, a second assignment) is None: the
-    self-update then fails closed (#2402).
+    self-update then fails closed (#2402).  So is any other write to either
+    table anywhere in the source (``del X[...]``, ``X[...] = ...``, ``X |= ...``,
+    ``X.pop(...)`` or another mutating method, a ``global`` rebind): the literal
+    would then over-claim names the running module no longer has (#2409 N2).
     """
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
+        return None
+    if _check_tables_mutated(tree):
         return None
     values: Dict[str, List[ast.expr]] = {name: [] for name in _KNOWN_CHECK_TABLES}
     for node in tree.body:
@@ -1140,6 +1181,70 @@ def deployer_known_checks(source: str) -> Optional[List[str]]:
             return None
         names.extend(sorted(c for c in contexts if c not in names))
     return names
+
+
+# Methods that change a dict or set in place; any call of one on a check table
+# makes the table unreadable for the self-update (fail closed, #2409 N2).
+_MUTATING_METHODS = frozenset({
+    "pop",
+    "popitem",
+    "clear",
+    "update",
+    "setdefault",
+    "remove",
+    "discard",
+    "add",
+    "difference_update",
+    "intersection_update",
+    "symmetric_difference_update",
+    "__delitem__",
+    "__setitem__",
+    "__ior__",
+    "__iand__",
+    "__isub__",
+    "__ixor__",
+})
+
+
+def _check_tables_mutated(tree: ast.Module) -> bool:
+    """True when anything but one plain top-level assignment writes a check table."""
+    tables = set(_KNOWN_CHECK_TABLES)
+
+    def table_of(node: ast.AST) -> Optional[str]:
+        while isinstance(node, (ast.Subscript, ast.Attribute, ast.Starred)):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) and node.id in tables else None
+
+    top_level = {
+        id(target)
+        for stmt in tree.body
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign))
+        for target in (stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target])
+        if isinstance(target, ast.Name)
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Delete) and any(table_of(t) for t in node.targets):
+            return True
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and tables & set(node.names):
+            return True
+        if isinstance(node, ast.Name) and node.id in tables:
+            if isinstance(node.ctx, (ast.Store, ast.Del)) and id(node) not in top_level:
+                return True
+        if isinstance(node, (ast.Subscript, ast.Attribute)) and isinstance(
+            node.ctx, (ast.Store, ast.Del)
+        ):
+            if table_of(node):
+                return True
+        if isinstance(node, ast.AugAssign) and table_of(node.target):
+            return True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _MUTATING_METHODS
+            and table_of(node.func.value)
+        ):
+            return True
+    return False
 
 
 def _parse_time(value: Any) -> Optional[float]:
@@ -1222,8 +1327,61 @@ def _timeline_time(api_get: Callable[[str], Any], repo: str, event: dict) -> Opt
     return None
 
 
+def _load_pin_park(path: Optional[Path]) -> Dict[str, Any]:
+    """The park record ({str(number): entry}); {} when absent or untrustworthy.
+
+    An empty record means every blocking PR head is "first seen now", so a
+    lost or corrupt file can only delay parking, never cause it (#2309).
+    """
+    if path is None:
+        return {}
+    data = _read_json_object(path)
+    if data is None or data.get("schema") != PIN_PARK_SCHEMA:
+        return {}
+    prs = data.get("prs")
+    return dict(prs) if isinstance(prs, dict) else {}
+
+
+def _save_pin_park(path: Path, prs: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"schema": PIN_PARK_SCHEMA, "prs": prs}
+    _atomic_write(path, json.dumps(payload, sort_keys=True).encode(), 0o600)
+
+
+def _first_seen(entry: Any, head: str, now: float) -> float:
+    """When (PR, head) started holding deploys; ``now`` unless the record proves earlier."""
+    if not isinstance(entry, dict) or entry.get("head_sha") != head:
+        return now
+    seen = entry.get("first_seen_epoch")
+    if isinstance(seen, bool) or not isinstance(seen, (int, float)):
+        return now
+    seen = float(seen)
+    if not math.isfinite(seen) or seen > now or seen <= 0:
+        return now
+    return seen
+
+
+def _mergeable_state(api_get: Callable[[str], Any], repo: str, number: int) -> Optional[str]:
+    """GitHub's ``mergeable_state`` of one PR, or None when it cannot be read.
+
+    Only ``dirty`` parks a PR; None (unreadable, still computing) keeps it blocking.
+    """
+    try:
+        pr = api_get(f"repos/{repo}/pulls/{int(number)}")
+    except Exception:  # noqa: BLE001 - unknown mergeability keeps the PR blocking
+        return None
+    state = pr.get("mergeable_state") if isinstance(pr, dict) else None
+    return state if isinstance(state, str) else None
+
+
 def pin_bumps_in_flight(
-    api_get: Callable[[str], Any], *, repo: str = REPOSITORY, now: Optional[float] = None
+    api_get: Callable[[str], Any],
+    *,
+    repo: str = REPOSITORY,
+    now: Optional[float] = None,
+    park_file: Optional[Path] = None,
+    park_seconds: float = PIN_BUMP_PARK_SECONDS,
+    record: bool = True,
 ) -> Dict[str, Any]:
     """Open pin-bump PRs; CLEAR, IN_FLIGHT or UNKNOWN (fail closed).
 
@@ -1234,11 +1392,23 @@ def pin_bumps_in_flight(
     ``ignored_draft`` / ``DRAFT_PIN_PR_IGNORED #N`` instead of blocking.  The
     re-check right before the switch applies the same rule, so a draft marked
     ready mid-cycle blocks the switch.
+
+    PARKED (#2309, see ``PIN_BUMP_PARK_SECONDS``): any other pin-bump PR whose
+    ``mergeable_state`` is ``dirty``, or that has held deploys at the same head
+    SHA for more than ``park_seconds`` (clock in ``park_file``), stops
+    blocking: it is listed in ``ignored_parked`` (detail with head SHA,
+    holding_since and reason in ``parked``) and warned as
+    ``PARKED_PIN_PR_IGNORED #N (holding since <iso>)``.  Without ``park_file``
+    no clock survives a call, so only ``dirty`` can park.  ``record=False``
+    (dry run) reads the clock without writing it.
     """
     now = time.time() if now is None else now
     hits: List[int] = []
     stale: List[int] = []
     drafts: List[int] = []
+    parked: List[Dict[str, Any]] = []
+    previous = _load_pin_park(park_file)
+    current: Dict[str, Any] = {}
     try:
         for pr in _paged(api_get, f"repos/{repo}/pulls?state=open"):
             label = f"{pr.get('title') or ''} {(pr.get('head') or {}).get('ref') or ''}"
@@ -1250,23 +1420,110 @@ def pin_bumps_in_flight(
                 continue
             if pr.get("draft") is True:
                 drafts.append(pr["number"])
-            elif _is_stale_pin_pr(api_get, repo, pr, now):
+                continue
+            if _is_stale_pin_pr(api_get, repo, pr, now):
                 stale.append(pr["number"])
+                continue
+            number = pr["number"]
+            head = (pr.get("head") or {}).get("sha")
+            if not isinstance(head, str) or not _SHA.match(head):
+                hits.append(number)  # no head to track: it keeps blocking
+                continue
+            entry = previous.get(str(number))
+            since = _first_seen(entry, head, now)
+            kept: Dict[str, Any] = {"head_sha": head, "first_seen_epoch": since}
+            if isinstance(entry, dict) and entry.get("head_sha") == head:
+                if entry.get("commented_head") == head:
+                    kept["commented_head"] = head
+            current[str(number)] = kept
+            reason: Optional[str] = None
+            if _mergeable_state(api_get, repo, number) == "dirty":
+                reason = PIN_PARK_REASON_DIRTY
+            elif now - since > park_seconds:
+                reason = PIN_PARK_REASON_HELD
+            if reason is None:
+                hits.append(number)
             else:
-                hits.append(pr["number"])
+                parked.append({
+                    "number": number,
+                    "head_sha": head,
+                    "holding_since": _iso(since),
+                    "reason": reason,
+                    "threshold_seconds": int(park_seconds),
+                })
     except Exception as exc:  # noqa: BLE001
         return {"verdict": "UNKNOWN", "error": f"{type(exc).__name__}:{exc}"[:300]}
-    return {
+    result: Dict[str, Any] = {
         "verdict": "IN_FLIGHT" if hits else "CLEAR",
         "pull_requests": sorted(hits),
         "ignored_stale": sorted(stale),
         "ignored_draft": sorted(drafts),
+        "ignored_parked": sorted(p["number"] for p in parked),
+        "parked": sorted(parked, key=lambda p: p["number"]),
         "warnings": [f"STALE_PIN_PR_IGNORED #{n}" for n in sorted(stale)]
-        + [f"DRAFT_PIN_PR_IGNORED #{n}" for n in sorted(drafts)],
+        + [f"DRAFT_PIN_PR_IGNORED #{n}" for n in sorted(drafts)]
+        + [
+            f"PARKED_PIN_PR_IGNORED #{p['number']} (holding since {p['holding_since']})"
+            for p in sorted(parked, key=lambda p: p["number"])
+        ],
     }
+    if park_file is not None and record and current != previous:
+        try:
+            _save_pin_park(park_file, current)
+        except OSError as exc:
+            # The clock is not advanced: parking is only delayed, never forced.
+            result["warnings"].append(f"PIN_PARK_STATE_UNWRITABLE:{type(exc).__name__}")
+    return result
+
+
+def _pin_parked_comment(parked: Dict[str, Any]) -> str:
+    head = parked["head_sha"]
+    if parked["reason"] == PIN_PARK_REASON_DIRTY:
+        why = f"at head `{head}` because it has a merge conflict (mergeable_state=dirty)"
+    else:
+        minutes = max(1, int(parked.get("threshold_seconds", PIN_BUMP_PARK_SECONDS)) // 60)
+        why = f"after {minutes} min at head `{head}`"
+    return (
+        "<!-- NEXUS_GATEWAY_PIN_BUMP_PARKED -->\n"
+        f"Gateway auto-deploy stopped waiting for this pin-bump PR {why}; deploys continue. "
+        "Mark it draft while it is parked.\n\n"
+        f"Holding since {parked['holding_since']} (#2309). A new head push makes it block "
+        "deploys again until it merges or parks.\n"
+    )
 
 
 # ------------------------------------------------------------------------- probes
+
+
+WORKER_ROUTE_PREFLIGHT_STATUSES = ("OK", "BLOCKED", "UNKNOWN")
+_WORKER_ROUTE_KEYS = ("route", "adapter", "preflight", "reason")
+_WORKER_ROUTE_MAX = 50
+
+
+def worker_route_preflight_summary(health: Any) -> Dict[str, Any]:
+    """Bounded copy of ``/health`` ``worker_route_preflight`` (#2345).
+
+    Shape: ``{"status": "OK"|"BLOCKED"|"UNKNOWN", "routes": [{"route",
+    "adapter", "preflight", "reason"}]}``.  An absent key is
+    ``{"status": "UNAVAILABLE"}``; anything else unexpected is UNAVAILABLE with
+    a reason.  Only those four route fields are kept, as short strings.
+    """
+    if not isinstance(health, dict) or "worker_route_preflight" not in health:
+        return {"status": "UNAVAILABLE"}
+    block = health["worker_route_preflight"]
+    if not isinstance(block, dict) or block.get("status") not in WORKER_ROUTE_PREFLIGHT_STATUSES:
+        return {"status": "UNAVAILABLE", "reason": "MALFORMED"}
+    routes: List[Dict[str, Any]] = []
+    raw = block.get("routes")
+    for item in raw if isinstance(raw, list) else []:
+        if len(routes) >= _WORKER_ROUTE_MAX:
+            break
+        if isinstance(item, dict):
+            routes.append({
+                k: (str(item[k])[:200] if item.get(k) is not None else None)
+                for k in _WORKER_ROUTE_KEYS
+            })
+    return {"status": block["status"], "routes": routes}
 
 
 def read_env_token(env_file: Path) -> str:
@@ -2579,6 +2836,8 @@ class _Cycle:
         # Manual `run --allow-in-flight` only; the LaunchAgent never passes it.
         self.allow_in_flight = False
         self.quiescence_note: Optional[Dict[str, Any]] = None
+        # The pre-build pin-bump verdict, copied into the receipt (#2309).
+        self.pin_note: Optional[Dict[str, Any]] = None
 
     # -- task quiescence (#2227) --------------------------------------------
 
@@ -2888,8 +3147,11 @@ class _Cycle:
             return finish("UNKNOWN_REQUIRED_CHECK:" + ",".join(checks["unknown_required"]))
         if checks["verdict"] != "GREEN":
             return finish(f"CHECKS_{checks['verdict']}")
-        pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
+        pins = self.pin_bumps(record=not dry_run)
         status["pin_bumps"] = pins
+        self.pin_note = pins
+        if not dry_run:
+            self.announce_parked(pins)
         if pins.get("warnings"):
             status["warnings"] = list(pins["warnings"])
         if pins["verdict"] != "CLEAR":
@@ -2957,6 +3219,48 @@ class _Cycle:
             self.end_deferral()
         status["receipt"] = receipt
         return finish(receipt["outcome"])
+
+    # -- parked pin bumps (#2309) ----------------------------------------------
+
+    def pin_bumps(self, *, record: bool) -> Dict[str, Any]:
+        """``pin_bumps_in_flight`` with this deployer's park clock and threshold."""
+        cfg = self.cfg
+        return pin_bumps_in_flight(
+            self.api_get,
+            repo=cfg.repository,
+            now=self.host.now(),
+            park_file=cfg.pin_park_file,
+            park_seconds=cfg.pin_bump_park_seconds,
+            record=record,
+        )
+
+    def announce_parked(self, pins: Dict[str, Any]) -> None:
+        """One comment per (PR, head) on a pin-bump PR when it first parks (#2309).
+
+        A failed post is retried next cycle; a posted one is remembered in the
+        park record, so a PR is never commented twice for the same head.
+        Never raises: a comment is visibility, not a gate.
+        """
+        cfg, host = self.cfg, self.host
+        try:
+            for parked in pins.get("parked") or []:
+                key, head = str(parked["number"]), parked["head_sha"]
+                prs = _load_pin_park(cfg.pin_park_file)
+                entry = prs.get(key)
+                if not isinstance(entry, dict) or entry.get("head_sha") != head:
+                    continue  # the record was not written: no comment state to keep
+                if entry.get("commented_head") == head:
+                    continue
+                if not host.post_issue_comment(
+                    cfg, _pin_parked_comment(parked), issue=int(parked["number"])
+                ):
+                    continue
+                prs[key] = {**entry, "commented_head": head}
+                _save_pin_park(cfg.pin_park_file, prs)
+        except Exception as exc:  # noqa: BLE001 - never let a comment stop a cycle
+            pins.setdefault("warnings", []).append(
+                f"PIN_PARK_COMMENT_FAILED:{type(exc).__name__}"[:200]
+            )
 
     # -- deployer-only self-update (#2402) -------------------------------------
 
@@ -3197,6 +3501,8 @@ class _Cycle:
         receipt["required_checks"] = checks
         if self.quiescence_note is not None:
             receipt["quiescence"] = self.quiescence_note
+        if self.pin_note is not None:
+            receipt["pin_bumps"] = self.pin_note
         receipt["warnings"] = list(warnings)
         hold: Optional[str] = None
         try:
@@ -3291,7 +3597,7 @@ class _Cycle:
             held = hold_reason(cfg, self.environ)
             if held:
                 return {"outcome": "HELD", "reason": f"hold set during the cycle ({held})"}
-            pins = pin_bumps_in_flight(self.api_get, repo=cfg.repository, now=host.now())
+            pins = self.pin_bumps(record=True)
             receipt["pin_bumps_before_switch"] = pins
             for warning in pins.get("warnings", []):
                 if warning not in receipt["warnings"]:
@@ -3429,9 +3735,37 @@ class _Cycle:
         receipt["probes"]["live"] = live
         if live.get("ok"):
             receipt["deployer_link"] = self.move_tool_link(root)
+            # Informational only (#2345): never changes the outcome or rolls back.
+            self.record_worker_route_preflight(receipt)
             return {"outcome": "DEPLOYED"}
         receipt["reason"] = "candidate failed the live probe"
         return self.guarded_rollback(previous_plist, receipt)
+
+    def record_worker_route_preflight(self, receipt: Dict[str, Any]) -> None:
+        """Copy the live ``/health`` ``worker_route_preflight`` into the receipt (#2345).
+
+        A BLOCKED route is policy (e.g. a missing authorization flag), not
+        health: it adds one ``WORKER_ROUTE_PREFLIGHT_BLOCKED <route>:<reason>``
+        warning per blocked route and nothing else.  Never raises.
+        """
+        summary: Dict[str, Any]
+        try:
+            health = self.prober.live_health()
+            summary = worker_route_preflight_summary(health)
+        except Exception as exc:  # noqa: BLE001 - visibility only, never a deploy failure
+            summary = {
+                "status": "UNAVAILABLE",
+                "reason": f"HEALTH_UNREADABLE:{type(exc).__name__}"[:200],
+            }
+        receipt["worker_route_preflight"] = summary
+        warnings = receipt.setdefault("warnings", [])
+        if summary.get("status") == "BLOCKED":
+            for route in summary.get("routes") or []:
+                if route.get("preflight") == "BLOCKED":
+                    warnings.append(
+                        "WORKER_ROUTE_PREFLIGHT_BLOCKED "
+                        f"{route.get('route')}:{route.get('reason')}"[:300]
+                    )
 
     def live_probe(
         self, commit: str, root: Path, python: Path, *, core: Optional[Dict[str, Any]] = None
@@ -3749,6 +4083,15 @@ def verify_commit(
 # ---------------------------------------------------------------------------- cli
 
 
+def _park_seconds_arg(value: str) -> int:
+    seconds = _park_seconds_or_none(value)
+    if seconds is None:
+        raise argparse.ArgumentTypeError(
+            f"must be a whole number of seconds >= {PIN_BUMP_PARK_MIN_SECONDS}"
+        )
+    return seconds
+
+
 def main(
     argv: Optional[List[str]] = None,
     *,
@@ -3781,6 +4124,14 @@ def main(
     parser.add_argument("--max-irrelevant-lag", type=int, default=None)
     parser.add_argument("--python-version", default=None)
     parser.add_argument(
+        "--pin-bump-park-seconds",
+        type=_park_seconds_arg,
+        default=None,
+        help=f"seconds a pin-bump PR may hold deploys at one head before it is parked "
+        f"(#2309; default {PIN_BUMP_PARK_SECONDS}, or ${PIN_BUMP_PARK_ENV}; "
+        f"minimum {PIN_BUMP_PARK_MIN_SECONDS})",
+    )
+    parser.add_argument(
         "--allow-in-flight",
         action="store_true",
         help="run, by hand only: switch even while governed tasks are in flight (#2227); "
@@ -3811,6 +4162,7 @@ def main(
         python_version=args.python_version,
         uv_extras=args.uv_extras,
         gh=args.gh,
+        pin_bump_park_seconds=args.pin_bump_park_seconds,
     )
     if args.command == "hold":
         _set_hold(cfg, args.reason)
