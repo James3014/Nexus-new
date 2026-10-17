@@ -371,6 +371,341 @@ def _apply_gemini_file_edits(case_dir: Path, payload: dict[str, Any]) -> list[st
     return written
 
 
+# #2528: explicit row statuses for the agy arm.  Every status except
+# AGY_STATUS_OK is a fail-closed outcome: the row is never a verified solve.
+# Spelling agreed with workspace-4e for the shared fail-closed vocabulary (#2454).
+AGY_STATUS_OK = "OK"
+AGY_NOT_AUTHENTICATED = "AGY_NOT_AUTHENTICATED"
+POOL_EXHAUSTED = "POOL_EXHAUSTED"
+AGY_POOL_BUSY = "AGY_POOL_BUSY"
+AGY_RUNTIME_NOT_AUTHORIZED = "AGY_RUNTIME_NOT_AUTHORIZED"
+AGY_FAILED = "AGY_FAILED"
+AGY_BENCH_WORKER_ROLE = "implementation"
+_AGY_EARLIEST_RESET_RE = re.compile(r"earliest reset in\s+(\d+h\d{2}m\d{2}s)")
+_AGY_POOL_SWITCH_OFF = ("0", "false", "no")
+
+
+def agy_bench_status(failure_reason: str | None, *, login_prompt_seen: bool = False) -> tuple[str, str]:
+    """Map an Agy worker receipt's failure reason to a bench row status and earliest reset.
+
+    The reasons come from the shared Agy worker route (#2405/#2413/#2431);
+    nothing here re-derives quota or auth from the model's reply.
+    """
+    from nexus.executors.worker_registry import (
+        AGY_AUTHENTICATION_REQUIRED,
+        AGY_CREDENTIALS_UNAVAILABLE,
+    )
+    from nexus.executors.worker_registry import (
+        AGY_POOL_BUSY as WORKER_POOL_BUSY,
+    )
+    from nexus.executors.worker_registry import (
+        AGY_POOL_EXHAUSTED as WORKER_POOL_EXHAUSTED,
+    )
+
+    reason = str(failure_reason or "")
+    match = _AGY_EARLIEST_RESET_RE.search(reason)
+    earliest_reset = match.group(1) if match else ""
+    if (
+        login_prompt_seen
+        or reason.startswith(AGY_AUTHENTICATION_REQUIRED)
+        or reason.startswith(AGY_CREDENTIALS_UNAVAILABLE)
+    ):
+        return AGY_NOT_AUTHENTICATED, earliest_reset
+    if reason.startswith(WORKER_POOL_EXHAUSTED):
+        return POOL_EXHAUSTED, earliest_reset
+    if reason.startswith(WORKER_POOL_BUSY):
+        return AGY_POOL_BUSY, earliest_reset
+    return AGY_FAILED, earliest_reset
+
+
+def _agy_row(
+    status: str,
+    *,
+    reason: str,
+    model_calls: int = 0,
+    token_capture_status: str = "not_run",
+    returncode: int | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "regression_test_added": False,
+        "unrelated_change": False,
+        "root_cause": "",
+        "written_files": [],
+        "model_calls": model_calls,
+        "total_tokens": 0,
+        "token_capture_status": token_capture_status,
+        "gemini_returncode": returncode,
+        "error": f"{status}: {reason}" if reason else status,
+        "agy_status": status,
+        "agy_failure_reason": reason,
+        "agy_account_alias_hash": "",
+        "agy_earliest_reset": "",
+        "agy_rotation_attempts": 0,
+    }
+    row.update(extra)
+    return row
+
+
+def _agy_envelope_tokens(stdout: str) -> tuple[int, str, str]:
+    """(total tokens, token status, response text) from agy's ``--output-format json`` envelope."""
+    from nexus.executors.agy_write_admission import top_level_json_objects
+
+    # The result envelope carries ``status``/``response``; other JSON objects
+    # (e.g. a trailing log line) are not it.
+    envelopes = [
+        item for item in top_level_json_objects(stdout) if "response" in item or "status" in item
+    ]
+    if not envelopes:
+        return 0, "missing_agy_envelope", stdout
+    envelope = envelopes[-1]
+    raw_usage = envelope.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+    total = usage.get("total_tokens")
+    if not isinstance(total, int) or isinstance(total, bool):
+        parts = [usage.get(key) for key in ("input_tokens", "output_tokens", "thinking_tokens")]
+        total = sum(value for value in parts if isinstance(value, int) and not isinstance(value, bool))
+    response = str(envelope.get("response") or "")
+    return int(total), ("measured" if total > 0 else "missing_agy_usage"), response
+
+
+AGY_STAGED_SYMLINK_REFUSED = "agy_staged_symlink_refused"
+
+
+def _tree_inventory(root: Path) -> tuple[set[Path], set[Path]] | None:
+    """(regular files, directories) under ``root``, relative; ``None`` on any
+    symlink, other non-regular entry or traversal error (an unreadable
+    directory must not make its files look deleted)."""
+    files: set[Path] = set()
+    dirs: set[Path] = set()
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    try:
+        for directory, dirnames, filenames in os.walk(root, onerror=fail):
+            for name in (*dirnames, *filenames):
+                if (Path(directory) / name).is_symlink():
+                    return None
+            for name in dirnames:
+                dirs.add((Path(directory) / name).relative_to(root))
+            for name in filenames:
+                path = Path(directory) / name
+                if not path.is_file():
+                    return None
+                files.add(path.relative_to(root))
+    except OSError:
+        return None
+    return files, dirs
+
+
+def _sync_staged_case(staged: Path, case_dir: Path) -> str | None:
+    """Mirror the agy run's regular-file edits from a staged copy back into the case dir.
+
+    Fail closed: when either tree holds any symlink or cannot be fully read,
+    or a path is a file in one tree and a directory in the other, nothing is
+    mirrored and ``AGY_STAGED_SYMLINK_REFUSED`` is returned, so neither a
+    symlink, an unreadable directory nor a type change can redirect a write
+    or hide the deletion of a file.  Writes use ``O_NOFOLLOW``.  Returns
+    ``None`` after a complete mirror.
+    """
+    staged_inventory = _tree_inventory(staged)
+    case_inventory = _tree_inventory(case_dir)
+    if staged_inventory is None or case_inventory is None:
+        return AGY_STAGED_SYMLINK_REFUSED
+    staged_files, staged_dirs = staged_inventory
+    case_files, case_dirs = case_inventory
+    if staged_files & case_dirs or case_files & staged_dirs:
+        return AGY_STAGED_SYMLINK_REFUSED
+    for rel in sorted(case_files - staged_files):
+        (case_dir / rel).unlink()
+    for rel in sorted(staged_files):
+        source, dest = staged / rel, case_dir / rel
+        data = source.read_bytes()
+        if rel in case_files and dest.read_bytes() == data:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+    return None
+
+
+def _run_agy_pool_patch(
+    case_dir: Path,
+    task: RealWorldTask,
+    *,
+    prompt: str,
+    mode: str,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    """Run the agy arm on a leased pool account through the production Agy worker adapter (#2528).
+
+    ``AgyWorkerAdapter(use_installed_account_pool=True)`` is what
+    ``WorkerRegistry.default()`` builds for the Gateway (#2405): it claims each
+    account under the shared ``CrossProcessLeaseCoordinator`` flock, rotates on
+    quota/auth/model-capability failures read from agy's structured error
+    channel (#2413/#2431/#2435), and materializes a disposable run HOME and
+    Seatbelt profile per attempt (#1912).  The bench only adds its own case
+    dir as the leased target.  It never runs agy on the default HOME: no
+    installed pool, or a completed run without a leased account, fails closed.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from nexus.executors.agy_write_admission import paths_overlap
+    from nexus.executors.worker_contract import WorkerOutcome, WorkerProviderUnavailable
+    from nexus.executors.worker_registry import AgyWorkerAdapter
+    from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+    from nexus.services.agy_failure_signals import agy_login_required
+
+    pool_switch = os.getenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", "").strip().lower()
+    manager_path = AgyAccountPoolManager.resolve_manager_path()
+    if pool_switch in _AGY_POOL_SWITCH_OFF or not manager_path or not Path(manager_path).is_file():
+        return _agy_row(
+            AGY_NOT_AUTHENTICATED,
+            reason="agy account pool not installed or disabled; the bench never runs agy on the default HOME",
+        )
+    observed: list[Any] = []
+    sync_refusal: str | None = None
+    adapter = AgyWorkerAdapter(
+        use_installed_account_pool=True, result_observer=observed.append, require_account_pool=True
+    )
+    preflight = adapter.preflight()
+    if not preflight.authorized:
+        return _agy_row(AGY_RUNTIME_NOT_AUTHORIZED, reason=preflight.reason)
+    if not preflight.ready:
+        return _agy_row(AGY_FAILED, reason=preflight.reason)
+
+    case_real = Path(os.path.realpath(case_dir))
+    staging_root: Path | None = None
+    target = case_real
+    if paths_overlap(case_real, Path(CANONICAL_SOURCE_ROOT).resolve()):
+        # The adapter refuses a target inside the canonical checkout (the
+        # default --output-dir is in the repo): run on a staged copy outside it.
+        staging_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-agy-case-")))
+        target = staging_root / "case"
+        shutil.copytree(case_real, target, symlinks=True)
+    try:
+        receipt = adapter.invoke(
+            SimpleNamespace(task_id=f"bench-{task.id}-{mode}", maximum_provider_calls=1),
+            SimpleNamespace(target_worktree=str(target)),
+            prompt=prompt,
+            timeout_seconds=float(timeout_sec),
+            worker_role=AGY_BENCH_WORKER_ROLE,
+        )
+        sweep_failed = any(
+            (result.timed_out and result.process_group_killed is not True)
+            or (not result.timed_out and result.descendants_swept is not True)
+            for result in observed
+        )
+        if (
+            staging_root is not None
+            and receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+            and not receipt.timed_out
+            and not sweep_failed
+        ):
+            # Only a completed, fully swept run's edits reach the case dir.
+            sync_refusal = _sync_staged_case(target, case_real)
+    except WorkerProviderUnavailable as exc:
+        return _agy_row(AGY_FAILED, reason=str(exc))
+    finally:
+        if staging_root is not None:
+            shutil.rmtree(staging_root, ignore_errors=True)
+
+    final = next((result for result in observed if result.stdout_sha256 == receipt.stdout_sha256), None)
+    stdout = final.stdout.decode("utf-8", errors="replace") if final is not None else ""
+    stderr = final.stderr.decode("utf-8", errors="replace") if final is not None else ""
+    common: dict[str, Any] = {
+        "agy_account_alias_hash": str(receipt.account_alias_hash or ""),
+        "agy_rotation_attempts": int(receipt.account_rotation_attempts or 0),
+        "agy_sweep_failed": sweep_failed,
+    }
+    model_calls = int(receipt.provider_attempt_count or 0)
+    completed = receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    if completed and not receipt.account_alias_hash:
+        return _agy_row(
+            AGY_NOT_AUTHENTICATED,
+            reason="agy ran without a leased pool account",
+            model_calls=model_calls,
+            returncode=receipt.exit_code,
+            **common,
+        )
+    if sweep_failed:
+        return _agy_row(
+            AGY_FAILED,
+            reason="agy_descendant_sweep_failed: worker descendants may survive",
+            model_calls=model_calls,
+            token_capture_status="sweep_failed",
+            returncode=receipt.exit_code,
+            **common,
+        )
+    if sync_refusal is not None:
+        return _agy_row(
+            AGY_FAILED,
+            reason=sync_refusal,
+            model_calls=model_calls,
+            returncode=receipt.exit_code,
+            **common,
+        )
+    if receipt.timed_out:
+        return _agy_row(
+            AGY_FAILED,
+            reason="gemini_timeout: agy execution timed out",
+            model_calls=model_calls,
+            token_capture_status="timeout",
+            **common,
+        )
+    if not completed:
+        login = final is not None and agy_login_required(stdout, stderr, stdout_is_envelope=True)
+        status, earliest_reset = agy_bench_status(receipt.failure_reason, login_prompt_seen=login)
+        return _agy_row(
+            status,
+            reason=str(receipt.failure_reason or "agy execution did not complete successfully"),
+            model_calls=model_calls,
+            returncode=receipt.exit_code,
+            agy_earliest_reset=earliest_reset,
+            **common,
+        )
+    if final is None:
+        return _agy_row(
+            AGY_FAILED,
+            reason="agy result not observed for the receipt",
+            model_calls=model_calls,
+            returncode=receipt.exit_code,
+            **common,
+        )
+    tokens, token_status, response = _agy_envelope_tokens(stdout)
+    return {
+        **_apply_model_answer(case_dir, _parse_gemini_payload(response), apply=True),
+        "model_calls": model_calls,
+        "total_tokens": tokens,
+        "token_capture_status": token_status,
+        "gemini_returncode": receipt.exit_code,
+        "error": "",
+        "agy_status": AGY_STATUS_OK,
+        "agy_failure_reason": "",
+        "agy_earliest_reset": "",
+        **common,
+    }
+
+
+def _apply_model_answer(case_dir: Path, payload: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+    """Apply a model's JSON file edits to the case dir and report what changed."""
+    before_note = case_dir / "notes" / "user_draft.md"
+    before_note_text = before_note.read_text(encoding="utf-8") if before_note.exists() else None
+    written_files = _apply_gemini_file_edits(case_dir, payload) if apply else []
+    after_note_text = before_note.read_text(encoding="utf-8") if before_note.exists() else None
+    added_regression_test = bool(payload.get("added_regression_test")) or any(path.startswith("tests/test_retry") for path in written_files)
+    return {
+        "regression_test_added": added_regression_test,
+        "unrelated_change": before_note_text is not None and before_note_text != after_note_text,
+        "root_cause": str(payload.get("root_cause") or ""),
+        "written_files": written_files,
+    }
+
+
 def _run_gemini_patch(
     case_dir: Path,
     task: RealWorldTask,
@@ -383,166 +718,31 @@ def _run_gemini_patch(
     prompt = _build_gemini_prompt(task, case_dir, mode=mode, nexus_profile=nexus_profile)
     bin_path = _resolve_gemini_bin()
     if "agy" in str(bin_path) or "agy" in os.path.basename(os.path.realpath(bin_path)):
-        # #1912: no permission bypass; file edits inside the case dir only.
-        cmd = [
-            bin_path,
-            "--mode",
-            "accept-edits",
-            "--add-dir",
-            str(case_dir),
-            "--print",
-            prompt,
-        ]
-    else:
-        cmd = [bin_path, "-m", model, "-p", prompt, "--output-format", "json"]
-        if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
-            cmd.insert(1, "-y")
+        # #2528: the agy arm runs through the production Agy worker adapter on
+        # a leased pool account, never on the default HOME.
+        return _run_agy_pool_patch(case_dir, task, prompt=prompt, mode=mode, timeout_sec=timeout_sec)
+    cmd = [bin_path, "-m", model, "-p", prompt, "--output-format", "json"]
+    if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
+        cmd.insert(1, "-y")
     env = os.environ.copy()
     _apply_bench_env(env)
-
-    if "agy" in str(bin_path) or "agy" in os.path.basename(os.path.realpath(bin_path)):
-        # #1912: same confinement as the production adapter, through the shared
-        # worker runner: disposable HOME, allowlisted exact env, Seatbelt
-        # profile (case dir minus .git/.agents, plus the per-run root), and a
-        # process-group + descendant sweep on timeout and on normal exit.
-        import tempfile
-
-        from nexus.executors import agy_write_admission as admission
-        from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
-
-        if not admission.seatbelt_available():
-            return {
-                "regression_test_added": False,
-                "unrelated_change": False,
-                "root_cause": "",
-                "written_files": [],
-                "model_calls": 0,
-                "total_tokens": 0,
-                "token_capture_status": "not_run",
-                "gemini_returncode": None,
-                "error": "agy_seatbelt_unavailable",
-            }
-        agy_run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-bench-agy-")))
-        case_real = Path(os.path.realpath(case_dir))
-        try:
-            run_home = agy_run_root / "home"
-            run_tmp = agy_run_root / "tmp"
-            run_tmp.mkdir(parents=True)
-            refusal, _profile = admission.materialize_run_home(
-                Path(env["HOME"]), run_home, read_only=False
-            )
-            if refusal is not None:
-                # #2260: no run HOME (or no isolated keychain on macOS) means no
-                # confined run; never fall back to the real HOME.
-                return {
-                    "regression_test_added": False,
-                    "unrelated_change": False,
-                    "root_cause": "",
-                    "written_files": [],
-                    "model_calls": 0,
-                    "total_tokens": 0,
-                    "token_capture_status": "not_run",
-                    "gemini_returncode": None,
-                    "error": refusal,
-                }
-            try:
-                seatbelt_profile = admission.build_seatbelt_profile(
-                    run_root=agy_run_root,
-                    writable_target=case_real,
-                    run_home=run_home,
-                    source_home=Path(env["HOME"]),
-                )
-            except ValueError as exc:
-                return {
-                    "regression_test_added": False,
-                    "unrelated_change": False,
-                    "root_cause": "",
-                    "written_files": [],
-                    "model_calls": 0,
-                    "total_tokens": 0,
-                    "token_capture_status": "not_run",
-                    "gemini_returncode": None,
-                    "error": (
-                        "agy_target_inside_credential_path"
-                        if isinstance(exc, admission.CredentialPathOverlapError)
-                        else "agy_seatbelt_profile_unrepresentable"
-                    ),
-                }
-            result = run_cli_worker(
-                CliWorkerRequest(
-                    executable=str(bin_path),
-                    argv=tuple(cmd[1:]),
-                    cwd=str(case_real),
-                    env=admission.agy_child_env(env, home=run_home, tmpdir=run_tmp),
-                    timeout_seconds=float(timeout_sec),
-                    seatbelt_profile=seatbelt_profile,
-                    sweep_descendants_on_exit=True,
-                    sweep_roots=(str(case_real), str(agy_run_root)),
-                    exact_env=True,
-                )
-            )
-        finally:
-            shutil.rmtree(agy_run_root, ignore_errors=True)
-        if result.status is CliWorkerStatus.TIMED_OUT:
-            return {
-                # #1912: a timeout whose kill/sweep was not clean is a failed sweep.
-                "agy_sweep_failed": result.process_group_killed is not True,
-                "regression_test_added": False,
-                "unrelated_change": False,
-                "root_cause": "",
-                "written_files": [],
-                "model_calls": 1,
-                "total_tokens": 0,
-                "token_capture_status": "timeout",
-                "gemini_returncode": None,
-                "error": "gemini_timeout: agy execution timed out",
-            }
-        if result.descendants_swept is not True:
-            return {
-                "regression_test_added": False,
-                "unrelated_change": False,
-                "root_cause": "",
-                "written_files": [],
-                "model_calls": 1,
-                "total_tokens": 0,
-                "agy_sweep_failed": True,
-                "token_capture_status": "sweep_failed",
-                "gemini_returncode": result.exit_code,
-                "error": "agy_descendant_sweep_failed: worker descendants may survive",
-            }
-        res = subprocess.CompletedProcess(
-            args=cmd,
-            returncode=result.exit_code if result.exit_code is not None else 1,
-            stdout=result.stdout.decode("utf-8", errors="ignore"),
-            stderr=result.stderr.decode("utf-8", errors="ignore"),
-        )
-    else:
-        try:
-            res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)
-        except subprocess.TimeoutExpired as exc:
-            return {
-                "regression_test_added": False,
-                "unrelated_change": False,
-                "root_cause": "",
-                "written_files": [],
-                "model_calls": 1,
-                "total_tokens": 0,
-                "token_capture_status": "timeout",
-                "gemini_returncode": None,
-                "error": f"gemini_timeout:{exc}",
-            }
+    try:
+        res = subprocess.run(cmd, cwd=case_dir, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "regression_test_added": False,
+            "unrelated_change": False,
+            "root_cause": "",
+            "written_files": [],
+            "model_calls": 1,
+            "total_tokens": 0,
+            "token_capture_status": "timeout",
+            "gemini_returncode": None,
+            "error": f"gemini_timeout:{exc}",
+        }
     tokens, token_status = _parse_total_tokens(res.stdout)
-    payload = _parse_gemini_payload(res.stdout)
-    before_note = case_dir / "notes" / "user_draft.md"
-    before_note_text = before_note.read_text(encoding="utf-8") if before_note.exists() else None
-    written_files = _apply_gemini_file_edits(case_dir, payload) if res.returncode == 0 else []
-    after_note_text = before_note.read_text(encoding="utf-8") if before_note.exists() else None
-    added_regression_test = bool(payload.get("added_regression_test")) or any(path.startswith("tests/test_retry") for path in written_files)
     return {
-        "regression_test_added": added_regression_test,
-        "unrelated_change": before_note_text is not None and before_note_text != after_note_text,
-        "root_cause": str(payload.get("root_cause") or ""),
-        "written_files": written_files,
+        **_apply_model_answer(case_dir, _parse_gemini_payload(res.stdout), apply=res.returncode == 0),
         "model_calls": 1,
         "total_tokens": tokens,
         "token_capture_status": token_status,
@@ -1214,6 +1414,9 @@ def run_task(
     if patch_info.get("agy_sweep_failed") or patch_info.get("token_capture_status") == "sweep_failed":
         # #1912: descendants may still be editing the case dir; never a solve.
         verified = False
+    if patch_info.get("agy_status") not in (None, AGY_STATUS_OK):
+        # #2528: an unauthenticated, exhausted or failed agy arm is never a solve.
+        verified = False
     if executor == "full_nexus" and mode == "with_nexus" and not _full_nexus_succeeded(patch_info):
         # #2202: a nested agy sweep failure only surfaces as a non-SUCCESS
         # Nexus result; its survivors may still be editing the case dir.
@@ -1260,6 +1463,11 @@ def run_task(
         "written_files": list(patch_info.get("written_files") or []),
         "root_cause": str(patch_info.get("root_cause") or ""),
         "error": str(patch_info.get("error") or ""),
+        "agy_status": str(patch_info.get("agy_status") or ""),
+        "agy_failure_reason": str(patch_info.get("agy_failure_reason") or ""),
+        "agy_account_alias_hash": str(patch_info.get("agy_account_alias_hash") or ""),
+        "agy_earliest_reset": str(patch_info.get("agy_earliest_reset") or ""),
+        "agy_rotation_attempts": int(patch_info.get("agy_rotation_attempts") or 0),
         "nexus_report": str(patch_info.get("nexus_report") or ""),
         "nexus_semantic_status": str(nexus_payload.get("semantic_status") or ""),
         "nexus_chosen_flow": str(nexus_payload.get("chosen_flow") or ""),
