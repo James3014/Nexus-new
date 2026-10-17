@@ -130,9 +130,6 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
     ("nexus/services/s2t_strict.py", "S2T3BAdvisor._advise_via_ollama", "raw_body"): (
         'HTTP envelope: Ollama /api/generate body; the model text from payload["response"] goes through robust_json_parse.'
     ),
-    ("nexus/services/mcp_delegator.py", "MCPDelegator.delegate_mcp", "text"): (
-        "MCP JSON-RPC envelope: Serena tool-result text read via read_response(); a tool result, not model text."
-    ),
 }
 
 

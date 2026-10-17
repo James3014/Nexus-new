@@ -1,22 +1,24 @@
+import importlib.util
+
 import pytest
-import json
-import os
+
 from nexus.services.wisdom_synthesizer import WisdomSynthesizer
-from nexus.services.predictive_audit import PredictiveAuditor
-from nexus.services.construction_service import ConstructionService
+
+# nexus.services.predictive_audit and nexus.services.construction_service were deleted
+# 2026-10-17 (#2475, dead-code batch B4, ARCHIVED_2026-10-17_deadcode_b4.md). Their test
+# ids are kept and assert the modules stay gone; the wisdom loop test is unchanged.
+
 
 @pytest.fixture
 def project_root(tmp_path):
     # Hermetic: a throwaway project root instead of a host-specific checkout.
     return tmp_path
 
+
 @pytest.fixture
 def synthesizer(project_root):
     return WisdomSynthesizer(project_root)
 
-@pytest.fixture
-def auditor(project_root):
-    return PredictiveAuditor(project_root)
 
 def test_wisdom_synthesis_loop(synthesizer):
     """🛡️ Test the full Lesson -> Wisdom induction loop."""
@@ -24,36 +26,10 @@ def test_wisdom_synthesis_loop(synthesizer):
     assert result["status"] in ["SUCCESS", "EMPTY"]
     assert "rules_synthesized" in result
 
-def test_predictive_audit_risk_detection(auditor):
-    """🛡️ Test risk detection with high-similarity intent."""
-    high_risk_pack = {
-        "task_id": "test-risk-999",
-        "planner_output": {
-            "goal": "Change shared data schema without evidence."
-        }
-    }
-    # Note: Success depends on whether 'UNKNOWN' category has processed this yet
-    report = auditor.audit_risk(high_risk_pack)
-    assert "risk_score" in report
-    assert "status" in report
 
-def test_construction_gate_block(project_root):
-    """🛡️ Test that high-risk packs are blocked by the construction gate."""
-    service = ConstructionService(project_root)
-    
-    # Mock pack that would trigger a risk (matching UNKNOWN or LOGIC)
-    mock_pack = {
-        "task_id": "mock-block-task",
-        "goal": "Perform unsafe unknown logic modification.",
-        "deliverables": ["unsafe_mod.py"],
-        "planner_output": {"goal": "Perform unsafe unknown logic modification."}
-    }
-    
-    # We create a physical file for the build service to read
-    pack_file = project_root / "mock_block_pack.json"
-    with open(pack_file, "w") as f:
-        json.dump(mock_pack, f)
-        
-    result = service.build(pack_file)
-    # The result should be REJECTED or AUTO_REPLAN_TRIGGERED depending on score
-    assert result["status"] in ["SUCCESS", "REJECTED", "AUTO_REPLAN_TRIGGERED"]
+def test_predictive_audit_risk_detection():
+    assert importlib.util.find_spec("nexus.services.predictive_audit") is None
+
+
+def test_construction_gate_block():
+    assert importlib.util.find_spec("nexus.services.construction_service") is None
