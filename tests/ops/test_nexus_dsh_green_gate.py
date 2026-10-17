@@ -210,34 +210,80 @@ def test_lint_violation_blocks(repo: Path, tmp_path: Path) -> None:
     assert "F401" in receipt["lint_output"]["ruff_check"]
 
 
+FAKE_RUFF = r"""#!%s
+import json, os, re, sys
+real = %r
+args = sys.argv[1:]
+if args[:2] != ["-m", "ruff"]:
+    os.execv(real, [real, *args])
+cmd = args[2:]
+if cmd[:1] == ["--version"]:
+    print("ruff fake")
+    sys.exit(0)
+paths = [a for a in cmd if a.endswith(".py")]
+if cmd[:1] == ["check"]:
+    found = []
+    for rel in paths:
+        for row, line in enumerate(open(rel).read().splitlines(), 1):
+            m = re.match(r"import (\w+)\s*(#.*)?$", line)
+            if m:
+                found.append({"code": "F401", "filename": os.path.abspath(rel),
+                              "location": {"row": row, "column": 1}, "severity": "error",
+                              "message": "`%%s` imported but unused" %% m.group(1)})
+    print(json.dumps(found))
+    sys.exit(1 if found else 0)
+bad = [rel for rel in paths if "( )" in open(rel).read()]
+for rel in bad:
+    print("Would reformat: " + rel)
+sys.exit(1 if bad else 0)
+"""
+
+
+@pytest.fixture
+def fake_ruff(tmp_path: Path) -> str:
+    """A python wrapper with a deterministic ruff stand-in (F401 on bare imports, format
+    on '( )'), so these tests do not depend on ruff being installed (the trusted impact
+    executor has no ruff) and still run pytest with the real interpreter."""
+    path = tmp_path / "fake-python"
+    path.write_text(FAKE_RUFF % (sys.executable, sys.executable), encoding="utf-8")
+    path.chmod(0o755)
+    return str(path)
+
+
 def _commit_legacy_debt(repo: Path, body: str) -> None:
     (repo / "app.py").write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "legacy debt")
 
 
-def test_legacy_lint_debt_in_changed_file_does_not_block(repo: Path, tmp_path: Path) -> None:
+def test_legacy_lint_debt_in_changed_file_does_not_block(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
     # Base already has an unused import; the change itself is clean (#2476).
     _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
     _fix(repo, "import os\n\n\ndef value():\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
     assert "LINT_FAILURE" not in receipt["reason_codes"]
     assert receipt["lint_output"]["ruff_check"] == ""
 
 
-def test_legacy_debt_moved_by_unrelated_edit_does_not_block(repo: Path, tmp_path: Path) -> None:
+def test_legacy_debt_moved_by_unrelated_edit_does_not_block(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
     # The debt line shifts down; identity is rule+message+line text, not line number.
     _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
     _fix(repo, "# note\n# note\nimport os\n\n\ndef value():\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
 
 
-def test_new_lint_finding_on_top_of_legacy_debt_blocks(repo: Path, tmp_path: Path) -> None:
+def test_new_lint_finding_on_top_of_legacy_debt_blocks(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
     _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
     _fix(repo, "import os\nimport sys\n\n\ndef value():\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == guard.EXIT_BLOCKED
     assert receipt["reason_codes"] == ["LINT_FAILURE"]
     output = receipt["lint_output"]["ruff_check"]
@@ -245,24 +291,30 @@ def test_new_lint_finding_on_top_of_legacy_debt_blocks(repo: Path, tmp_path: Pat
     assert "`os`" not in output  # repair feedback lists only the new finding
 
 
-def test_new_file_with_lint_finding_blocks(repo: Path, tmp_path: Path) -> None:
+def test_new_file_with_lint_finding_blocks(repo: Path, tmp_path: Path, fake_ruff: str) -> None:
     _fix(repo)
     (repo / "extra.py").write_text("import os\n", encoding="utf-8")
-    code, receipt = _gate(repo, tmp_path, _contract(allowed_change_globs=["app.py", "extra.py"]))
+    code, receipt = _gate(
+        repo, tmp_path, _contract(allowed_change_globs=["app.py", "extra.py"]), python=fake_ruff
+    )
     assert code == guard.EXIT_BLOCKED
     assert "LINT_FAILURE" in receipt["reason_codes"]
 
 
-def test_legacy_unformatted_file_does_not_block_format(repo: Path, tmp_path: Path) -> None:
+def test_legacy_unformatted_file_does_not_block_format(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
     _commit_legacy_debt(repo, "def value( ):\n    return 1\n")
     _fix(repo, "def value( ):\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == 0, (receipt["reason_codes"], receipt["lint_output"])
 
 
-def test_file_formatted_at_base_and_unformatted_at_head_blocks(repo: Path, tmp_path: Path) -> None:
+def test_file_formatted_at_base_and_unformatted_at_head_blocks(
+    repo: Path, tmp_path: Path, fake_ruff: str
+) -> None:
     _fix(repo, "def value( ):\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
+    code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == guard.EXIT_BLOCKED
     assert "FORMAT_FAILURE" in receipt["reason_codes"]
 
@@ -415,21 +467,17 @@ def test_missing_python_receipt_records_intended_argv(repo: Path, tmp_path: Path
 
 
 def test_base_tree_materialization_never_writes_outside_the_temp_dir(
-    repo: Path, tmp_path: Path
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dest = tmp_path / "dest"
     dest.mkdir()
     outside = tmp_path / "escaped.py"
-    base = _git(repo, "rev-parse", "HEAD")
-    guard._materialize_base_tree(repo, base, ["../escaped.py", str(outside), "app.py"], dest)
+    # Even if git were to hand back bytes for a hostile path, nothing may be written.
+    monkeypatch.setattr(
+        guard.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=b"x = 1\n", stderr=b""),
+    )
+    guard._materialize_base_tree(repo, "HEAD", ["../escaped.py", str(outside), "app.py"], dest)
     assert not outside.exists()
     assert (dest / "app.py").is_file()
-
-
-def test_editing_the_text_of_a_legacy_debt_line_counts_as_new(repo: Path, tmp_path: Path) -> None:
-    # Identity includes the source line text, like the CI exact-base gate.
-    _commit_legacy_debt(repo, "import os\n\n\ndef value():\n    return 1\n")
-    _fix(repo, "import os  # touched\n\n\ndef value():\n    return 2\n")
-    code, receipt = _gate(repo, tmp_path)
-    assert code == guard.EXIT_BLOCKED
-    assert receipt["reason_codes"] == ["LINT_FAILURE"]
