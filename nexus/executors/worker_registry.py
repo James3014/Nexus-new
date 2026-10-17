@@ -503,6 +503,10 @@ def cline_delivery_failure(stdout: bytes, stderr: bytes) -> Optional[str]:
                 refused_calls.add(key)
             else:
                 unadmitted.add(key)
+                # Any end that is not cline's rejection is a tool that ran
+                # (#2459 Codex r3: one rejected end must not mask it).
+                if event.get("type") != "content_start":
+                    unadmitted.add("#ran:" + key)
         if value.get("type") == "run_result":
             results.append(value)
     # An unadmitted tool call is tolerated only when every event of that call
@@ -555,7 +559,17 @@ def cline_permission_bypass(argv: tuple[str, ...]) -> bool:
 
 
 _MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
-_CLINE_PLATFORM_BINARY = re.compile(r"(/[^\s\"']*/@cline/cli-darwin-[a-z0-9]+/bin/cline)")
+# Only an ``exec`` line of a shell wrapper names the binary (never a comment).
+_CLINE_PLATFORM_BINARY = re.compile(
+    r"^\s*exec\s+(?:/usr/bin/arch\s+-arm64\s+)?(/[^\s\"']*/@cline/cli-darwin-[a-z0-9]+/bin/cline)\s",
+    re.MULTILINE,
+)
+# The version probe runs the selected binary before the run's own Seatbelt
+# exists, so it gets one that allows no write and no subprocess (#2459 r3).
+_CLINE_PROBE_SEATBELT = (
+    '(version 1)(allow default)(deny file-write*)(allow file-write* (literal "/dev/null"))'
+    "(deny process-fork)"
+)
 
 
 def _is_macho(path: Path) -> bool:
@@ -599,9 +613,13 @@ def cline_launch_binary(resolved: Optional[str]) -> Optional[str]:
 
 def cline_version_probe(executable: str) -> Optional[str]:
     """``cline --version`` output, stripped; ``None`` when it cannot be read."""
+    from nexus.executors.agy_write_admission import SANDBOX_EXEC_PATH, seatbelt_available
+
+    if not seatbelt_available():
+        return None
     try:
         completed = subprocess.run(
-            [executable, "--version"],
+            [SANDBOX_EXEC_PATH, "-p", _CLINE_PROBE_SEATBELT, executable, "--version"],
             capture_output=True,
             timeout=30,
             check=False,

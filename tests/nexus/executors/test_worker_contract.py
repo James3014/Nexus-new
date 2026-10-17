@@ -2752,7 +2752,12 @@ def test_cline_version_probe_reads_the_binary_output(tmp_path):
     fake = tmp_path / "cline"
     fake.write_text("#!/bin/sh\necho 3.0.69\n", encoding="utf-8")
     fake.chmod(0o755)
-    assert cline_version_probe(str(fake)) == "3.0.69"
+    from nexus.executors.agy_write_admission import seatbelt_available
+
+    # The probe itself runs under a no-write, no-fork Seatbelt; without
+    # sandbox-exec it fails closed.
+    expected = "3.0.69" if seatbelt_available() else None
+    assert cline_version_probe(str(fake)) == expected
     failing = tmp_path / "cline-bad"
     failing.write_text("#!/bin/sh\necho 3.0.69\nexit 3\n", encoding="utf-8")
     failing.chmod(0o755)
@@ -2898,6 +2903,10 @@ def test_cline_launch_binary_refuses_anything_else(tmp_path):
     script = tmp_path / "cline"
     script.write_text('#!/bin/sh\nexec /opt/other/cline "$@"\n')
     assert cline_launch_binary(str(script)) is None
+    # A binary named only in a comment is never used (#2459 Codex r3).
+    native = _fake_macho(tmp_path / "n" / "@cline" / "cli-darwin-arm64" / "bin" / "cline")
+    script.write_text(f'#!/bin/sh\n# exec {native} "$@"\nexec /opt/other/cline "$@"\n')
+    assert cline_launch_binary(str(script)) is None
     # A named path that is not a Mach-O binary is refused.
     fake = tmp_path / "x" / "@cline" / "cli-darwin-arm64" / "bin" / "cline"
     fake.parent.mkdir(parents=True)
@@ -3001,6 +3010,13 @@ def test_cline_unavailable_tool_rejected_by_cline_is_not_a_tool_run():
     assert cline_delivery_failure(event("content_end", "c5", in_result) + done, b"") == (
         "cline_unadmitted_tool"
     )
+    # One rejected end must not mask a successful end of the same call.
+    masked = (
+        event("content_start", "c6")
+        + event("content_end", "c6", [{"query": "ls", "result": "a.txt", "success": True}])
+        + event("content_end", "c6", rejected)
+    )
+    assert cline_delivery_failure(masked + done, b"") == "cline_unadmitted_tool"
     # No call id: never tolerated.
     no_id = (
         json.dumps(
