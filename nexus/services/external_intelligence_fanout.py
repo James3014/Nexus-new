@@ -248,6 +248,31 @@ def _sets_overlap(left: Sequence[str], right: Sequence[str]) -> bool:
     return any(_paths_overlap(a, b) for a in left for b in right)
 
 
+def _parse_excerpt_base_hashes(value: Any, mutation_paths: Sequence[str]) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or not value:
+        raise FanoutError("INVALID_EXCERPT_BASE_HASHES")
+    result: dict[str, str] = {}
+    for raw_path, raw_hash in value.items():
+        path = _safe_relative_path(raw_path)
+        digest = str(raw_hash or "").strip().lower()
+        if path not in mutation_paths or not _SHA256_RE.fullmatch(digest) or path in result:
+            raise FanoutError("INVALID_EXCERPT_BASE_HASHES")
+        result[path] = digest
+    return dict(sorted(result.items()))
+
+
+def _verify_excerpt_base_hashes(root: Path, unit: "ExecutionUnit") -> None:
+    """Refuse when a file the semantic stage saw only as an excerpt is not, at
+    the unit's base revision, the exact whole file the excerpt's evidence ref
+    was minted from (#2357)."""
+    for path, expected in (unit.excerpt_base_hashes or {}).items():
+        blob = _git_blob_bytes(root, unit.expected_base_sha, path)
+        if blob is None or _sha256(blob) != expected:
+            raise FanoutError("EXCERPT_BASE_FILE_HASH_MISMATCH")
+
+
 @dataclass(frozen=True)
 class ExecutionUnit:
     task_id: str
@@ -266,6 +291,10 @@ class ExecutionUnit:
     # Deliberately excluded from identity(): unit identity, attempts and receipts of
     # unbound dispatch stay byte-identical; the minted binding pins this authority.
     core_authority: Mapping[str, Any] | None = field(default=None, compare=False, hash=False)
+    # Whole-file sha256 at expected_base_sha of each mutation path the semantic
+    # stage saw only as a symbol excerpt (#2357). Part of identity() only when set,
+    # so units without excerpts keep their existing identity byte-for-byte.
+    excerpt_base_hashes: Mapping[str, str] | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionUnit":
@@ -287,6 +316,9 @@ class ExecutionUnit:
         priority = value.get("priority", 0)
         if not isinstance(priority, int):
             raise FanoutError("INVALID_PRIORITY")
+        excerpt_base_hashes = _parse_excerpt_base_hashes(
+            value.get("excerpt_base_hashes"), mutation_paths
+        )
         selected_worker_raw = value.get("selected_worker")
         if selected_worker_raw is not None:
             try:
@@ -321,6 +353,7 @@ class ExecutionUnit:
             core_authority=dict(value["core_authority"])
             if isinstance(value.get("core_authority"), Mapping)
             else None,
+            excerpt_base_hashes=excerpt_base_hashes,
         )
 
     def identity(self) -> dict[str, Any]:
@@ -339,6 +372,8 @@ class ExecutionUnit:
         }
         if self.selected_worker is not None:
             result["selected_worker"] = dict(self.selected_worker)
+        if self.excerpt_base_hashes:
+            result["excerpt_base_hashes"] = dict(sorted(self.excerpt_base_hashes.items()))
         return result
 
     @property
@@ -560,6 +595,7 @@ class GitWorktreeAllocator:
         dirty = _run_git(path, "status", "--porcelain=v1")
         if observed != unit.expected_base_sha or dirty:
             raise FanoutError("WORKSPACE_FRESHNESS_FAILED")
+        _verify_excerpt_base_hashes(path, unit)
         return WorkspaceLease(workspace_id=workspace_id, path=str(path), expected_base_sha=observed)
 
 
@@ -1811,6 +1847,7 @@ def _capture_candidate(
     observed_head = _run_git(root, "rev-parse", "HEAD")
     if observed_head != expected_head:
         raise FanoutError("WORKER_COMMIT_FORBIDDEN")
+    _verify_excerpt_base_hashes(root, unit)
     changed = _changed_paths(root, expected_head)
     if not changed:
         raise FanoutError("EMPTY_IMPLEMENTATION_RESULT")
@@ -3034,6 +3071,7 @@ class AdaptiveWorkerFanoutRuntime:
             "selected_worker": previous_receipt.get("selected_worker"),
             "provider": previous_receipt.get("provider", PROVIDER),
             "model": previous_receipt.get("model", MODEL),
+            "excerpt_base_hashes": previous_receipt.get("excerpt_base_hashes"),
         })
         if worker["status"] == "BLOCKED":
             receipt = self._build_receipt(
@@ -3139,6 +3177,10 @@ class AdaptiveWorkerFanoutRuntime:
         }
         if unit.selected_worker is not None:
             receipt["selected_worker"] = dict(unit.selected_worker)
+        if unit.excerpt_base_hashes:
+            # Only when set, so receipts of units without excerpts stay byte-identical;
+            # repair rebuilds the unit from this receipt and re-checks the base (#2357).
+            receipt["excerpt_base_hashes"] = dict(sorted(unit.excerpt_base_hashes.items()))
         if _attempt_core_hashes(attempt) is not None:
             # The receipt's envelope_sha256 stays the semantic identity; the bound
             # envelope and the runtime-attested Core identity are added alongside.

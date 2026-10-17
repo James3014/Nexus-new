@@ -15,6 +15,7 @@ from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
     build_canonical_planner_admission,
 )
+from nexus.services.eia_source_excerpt import ExcerptError, validate_symbol_names
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
@@ -253,6 +254,29 @@ def _validate_verifier_specs(specs: Any, field: str) -> None:
             raise AutomationError(f"ISSUE_CONTRACT_{field}_UNSCOPED_GIT_DIFF")
 
 
+def _validate_excerpt_symbols(value: Any, mutation_paths: set[str]) -> dict[str, list[str]]:
+    """Optional per-unit symbol scope ``{path: [names]}`` for oversized .py sources (#2357).
+
+    Each path must be one of the unit's own mutation paths; names are top-level
+    symbols or ``Class.method``.  Absent → oversized sources keep failing closed.
+    """
+    if not isinstance(value, dict) or not value:
+        raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID")
+    result: dict[str, list[str]] = {}
+    for path, names in value.items():
+        try:
+            norm = _validate_relative_path(path)
+        except AutomationError as exc:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID") from exc
+        if norm not in mutation_paths or not norm.endswith(".py") or norm in result:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID")
+        try:
+            result[norm] = validate_symbol_names(names)
+        except ExcerptError as exc:
+            raise AutomationError("ISSUE_CONTRACT_UNIT_EXCERPT_SYMBOLS_INVALID") from exc
+    return result
+
+
 def parse_issue_contract(body: str) -> dict[str, Any]:
     matches = FENCE_RE.findall(body or "")
     if len(matches) != 1:
@@ -309,6 +333,7 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             "priority",
             "allow_deletions",
             "selected_worker",
+            "excerpt_symbols",
         }
         if set(unit) - allowed_unit:
             raise AutomationError("ISSUE_CONTRACT_UNIT_KEYS_INVALID")
@@ -325,6 +350,10 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             if normalized in normalized_paths:
                 raise AutomationError("ISSUE_CONTRACT_MUTATION_PATHS_INVALID")
             normalized_paths.add(normalized)
+        if "excerpt_symbols" in unit:
+            unit["excerpt_symbols"] = _validate_excerpt_symbols(
+                unit["excerpt_symbols"], normalized_paths
+            )
         for key in ("dependencies_ready", "allow_deletions"):
             if key in unit and not isinstance(unit[key], bool):
                 raise AutomationError(f"ISSUE_CONTRACT_UNIT_{key.upper()}_INVALID")
@@ -408,7 +437,7 @@ def compute_publication_id(
 
 
 _REASON_CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
-_REASON_DETAIL_KEYS = ("kind", "ref", "source_bytes", "remaining_bytes", "max_bytes")
+_REASON_DETAIL_KEYS = ("kind", "ref", "source_bytes", "remaining_bytes", "max_bytes", "reason")
 
 
 def _error_reason_fields(exc: BaseException) -> dict[str, Any]:
@@ -760,21 +789,27 @@ class ExternalIntelligenceAutomation:
         ]
 
         seen_paths: set[str] = set()
+        excerpt_scope: dict[str, set[str]] = {}
         for unit in item.contract.get("execution_units", []):
             for path in unit.get("mutation_paths", []):
                 norm = _validate_relative_path(path)
                 if norm not in seen_paths:
                     seen_paths.add(norm)
+            for path, names in (unit.get("excerpt_symbols") or {}).items():
+                excerpt_scope.setdefault(_validate_relative_path(path), set()).update(names)
 
         for path in sorted(seen_paths):
             exists, content = self._read_git_blob(main_sha, path)
-            sources.append({
+            source: dict[str, Any] = {
                 "kind": "source_file" if exists else "source_absence",
                 "ref": path,
                 "revision": main_sha,
                 "provenance": f"git:{main_sha}",
                 "content": content,
-            })
+            }
+            if exists and path in excerpt_scope:
+                source["excerpt_symbols"] = sorted(excerpt_scope[path])
+            sources.append(source)
 
         verifier_paths = self._extract_verifier_paths(item.contract)
         for path in sorted(verifier_paths):
@@ -927,8 +962,36 @@ class ExternalIntelligenceAutomation:
         except ExternalIntelligenceError as exc:
             raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
+    def _excerpt_base_hashes(
+        self,
+        item: IssueWorkItem,
+        task_card_text: str,
+        intelligence: Mapping[str, Any],
+    ) -> dict[str, str]:
+        """Whole-file sha256 of every contract source the pack carried as an excerpt.
+
+        The rebuilt pack must be the one the semantic request was bound to;
+        otherwise the hashes could describe a different pack (fail closed).
+        """
+        pack = build_context_pack(self._sources(item, task_card_text))
+        hashes = {
+            str(entry["ref"]): str(entry["source_sha256"])
+            for entry in pack["entries"]
+            if entry.get("kind") == "source_file" and "excerpt" in entry
+        }
+        if hashes:
+            request = intelligence.get("request")
+            bound = request.get("context_pack_sha256") if isinstance(request, Mapping) else None
+            if not bound or bound != pack["context_pack_sha256"]:
+                raise AutomationError("EXCERPT_CONTEXT_PACK_MISMATCH")
+        return hashes
+
     def _c_units(
-        self, item: IssueWorkItem, intelligence: Mapping[str, Any]
+        self,
+        item: IssueWorkItem,
+        intelligence: Mapping[str, Any],
+        *,
+        excerpt_base_hashes: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         request = intelligence.get("request")
         if not isinstance(request, Mapping):
@@ -960,6 +1023,14 @@ class ExternalIntelligenceAutomation:
             }
             if unit_worker:
                 unit_data["selected_worker"] = dict(unit_worker)
+            unit_excerpts = {
+                path: digest
+                for path, digest in (excerpt_base_hashes or {}).items()
+                if path in unit["mutation_paths"]
+            }
+            if unit_excerpts:
+                # Fanout refuses dispatch/Candidate when the base file differs (#2357).
+                unit_data["excerpt_base_hashes"] = unit_excerpts
             if core_authority is not None:
                 # Authority inputs only; fanout mints the per-attempt Core binding.
                 # Not part of unit identity, so existing attempts/receipts are unchanged.
@@ -1175,7 +1246,11 @@ class ExternalIntelligenceAutomation:
         return {
             "status": "COMPLETED",
             "receipt_id": str(receipt.get("receipt_id") or ""),
-            "request": {"request_sha256": str(request["request_sha256"])},
+            "request": {
+                "request_sha256": str(request["request_sha256"]),
+                # Lets resume bind excerpt base hashes to this exact pack (#2357).
+                "context_pack_sha256": str(context_pack["context_pack_sha256"]),
+            },
             "envelope_sha256": envelope_sha,
         }
 
@@ -1370,7 +1445,11 @@ class ExternalIntelligenceAutomation:
                 **completed_state,
             )
 
-            units = self._c_units(item, intelligence)
+            units = self._c_units(
+                item,
+                intelligence,
+                excerpt_base_hashes=self._excerpt_base_hashes(item, task_card_text, intelligence),
+            )
             if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
                 return self.state_store.save(
                     item,
