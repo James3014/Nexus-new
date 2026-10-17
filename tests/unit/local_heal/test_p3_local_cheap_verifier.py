@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import json
-import pytest
-from nexus.services.local_heal.p3_local_cheap_verifier import (
-    P3LocalCheapVerifierResult,
-    compute_p3_cheap_verifier,
-    p3_cheap_verifier_to_dict,
-)
+import importlib.util
 
 
 def _make_cloud_stub_with_candidate():
@@ -32,11 +26,10 @@ def _make_cloud_stub_without_candidate():
 # ============================================================
 
 
-def test_candidate_available_plans_cheap_verifier():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.cheap_verifier_planned is True
-    assert result.cheap_verifier_result == "not_run_shadow_only"
-    assert result.full_verifier_required is True
+def test_candidate_available_plans_cheap_verifier() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -44,11 +37,10 @@ def test_candidate_available_plans_cheap_verifier():
 # ============================================================
 
 
-def test_missing_candidate_blocks_cheap_verifier():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_without_candidate())
-    assert result.cheap_verifier_planned is False
-    assert result.cheap_verifier_result == "not_applicable"
-    assert "no_candidate_available" in result.reason
+def test_missing_candidate_blocks_cheap_verifier() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -56,11 +48,10 @@ def test_missing_candidate_blocks_cheap_verifier():
 # ============================================================
 
 
-def test_cheap_verifier_invoked_always_false():
-    for has_candidate in (True, False):
-        stub = _make_cloud_stub_with_candidate() if has_candidate else _make_cloud_stub_without_candidate()
-        result = compute_p3_cheap_verifier(cloud_stub_metadata=stub)
-        assert result.cheap_verifier_invoked is False
+def test_cheap_verifier_invoked_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -68,9 +59,10 @@ def test_cheap_verifier_invoked_always_false():
 # ============================================================
 
 
-def test_full_verifier_required_always_true():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.full_verifier_required is True
+def test_full_verifier_required_always_true() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -78,9 +70,10 @@ def test_full_verifier_required_always_true():
 # ============================================================
 
 
-def test_claim_gate_required_always_true():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.claim_gate_required is True
+def test_claim_gate_required_always_true() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -88,9 +81,10 @@ def test_claim_gate_required_always_true():
 # ============================================================
 
 
-def test_solved_claim_allowed_always_false():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.solved_claim_allowed is False
+def test_solved_claim_allowed_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -98,9 +92,10 @@ def test_solved_claim_allowed_always_false():
 # ============================================================
 
 
-def test_public_claim_allowed_always_false():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.public_claim_allowed is False
+def test_public_claim_allowed_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -108,9 +103,10 @@ def test_public_claim_allowed_always_false():
 # ============================================================
 
 
-def test_runtime_behavior_changed_always_false():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    assert result.runtime_behavior_changed is False
+def test_runtime_behavior_changed_always_false() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -118,13 +114,10 @@ def test_runtime_behavior_changed_always_false():
 # ============================================================
 
 
-def test_metadata_json_serializable():
-    result = compute_p3_cheap_verifier(cloud_stub_metadata=_make_cloud_stub_with_candidate())
-    meta = p3_cheap_verifier_to_dict(result)
-    serialized = json.dumps(meta)
-    assert isinstance(serialized, str)
-    deserialized = json.loads(serialized)
-    assert deserialized["p3_cheap_verifier_full_verifier_required"] is True
+def test_metadata_json_serializable() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_local_cheap_verifier") is None
 
 
 # ============================================================
@@ -132,13 +125,10 @@ def test_metadata_json_serializable():
 # ============================================================
 
 
-def test_p3_c_still_works():
-    from nexus.services.local_heal.p3_cloud_candidate_stub import compute_cloud_candidate_stub
-    stub = compute_cloud_candidate_stub(
-        diagnosis_metadata={"p3_diagnosis_cloud_ready": True, "p3_diagnosis_compact_prompt_hash": "h"},
-    )
-    assert stub.cloud_call_planned is True
-    assert stub.cloud_call_invoked is False
+def test_p3_c_still_works() -> None:
+    # Retired in #2514 (ARCHIVED_2026-10-17_deadcode_b2.md): the case keeps its id and
+    # asserts the module it exercised is gone.
+    assert importlib.util.find_spec("nexus.services.local_heal.p3_cloud_candidate_stub") is None
 
 
 # ============================================================
