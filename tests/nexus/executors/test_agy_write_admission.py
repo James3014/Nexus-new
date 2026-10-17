@@ -2115,28 +2115,58 @@ def test_worker_receipt_records_the_keychain_state(monkeypatch, tmp_path, agy_ho
     )
 
 
+def _bench_pool_account(tmp_path, monkeypatch, account_home: Path | None = None) -> Path:
+    """#2528: the bench agy arm runs on a leased pool account through the adapter.
+
+    Installs a one-account in-memory pool (with an OAuth token) and a tmp
+    canonical checkout; returns the account HOME the run HOME is built from.
+    """
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    home = (account_home or (tmp_path / "pool-account")).resolve()
+    token = home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("token", encoding="utf-8")
+    (token.parent / "installation_id").write_text("acc", encoding="utf-8")
+    pool = AgyAccountPoolManager([AgyAccount(alias="acc", home_dir=str(home))])
+    manager = tmp_path / "pool-bin" / "agy-cli-manager"
+    manager.parent.mkdir(parents=True)
+    manager.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_MANAGER_PATH", str(manager))
+    monkeypatch.setenv("NEXUS_AGY_LEASES_DIR", str(tmp_path / "leases"))
+    monkeypatch.setenv("NEXUS_AGY_ALLOCATOR_LOCK_PATH", str(tmp_path / "allocator.lock"))
+    monkeypatch.delenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", raising=False)
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.services.agy_account_pool.get_account_pool_manager", lambda: pool)
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    monkeypatch.setattr(
+        "nexus.orchestrator.canonical_source_root.CANONICAL_SOURCE_ROOT", _repo(tmp_path)
+    )
+    return home
+
+
 def test_bench_runner_refuses_when_the_run_home_cannot_be_materialized(tmp_path, monkeypatch):
     from scripts.bench import real_world_task_runner as runner
 
-    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
+    _bench_pool_account(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        admission,
-        "materialize_run_home",
+        "nexus.executors.worker_registry.materialize_run_home",
         lambda *a, **k: (admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE, ""),
     )
     monkeypatch.setattr(
-        "nexus.executors.cli_worker.run_cli_worker",
+        "nexus.executors.worker_registry.run_cli_worker",
         lambda *a, **k: pytest.fail("must not start agy"),
     )
     monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
     )
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
-    assert row["error"] == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
+    assert row["agy_failure_reason"] == admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE
+    assert row["error"].endswith(admission.AGY_RUN_HOME_KEYCHAIN_UNAVAILABLE)
     assert row["model_calls"] == 0 and row["written_files"] == []
 
 
@@ -2308,46 +2338,42 @@ def test_seatbelt_profile_denies_symlinks_inside_credential_directories(tmp_path
 def test_bench_runner_refuses_a_target_inside_a_credential_path(tmp_path, monkeypatch):
     from scripts.bench import real_world_task_runner as runner
 
-    fake_home = (tmp_path / "bench-home").resolve()
-    case_dir = fake_home / ".codex" / "case"
+    # #2528: the credential paths are the leased pool account's HOME.
+    account_home = _bench_pool_account(tmp_path, monkeypatch, tmp_path / "bench-home")
+    case_dir = account_home / ".codex" / "case"
     case_dir.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(fake_home))
-    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
-    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
     monkeypatch.setattr(
-        "nexus.executors.cli_worker.run_cli_worker",
+        "nexus.executors.worker_registry.run_cli_worker",
         lambda *a, **k: pytest.fail("must not start agy"),
     )
     monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     task = SimpleNamespace(
-        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
     )
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
-    assert row["error"] == "agy_target_inside_credential_path"
+    assert row["agy_failure_reason"] == "agy_target_inside_credential_path"
     assert row["model_calls"] == 0
 
 
 def test_bench_runner_reports_an_unrepresentable_profile_as_a_typed_error(tmp_path, monkeypatch):
     from scripts.bench import real_world_task_runner as runner
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
-    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
+    _bench_pool_account(tmp_path, monkeypatch)
 
     def unrepresentable(**kwargs):
         raise ValueError("path not representable in a Seatbelt profile")
 
-    monkeypatch.setattr(admission, "build_seatbelt_profile", unrepresentable)
+    monkeypatch.setattr("nexus.executors.worker_registry.build_seatbelt_profile", unrepresentable)
     monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
     )
     row = runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
-    assert row["error"] == "agy_seatbelt_profile_unrepresentable"
+    assert row["agy_failure_reason"] == "agy_seatbelt_profile_unrepresentable"
 
 
 def test_agy_adapter_refuses_a_read_only_target_inside_a_credential_path(
@@ -2394,28 +2420,29 @@ def test_agy_adapter_passes_source_home_to_the_seatbelt_profile(monkeypatch, tmp
 def test_bench_runner_passes_source_home_to_the_seatbelt_profile(tmp_path, monkeypatch):
     from scripts.bench import real_world_task_runner as runner
 
+    # #2528: the source HOME is the leased pool account, never the default HOME.
     fake_home = (tmp_path / "bench-home").resolve()
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
+    account_home = _bench_pool_account(tmp_path, monkeypatch)
     seen: list = []
 
     def spy(**kwargs):
         seen.append(kwargs)
         raise RuntimeError("profile spy: stop before launching agy")
 
-    monkeypatch.setattr(admission, "seatbelt_available", lambda: True)
-    monkeypatch.setattr(admission, "materialize_run_home", lambda *a, **k: (None, ""))
-    monkeypatch.setattr(admission, "build_seatbelt_profile", spy)
+    monkeypatch.setattr("nexus.executors.worker_registry.build_seatbelt_profile", spy)
     monkeypatch.setattr(runner, "_resolve_gemini_bin", lambda: "/opt/homebrew/bin/agy")
     monkeypatch.setattr(runner, "_build_gemini_prompt", lambda *a, **k: "prompt")
     case_dir = tmp_path / "case"
     case_dir.mkdir()
     task = SimpleNamespace(
-        task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
+        id="t", task_id="t", prompt="p", visible_tests=[], files=[], root_cause="", target_file="x.py"
     )
     with pytest.raises(RuntimeError, match="profile spy"):
         runner._run_gemini_patch(case_dir, task, mode="with_nexus", timeout_sec=5, model="agy")
-    assert seen[0]["source_home"] == fake_home
+    assert seen[0]["source_home"] == account_home
+    assert seen[0]["source_home"] != fake_home
 
 
 # Opt-in: defined (so collected) only when NEXUS_LOCAL_PHYSICAL_WITNESS=1, never in CI.

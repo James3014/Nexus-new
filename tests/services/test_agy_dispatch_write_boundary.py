@@ -1086,7 +1086,8 @@ READ_ONLY_PROBE = "read-only probe"
 # Every file whose source carries an Agy argv shape, with its classification.
 AGY_LAUNCHERS: dict[str, tuple[str, str]] = {
     "nexus/executors/worker_registry.py": (WRAPPED_CLI_WORKER, "#1912 production adapter"),
-    "scripts/bench/real_world_task_runner.py": (WRAPPED_CLI_WORKER, "#1912 bench agy arm"),
+    # scripts/bench/real_world_task_runner.py: no own launcher since #2528; its
+    # agy arm runs through worker_registry.AgyWorkerAdapter (listed above).
     "scripts/ops/nexus-agy-dispatch": (WRAPPED_DISPATCH, "#2202 accept-edits runs"),
     "nexus/orchestrator/unified_mcp_gateway.py": (PLAN_ONLY, "#2202 gateway, --sandbox"),
     "scripts/ops/unified_runtime_scenarios.py": (PLAN_ONLY, "#2202 scenarios, --sandbox"),
