@@ -87,3 +87,28 @@ After the task runs, the durable receipt
 coverage entries, `blocking`, `coverage_complete` and `core_provenance`. A
 `core_provenance.status` of `CORE_REVISION_PINNED` means the verdict came from
 the pinned Core revision.
+
+### Which universe identity to compare
+
+The verdict (`verified_receipt.core_verdict`, and
+`terminal_core_record.core_verdict` for a declared task that ended without a
+Candidate, #2355) carries two identities with similar names. They use
+different formulas:
+
+| Field | Formula | Compare with |
+| --- | --- | --- |
+| `core_universe_identity` | the card universe under Core's `expected_universe_identity()` | `coverage.universe_identity` (must be equal) |
+| `contract_universe_identity` | the Nexus contract hash of the same declaration (`SelfHostedTaskContract.universe_identity`, also called `expected_evidence_identity`) | nothing from Core |
+
+`contract_universe_identity` always differs from `coverage.universe_identity`
+**by design**. That difference is not a mismatch. Never block or keep an Issue
+open because of it.
+
+Read `core_universe_identity_matches` instead (#2451). The host computes it as
+`core_universe_identity == coverage.universe_identity`:
+
+- `true`: Core's coverage is bound to exactly the declared universe;
+- `false`: the identities differ, or one side is missing (Core unavailable,
+  no coverage). The verdict then also blocks with a host reason such as
+  `CORE_COVERAGE_IDENTITY_MISMATCH`;
+- `null`: a legacy task with no declared universe.

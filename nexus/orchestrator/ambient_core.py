@@ -313,6 +313,13 @@ def build_core_verdict(
     ):
         host_reasons.append("CORE_RESPONSE_UNIVERSE_IDENTITY_MISMATCH")
     blocking = bool(host_reasons)
+    # The one comparison that must hold (#2451): the card universe under Core's
+    # formula against the identity Core's coverage carries. None for a legacy
+    # task, which declares no universe; False whenever either side is missing.
+    coverage_identity = coverage.get("universe_identity") if isinstance(coverage, Mapping) else None
+    identity_matches = (
+        (card_identity is not None and coverage_identity == card_identity) if declared else None
+    )
     return {
         "schema": CORE_VERDICT_SCHEMA,
         "core_status": core_status,
@@ -328,6 +335,9 @@ def build_core_verdict(
             getattr(contract, "universe_identity", None) if declared else None
         ),
         "core_universe_identity": card_identity,
+        # contract_universe_identity uses the Nexus contract formula and never
+        # equals either Core identity; read this flag, not that comparison.
+        "core_universe_identity_matches": identity_matches,
         # Coverage is claimed only for a declared universe, never for legacy.
         "coverage": coverage if declared else None,
         "coverage_complete": bool(declared and not blocking),
