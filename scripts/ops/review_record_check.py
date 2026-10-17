@@ -69,6 +69,11 @@ HIGH_RISK_PREFIXES = (
     "scripts/ci/",
     "nexus/orchestrator/governed_integration.py",
     "nexus/orchestrator/self_hosted_task_service.py",
+    # Big-file split surfaces (#2473): the original module and its _parts package only;
+    # near-miss siblings such as unified_mcp_gateway_helpers.py stay low-risk.
+    "nexus/orchestrator/self_hosted_task_service_parts/",
+    "nexus/orchestrator/unified_mcp_gateway.py",
+    "nexus/orchestrator/unified_mcp_gateway_parts/",
     "nexus/orchestrator/target_integration_lifecycle.py",
     "nexus/governance/",
 )
