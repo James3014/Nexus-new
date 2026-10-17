@@ -6558,7 +6558,12 @@ def _park_api(
             number = int(tail)
             if number not in (mergeable or {}):
                 raise ad.DeployError("GH_API_FAILED:404")
-            return {"number": number, "mergeable_state": (mergeable or {})[number]}
+            listed = next((p for p in pulls if p["number"] == number), {})
+            return {
+                "number": number,
+                "head": {"sha": (listed.get("head") or {}).get("sha")},
+                "mergeable_state": (mergeable or {})[number],
+            }
         return base(path)
 
     return get
@@ -6978,3 +6983,59 @@ def test_this_deployer_keeps_check_tables_as_literals_the_reader_parses() -> Non
     assert known == list(ad.REQUIRED_CHECKS) + sorted(
         set(ad.PR_HEAD_STATUS_CONTEXTS) - set(ad.REQUIRED_CHECKS)
     )
+
+
+def test_dirty_detail_for_an_older_head_does_not_park_the_new_head(cfg: ad.Config) -> None:
+    """A lagging PR detail (dirty at the old head) must not park the listed new head."""
+    pr = _pin_pr(PARK_PR, draft=False)
+    pr["head"] = {**pr["head"], "sha": "e" * 40}
+    base = green_api(open_pulls=[pr])
+
+    def api(path: str) -> Any:
+        if path.endswith(f"/pulls/{PARK_PR}"):
+            return {"number": PARK_PR, "head": {"sha": PARK_HEAD}, "mergeable_state": "dirty"}
+        return base(path)
+
+    pins = _pins(cfg, api, NOW)
+    assert pins["verdict"] == "IN_FLIGHT" and pins["ignored_parked"] == []
+    # Positive control: the same dirty detail for the listed head parks it.
+    pr["head"] = {**pr["head"], "sha": PARK_HEAD}
+    assert _pins(cfg, api, NOW)["ignored_parked"] == [PARK_PR]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["2h", "\u00b2", "\u0663\u0666\u0660\u0660", "abc", "59", "0"],
+    ids=["unit-suffix", "superscript-two", "arabic-indic-3600", "letters", "below-minimum", "zero"],
+)
+def test_invalid_park_env_falls_back_and_warns(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch, bad: str
+) -> None:
+    monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, bad)
+    loaded = ad.Config.default(cfg.state_dir.parents[2])
+    assert loaded.pin_bump_park_seconds == ad.PIN_BUMP_PARK_SECONDS
+    assert loaded.pin_bump_park_env_invalid is True
+    with pytest.raises(argparse.ArgumentTypeError):
+        ad._park_seconds_arg(bad)
+    flagged = dataclasses.replace(cfg, pin_bump_park_env_invalid=True)
+    api = _park_api([_pin_pr(9, draft=True)])
+    result = cycle(flagged, FakeHost(), FakeProber(), api)
+    assert result["status"] == "DEPLOYED"
+    assert "PIN_PARK_SECONDS_INVALID" in result["warnings"]
+    assert "PIN_PARK_SECONDS_INVALID" in result["receipt"]["warnings"]
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert "PIN_PARK_SECONDS_INVALID" in status["warnings"]
+
+
+def test_valid_or_unset_park_env_does_not_warn(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control for the invalid-env warning."""
+    for value in (None, "", "120"):
+        if value is None:
+            monkeypatch.delenv(ad.PIN_BUMP_PARK_ENV, raising=False)
+        else:
+            monkeypatch.setenv(ad.PIN_BUMP_PARK_ENV, value)
+        assert ad.Config.default(cfg.state_dir.parents[2]).pin_bump_park_env_invalid is False
+    result = cycle(cfg, FakeHost(), FakeProber(), _park_api([_pin_pr(9, draft=True)]))
+    assert "PIN_PARK_SECONDS_INVALID" not in result.get("warnings", [])

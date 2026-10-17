@@ -439,7 +439,7 @@ RECONCILE_FAILED_HOLD = "auto-hold: RECONCILE_FAILED"
 def _park_seconds_or_none(value: Any) -> Optional[int]:
     """A park threshold override in whole seconds (>= the minimum), else None."""
     text = str(value).strip()
-    if not text.isdigit():
+    if not (text.isascii() and text.isdigit()):
         return None
     seconds = int(text)
     return seconds if seconds >= PIN_BUMP_PARK_MIN_SECONDS else None
@@ -464,6 +464,8 @@ class Config:
     quiescence_warn_after_seconds: int = QUIESCENCE_WARN_AFTER_SECONDS
     alert_issue: int = QUIESCENCE_ALERT_ISSUE
     pin_bump_park_seconds: int = PIN_BUMP_PARK_SECONDS
+    # True when PIN_BUMP_PARK_ENV is set but invalid (the default is used and warned).
+    pin_bump_park_env_invalid: bool = False
 
     @classmethod
     def default(cls, home: Optional[Path] = None, **overrides: Any) -> "Config":
@@ -480,9 +482,13 @@ class Config:
             "env_file": support / "mcp-gateway.env",
             "canonical_state_dir": home / ".local/state/Nexus-new-self-hosted-state",
         }
-        park = _park_seconds_or_none(os.environ.get(PIN_BUMP_PARK_ENV, ""))
-        if park is not None:
-            values["pin_bump_park_seconds"] = park
+        raw_park = os.environ.get(PIN_BUMP_PARK_ENV)
+        if raw_park is not None and raw_park.strip():
+            park = _park_seconds_or_none(raw_park)
+            if park is None:
+                values["pin_bump_park_env_invalid"] = True
+            else:
+                values["pin_bump_park_seconds"] = park
         values.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**values)
 
@@ -1361,16 +1367,21 @@ def _first_seen(entry: Any, head: str, now: float) -> float:
     return seen
 
 
-def _mergeable_state(api_get: Callable[[str], Any], repo: str, number: int) -> Optional[str]:
-    """GitHub's ``mergeable_state`` of one PR, or None when it cannot be read.
+def _mergeable_state(
+    api_get: Callable[[str], Any], repo: str, number: int, head: str
+) -> Optional[str]:
+    """GitHub's ``mergeable_state`` of one PR at ``head``, or None when it cannot be read.
 
-    Only ``dirty`` parks a PR; None (unreadable, still computing) keeps it blocking.
+    Only ``dirty`` parks a PR; None (unreadable, still computing, or a detail
+    response for a different head than the listed one) keeps it blocking.
     """
     try:
         pr = api_get(f"repos/{repo}/pulls/{int(number)}")
     except Exception:  # noqa: BLE001 - unknown mergeability keeps the PR blocking
         return None
-    state = pr.get("mergeable_state") if isinstance(pr, dict) else None
+    if not isinstance(pr, dict) or (pr.get("head") or {}).get("sha") != head:
+        return None
+    state = pr.get("mergeable_state")
     return state if isinstance(state, str) else None
 
 
@@ -1437,7 +1448,7 @@ def pin_bumps_in_flight(
                     kept["commented_head"] = head
             current[str(number)] = kept
             reason: Optional[str] = None
-            if _mergeable_state(api_get, repo, number) == "dirty":
+            if _mergeable_state(api_get, repo, number, head) == "dirty":
                 reason = PIN_PARK_REASON_DIRTY
             elif now - since > park_seconds:
                 reason = PIN_PARK_REASON_HELD
@@ -3225,7 +3236,7 @@ class _Cycle:
     def pin_bumps(self, *, record: bool) -> Dict[str, Any]:
         """``pin_bumps_in_flight`` with this deployer's park clock and threshold."""
         cfg = self.cfg
-        return pin_bumps_in_flight(
+        pins = pin_bumps_in_flight(
             self.api_get,
             repo=cfg.repository,
             now=self.host.now(),
@@ -3233,6 +3244,9 @@ class _Cycle:
             park_seconds=cfg.pin_bump_park_seconds,
             record=record,
         )
+        if cfg.pin_bump_park_env_invalid:
+            pins.setdefault("warnings", []).append("PIN_PARK_SECONDS_INVALID")
+        return pins
 
     def announce_parked(self, pins: Dict[str, Any]) -> None:
         """One comment per (PR, head) on a pin-bump PR when it first parks (#2309).
