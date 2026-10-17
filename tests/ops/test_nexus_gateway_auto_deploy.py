@@ -7332,3 +7332,51 @@ def test_prune_keeps_live_and_retained_rie_checkouts_only(cfg: ad.Config) -> Non
 def test_rie_deployer_change_leaves_required_checks_and_pin_files_alone() -> None:
     assert ad.RIE_PIN_FILE not in getattr(ad, "PIN_FILES", ())
     assert not any("rie" in name.lower() for name in ad.REQUIRED_CHECKS)
+
+
+def test_rie_assume_unchanged_edit_is_not_verified(cfg: ad.Config, tmp_path: Path) -> None:
+    """Codex r1: an edit hidden from `git status` by an index flag never exports."""
+    root = tmp_path / "candidate"
+    (root / ad.RIE_PIN_FILE).parent.mkdir(parents=True)
+    (root / ad.RIE_PIN_FILE).write_text(_rie_pin_source(RIE.pin))
+    checkout = Path(ad.materialize_rie(cfg, FakeHost(), RIE.pin)["root"])
+    for flag in ("--assume-unchanged", "--skip-worktree"):
+        cli = checkout / "repository_intelligence" / "cli.py"
+        _fixture_git(checkout, "update-index", flag, "repository_intelligence/cli.py")
+        cli.write_text("def main():\n    return 1\n")
+        assert _fixture_git(checkout, "status", "--porcelain", "--ignored") == ""
+        problem = ad.rie_checkout_problem(FakeHost(), checkout, RIE.pin)
+        assert problem is not None and problem.startswith("RIE_INDEX_FLAGGED")
+        _fixture_git(
+            checkout, "update-index", flag.replace("--", "--no-"), "repository_intelligence/cli.py"
+        )
+        _fixture_git(checkout, "checkout", "--", "repository_intelligence/cli.py")
+    # Not in use by the live wrapper: the next materialization rebuilds it clean.
+    _fixture_git(checkout, "update-index", "--assume-unchanged", "repository_intelligence/cli.py")
+    rebuilt = ad.rie_engine(cfg, FakeHost(), root, Path(sys.executable))
+    assert rebuilt["status"] == "VERIFIED", rebuilt
+    assert ad.rie_checkout_problem(FakeHost(), checkout, RIE.pin) is None
+
+
+def test_rie_fetch_never_waits_on_a_credential_prompt(cfg: ad.Config) -> None:
+    host = FakeHost()
+    ad.materialize_rie(cfg, host, RIE.pin)
+    fetches = [
+        e
+        for c, e in zip(host.calls, host.envs)
+        if "fetch" in c and "gateway-direct/rie" in " ".join(c)
+    ]
+    assert fetches and all((e or {}).get("GIT_TERMINAL_PROMPT") == "0" for e in fetches)
+
+
+def test_rie_prune_failure_never_fails_the_cycle(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> list[str]:
+        raise subprocess.TimeoutExpired(["git", "worktree", "remove"], 60)
+
+    monkeypatch.setattr(ad, "prune_rie", boom)
+    host, prober = FakeHost(), FakeProber()
+    host.rie_pin = RIE.pin
+    assert cycle(cfg, host, prober)["status"] == "DEPLOYED"
+    assert cycle(cfg, host, prober)["status"] == "IN_SYNC"

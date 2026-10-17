@@ -2268,6 +2268,13 @@ def rie_checkout_problem(host: Host, checkout: Path, revision: str) -> Optional[
         return f"RIE_HEAD_FAILED:{(head.stderr or '').strip()[:200]}"
     if head.stdout.strip() != revision:
         return f"RIE_HEAD_MISMATCH:{head.stdout.strip()}"
+    # assume-unchanged / skip-worktree entries hide local edits from `git status`.
+    flags = host.run(["git", "-C", str(checkout), "ls-files", "-v", "-z"], timeout=60)
+    if flags.returncode != 0:
+        return "RIE_LS_FILES_FAILED"
+    for entry in (flags.stdout or "").split("\0"):
+        if entry and not entry.startswith("H "):
+            return f"RIE_INDEX_FLAGGED:{entry[:200]}"
     status = host.run(
         [
             "git",
@@ -2342,7 +2349,14 @@ def materialize_rie(cfg: Config, host: Host, revision: str) -> Dict[str, Any]:
     if host.run(present, timeout=60).returncode != 0:
         refspec = "+refs/heads/*:refs/rie/heads/*"
         fetch = _rie_git(cfg, "fetch", "--quiet", "--no-tags", "origin", refspec)
-        _must(host, fetch, "RIE_FETCH_FAILED", timeout=RIE_FETCH_TIMEOUT_SECONDS)
+        # Never wait on a credential prompt: fail fast instead.
+        _must(
+            host,
+            fetch,
+            "RIE_FETCH_FAILED",
+            timeout=RIE_FETCH_TIMEOUT_SECONDS,
+            env={"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"},
+        )
         _must(host, present, "RIE_COMMIT_NOT_FOUND", timeout=60)
     checkout = cfg.rie_checkouts / revision
     if checkout.is_symlink():
@@ -2765,7 +2779,10 @@ def prune(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[str]
         if controller.exists() and not controller.is_symlink():
             shutil.rmtree(controller, ignore_errors=True)
     prune_core(cfg, host, protected)
-    prune_rie(cfg, host, protected)
+    try:
+        prune_rie(cfg, host, protected)
+    except Exception:  # noqa: BLE001 - RIE is advisory: disk cleanup never fails a cycle
+        pass
     return removed
 
 
@@ -2841,7 +2858,7 @@ def prune_rie(cfg: Config, host: Host, protected: List[Optional[Path]]) -> List[
             continue
         if child.resolve().parent != real_parent or child.name in pinned:
             continue
-        host.run(_rie_git(cfg, "worktree", "remove", "--force", str(child)), timeout=300)
+        host.run(_rie_git(cfg, "worktree", "remove", "--force", str(child)), timeout=60)
         if child.exists() and not child.is_symlink():
             shutil.rmtree(child, ignore_errors=True)
         removed.append(child.name)
