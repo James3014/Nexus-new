@@ -523,10 +523,10 @@ def _run_operation(
         except BaseException as exc:
             if proc is None and started_children and started_children[0].returncode is None:
                 # #2389 item 4: Popen raised after the fork and the child was not
-                # reaped, so it may be running. Treat it like a started provider.
+                # reaped, so it may be running. For every adapter: kill its group,
+                # never release, record OUTCOME_UNKNOWN.
                 proc = started_children[0]
-                if mark_pending is None:
-                    _kill_and_reap(proc)
+                return _fail_closed_after_start(exc)
             if proc is not None and mark_pending is not None:
                 return _fail_closed_after_start(exc)
             # No child exists (Popen never succeeded): known pre-effect failure.

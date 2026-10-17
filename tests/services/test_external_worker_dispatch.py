@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess
 import time
@@ -1018,3 +1019,84 @@ def test_claude_real_exec_failure_after_fork_is_pre_effect(
         assert get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32).lease_id
     finally:
         set_claude_account_pool_manager(None)
+
+
+def test_cline_exception_inside_popen_after_fork_is_unknown_not_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 4 (Codex r2): adapters without launch_pending never record FAILED/release."""
+
+    import hashlib
+
+    from nexus.services import external_worker_runtime as runtime
+
+    fake = tmp_path / "cline"
+    _fake_cline(fake)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", str(fake))
+    released: list[str] = []
+    original_get = runtime.get_account_adapter
+
+    def tracking_get(provider):
+        adapter = original_get(provider)
+        original_release = adapter.release
+
+        def tracking_release(binding):
+            released.append("release")
+            return original_release(binding)
+
+        adapter.release = tracking_release
+        return adapter
+
+    monkeypatch.setattr(dispatch, "get_account_adapter", tracking_get)
+    real_execute_child = subprocess.Popen._execute_child
+    forked: list[int] = []
+
+    def interrupted_after_fork(self, args, *rest, **kwargs):
+        real_execute_child(self, args, *rest, **kwargs)
+        if "--json" in list(args) and "--provider" in list(args):
+            forked.append(self.pid)
+            os.kill(self.pid, signal.SIGSTOP)  # keep the forked child alive and unreaped
+            raise _InterruptedDuringPopen()
+
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", interrupted_after_fork)
+    root = tmp_path / "ops"
+    journal = dispatch._journal("cline", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="cline",
+        model="cline-free/mimo-v2.6-flash",
+        effort="none",
+        prompt_sha256=hashlib.sha256(b"hello").hexdigest(),
+        runtime_revision=None,
+        initial_fields={"mode": "plan", "auto_approve": False, "require_free": True},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "hello")
+    code = dispatch._run_operation(
+        operation_id=operation_id,
+        provider="cline",
+        model="cline-free/mimo-v2.6-flash",
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=30,
+        require_free=True,
+        thinking="none",
+        operation_root=root,
+        heartbeat_interval=1.0,
+        outer_grace_seconds=1.0,
+    )
+    current = journal.read(operation_id)
+    assert (code, current["status"], current["failure_kind"]) == (
+        1,
+        "OUTCOME_UNKNOWN",
+        "PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME:_InterruptedDuringPopen",
+    )
+    assert released == []
+    (child_pid,) = forked
+    with pytest.raises(ProcessLookupError):
+        os.killpg(child_pid, 0)
