@@ -113,6 +113,10 @@ def _bind(
     monkeypatch.setattr(gateway_module, "CONTROLLER_IS_SEPARATE", separate)
     monkeypatch.setattr(gateway_module, "CONTROLLER_BINDING_PROBLEM", problem)
     monkeypatch.setattr(roots, "CONTROLLER_BINDING_PROBLEM", problem)
+    # The Gateway's start HEAD is the loaded deployment's HEAD (#2301).
+    monkeypatch.setattr(
+        gateway_module, "SERVER_REPO_HEAD_AT_START", _git(loaded, "rev-parse", "HEAD")
+    )
 
 
 def _call(gateway: UnifiedMCPGateway, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -301,7 +305,7 @@ def test_non_bootstrap_or_invalid_mode_still_requires_the_grant(tmp_path, monkey
 
 def test_mode_is_read_from_the_loaded_deployment_not_the_controller(tmp_path, monkeypatch):
     """A Controller cannot carry its own mode file: only tasks/ may change there."""
-    loaded, controller, _ = _make_pair(tmp_path, None)
+    loaded, controller, head0 = _make_pair(tmp_path, None)
     target = controller / baa.OPERATING_MODE_RELATIVE_PATH
     target.parent.mkdir(parents=True)
     target.write_text(_real_mode(), encoding="utf-8")
@@ -313,6 +317,7 @@ def test_mode_is_read_from_the_loaded_deployment_not_the_controller(tmp_path, mo
             AutonomyActionClass.TASK_CARD_CREATE,
             source_root=loaded,
             controller_binding={"status": "SEPARATE", "reason": None},
+            expected_source_head=head0,
         )
         is None
     )
@@ -422,6 +427,7 @@ def test_delegation_requires_exactly_a_clean_separate_binding(binding):
             AutonomyActionClass.TASK_CARD_CREATE,
             source_root=REPO_ROOT,
             controller_binding=binding,
+            expected_source_head="a" * 40,
         )
         is None
     )
@@ -678,3 +684,176 @@ def test_http_create_commit_worker_candidate_end_to_end_with_no_owner_step(tmp_p
     assert _git(loaded, "rev-parse", "HEAD") == head
     assert _git(controller, "rev-parse", "HEAD") == commit_payload["commit_sha"]
     shutil.rmtree(targets, ignore_errors=True)
+
+
+# --- #2301 hardening: start HEAD, hash chain, authority basis ------------------------
+
+SEPARATE = {"status": "SEPARATE", "reason": None}
+
+
+def _ctx(loaded: Path, head: Any):
+    return baa.delegation_context(
+        AutonomyActionClass.TASK_CARD_CREATE,
+        source_root=loaded,
+        controller_binding=SEPARATE,
+        expected_source_head=head,
+    )
+
+
+def test_delegation_requires_loaded_head_to_equal_the_start_head(tmp_path):
+    loaded, _, head = _make_pair(tmp_path, _real_mode())
+    assert _ctx(loaded, head) is not None
+    assert _ctx(loaded, "b" * 40) is None
+    for bad in (None, "", "unknown", head.upper(), head[:12]):
+        assert _ctx(loaded, bad) is None
+
+
+def test_head_moved_since_start_keeps_the_grant_path_over_the_gateway(tmp_path, monkeypatch):
+    loaded, controller, head = _make_pair(tmp_path, _real_mode())
+    _bind(monkeypatch, loaded, controller, separate=True)
+    # Loaded tree still says BOOTSTRAP at its own HEAD, but the process started elsewhere.
+    monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", "c" * 40)
+    result = _call(UnifiedMCPGateway(service=MagicMock()), "nexus_task_card_create", _create_args())
+    _assert_grant_required(result, tmp_path, controller)
+
+
+def test_unresolvable_source_root_falls_back_instead_of_raising(tmp_path, monkeypatch):
+    loaded, _, head = _make_pair(tmp_path, _real_mode())
+
+    def boom(self, *args, **kwargs):
+        raise OSError("resolve failed")
+
+    monkeypatch.setattr(Path, "resolve", boom)
+    assert baa._committed_blob(loaded, baa.OPERATING_MODE_RELATIVE_PATH.as_posix()) is None
+    assert _ctx(loaded, head) is None
+
+
+def _authorize(tmp_path: Path, n: int, goal: str = "g"):
+    key = UnifiedMCPGateway._owner_effect_key(AUTHORITY_ARGS)
+    loaded = tmp_path / "chain" / "deployments" / "a1-x"
+    if not loaded.exists():
+        _make_pair(tmp_path / "chain", _real_mode())
+    head = _git(loaded, "rev-parse", "HEAD")
+    context = _ctx(loaded, head)
+    assert context is not None
+    return baa.authorize_bootstrap_agent_effect(
+        repository=gateway_module.GITHUB_REPOSITORY,
+        action=AutonomyActionClass.TASK_CARD_CREATE,
+        effect={"campaign_id": f"c{n}", "task_id": "t", "allowed_files": ["README.md"]},
+        key=key,
+        context=context,
+        record_directory=tmp_path / "authority",
+    )
+
+
+def test_records_form_a_hash_chain_from_genesis(tmp_path):
+    for n in range(3):
+        _authorize(tmp_path, n)
+    records = _records(tmp_path)
+    assert records[0]["prev_record_hash"] == baa.GENESIS_PREV_RECORD_HASH
+    assert records[1]["prev_record_hash"] == records[0]["record_hash"]
+    assert records[2]["prev_record_hash"] == records[1]["record_hash"]
+    for record in records:
+        body = {k: v for k, v in record.items() if k != "record_hash"}
+        assert record["record_hash"] == sg_store.canonical_autonomy_hash(body)
+
+
+def _rewrite(tmp_path: Path, records: list[dict[str, Any]]) -> None:
+    path = tmp_path / "authority" / baa.RECORD_FILENAME
+    path.write_text(
+        "".join(json.dumps(r, sort_keys=True) + "\n" for r in records), encoding="utf-8"
+    )
+
+
+def test_tampered_record_refuses_further_agent_authority(tmp_path):
+    for n in range(2):
+        _authorize(tmp_path, n)
+    records = _records(tmp_path)
+    records[0]["actor"] = "OWNER"  # edit without re-hashing
+    _rewrite(tmp_path, records)
+    with pytest.raises(baa.BootstrapAgentAuthorityError, match="CHAIN_BROKEN"):
+        _authorize(tmp_path, 9)
+    assert len(_records(tmp_path)) == 2
+
+
+def test_removed_middle_record_breaks_the_chain(tmp_path):
+    for n in range(3):
+        _authorize(tmp_path, n)
+    records = _records(tmp_path)
+    _rewrite(tmp_path, [records[0], records[2]])
+    with pytest.raises(baa.BootstrapAgentAuthorityError, match="LINK_MISMATCH"):
+        _authorize(tmp_path, 9)
+
+
+def test_garbage_line_breaks_the_chain(tmp_path):
+    _authorize(tmp_path, 0)
+    path = tmp_path / "authority" / baa.RECORD_FILENAME
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+    with pytest.raises(baa.BootstrapAgentAuthorityError, match="UNPARSEABLE_RECORD"):
+        _authorize(tmp_path, 1)
+
+
+def _legacy(record: dict[str, Any]) -> dict[str, Any]:
+    body = {k: v for k, v in record.items() if k not in {"record_hash", "prev_record_hash"}}
+    return {**body, "record_hash": sg_store.canonical_autonomy_hash(body)}
+
+
+def test_legacy_unchained_records_stay_readable_and_link_into_the_chain(tmp_path):
+    _authorize(tmp_path, 0)
+    _authorize(tmp_path, 1)
+    legacy = [_legacy(r) for r in _records(tmp_path)]
+    _rewrite(tmp_path, legacy)
+    _authorize(tmp_path, 2)
+    records = _records(tmp_path)
+    assert "prev_record_hash" not in records[0] and "prev_record_hash" not in records[1]
+    assert records[2]["prev_record_hash"] == legacy[1]["record_hash"]
+    _authorize(tmp_path, 3)  # the mixed file verifies end to end
+    assert len(_records(tmp_path)) == 4
+
+
+def test_unchained_record_after_chained_one_is_refused(tmp_path):
+    _authorize(tmp_path, 0)
+    _authorize(tmp_path, 1)
+    records = _records(tmp_path)
+    _rewrite(tmp_path, [records[0], _legacy(records[1])])
+    with pytest.raises(baa.BootstrapAgentAuthorityError, match="UNCHAINED_AFTER_CHAINED"):
+        _authorize(tmp_path, 2)
+
+
+def test_broken_chain_refuses_create_over_the_gateway(tmp_path, monkeypatch):
+    loaded, controller, _ = _make_pair(tmp_path, _real_mode())
+    _bind(monkeypatch, loaded, controller, separate=True)
+    gateway = UnifiedMCPGateway(service=MagicMock())
+    first = _call(gateway, "nexus_task_card_create", _create_args("one", "card"))
+    assert first["isError"] is False, first["structuredContent"]
+    records = _records(tmp_path)
+    records[0]["actor"] = "OWNER"
+    _rewrite(tmp_path, records)
+    second = _call(gateway, "nexus_task_card_create", _create_args("two", "card"))
+    assert second["isError"] is True
+    assert "CHAIN_BROKEN" in second["structuredContent"]["error"]
+    assert not (controller / "tasks" / "two").exists()
+
+
+def test_result_reports_authority_basis_and_owner_confirmation_only_for_grants(
+    tmp_path, monkeypatch
+):
+    loaded, controller, head = _make_pair(tmp_path, _real_mode())
+    _bind(monkeypatch, loaded, controller, separate=True)
+    gateway = UnifiedMCPGateway(service=MagicMock())
+    created = _call(gateway, "nexus_task_card_create", _create_args())["structuredContent"]
+    assert created["authority_basis"] == "bootstrap_agent"
+    assert created["owner_confirmation"] is False
+    committed = _call(gateway, "nexus_task_card_commit", _commit_args(created, head))
+    assert committed["structuredContent"]["authority_basis"] == "bootstrap_agent"
+    assert committed["structuredContent"]["owner_confirmation"] is False
+
+
+def test_authority_basis_helper_distinguishes_grant_from_agent():
+    assert baa.authority_basis({"schema": baa.AUTHORIZATION_SCHEMA}) == "bootstrap_agent"
+    assert (
+        baa.authority_basis({"schema": "nexus.standing_grant_effect_authorization.v1"})
+        == "owner_grant"
+    )
+    assert baa.authority_basis(None) == "owner_grant"
