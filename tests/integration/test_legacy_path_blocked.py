@@ -102,6 +102,13 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
     ): (
         "File read: pending-manifest JSON this service wrote itself (pending.json read under the .lock flock); no model text."
     ),
+    (
+        "nexus/services/nightshift_queue_consumer.py",
+        "NightshiftQueueConsumer.consume_file",
+        "content",
+    ): (
+        "File read: pending.json manifest re-read under the pending.lock flock before write-back (#2479, #2519); no model text."
+    ),
     ("nexus/core/mental_snapshot.py", "MentalSnapshot.deserialize", "json_str"): (
         "State round-trip: json_str is the output of MentalSnapshot.serialize() (json.dumps of self.mind); no model text."
     ),
