@@ -150,14 +150,16 @@ _LABEL_WORDS = re.compile(
     r"\b(?:review|reviewer|cross-model|adversarial|independent|verdict)\b", re.IGNORECASE
 )
 _NOT_A_HEADER = re.compile(
-    r"\b(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none)\b",
+    r"\b(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none"
+    r"|awaiting|in progress|queued|running)\b",
     re.IGNORECASE,
 )
 # A parenthetical that STARTS with a not-run word is the header's own status ("Codex
 # review (pending)"); one that merely mentions it later is an aside ("(agy Gemini ...;
 # Codex: out of credits)").
 _ASIDE_NOT_RUN = re.compile(
-    r"\(\s*(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none)\b",
+    r"\(\s*(?:pending|unavailable|timed out|out of credits|not run|tbd|skipped|n/a|no run|none"
+    r"|awaiting|in progress|queued|running)\b",
     re.IGNORECASE,
 )
 _CLAUSE_SPLIT = re.compile(r"[;,]\s+|\.\s+|!\s+|\s[—–]\s|\s-\s|\)\s+")
@@ -373,10 +375,39 @@ def _own_status(line: str) -> bool:
     )
 
 
+def _not_run_label(line: str) -> bool:
+    """The text carries a not-run word as its own status ("Codex: unavailable",
+    "Codex review (queued)", "**Codex review awaiting**")."""
+    plain = _plain(line, keep_parens=True).strip()
+    return bool(_NOT_A_HEADER.search(_plain(line)) or _ASIDE_NOT_RUN.search(plain)) or _own_status(
+        line
+    )
+
+
+def _split_label(prefix: str) -> tuple[str, str]:
+    """Split at the first colon outside parentheses: (label, text after it). A parenthetical
+    aside such as "(Gemini via agy, Codex out of credits)" stays inside the label (#2299)."""
+    depth = 0
+    for index, char in enumerate(prefix):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == ":" and depth == 0:
+            return prefix[:index], prefix[index + 1 :]
+    return prefix, ""
+
+
+def _disabled_verdict_label(label_part: str) -> bool:
+    """A label part that names a model and is disabled by a not-run word ("Codex (not run):")
+    contributes no family to a verdict clause that follows it (#2308)."""
+    return bool(_MODEL_WORDS.search(label_part)) and _not_run_label(label_part)
+
+
 def _label_family(line: str) -> str | None:
     """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
     plain = _plain(line, keep_parens=True).strip()
-    if _NOT_A_HEADER.search(_plain(line)) or _ASIDE_NOT_RUN.search(plain) or _own_status(line):
+    if _not_run_label(line):
         # "Codex: unavailable", "Codex adversarial review: pending" open no section; a
         # not-run word inside a parenthetical aside ("Gemini ... (Codex: out of credits)")
         # does not disable the header (#2299, first live false negative on #2296).
@@ -480,6 +511,14 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             # The family named on the line before the token ("Claude: r1 ..., r2 ACCEPT"),
             # else the section header's.
             line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
+            label_part, status_part = _split_label(line_before)
+            if _disabled_verdict_label(label_part) or (
+                label_part != line_before
+                and bool(_MODEL_WORDS.search(label_part))
+                and len(status_part.split()) <= 4
+                and bool(_NOT_A_HEADER.search(_plain(status_part)))
+            ):
+                continue  # "**Codex (not run)**: ACCEPT @ sha" names no reviewer family
             family = _family(before) or _family(line_before) or header_family
             if family and _binding(clause, line, head, comment_head):
                 verdicts.append({"family": family, "line": clause.strip()})
@@ -535,12 +574,11 @@ def approved_reviews_at_head(reviews: list[Any], head: str) -> int:
     return sum(1 for state in latest.values() if state == "APPROVED")
 
 
-def evaluate(
-    head: str, files: list[Any], comments: list[Any], reviews: list[Any]
-) -> dict[str, Any]:
-    """Pure classification of the PR's review evidence at ``head``."""
-    risky = high_risk_paths(files)
-    records = []
+def _evidence_at(
+    head: str, comments: list[Any], reviews: list[Any]
+) -> tuple[list[dict[str, Any]], bool, bool, int]:
+    """Records, stale flag, unbound flag and approved-review count for one head."""
+    records: list[dict[str, Any]] = []
     stale = False
     unbound = False
     for comment in comments:
@@ -558,11 +596,48 @@ def evaluate(
             records.append(record)
         else:
             unbound = True
-    approved_reviews = approved_reviews_at_head(reviews, head)
+    return records, stale, unbound, approved_reviews_at_head(reviews, head)
+
+
+def _contributes(head: str, comments: list[Any], reviews: list[Any]) -> tuple[bool, bool]:
+    """(independent, cross_model) evidence a record at ``head`` provides."""
+    records, _stale, _unbound, approved = _evidence_at(head, comments, reviews)
+    return (
+        approved > 0 or any(r["claude"] for r in records),
+        any(r["cross_model"] or r["rebuttal_at_cap"] for r in records),
+    )
+
+
+def evaluate(
+    head: str,
+    files: list[Any],
+    comments: list[Any],
+    reviews: list[Any],
+    delta_verified: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Pure classification of the PR's review evidence at ``head``.
+
+    ``delta_verified`` lists older reviewed heads whose delta to ``head`` the caller has
+    verified as merge-only (#2308); a record at one of those counts as a record at the head.
+    The caller is the only place that may verify a delta; this function trusts nothing else.
+    """
+    risky = high_risk_paths(files)
+    records, stale, unbound, approved_reviews = _evidence_at(head, comments, reviews)
     # The independent record is the Claude-family review (or a submitted approval); a
     # cross-model record alone satisfies only the cross-model requirement.
-    independent = approved_reviews > 0 or any(r["claude"] for r in records)
-    cross_model = any(r["cross_model"] or r["rebuttal_at_cap"] for r in records)
+    independent_head = approved_reviews > 0 or any(r["claude"] for r in records)
+    cross_head = any(r["cross_model"] or r["rebuttal_at_cap"] for r in records)
+    independent, cross_model = independent_head, cross_head
+    delta_heads: list[str] = []
+    for old in delta_verified:
+        if old.lower() == head.lower():
+            continue
+        old_ind, old_cross = _contributes(old, comments, reviews)
+        used = (old_ind and not independent_head) or (old_cross and not cross_head and bool(risky))
+        independent = independent or old_ind
+        cross_model = cross_model or old_cross
+        if used:
+            delta_heads.append(old)
     short = head[:12]
     if not independent:
         status = "MISSING_RECORD"
@@ -579,6 +654,12 @@ def evaluate(
     elif risky and not cross_model:
         status = "MISSING_CROSS_MODEL"
         reason = f"high-risk paths changed but no Codex/Gemini verdict or rebuttal at head {short}"
+    elif delta_heads:
+        status = "OK"
+        reason = (
+            f"record at {', '.join(h[:MIN_PREFIX] for h in delta_heads)}, "
+            f"merge-only delta verified (head {short})"
+        )
     else:
         status, reason = "OK", f"review record present at head {short}"
     return {
@@ -590,9 +671,203 @@ def evaluate(
         "approved_reviews_at_head": approved_reviews,
         "independent": independent,
         "cross_model": cross_model,
+        "delta_verified_heads": delta_heads,
         "status": status,
         "reason": reason,
     }
+
+
+# -- merge-only delta (#2308) -----------------------------------------------------------
+
+MAX_DELTA_COMMITS = 100  # compare returns at most 250 commits / 300 files; stay well inside
+MAX_DELTA_FILES = 300
+MAX_DELTA_CANDIDATES = 6
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,200}")
+
+
+def _compare(
+    fetch: Callable[[str, str], Any], base: str, token: str, left: str, right: str, page: int = 1
+) -> dict[str, Any]:
+    data = fetch(f"{base}/compare/{left}...{right}?per_page={PER_PAGE}&page={page}", token)
+    if not isinstance(data, dict):
+        raise CheckError("unexpected compare response shape")
+    return data
+
+
+def _names(entries: list[Any]) -> set[str]:
+    """Every path an entry list touches, a rename by both names. Raises on a bad entry."""
+    out: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("filename"), str):
+            raise CheckError("unexpected file entry")
+        out.add(entry["filename"])
+        previous = entry.get("previous_filename")
+        if isinstance(previous, str):
+            out.add(previous)
+    return out
+
+
+def _compare_files(
+    fetch: Callable[[str, str], Any], base: str, token: str, left: str, right: str
+) -> set[str]:
+    """All paths changed between two commits; raises when the list may be truncated.
+
+    The compare API returns up to 300 files on page 1 whatever ``per_page`` says and no
+    ``files`` key on later pages, so only page 1 is read and 300 files means truncated.
+    """
+    files = _compare(fetch, base, token, left, right).get("files")
+    if not isinstance(files, list) or len(files) >= MAX_DELTA_FILES:
+        raise CheckError("compare file list missing or may be truncated")
+    return _names(files)
+
+
+def merge_only_delta(
+    fetch: Callable[[str, str], Any],
+    base: str,
+    token: str,
+    reviewed: str,
+    head: str,
+    pr_paths: set[str],
+    base_ref: str,
+) -> bool:
+    """True only when ``head`` differs from the reviewed ``reviewed`` by merges of the base branch.
+
+    Fails closed on any doubt (API error, truncation, odd shape). Requires: the compare is
+    "ahead" with nothing behind and a complete commit list; the first-parent chain from the
+    head reaches the reviewed commit through merge commits only; every other parent of those
+    merges is already on the base branch (so every other commit in the range is too); and no
+    path of the PR (as of the head, and as of the reviewed commit) changed in the range.
+    """
+    try:
+        if not (_FULL_SHA.fullmatch(reviewed) and _FULL_SHA.fullmatch(head)) or reviewed == head:
+            return False
+        if not _REF.fullmatch(base_ref) or ".." in base_ref:
+            return False
+        data = _compare(fetch, base, token, reviewed, head)
+        total = data.get("total_commits")
+        commits = data.get("commits")
+        if (
+            data.get("status") != "ahead"
+            or data.get("behind_by") != 0
+            or not isinstance(commits, list)
+            or not isinstance(total, int)
+            or data.get("ahead_by") != total
+            or not 1 <= total <= MAX_DELTA_COMMITS
+            or len(commits) != total
+        ):
+            return False
+        parents: dict[str, list[str]] = {}
+        for commit in commits:
+            sha = commit.get("sha") if isinstance(commit, dict) else None
+            plist = commit.get("parents") if isinstance(commit, dict) else None
+            if not isinstance(sha, str) or not isinstance(plist, list) or sha in parents:
+                return False
+            shas = [p.get("sha") if isinstance(p, dict) else None for p in plist]
+            if not shas or not all(isinstance(x, str) and _FULL_SHA.fullmatch(x) for x in shas):
+                return False
+            parents[sha] = [str(x) for x in shas]
+        if head not in parents:
+            return False
+        # First-parent spine from the head down to the reviewed commit: merge commits only.
+        side_parents: list[str] = []
+        spine = 0
+        cursor = head
+        while cursor != reviewed:
+            plist = parents.get(cursor)
+            if plist is None or len(plist) < 2 or spine >= total:
+                return False
+            side_parents.extend(plist[1:])
+            cursor = plist[0]
+            spine += 1
+        if spine == 0:
+            return False
+        # Every non-first parent is already on the base branch, so is everything under it.
+        for side in dict.fromkeys(side_parents):
+            if side == reviewed:
+                return False
+            relation = _compare(fetch, base, token, base_ref, side, 1)
+            if (
+                relation.get("status") not in ("identical", "behind")
+                or relation.get("ahead_by") != 0
+            ):
+                return False
+        # The PR's paths as of the reviewed commit; the head must not add any (an "evil merge"
+        # that keeps the reviewed tree reverts what the base gained, and the reverted file
+        # shows up as a new PR path).
+        pr_at_reviewed = _compare_files(fetch, base, token, base_ref, reviewed)
+        if not pr_paths <= pr_at_reviewed:
+            return False
+        covered = pr_paths | pr_at_reviewed
+        # What the base branch gained since the reviewed commit forked from it must not
+        # touch a PR path either (the squash would otherwise land a silent revert of it).
+        for side in dict.fromkeys(side_parents):
+            if _compare_files(fetch, base, token, reviewed, side) & covered:
+                return False
+        return not (_compare_files(fetch, base, token, reviewed, head) & covered)
+    except Exception:  # noqa: BLE001 - any doubt means the delta is not verified
+        return False
+
+
+def _delta_candidates(
+    fetch: Callable[[str, str], Any],
+    base: str,
+    token: str,
+    head: str,
+    comments: list[Any],
+    reviews: list[Any],
+) -> list[str]:
+    """Full shas of older heads that records or approved reviews name (newest first, capped)."""
+    found: list[str] = []
+    tokens: list[str] = []
+    for review in reversed(reviews):
+        commit = str(review.get("commit_id", "")).lower() if isinstance(review, dict) else ""
+        if _FULL_SHA.fullmatch(commit) and commit != head:
+            found.append(commit)
+    for comment in reversed(comments):
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str):
+            continue
+        # A record names its head on a "Head reviewed:" line, apart from the verdict line.
+        if any(is_verdict_line(line) for line in body.splitlines()):
+            tokens.extend(t for t in _hex_tokens(body) if not head.startswith(t))
+    for token_hex in dict.fromkeys(tokens):
+        if len(found) >= MAX_DELTA_CANDIDATES:
+            break
+        try:
+            commit = fetch(f"{base}/commits/{token_hex}", token)
+            full = str(commit.get("sha", "")).lower() if isinstance(commit, dict) else ""
+        except Exception:  # noqa: BLE001 - an unresolvable token is just not a candidate
+            continue
+        if _FULL_SHA.fullmatch(full) and full.startswith(token_hex) and full != head:
+            found.append(full)
+    return list(dict.fromkeys(found))[:MAX_DELTA_CANDIDATES]
+
+
+def _verify_deltas(
+    fetch: Callable[[str, str], Any],
+    base: str,
+    token: str,
+    head: str,
+    pull: Any,
+    files: list[Any],
+    comments: list[Any],
+    reviews: list[Any],
+) -> tuple[str, ...]:
+    """Older reviewed heads that carry a record and differ from the head by a merge only."""
+    try:
+        base_obj = pull.get("base") if isinstance(pull, dict) else None
+        base_ref = str(base_obj.get("ref", "")) if isinstance(base_obj, dict) else ""
+        pr_paths = _names(files)
+        verified = []
+        for old in _delta_candidates(fetch, base, token, head, comments, reviews):
+            if any(_contributes(old, comments, reviews)) and merge_only_delta(
+                fetch, base, token, old, head, pr_paths, base_ref
+            ):
+                verified.append(old)
+        return tuple(verified)
+    except Exception:  # noqa: BLE001 - fail closed
+        return ()
 
 
 def _description(report: dict[str, Any]) -> str:
@@ -626,6 +901,10 @@ def run(
         comments = _paginate(fetch, f"{base}/issues/{pr}/comments", token)
         reviews = _paginate(fetch, f"{base}/pulls/{pr}/reviews", token)
         report = evaluate(head, files, comments, reviews)
+        if report["status"] != "OK":
+            deltas = _verify_deltas(fetch, base, token, head, pull, files, comments, reviews)
+            if deltas:
+                report = evaluate(head, files, comments, reviews, deltas)
     except Exception as exc:  # noqa: BLE001 - any read failure must fail closed
         report = {
             "schema": "nexus.review_record_check.v1",
