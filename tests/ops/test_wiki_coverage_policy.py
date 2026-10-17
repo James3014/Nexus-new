@@ -14,13 +14,15 @@ def test_crosswalk_alignment_regenerates_current_inputs() -> None:
     assert result["authority"] == "derived_non_authoritative"
     # 36 records since #1961 (fe29afcee) dropped scripts/engine/commands/stress_test.py
     # (an EXACT_PREFIX_MATCH) from the OpenWiki source_paths ahead of its governed deletion.
-    assert result["record_count"] == 36
+    # 37 since #2420 (8fe949412) added nexus/services/runtime_compat.py (the executor_binding
+    # registration seam) to routing/capability-execution-status.md; it maps EXACT_PREFIX_MATCH.
+    assert result["record_count"] == 37
     assert result["status_counts"] == {
-        "EXACT_PREFIX_MATCH": 14,
+        "EXACT_PREFIX_MATCH": 15,
         "UNMAPPED": 22,
     }
     assert result["alignment_status"] == "PASS"
-    assert result["mapped_count"] == 14
+    assert result["mapped_count"] == 15
     assert result["unmapped_count"] == 22
     assert result["ambiguous_count"] == 0
 
