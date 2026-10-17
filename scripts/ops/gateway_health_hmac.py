@@ -60,6 +60,20 @@ def _read_key(path: Path) -> bytes:
     return bytes.fromhex(text)
 
 
+def _fsync_dir(parent: Path) -> None:
+    """Best-effort directory fsync so the new link survives a crash."""
+    try:
+        dir_fd = os.open(parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
 def load_or_create_key(path: Path | None = None) -> bytes:
     """Return the per-host key, creating it atomically (0600, never overwritten)."""
     try:
@@ -77,12 +91,15 @@ def load_or_create_key(path: Path | None = None) -> bytes:
         try:
             try:
                 os.write(fd, (secrets.token_hex(_KEY_BYTES) + "\n").encode("ascii"))
+                os.fsync(fd)  # a hard crash must not leave a torn/empty key behind the link
             finally:
                 os.close(fd)
             try:
                 os.link(tmp, target)  # fails if another process created it first
             except FileExistsError:
                 pass
+            else:
+                _fsync_dir(target.parent)
         finally:
             tmp.unlink(missing_ok=True)
         return _read_key(target)
