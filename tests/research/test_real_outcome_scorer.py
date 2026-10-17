@@ -729,6 +729,62 @@ def test_p2p_baseline_timeout_is_recorded_without_label_effect(tmp_path, fx):
     ]
 
 
+class _OracleFaultRunner(ros.PytestRunner):
+    """Kills (timeout, or a signal exit code) oracle-module runs on one tree."""
+
+    def __init__(self, *a, fail_tree: str, exit_code: int = -1, timed_out: bool = True, **kw):
+        super().__init__(*a, **kw)
+        self.fail_tree, self.fault = fail_tree, (exit_code, timed_out)
+
+    def run(self, env, tree, tree_id, target, ignores, run_idx, role=""):
+        if target != "tests" and tree.name == self.fail_tree:
+            return ros.RunResult({}, self.fault[0], self.fault[1])
+        return super().run(env, tree, tree_id, target, ignores, run_idx, role)
+
+
+def _oracle_fault_receipt(tmp, tree, **kw):
+    tmp.mkdir(parents=True)
+    fx = Fixture(tmp)
+    ctx = _ctx(tmp, fx)
+    ctx.runner = _OracleFaultRunner(
+        tmp / "work" / "scratch", timeout=300, log=lambda m: None, fail_tree=tree, **kw
+    )
+    task = fx.task(fx.diff_from_base({"pkg/calc.py": FIXED}))
+    return ros.score_task(task, ctx)["receipt"]
+
+
+def test_a7_oracle_timeouts_are_diagnostic_only(tmp_path, monkeypatch):
+    (tmp_path / "clean").mkdir()
+    fx = Fixture(tmp_path / "clean")
+    clean = _score(tmp_path / "clean", fx, fx.task(fx.diff_from_base({"pkg/calc.py": FIXED})))
+    assert clean["run_failure_diagnostics"] == []
+    for tree, name in (("baset", "BASE+T"), ("candt", "CAND+T")):
+        r = _oracle_fault_receipt(tmp_path / tree, tree)
+        diag = r["run_failure_diagnostics"]
+        assert diag and all(d["tree"] == name and d["timed_out"] for d in diag)
+        assert all(d["exit_code"] == -1 and d["target"] != "tests" for d in diag)
+        # Labels are what they would be without the recording (A7 never changes a label).
+        monkeypatch.setattr(ros, "_run_failures", lambda *a, **k: [])
+        off = _oracle_fault_receipt(tmp_path / (tree + "-off"), tree)
+        monkeypatch.undo()
+        assert off["run_failure_diagnostics"] == []
+        assert (r["label"], r["sub_reason"], r.get("shadow_label")) == (
+            off["label"],
+            off["sub_reason"],
+            off.get("shadow_label"),
+        )
+
+
+def test_a7_signal_kill_is_listed_and_exit_2_is_not(tmp_path):
+    r = _oracle_fault_receipt(tmp_path / "sig", "candt", exit_code=-9, timed_out=False)
+    assert r["run_failure_diagnostics"]
+    assert all(d["exit_code"] == -9 and not d["timed_out"] for d in r["run_failure_diagnostics"])
+    # Exit 2 (collection error) is how F2P fails on BASE+T: never listed.
+    for tree in ("baset", "candt"):
+        r = _oracle_fault_receipt(tmp_path / f"e2{tree}", tree, exit_code=2, timed_out=False)
+        assert r["run_failure_diagnostics"] == []
+
+
 def test_p2p_gold_timeout_makes_suspects_gold_also_fails(tmp_path, fx):
     # The candidate breaks add(); GOLD's P2P run times out, so under v1 every node of it
     # counts as fail on GOLD and the suspect is `gold_also_fails`. The diagnostic shows why.
@@ -1003,7 +1059,7 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.1"
+    assert ros.SCORER_VERSION == "1.2.2"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
