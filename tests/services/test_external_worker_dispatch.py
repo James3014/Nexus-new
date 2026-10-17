@@ -783,3 +783,199 @@ def test_claude_popen_failure_is_pre_effect_and_account_reusable(
         assert manager.acquire("claudeop_" + "9" * 32).lease_id
     finally:
         set_claude_account_pool_manager(None)
+
+
+def _claude_result_text(tmp_path: Path, result: str) -> None:
+    fake = tmp_path / "claude"
+    fake.write_text(
+        fake.read_text().replace(
+            '"subtype":"success","is_error":false,"session_id":"cs-1","total_cost_usd":0.01,"result":"ok"',
+            '"subtype":"error","is_error":true,"session_id":"cs-1","result":"' + result + '"',
+        )
+    )
+
+
+def test_claude_rotation_heartbeat_failure_records_unknown_and_holds_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 1: a journal failure at ACCOUNT_ROTATING must not escape unrecorded."""
+
+    import json
+
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+    from nexus.services.direct_operation_journal import DirectOperationJournal
+
+    original_heartbeat = DirectOperationJournal.heartbeat
+
+    def failing_rotation_heartbeat(self, operation_id, *, phase=None, **kwargs):
+        if phase == "ACCOUNT_ROTATING":
+            raise OSError("journal disk full")
+        return original_heartbeat(self, operation_id, phase=phase, **kwargs)
+
+    monkeypatch.setattr(DirectOperationJournal, "heartbeat", failing_rotation_heartbeat)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    _claude_result_text(tmp_path, "Not logged in. Please run /login")
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+    finally:
+        set_claude_account_pool_manager(None)
+    current = journal.read(operation_id)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["failure_kind"].startswith("PROVIDER_SUPERVISION_FAILED_UNKNOWN_OUTCOME")
+    assert current["reconciliation"]["retry_permitted"] is False
+    (lease,) = json.loads((pool_root / "state.json").read_text())["leases"].values()
+    assert lease["unknown_outcome"] is True
+
+
+def test_claude_starting_heartbeat_failure_is_pre_effect_terminal_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 1 (same class): PROVIDER_STARTING heartbeat failure leaves a terminal record."""
+
+    import json
+
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+    from nexus.services.direct_operation_journal import DirectOperationJournal
+
+    original_heartbeat = DirectOperationJournal.heartbeat
+
+    def failing_start_heartbeat(self, operation_id, *, phase=None, **kwargs):
+        if phase == "PROVIDER_STARTING":
+            raise OSError("journal disk full")
+        return original_heartbeat(self, operation_id, phase=phase, **kwargs)
+
+    monkeypatch.setattr(DirectOperationJournal, "heartbeat", failing_start_heartbeat)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+    finally:
+        set_claude_account_pool_manager(None)
+    current = journal.read(operation_id)
+    assert current["status"] == "FAILED"
+    assert current["failure_kind"] == "JOURNAL_HEARTBEAT_FAILED:OSError"
+    assert current["reconciliation"]["result"] == "NO_PROVIDER_PROCESS_STARTED"
+    assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+
+
+def _fail_cooldown_writes(monkeypatch: pytest.MonkeyPatch, *, failures: int) -> list[int]:
+    from nexus.services.claude_account_pool import ClaudeAccountPoolManager
+
+    original_write = ClaudeAccountPoolManager._write_state
+    calls: list[int] = []
+
+    def flaky_write(self, state):
+        cooling = any(
+            isinstance(a, dict) and a.get("last_failure_reason") == "QUOTA_EXHAUSTED"
+            for a in state.get("accounts", {}).values()
+        )
+        if cooling and len(calls) < failures:
+            calls.append(1)
+            raise OSError("transient state write failure")
+        return original_write(self, state)
+
+    monkeypatch.setattr(ClaudeAccountPoolManager, "_write_state", flaky_write)
+    return calls
+
+
+def test_claude_quota_cooldown_write_failure_keeps_account_ineligible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 2: a failed cooldown write must not leave the account immediately eligible."""
+
+    import json
+
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolExhaustedError,
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    _claude_result_text(tmp_path, "Claude usage limit reached")
+    _fail_cooldown_writes(monkeypatch, failures=10**6)
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) != 0
+        current = journal.read(operation_id)
+        assert current["status"] == "FAILED"
+        assert current["failure_kind"] == "QUOTA_EXHAUSTED"
+        _kill_dispatcher_pid_in_state(pool_root)
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32)
+        assert len(json.loads((pool_root / "state.json").read_text())["leases"]) == 1
+        assert current["reconciliation"]["account_release"] == "LEASE_HELD_COOLDOWN_PERSIST_FAILED"
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+def test_claude_quota_cooldown_write_transient_failure_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 2: one transient failure is retried; cooldown persists and lease frees."""
+
+    import json
+
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolExhaustedError,
+        get_claude_account_pool_manager,
+        set_claude_account_pool_manager,
+    )
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    _claude_result_text(tmp_path, "Claude usage limit reached")
+    calls = _fail_cooldown_writes(monkeypatch, failures=1)
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) != 0
+        assert calls == [1]
+        current = journal.read(operation_id)
+        assert current["status"] == "FAILED"
+        state = json.loads((pool_root / "state.json").read_text())
+        assert state["leases"] == {}
+        assert state["accounts"]["claude-a"]["last_failure_reason"] == "QUOTA_EXHAUSTED"
+        assert state["accounts"]["claude-a"]["cooldown_until"] > time.time()
+        with pytest.raises(ClaudeAccountPoolExhaustedError):
+            get_claude_account_pool_manager().acquire("claudeop_" + "9" * 32)
+    finally:
+        set_claude_account_pool_manager(None)
+
+
+class _InterruptedDuringPopen(BaseException):
+    """Stands in for e.g. KeyboardInterrupt raised inside Popen.__init__ after fork."""
+
+
+def test_claude_non_oserror_inside_popen_is_unknown_and_holds_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2389 item 4: only OSError/SubprocessError from Popen prove no child exists."""
+
+    import json
+
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, "true"
+    )
+    real_popen = subprocess.Popen
+
+    def interrupted_popen(argv, *args, **kwargs):
+        if "--output-format" in list(argv):
+            raise _InterruptedDuringPopen()
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", interrupted_popen)
+    try:
+        assert _run_claude_inproc(tmp_path, operation_id, prompt_path, root) == 1
+    finally:
+        set_claude_account_pool_manager(None)
+    current = journal.read(operation_id)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["failure_kind"].endswith("_InterruptedDuringPopen")
+    (lease,) = json.loads((pool_root / "state.json").read_text())["leases"].values()
+    assert lease["unknown_outcome"] is True
