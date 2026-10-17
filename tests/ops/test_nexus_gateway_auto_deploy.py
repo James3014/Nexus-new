@@ -6466,3 +6466,153 @@ def test_replay_2026_10_16_old_deployer_self_updates_to_the_2370_deployer(
     subset = result["receipt"]["self_update"]["bindable_checks"]
     assert subset["verdict"] == "GREEN"
     assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
+
+
+# ------------- 2026-10-17: Exact-base Pyright regression gate joins the ruleset
+
+PYRIGHT_GATE = "Exact-base Pyright regression gate"
+# GET repos/James3014/Nexus-new/rules/branches/main on 2026-10-17 (~00:29Z), in its order.
+LIVE_REQUIRED_2026_10_17_SEVEN = [
+    "Deletion guard",
+    TRUSTED_IMPACT,
+    "Full published Git history secret audit",
+    TRUSTED_DEPENDENCY,
+    BINDINGS_PREFLIGHT,
+    REVIEW_RECORD,
+    PYRIGHT_GATE,
+]
+
+
+def _live_seven_api(
+    *, names: list[str] | None = None, pyright_path: str | None = None
+) -> Callable[[str], Any]:
+    """The 7-check ruleset; Pyright runs on the push to main like Exact-base impact."""
+    base = _live_six_api()
+    rules = LIVE_REQUIRED_2026_10_17_SEVEN if names is None else names
+    suites = {SUITES[PYRIGHT_GATE], SUITES[PYRIGHT_GATE] + PR_SUITE_OFFSET}
+
+    def api(path: str) -> Any:
+        if "/rules/branches/main" in path:
+            return [] if "page=" in path and not path.endswith("page=1") else _branch_rules(rules)
+        payload = base(path)
+        if pyright_path is not None and "check_suite_id=" in path:
+            if int(path.rsplit("=", 1)[1]) in suites:
+                for run in payload["workflow_runs"]:
+                    run["path"] = pyright_path
+        return payload
+
+    return api
+
+
+def test_pyright_gate_is_bound_to_typecheck_workflow_on_push_to_main() -> None:
+    import yaml
+
+    workflow = ad.REQUIRED_CHECKS[PYRIGHT_GATE]
+    assert workflow == ".github/workflows/typecheck.yml"
+    assert PYRIGHT_GATE not in ad.PR_TARGET_ONLY_CHECKS
+    assert PYRIGHT_GATE not in ad.PR_HEAD_STATUS_CONTEXTS
+    doc = yaml.safe_load((REPO_ROOT / workflow).read_text("utf-8"))
+    assert "main" in doc[True]["push"]["branches"]
+    assert PYRIGHT_GATE in {job.get("name") for job in doc["jobs"].values()}
+
+
+def test_live_ruleset_seven_checks_all_success_is_green() -> None:
+    result = ad.required_checks(_live_seven_api(), NEW)
+    assert result["verdict"] == "GREEN", result
+    assert result["merge_time_only"] == [BINDINGS_PREFLIGHT, REVIEW_RECORD]
+    assert set(result["checks"]) == {
+        *LIVE_REQUIRED_2026_10_16,
+        PYRIGHT_GATE,
+        "Exact-base impact gate",
+    }
+    # A push-to-main check: bound on the merge commit itself, not the PR head.
+    assert result["checks"][PYRIGHT_GATE]["sha"] == NEW
+
+
+def test_live_ruleset_seven_checks_green_candidate_deploys(cfg: ad.Config) -> None:
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, _live_seven_api())["status"] == "DEPLOYED"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/workflows/pytest.yml",  # a real workflow, but not the bound one
+        ".github/workflows/trusted-impact-gate.yml",
+        ".github/workflows/stray.yml",
+    ],
+)
+def test_pyright_gate_from_another_workflow_is_not_green(cfg: ad.Config, path: str) -> None:
+    api = _live_seven_api(pyright_path=path)
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["missing"] == [PYRIGHT_GATE]
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] != "DEPLOYED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_red_pyright_gate_blocks_the_deploy(cfg: ad.Config) -> None:
+    base = _live_seven_api()
+
+    def api(path: str) -> Any:
+        payload = base(path)
+        if "check-runs" in path and "Pyright" in path:
+            for run in payload["check_runs"]:
+                run["conclusion"] = "failure"
+        return payload
+
+    assert ad.required_checks(api, NEW)["verdict"] == "RED"
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == "CHECKS_RED"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_live_ruleset_seven_plus_unknown_eighth_stays_unknown_required_check(
+    cfg: ad.Config,
+) -> None:
+    eighth = "Exact-base Pyright regression gate (fork)"
+    api = _live_seven_api(names=[*LIVE_REQUIRED_2026_10_17_SEVEN, eighth])
+    result = ad.required_checks(api, NEW)
+    assert result["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert result["unknown_required"] == [eighth]
+    host, prober = FakeHost(), FakeProber()
+    assert cycle(cfg, host, prober, api)["status"] == f"UNKNOWN_REQUIRED_CHECK:{eighth}"
+    assert prober.calls == [] and host.reloads == []
+
+
+def test_self_update_parser_recognises_the_pyright_gate() -> None:
+    source = (REPO_ROOT / ad.DEPLOYER).read_text(encoding="utf-8")
+    known = ad.deployer_known_checks(source)
+    assert known is not None and PYRIGHT_GATE in known
+    assert _module_table(source, "REQUIRED_CHECKS")[PYRIGHT_GATE] == (
+        ".github/workflows/typecheck.yml"
+    )
+
+
+def test_installed_deployer_without_pyright_self_updates_to_this_source(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deployer live on 2026-10-17 lacks the Pyright binding; this file's source
+    is what its #2402 self-update reads from the candidate, and it must move only
+    the deployer link (then the next cycle deploys through the full 7-check gate)."""
+    new_source = (REPO_ROOT / ad.DEPLOYER).read_text(encoding="utf-8")
+    old_checks = {k: v for k, v in ad.REQUIRED_CHECKS.items() if k != PYRIGHT_GATE}
+    monkeypatch.setattr(ad, "REQUIRED_CHECKS", old_checks)
+    api = _live_seven_api()
+    stuck = ad.required_checks(api, NEW)
+    assert stuck["verdict"] == "UNKNOWN_REQUIRED_CHECK"
+    assert stuck["unknown_required"] == [PYRIGHT_GATE]
+    # A candidate whose deployer still lacks the name: no self-update.
+    held_back = cycle(cfg, SelfUpdateHost(_deployer_source()), FakeProber(), api)
+    assert held_back["self_update"]["verdict"] == "CANDIDATE_DOES_NOT_KNOW"
+    assert not cfg.tool_link.exists()
+    host, prober = SelfUpdateHost(new_source), FakeProber()
+    plist = cfg.plist.read_bytes()
+    result = cycle(cfg, host, prober, api)
+    assert result["status"] == ad.SELF_UPDATED_OUTCOME
+    assert Path(os.readlink(cfg.tool_link)) == cfg.deployments / f"a1-{NEW}"
+    _no_gateway_effect(cfg, host, prober, plist)
+    subset = result["receipt"]["self_update"]["bindable_checks"]
+    assert subset["verdict"] == "GREEN"
+    assert set(subset["checks"]) == {*LIVE_REQUIRED_2026_10_16, "Exact-base impact gate"}
