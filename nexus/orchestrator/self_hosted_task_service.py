@@ -759,6 +759,24 @@ def _task_deadline(contract: ArchitectTaskContract, submitted_at: Optional[str])
     return started + budget if started is not None and budget > 0 else None
 
 
+def _codeintel_lookup_context(raw: Any) -> dict[str, Any]:
+    """Codeintel executor inputs from the signed ``codeintel_lookup`` (#1579).
+
+    Validated at the Gateway; anything malformed here yields no lookup inputs,
+    so the executor keeps refusing instead of guessing.
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    symbol = raw.get("target_symbol")
+    if not isinstance(symbol, str) or not symbol:
+        return {}
+    context: dict[str, Any] = {"target_symbol": symbol}
+    paths = raw.get("search_paths")
+    if isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths):
+        context["search_paths"] = tuple(paths)
+    return context
+
+
 def _validated_action_request(
     request: Mapping[str, Any],
 ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
@@ -841,6 +859,11 @@ def _validated_action_request(
         request["rie_knowledge_identity"] != bound.get("rie_knowledge_identity")
     ):
         raise ValueError("ACTION_IDENTITY_MISMATCH: rie_knowledge_identity")
+    # #1579: the optional codeintel lookup target follows the same rule.
+    if "codeintel_lookup" in request and (
+        request["codeintel_lookup"] != bound.get("codeintel_lookup")
+    ):
+        raise ValueError("ACTION_IDENTITY_MISMATCH: codeintel_lookup")
     expected_paths = tuple(envelope.allowed_paths)
     for source in (bound, request):
         if "allowed_files" in source and tuple(source["allowed_files"]) != expected_paths:
@@ -3987,6 +4010,7 @@ class SelfHostedTaskService(_ReadProjectionMixin, _InventoryMixin, _ClaimsMixin)
                         )
                         if key in request
                     },
+                    **_codeintel_lookup_context(request.get("codeintel_lookup")),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,

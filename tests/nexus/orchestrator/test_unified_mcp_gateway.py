@@ -6521,3 +6521,98 @@ def test_worker_candidate_rie_identity_tamper_is_rejected(monkeypatch):
     request["rie_knowledge_identity"] = _rie_hint()
     with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH: rie_knowledge_identity"):
         _validated_action_request(request)
+
+
+
+# --- #1579: optional codeintel lookup target on nexus_worker_candidate ----------------
+
+
+def test_worker_candidate_codeintel_lookup_schema_is_optional_and_closed():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_worker_candidate")
+    schema = spec["inputSchema"]
+    assert "codeintel_lookup" not in schema["required"]
+    prop = schema["properties"]["codeintel_lookup"]
+    assert prop["type"] == "object" and prop["additionalProperties"] is False
+    assert prop["required"] == ["target_symbol"]
+    assert set(prop["properties"]) == {"target_symbol", "search_paths"}
+
+
+def test_worker_candidate_codeintel_lookup_is_bound_into_signed_request(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    args = _worker_args("codeintel-lookup-bound")
+    args["codeintel_lookup"] = {
+        "target_symbol": "knowledge_applicability_evidence",
+        "search_paths": ["nexus/services/rie_knowledge_codeintel_hook.py"],
+    }
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is False, response
+    request = service.submitted[0]
+    expected = {
+        "target_symbol": "knowledge_applicability_evidence",
+        "search_paths": ["nexus/services/rie_knowledge_codeintel_hook.py"],
+    }
+    assert request["codeintel_lookup"] == expected
+    assert request["bound_action_request"]["codeintel_lookup"] == expected
+    effective, _ = _validated_action_request(request)
+    assert effective["codeintel_lookup"] == expected
+
+
+def test_worker_candidate_without_codeintel_lookup_binds_nothing(monkeypatch):
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    assert _call_worker_candidate(gateway, _worker_args("codeintel-lookup-absent"))["result"]["isError"] is False
+    request = service.submitted[0]
+    assert "codeintel_lookup" not in request
+    assert "codeintel_lookup" not in request["bound_action_request"]
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        "main",
+        {},
+        {"target_symbol": ""},
+        {"target_symbol": "a b"},
+        {"target_symbol": "x;rm"},
+        {"target_symbol": "a" * 129},
+        {"target_symbol": "main", "search_paths": "nexus/a.py"},
+        {"target_symbol": "main", "search_paths": ["../etc/passwd"]},
+        {"target_symbol": "main", "search_paths": ["/abs.py"]},
+        {"target_symbol": "main", "search_paths": ["a.py"] * 5},
+        {"target_symbol": "main", "extra": 1},
+    ],
+    ids=[
+        "not-object", "empty", "blank-symbol", "space", "shell", "too-long", "paths-not-list",
+        "parent-escape", "absolute", "too-many", "unknown-key",
+    ],
+)
+def test_worker_candidate_rejects_invalid_codeintel_lookup_before_preflight(monkeypatch, lookup):
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    preflight_calls = []
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: preflight_calls.append(1))
+    args = _worker_args("codeintel-lookup-invalid")
+    args["codeintel_lookup"] = lookup
+    response = _call_worker_candidate(gateway, args)
+    assert response["result"]["isError"] is True
+    assert "CODEINTEL_LOOKUP_INVALID" in json.dumps(response)
+    assert service.submitted == [] and preflight_calls == []
+
+
+def test_worker_candidate_codeintel_lookup_tamper_is_rejected(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+
+    gateway, service, _ = _rie_gateway(monkeypatch)
+    args = _worker_args("codeintel-lookup-tamper")
+    args["codeintel_lookup"] = {"target_symbol": "main"}
+    _call_worker_candidate(gateway, args)
+    original = service.submitted[0]
+    forged = {"target_symbol": "other"}
+    request = dict(original)
+    request["bound_action_request"] = {**original["bound_action_request"], "codeintel_lookup": forged}
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request(request)
+    request = dict(original)
+    request["codeintel_lookup"] = forged
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH: codeintel_lookup"):
+        _validated_action_request(request)
