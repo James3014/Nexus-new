@@ -2643,3 +2643,45 @@ def test_oversized_contract_source_blocked_record_names_reason_code_and_path(tmp
     )
     assert persisted["error_code"] == "CONTRACT_CONTEXT_BUDGET_EXCEEDED"
     assert persisted["error_detail"]["ref"] == "nexus/a.py"
+
+
+def test_read_git_blob_fails_closed_on_non_utf8_source(tmp_path):
+    _, _, _, _, store = _setup(tmp_path)
+    blob_repo = tmp_path / "blob_repo"
+    blob_repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=blob_repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Test Runner"], cwd=blob_repo, capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=blob_repo,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=blob_repo,
+        capture_output=True,
+        check=True,
+    )
+    (blob_repo / "bin.py").write_bytes(b"\xff\xfe\x00bad")
+    (blob_repo / "ok.py").write_text("ok content\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=blob_repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "x"], cwd=blob_repo, capture_output=True, check=True
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=blob_repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    automation = ExternalIntelligenceAutomation(
+        repository_root=blob_repo,
+        state_store=AutomationStateStore(tmp_path / "state2"),
+        intelligence_store=store,
+        sidecar=FakeSidecar(store),
+        c_runtime=FakeC(),
+        d_runtime=FakeD(),
+    )
+    assert automation._read_git_blob(sha, "ok.py") == (True, "ok content\n")
+    with pytest.raises(AutomationError, match="CONTRACT_SOURCE_NOT_UTF8"):
+        automation._read_git_blob(sha, "bin.py")

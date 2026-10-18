@@ -670,8 +670,8 @@ class ExternalIntelligenceAutomation:
             return False, f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:{rel.as_posix()}"
         try:
             text = res.stdout.decode("utf-8")
-        except UnicodeDecodeError:
-            text = f"BINARY_OR_UNDECODABLE_CONTENT:{main_sha}:{rel.as_posix()}"
+        except UnicodeDecodeError as exc:
+            raise AutomationError(f"CONTRACT_SOURCE_NOT_UTF8: {rel.as_posix()}") from exc
         return True, text
 
     @staticmethod
