@@ -24,11 +24,13 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from typing import Any
 
+from nexus.contracts.task_bound_key import TaskBoundKey, task_bound_key, task_identity
+
 ROUTE_CONTEXT_NOT_PLANNER_BOUND = "ROUTE_CONTEXT_NOT_PLANNER_BOUND"
 _MAX_BOUND_SNAPSHOTS = 1024
 
 _lock = threading.Lock()
-_bound: OrderedDict[tuple[str, str], None] = OrderedDict()
+_bound: OrderedDict[TaskBoundKey, None] = OrderedDict()
 
 
 def planner_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
@@ -36,19 +38,12 @@ def planner_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _task_key(task_id: object) -> str | None:
-    if not isinstance(task_id, str) or not task_id.strip():
-        return None
-    return task_id
-
-
 def register_planner_snapshot(snapshot: Mapping[str, Any], *, task_id: str) -> str:
     """Bind ``snapshot`` to ``task_id``; an empty task_id binds nothing (fail closed)."""
     digest = planner_snapshot_digest(snapshot)
-    task_key = _task_key(task_id)
-    if task_key is None:
+    key = task_bound_key(task_id, digest)
+    if key is None:
         return digest
-    key = (task_key, digest)
     with _lock:
         _bound[key] = None
         _bound.move_to_end(key)
@@ -58,10 +53,12 @@ def register_planner_snapshot(snapshot: Mapping[str, Any], *, task_id: str) -> s
 
 
 def is_planner_bound(snapshot: object, *, task_id: object) -> bool:
-    task_key = _task_key(task_id)
-    if task_key is None or not isinstance(snapshot, Mapping) or not snapshot:
+    # Task check first (no digest work for an invalid task id), as before the helper existed.
+    if task_identity(task_id) is None or not isinstance(snapshot, Mapping) or not snapshot:
         return False
-    key = (task_key, planner_snapshot_digest(snapshot))
+    key = task_bound_key(task_id, planner_snapshot_digest(snapshot))
+    if key is None:
+        return False
     with _lock:
         return key in _bound
 
