@@ -278,7 +278,7 @@
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py, tests/services/test_agy_dispatch_attestation_channel_2314.py | active | high | agy_dispatch_write_boundary_contract |
-| nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py | active | high | agy_write_admission_run_home_seatbelt_contract |
+| nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py, tests/ops/test_start_codex_nexus_enforced.py | active | high | agy_write_admission_run_home_seatbelt_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
 | tests/conftest.py | tests/conftest.py, tests/services/test_executor_resolution_observable.py | active | high | test_contract |
 | tests/services/test_executor_resolution_observable.py | tests/services/test_executor_resolution_observable.py | active | high | test_contract |

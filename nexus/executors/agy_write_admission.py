@@ -873,6 +873,50 @@ def code_bearing_git_config(
     return b"".join(kept)
 
 
+def _code_bearing_config_parts(
+    common_dir: Path, git_dir: Path
+) -> Optional[list[tuple[bytes, bytes]]]:
+    """Labelled config material shared by both fingerprints; ``None`` if unparseable.
+
+    The common dir's ``config`` minus bookkeeping and the per-worktree
+    ``config.worktree`` unfiltered (see ``code_bearing_git_config``).
+    """
+    config = code_bearing_git_config(common_dir / "config")
+    worktree_config = code_bearing_git_config(
+        git_dir / "config.worktree", exclude_bookkeeping=False
+    )
+    if config is None or worktree_config is None:
+        return None
+    return [(b"common:config", config), (b"gitdir:config.worktree", worktree_config)]
+
+
+def git_config_fingerprint(root: Path | str) -> Optional[str]:
+    """sha256 hex of the code-bearing Git config behind ``root``; ``None`` on failure.
+
+    Exactly the config material ``checkout_fingerprint`` covers, for callers
+    that fingerprint the rest of a checkout themselves: the Codex launcher
+    (``scripts/ops/start_codex_nexus_enforced.sh``) reads it through
+    ``scripts/ops/codex_run_guard.py git-config-fingerprint`` so the
+    bookkeeping exclusions have one definition (#2547).  A root Git cannot
+    resolve, or a config Git refuses to parse, fails closed.
+    """
+    path = Path(os.path.realpath(root))
+    common = _git_output(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    git_dir = _git_output(path, "rev-parse", "--absolute-git-dir")
+    if common is None or git_dir is None:
+        return None
+    config_parts = _code_bearing_config_parts(
+        Path(common.decode("utf-8", errors="surrogateescape").strip()),
+        Path(git_dir.decode("utf-8", errors="surrogateescape").strip()),
+    )
+    if config_parts is None:
+        return None
+    digest = hashlib.sha256()
+    for label, part in config_parts:
+        _update(digest, label, part)
+    return digest.hexdigest()
+
+
 def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> Optional[str]:
     """Fingerprint one protected checkout; ``None`` when it cannot be read.
 
@@ -931,15 +975,12 @@ def checkout_fingerprint(root: Path | str, *, include_ignored: bool = True) -> O
             stamp = b"missing"
         _update(digest, b"ignored:" + entry, stamp)
     common_dir = Path(common.decode("utf-8", errors="surrogateescape").strip())
-    config = code_bearing_git_config(common_dir / "config")
     git_dir_path = Path(git_dir.decode("utf-8", errors="surrogateescape").strip())
-    worktree_config = code_bearing_git_config(
-        git_dir_path / "config.worktree", exclude_bookkeeping=False
-    )
-    if config is None or worktree_config is None:
+    config_parts = _code_bearing_config_parts(common_dir, git_dir_path)
+    if config_parts is None:
         return None
-    _update(digest, b"common:config", config)
-    _update(digest, b"gitdir:config.worktree", worktree_config)
+    for label, part in config_parts:
+        _update(digest, label, part)
     for name in ("hooks", "info"):
         for relative, content in _tree_files(common_dir / name):
             _update(digest, f"common:{name}/{relative}".encode("utf-8", "surrogateescape"), content)
