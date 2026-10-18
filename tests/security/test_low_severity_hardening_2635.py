@@ -93,6 +93,48 @@ def test_run_command_string_chain_env_and_no_expansion(tmp_path):
     assert missing.returncode == 127
 
 
+@pytest.mark.parametrize("command", ["true\nfalse", "true\rfalse", "true\x00false"])
+def test_newline_cr_nul_are_refused_not_run(command, tmp_path):
+    """Gemini r1 #1: a shell ran ``true\\nfalse`` as two commands (exit 1)."""
+    marker = tmp_path / "pwned"
+    result = run_command_string(command.replace("false", f"touch {marker}"), cwd=tmp_path)
+    assert result.returncode == UNSUPPORTED_SYNTAX_EXIT
+    assert not marker.exists()
+    with pytest.raises(UnsupportedShellSyntax):
+        split_command_chain(command)
+
+
+@pytest.mark.parametrize("command", ["false # comment", "#false", "echo ok && false #x"])
+def test_unquoted_comment_is_refused_not_truncated(command, tmp_path):
+    """Gemini r1 #2: an unquoted ``#`` must not silently drop the rest."""
+    result = run_command_string(command, cwd=tmp_path)
+    assert result.returncode == UNSUPPORTED_SYNTAX_EXIT
+    assert result.stdout == ""
+
+
+def test_quoted_or_embedded_hash_stays_literal():
+    assert split_command_chain("echo a#b '#x' \"#y\" \\#z") == [["echo", "a#b", "#x", "#y", "#z"]]
+
+
+def test_quoted_and_and_is_a_literal_argument(tmp_path):
+    """Gemini r1 #3: only an unquoted ``&&`` separates segments."""
+    assert split_command_chain("echo '&&' \"a && b\" \\&\\& && echo x") == [
+        ["echo", "&&", "a && b", "&&"],
+        ["echo", "x"],
+    ]
+    result = run_command_string("echo '&&' false", cwd=tmp_path)
+    assert (result.returncode, result.stdout) == (0, "&& false\n")
+
+
+def test_only_unquoted_name_prefix_is_an_assignment(tmp_path):
+    ok = run_command_string(
+        f'FOO="a b" {sys.executable} -c "import os; print(os.environ[\'FOO\'])"', cwd=tmp_path
+    )
+    assert (ok.returncode, ok.stdout) == (0, "a b\n")
+    quoted = run_command_string("'FOO=1' true", cwd=tmp_path)
+    assert quoted.returncode == 127  # a shell runs 'FOO=1' as the command name
+
+
 def test_sec007_files_no_longer_use_shell_true():
     for rel in SEC_007_FILES:
         tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))

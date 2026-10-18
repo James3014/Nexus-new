@@ -5,12 +5,14 @@ model output and ran it with ``shell=True``. That lets any ``;``, ``|``,
 ``$(...)`` or redirect inside the string execute. This helper keeps the
 string interface but never invokes a shell:
 
-* the string is tokenized with :mod:`shlex` (POSIX quoting rules);
+* the string is tokenized with POSIX quoting rules (single quotes, double
+  quotes, backslash); newline, CR and NUL are refused;
 * ``a && b`` chains are supported: segments run in order and the chain stops
   at the first non-zero exit, as a shell would;
 * leading ``NAME=value`` words are passed as environment variables;
-* every other shell operator (``;``, ``|``, ``||``, ``>``, ``<``, ``&``,
-  parentheses) is refused fail-closed with exit code 2 and nothing runs;
+* every other unquoted shell operator (``;``, ``|``, ``||``, ``>``, ``<``,
+  ``&``, parentheses) and an unquoted ``#`` comment are refused fail-closed
+  with exit code 2 and nothing runs; a quoted ``'&&'`` stays a literal;
 * no variable, glob, tilde or command substitution happens: ``$HOME`` or
   ``*.py`` reach the program literally.
 """
@@ -19,7 +21,6 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -35,39 +36,126 @@ class UnsupportedShellSyntax(ValueError):
     """The command string needs a shell feature this runner refuses."""
 
 
-def split_command_chain(command: str) -> list[list[str]]:
-    """Return the ``&&``-separated segments of *command* as argv lists.
+_FORBIDDEN_CHARS = {"\n": "newline", "\r": "carriage return", "\x00": "NUL"}
+_DOUBLE_QUOTE_ESCAPABLE = frozenset('"\\$`')
 
-    Raises :class:`UnsupportedShellSyntax` for any other shell operator, for
-    an empty segment, or for unbalanced quotes.
+
+def _tokenize(command: str) -> list[tuple[str, bool, bool]]:
+    """Split *command* POSIX-style into ``(text, is_operator, assignment)``.
+
+    Quoted or escaped operators and ``#`` stay literal word characters.
+    ``assignment`` is True when the word starts with an unquoted ``NAME=``,
+    the only form a shell treats as an environment assignment.
     """
-    lexer = shlex.shlex(str(command), posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    try:
-        tokens = list(lexer)
-    except ValueError as exc:
-        raise UnsupportedShellSyntax(f"unparseable command: {exc}") from exc
-    segments: list[list[str]] = [[]]
-    for token in tokens:
-        if token == "&&":
+    for char, name in _FORBIDDEN_CHARS.items():
+        if char in command:
+            raise UnsupportedShellSyntax(f"{name} in command string is not supported")
+    tokens: list[tuple[str, bool, bool]] = []
+    word: list[str] = []
+    in_word = False
+    bare_prefix: list[str] = []  # leading unquoted characters of the word
+    prefix_open = True
+    i = 0
+    n = len(command)
+
+    def flush() -> None:
+        nonlocal word, in_word, bare_prefix, prefix_open
+        if in_word:
+            assignment = bool(_ASSIGNMENT.match("".join(bare_prefix)))
+            tokens.append(("".join(word), False, assignment))
+        word, in_word, bare_prefix, prefix_open = [], False, [], True
+
+    while i < n:
+        char = command[i]
+        if char in " \t":
+            flush()
+            i += 1
+        elif char == "'":
+            end = command.find("'", i + 1)
+            if end < 0:
+                raise UnsupportedShellSyntax("unparseable command: unbalanced single quote")
+            word.append(command[i + 1 : end])
+            in_word, prefix_open = True, False
+            i = end + 1
+        elif char == '"':
+            i += 1
+            while True:
+                if i >= n:
+                    raise UnsupportedShellSyntax("unparseable command: unbalanced double quote")
+                c = command[i]
+                if c == '"':
+                    i += 1
+                    break
+                if c == "\\" and i + 1 < n and command[i + 1] in _DOUBLE_QUOTE_ESCAPABLE:
+                    word.append(command[i + 1])
+                    i += 2
+                    continue
+                word.append(c)
+                i += 1
+            in_word, prefix_open = True, False
+        elif char == "\\":
+            if i + 1 >= n:
+                raise UnsupportedShellSyntax("unparseable command: trailing backslash")
+            word.append(command[i + 1])
+            in_word, prefix_open = True, False
+            i += 2
+        elif char in _OPERATOR_CHARS:
+            flush()
+            j = i
+            while j < n and command[j] in _OPERATOR_CHARS:
+                j += 1
+            tokens.append((command[i:j], True, False))
+            i = j
+        elif char == "#" and not in_word:
+            # A shell would treat the rest as a comment; silently dropping it
+            # could hide part of a verification command, so refuse instead.
+            raise UnsupportedShellSyntax("unquoted '#' (shell comment) is not supported")
+        else:
+            word.append(char)
+            if prefix_open:
+                bare_prefix.append(char)
+            in_word = True
+            i += 1
+    flush()
+    return tokens
+
+
+def _split_chain(command: str) -> list[list[tuple[str, bool]]]:
+    segments: list[list[tuple[str, bool]]] = [[]]
+    for text, is_operator, assignment in _tokenize(str(command)):
+        if is_operator:
+            if text != "&&":
+                raise UnsupportedShellSyntax(f"shell operator {text!r} is not supported")
             segments.append([])
             continue
-        if token and set(token) <= _OPERATOR_CHARS:
-            raise UnsupportedShellSyntax(f"shell operator {token!r} is not supported")
-        segments[-1].append(token)
+        segments[-1].append((text, assignment))
     if any(not segment for segment in segments):
         raise UnsupportedShellSyntax("empty command segment")
     return segments
 
 
-def _split_assignments(argv: Sequence[str]) -> tuple[dict[str, str], list[str]]:
+def split_command_chain(command: str) -> list[list[str]]:
+    """Return the ``&&``-separated segments of *command* as argv lists.
+
+    Only an unquoted ``&&`` separates segments. Raises
+    :class:`UnsupportedShellSyntax` for any other unquoted shell operator, an
+    unquoted ``#`` starting a word, a newline/CR/NUL anywhere, an empty
+    segment, or unbalanced quotes.
+    """
+    return [[text for text, _assignment in segment] for segment in _split_chain(command)]
+
+
+def _split_assignments(
+    words: Sequence[tuple[str, bool]],
+) -> tuple[dict[str, str], list[str]]:
     env: dict[str, str] = {}
     index = 0
-    while index < len(argv) and _ASSIGNMENT.match(argv[index]):
-        name, _, value = argv[index].partition("=")
+    # Only an unquoted leading NAME= is an assignment, as in a shell.
+    while index < len(words) and words[index][1]:
+        name, _, value = words[index][0].partition("=")
         env[name] = value
         index += 1
-    return env, list(argv[index:])
+    return env, [text for text, _assignment in words[index:]]
 
 
 def run_command_string(
@@ -84,7 +172,7 @@ def run_command_string(
     ``subprocess.run``; callers keep their existing timeout handling.
     """
     try:
-        segments = split_command_chain(command)
+        segments = _split_chain(command)
     except UnsupportedShellSyntax as exc:
         return subprocess.CompletedProcess(
             command, UNSUPPORTED_SYNTAX_EXIT, "", f"refused (no shell): {exc}\n"
