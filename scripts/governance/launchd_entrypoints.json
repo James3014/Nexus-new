@@ -1,0 +1,15 @@
+{
+  "schema": "nexus.launchd_entrypoints.v1",
+  "note": "Checked-in launchd label -> Nexus-new script map for entrypoints_touched.py (#2612). Labels exist only as strings in plists outside the repo, so this registry is the source. Observed 2026-10-18 from ~/Library/LaunchAgents on the Mac mini and scripts/ops/*.plist.template; update it when a launchd job is added, renamed or retargeted.",
+  "labels": {
+    "com.nexus.eia-nightly-dispatch": {"scripts": ["scripts/ops/eia_nightly.py"], "host": "M4", "source": "scripts/ops/com.nexus.eia-nightly-dispatch.plist.template"},
+    "com.nexus.eia-nightly-prepare": {"scripts": ["scripts/ops/eia_nightly.py"], "host": "M4", "source": "scripts/ops/com.nexus.eia-nightly-prepare.plist.template"},
+    "com.nexus.eia-nightly-start": {"scripts": ["scripts/ops/eia_nightly.py"], "host": "M4", "source": "scripts/ops/com.nexus.eia-nightly-start.plist.template"},
+    "com.nexus.eia-nightly-stop": {"scripts": ["scripts/ops/eia_nightly.py"], "host": "M4", "source": "scripts/ops/com.nexus.eia-nightly-stop.plist.template"},
+    "com.nexus.gateway-auto-deploy": {"scripts": ["scripts/ops/nexus_gateway_auto_deploy.py"], "host": "mini", "source": "~/Library/LaunchAgents/com.nexus.gateway-auto-deploy.plist"},
+    "com.nexus.gateway-source-drift": {"scripts": ["scripts/ops/check_gateway_source_drift.py"], "host": "mini", "source": "~/Library/LaunchAgents/com.nexus.gateway-source-drift.plist"},
+    "com.nexus.hybrid-replication": {"scripts": ["scripts/ops/hybrid_replication_daemon.py"], "host": "mini", "source": "scripts/ops/hybrid_replication_daemon.py --launchd-label default (daemon stopped 2026-10-17)"},
+    "com.nexus.mcp.gateway.direct": {"scripts": ["scripts/ops/nexus_mcp_gateway_http.py"], "host": "mini", "source": "~/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"},
+    "com.nexus.workforce-model-autoupdate": {"scripts": ["scripts/ops/workforce_model_autoupdate.py"], "host": "mini", "source": "scripts/ops/com.nexus.workforce-model-autoupdate.plist.template"}
+  }
+}
