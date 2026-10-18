@@ -718,27 +718,37 @@ def test_health_hmac_key_content_rule_rejects_and_keeps_file(tmp_path, content):
     assert sorted(p.name for p in key_dir.iterdir()) == ["key"]
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param("key_mode_0644", id="key_mode_0644"),
-        pytest.param("key_mode_0660", id="key_mode_0660"),
-        pytest.param("key_mode_0777", id="key_mode_0777"),
-        pytest.param("parent_mode_0770_existing_key", id="parent_mode_0770_existing_key"),
-        pytest.param("parent_mode_0777_existing_key", id="parent_mode_0777_existing_key"),
-        pytest.param("parent_mode_0777_no_key", id="parent_mode_0777_no_key"),
-        pytest.param("symlink_to_valid_key", id="symlink_to_valid_key"),
-        pytest.param("directory_at_key_path", id="directory_at_key_path"),
-        pytest.param("fifo_holding_valid_key", id="fifo_holding_valid_key"),
-    ],
-)
-def test_health_hmac_key_unsafe_file_or_dir_fails_closed_and_is_untouched(tmp_path, case):
+_UNSAFE_KEY_CASES = [
+    # Key file with any group or other permission bit.
+    "key_mode_0644",
+    "key_mode_0660",
+    "key_mode_0777",
+    "key_mode_0604",
+    "key_mode_0606",
+    # Key directory writable by group or by other (other-only too).
+    "parent_mode_0770_existing_key",
+    "parent_mode_0777_existing_key",
+    "parent_mode_0777_no_key",
+    "parent_mode_0702_existing_key",
+    "parent_mode_0702_no_key",
+    "parent_mode_0757_existing_key",
+    "parent_mode_0757_no_key",
+    # Not a regular file of our own at the key path.
+    "symlink_to_valid_key",
+    "directory_at_key_path",
+    "fifo_holding_valid_key",
+]
+
+
+@pytest.mark.parametrize("case", [pytest.param(c, id=c) for c in _UNSAFE_KEY_CASES])
+def test_health_hmac_key_unsafe_file_or_dir_fails_closed_and_is_untouched(tmp_path, request, case):
     """Unsafe key files/dirs are rejected and nothing in the key dir is changed."""
     import os
 
     from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
 
     key_dir = _private_dir(tmp_path / "keys")
+    request.addfinalizer(lambda: key_dir.chmod(0o700))
     key_path = key_dir / "key"
     fifo_fd = None
     if case.startswith("key_mode_"):
@@ -757,7 +767,10 @@ def test_health_hmac_key_unsafe_file_or_dir_fails_closed_and_is_untouched(tmp_pa
         # regular-file check rejects it.
         os.mkfifo(key_path, 0o600)
         fifo_fd = os.open(key_path, os.O_RDWR | os.O_NONBLOCK)
+        request.addfinalizer(lambda: os.close(fifo_fd))
         os.write(fifo_fd, _CANONICAL_KEY_FILE)
+    else:
+        raise AssertionError(f"unknown case {case}")
     before = {
         p.name: (os.lstat(p).st_mode, p.is_file() and p.read_bytes()) for p in key_dir.iterdir()
     }
@@ -768,8 +781,8 @@ def test_health_hmac_key_unsafe_file_or_dir_fails_closed_and_is_untouched(tmp_pa
     }
     assert after == before  # nothing created, rewritten, re-moded or left behind
     if fifo_fd is not None:
-        os.close(fifo_fd)
-    key_dir.chmod(0o700)
+        # The FIFO was never read: its buffered key bytes are all still there.
+        assert os.read(fifo_fd, 4096) == _CANONICAL_KEY_FILE
 
 
 def _record_key_creation_syscalls(mod, monkeypatch, events, fail_fsync_on_tmp=False):
@@ -809,6 +822,7 @@ def _record_key_creation_syscalls(mod, monkeypatch, events, fail_fsync_on_tmp=Fa
 
 def test_health_hmac_key_temp_file_fsynced_before_link_and_dir_fsynced_after(tmp_path, monkeypatch):
     import re
+    import stat
 
     from scripts.ops import gateway_health_hmac as mod
 
@@ -832,7 +846,7 @@ def test_health_hmac_key_temp_file_fsynced_before_link_and_dir_fsynced_after(tmp
     on_disk = target.read_bytes()
     assert re.fullmatch(rb"[0-9a-f]{64}\n", on_disk)
     assert on_disk == key.hex().encode("ascii") + b"\n"
-    assert (target.stat().st_mode & 0o077) == 0
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert sorted(p.name for p in key_dir.iterdir()) == ["key"]
 
 
