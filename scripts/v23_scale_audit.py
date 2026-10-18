@@ -7,6 +7,19 @@ import re
 from node_fleet_mgr_v22 import start_fleet, stop_fleet
 from stress_test_nsp_v22 import inject_tasks, analyze_logs
 
+# ARCHIVED 2026-10-19 (#2637): dead v18-v23 swarm script (needs the removed
+# nexus-swarm/ directory; carried a default token and a name-matching kill).
+# Unreachable + manifest: see ARCHIVED_2026-10-19-swarm-scripts.md. Do not run or import.
+import warnings as _archived_warnings  # noqa: E402
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-19 (#2637): retired swarm script; see ARCHIVED_2026-10-19-swarm-scripts.md. Do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+if __name__ == "__main__":
+    raise SystemExit("ARCHIVED 2026-10-19 (#2637): retired swarm script; see ARCHIVED_2026-10-19-swarm-scripts.md.")
+
 # ⚡️ Nexus Swarm V23 Queue & Batching Audit
 TOKEN = "nexus-secret-2026"
 BASE_TPS_3NODES = 0.80 # From Phase 22

@@ -4,6 +4,19 @@ import os
 import signal
 from pathlib import Path
 
+# ARCHIVED 2026-10-19 (#2637): dead v18-v23 swarm script (needs the removed
+# nexus-swarm/ directory; carried a default token and a name-matching kill).
+# Unreachable + manifest: see ARCHIVED_2026-10-19-swarm-scripts.md. Do not run or import.
+import warnings as _archived_warnings  # noqa: E402
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-19 (#2637): retired swarm script; see ARCHIVED_2026-10-19-swarm-scripts.md. Do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+if __name__ == "__main__":
+    raise SystemExit("ARCHIVED 2026-10-19 (#2637): retired swarm script; see ARCHIVED_2026-10-19-swarm-scripts.md.")
+
 # 🛡️ Nexus 物理路徑對位
 PROJECT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 MANAGER_BIN = PROJECT_ROOT / "nexus-swarm/swarm-manager"

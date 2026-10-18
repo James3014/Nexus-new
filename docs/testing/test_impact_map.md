@@ -80,7 +80,16 @@
 | nexus/app/core_ports.py | tests/core/test_layer_ports.py, tests/test_layer_boundaries.py | active | high | core_layer_port_binding_contract |
 | nexus/core/belief_v02.py | tests/core/test_belief_v02.py | active | high | belief_v02_jsonl_contract |
 | nexus/memory | tests/unit/memory, tests/integration/test_v28_contract_sealing.py, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
-| nexus/federation/fleet_manager.py | tests/federation, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
+| nexus/federation/fleet_manager.py | tests/federation, tests/test_lab_only_deprecations.py, tests/ops/test_retired_swarm_scripts_2637.py | active | medium | lab_only_module_contract |
+| scripts/execute_scaling_audit_v22.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/node_fleet_mgr_v22.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/stress_test_nsp_v22.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/stress_test_swarm_v18.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/test_multi_region_swarm_v19.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/test_swarm_v20_otel.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/test_swarm_v21_nsp.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/tests/p3_swarm_stress.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/v23_scale_audit.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
 | nexus/search/sampler.py | tests/unit/committee/search/test_adaptive_resampler.py, tests/unit/committee/test_data_flow_v267.py | active | medium | committee_adaptive_resampler_contract |
 | tests/test_lab_only_deprecations.py | tests/test_lab_only_deprecations.py | active | medium | test_contract |
 | tests/unit/committee/search/test_adaptive_resampler.py | tests/unit/committee/search/test_adaptive_resampler.py | active | medium | test_contract |
