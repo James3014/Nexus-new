@@ -22,6 +22,9 @@ class RouteSignals(TypedDict):
     has_hard_signal: bool
 
 
+MAX_FINDINGS_HINT_CARDS = 3
+
+
 def task_body_only(task_desc: str) -> str:
     return (task_desc or "").split("\n\nNexus wearing contract:", 1)[0]
 
@@ -118,7 +121,9 @@ def collect_route_signals(
         store = findings_memory_store_cls(repo_root)
         hits = store.search(effective_findings_query)
         findings_hits = len(hits)
-        for h in hits:
+        # Hits are relevance-ranked (#2640); keep only the top few cards' hints so a long
+        # hit list cannot flood the prompt.
+        for h in hits[:MAX_FINDINGS_HINT_CARDS]:
             historical_hints.extend(h.retrieval_hints)
 
         if findings_hits >= 1:

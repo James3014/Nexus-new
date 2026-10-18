@@ -7,9 +7,12 @@ the path here instead of hardcoding it.
 | kind          | relative path                          | owner / main users                                   | env override            |
 |---------------|----------------------------------------|------------------------------------------------------|-------------------------|
 | KNOWLEDGE     | .nexus/knowledge/lancedb               | services/memory.py (MemoryService), nexus_fs.py      | NEXUS_MEMORY_DB_PATH    |
-| MEMORY_INDEX  | .nexus/memory/memory_index.lancedb     | research/findings_vector_sync.py, core/router.py,    | NEXUS_MEMORY_DB_PATH    |
+| MEMORY_INDEX  | .nexus/memory/memory_index.lancedb     | research/findings_vector_sync.py (writes findings_   | NEXUS_MEMORY_DB_PATH    |
+|               |                                        | cards), local_heal/memory_retrieval_adapter.py       |                         |
+|               |                                        | (reads them, #2640), core/router.py,                 |                         |
 |               |                                        | memory_indexer.py, msa_indexer.py                    |                         |
-| REPOSITORY    | .nexus/memory_repository               | services/local_heal/memory_retrieval_adapter.py      | none                    |
+| REPOSITORY    | .nexus/memory_repository               | legacy: no caller since #2640 (the findings reader   | none                    |
+|               |                                        | moved to MEMORY_INDEX, where the writer is)          |                         |
 | VECTOR_DB     | .nexus/vector_db                       | core/vector_rag.py, learning/vector_cache.py,        | none                    |
 |               |                                        | storage_implementations.py, nexus_fs.py              |                         |
 | TENANT_JSONL  | .nexus/tenants/<tenant>/lancedb/*.jsonl| infrastructure/storage_implementations.py (JSONL,    | none                    |

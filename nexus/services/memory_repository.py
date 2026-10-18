@@ -433,7 +433,17 @@ class MemoryRepository:
         return combined
 
     def search_fts(self, table_name: str, query: str, limit: int = 10, fallback_columns: List[str] = None):
-        """執行單表全文搜尋。"""
+        """執行單表全文搜尋。
+
+        Tries the table's LanceDB full-text index first. Without one (LanceDB raises, e.g.
+        "There is no vector column"), falls back to tokenised BM25 scoring over
+        ``fallback_columns`` (#2640) instead of matching the whole query as one substring.
+        Fallback rows carry a ``_score`` column and are sorted by it, highest first. Columns
+        named in ``fallback_columns`` that the table does not have are skipped (an absent
+        ``aaak_content`` used to raise ``KeyError``). Without ``fallback_columns`` there is
+        no fallback and the result is empty, as before. The fallback applies the BM25
+        relevance floor (``BM25Index.floored_scores``).
+        """
         import pandas as pd
         db = self._get_db()
         if db is None or table_name not in self.list_tables():
@@ -444,11 +454,41 @@ class MemoryRepository:
             # 優先執行 FTS
             return table.search(query).limit(limit).to_pandas()
         except Exception:
-            # 如果 FTS 索引不存在，退回到關鍵字過濾
-            df = table.to_pandas()
-            if df.empty or not fallback_columns:
+            # 如果 FTS 索引不存在，退回到 BM25 關鍵字排序
+            if not fallback_columns:
                 return pd.DataFrame()
-            
-            import numpy as np
-            mask = np.column_stack([df[col].str.contains(query, case=False, na=False) for col in fallback_columns]).any(axis=1)
-            return df[mask].head(limit)
+            df = table.to_pandas()
+            ranked = bm25_frame_search(df, query, limit=limit, columns=fallback_columns)
+            return pd.DataFrame() if ranked.empty else ranked
+
+
+def bm25_frame_search(df: Any, query: str, *, limit: int = 10, columns: Optional[List[str]] = None):
+    """Rank DataFrame rows by tokenised BM25 over ``columns`` (missing columns are skipped).
+
+    Rows must pass the relevance floor (``BM25Index.floored_scores``). ``columns=None``
+    means every string column. Returns an empty slice of ``df`` when nothing matches.
+    """
+    from nexus.services.bm25_retrieval import BM25Index
+
+    if df.empty or not str(query or "").strip():
+        return df.iloc[0:0]
+    if columns is None:
+        usable = [col for col in df.columns if df[col].dtype == object and not str(col).startswith("_")]
+    else:
+        usable = [col for col in columns if col in df.columns]
+    if not usable:
+        return df.iloc[0:0]
+    texts = (
+        df[usable]
+        .apply(lambda row: "\n".join(str(v) for v in row if isinstance(v, str) and v), axis=1)
+        .tolist()
+    )
+    scores = BM25Index(enumerate(texts)).floored_scores(query)
+    if not scores:
+        return df.iloc[0:0]
+    order = sorted(scores, key=lambda index: (-scores[index], index))
+    if limit is not None and limit >= 0:
+        order = order[:limit]
+    result = df.iloc[order].copy()
+    result["_score"] = [scores[index] for index in order]
+    return result

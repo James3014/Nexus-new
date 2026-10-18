@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
-from nexus.services.lancedb_roots import REPOSITORY, resolve_lancedb_root
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 from nexus.services.local_heal.lesson_embedding import embed_text
 
 
@@ -465,7 +465,12 @@ class FindingsMemoryLessonStore:
 
 
 class MemoryRepositoryLessonStore:
-    """Optional LanceDB/MemoryRepository read path for findings_cards."""
+    """Optional LanceDB/MemoryRepository read path for findings_cards.
+
+    Reads the same root FindingsMemoryStore's vector sync writes ``findings_cards`` to
+    (``MEMORY_INDEX``, with the same env override as the writer). It used to read the separate
+    ``REPOSITORY`` root, which nothing writes findings to (#2640).
+    """
 
     def __init__(self, project_root: Path | None = None, repository: Any | None = None) -> None:
         self.project_root = project_root or Path(__file__).resolve().parents[3]
@@ -479,7 +484,7 @@ class MemoryRepositoryLessonStore:
             return self.repository
         from nexus.services.memory_repository import MemoryRepository
 
-        self.repository = MemoryRepository(resolve_lancedb_root(REPOSITORY, self.project_root))
+        self.repository = MemoryRepository(resolve_lancedb_root(MEMORY_INDEX, self.project_root))
         return self.repository
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
@@ -834,7 +839,7 @@ class NexusCompositeLessonStore:
         limit: int,
         current_state: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
+        per_store_rows: list[tuple[str, list[dict[str, Any]]]] = []
         sources: list[str] = []
         source_counts: dict[str, int] = {}
         source_errors: dict[str, str] = {}
@@ -865,7 +870,7 @@ class NexusCompositeLessonStore:
             if store_rows:
                 sources.append(source)
                 source_counts[source] = len(store_rows)
-            rows.extend(store_rows)
+            per_store_rows.append((source, store_rows))
             store_metadata = dict(getattr(store, "last_metadata", {}) or {})
             backend_receipts.append({
                 "store": source,
@@ -887,7 +892,82 @@ class NexusCompositeLessonStore:
             "retrieval_backend_receipts": backend_receipts,
             **g2_counters,
         }
-        return rows[:limit]
+        merged = fair_merge_store_rows(per_store_rows, limit)
+        self.last_metadata["merge"] = "reciprocal_rank_fusion"
+        self.last_metadata["merged_source_counts"] = _merged_source_counts(merged)
+        return merged
+
+
+RRF_K = 60
+
+
+def _row_fusion_key(row: dict[str, Any]) -> str:
+    for key in ("task_id", "lesson_id", "finding_id", "id"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return f"{key}:{value}" if key != "task_id" else f"task:{value}"
+    return ""
+
+
+def fair_merge_store_rows(
+    per_store_rows: list[tuple[str, list[dict[str, Any]]]], limit: int
+) -> list[dict[str, Any]]:
+    """Merge relevance-ordered rows from several stores fairly (#2640).
+
+    Reciprocal rank fusion: a row at rank r (1-based) in a store contributes
+    ``1 / (RRF_K + r)``. Rows from different stores that describe the same task or lesson
+    (same ``task_id``, else ``lesson_id``/``finding_id``/``id``) are fused into one entry,
+    so agreement across stores ranks higher; within one store, repeated keys stay separate.
+    Ties keep store order, then rank, so the first store's top row still leads. Unlike the
+    previous concatenate-then-truncate, a store listed later is never starved because an
+    earlier store already returned ``limit`` rows. The first store's copy of a fused row is
+    kept, annotated with ``fusion_score`` and ``fused_sources``.
+    """
+    entries: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for store_index, (source, rows) in enumerate(per_store_rows):
+        seen_in_store: dict[str, int] = {}
+        for rank, row in enumerate(rows, start=1):
+            base = _row_fusion_key(row)
+            if base:
+                occurrence = seen_in_store.get(base, 0)
+                seen_in_store[base] = occurrence + 1
+                key = base if occurrence == 0 else f"{base}#{occurrence}"
+            else:
+                key = f"row:{store_index}:{rank}"
+            contribution = 1.0 / (RRF_K + rank)
+            entry = entries.get(key)
+            if entry is None:
+                entries[key] = {
+                    "row": row,
+                    "score": contribution,
+                    "first": (store_index, rank),
+                    "sources": [source],
+                }
+                order.append(key)
+            else:
+                entry["score"] += contribution
+                if source not in entry["sources"]:
+                    entry["sources"].append(source)
+    ranked = sorted(order, key=lambda key: (-entries[key]["score"], entries[key]["first"]))
+    if limit is not None and limit >= 0:
+        ranked = ranked[:limit]
+    merged: list[dict[str, Any]] = []
+    for key in ranked:
+        entry = entries[key]
+        row = dict(entry["row"])
+        row["fusion_score"] = round(entry["score"], 8)
+        row["fused_sources"] = list(entry["sources"])
+        merged.append(row)
+    return merged
+
+
+def _merged_source_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        for source in row.get("fused_sources") or []:
+            counts[source] = counts.get(source, 0) + 1
+    return counts
 
 
 class MemoryRetrievalAdapter:
