@@ -9,18 +9,20 @@
 
 import ast
 import asyncio
-import os
-import sys
-import re
+import hmac
 import json
+import os
+import re
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from pydantic import BaseModel
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 try:
     from cron_utils import CronManager
@@ -31,14 +33,36 @@ app = FastAPI(title="Muse-Core 戰情室 Pro Max")
 
 # 安全配置
 TARGET_DIR = Path(__file__).parent.resolve()
-ACCESS_TOKEN = os.getenv("MUSE_DASHBOARD_TOKEN")
-if not ACCESS_TOKEN:
-    ACCESS_TOKEN = "PROTECTED_STATE_UNCONFIGURED"
+# SEC-002: fallback literal removed; the token comes only from MUSE_DASHBOARD_TOKEN (see below).
 
 
 class ToggleJobRequest(BaseModel):
     raw_job: str
     enable: bool
+
+
+# SEC-002/SEC-003: no built-in fallback token; every /api/ route fails closed
+# when MUSE_DASHBOARD_TOKEN is unset.
+ACCESS_TOKEN = os.getenv("MUSE_DASHBOARD_TOKEN") or None
+TOKEN_HEADER = "X-Muse-Token"
+
+# SEC-003: reject DNS-rebinding requests whose Host is not loopback.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+
+@app.middleware("http")
+async def require_token_for_api(request: Request, call_next):
+    # SEC-002/SEC-003: every /api/ request (read or write) needs the token in a
+    # custom header. The HTML pages carry no token; the operator types it in.
+    # A custom header cannot be sent cross-site without a CORS preflight, which
+    # this app never grants, so this also blocks CSRF.
+    if request.url.path.startswith("/api/"):
+        if not ACCESS_TOKEN:
+            return JSONResponse({"success": False, "error": "MUSE_DASHBOARD_TOKEN not set"}, status_code=503)
+        supplied = request.headers.get(TOKEN_HEADER, "")
+        if not hmac.compare_digest(supplied.encode(), ACCESS_TOKEN.encode()):
+            return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 class TestJobRequest(BaseModel):
@@ -255,7 +279,7 @@ async def run_script(script_name: str) -> dict:
     try:
         # 安全處理路徑，防止目錄遍歷攻擊
         target_path = (TARGET_DIR / script_name).resolve()
-        if not str(target_path).startswith(str(TARGET_DIR)):
+        if not target_path.is_relative_to(TARGET_DIR) or target_path.suffix not in (".py", ".sh"):
             return {"success": False, "output": "非法路徑訪問"}
 
         cmd = (
@@ -564,6 +588,19 @@ def index() -> str:
         <div id="app"></div>
     </main>
     <script>
+        // SEC-002: every /api/ call carries the operator-entered token (kept only in this tab's sessionStorage).
+        const _museFetch = window.fetch.bind(window);
+        function museToken() {
+            let t = sessionStorage.getItem('museToken');
+            if (!t) { t = prompt('Muse dashboard token') || ''; sessionStorage.setItem('museToken', t); }
+            return t;
+        }
+        window.fetch = (url, opts = {}) => {
+            if (typeof url === 'string' && url.startsWith('/api/')) {
+                opts = { ...opts, headers: { ...(opts.headers || {}), 'X-Muse-Token': museToken() } };
+            }
+            return _museFetch(url, opts);
+        };
         let scriptData = { tools: {}, protocols: {}, intel: {} }; let cronData = []; let currentView = 'tools';
         async function init() {
             await fetchAllData(); renderView();
