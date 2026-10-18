@@ -42,6 +42,7 @@
 | nexus-core | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
 | scratch/final_parity_check.py | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
 | scripts/test_l6_mechanical_gate.py | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
+| nexus/delivery/gate.py | tests/delivery, tests/test_task_runner_completion_gate.py, tests/security/test_low_severity_hardening_2635.py | active | high | completion_gate_no_shell_2635 |
 | nexus/delivery/suggestions.py | tests/delivery/test_suggestions.py, tests/test_cli_thinning.py | active | medium | verification_command_suggestion_contract |
 | nexus/bridge | tests/integration/test_capability_existence_155.py, tests/integration/test_rust_wave3_cutover.py, tests/core/test_l1_l4_realization.py | active | low | rust_bridge_python_scan_contract |
 | nexus-core-rs | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
