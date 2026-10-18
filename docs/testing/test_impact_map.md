@@ -47,6 +47,7 @@
 | nexus-core-rs | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
 | scripts/generate-prod-package.sh | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
 | tests/ops/test_retired_rust_crate_removed.py | tests/ops/test_retired_rust_crate_removed.py | active | medium | test_contract |
+| tests/architecture/test_no_collection_time_clock.py | tests/architecture/test_no_collection_time_clock.py | active | medium | test_contract |
 | .claude | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | HANDOFF.md | tests/ops/test_claude_handoff_hooks.py | active | medium | claude_handoff_hook_contract |
 | tests/ops/test_claude_handoff_hooks.py | tests/ops/test_claude_handoff_hooks.py | active | medium | test_contract |
