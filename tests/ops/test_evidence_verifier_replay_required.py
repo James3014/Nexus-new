@@ -104,7 +104,10 @@ def test_delivery_verifier_notes_only_is_unverified():
 def test_delivery_verifier_no_test_artifacts_is_uncovered_advisory():
     with (
         patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})),
-        patch("nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty", return_value=True),
+        patch(
+            "nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty",
+            return_value=True,
+        ),
     ):
         res = _delivery_verifier().verify(_bundle([]))
     assert res["status"] == "UNCOVERED"
@@ -118,7 +121,10 @@ def test_delivery_verifier_no_test_artifacts_is_uncovered_advisory():
 def test_delivery_verifier_uncovered_with_empty_diff_stays_low_trust():
     with (
         patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})),
-        patch("nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty", return_value=False),
+        patch(
+            "nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty",
+            return_value=False,
+        ),
     ):
         res = _delivery_verifier().verify(_bundle(["claims_count=7"]))
     assert res["status"] == "UNCOVERED"
