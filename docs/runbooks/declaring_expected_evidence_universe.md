@@ -240,6 +240,50 @@ The result grants nothing: it has no approve, merge or close field, and
 not this function and not `issue_closure_guard`, decides what an incomplete
 result blocks.
 
+### 4. Live witnesses and the confirmer report (#2453)
+
+`nexus.services.promise_confirmation.build_promise_confirmation_report` (CLI:
+`scripts/governance/promise_confirmation.py --issue N --pr M [--author-session NAME]`,
+read-only, `--offline-input FILE.json` for no network) builds a per-promise table
+(`WITNESSED`, `UNCOVERED`, `FAILED`, `STALE`) and a `recommendation`
+(`NOT_APPLICABLE`, `BLOCKED`, `LIVE_FAILED`, `PROVISIONAL`, `VERIFIED`). Claim
+ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
+
+- Issue body: an optional `nexus.issue_promise_statements.v1` fence holds
+  `{"statements": [{promise_id, statement, observe, entry, counterexample}]}`;
+  `sha256(canonical JSON of each statement)` must equal the promise's
+  `statement_sha256`. `--emit-blocks statements.json --generation G` prints both
+  fences plus a witness template per promise.
+- Witness comment (whoever ran the real entry): `<!-- NEXUS_PROMISE_WITNESS_V1`
+  + one JSON object + `NEXUS_PROMISE_WITNESS_V1 -->` with promise_id,
+  promise_set_identity, phase, pr, commit, entry (must equal the statement's
+  entry), result, observed_at, by, evidence. A post-merge witness must be on a
+  commit containing every listed merge commit and observed after the merge.
+- Only comments by an `OWNER`, `MEMBER` or `COLLABORATOR`, or by a trusted login
+  (CLI `--trusted-login`, default `James3014` and `james3014-nexus-agent[bot]`),
+  count. Others, and any comment edited after posting (`updated_at` later than
+  `created_at`), are listed in `ignored_blocks`; re-post instead of editing.
+- A later `ACTUAL_FAILED` is only superseded by a valid PASS of the same phase on
+  a commit that contains a listed PR merged after the failure (any such listed PR
+  counts as the fix). A failure recorded under an older promise-set identity
+  still counts. Every listed PR must be merged, else the report is `BLOCKED`.
+- A post-merge `ACTUAL_FAILED` on an earlier merge keeps counting after another
+  listed PR merges (its commit then lacks the later merge), as long as its commit
+  contains its own PR's merge; only a later PASS on a commit containing a merge
+  made after the failure clears it.
+- All bot comments share one GitHub login, so a confirmation whose comment author
+  is in the author identities is ignored unless that login is a shared login
+  (CLI `--shared-login`, default `james3014-nexus-agent[bot]`); for shared
+  logins only the text-level name check applies. Comments dated after `now` or
+  without an edit timestamp are ignored.
+- Any change of the promise set after work start (including a generation bump),
+  an Issue created after work start, or unavailable edit history blocks
+  `VERIFIED`; a dropped promise is `BLOCKED`.
+- Confirmation comment (independent confirmer): `NEXUS_PROMISE_CONFIRMATION_V1`
+  with promise_set_identity, commit, confirmer and per-promise verdicts. The
+  confirmer's verdict is ignored when its name equals a witness `by` on ANY promise, the Issue
+  or PR author, or an `--author-session`; this is a text-level check only.
+
 ### Fail-to-pass and missing test ids
 
 If a verifier names a pytest node id that does not exist on base, pytest
