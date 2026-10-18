@@ -996,7 +996,7 @@ def test_confirmer_equal_to_author_session_is_not_independent():
 @pytest.mark.parametrize("sessions", [(), ("  ",)])
 def test_unknown_author_session_blocks_verified(sessions):
     body, comments = _verified_inputs()
-    rep = report(body, comments, author_sessions=sessions)
+    rep = report(body, comments, author_sessions=sessions, pr_sessions={})
     assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
     assert report(body, comments)["recommendation"] == "VERIFIED"
@@ -1191,7 +1191,7 @@ def test_cli_offline_input_accepts_author_sessions_and_linked_prs(tmp_path):
         "linked_pr_created_at": [],
         "issue_created_at": "2026-01-01T00:00:00Z",
         "comments": [witness_comment("P1", identity=ident)],
-        "prs": [pr()],
+        "prs": [dict(pr(), body=MARKER)],
         "contains": [[MERGE, LIVE, True]],
         "now": NOW,
     }
@@ -1201,6 +1201,8 @@ def test_cli_offline_input_accepts_author_sessions_and_linked_prs(tmp_path):
     rep = json.loads(out.stdout)
     assert "AUTHOR_SESSION_UNKNOWN" not in rep["reason_codes"]
     assert "PROMISE_HISTORY_UNAVAILABLE" not in rep["reason_codes"]
+    assert not _missing(rep)
+    assert rep["recommendation"] == "PROVISIONAL"  # witnessed, but no confirmer yet
 
 
 # --- hardening round 2 (PR #2599 review) -------------------------------------------
@@ -1253,7 +1255,7 @@ def test_cli_same_repo_check_is_case_insensitive(tmp_path):
 
 def test_library_author_sessions_none_is_treated_as_empty():
     body, comments = _verified_inputs()
-    rep = report(body, comments, author_sessions=None)
+    rep = report(body, comments, author_sessions=None, pr_sessions={})
     assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
 
 
@@ -1417,3 +1419,77 @@ def test_cli_offline_pr_body_marker_is_required_per_pr(tmp_path):
     marked = _offline(tmp_path, author_sessions=["author-session"], prs=[dict(pr(), body=MARKER)])
     out = _run_cli(tmp_path, ["--offline-input", str(marked), "--json"])
     assert not _missing(json.loads(out.stdout))
+
+
+# --- robust PR marker handling (PR #2608 review) -------------------------------------
+
+
+def test_duplicate_listed_pr_numbers_are_blocked():
+    body, comments = _verified_inputs()
+    for dup in (pr(), dict(pr(), number="2549")):
+        rep = report(body, comments, prs=[pr(), dup])
+        assert rep["recommendation"] == "BLOCKED"
+        assert "DUPLICATE_PR_LISTED:2549" in rep["reason_codes"]
+
+
+@pytest.mark.parametrize("marked_first", [True, False])
+def test_cli_offline_duplicate_pr_numbers_cannot_hide_an_unmarked_entry(tmp_path, marked_first):
+    entries = [dict(pr(), body=MARKER), pr()]
+    if not marked_first:
+        entries.reverse()
+    path = _offline(tmp_path, author_sessions=["author-session"], prs=entries)
+    out = _run_cli(tmp_path, ["--offline-input", str(path), "--json"])
+    rep = json.loads(out.stdout)
+    assert rep["recommendation"] == "BLOCKED"
+    assert "DUPLICATE_PR_LISTED:2549" in rep["reason_codes"]
+
+
+@pytest.mark.parametrize("value", [None, "", 5, {"a": 1}, [1, 2], [None], [" "], ("  ",)])
+def test_unusable_pr_marker_values_count_as_unmarked(value):
+    body, comments = _verified_inputs()
+    rep = report(body, comments, pr_sessions={2549: value})
+    assert _missing(rep) and rep["recommendation"] == "PROVISIONAL"
+
+
+def test_bare_string_marker_is_one_name_and_non_str_items_are_dropped():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="Solo"),
+    ]
+    rep = report(body, comments, pr_sessions={2549: "solo"})
+    assert not _missing(rep) and _not_independent(rep)
+    mixed = report(body, comments, pr_sessions={2549: ["ok-name", 5, None]})
+    assert not _missing(mixed) and mixed["recommendation"] == "VERIFIED"
+
+
+def test_pr_marker_keys_are_normalized_and_bad_keys_ignored():
+    body, comments = _verified_inputs()
+    assert report(body, comments, pr_sessions={"2549": ["a"]})["recommendation"] == "VERIFIED"
+    for key in ("abc", 2.5, True, None, "-1"):
+        rep = report(body, comments, pr_sessions={key: ["a"]})
+        assert _missing(rep), key
+
+
+def test_listed_pr_number_is_normalized_and_missing_number_does_not_raise():
+    body, comments = _verified_inputs()
+    ok = report(body, comments, prs=[dict(pr(), number="2549")], pr_sessions={2549: ["a"]})
+    assert not _missing(ok)
+    nameless = {k: v for k, v in pr().items() if k != "number"}
+    rep = report(body, comments, prs=[nameless], pr_sessions={2549: ["a"]})
+    assert "PR_AUTHOR_SESSION_MISSING:?" in rep["reason_codes"]
+    assert rep["recommendation"] != "VERIFIED"
+
+
+def test_pr_marker_names_count_as_known_sessions():
+    body, comments = _verified_inputs()
+    rep = report(body, comments, author_sessions=(), pr_sessions={2549: ["pr-author-session"]})
+    assert "AUTHOR_SESSION_UNKNOWN" not in rep["reason_codes"]
+    assert rep["recommendation"] == "VERIFIED"
+
+
+def test_two_listed_prs_both_marked_is_verified():
+    body, comments = _verified_inputs()
+    marked = {2549: ["pr-author-session"], 2600: ["other-session"]}
+    rep = report(body, comments, prs=[pr(), PR2], pr_sessions=marked)
+    assert rep["recommendation"] == "VERIFIED"

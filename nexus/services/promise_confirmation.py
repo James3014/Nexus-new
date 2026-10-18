@@ -423,9 +423,35 @@ def _confirmation(
     return (candidates[-1][1] if candidates else None), ignored
 
 
+def _pr_key(value: Any) -> int | None:
+    """A PR number as int; accepts int or an ASCII digit string, nothing else."""
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,9}", value):
+        return int(value)
+    return None
+
+
+def _marker_names(value: Any) -> set[str]:
+    """Usable lowercase names from one PR's marker value; anything odd yields none."""
+    items = [value] if isinstance(value, str) else value if isinstance(value, (list, tuple)) else []
+    return {x.strip().lower() for x in items if isinstance(x, str) and x.strip()}
+
+
+def _pr_markers(raw: Mapping[Any, Any] | None) -> dict[int, set[str]]:
+    """PR number -> marker names; bad keys ignored, the first entry for a number wins."""
+    out: dict[int, set[str]] = {}
+    for key, value in (raw if isinstance(raw, Mapping) else {}).items():
+        number = _pr_key(key)
+        if number is not None:
+            out.setdefault(number, _marker_names(value))
+    return out
+
+
 def _normalize_pr(p: Mapping[str, Any]) -> dict[str, Any]:
     """A PR with an unreadable merged_at (or no merge pair) counts as not merged."""
     out = dict(p)
+    out["number"] = _pr_key(out.get("number"))
     if not (out.get("merge_sha") and _ts(out.get("merged_at"))):
         out["merge_sha"], out["merged_at"] = None, None
     return out
@@ -519,10 +545,7 @@ def build_promise_confirmation_report(
     authors = {a.strip().lower() for a in author_identities}
     shared = {x.strip().lower() for x in shared_logins}
     sessions = {x.strip().lower() for x in (author_sessions or ()) if x.strip()}
-    pr_marked = {
-        int(number): {x.strip().lower() for x in names if x.strip()}
-        for number, names in (pr_author_sessions or {}).items()
-    }
+    pr_marked = _pr_markers(pr_author_sessions)
     excluded = sessions.union(*pr_marked.values())
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
@@ -602,12 +625,15 @@ def build_promise_confirmation_report(
         issue_created_at,
     )
     top: set[str] = set(info)
-    if not sessions:
+    if not excluded:
         top.add("AUTHOR_SESSION_UNKNOWN")
         blockers = set(blockers) | {"AUTHOR_SESSION_UNKNOWN"}
-    for listed in prs:
-        if not pr_marked.get(listed["number"]):
-            reason = f"PR_AUTHOR_SESSION_MISSING:{listed['number']}"
+    numbers = [p["number"] for p in prs]
+    for duplicate in sorted({n for n in numbers if n is not None and numbers.count(n) > 1}):
+        top.add(f"DUPLICATE_PR_LISTED:{duplicate}")
+    for number in numbers:
+        if number is None or not pr_marked.get(number):
+            reason = f"PR_AUTHOR_SESSION_MISSING:{'?' if number is None else number}"
             top.add(reason)
             blockers = set(blockers) | {reason}
     if not prs:
@@ -633,6 +659,7 @@ def build_promise_confirmation_report(
     if (
         any(r.startswith("PROMISE_DROPPED") for r in info)
         or {"NO_PR_LISTED", "PR_NOT_MERGED"} & top
+        or any(r.startswith("DUPLICATE_PR_LISTED") for r in top)
     ):
         recommendation = "BLOCKED"
     elif rejected or any(r["status"] == "FAILED" for r in rows):

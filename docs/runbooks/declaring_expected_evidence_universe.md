@@ -286,6 +286,8 @@ ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
   own body, else the report cannot be `VERIFIED` (`PR_AUTHOR_SESSION_MISSING:<n>`); markers
   from the Issue, linked PRs and `--author-session` only add excluded names and never
   replace a listed PR's own marker.
+- The same PR listed twice gives `DUPLICATE_PR_LISTED:<n>` (`BLOCKED`); a marker value that is
+  not a list of names counts as no marker, and marker names also count as known author sessions.
 - Work start is the earliest creation among the listed PRs and every PR linked to
   the Issue (cross-reference or connected events). If the link list cannot be
   read completely the report cannot be `VERIFIED` (`PROMISE_HISTORY_UNAVAILABLE`).

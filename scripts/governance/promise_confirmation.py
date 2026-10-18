@@ -151,6 +151,16 @@ class Gh:
         )
 
 
+def _offline_pr_markers(prs: list[dict]) -> dict[Any, list[str]]:
+    """Markers per PR number; the FIRST entry for a number wins (duplicates are BLOCKED later)."""
+    out: dict[Any, list[str]] = {}
+    for p in prs:
+        number = p.get("number")
+        if isinstance(number, (int, str)) and number not in out:
+            out[number] = author_session_markers(str(p.get("body") or ""))
+    return out
+
+
 def _markdown(rep: dict) -> str:
     lines = [f"Recommendation: {rep['recommendation']}  (input only, grants nothing)", ""]
     if rep.get("promises"):
@@ -187,7 +197,14 @@ def _emit(path: str, generation: int) -> int:
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
-    except (subprocess.CalledProcessError, OSError, ValueError, KeyError, TypeError) as exc:
+    except (
+        subprocess.CalledProcessError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+    ) as exc:
         detail = (getattr(exc, "stderr", "") or str(exc)).strip().splitlines()
         print(
             f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}",
@@ -234,9 +251,7 @@ def _main(argv: list[str] | None = None) -> int:
             shared_logins=d.get("shared_logins", args.shared_login),
             issue_created_at=d.get("issue_created_at"),
             author_sessions=sessions,
-            pr_author_sessions={
-                p["number"]: author_session_markers(str(p.get("body") or "")) for p in d["prs"]
-            },
+            pr_author_sessions=_offline_pr_markers(d["prs"]),
             linked_pr_created_at=d.get("linked_pr_created_at"),
         )
     else:
