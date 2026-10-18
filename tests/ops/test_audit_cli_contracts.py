@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 
 def _run_json_command(args: list[str]) -> dict:
@@ -10,7 +11,7 @@ def _run_json_command(args: list[str]) -> dict:
 
 
 def test_hallucination_guard_drift_accepts_output_json_flag():
-    payload = _run_json_command(["uv", "run", "python", "scripts/ops/hallucination_guard_drift.py", "--output-json"])
+    payload = _run_json_command([sys.executable, "scripts/ops/hallucination_guard_drift.py", "--output-json"])
 
     assert payload["schema_version"] == "nexus_hallucination_guard_drift.v1"
     assert payload["passed"] is True
@@ -19,9 +20,7 @@ def test_hallucination_guard_drift_accepts_output_json_flag():
 def test_brain_hub_audit_accepts_output_json_flag():
     payload = _run_json_command(
         [
-            "uv",
-            "run",
-            "python",
+            sys.executable,
             "scripts/ops/brain_hub_audit.py",
             "--manifest",
             "docs/ops/brain_hub_manifest.json",
@@ -37,9 +36,7 @@ def test_render_brain_hub_coverage_accepts_output_json_flag(tmp_path):
     output = tmp_path / "coverage.md"
     payload = _run_json_command(
         [
-            "uv",
-            "run",
-            "python",
+            sys.executable,
             "scripts/ops/render_brain_hub_coverage.py",
             "--manifest",
             "docs/ops/brain_hub_manifest.json",
