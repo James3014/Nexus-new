@@ -785,7 +785,8 @@ def main(argv: list[str] | None = None) -> int:
                     "released": ok,
                     "reason": why,
                 })
-            print(json.dumps({"sweep": rows, "at": utcnow()}, indent=2))
+            # One line: coord-sweep's daily report keeps only the last stdout line.
+            print(json.dumps({"sweep": rows, "at": utcnow()}, sort_keys=True))
             return 0
         if args.issue is None:
             ap.error("--issue is required")
