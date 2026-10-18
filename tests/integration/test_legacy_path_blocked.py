@@ -24,6 +24,13 @@ MODEL_OUTPUT_NAMES = frozenset({
     "generated_text",
     "content",
     "json_str",
+    # Raw model text names. An explicit list rather than a ``model_*`` prefix: the prefix
+    # also catches model_path, model_name, model_id, model_dir (paths, identifiers,
+    # metadata, not model text), which would dilute the allowlist.
+    "model_text",
+    "model_reply",
+    "model_answer",
+    "model_raw_text",
     # Raw text captured from a model CLI/server. An explicit list rather than a ``raw_*``
     # prefix: the prefix also catches raw_bytes/raw_packet/raw_jwk/raw_coverage (sealed
     # files, env secrets, Mapping copies), which would need allowlist entries for
@@ -300,10 +307,10 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
         "local_receipt_path.read_text(encoding='utf-8')",
     ): ("File read: local execution receipt JSON written by the executor, not raw model text."),
     ("scripts/train/smoke_test_adapter.py", "run_physical_smoke", "clean_response"): (
-        "TODO route: model text parsed under `except json.JSONDecodeError` and non-object values reach validate_json_schema's own message; routing through parse_model_json would change the exception type and that message."
+        "Justified (#2523): model text parsed under `except json.JSONDecodeError` and non-object values reach validate_json_schema's own message; routing through parse_model_json would change the exception type and that message."
     ),
     ("nexus/core/drone_engine.py", "LocalBonsaiBrain.ask_structured", "text"): (
-        "TODO route: model text (Ollama format-constrained reply); today a non-object JSON value is returned as-is, while parse_model_json(expect='object') would turn it into the Malformed-output FAIL dict."
+        "Justified (#2523): model text (Ollama format-constrained reply); today a non-object JSON value is returned as-is, while parse_model_json(expect='object') would turn it into the Malformed-output FAIL dict."
     ),
 }
 
@@ -574,6 +581,43 @@ class TestLegacyPathBlocked(unittest.TestCase):
         # 這裡檢查是否有人直接寫 state = FlowState.XXX 而非調用驗證器
         # (此為行為測試啟發式檢查)
         pass
+
+    def test_scanner_flags_model_text_and_sibling_names(self):
+        for name in ("model_text", "model_reply", "model_answer", "model_raw_text"):
+            source = f"import json\ndef f({name}):\n    return json.loads({name})\n"
+            with self.subTest(name=name):
+                hits = find_model_output_json_parses(source, "synthetic/model_names.py")
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0][:3], ("synthetic/model_names.py", "f", name))
+        propagated = "import json\ndef f(model_text):\n    body = model_text.strip()\n    return json.loads(body)\n"
+        with self.subTest(case="propagated"):
+            self.assertTrue(find_model_output_json_parses(propagated, "synthetic/prop.py"))
+
+    def test_temp_model_text_parse_in_scripts_is_a_violation(self):
+        source = "import json\ndef f(model_text):\n    return json.loads(model_text)\n"
+        for rel_path in ("scripts/_tmp_probe_2523.py", "nexus/_tmp_probe_2523.py"):
+            with self.subTest(rel_path=rel_path):
+                hits = find_model_output_json_parses(source, rel_path)
+                violations = [h for h in hits if h[:3] not in NON_MODEL_JSON_PARSE_ALLOWLIST]
+                self.assertTrue(violations)
+
+    def test_non_model_names_with_model_prefix_stay_quiet(self):
+        for name in ("model_path", "model_name", "model_id", "model_dir"):
+            source = f"import json\ndef f(path):\n    {name} = path.read_text()\n    return json.loads({name})\n"
+            with self.subTest(name=name):
+                self.assertEqual(find_model_output_json_parses(source, "synthetic/quiet.py"), [])
+
+    def test_todo_route_sites_have_a_recorded_decision(self):
+        keys = (
+            ("scripts/train/smoke_test_adapter.py", "run_physical_smoke", "clean_response"),
+            ("nexus/core/drone_engine.py", "LocalBonsaiBrain.ask_structured", "text"),
+        )
+        for key in keys:
+            with self.subTest(key=key):
+                self.assertIn(key, NON_MODEL_JSON_PARSE_ALLOWLIST)
+                reason = NON_MODEL_JSON_PARSE_ALLOWLIST[key]
+                self.assertFalse(reason.startswith("TODO route"))
+                self.assertIn("#2523", reason)
 
 
 if __name__ == "__main__":
