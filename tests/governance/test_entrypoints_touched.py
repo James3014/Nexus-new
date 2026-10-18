@@ -324,3 +324,61 @@ def test_real_gateway_resolves_every_tool_spec_to_a_handler():
     assert report["gateway_tools_known"] >= 40
     assert "gateway:nexus_worker_candidate" in _ids(report)
     assert "launchd:com.nexus.mcp.gateway.direct" in _ids(report)
+
+
+def _to_elif_chain(repo: Path) -> None:
+    path = repo / "nexus/orchestrator/unified_mcp_gateway.py"
+    text = path.read_text()
+    text = text.replace('        if name == "tool_b":', '        elif name == "tool_b":')
+    text = text.replace("        if name == TOOL_C:", "        elif name == TOOL_C:")
+    path.write_text(text)
+    _git(repo, "commit", "-qam", "elif chain")
+
+
+def test_elif_chain_branch_span_excludes_the_following_branches(repo):
+    _to_elif_chain(repo)
+    base, head = _commit_edit(
+        repo,
+        "nexus/orchestrator/unified_mcp_gateway.py",
+        "return self._tool_c(arguments)",
+        "return self._tool_c(dict(arguments))",
+    )
+    report = _run(repo, base, head)
+    assert report["unresolved"] == []
+    assert {i for i in _ids(report) if i.startswith("gateway:")} == {"gateway:tool_c"}
+    # A dependency of tool_c alone is not attributed to tool_a, whose If holds tool_c in orelse.
+    base, head = _commit_edit(repo, "nexus/services/only_c.py", "return x", "return -x")
+    assert {i for i in _ids(_run(repo, base, head)) if i.startswith("gateway:")} == {
+        "gateway:tool_c"
+    }
+
+
+def test_edit_inside_a_call_tool_branch_names_only_that_tool(repo):
+    base, head = _commit_edit(
+        repo,
+        "nexus/orchestrator/unified_mcp_gateway.py",
+        "return self._tool_b(arguments)",
+        "return self._tool_b(dict(arguments))",
+    )
+    assert {i for i in _ids(_run(repo, base, head)) if i.startswith("gateway:")} == {
+        "gateway:tool_b"
+    }
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {"com.nexus.bad": "scripts/ops/nightly.py"},
+        {"com.nexus.bad": ["scripts/ops/nightly.py"]},
+        {"com.nexus.bad": {"scripts": "scripts/ops/nightly.py"}},
+        {"com.nexus.bad": {"scripts": [1]}},
+    ],
+)
+def test_malformed_launchd_label_raises_entrypoints_error(repo, labels):
+    path = repo / et.LAUNCHD_MAP
+    path.write_text(json.dumps({"schema": "nexus.launchd_entrypoints.v1", "labels": labels}))
+    with pytest.raises(et.EntrypointsError, match="malformed"):
+        et.analyze(repo, ["nexus/services/deep_a.py"])
+    path.write_text(json.dumps(["not", "a", "mapping"]))
+    with pytest.raises(et.EntrypointsError, match="malformed"):
+        et.analyze(repo, ["nexus/services/deep_a.py"])

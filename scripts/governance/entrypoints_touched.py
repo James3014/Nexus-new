@@ -345,9 +345,13 @@ class GatewayModel:
             if branch is None:
                 self.unresolved.append(f"gateway:{tool}: no _call_tool branch")
             else:
-                reach.add_range(call.file, branch.lineno, branch.end_lineno or branch.lineno)
+                # The branch is its test and body only: in an if/elif chain the
+                # ``orelse`` holds the next tools' branches and must not count.
+                end = max(stmt.end_lineno or stmt.lineno for stmt in branch.body)
+                reach.add_range(call.file, branch.lineno, end)
                 bindings = self.method_bindings.get("_call_tool", {})
-                self._walk(branch, call.file, bindings, reach)
+                body = ast.Module(body=list(branch.body), type_ignores=[])
+                self._walk(body, call.file, bindings, reach)
             self.tools[tool] = reach
 
     def _walk(
@@ -479,10 +483,18 @@ def _launchd(repo: Path, path: str) -> dict[str, list[str]]:
         data = json.loads((repo / path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise EntrypointsError(f"launchd map unreadable: {path}") from exc
-    labels = data.get("labels") if isinstance(data, dict) else None
-    if data.get("schema") != "nexus.launchd_entrypoints.v1" or not isinstance(labels, dict):
+    if not isinstance(data, dict) or data.get("schema") != "nexus.launchd_entrypoints.v1":
         raise EntrypointsError(f"launchd map malformed: {path}")
-    return {label: list(entry.get("scripts") or []) for label, entry in labels.items()}
+    labels = data.get("labels")
+    if not isinstance(labels, dict):
+        raise EntrypointsError(f"launchd map malformed: {path}")
+    out: dict[str, list[str]] = {}
+    for label, entry in labels.items():
+        scripts = entry.get("scripts") if isinstance(entry, dict) else None
+        if not isinstance(scripts, list) or not all(isinstance(x, str) for x in scripts):
+            raise EntrypointsError(f"launchd map malformed at {label!r}: {path}")
+        out[label] = list(scripts)
+    return out
 
 
 def _in_ranges(lines: Iterable[int], ranges: Sequence[tuple[int, int]]) -> bool:

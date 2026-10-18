@@ -1541,7 +1541,10 @@ def test_uncovered_entrypoint_is_advisory_and_never_changes_verified():
     rep = _report_with_entrypoints(body, comments, _touched("gateway:nexus_worker_candidate"))
     assert rep["recommendation"] == "VERIFIED"
     assert rep["entrypoint_advisory_recommendation"] == "PROVISIONAL"
-    assert "ENTRYPOINT_UNCOVERED:gateway:nexus_worker_candidate" in rep["reason_codes"]
+    assert (
+        "ENTRYPOINT_UNCOVERED:gateway:nexus_worker_candidate"
+        in rep["entrypoint_advisory_reason_codes"]
+    )
     assert rep["entrypoints"]["uncovered"] == ["gateway:nexus_worker_candidate"]
     assert rep["uncovered"] == []
 
@@ -1618,7 +1621,7 @@ def test_explicit_out_of_scope_entries_are_accepted_from_issue_fence_and_input()
         "console:nexus",
         "script:scripts/ops/x.py",
     ]
-    assert not any(r.startswith("ENTRYPOINT") for r in rep["reason_codes"])
+    assert rep["entrypoint_advisory_reason_codes"] == []
 
 
 def test_out_of_scope_without_reason_is_invalid_and_ignored():
@@ -1626,8 +1629,8 @@ def test_out_of_scope_without_reason_is_invalid_and_ignored():
     touched = _touched("console:nexus", out_of_scope=[{"id": "console:nexus", "reason": " "}])
     rep = _report_with_entrypoints(body, comments, touched)
     assert rep["recommendation"] == "VERIFIED"
-    assert "ENTRYPOINT_OUT_OF_SCOPE_INVALID" in rep["reason_codes"]
-    assert "ENTRYPOINT_UNCOVERED:console:nexus" in rep["reason_codes"]
+    assert "ENTRYPOINT_OUT_OF_SCOPE_INVALID" in rep["entrypoint_advisory_reason_codes"]
+    assert "ENTRYPOINT_UNCOVERED:console:nexus" in rep["entrypoint_advisory_reason_codes"]
     assert rep["entrypoint_advisory_recommendation"] == "PROVISIONAL"
 
 
@@ -1644,7 +1647,7 @@ def test_invalid_entrypoints_input_is_advisory_only(bad):
     body, comments = _verified_inputs()
     rep = _report_with_entrypoints(body, comments, bad)
     assert rep["recommendation"] == "VERIFIED"
-    assert "ENTRYPOINTS_TOUCHED_INVALID" in rep["reason_codes"]
+    assert "ENTRYPOINTS_TOUCHED_INVALID" in rep["entrypoint_advisory_reason_codes"]
     assert rep["entrypoint_advisory_recommendation"] == "PROVISIONAL"
 
 
@@ -1679,6 +1682,31 @@ def test_cli_entrypoints_json_adds_advisory_section(tmp_path):
     assert out.returncode == 0, out.stderr
     rep = json.loads(out.stdout)
     assert rep["entrypoints"]["uncovered"] == ["gateway:nexus_task_run"]
-    assert "ENTRYPOINT_UNCOVERED:gateway:nexus_task_run" in rep["reason_codes"]
+    assert "ENTRYPOINT_UNCOVERED:gateway:nexus_task_run" in rep["entrypoint_advisory_reason_codes"]
     md = subprocess.run(base_args, capture_output=True, text=True, env=env, cwd=REPO_ROOT)
     assert md.returncode == 0 and "Entry points (advisory): PROVISIONAL" in md.stdout
+
+
+@pytest.mark.parametrize(
+    "touched",
+    [
+        _touched("gateway:nexus_worker_candidate", "console:nexus"),
+        _touched("console:nexus", out_of_scope=[{"id": "console:nexus", "reason": " "}]),
+        {"schema": "other", "entrypoints": []},
+        ["not", "a", "mapping"],
+    ],
+)
+@pytest.mark.parametrize("case", ["verified", "provisional", "live_failed"])
+def test_advisory_input_never_changes_reason_codes_or_recommendation(touched, case):
+    if case == "verified":
+        body, comments = _verified_inputs()
+    else:
+        body, ident = setup()
+        result = "PASS" if case == "provisional" else "ACTUAL_FAILED"
+        comments = [witness_comment("P1", result=result, identity=ident)]
+    baseline = _report_with_entrypoints(body, comments, None)
+    rep = _report_with_entrypoints(body, comments, touched)
+    for key in ("reason_codes", "recommendation", "uncovered", "promises"):
+        assert json.dumps(rep[key], sort_keys=True) == json.dumps(baseline[key], sort_keys=True)
+    assert not any(r.startswith("ENTRYPOINT") for r in rep["reason_codes"])
+    assert {k: v for k, v in rep.items() if not k.startswith("entrypoint")} == baseline

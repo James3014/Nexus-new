@@ -16,7 +16,8 @@ and with the supplied author identities, which proves nothing cryptographic.
 Optional ``entrypoints_touched`` (``nexus.entrypoints_touched.v1``, from
 ``scripts/governance/entrypoints_touched.py``, #2612) is advisory only: each
 touched entry point that no statement ``entry`` names and that is not declared
-out of scope adds ``ENTRYPOINT_UNCOVERED:<id>`` and makes the separate
+out of scope adds ``ENTRYPOINT_UNCOVERED:<id>`` to the separate
+``entrypoint_advisory_reason_codes`` and sets
 ``entrypoint_advisory_recommendation`` PROVISIONAL. It never changes
 ``recommendation`` (the VERIFIED rule belongs to #2453) and never blocks.
 """
@@ -802,10 +803,12 @@ def build_promise_confirmation_report(
     extra: dict[str, Any] = {}
     if entrypoints_touched is not None:
         # Advisory only: computed after ``recommendation`` and never feeds it.
+        # Its codes stay out of ``reason_codes`` so that field and
+        # ``recommendation`` are identical whatever the advisory input is.
         section, advisory = _entrypoint_advisory(entrypoints_touched, issue_body, statements)
-        top |= advisory
         extra = {
             "entrypoints": section,
+            "entrypoint_advisory_reason_codes": sorted(advisory),
             "entrypoint_advisory_recommendation": (
                 "PROVISIONAL"
                 if recommendation == "VERIFIED" and (section["uncovered"] or advisory)
