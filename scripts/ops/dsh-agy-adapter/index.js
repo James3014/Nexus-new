@@ -92,6 +92,10 @@ function boundedEnvInt(name, fallback, min, max) {
 
 const POOL_BUSY_CODE = 'AGY_ACCOUNT_POOL_BUSY_PRE_EFFECT'
 const QUOTA_PRE_EFFECT_CODE = 'PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT'
+// Dispatcher `status=pool_exhausted, failure_kind=ACCOUNT_UNAVAILABLE` with a proven recovery
+// time (#2618). Typed only when every account has a known reset; waited out under the busy budget.
+const POOL_EXHAUSTED_CODE = 'AGY_ACCOUNT_POOL_EXHAUSTED_PRE_EFFECT'
+const EXHAUSTED_JITTER_MS = 1000
 const RETRYABLE_PRE_EFFECT_CODES = new Set([PRE_EFFECT_CODE, POOL_BUSY_CODE, QUOTA_PRE_EFFECT_CODE])
 const DEFAULT_RETRY_BACKOFF_MS = Object.freeze([10000, 30000])
 const DISPATCH_META_PREFIX = 'NEXUS_AGY_DISPATCH '
@@ -185,6 +189,21 @@ function classifyFailedOperation(record, meta, operationId) {
   } else if (kind === QUOTA_PRE_EFFECT_CODE) {
     code = QUOTA_PRE_EFFECT_CODE
     detail = 'Agy provider quota exhausted before any provider effect'
+  } else if (meta.status === 'pool_exhausted' && kind === 'ACCOUNT_UNAVAILABLE') {
+    // Only a fully proven, time-bounded exhaustion is typed; anything else keeps failing as
+    // AGY_OPERATION_FAILED exactly as before.
+    const resetAtMs = typeof meta.earliest_reset_at === 'string' ? Date.parse(meta.earliest_reset_at) : NaN
+    if (meta.attempts !== 0 || !Number.isFinite(resetAtMs)) return null
+    if (meta.pool_recovery?.accounts_without_known_recovery !== 0) return null
+    code = POOL_EXHAUSTED_CODE
+    detail = 'Agy account pool exhausted (all accounts cooling, recovery at ' + meta.earliest_reset_at + ') before any provider effect'
+    const exhausted = new LlmError(detail + '; operation ' + operationId + ' FAILED', code)
+    exhausted.effect = 'none'
+    exhausted.retryable = true
+    exhausted.failureKind = kind
+    exhausted.operationId = operationId
+    exhausted.resetAtMs = resetAtMs
+    return exhausted
   } else {
     return null
   }
@@ -614,18 +633,29 @@ export class AgyPoolAdapter extends LlmAdapter {
         const provablyPreEffect = RETRYABLE_PRE_EFFECT_CODES.has(error?.code) && error?.effect === 'none'
         // Pool-busy is the only code with a time budget; it never consumes the count-limited
         // retries. All other pre-effect codes keep the existing count limit.
-        const busy = provablyPreEffect && error.code === POOL_BUSY_CODE && busyBudgetMs > 0 && maxRetries > 0
+        const exhausted = error?.code === POOL_EXHAUSTED_CODE && error?.effect === 'none'
+          && Number.isFinite(error.resetAtMs)
+        const busy = (exhausted || (provablyPreEffect && error.code === POOL_BUSY_CODE))
+          && busyBudgetMs > 0 && maxRetries > 0
         let waitMs = 0
         let retryable = false
         if (busy) {
           if (busyDeadline === null) busyDeadline = attemptStartedAt + busyBudgetMs
           const remaining = busyDeadline - Date.now()
-          if (remaining > 0) {
-            waitMs = Math.min(backoff[Math.min(busyWaits, backoff.length - 1)], remaining)
+          // Exhaustion is waited out only when the proven reset lies inside the budget.
+          const resetInBudget = !exhausted || error.resetAtMs <= busyDeadline
+          if (remaining > 0 && resetInBudget) {
+            waitMs = exhausted
+              ? Math.min(
+                Math.max(0, error.resetAtMs - Date.now()) + Math.floor(Math.random() * EXHAUSTED_JITTER_MS),
+                remaining,
+              )
+              : Math.min(backoff[Math.min(busyWaits, backoff.length - 1)], remaining)
             retryable = true
             busyWaits += 1
             process.stderr.write('NEXUS_DSH_AGY_BUSY_RETRY ' + JSON.stringify({
               attempt,
+              reason: exhausted ? 'pool_exhausted' : 'pool_busy',
               wait_ms: waitMs,
               budget_remaining_ms: remaining,
               operation_id: error.operationId ?? null,
