@@ -240,6 +240,32 @@ The result grants nothing: it has no approve, merge or close field, and
 not this function and not `issue_closure_guard`, decides what an incomplete
 result blocks.
 
+### 4. Live witnesses and the confirmer report (#2453)
+
+`nexus.services.promise_confirmation.build_promise_confirmation_report` (CLI:
+`scripts/governance/promise_confirmation.py --issue N --pr M [--author-session NAME]`,
+read-only, `--offline-input FILE.json` for no network) builds a per-promise table
+(`WITNESSED`, `UNCOVERED`, `FAILED`, `STALE`) and a `recommendation`
+(`NOT_APPLICABLE`, `BLOCKED`, `LIVE_FAILED`, `PROVISIONAL`, `VERIFIED`). Claim
+ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
+
+- Issue body: an optional `nexus.issue_promise_statements.v1` fence holds
+  `{"statements": [{promise_id, statement, observe, entry, counterexample}]}`;
+  `sha256(canonical JSON of each statement)` must equal the promise's
+  `statement_sha256`. `--emit-blocks statements.json --generation G` prints both
+  fences plus a witness template per promise.
+- Witness comment (whoever ran the real entry): `<!-- NEXUS_PROMISE_WITNESS_V1`
+  + one JSON object + `NEXUS_PROMISE_WITNESS_V1 -->` with promise_id,
+  promise_set_identity, phase, pr, commit, entry (must equal the statement's
+  entry), result, observed_at, by, evidence. A post-merge witness must be on a
+  commit containing every listed merge commit and observed after the merge.
+- A later `ACTUAL_FAILED` is only superseded by a valid PASS on a commit that
+  contains a PR merged after the failure.
+- Confirmation comment (independent confirmer): `NEXUS_PROMISE_CONFIRMATION_V1`
+  with promise_set_identity, commit, confirmer and per-promise verdicts. The
+  confirmer's verdict is ignored when its name equals a witness `by`, the Issue
+  or PR author, or an `--author-session`; this is a text-level check only.
+
 ### Fail-to-pass and missing test ids
 
 If a verifier names a pytest node id that does not exist on base, pytest
