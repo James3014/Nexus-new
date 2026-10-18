@@ -49,6 +49,17 @@ SENSITIVE_PREFIXES = (
     "scripts/ops/ci_gate.py",
     ".github/workflows/",
 )
+# Repo-wide inventory/scanner tests (#2613). They assert facts about the whole
+# tree (OpenWiki crosswalk counts, SOURCES.txt, the model-JSON read allowlist),
+# so any PR that adds, moves or removes a file can break them, yet no impact-map
+# row points at them. Three of the ten nightly failures of 2026-10-16..18 were
+# these, each from a Tier 1 PR (#2486, #2531, #2534). They run on every plan that
+# runs pytest (~12 s). Owner decision 2026-10-18: 「同意」.
+ALWAYS_RUN_TARGETS = (
+    "tests/ops/test_wiki_coverage_policy.py",
+    "tests/ops/test_source_inventory_integrity.py",
+    "tests/integration/test_legacy_path_blocked.py",
+)
 MANDATORY_TIER2_TARGETS = (
     "tests/gates/test_s2t_memory_sidecar_fixtures.py",
     "tests/ops/test_select_tests.py",
@@ -59,6 +70,7 @@ MANDATORY_TIER2_TARGETS = (
     "tests/architecture/test_boundaries_v3.py",
     "tests/architecture/test_boundaries_v4.py",
     "tests/architecture/test_effect_owner_uniqueness.py",
+    *ALWAYS_RUN_TARGETS,
 )
 DOC_GOVERNANCE_TARGETS = (
     "tests/ops/test_select_tests.py",
@@ -912,6 +924,11 @@ def build_impact_plan(
         targets = _unique_existing(MANDATORY_TIER2_TARGETS, root=root)
         pytest_required = True
         reasons.append("empty verification set failed closed")
+
+    if pytest_required:
+        # Added only after the empty-set and unknown checks above, so these
+        # always-run targets can never turn an empty selection into a pass.
+        targets = _unique_existing([*targets, *ALWAYS_RUN_TARGETS], root=root)
 
     if impact_class != FULL_SUITE_IMPACT_CLASS:
         # Any other true-unknown reason (provenance, empty set) keeps IMPACT_UNKNOWN.
