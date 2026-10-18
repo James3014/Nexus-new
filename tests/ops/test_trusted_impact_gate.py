@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
-import sysconfig
+import sys
 from pathlib import Path
 
 import pytest
@@ -785,8 +785,13 @@ def test_evidence_claiming_a_run_the_plan_does_not_need_fails(pr_repo):
 
 def test_real_executor_output_round_trips_through_the_verifier(pr_repo, monkeypatch):
     bundle, manifest, manifest_sha = _bundle(pr_repo)
-    purelib = Path(sysconfig.get_paths()["purelib"])
-    monkeypatch.setattr(tig, "_prepare_runtime", lambda *_args: purelib)
+    # The runtime stand-in is wherever this interpreter's pytest lives: on a
+    # synced checkout that is purelib, inside the trusted executor it is the
+    # offline runtime tree (purelib there has no pytest, #2593).
+    runtime = Path(pytest.__file__).resolve().parents[1]
+    monkeypatch.setattr(tig, "_prepare_runtime", lambda *_args: runtime)
+    # The executor builds its tree in the job workspace; keep it out of this checkout.
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(pr_repo["tmp"] / "workspace"))
     evidence = pr_repo["tmp"] / "evidence"
     for side in tig.SIDES:
         assert (
@@ -807,6 +812,98 @@ def test_real_executor_output_round_trips_through_the_verifier(pr_repo, monkeypa
     ).hexdigest()
     payload = _verify(pr_repo, bundle, manifest_sha, base_sha256)
     assert payload["classification"] == "PASS"
+    # The trees were built in the job workspace, not under a temp root.
+    assert sorted(p.name.split("-")[2] for p in (pr_repo["tmp"] / "workspace").iterdir()) == [
+        "base",
+        "head",
+    ]
+
+
+def test_runtime_interpreter_keeps_runtime_and_checkout_for_scrubbed_children(tmp_path):
+    runtime = tmp_path / "runtime" / "site-packages"
+    (runtime / "bin").mkdir(parents=True)
+    (runtime / "trusted_rt_probe.py").write_text("VALUE = 'runtime'\n", encoding="utf-8")
+    (runtime / "pytest.py").write_text("", encoding="utf-8")  # the self-check imports it
+    (runtime / "bin" / "probe-tool").write_bytes(
+        b"#!/usr/bin/python-from-builder\nimport trusted_rt_probe\nprint(trusted_rt_probe.VALUE)\n"
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "trusted_src_probe.py").write_text("VALUE = 'source'\n", encoding="utf-8")
+
+    python = tig._runtime_interpreter(source, runtime)
+
+    assert python == source / ".venv" / "bin" / "python"
+    # A child that drops PYTHONPATH (or runs -I) still sees the runtime and the checkout.
+    child = subprocess.run(
+        [str(python), "-I", "-c", "import trusted_rt_probe, trusted_src_probe"],
+        env={"PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    tool = python.parent / "probe-tool"
+    assert tool.read_bytes().split(b"\n", 1)[0] == f"#!{python}".encode()
+    ran = subprocess.run([str(tool)], env={}, capture_output=True, text=True, check=False)
+    assert ran.stdout.strip() == "runtime", ran.stderr
+
+
+def test_runtime_interpreter_refuses_a_venv_supplied_by_the_tree(tmp_path):
+    runtime = Path(pytest.__file__).resolve().parents[1]
+    source = tmp_path / "source"
+    (source / ".venv" / "bin").mkdir(parents=True)
+    with pytest.raises(tig.GateError, match=r"\.venv"):
+        tig._runtime_interpreter(source, runtime)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".venv").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(tig.GateError, match=r"\.venv"):
+        tig._runtime_interpreter(linked, runtime)
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_materialized_tree_has_the_trusted_origin(pr_repo, tmp_path):
+    bundle, manifest, _manifest_sha = _bundle(pr_repo)
+    work = tmp_path / "work"
+    work.mkdir()
+    source = tig._materialize(
+        bundle, manifest["sides"]["head"], work, tig._trusted_repository(manifest)
+    )
+    assert _git(source, "config", "--get", "remote.origin.url") == (
+        f"https://github.com/{REPOSITORY}.git"
+    )
+    for bad in ("", "James3014", "a/b c", "a/b\nc", None):
+        with pytest.raises(tig.GateError, match="repository identity"):
+            tig._trusted_repository({"workflow_identity": {"repository": bad}})
+
+
+def test_offline_plugin_xfails_only_the_listed_nodes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        tig, "OFFLINE_EXCLUDED_TESTS", {"test_probe.py::test_needs_network": "offline"}
+    )
+    plugins = tig._offline_plugin_dir(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "test_probe.py").write_text(
+        "def test_needs_network():\n    assert False\n\n\ndef test_other():\n    assert False\n",
+        encoding="utf-8",
+    )
+    ran = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", tig.OFFLINE_PLUGIN, "-p", "no:cacheprovider"],
+        cwd=project,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join((str(plugins), *sys.path))},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "1 failed, 1 xfailed" in ran.stdout, ran.stdout + ran.stderr
+
+
+def test_offline_excluded_tests_name_existing_test_ids():
+    for node in tig.OFFLINE_EXCLUDED_TESTS:
+        path, name = node.split("::")
+        assert f"def {name}(" in (ROOT / path).read_text(encoding="utf-8"), node
 
 
 def test_executor_rejects_bundle_not_bound_to_controller_output(pr_repo, tmp_path):
