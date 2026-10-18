@@ -43,8 +43,12 @@ Exception` then returned a hard-coded `rust-v16` candidate, so every Repair phas
 swarm-gated route. The loader now returns no candidates and logs a warning, and
 `select_self_heal_route` fails closed with reason `self_heal_candidate_source_missing`. The
 Repair phase already handles `fail-closed` by running the same `try_local_repair` that the old
-swarm stub (`_swarm_repair`) proxied to, so repair behaviour is unchanged apart from the
-truthful route record.
+swarm stub (`_swarm_repair`) proxied to, with one behaviour difference besides the truthful
+route record: the fail-closed branch (`nexus/engine/phases/repair.py`) passes
+`context={"task": task, **context}`, while the swarm stub passed `context` alone. `try_local_repair`
+reads `state.metadata["task_description"]` first and then `context["task"]`
+(`nexus/engine/phases/local_repair.py`), so a run without a `task_description` can now attempt a
+local repair from `task`, where before it found no task text and returned `None` (no repair attempt).
 
 ## Tests
 
