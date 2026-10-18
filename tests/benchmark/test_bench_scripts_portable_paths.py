@@ -62,9 +62,7 @@ def test_rebuild_bd_ceiling_entrypoint_template_uses_repo_root() -> None:
     spec.loader.exec_module(module)
     source = inspect.getsource(module.step_bd2)
 
-    default_output_lines = [
-        line for line in source.splitlines() if "DEFAULT_OUTPUT =" in line
-    ]
+    default_output_lines = [line for line in source.splitlines() if "DEFAULT_OUTPUT =" in line]
     assert len(default_output_lines) == 1, (
         f"Expected 1 DEFAULT_OUTPUT line in step_bd2, found {len(default_output_lines)}"
     )
