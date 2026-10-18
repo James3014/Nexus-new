@@ -4958,8 +4958,9 @@ def test_execution_readiness_public_workforce_callback_reaches_ready_without_env
     "override",
     [
         {"kind": "non_mapping"}, {"kind": "raises"},
-        {"probe_expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
-        {"probe_expires_at": datetime.now().replace(tzinfo=None).isoformat()},
+        # Fixed timestamps: parametrize values are built at collection (#2581).
+        {"probe_expires_at": "2026-10-17T00:00:00+00:00"},
+        {"probe_expires_at": "2999-01-01T00:00:00"},
         {"provider": "other"}, {"requested_model": "other-model"},
         {"binary_sha256": "bad"}, {"cli_version_sha256": "bad"},
         {"probe_evidence_hash": "bad"}, {"execution_ready": False},
