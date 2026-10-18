@@ -185,6 +185,7 @@ def test_route_off_explicit_patch_override_is_authoritative(tmp_path: Path, monk
 @pytest.mark.parametrize(
     ("tier", "model", "effort"),
     [("light", "gemini-3.8-flash-low", "low"), ("small", "gemini-3.8-flash-medium", "medium")],
+    ids=["light-gemini-3.8-flash-low", "small-gemini-3.8-flash-medium"],
 )
 def test_auto_cheap_tier_appends_derived_patch_after_caller_patch(
     tmp_path: Path, monkeypatch, tier: str, model: str, effort: str
