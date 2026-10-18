@@ -23,8 +23,14 @@ def test_missing_or_malformed_task_fails_closed(task_id: object) -> None:
 
 
 @pytest.mark.parametrize("digest", [None, "", "  ", 0, b"sha256:x", object()])
-def test_missing_or_malformed_digest_fails_closed(digest: object) -> None:
+def test_missing_or_non_string_digest_fails_closed(digest: object) -> None:
     assert task_bound_key("task-1", digest) is None
+
+
+def test_digest_is_opaque() -> None:
+    # The helper binds a task to whatever digest the caller computed; the digest format is
+    # the caller's contract (planner_snapshot_digest always yields "sha256:<64 hex>").
+    assert task_bound_key("task-1", "opaque-digest") == ("task-1", "opaque-digest")
 
 
 def test_task_id_is_never_normalised() -> None:
@@ -85,3 +91,21 @@ def test_invalid_task_is_refused_before_hashing_the_snapshot() -> None:
     unsortable = {1: "a", "b": 2}
     for task_id in (None, "", "  ", 0):
         assert psb.is_planner_bound(unsortable, task_id=task_id) is False
+
+
+def test_planner_binding_stores_the_real_helper_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nexus.contracts.task_bound_key as tbk
+
+    seen: list[object] = []
+
+    def spy(task_id: object, digest: object) -> object:
+        key = tbk.task_bound_key(task_id, digest)
+        seen.append(key)
+        return key
+
+    monkeypatch.setattr(psb, "task_bound_key", spy)
+    psb.register_planner_snapshot(SNAPSHOT, task_id="task-1")
+    expected = ("task-1", psb.planner_snapshot_digest(SNAPSHOT))
+    assert seen == [expected] and list(psb._bound) == [expected]
+    assert psb.is_planner_bound(SNAPSHOT, task_id="task-1")
+    assert seen[-1] == expected

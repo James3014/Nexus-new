@@ -9,8 +9,9 @@ the #2032 escape, where a planner route_context snapshot was accepted for any ta
 ``task_bound_key`` builds that key and fails closed: when the task identity or the digest is
 missing, empty or not a string it returns ``None``, and callers must then bind nothing and
 treat a lookup as "not bound". Task ids are used exactly as given (never stripped, folded or
-normalised), so two distinct ids can never collide into one key. Stdlib-only, importable
-from any layer.
+normalised), so two distinct ids can never collide into one key. The digest is opaque here:
+its format is the caller's contract (e.g. ``planner_snapshot_digest`` yields "sha256:<hex>").
+Stdlib-only, importable from any layer.
 """
 
 from __future__ import annotations
