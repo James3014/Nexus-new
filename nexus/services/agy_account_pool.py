@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -250,25 +251,36 @@ RUNTIME_POPULATED = "populated"
 RUNTIME_UNREADABLE = "unreadable"
 
 
+def _stat_child(path: Path) -> tuple[Optional[os.stat_result], Optional[str]]:
+    """``os.stat`` a runtime child: ``(None, None)`` when absent.
+
+    Unlike ``Path.exists()``, a permission error is not reported as absent:
+    it comes back as ``(None, <error kind>)``.
+    """
+    try:
+        return path.stat(), None
+    except (FileNotFoundError, NotADirectoryError):
+        return None, None
+    except OSError as exc:
+        return None, type(exc).__name__
+
+
 def _runtime_root_state(path: Path) -> tuple[str, Optional[str]]:
     """Classify a candidate pool runtime root.
 
     Returns ``(state, error_kind)``.  ``RUNTIME_UNREADABLE`` means the root
-    exists with a ``state.json`` or ``accounts/`` that could not be read or
-    parsed, and nothing readable showed it populated.  ``error_kind`` is the
-    exception class name only (never file contents).
+    exists with a ``state.json`` or ``accounts/`` that could not be stat'ed,
+    read, listed or parsed, and nothing readable showed it populated.
+    ``error_kind`` is the exception class name only (never file contents).
     """
-    if not path.exists() or not path.is_dir():
+    if not path.is_dir():
         return RUNTIME_ABSENT, None
-    try:
-        # A root that cannot be listed or traversed makes the child
-        # exists() checks below report False, which would look "empty".
-        os.listdir(path)
-    except OSError as exc:
-        return RUNTIME_UNREADABLE, type(exc).__name__
     error_kind: Optional[str] = None
     state_json = path / "state.json"
-    if state_json.exists() and state_json.is_file():
+    st, err = _stat_child(state_json)
+    if err is not None:
+        error_kind = err
+    elif st is not None and stat.S_ISREG(st.st_mode):
         try:
             data = json.loads(state_json.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
@@ -279,11 +291,23 @@ def _runtime_root_state(path: Path) -> tuple[str, Optional[str]]:
         except _RUNTIME_READ_ERRORS as exc:
             error_kind = type(exc).__name__
     accounts_dir = path / "accounts"
-    if accounts_dir.exists() and accounts_dir.is_dir():
+    st, err = _stat_child(accounts_dir)
+    if err is not None:
+        error_kind = error_kind or err
+    elif st is not None and stat.S_ISDIR(st.st_mode):
         try:
-            subdirs = [x for x in accounts_dir.iterdir() if x.is_dir()]
-            if len(subdirs) > 0:
-                return RUNTIME_POPULATED, None
+            with os.scandir(accounts_dir) as entries:
+                for entry in entries:
+                    # entry.stat() (not the d_type-based is_dir()) so an
+                    # accounts/ without +x fails here instead of
+                    # looking populated or empty.  Follows symlinks like
+                    # main's Path.is_dir(); a dangling link is not a dir.
+                    try:
+                        entry_mode = entry.stat().st_mode
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    if stat.S_ISDIR(entry_mode):
+                        return RUNTIME_POPULATED, None
         except OSError as exc:
             error_kind = error_kind or type(exc).__name__
     if error_kind is not None:
@@ -391,7 +415,10 @@ class AgyAccountPoolManager:
                 derived_from_mgr = base / "runtime"
 
         if derived_from_mgr:
-            if manager_path is not None or _selects_runtime_root(derived_from_mgr):
+            # Classify first even when manager_path is given: the result is
+            # then only diagnostic (an unreadable root still logs), and the
+            # derived root is returned unconditionally as before.
+            if _selects_runtime_root(derived_from_mgr) or manager_path is not None:
                 return (
                     str(derived_from_mgr.resolve())
                     if derived_from_mgr.exists()
