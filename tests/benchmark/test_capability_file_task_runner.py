@@ -324,7 +324,10 @@ def test_codex_direct_patch_env_uses_host_home_not_a_user_name(tmp_path: Path, m
 
     assert "jameschen" not in captured_env.get("PATH", "")
     assert f"{fakehome}/.npm-global/bin" in captured_env.get("PATH", "")
-    assert "jameschen" not in capability_ab_runner.DEFAULT_CODEX_BIN
+    # DEFAULT_CODEX_BIN is resolved at import from the real home, so check its source
+    # (not its value) to stay host-independent, e.g. on M4 where HOME is that user.
+    assert capability_ab_runner.DEFAULT_CODEX_BIN.endswith("/.npm-global/bin/codex")
+    assert "jameschen" not in Path(capability_ab_runner.__file__).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
