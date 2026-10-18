@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
@@ -74,6 +75,15 @@ SANDBOX_SYSTEM_READ_LITERALS = (
     "/dev/null",
     "/dev/urandom",
 )
+# Single system tool files some lanes' test runs need: ``/usr/bin/shasum`` is a Perl script,
+# so Perl must read it (an executable binary needs no read grant to be exec'd) (#2650).
+SANDBOX_TOOL_READ_FILES = ("/usr/bin/shasum",)
+# The active developer dir (``xcode-select -p``) is read-allowed for confined git: ``/usr/bin/git``
+# is an xcrun shim that loads ``libxcrun`` and the real git from it (#2650). Only a system
+# toolchain location is accepted, never a path under a user's home or a temp tree.
+DEVELOPER_DIR_ALLOWED_PREFIXES = ("/Library/Developer/", "/Applications/")
+XCODE_SELECT = "/usr/bin/xcode-select"
+_DEVELOPER_DIR_PROBE: dict[str, list[str]] = {}
 # A readable subtree may never be (or contain) one of these.
 # (The bare temp roots are joined, not literal: this is a deny list, not a temp-file use.)
 SANDBOX_FORBIDDEN_READ_ROOTS = (
@@ -246,6 +256,49 @@ def interpreter_read_roots() -> list[str]:
     return [
         sbpl_path(Path(sys.prefix).resolve()),
         sbpl_path(Path(sys.base_prefix).resolve()),
+    ]
+
+
+def developer_toolchain_read_roots() -> list[str]:
+    """The macOS active developer dir (``xcode-select -p``) as a read root, or ``[]``.
+
+    Resolved once with a fixed binary path and an empty environment (no ``DEVELOPER_DIR``
+    override), and accepted only when it resolves to an existing directory under
+    ``DEVELOPER_DIR_ALLOWED_PREFIXES`` that is also safe for an SBPL literal. Anything else
+    (non-macOS, no Command Line Tools, an unusual location) yields ``[]``: git then stays
+    unavailable inside the sandbox, which is the pre-#2650 behaviour (fail closed)."""
+
+    if "developer_dir" not in _DEVELOPER_DIR_PROBE:
+        roots: list[str] = []
+        if sys.platform == "darwin" and os.path.isfile(XCODE_SELECT):
+            try:
+                found = subprocess.run(  # noqa: S603 - fixed argv, empty env
+                    [XCODE_SELECT, "-p"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    env={},
+                )
+                text = (found.stdout or "").strip() if found.returncode == 0 else ""
+                if text and os.path.isabs(text):
+                    resolved = sbpl_path(text)
+                    if os.path.isdir(resolved) and any(
+                        resolved.startswith(prefix) for prefix in DEVELOPER_DIR_ALLOWED_PREFIXES
+                    ):
+                        roots = [resolved]
+            except (OSError, subprocess.SubprocessError, SandboxError):
+                roots = []
+        _DEVELOPER_DIR_PROBE["developer_dir"] = roots
+    return list(_DEVELOPER_DIR_PROBE["developer_dir"])
+
+
+def tool_read_roots() -> list[str]:
+    """Existing ``SANDBOX_TOOL_READ_FILES`` plus the developer toolchain dir (#2650)."""
+
+    return [
+        *(path for path in SANDBOX_TOOL_READ_FILES if os.path.isfile(path)),
+        *developer_toolchain_read_roots(),
     ]
 
 
@@ -461,10 +514,13 @@ def run_confined(
     timeout: float,
     require_barrier: bool = False,
     stdin_text: str | None = None,
+    kill_process_group: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run ``argv`` (never a shell) with ``env`` in a ``cwd`` inside ``confine_roots``, wrapped
     in ``sandbox-exec`` when available. ``require_barrier`` refuses to run without one.
     ``stdin_text``, when given, is the child's whole stdin (a pipe, never the caller's).
+    ``kill_process_group`` starts the child in its own session and, on timeout, SIGKILLs that
+    whole process group by the child's PID, so grandchildren do not outlive the run (#2650).
     Raises subprocess.TimeoutExpired on timeout."""
 
     if not argv:
@@ -479,6 +535,10 @@ def run_confined(
         command = [SANDBOX_EXEC, "-p", profile(), *command]
     elif require_barrier:
         raise SandboxError("no_os_barrier")
+    if kill_process_group:
+        return _run_in_own_process_group(
+            command, cwd=resolved_cwd, env=env, timeout=timeout, stdin_text=stdin_text
+        )
     return subprocess.run(  # noqa: S603 - argv list, no shell
         command,
         cwd=resolved_cwd,
@@ -489,6 +549,56 @@ def run_confined(
         timeout=timeout,
         input=stdin_text,
     )
+
+
+def _run_in_own_process_group(
+    command: list[str], *, cwd: Path, env: dict[str, str], timeout: float, stdin_text: str | None
+) -> subprocess.CompletedProcess:
+    """``subprocess.run`` equivalent whose timeout kills the child's whole process group.
+
+    The child starts a new session, so its PID is its process group id. On timeout the group
+    is SIGKILLed by that PID before the child is reaped (so the id cannot have been reused),
+    and every descendant still in the group dies with it (#2650: orphaned ``stall``
+    grandchildren of a timed-out ghost run kept running for hours)."""
+
+    proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
+        command,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(input=stdin_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            # A descendant that left the group still holds the pipes: stop reading.
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+            proc.wait()
+            stdout, stderr = "", ""
+        raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from None
+    except BaseException:
+        _kill_group(proc.pid)
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
+
+def _kill_group(pid: int) -> None:
+    """SIGKILL the process group led by ``pid`` (a child started with a new session)."""
+
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        pass
 
 
 def trusted_executable(name: str, *, untrusted_roots: Iterable[Path | str | None]) -> str:

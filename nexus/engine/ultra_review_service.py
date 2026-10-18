@@ -40,6 +40,7 @@ from nexus.engine.sandboxed_lane import (  # noqa: F401 - re-exported for caller
     os_sandbox_available,
     run_confined,
     scrubbed_env,
+    tool_read_roots,
     unsafe_summary_lines,
     write_no_follow,
 )
@@ -95,6 +96,18 @@ del _arm
 sys.exit(int(_pytest.main(_args, plugins=[_witness])))
 """
 GHOST_WITNESS_MAX_BYTES = 4096
+# A ghost run that hits its time budget is retried once with this many times the budget
+# before it is reported INCONCLUSIVE_TIMEOUT: under heavy host load a real regression
+# otherwise escapes as "inconclusive" (#2650, live witness of #2623).
+GHOST_TIMEOUT_RETRY_FACTOR = 2
+# Sandbox capability probes (#2650): run once per review, only when a head failure has no
+# base result. A failed probe means "this sandbox cannot run such a test", never a regression.
+ENV_PROBE_TIMEOUT_SEC = 30
+ENV_PROBE_TMPDIR_WRITE = "import os, tempfile\nfd, path = tempfile.mkstemp()\nos.close(fd)\nos.unlink(path)\n"
+# ``ModuleNotFoundError`` text in a pytest collection-error report (#2650).
+MODULE_NOT_FOUND_RE = re.compile(r"ModuleNotFoundError: No module named '([A-Za-z_][A-Za-z0-9_.]*)'")
+TOP_LEVEL_MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+FIND_SPEC_PROBE = "import importlib.util, sys\nsys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)\n"
 LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
@@ -347,14 +360,33 @@ class UltraReviewService:
         explicit_tests = tuple(
             text for text in (str(rel).strip() for rel in regression_tests) if text and text in test_candidates
         )
-        ghost_regression = self._run_ghost_regression(
-            test_candidates,
-            execution_root=execution_root,
-            base_ref=base_ref,
-            sandbox_path=sandbox_path,
-            explicit_tests=explicit_tests,
-            mode=mode,
-        )
+        mirror_git: dict[str, Any] = {}
+        if (
+            test_candidates
+            and os_sandbox_available()
+            and os.getenv(ULTRA_SKIP_GHOST_ENV, "").strip().lower() not in {"1", "true", "yes", "on"}
+            and str(mirror_metadata.get("strategy") or "").startswith("git_worktree")
+            and mirror_metadata.get("diff_applied")
+        ):
+            mirror_git = self._give_checkout_sandbox_git_dir(
+                execution_root, sandbox_path / "mirror-git-dir", rev="HEAD", diff_path=diff_path
+            )
+        try:
+            ghost_regression = self._run_ghost_regression(
+                test_candidates,
+                execution_root=execution_root,
+                base_ref=base_ref,
+                sandbox_path=sandbox_path,
+                explicit_tests=explicit_tests,
+                mode=mode,
+            )
+        finally:
+            mirror_git_restore = self._restore_checkout_git_file(execution_root, mirror_git)
+        if mirror_git:
+            ghost_regression["sandbox_git_dir"] = {
+                **{k: v for k, v in mirror_git.items() if k != "original"},
+                "restore": mirror_git_restore,
+            }
         unmapped_paths = [str(item.get("changed_file") or "") for item in regression_map if not item.get("existing")]
         ghost_regression["uncovered_paths"] = unmapped_paths
         if (
@@ -772,6 +804,10 @@ class UltraReviewService:
             untrusted_roots=(self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")),
         )
         env[ULTRA_REVIEW_NESTED_ENV] = "1"
+        if ctx.get("tmp"):
+            # xcrun caches into the per-user temp dir (outside the sandbox) unless told
+            # otherwise; keep its cache in the sandbox tmp so git prints no cache errors (#2650).
+            env["xcrun_db"] = str(Path(ctx["tmp"]) / "xcrun_db")
         return env
 
     @_as_review_error
@@ -797,8 +833,10 @@ class UltraReviewService:
         ``$HOME``/``/Users``/temp tree; any such root fails closed."""
 
         ctx = getattr(self, "_sandbox_ctx", None) or {}
+        # tool_read_roots: /usr/bin/shasum and the active developer dir, so the xcrun git shim
+        # and Perl tools work inside the sandbox (#2650); validated like every other root.
         return checked_read_roots(
-            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots()],
+            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots(), *tool_read_roots()],
             extra_forbidden=[self.project_root],
         )
 
@@ -835,7 +873,13 @@ class UltraReviewService:
 
     @_as_review_error
     def _sandboxed_run(
-        self, cmd: list[str], *, cwd: Path, timeout: float, stdin_text: str | None = None
+        self,
+        cmd: list[str],
+        *,
+        cwd: Path,
+        timeout: float,
+        stdin_text: str | None = None,
+        kill_process_group: bool = False,
     ) -> subprocess.CompletedProcess:
         """Run a lane command on PR-controlled content: scrubbed env, sandbox cwd, timeout,
         and (when available) an OS barrier denying network, credential reads and writes
@@ -856,6 +900,7 @@ class UltraReviewService:
             env=self._sandbox_env(),
             timeout=timeout,
             stdin_text=stdin_text,
+            kill_process_group=kill_process_group,
         )
 
     def _cleanup_execution_worktree(self, execution_root: Path, mirror_metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1725,8 +1770,20 @@ class UltraReviewService:
         passed = False
         head_returncode: int | None = None
         head_check: dict[str, Any] = {"verified": False, "reason": "not_run", "junit_bytes": None}
+        head_retried = False
         try:
-            result = self._run_witnessed(cmd, head_report, cwd=execution_root, timeout=timeout_sec)
+            try:
+                result = self._run_witnessed(cmd, head_report, cwd=execution_root, timeout=timeout_sec)
+            except subprocess.TimeoutExpired:
+                # One retry with a longer budget before calling it inconclusive (#2650).
+                head_retried = True
+                head_report = self._new_ghost_report(sandbox_path or execution_root, "head-retry")
+                cmd = self._ghost_pytest_cmd(
+                    execution_root, test_candidates, head_report["junit"], head_report["witness"]
+                )
+                result = self._run_witnessed(
+                    cmd, head_report, cwd=execution_root, timeout=timeout_sec * GHOST_TIMEOUT_RETRY_FACTOR
+                )
             head_returncode = result.returncode
             head_check = self._verify_ghost_report(head_report, result.returncode)
             passed = result.returncode == 0 and head_check["verified"]
@@ -1741,6 +1798,7 @@ class UltraReviewService:
         regressions: list[str] = []
         pre_existing: list[str] = []
         inconclusive_tests: list[str] = []
+        inconclusive_env: list[dict[str, str]] = []
         base_comparison: dict[str, Any] = {}
 
         def add_finding(rule_id: str, state: str, severity: str, summary: str, tests: list[str]) -> None:
@@ -1769,8 +1827,8 @@ class UltraReviewService:
                 "regression_test_timeout",
                 "INCONCLUSIVE_TIMEOUT",
                 "info",
-                f"Ghost regression candidate timed out after {timeout_sec:g}s in {phrase}"
-                " (inconclusive, not a finding).",
+                f"Ghost regression candidate timed out after {timeout_sec:g}s and again after"
+                f" {timeout_sec * GHOST_TIMEOUT_RETRY_FACTOR:g}s in {phrase} (inconclusive, not a finding).",
                 inconclusive_tests,
             )
         elif head_returncode == 0 and not head_check["verified"]:
@@ -1804,7 +1862,12 @@ class UltraReviewService:
                 # Only base-pass -> head-fail counts against the change: re-run the failing
                 # mapped tests on an isolated checkout of the base.
                 base_comparison = self._compare_failures_on_base(
-                    comparable, base_ref=base_ref, sandbox_path=sandbox_path, timeout_sec=timeout_sec
+                    comparable,
+                    base_ref=base_ref,
+                    sandbox_path=sandbox_path,
+                    timeout_sec=timeout_sec,
+                    head_collection_modules=self._junit_collection_error_modules(head_check["junit_bytes"]),
+                    execution_root=execution_root,
                 )
                 regressions.extend(base_comparison.pop("regressions"))
                 cleanup = base_comparison.get("base_cleanup") or {}
@@ -1818,6 +1881,7 @@ class UltraReviewService:
                     )
                 pre_existing = base_comparison.pop("pre_existing")
                 inconclusive_tests = base_comparison.pop("inconclusive")
+                inconclusive_env = base_comparison.pop("inconclusive_env")
             if regressions:
                 add_finding(
                     "regression_test_failed",
@@ -1835,6 +1899,18 @@ class UltraReviewService:
                     + ", ".join(pre_existing[:10]),
                     pre_existing,
                 )
+            if inconclusive_env:
+                # The test has no base result and this sandbox cannot run it (a dependency the
+                # reviewer's interpreter lacks, or a failed capability probe): not evidence
+                # against the change (#2650). A test that passes on base never lands here.
+                add_finding(
+                    "environment_unavailable",
+                    "INCONCLUSIVE_ENV",
+                    "info",
+                    f"Mapped test fails on head, has no base result and cannot run in this sandbox in {phrase}: "
+                    + ", ".join(f"{item['test']} ({item['reason']})" for item in inconclusive_env[:10]),
+                    [item["test"] for item in inconclusive_env],
+                )
             if inconclusive_tests:
                 timed_out = bool(base_comparison.get("timeout"))
                 add_finding(
@@ -1847,11 +1923,13 @@ class UltraReviewService:
                 )
         return {
             "passed": not regressions,
-            "inconclusive": bool(inconclusive_tests),
+            "inconclusive": bool(inconclusive_tests or inconclusive_env),
             "executed_tests": list(test_candidates),
             "failed_tests": regressions,
             "pre_existing_failures": pre_existing,
             "inconclusive_tests": inconclusive_tests,
+            "inconclusive_env_tests": inconclusive_env,
+            "head_retried_after_timeout": head_retried,
             "base_comparison": base_comparison,
             "skipped_tests": [],
             "findings": findings,
@@ -1891,7 +1969,10 @@ class UltraReviewService:
         self, cmd: list[str], report: dict[str, Any], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess:
         report["started"] = datetime.now(timezone.utc).timestamp()
-        return self._sandboxed_run(cmd, cwd=cwd, timeout=timeout, stdin_text=report["key"].hex() + "\n")
+        # The ghost re-run is the lane whose stalled descendants outlived a timeout (#2650).
+        return self._sandboxed_run(
+            cmd, cwd=cwd, timeout=timeout, stdin_text=report["key"].hex() + "\n", kill_process_group=True
+        )
 
     @staticmethod
     def _verify_ghost_report(report: dict[str, Any], returncode: int) -> dict[str, Any]:
@@ -1977,6 +2058,9 @@ class UltraReviewService:
             f"pythonpath={sbpl_path(root)}",
             "-o",
             "junit_family=xunit1",
+            # A file that fails to import is reported (error_file) and the other files still
+            # run, instead of the whole session aborting with exit 2 (#2650).
+            "--continue-on-collection-errors",
             f"--junitxml={sbpl_path(junit_path)}",
             *tests,
         ]
@@ -2068,25 +2152,44 @@ class UltraReviewService:
         return regressions, comparable
 
     def _compare_failures_on_base(
-        self, failed_ids: list[str], *, base_ref: str, sandbox_path: Path | None, timeout_sec: float
+        self,
+        failed_ids: list[str],
+        *,
+        base_ref: str,
+        sandbox_path: Path | None,
+        timeout_sec: float,
+        head_collection_modules: dict[str, str] | None = None,
+        execution_root: Path | None = None,
     ) -> dict[str, Any]:
         """Re-run the files of head-failing mapped tests on a detached worktree of ``base_ref``.
 
-        Per id, from the base junit report: failed on base too -> pre-existing; passed on base,
-        or absent on base (a failing test the change added) -> regression; skipped on base, a
-        file-level collection error on base, an unknown base result (timeout, exit other than
-        0/1, unparseable report) or an unpreparable base -> inconclusive."""
+        Per id, from the base junit report: failed on base too -> pre-existing; passed on base
+        -> regression; absent on base (a failing test the change added) -> regression, unless
+        this sandbox cannot run it (#2650: a collection-time ``ModuleNotFoundError`` for a module
+        neither tree provides and the reviewer's interpreter cannot import, or a failed sandbox
+        capability probe) -> inconclusive_env; skipped on base, a file-level collection error on
+        base, an unknown base result (timeout, exit other than 0/1, unparseable report) or an
+        unpreparable base -> inconclusive."""
         outcome: dict[str, Any] = {
             "base_ref": base_ref,
             "regressions": [],
             "pre_existing": [],
             "inconclusive": [],
+            "inconclusive_env": [],
             "reason": "",
             "timeout": False,
         }
+        modules = dict(head_collection_modules or {})
 
         def file_of(test_id: str) -> str:
             return test_id.split("::", 1)[0]
+
+        def absent_on_base(test_id: str) -> None:
+            reason = self._environment_reason(test_id, modules, execution_root=execution_root, base_ref=base_ref)
+            if reason:
+                outcome["inconclusive_env"].append({"test": test_id, "reason": reason})
+            else:
+                outcome["regressions"].append(test_id)
 
         if sandbox_path is None or not base_ref or base_ref.startswith("-"):
             outcome["inconclusive"] = list(failed_ids)
@@ -2098,6 +2201,7 @@ class UltraReviewService:
             outcome["inconclusive"] = list(failed_ids)
             outcome["reason"] = "base_worktree_unavailable: " + (add.stderr or add.stdout or "")[-300:].strip()
             return outcome
+        base_git: dict[str, Any] = {}
         try:
             violations = self._neutralize_base_links(base_root)
             if violations:
@@ -2109,19 +2213,32 @@ class UltraReviewService:
                 rel for rel in files if self._contained_path(rel, base_root) is not None and (base_root / rel).is_file()
             ]
             remaining = [test_id for test_id in failed_ids if file_of(test_id) in present]
-            outcome["regressions"] = [test_id for test_id in failed_ids if file_of(test_id) not in present]
+            for test_id in failed_ids:
+                if file_of(test_id) not in present:
+                    absent_on_base(test_id)
             if not remaining:
                 return outcome
+            # Same git capability on base as on head, so a git-using test is judged alike (#2650).
+            base_git = self._give_checkout_sandbox_git_dir(base_root, sandbox_path / "base-git-dir", rev=base_ref)
             base_report = self._new_ghost_report(sandbox_path, "base")
             cmd = self._ghost_pytest_cmd(base_root, present, base_report["junit"], base_report["witness"])
-            outcome["repro_command"] = self._display_cmd(cmd)
             try:
-                result = self._run_witnessed(cmd, base_report, cwd=base_root, timeout=timeout_sec)
+                try:
+                    result = self._run_witnessed(cmd, base_report, cwd=base_root, timeout=timeout_sec)
+                except subprocess.TimeoutExpired:
+                    outcome["base_retried_after_timeout"] = True
+                    base_report = self._new_ghost_report(sandbox_path, "base-retry")
+                    cmd = self._ghost_pytest_cmd(base_root, present, base_report["junit"], base_report["witness"])
+                    result = self._run_witnessed(
+                        cmd, base_report, cwd=base_root, timeout=timeout_sec * GHOST_TIMEOUT_RETRY_FACTOR
+                    )
             except subprocess.TimeoutExpired:
+                outcome["repro_command"] = self._display_cmd(cmd)
                 outcome["inconclusive"] = remaining
-                outcome["reason"] = f"base_run_timeout_{timeout_sec:g}s"
+                outcome["reason"] = f"base_run_timeout_{timeout_sec * GHOST_TIMEOUT_RETRY_FACTOR:g}s"
                 outcome["timeout"] = True
                 return outcome
+            outcome["repro_command"] = self._display_cmd(cmd)
             outcome["base_returncode"] = result.returncode
             base_check = self._verify_ghost_report(base_report, result.returncode)
             base_outcomes = (
@@ -2147,19 +2264,203 @@ class UltraReviewService:
                 state = base_outcomes.get(test_id)
                 if state == "failed":
                     outcome["pre_existing"].append(test_id)
-                elif state in (None, "passed"):
+                elif state == "passed":
                     outcome["regressions"].append(test_id)
+                elif state is None:
+                    prefix = file_of(test_id) + "::"
+                    if test_id == file_of(test_id) and any(
+                        key.startswith(prefix) and value == "passed" for key, value in base_outcomes.items()
+                    ):
+                        # The file no longer collects on head but its tests pass on base:
+                        # base pass -> head fail, whatever the import error says.
+                        outcome["regressions"].append(test_id)
+                    else:
+                        absent_on_base(test_id)
                 else:
                     outcome["inconclusive"].append(test_id)
                     reasons.add(f"base_{state}")
             outcome["reason"] = ",".join(sorted(reasons))
             return outcome
         finally:
+            restore = self._restore_checkout_git_file(base_root, base_git)
+            if base_git:
+                outcome["base_git_dir"] = {
+                    **{k: v for k, v in base_git.items() if k != "original"},
+                    "restore": restore,
+                }
             removed = self._git_run(["worktree", "remove", "--force", str(base_root)])
             outcome["base_cleanup"] = {
                 "removed": removed.returncode == 0,
                 "detail": (removed.stderr or removed.stdout or "")[-300:].strip(),
             }
+
+    def _environment_reason(
+        self, test_id: str, modules: dict[str, str], *, execution_root: Path | None, base_ref: str
+    ) -> str:
+        """Why a head failure with no base result cannot be judged here, or ``""`` (#2650).
+
+        ``dependency_unavailable:<module>`` when the file failed to collect with a
+        ``ModuleNotFoundError`` for a top-level module that neither the head tree nor the base
+        tree provides and the reviewer's interpreter cannot import (a moved or deleted in-tree
+        module therefore stays a regression); ``environment_probe_failed:<probes>`` when a
+        sandbox capability probe fails."""
+        module = modules.get(test_id) or ""
+        if module and execution_root is not None and self._dependency_unavailable(module, execution_root, base_ref):
+            return "dependency_unavailable:" + module.split(".", 1)[0]
+        if execution_root is not None:
+            failed = self._environment_probe(execution_root)
+            if failed:
+                return "environment_probe_failed:" + ",".join(failed)
+        return ""
+
+    def _dependency_unavailable(self, module: str, execution_root: Path, base_ref: str) -> bool:
+        top = module.split(".", 1)[0]
+        if not TOP_LEVEL_MODULE_RE.fullmatch(top):
+            return False
+        candidates = (top, f"{top}.py", f"src/{top}", f"src/{top}.py")
+        for rel in candidates:
+            if os.path.lexists(execution_root / rel):
+                return False  # the head tree provides it: an import break is the change's
+            if base_ref and not base_ref.startswith("-"):
+                shown = self._git_run(["cat-file", "-e", f"{base_ref}:{rel}"])
+                if shown.returncode == 0:
+                    return False  # the base tree provides it: moved or deleted by the change
+        try:
+            probe = subprocess.run(  # noqa: S603 - trusted interpreter, fixed code, name validated
+                [sys.executable, "-I", "-c", FIND_SPEC_PROBE, top],
+                cwd=self._git_home if getattr(self, "_git_home", None) else None,
+                capture_output=True,
+                text=True,
+                timeout=ENV_PROBE_TIMEOUT_SEC,
+                check=False,
+                env={key: os.environ[key] for key in SANDBOX_ENV_ALLOWLIST if key in os.environ},
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        # Importable by the reviewer yet missing in the run: not a dependency gap, keep it.
+        return probe.returncode == 1
+
+    def _environment_probe(self, execution_root: Path) -> list[str]:
+        """Names of the sandbox capability probes that fail (run once per mirror)."""
+        cache: dict[str, list[str]] = self.__dict__.setdefault("_env_probe_cache", {})
+        key = str(execution_root)
+        if key in cache:
+            return list(cache[key])
+        probes = (
+            ("git_version", ["git", "--version"]),
+            ("git_rev_parse_mirror", ["git", "-C", str(execution_root), "rev-parse", "HEAD"]),
+            ("tmpdir_write", [sys.executable, "-I", "-c", ENV_PROBE_TMPDIR_WRITE]),
+        )
+        failed: list[str] = []
+        for name, cmd in probes:
+            try:
+                ok = self._sandboxed_run(cmd, cwd=execution_root, timeout=ENV_PROBE_TIMEOUT_SEC).returncode == 0
+            except (subprocess.TimeoutExpired, OSError, SandboxError):
+                ok = False
+            if not ok:
+                failed.append(name)
+        cache[key] = failed
+        return list(failed)
+
+    @staticmethod
+    def _junit_collection_error_modules(data: bytes | None) -> dict[str, str]:
+        """``{file: module}`` for file-level collection errors whose last
+        ``ModuleNotFoundError`` names ``module`` (same keys as ``_junit_outcomes_from_bytes``)."""
+        import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 - DTD/entities rejected below
+
+        if data is None or len(data) > JUNIT_MAX_BYTES or b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+            return {}
+        try:
+            root = ET.fromstring(data)  # noqa: S314  # nosec B314 - DTD/entities rejected above
+        except ET.ParseError:
+            return {}
+        found: dict[str, str] = {}
+        for case in root.iter("testcase"):
+            if case.get("classname"):
+                continue
+            name = str(case.get("name") or "")
+            file = str(case.get("file") or "").replace("\\", "/")
+            text = "".join(
+                str(element.get("message") or "") + "\n" + (element.text or "")
+                for element in (case.find("error"), case.find("failure"))
+                if element is not None
+            )
+            matches = MODULE_NOT_FOUND_RE.findall(text)
+            if name and matches:
+                found[file or name.replace(".", "/") + ".py"] = matches[-1]
+        return found
+
+    def _give_checkout_sandbox_git_dir(
+        self, checkout: Path, git_dir: Path, *, rev: str, diff_path: Path | None = None
+    ) -> dict[str, Any]:
+        """Point a review worktree at a self-contained git dir inside the sandbox (#2650).
+
+        A ``git worktree``'s admin dir lives in the reviewed repository's ``.git``, which the
+        sandbox cannot (and must not) read, so ``git rev-parse HEAD`` in the mirror fails under
+        test. Build ``git_dir`` with a depth-1 fetch of ``rev`` from the repository, an index of
+        that commit (plus ``diff_path`` staged, matching the mirror), and swap the checkout's
+        ``.git`` file to it. ``_restore_checkout_git_file`` puts the original back before the
+        reviewer touches the worktree with git again. Sandboxed code may write ``git_dir``; the
+        reviewer never runs git with it. Returns ``{}``-like ``{"ok": False, ...}`` on any
+        failure, leaving the checkout untouched."""
+        try:
+            self._mirror_git_dir(checkout)
+            original = (checkout / ".git").read_text(encoding="utf-8")
+        except (UltraReviewError, OSError) as exc:
+            return {"ok": False, "detail": f"not_a_review_worktree:{exc}"}
+        sha_run = self._git_run(["rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}"])
+        sha = (sha_run.stdout or "").strip()
+        if sha_run.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+            return {"ok": False, "detail": "rev_unresolved"}
+        gd, wt = str(git_dir), str(checkout)
+        steps = (
+            ("init", ["--git-dir", gd, "--work-tree", wt, "init", "-q"]),
+            (
+                "fetch",
+                # A fixed local path and an exact sha; the file transport is enabled for this
+                # one call only (GIT_SAFE_CONFIG sets protocol.allow=never).
+                ["--git-dir", gd, "-c", "protocol.file.allow=always", "fetch", "-q", "--no-tags", "--depth=1",
+                 str(self.project_root), sha],
+            ),
+            ("update_ref", ["--git-dir", gd, "update-ref", "--no-deref", "HEAD", sha]),
+            ("read_tree", ["--git-dir", gd, "--work-tree", wt, "read-tree", "HEAD"]),
+        )
+        for label, step in steps:
+            done = self._git_run(step)
+            if done.returncode != 0:
+                shutil.rmtree(git_dir, ignore_errors=True)
+                return {"ok": False, "detail": f"{label}:" + (done.stderr or done.stdout or "")[-200:].strip()}
+        staged = False
+        if diff_path is not None and diff_path.is_file() and diff_path.read_text(encoding="utf-8").strip():
+            staged = (
+                self._git_run(["--git-dir", gd, "--work-tree", wt, "apply", "--cached", "--binary", str(diff_path)]).returncode
+                == 0
+            )
+        self._git_run(["--git-dir", gd, "--work-tree", wt, "update-index", "-q", "--refresh"])
+        try:
+            _write_no_follow(checkout / ".git", f"gitdir: {gd}\n".encode())
+        except (OSError, SandboxError) as exc:
+            shutil.rmtree(git_dir, ignore_errors=True)
+            return {"ok": False, "detail": f"swap_failed:{exc}"}
+        return {"ok": True, "git_dir": gd, "head": sha, "diff_staged": staged, "original": original}
+
+    @staticmethod
+    def _restore_checkout_git_file(checkout: Path, swap: dict[str, Any]) -> dict[str, Any]:
+        """Undo ``_give_checkout_sandbox_git_dir``: the original ``.git`` file back (whatever the
+        sandboxed run left there), the sandbox git dir removed."""
+        if not swap or not swap.get("ok"):
+            return {}
+        dot_git = checkout / ".git"
+        detail = ""
+        try:
+            if dot_git.is_dir() and not dot_git.is_symlink():
+                shutil.rmtree(dot_git)
+            _write_no_follow(dot_git, str(swap["original"]).encode())
+            restored = True
+        except (OSError, SandboxError) as exc:
+            restored, detail = False, str(exc)[:200]
+        shutil.rmtree(str(swap["git_dir"]), ignore_errors=True)
+        return {"restored": restored, "detail": detail}
 
     @staticmethod
     def _neutralize_base_links(base_root: Path) -> list[str]:
