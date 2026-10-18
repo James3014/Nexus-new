@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -281,7 +282,16 @@ def build_handler(
                 request = json.loads(self.rfile.read(length).decode("utf-8"))
                 response = gateway.handle(request)
             except Exception as exc:
-                self._send_json(400, {"error": str(exc)})
+                # #2635 SEC-009: exception text can carry paths or secrets.
+                # Log it server-side; the client gets a generic error id.
+                error_id = uuid.uuid4().hex[:12]
+                print(
+                    f"nexus-mcp-gateway-http: request failed error_id={error_id} "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self._send_json(400, {"error": "bad request", "error_id": error_id})
                 return
             if response is None:
                 self.send_response(202)

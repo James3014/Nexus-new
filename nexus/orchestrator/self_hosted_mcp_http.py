@@ -155,8 +155,10 @@ def build_handler(
             self.end_headers()
 
         def _is_authorized(self) -> bool:
-            provided = self.headers.get("Authorization", "")
-            expected = f"Bearer {token}"
+            # Compare bytes: a non-ASCII header must be "unauthorized", not a
+            # TypeError from compare_digest (#2635 SEC-008, mirrors the Gateway).
+            provided = self.headers.get("Authorization", "").encode("utf-8", "surrogateescape")
+            expected = f"Bearer {token}".encode("utf-8", "surrogateescape")
             return hmac.compare_digest(provided, expected)
 
         def _send_auth_failed(self) -> None:

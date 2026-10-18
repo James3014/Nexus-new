@@ -95,10 +95,14 @@ def should_pause(run_cmd: str, policy: dict) -> tuple[bool, str]:
     return False, ""
 
 def run_shell(cmd: str, timeout_sec: int, cwd: Path | str | None = None) -> tuple[int, str, str]:
+    # #2635 SEC-007: task "run" strings come from repo task files; run them
+    # without a shell (``&&`` chains only, other operators refused).
+    from nexus.core.argv_command import run_command_string
+
     try:
         env = os.environ.copy()
         env["NEXUS_FORCE_RUN"] = "1"
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout_sec, env=env, cwd=cwd)
+        r = run_command_string(cmd, timeout=timeout_sec, env=env, cwd=cwd)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired as e:
         return 124, "", f"timeout:{timeout_sec}s"
