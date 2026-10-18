@@ -701,3 +701,304 @@ def test_ensure_pool_keychain_failure_on_existing_snapshot_propagates(tmp_path, 
 
     with pytest.raises(AgyAccountPoolManagerError, match="AGY_KEYCHAIN_SETUP_FAILED"):
         manager._ensure_pool()
+
+
+# --- #2638: an existing but unreadable runtime root must not be skipped -----
+
+
+def _pool_layout_2638(tmp_path, monkeypatch):
+    """Derived root (from the env manager path) plus a populated canonical root."""
+    home = tmp_path / "home"
+    canonical = home / ".nexus" / "agy-account-pool" / "runtime"
+    canonical.mkdir(parents=True)
+    (canonical / "state.json").write_text(
+        '{"active": "acc1", "accounts": {"acc1": {"enabled": true}}}', encoding="utf-8"
+    )
+    mgr_bin = tmp_path / "other-pool" / "bin" / "agy-cli-manager"
+    mgr_bin.parent.mkdir(parents=True)
+    mgr_bin.write_text("#!/bin/sh\nexit 0")
+    mgr_bin.chmod(0o755)
+    derived = tmp_path / "other-pool" / "runtime"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", raising=False)
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_MANAGER_PATH", str(mgr_bin))
+    return derived, canonical
+
+
+def test_resolve_manager_root_corrupt_state_json_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    (derived / "state.json").write_text('{"accounts": {"secret-acc', encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(str(derived) in m and "JSONDecodeError" in m for m in messages)
+    assert not any("secret-acc" in m for m in messages)
+
+
+def test_resolve_manager_root_non_object_state_json_does_not_fall_through_2638(
+    tmp_path, monkeypatch
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    (derived / "state.json").write_text("[1, 2]", encoding="utf-8")
+
+    assert AgyAccountPoolManager.resolve_manager_root() == str(derived.resolve())
+
+
+def test_resolve_manager_root_undecodable_state_json_does_not_fall_through_2638(
+    tmp_path, monkeypatch
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    (derived / "state.json").write_bytes(b"\xff\xfe\x00not-utf8")
+
+    assert AgyAccountPoolManager.resolve_manager_root() == str(derived.resolve())
+
+
+def test_resolve_manager_root_unreadable_accounts_dir_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    import os
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    accounts_dir = derived / "accounts"
+    (accounts_dir / "acc1").mkdir(parents=True)
+    accounts_dir.chmod(0o000)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        accounts_dir.chmod(0o755)
+
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "PermissionError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_absent_derived_root_still_falls_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    assert not derived.exists()
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(canonical.resolve())
+    assert not caplog.records
+
+
+def test_resolve_manager_root_empty_derived_root_still_falls_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (derived / "accounts").mkdir(parents=True)
+    (derived / "state.json").write_text('{"active": null, "accounts": {}}', encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(canonical.resolve())
+    assert not caplog.records
+
+
+def test_resolve_manager_root_readable_populated_derived_root_unchanged_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (derived / "accounts" / "acc9").mkdir(parents=True)
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(derived.resolve())
+    assert not caplog.records
+
+
+def test_resolve_manager_root_corrupt_canonical_root_selected_over_fallbacks_2638(
+    tmp_path, monkeypatch, caplog
+):
+    """A corrupt canonical root is selected *and diagnosed*.
+
+    main already returned the canonical root through its "exists" fallback
+    loop, but silently; the warning naming the path and error kind is what
+    #2638 adds.
+    """
+    _derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (canonical / "state.json").write_text("{not json", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(canonical.resolve())
+    assert any(
+        str(canonical) in r.getMessage() and "JSONDecodeError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_untraversable_derived_root_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    import os
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (derived / "accounts" / "acc1").mkdir(parents=True)
+    derived.chmod(0o000)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        derived.chmod(0o755)
+
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "PermissionError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_deeply_nested_state_json_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    import json
+
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    # ~5000 levels does not raise on Python 3.14 (C-stack based limit), so
+    # use a depth that does on every supported version, and prove it.
+    depth = 200_000
+    payload = '{"accounts": ' + "[" * depth + "]" * depth + "}"
+    with pytest.raises(RecursionError):
+        json.loads(payload)
+    (derived / "state.json").write_text(payload, encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(derived.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "RecursionError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def _skip_if_root_2638():
+    import os
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+
+
+def test_resolve_manager_root_read_only_no_exec_root_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    _skip_if_root_2638()
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (derived / "accounts" / "acc1").mkdir(parents=True)
+    (derived / "state.json").write_text('{"accounts": {"a": {}}}', encoding="utf-8")
+    derived.chmod(0o600)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        derived.chmod(0o755)
+
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "PermissionError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_exec_only_root_with_readable_state_is_populated_2638(
+    tmp_path, monkeypatch, caplog
+):
+    from nexus.services.agy_account_pool import RUNTIME_POPULATED, _runtime_root_state
+
+    _skip_if_root_2638()
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    (derived / "state.json").write_text('{"accounts": {"a": {}}}', encoding="utf-8")
+    # Owner x without r (0o711 would still give the owner rwx).
+    derived.chmod(0o100)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            state = _runtime_root_state(derived)
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        derived.chmod(0o755)
+
+    assert state == (RUNTIME_POPULATED, None)
+    assert root == str(derived.resolve())
+    assert not caplog.records
+
+
+def test_resolve_manager_root_read_only_accounts_dir_is_unreadable_2638(
+    tmp_path, monkeypatch, caplog
+):
+    from nexus.services.agy_account_pool import RUNTIME_UNREADABLE, _runtime_root_state
+
+    _skip_if_root_2638()
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    accounts_dir = derived / "accounts"
+    (accounts_dir / "acc1").mkdir(parents=True)
+    accounts_dir.chmod(0o400)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            state = _runtime_root_state(derived)
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        accounts_dir.chmod(0o755)
+
+    assert state == (RUNTIME_UNREADABLE, "PermissionError")
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+
+
+def test_resolve_manager_root_explicit_manager_path_unreadable_root_warns_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    (derived / "state.json").write_text("{corrupt", encoding="utf-8")
+    mgr_bin = tmp_path / "other-pool" / "bin" / "agy-cli-manager"
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin))
+
+    assert root == str(derived.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "JSONDecodeError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_explicit_manager_path_empty_root_unchanged_2638(
+    tmp_path, monkeypatch, caplog
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    mgr_bin = tmp_path / "other-pool" / "bin" / "agy-cli-manager"
+
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin))
+
+    assert root == str(derived.resolve())
+    assert not caplog.records

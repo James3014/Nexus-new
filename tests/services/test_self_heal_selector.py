@@ -4,7 +4,9 @@ from pathlib import Path
 import os
 import shutil
 
+from nexus.services import self_heal_selector
 from nexus.services.self_heal_selector import select_self_heal_route
+from nexus.services.swarm_router import RouteCandidate
 
 
 def test_self_heal_selector_blocks_low_health():
@@ -34,11 +36,26 @@ def test_self_heal_selector_blocks_low_health():
         shutil.rmtree(repo_root)
 
 
-def test_self_heal_selector_uses_swarm_for_healthy():
-    """驗證正常情況下使用 Swarm-gated 路由"""
+def test_self_heal_selector_uses_swarm_for_healthy(monkeypatch):
+    """驗證有健康候選時使用 Swarm-gated 路由 (candidates injected; #2637)."""
     repo_root = Path(".") # 使用現有工作區
     diagnosis = {"phase": "R"}
-    
+    monkeypatch.setattr(
+        self_heal_selector,
+        "load_self_heal_candidates",
+        lambda _root, phase, n: [
+            RouteCandidate(
+                route_id="injected-healthy",
+                provider="local",
+                armor_id="local",
+                phase=phase,
+                base_weight=0.8,
+                success_rate=0.9,
+                regression_pass_rate=0.95,
+            )
+        ][:n],
+    )
+
     decision = select_self_heal_route(
         repo_root,
         "R",
@@ -49,3 +66,22 @@ def test_self_heal_selector_uses_swarm_for_healthy():
     assert decision["backend_used"] == "swarm-gated"
     assert "selected_route" in decision
     print(f"✅ Self-heal Selector Swarm Path Verified: {decision['selected_route']}")
+
+
+def test_self_heal_selector_missing_candidate_source_fails_closed(tmp_path, caplog):
+    """#2637: no candidate source must fail closed, never route to a fake "rust-v16"."""
+    with caplog.at_level("WARNING", logger="nexus.services.self_heal_selector"):
+        decision = select_self_heal_route(tmp_path, "R", {"phase": "R"})
+
+    assert decision["backend_used"] == "fail-closed"
+    assert decision["reason"] == self_heal_selector.SELF_HEAL_CANDIDATE_SOURCE_MISSING
+    assert decision["selected_route"] != "rust-v16"
+    assert "candidate source missing" in caplog.text
+
+
+def test_self_heal_candidates_have_no_hardcoded_fallback(tmp_path):
+    """#2637: the loader returns nothing rather than a hard-coded legacy route."""
+    assert self_heal_selector.load_self_heal_candidates(tmp_path, "R", 8) == []
+    source = Path(self_heal_selector.__file__).read_text(encoding="utf-8")
+    assert "nexus.core.learning.compute_route_weights" not in source
+    assert '"rust-v16"' not in source

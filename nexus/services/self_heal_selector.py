@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Any
+import logging
 
 from nexus.services.swarm_router import RouteCandidate, select_best_route
 from nexus.services.policy_gate import apply_policy_gate
 from nexus.services.health_analyzer import compute_phase_health
+
+logger = logging.getLogger(__name__)
+
+SELF_HEAL_CANDIDATE_SOURCE_MISSING = "self_heal_candidate_source_missing"
 
 
 def select_self_heal_route(
@@ -23,7 +28,16 @@ def select_self_heal_route(
     
     # 1. 載入修復候選 (目前對接 Day 1 Loader)
     candidates = load_self_heal_candidates(repo_root, phase, max_candidates)
-    
+    if not candidates:
+        return {
+            "selected_route": "no-route-available",
+            "backend_used": "fail-closed",
+            "reason": SELF_HEAL_CANDIDATE_SOURCE_MISSING,
+            "gated_score": 0.0,
+            "signals": [],
+            "health_metrics": {},
+        }
+
     # 2. Swarm 基礎路由評分
     route_decision = select_best_route(candidates)
     if route_decision.backend_used == "fail-closed":
@@ -75,30 +89,17 @@ def load_self_heal_candidates(
     phase: str,
     max_candidates: int,
 ) -> List[RouteCandidate]:
-    """載入 self-heal 專用修復候選。"""
-    try:
-        from nexus.core.learning.compute_route_weights import load_mock_candidates  # type: ignore
-        return load_mock_candidates(repo_root, phase)[:max_candidates]
-    except Exception:
-        # Legacy fallback candidate set for environments without core.learning module.
-        defaults = [
-            RouteCandidate(
-                route_id="rust-v16",
-                provider="swarm",
-                armor_id="v16",
-                phase=phase,
-                base_weight=0.82,
-                success_rate=0.8,
-                regression_pass_rate=0.9,
-            ),
-            RouteCandidate(
-                route_id="conservative-local-repair",
-                provider="local",
-                armor_id="local",
-                phase=phase,
-                base_weight=0.45,
-                success_rate=0.6,
-                regression_pass_rate=0.8,
-            ),
-        ]
-        return defaults[:max_candidates]
+    """載入 self-heal 專用修復候選。
+
+    There is no production candidate source. The old code imported the
+    nonexistent ``nexus.core.learning`` route-weight loader and, on the
+    ImportError, silently returned a hard-coded rust-v16 route, so every
+    repair looked swarm-routed (#2637). Return no candidates instead and log
+    it; ``select_self_heal_route`` then fails closed with
+    ``SELF_HEAL_CANDIDATE_SOURCE_MISSING``.
+    """
+    logger.warning(
+        "self-heal candidate source missing (phase=%s); routing fails closed (#2637)",
+        phase,
+    )
+    return []
