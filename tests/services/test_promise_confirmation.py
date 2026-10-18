@@ -24,10 +24,19 @@ from nexus.services.promise_confirmation import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _cli_pythonpath() -> str:
+    # Keep the caller's PYTHONPATH: CI runs pytest with the dependencies only
+    # on PYTHONPATH (python -S), so replacing it would hide pydantic.
+    existing = os.environ.get("PYTHONPATH")
+    return os.pathsep.join([str(REPO_ROOT), *([existing] if existing else [])])
+
+
 def _parsed(body: str) -> dict:
     parsed = parse_issue_promise_set(body)
     assert parsed is not None
     return parsed
+
+
 HEAD = "a" * 40
 MERGE = "b" * 40
 LIVE = "c" * 40
@@ -67,9 +76,23 @@ def contains_all(ancestor, commit):
     return True
 
 
-def witness_comment(pid, *, phase="POST_MERGE", result="PASS", commit=LIVE, by="worker-a",
-                    entry=None, identity=None, body=None, observed=None, pr_no=2549, extra=None,
-                    author="bot", assoc="OWNER", updated=None):
+def witness_comment(
+    pid,
+    *,
+    phase="POST_MERGE",
+    result="PASS",
+    commit=LIVE,
+    by="worker-a",
+    entry=None,
+    identity=None,
+    body=None,
+    observed=None,
+    pr_no=2549,
+    extra=None,
+    author="bot",
+    assoc="OWNER",
+    updated=None,
+):
     payload = {
         "promise_id": pid,
         "promise_set_identity": identity,
@@ -94,9 +117,18 @@ def witness_comment(pid, *, phase="POST_MERGE", result="PASS", commit=LIVE, by="
     }
 
 
-def confirmation_comment(identity, verdicts, *, confirmer="reviewer-b", commit=LIVE,
-                         created="2026-10-18T01:00:00Z", checked=True,
-                         author="bot", assoc="OWNER", updated=None):
+def confirmation_comment(
+    identity,
+    verdicts,
+    *,
+    confirmer="reviewer-b",
+    commit=LIVE,
+    created="2026-10-18T01:00:00Z",
+    checked=True,
+    author="bot",
+    assoc="OWNER",
+    updated=None,
+):
     payload = {
         "promise_set_identity": identity,
         "commit": commit,
@@ -107,7 +139,8 @@ def confirmation_comment(identity, verdicts, *, confirmer="reviewer-b", commit=L
         ],
     }
     return {
-        "body": "<!-- NEXUS_PROMISE_CONFIRMATION_V1\n" + json.dumps(payload)
+        "body": "<!-- NEXUS_PROMISE_CONFIRMATION_V1\n"
+        + json.dumps(payload)
         + "\nNEXUS_PROMISE_CONFIRMATION_V1 -->",
         "created_at": created,
         "updated_at": updated or created,
@@ -124,12 +157,23 @@ def setup(pids=("P1",), phase="POST_MERGE", risk="STANDARD", generation=1):
     return body, identity
 
 
-def report(body, comments, *, prs=None, history=(), contains=contains_all, authors=(),
-           trusted=(), issue_created_at="2026-01-01T00:00:00Z"):
+def report(
+    body,
+    comments,
+    *,
+    prs=None,
+    history=(),
+    contains=contains_all,
+    authors=(),
+    trusted=(),
+    issue_created_at: str | None = "2026-01-01T00:00:00Z",
+    shared=(),
+):
     return build_promise_confirmation_report(
         author_identities=list(authors),
         trusted_logins=list(trusted),
         issue_created_at=issue_created_at,
+        shared_logins=list(shared),
         issue_body=body,
         body_history=None if history is None else list(history),
         comments=comments,
@@ -190,8 +234,7 @@ def test_correct_version_all_promises_witnessed_and_independently_confirmed_supp
 
 def test_swapped_version_witness_commit_not_containing_merge_is_stale():
     body, ident = setup()
-    rep = report(body, [witness_comment("P1", identity=ident)],
-                 contains=lambda a, c: False)
+    rep = report(body, [witness_comment("P1", identity=ident)], contains=lambda a, c: False)
     assert row(rep, "P1")["status"] == "STALE"
     assert "WITNESS_COMMIT_NOT_LIVE_MERGE" in row(rep, "P1")["reason_codes"]
 
@@ -217,8 +260,10 @@ def test_swapped_version_changed_promise_set_makes_old_witnesses_stale():
 def test_swapped_version_promise_dropped_after_work_start_is_blocked():
     body_old, _ = setup(pids=("P1", "P2"), generation=1)
     body_new, ident_new = setup(pids=("P1",), generation=2)
-    history = [{"edited_at": "2026-10-16T00:00:00Z", "body": body_old},
-               {"edited_at": "2026-10-17T05:00:00Z", "body": body_new}]
+    history = [
+        {"edited_at": "2026-10-16T00:00:00Z", "body": body_old},
+        {"edited_at": "2026-10-17T05:00:00Z", "body": body_new},
+    ]
     rep = report(body_new, [witness_comment("P1", identity=ident_new)], history=history)
     assert rep["recommendation"] == "BLOCKED"
     assert "PROMISE_DROPPED_AFTER_WORK_START:P2" in rep["reason_codes"]
@@ -262,8 +307,10 @@ def test_high_risk_needs_both_pre_and_post_witnesses():
 
 def test_confirmer_equal_to_witness_author_is_ignored():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident, by="same"),
-                confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="same")]
+    comments = [
+        witness_comment("P1", identity=ident, by="same"),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="same"),
+    ]
     rep = report(body, comments)
     assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -272,15 +319,19 @@ def test_confirmer_equal_to_witness_author_is_ignored():
 @pytest.mark.parametrize("source", ["issue-author", "PR-Author", "author-session"])
 def test_confirmer_equal_to_issue_author_pr_author_or_session_is_ignored(source):
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident, by="worker"),
-                confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer=source.lower())]
+    comments = [
+        witness_comment("P1", identity=ident, by="worker"),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer=source.lower()),
+    ]
     rep = report(body, comments, authors=["issue-author", "pr-author", "author-session"])
     assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
 
 
 def test_emit_blocks_includes_witness_templates():
-    text = emit_witness_templates([stmt("P1")], "sha256:" + "1" * 64, {"P1": ("POST_MERGE", "STANDARD")})
+    text = emit_witness_templates(
+        [stmt("P1")], "sha256:" + "1" * 64, {"P1": ("POST_MERGE", "STANDARD")}
+    )
     assert "NEXUS_PROMISE_WITNESS_V1" in text
     assert '"entry":"real-entry-P1"' in text.replace(" ", "") or "real-entry-P1" in text
     assert '"promise_id": "P1"' in text and "sha256:" + "1" * 64 in text
@@ -289,8 +340,10 @@ def test_emit_blocks_includes_witness_templates():
 
 def test_confirmation_for_old_identity_is_ignored():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident),
-                confirmation_comment("sha256:" + "0" * 64, {"P1": "ACCEPT"})]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment("sha256:" + "0" * 64, {"P1": "ACCEPT"}),
+    ]
     rep = report(body, comments)
     assert rep["recommendation"] == "PROVISIONAL"
     assert rep["ignored_confirmations"]
@@ -298,8 +351,10 @@ def test_confirmation_for_old_identity_is_ignored():
 
 def test_confirmation_commit_not_live_merge_is_ignored():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident),
-                confirmation_comment(ident, {"P1": "ACCEPT"})]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
 
     def contains(a, c):
         return c != LIVE if c == LIVE else True
@@ -307,17 +362,23 @@ def test_confirmation_commit_not_live_merge_is_ignored():
     def only_witness_ok(a, c):
         return True
 
-    rep = report(body, comments[:1] + [confirmation_comment(ident, {"P1": "ACCEPT"}, commit=OTHER)],
-                 contains=lambda a, c: c != OTHER)
+    rep = report(
+        body,
+        comments[:1] + [confirmation_comment(ident, {"P1": "ACCEPT"}, commit=OTHER)],
+        contains=lambda a, c: c != OTHER,
+    )
     assert rep["recommendation"] == "PROVISIONAL"
-    assert any(i["reason"] == "CONFIRMATION_COMMIT_NOT_LIVE_MERGE"
-               for i in rep["ignored_confirmations"])
+    assert any(
+        i["reason"] == "CONFIRMATION_COMMIT_NOT_LIVE_MERGE" for i in rep["ignored_confirmations"]
+    )
 
 
 def test_confirmer_reject_reports_live_failed():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident),
-                confirmation_comment(ident, {"P1": "REJECT"})]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "REJECT"}),
+    ]
     assert report(body, comments)["recommendation"] == "LIVE_FAILED"
 
 
@@ -352,9 +413,7 @@ def test_unmerged_pr_with_post_merge_requirement_is_blocked():
 def test_missing_statement_is_uncovered():
     statements = [stmt("P1")]
     full = emit_promise_blocks(statements, 1, {"P1": ("POST_MERGE", "STANDARD")})
-    set_only = "\n".join(
-        full.split("```nexus.issue_promise_statements.v1")[0:1]
-    )
+    set_only = "\n".join(full.split("```nexus.issue_promise_statements.v1")[0:1])
     ident = issue_promise_set_identity(_parsed(set_only))
     rep = report(set_only, [witness_comment("P1", identity=ident)])
     assert row(rep, "P1")["status"] == "UNCOVERED"
@@ -363,7 +422,10 @@ def test_missing_statement_is_uncovered():
 
 def test_history_unavailable_blocks_verified():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident), confirmation_comment(ident, {"P1": "ACCEPT"})]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
     rep = report(body, comments, history=None)
     assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -371,9 +433,14 @@ def test_history_unavailable_blocks_verified():
 
 def test_set_not_predeclared_blocks_verified():
     body, ident = setup()
-    history = [{"edited_at": "2026-10-16T00:00:00Z", "body": "no promises yet"},
-               {"edited_at": "2026-10-17T05:00:00Z", "body": body}]
-    comments = [witness_comment("P1", identity=ident), confirmation_comment(ident, {"P1": "ACCEPT"})]
+    history = [
+        {"edited_at": "2026-10-16T00:00:00Z", "body": "no promises yet"},
+        {"edited_at": "2026-10-17T05:00:00Z", "body": body},
+    ]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
     rep = report(body, comments, history=history)
     assert "PROMISE_SET_NOT_PREDECLARED" in rep["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -390,14 +457,18 @@ def test_emit_blocks_round_trip_and_statement_hash_rule():
     import hashlib
 
     statements = [stmt("P1"), stmt("P2")]
-    text = emit_promise_blocks(statements, 3, {"P1": ("PRE_MERGE", "HIGH"), "P2": ("POST_MERGE", "STANDARD")})
+    text = emit_promise_blocks(
+        statements, 3, {"P1": ("PRE_MERGE", "HIGH"), "P2": ("POST_MERGE", "STANDARD")}
+    )
     parsed = _parsed(text)
     assert parsed["promise_set_generation"] == 3
     by_id = {p["promise_id"]: p for p in parsed["promises"]}
     assert by_id["P1"]["risk"] == "HIGH" and by_id["P2"]["phase"] == "POST_MERGE"
     for s in statements:
         canon = json.dumps(s, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        assert by_id[s["promise_id"]]["statement_sha256"] == hashlib.sha256(canon.encode()).hexdigest()
+        assert (
+            by_id[s["promise_id"]]["statement_sha256"] == hashlib.sha256(canon.encode()).hexdigest()
+        )
 
 
 def test_duplicate_statements_fence_fails_closed():
@@ -418,11 +489,23 @@ def test_cli_runs_with_fake_gh_and_reports_not_applicable(tmp_path):
         "esac\n" % (HEAD, PR_CREATED)
     )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-    env = dict(os.environ, NEXUS_GH_BIN=str(fake), PYTHONPATH=str(REPO_ROOT))
+    env = dict(os.environ, NEXUS_GH_BIN=str(fake), PYTHONPATH=_cli_pythonpath())
     out = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts/governance/promise_confirmation.py"),
-         "--issue", "1", "--pr", "7", "--json", "--now", NOW],
-        capture_output=True, text=True, env=env, cwd=REPO_ROOT,
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/governance/promise_confirmation.py"),
+            "--issue",
+            "1",
+            "--pr",
+            "7",
+            "--json",
+            "--now",
+            NOW,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
     )
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout)["recommendation"] == "NOT_APPLICABLE"
@@ -431,7 +514,9 @@ def test_cli_runs_with_fake_gh_and_reports_not_applicable(tmp_path):
 def test_failure_then_pass_without_new_fix_pr_stays_failed():
     body, ident = setup()
     comments = [
-        witness_comment("P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"),
+        witness_comment(
+            "P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"
+        ),
         witness_comment("P1", result="PASS", identity=ident, observed="2026-10-17T09:00:00Z"),
     ]
     rep = report(body, comments)
@@ -441,37 +526,58 @@ def test_failure_then_pass_without_new_fix_pr_stays_failed():
 
 def test_failure_then_fix_pr_merged_then_pass_on_fixed_commit_is_witnessed():
     body, ident = setup()
-    fix = {"number": 2600, "head_sha": "e" * 40, "merge_sha": "f" * 40,
-           "created_at": "2026-10-17T07:00:00Z", "merged_at": "2026-10-17T08:30:00Z"}
+    fix = {
+        "number": 2600,
+        "head_sha": "e" * 40,
+        "merge_sha": "f" * 40,
+        "created_at": "2026-10-17T07:00:00Z",
+        "merged_at": "2026-10-17T08:30:00Z",
+    }
     comments = [
-        witness_comment("P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"),
+        witness_comment(
+            "P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"
+        ),
         witness_comment("P1", result="PASS", identity=ident, observed="2026-10-17T09:00:00Z"),
     ]
     rep = report(body, comments, prs=[pr(), fix])
     assert row(rep, "P1")["status"] == "WITNESSED"
     assert "FAILURE_SUPERSEDED_BY_FIX:2600" in row(rep, "P1")["reason_codes"]
     # a PASS that does not contain the fix merge does not supersede
-    comments[0] = witness_comment("P1", result="ACTUAL_FAILED", identity=ident, commit=MERGE,
-                                  observed="2026-10-17T08:00:00Z")
-    rep2 = report(body, comments, prs=[pr(), fix],
-                  contains=lambda a, c: not (a == "f" * 40 and c == LIVE))
+    comments[0] = witness_comment(
+        "P1", result="ACTUAL_FAILED", identity=ident, commit=MERGE, observed="2026-10-17T08:00:00Z"
+    )
+    rep2 = report(
+        body, comments, prs=[pr(), fix], contains=lambda a, c: not (a == "f" * 40 and c == LIVE)
+    )
     assert row(rep2, "P1")["status"] == "FAILED"
 
 
 def test_cli_offline_input_needs_no_network(tmp_path):
     body, ident = setup()
     data = {
-        "issue_body": body, "body_history": [], "author_identities": [],
+        "issue_body": body,
+        "body_history": [],
+        "author_identities": [],
         "comments": [witness_comment("P1", identity=ident)],
-        "prs": [pr()], "contains": [[MERGE, LIVE, True]], "now": NOW,
+        "prs": [pr()],
+        "contains": [[MERGE, LIVE, True]],
+        "now": NOW,
     }
     path = tmp_path / "in.json"
     path.write_text(json.dumps(data))
-    env = dict(os.environ, NEXUS_GH_BIN="/nonexistent/gh", PYTHONPATH=str(REPO_ROOT))
+    env = dict(os.environ, NEXUS_GH_BIN="/nonexistent/gh", PYTHONPATH=_cli_pythonpath())
     out = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts/governance/promise_confirmation.py"),
-         "--offline-input", str(path), "--json"],
-        capture_output=True, text=True, env=env, cwd=REPO_ROOT,
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/governance/promise_confirmation.py"),
+            "--offline-input",
+            str(path),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
     )
     assert out.returncode == 0, out.stderr
     rep = json.loads(out.stdout)
@@ -497,8 +603,10 @@ def test_trusted_login_counts_even_without_association():
 
 def test_untrusted_confirmation_is_ignored():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident),
-                confirmation_comment(ident, {"P1": "ACCEPT"}, author="rando", assoc="CONTRIBUTOR")]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, author="rando", assoc="CONTRIBUTOR"),
+    ]
     rep = report(body, comments)
     assert rep["recommendation"] == "PROVISIONAL"
     assert any(b["reason"] == "UNTRUSTED_COMMENT_AUTHOR" for b in rep["ignored_blocks"])
@@ -516,7 +624,9 @@ def test_failure_at_old_generation_survives_generation_bump_and_same_commit_pass
     body1, ident1 = setup(generation=1)
     body2, ident2 = setup(generation=2)
     comments = [
-        witness_comment("P1", result="ACTUAL_FAILED", identity=ident1, observed="2026-10-17T08:00:00Z"),
+        witness_comment(
+            "P1", result="ACTUAL_FAILED", identity=ident1, observed="2026-10-17T08:00:00Z"
+        ),
         witness_comment("P1", identity=ident2, observed="2026-10-17T09:00:00Z"),
         confirmation_comment(ident2, {"P1": "ACCEPT"}),
     ]
@@ -528,9 +638,14 @@ def test_failure_at_old_generation_survives_generation_bump_and_same_commit_pass
 def test_weakening_high_to_standard_after_work_start_blocks_verified():
     old, _ = setup(phase="POST_MERGE", risk="HIGH", generation=1)
     new, ident = setup(phase="POST_MERGE", risk="STANDARD", generation=2)
-    history = [{"edited_at": "2026-10-16T00:00:00Z", "body": old},
-               {"edited_at": "2026-10-17T05:00:00Z", "body": new}]
-    comments = [witness_comment("P1", identity=ident), confirmation_comment(ident, {"P1": "ACCEPT"})]
+    history = [
+        {"edited_at": "2026-10-16T00:00:00Z", "body": old},
+        {"edited_at": "2026-10-17T05:00:00Z", "body": new},
+    ]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
     rep = report(new, comments, history=history)
     assert "PROMISE_SET_CHANGED_AFTER_WORK_START" in rep["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -538,9 +653,11 @@ def test_weakening_high_to_standard_after_work_start_blocks_verified():
 
 def test_confirmer_who_witnessed_another_promise_is_not_independent():
     body, ident = setup(pids=("P1", "P2"))
-    comments = [witness_comment("P1", identity=ident, by="A"),
-                witness_comment("P2", identity=ident, by="B"),
-                confirmation_comment(ident, {"P1": "ACCEPT", "P2": "ACCEPT"}, confirmer="A")]
+    comments = [
+        witness_comment("P1", identity=ident, by="A"),
+        witness_comment("P2", identity=ident, by="B"),
+        confirmation_comment(ident, {"P1": "ACCEPT", "P2": "ACCEPT"}, confirmer="A"),
+    ]
     rep = report(body, comments)
     assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P2")["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -548,7 +665,10 @@ def test_confirmer_who_witnessed_another_promise_is_not_independent():
 
 def test_issue_created_after_work_start_is_not_predeclared():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident), confirmation_comment(ident, {"P1": "ACCEPT"})]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
     rep = report(body, comments, issue_created_at="2026-10-17T01:00:00Z")
     assert "PROMISE_SET_NOT_PREDECLARED" in rep["reason_codes"]
     assert rep["recommendation"] == "PROVISIONAL"
@@ -572,17 +692,28 @@ def test_live_for_all_is_false_when_no_listed_pr_is_merged():
 
 def test_verified_requires_counterexample_checked():
     body, ident = setup()
-    comments = [witness_comment("P1", identity=ident),
-                confirmation_comment(ident, {"P1": "ACCEPT"}, checked=False)]
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, checked=False),
+    ]
     assert report(body, comments)["recommendation"] == "PROVISIONAL"
 
 
 def test_multi_pr_witness_must_contain_every_listed_merge():
     body, ident = setup()
-    second = {"number": 2600, "head_sha": "e" * 40, "merge_sha": "f" * 40,
-              "created_at": PR_CREATED, "merged_at": PR_MERGED}
-    rep = report(body, [witness_comment("P1", identity=ident)], prs=[pr(), second],
-                 contains=lambda a, c: a == MERGE)
+    second = {
+        "number": 2600,
+        "head_sha": "e" * 40,
+        "merge_sha": "f" * 40,
+        "created_at": PR_CREATED,
+        "merged_at": PR_MERGED,
+    }
+    rep = report(
+        body,
+        [witness_comment("P1", identity=ident)],
+        prs=[pr(), second],
+        contains=lambda a, c: a == MERGE,
+    )
     assert row(rep, "P1")["status"] == "STALE"
     assert "WITNESS_COMMIT_NOT_LIVE_MERGE" in row(rep, "P1")["reason_codes"]
 
@@ -596,18 +727,27 @@ def test_future_observed_at_is_malformed():
 
 def test_superseding_pass_must_be_same_phase():
     body, ident = setup(phase="PRE_MERGE")
-    fix = {"number": 2600, "head_sha": "e" * 40, "merge_sha": "f" * 40,
-           "created_at": "2026-10-17T07:00:00Z", "merged_at": "2026-10-17T08:30:00Z"}
+    fix = {
+        "number": 2600,
+        "head_sha": "e" * 40,
+        "merge_sha": "f" * 40,
+        "created_at": "2026-10-17T07:00:00Z",
+        "merged_at": "2026-10-17T08:30:00Z",
+    }
     comments = [
-        witness_comment("P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"),
-        witness_comment("P1", phase="PRE_MERGE", commit=HEAD, identity=ident, observed="2026-10-17T09:00:00Z"),
+        witness_comment(
+            "P1", result="ACTUAL_FAILED", identity=ident, observed="2026-10-17T08:00:00Z"
+        ),
+        witness_comment(
+            "P1", phase="PRE_MERGE", commit=HEAD, identity=ident, observed="2026-10-17T09:00:00Z"
+        ),
     ]
     rep = report(body, comments, prs=[pr(), fix])
     assert row(rep, "P1")["status"] == "FAILED"
 
 
 def _run_cli(tmp_path, args, gh_script=None):
-    env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHONWARNINGS="ignore")
+    env = dict(os.environ, PYTHONPATH=_cli_pythonpath(), PYTHONWARNINGS="ignore")
     if gh_script is not None:
         fake = tmp_path / "gh"
         fake.write_text(gh_script)
@@ -615,12 +755,17 @@ def _run_cli(tmp_path, args, gh_script=None):
         env["NEXUS_GH_BIN"] = str(fake)
     return subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts/governance/promise_confirmation.py"), *args],
-        capture_output=True, text=True, env=env, cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
     )
 
 
 def test_cli_now_without_z_is_a_clear_error(tmp_path):
-    out = _run_cli(tmp_path, ["--issue", "1", "--now", "2026-10-18T12:00:00"], "#!/bin/sh\necho '{}'\n")
+    out = _run_cli(
+        tmp_path, ["--issue", "1", "--now", "2026-10-18T12:00:00"], "#!/bin/sh\necho '{}'\n"
+    )
     assert out.returncode == 2
     assert "Traceback" not in out.stderr and "--now" in out.stderr
 
@@ -639,3 +784,177 @@ def test_never_edited_issue_without_creation_time_cannot_be_verified():
     rep = report(body, comments, issue_created_at=None)
     assert rep["recommendation"] != "VERIFIED"
     assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+
+
+# --- review round 2 -------------------------------------------------------------
+
+PR2 = {
+    "number": 2600,
+    "head_sha": "e" * 40,
+    "merge_sha": "f" * 40,
+    "created_at": "2026-10-17T07:00:00Z",
+    "merged_at": "2026-10-17T08:30:00Z",
+}
+
+
+def _m1_only(a, c):
+    return c == LIVE or (a == MERGE and c == MERGE)
+
+
+def test_failure_on_first_merge_survives_second_pr_merge_until_a_fix_pass():
+    body, ident = setup()
+    comments = [
+        witness_comment(
+            "P1",
+            result="ACTUAL_FAILED",
+            commit=MERGE,
+            identity=ident,
+            observed="2026-10-17T07:00:00Z",
+        ),
+        witness_comment("P1", identity=ident, observed="2026-10-17T09:00:00Z"),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
+    rep = report(body, comments, prs=[pr(), PR2], contains=_m1_only)
+    assert row(rep, "P1")["status"] == "WITNESSED"
+    assert "FAILURE_SUPERSEDED_BY_FIX:2600" in row(rep, "P1")["reason_codes"]
+    assert rep["recommendation"] == "VERIFIED"
+
+
+def test_failure_on_first_merge_with_second_pr_merged_and_no_pass_is_failed_not_stale():
+    body, ident = setup()
+    failure = witness_comment(
+        "P1", result="ACTUAL_FAILED", commit=MERGE, identity=ident, observed="2026-10-17T07:00:00Z"
+    )
+    rep = report(body, [failure], prs=[pr(), PR2], contains=_m1_only)
+    assert row(rep, "P1")["status"] == "FAILED"
+    assert rep["recommendation"] == "LIVE_FAILED"
+
+
+def test_failure_on_a_commit_that_never_contained_its_own_merge_does_not_count():
+    body, ident = setup()
+    failure = witness_comment(
+        "P1", result="ACTUAL_FAILED", commit=OTHER, identity=ident, observed="2026-10-17T07:00:00Z"
+    )
+    rep = report(body, [failure], prs=[pr(), PR2], contains=lambda a, c: False)
+    assert row(rep, "P1")["status"] == "STALE"
+
+
+def test_whitespace_padded_confirmer_is_not_independent():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident, by="Alice"),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="  alice "),
+    ]
+    rep = report(body, comments)
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+
+
+def test_whitespace_padded_witness_by_is_not_independent_of_confirmer():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident, by=" Alice "),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="Alice"),
+    ]
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(report(body, comments), "P1")["reason_codes"]
+
+
+def test_blank_witness_by_is_malformed():
+    body, ident = setup()
+    assert (
+        report(body, [witness_comment("P1", identity=ident, by="   ")])["malformed_witnesses"] == 1
+    )
+
+
+def test_confirmation_comment_author_in_author_identities_is_ignored_unless_shared_login():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, author="Dev-Person"),
+    ]
+    rep = report(body, comments, authors=["dev-person"])
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+    shared = report(body, comments, authors=["dev-person"], shared=["dev-person"])
+    assert shared["recommendation"] == "VERIFIED"
+
+
+def test_future_dated_confirmation_and_witness_comments_are_ignored():
+    body, ident = setup()
+    late = "2026-10-19T00:00:00Z"
+    wit = witness_comment("P1", identity=ident)
+    wit["created_at"] = wit["updated_at"] = late
+    conf = confirmation_comment(ident, {"P1": "ACCEPT"}, created=late)
+    rep = report(body, [wit, conf])
+    assert row(rep, "P1")["status"] == "UNCOVERED"
+    assert [b["reason"] for b in rep["ignored_blocks"]] == ["FUTURE_COMMENT", "FUTURE_COMMENT"]
+
+
+def test_unparseable_pr_created_at_blocks_verified():
+    body, ident = setup()
+    bad = dict(pr(), created_at="garbage")
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
+    rep = report(body, comments, prs=[bad])
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+def test_unparseable_issue_created_at_blocks_verified():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
+    rep = report(body, comments, issue_created_at="garbage")
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+def test_unparseable_merged_at_is_treated_as_not_merged():
+    body, ident = setup()
+    rep = report(body, [], prs=[dict(pr(), merged_at="garbage")])
+    assert rep["recommendation"] == "BLOCKED"
+    assert "PR_NOT_MERGED" in rep["reason_codes"]
+
+
+def test_invalid_now_raises_value_error():
+    body, _ = setup()
+    with pytest.raises(ValueError):
+        build_promise_confirmation_report(
+            issue_body=body,
+            body_history=[],
+            comments=[],
+            prs=[pr()],
+            contains=contains_all,
+            now="not-a-time",
+            author_identities=[],
+        )
+
+
+def test_comment_without_updated_at_is_ignored_fail_closed():
+    body, ident = setup()
+    c = witness_comment("P1", identity=ident)
+    del c["updated_at"]
+    rep = report(body, [c])
+    assert row(rep, "P1")["status"] == "UNCOVERED"
+    assert [b["reason"] for b in rep["ignored_blocks"]] == ["COMMENT_EDIT_STATE_UNKNOWN"]
+
+
+def test_cli_offline_invalid_now_is_one_line_exit_2(tmp_path):
+    body, _ = setup()
+    path = tmp_path / "in.json"
+    path.write_text(
+        json.dumps({
+            "issue_body": body,
+            "body_history": [],
+            "author_identities": [],
+            "comments": [],
+            "prs": [pr()],
+            "contains": [],
+            "now": "bad",
+        })
+    )
+    out = _run_cli(tmp_path, ["--offline-input", str(path), "--json"])
+    assert out.returncode == 2 and len(out.stderr.strip().splitlines()) == 1

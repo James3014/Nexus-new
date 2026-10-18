@@ -28,6 +28,7 @@ from nexus.services.promise_confirmation import (
     emit_witness_templates,
 )
 
+DEFAULT_SHARED = ("james3014-nexus-agent[bot]",)
 DEFAULT_TRUSTED = ("James3014", "james3014-nexus-agent[bot]")
 
 
@@ -43,49 +44,82 @@ class Gh:
         return self.api(f"repos/{self.repo}/issues/{n}")
 
     def comments(self, n: int) -> list[dict]:
-        data = self.api("--paginate", "--slurp", f"repos/{self.repo}/issues/{n}/comments?per_page=100")
+        data = self.api(
+            "--paginate", "--slurp", f"repos/{self.repo}/issues/{n}/comments?per_page=100"
+        )
         flat = [c for part in data for c in (part if isinstance(part, list) else [part])]
-        return [{"body": c.get("body") or "", "created_at": c.get("created_at"),
-                 "updated_at": c.get("updated_at"), "author_association": c.get("author_association"),
-                 "author": (c.get("user") or {}).get("login", "")} for c in flat]
+        return [
+            {
+                "body": c.get("body") or "",
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+                "author_association": c.get("author_association"),
+                "author": (c.get("user") or {}).get("login", ""),
+            }
+            for c in flat
+        ]
 
     def history(self, n: int) -> list[dict] | None:
         """userContentEdits.diff holds the FULL body of each version (newest first);
         the oldest node is the original. None when it cannot be fetched completely."""
         owner, name = self.repo.split("/")
-        query = ('query{repository(owner:"%s",name:"%s"){issue(number:%d){userContentEdits(first:100)'
-                 "{totalCount nodes{editedAt diff}}}}}") % (owner, name, n)
+        query = (
+            'query{repository(owner:"%s",name:"%s"){issue(number:%d){userContentEdits(first:100)'
+            "{totalCount nodes{editedAt diff}}}}}"
+        ) % (owner, name, n)
         try:
-            edits = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"]["userContentEdits"]
+            edits = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"][
+                "userContentEdits"
+            ]
         except (subprocess.CalledProcessError, KeyError, TypeError, ValueError):
             return None
-        if edits["totalCount"] > len(edits["nodes"]) or any(e.get("diff") is None for e in edits["nodes"]):
+        if edits["totalCount"] > len(edits["nodes"]) or any(
+            e.get("diff") is None for e in edits["nodes"]
+        ):
             return None
         return [{"edited_at": e["editedAt"], "body": e["diff"]} for e in edits["nodes"]]
 
     def pr(self, m: int) -> tuple[dict, str]:
         p = self.api(f"repos/{self.repo}/pulls/{m}")
-        return ({"number": p["number"], "head_sha": p["head"]["sha"], "merge_sha": p.get("merge_commit_sha") if p.get("merged_at") else None,
-                 "created_at": p["created_at"], "merged_at": p.get("merged_at")},
-                (p.get("user") or {}).get("login", ""))
+        return (
+            {
+                "number": p["number"],
+                "head_sha": p["head"]["sha"],
+                "merge_sha": p.get("merge_commit_sha") if p.get("merged_at") else None,
+                "created_at": p["created_at"],
+                "merged_at": p.get("merged_at"),
+            },
+            (p.get("user") or {}).get("login", ""),
+        )
 
     def contains(self, ancestor: str, commit: str) -> bool | None:
         try:
             status = self.api(f"repos/{self.repo}/compare/{ancestor}...{commit}").get("status")
         except (subprocess.CalledProcessError, ValueError):
             return None
-        return True if status in ("ahead", "identical") else False if status in ("behind", "diverged") else None
+        return (
+            True
+            if status in ("ahead", "identical")
+            else False
+            if status in ("behind", "diverged")
+            else None
+        )
 
 
 def _markdown(rep: dict) -> str:
     lines = [f"Recommendation: {rep['recommendation']}  (input only, grants nothing)", ""]
     if rep.get("promises"):
-        lines += ["| promise | phase/risk | status | reasons | confirmer |", "|---|---|---|---|---|"]
+        lines += [
+            "| promise | phase/risk | status | reasons | confirmer |",
+            "|---|---|---|---|---|",
+        ]
         for r in rep["promises"]:
             v = r["confirmer_verdict"]
             verdict = "-" if not v else v["verdict"] + (" (ignored)" if v["ignored"] else "")
-            lines.append(f"| {r['promise_id']} | {r['phase']}/{r['risk']} | {r['status']} | "
-                         f"{', '.join(r['reason_codes']) or '-'} | {verdict} |")
+            lines.append(
+                f"| {r['promise_id']} | {r['phase']}/{r['risk']} | {r['status']} | "
+                f"{', '.join(r['reason_codes']) or '-'} | {verdict} |"
+            )
         lines.append("")
     if rep.get("reason_codes"):
         lines += ["Reasons: " + ", ".join(rep["reason_codes"]), ""]
@@ -110,7 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         return _main(argv)
     except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
         detail = (getattr(exc, "stderr", "") or str(exc)).strip().splitlines()
-        print(f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}", file=sys.stderr)
+        print(
+            f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}",
+            file=sys.stderr,
+        )
         return 2
 
 
@@ -121,6 +158,7 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pr", type=int, action="append", default=[])
     ap.add_argument("--author-session", action="append", default=[])
     ap.add_argument("--trusted-login", action="append", default=list(DEFAULT_TRUSTED))
+    ap.add_argument("--shared-login", action="append", default=list(DEFAULT_SHARED))
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--now")
     ap.add_argument("--offline-input")
@@ -135,11 +173,17 @@ def _main(argv: list[str] | None = None) -> int:
         d = json.loads(Path(args.offline_input).read_text())
         table = {(a, c): v for a, c, v in d.get("contains", [])}
         rep = build_promise_confirmation_report(
-            issue_body=d["issue_body"], body_history=d.get("body_history"), comments=d["comments"],
-            prs=d["prs"], contains=lambda a, c: table.get((a, c)), now=d["now"],
+            issue_body=d["issue_body"],
+            body_history=d.get("body_history"),
+            comments=d["comments"],
+            prs=d["prs"],
+            contains=lambda a, c: table.get((a, c)),
+            now=d["now"],
             author_identities=d.get("author_identities", []),
             trusted_logins=d.get("trusted_logins", args.trusted_login),
-            issue_created_at=d.get("issue_created_at"))
+            shared_logins=d.get("shared_logins", args.shared_login),
+            issue_created_at=d.get("issue_created_at"),
+        )
     else:
         if args.issue is None:
             ap.error("--issue is required")
@@ -152,10 +196,17 @@ def _main(argv: list[str] | None = None) -> int:
             authors.append(login)
         now = args.now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         rep = build_promise_confirmation_report(
-            issue_body=issue.get("body") or "", body_history=gh.history(args.issue),
-            comments=gh.comments(args.issue), prs=prs, contains=gh.contains, now=now,
+            issue_body=issue.get("body") or "",
+            body_history=gh.history(args.issue),
+            comments=gh.comments(args.issue),
+            prs=prs,
+            contains=gh.contains,
+            now=now,
             author_identities=[a for a in authors if a],
-            trusted_logins=args.trusted_login, issue_created_at=issue.get("created_at"))
+            trusted_logins=args.trusted_login,
+            shared_logins=args.shared_login,
+            issue_created_at=issue.get("created_at"),
+        )
     print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
     return 0
 

@@ -44,19 +44,19 @@ _RESULTS = frozenset({"PASS", "ACTUAL_FAILED", "NOT_EXERCISED", "PARTIAL", "UNKN
 _PHASES = ("PRE_MERGE", "POST_MERGE")
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _IDENT = re.compile(r"^sha256:[0-9a-f]{64}$")
-_WITNESS_RE = re.compile(r"<!-- NEXUS_PROMISE_WITNESS_V1\s*\n(.*?)\nNEXUS_PROMISE_WITNESS_V1 -->", re.S)
+_WITNESS_RE = re.compile(
+    r"<!-- NEXUS_PROMISE_WITNESS_V1\s*\n(.*?)\nNEXUS_PROMISE_WITNESS_V1 -->", re.S
+)
 _CONFIRM_RE = re.compile(
     r"<!-- NEXUS_PROMISE_CONFIRMATION_V1\s*\n(.*?)\nNEXUS_PROMISE_CONFIRMATION_V1 -->", re.S
 )
-_STALE_REASONS = frozenset(
-    {
-        "WITNESS_PROMISE_SET_MISMATCH",
-        "WITNESS_PR_UNKNOWN",
-        "WITNESS_COMMIT_NOT_LIVE_MERGE",
-        "WITNESS_BEFORE_MERGE",
-        "WITNESS_COMMIT_NOT_PR_HEAD",
-    }
-)
+_STALE_REASONS = frozenset({
+    "WITNESS_PROMISE_SET_MISMATCH",
+    "WITNESS_PR_UNKNOWN",
+    "WITNESS_COMMIT_NOT_LIVE_MERGE",
+    "WITNESS_BEFORE_MERGE",
+    "WITNESS_COMMIT_NOT_PR_HEAD",
+})
 
 Contains = Callable[[str, str], "bool | None"]
 
@@ -178,6 +178,7 @@ def _blocks(
     kind: str,
     trusted: frozenset[str],
     ignored: list[dict],
+    now: datetime,
 ):
     """Yield (comment, block text) from trusted, unedited comments only."""
     for comment in comments:
@@ -186,16 +187,27 @@ def _blocks(
             continue
         author = str(comment.get("author", ""))
         reason = None
-        if comment.get("author_association") not in _TRUSTED_ASSOCIATIONS and author.lower() not in trusted:
+        if (
+            comment.get("author_association") not in _TRUSTED_ASSOCIATIONS
+            and author.lower() not in trusted
+        ):
             reason = "UNTRUSTED_COMMENT_AUTHOR"
         else:
             created, updated = _ts(comment.get("created_at")), _ts(comment.get("updated_at"))
-            if created and updated and updated > created:
+            if created is None or updated is None:
+                reason = "COMMENT_EDIT_STATE_UNKNOWN"
+            elif created > now:
+                reason = "FUTURE_COMMENT"
+            elif updated > created:
                 reason = "COMMENT_EDITED_AFTER_POSTING"
         for text in texts:
             if reason:
-                ignored.append({"kind": kind, "author": author,
-                                "created_at": comment.get("created_at"), "reason": reason})
+                ignored.append({
+                    "kind": kind,
+                    "author": author,
+                    "created_at": comment.get("created_at"),
+                    "reason": reason,
+                })
             else:
                 yield comment, text
 
@@ -209,17 +221,19 @@ def _parse_witness(text: str, now: datetime) -> dict[str, Any] | None:
         return None
     strings = ("promise_id", "entry", "observed_at", "by", "evidence")
     ok = (
-        all(isinstance(w[k], str) and w[k] for k in strings)
+        all(isinstance(w[k], str) and w[k].strip() for k in strings)
         and type(w["pr"]) is int
         and w["phase"] in _PHASES
         and w["result"] in _RESULTS
-        and isinstance(w["commit"], str) and _SHA40.match(w["commit"])
-        and isinstance(w["promise_set_identity"], str) and _IDENT.match(w["promise_set_identity"])
+        and isinstance(w["commit"], str)
+        and _SHA40.match(w["commit"])
+        and isinstance(w["promise_set_identity"], str)
+        and _IDENT.match(w["promise_set_identity"])
     )
     observed = _ts(w["observed_at"])
     if not ok or observed is None or observed > now:
         return None
-    return w
+    return {**w, "by": w["by"].strip()}
 
 
 def _parse_confirmation(text: str) -> dict[str, Any] | None:
@@ -229,8 +243,9 @@ def _parse_confirmation(text: str) -> dict[str, Any] | None:
         return None
     if not isinstance(c, dict) or set(c) != _CONFIRM_KEYS or not isinstance(c["promises"], list):
         return None
-    if not (isinstance(c["confirmer"], str) and c["confirmer"]):
+    if not (isinstance(c["confirmer"], str) and c["confirmer"].strip()):
         return None
+    c = {**c, "confirmer": c["confirmer"].strip()}
     if not (isinstance(c["commit"], str) and _SHA40.match(c["commit"])):
         return None
     if not (isinstance(c["promise_set_identity"], str) and _IDENT.match(c["promise_set_identity"])):
@@ -278,6 +293,23 @@ def _judge_witness(w, *, promise_set, identity, statements, prs, contains) -> st
     return None
 
 
+def _failure_counts(
+    w: Mapping[str, Any], prs: Sequence[Mapping[str, Any]], contains: Contains
+) -> bool:
+    """Whether an ACTUAL_FAILED witness still counts as a failure."""
+    if w["result"] != "ACTUAL_FAILED":
+        return False
+    if w["valid"]:
+        return True
+    reason = w["reason"]
+    if w["phase"] != "POST_MERGE":
+        return reason == "WITNESS_PROMISE_SET_MISMATCH"
+    if reason not in ("WITNESS_PROMISE_SET_MISMATCH", "WITNESS_COMMIT_NOT_LIVE_MERGE"):
+        return False
+    own = next((p for p in prs if p["number"] == w["pr"]), None)
+    return bool(own and own.get("merge_sha") and contains(own["merge_sha"], w["commit"]) is True)
+
+
 def _superseding_fix(failure, valid, prs, contains) -> int | None:
     """PR number of a merged fix that a later valid PASS (same phase) contains, else None."""
     failed_at = _ts(failure["observed_at"])
@@ -291,14 +323,24 @@ def _superseding_fix(failure, valid, prs, contains) -> int | None:
             continue
         for p in prs:
             merged = _ts(p.get("merged_at")) if p.get("merged_at") else None
-            if merged and merged > failed_at and p.get("merge_sha") \
-                    and contains(p["merge_sha"], ok["commit"]) is True:  # type: ignore[operator]
+            if (
+                merged
+                and merged > failed_at
+                and p.get("merge_sha")
+                and contains(p["merge_sha"], ok["commit"]) is True
+            ):  # type: ignore[operator]
                 return p["number"]
     return None
 
 
 def _required_phases(phase: str, risk: str) -> set[str]:
-    return {"PRE_MERGE", "POST_MERGE"} if risk == "HIGH" else {"POST_MERGE"} if phase == "POST_MERGE" else {"ANY"}
+    return (
+        {"PRE_MERGE", "POST_MERGE"}
+        if risk == "HIGH"
+        else {"POST_MERGE"}
+        if phase == "POST_MERGE"
+        else {"ANY"}
+    )
 
 
 def _satisfied(required: set[str], passed: set[str]) -> bool:
@@ -306,11 +348,14 @@ def _satisfied(required: set[str], passed: set[str]) -> bool:
 
 
 def _predeclaration(
-    history, work_start, current_set, current_identity, issue_created_at=None
+    history, start: datetime | None, current_set, current_identity, issue_created_at=None
 ) -> tuple[set[str], set[str]]:
     """(reasons to report, reasons that block VERIFIED); dropped ids use BLOCKED prefix."""
-    created = _ts(issue_created_at) if issue_created_at else None
-    if issue_created_at and (created is None or (_ts(work_start) and created > _ts(work_start))):  # type: ignore[operator]
+    unavailable = {"PROMISE_HISTORY_UNAVAILABLE"}
+    created = _ts(issue_created_at) if issue_created_at is not None else None
+    if start is None or (issue_created_at is not None and created is None):
+        return unavailable, unavailable
+    if created is not None and created > start:
         return {"PROMISE_SET_NOT_PREDECLARED"}, {"PROMISE_SET_NOT_PREDECLARED"}
     if history is None:
         return {"PROMISE_HISTORY_UNAVAILABLE"}, {"PROMISE_HISTORY_UNAVAILABLE"}
@@ -320,9 +365,8 @@ def _predeclaration(
         if created is None:
             return {"PROMISE_HISTORY_UNAVAILABLE"}, {"PROMISE_HISTORY_UNAVAILABLE"}
         return set(), set()
-    start = _ts(work_start)
     stamped = [(_ts(h.get("edited_at")), h) for h in history]
-    if start is None or any(ts is None for ts, _ in stamped):
+    if any(ts is None for ts, _ in stamped):
         # An unreadable timestamp cannot prove what was declared before work began.
         return {"PROMISE_HISTORY_UNAVAILABLE"}, {"PROMISE_HISTORY_UNAVAILABLE"}
     versions = [h for ts, h in sorted(stamped, key=lambda item: item[0]) if ts <= start]  # type: ignore[operator]
@@ -346,24 +390,52 @@ def _predeclaration(
     return set(), set()
 
 
-def _confirmation(comments, identity, prs, contains, trusted, blocks_ignored) -> tuple[dict | None, list[dict]]:
+def _confirmation(
+    comments, identity, prs, contains, trusted, blocks_ignored, now
+) -> tuple[dict | None, list[dict]]:
     ignored: list[dict] = []
     candidates: list[tuple[datetime, dict]] = []
-    for comment, text in _blocks(comments, _CONFIRM_RE, "CONFIRMATION", trusted, blocks_ignored):
+    for comment, text in _blocks(
+        comments, _CONFIRM_RE, "CONFIRMATION", trusted, blocks_ignored, now
+    ):
         parsed = _parse_confirmation(text)
         created = _ts(comment.get("created_at"))
         if parsed is None or created is None:
-            ignored.append({"created_at": comment.get("created_at"), "reason": "CONFIRMATION_MALFORMED"})
+            ignored.append({
+                "created_at": comment.get("created_at"),
+                "reason": "CONFIRMATION_MALFORMED",
+            })
         elif parsed["promise_set_identity"] != identity:
-            ignored.append({"created_at": comment.get("created_at"), "reason": "CONFIRMATION_PROMISE_SET_MISMATCH"})
+            ignored.append({
+                "created_at": comment.get("created_at"),
+                "reason": "CONFIRMATION_PROMISE_SET_MISMATCH",
+            })
         elif not _live_for_all(prs, parsed["commit"], contains):
-            ignored.append({"created_at": comment.get("created_at"), "reason": "CONFIRMATION_COMMIT_NOT_LIVE_MERGE"})
+            ignored.append({
+                "created_at": comment.get("created_at"),
+                "reason": "CONFIRMATION_COMMIT_NOT_LIVE_MERGE",
+            })
         else:
-            candidates.append((created, parsed))
+            candidates.append((created, {**parsed, "_author": str(comment.get("author", ""))}))
     candidates.sort(key=lambda item: item[0])
     for created, _ in candidates[:-1]:
         ignored.append({"created_at": created.isoformat(), "reason": "CONFIRMATION_SUPERSEDED"})
     return (candidates[-1][1] if candidates else None), ignored
+
+
+def _normalize_pr(p: Mapping[str, Any]) -> dict[str, Any]:
+    """A PR with an unreadable merged_at (or no merge pair) counts as not merged."""
+    out = dict(p)
+    if not (out.get("merge_sha") and _ts(out.get("merged_at"))):
+        out["merge_sha"], out["merged_at"] = None, None
+    return out
+
+
+def _work_start(prs: Sequence[Mapping[str, Any]]) -> datetime | None:
+    stamps = [_ts(p.get("created_at")) for p in prs]
+    if not stamps or any(t is None for t in stamps):
+        return None
+    return min(t for t in stamps if t is not None)
 
 
 def build_promise_confirmation_report(
@@ -377,23 +449,36 @@ def build_promise_confirmation_report(
     author_identities: Sequence[str],
     trusted_logins: Sequence[str] = (),
     issue_created_at: str | None = None,
+    shared_logins: Sequence[str] = (),
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
     try:
         promise_set = parse_issue_promise_set(issue_body)
     except ValueError as exc:
-        return {**base, "applicable": True, "recommendation": "BLOCKED",
-                "reason_codes": ["PROMISE_SET_INVALID"], "detail": str(exc)}
+        return {
+            **base,
+            "applicable": True,
+            "recommendation": "BLOCKED",
+            "reason_codes": ["PROMISE_SET_INVALID"],
+            "detail": str(exc),
+        }
     if promise_set is None:
         return {**base, "applicable": False, "recommendation": "NOT_APPLICABLE"}
     try:
         statements = _parse_statements(issue_body)
     except ValueError as exc:
-        return {**base, "applicable": True, "recommendation": "BLOCKED",
-                "reason_codes": ["PROMISE_STATEMENTS_INVALID"], "detail": str(exc)}
+        return {
+            **base,
+            "applicable": True,
+            "recommendation": "BLOCKED",
+            "reason_codes": ["PROMISE_STATEMENTS_INVALID"],
+            "detail": str(exc),
+        }
     identity = issue_promise_set_identity(promise_set)
     now_dt = _ts(now)
-    assert now_dt is not None, "now must be RFC3339 Z"
+    if now_dt is None:
+        raise ValueError("now must be RFC3339 UTC ending in Z")
+    prs = [_normalize_pr(p) for p in prs]
     declared = {p["promise_id"]: p for p in promise_set["promises"]}
 
     witnesses: dict[str, list[dict]] = {pid: [] for pid in declared}
@@ -401,21 +486,30 @@ def build_promise_confirmation_report(
     trusted = frozenset(t.lower() for t in trusted_logins)
     ignored_blocks: list[dict] = []
     all_by: set[str] = set()
-    for _, text in _blocks(comments, _WITNESS_RE, "WITNESS", trusted, ignored_blocks):
+    for _, text in _blocks(comments, _WITNESS_RE, "WITNESS", trusted, ignored_blocks, now_dt):
         w = _parse_witness(text, now_dt)
         if w is None:
             malformed += 1
             continue
         all_by.add(w["by"].lower())
-        reason = _judge_witness(w, promise_set=promise_set, identity=identity,
-                                statements=statements, prs=prs, contains=contains)
+        reason = _judge_witness(
+            w,
+            promise_set=promise_set,
+            identity=identity,
+            statements=statements,
+            prs=prs,
+            contains=contains,
+        )
         if reason == "WITNESS_UNKNOWN_PROMISE":
             unknown += 1
             continue
         witnesses[w["promise_id"]].append({**w, "valid": reason is None, "reason": reason})
 
-    confirmation, ignored = _confirmation(comments, identity, prs, contains, trusted, ignored_blocks)
-    authors = {a.lower() for a in author_identities}
+    confirmation, ignored = _confirmation(
+        comments, identity, prs, contains, trusted, ignored_blocks, now_dt
+    )
+    authors = {a.strip().lower() for a in author_identities}
+    shared = {x.strip().lower() for x in shared_logins}
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
     rows = []
@@ -428,8 +522,7 @@ def build_promise_confirmation_report(
         required = _required_phases(promise["phase"], promise["risk"])
         live_failures = []
         # A failure whose only defect is an older promise-set identity still counts.
-        failing = [w for w in ws if w["result"] == "ACTUAL_FAILED"
-                   and (w["valid"] or w["reason"] == "WITNESS_PROMISE_SET_MISMATCH")]
+        failing = [w for w in ws if _failure_counts(w, prs, contains)]
         for failure in failing:
             fix = _superseding_fix(failure, valid, prs, contains)
             if fix is None:
@@ -456,22 +549,43 @@ def build_promise_confirmation_report(
         if confirmation is not None and pid in verdicts:
             v = verdicts[pid]
             who = confirmation["confirmer"].lower()
-            independent = who not in all_by and who not in authors
+            login = confirmation["_author"].lower()
+            independent = (
+                who not in all_by
+                and who not in authors
+                and (login in shared or login not in authors)
+            )
             if not independent:
                 reasons.add("CONFIRMER_NOT_INDEPENDENT")
-            verdict = {"verdict": v["verdict"], "counterexample_checked": v["counterexample_checked"],
-                       "confirmer": confirmation["confirmer"], "ignored": not independent}
+            verdict = {
+                "verdict": v["verdict"],
+                "counterexample_checked": v["counterexample_checked"],
+                "confirmer": confirmation["confirmer"],
+                "ignored": not independent,
+            }
         rows.append({
-            "promise_id": pid, "phase": promise["phase"], "risk": promise["risk"],
-            "status": status, "reason_codes": sorted(reasons),
-            "witnesses": [{k: w[k] for k in ("commit", "phase", "result", "by", "observed_at", "valid", "reason")}
-                          for w in ws],
+            "promise_id": pid,
+            "phase": promise["phase"],
+            "risk": promise["risk"],
+            "status": status,
+            "reason_codes": sorted(reasons),
+            "witnesses": [
+                {
+                    k: w[k]
+                    for k in ("commit", "phase", "result", "by", "observed_at", "valid", "reason")
+                }
+                for w in ws
+            ],
             "confirmer_verdict": verdict,
         })
 
     info, blockers = _predeclaration(
         None if body_history is None else list(body_history),
-        min((p["created_at"] for p in prs), default=now), promise_set, identity, issue_created_at)
+        _work_start(prs),
+        promise_set,
+        identity,
+        issue_created_at,
+    )
     top: set[str] = set(info)
     if not prs:
         top.add("NO_PR_LISTED")
@@ -482,12 +596,21 @@ def build_promise_confirmation_report(
 
     def accepted(row: dict) -> bool:
         v = row["confirmer_verdict"]
-        return bool(v and not v["ignored"] and v["verdict"] == "ACCEPT" and v["counterexample_checked"])
+        return bool(
+            v and not v["ignored"] and v["verdict"] == "ACCEPT" and v["counterexample_checked"]
+        )
 
     uncovered = [r["promise_id"] for r in rows if not (r["status"] == "WITNESSED" and accepted(r))]
-    rejected = any(r["confirmer_verdict"] and not r["confirmer_verdict"]["ignored"]
-                   and r["confirmer_verdict"]["verdict"] == "REJECT" for r in rows)
-    if any(r.startswith("PROMISE_DROPPED") for r in info) or {"NO_PR_LISTED", "PR_NOT_MERGED"} & top:
+    rejected = any(
+        r["confirmer_verdict"]
+        and not r["confirmer_verdict"]["ignored"]
+        and r["confirmer_verdict"]["verdict"] == "REJECT"
+        for r in rows
+    )
+    if (
+        any(r.startswith("PROMISE_DROPPED") for r in info)
+        or {"NO_PR_LISTED", "PR_NOT_MERGED"} & top
+    ):
         recommendation = "BLOCKED"
     elif rejected or any(r["status"] == "FAILED" for r in rows):
         recommendation = "LIVE_FAILED"
@@ -497,11 +620,19 @@ def build_promise_confirmation_report(
         recommendation = "PROVISIONAL"
     count = lambda s: sum(r["status"] == s for r in rows)  # noqa: E731
     return {
-        **base, "applicable": True, "promise_set_identity": identity,
-        "recommendation": recommendation, "reason_codes": sorted(top),
-        "promises": rows, "uncovered": uncovered if recommendation == "PROVISIONAL" else [],
-        "promises_total": len(rows), "witnessed": count("WITNESSED"), "uncovered_count": count("UNCOVERED"),
-        "failed": count("FAILED"), "stale": count("STALE"),
-        "malformed_witnesses": malformed, "ignored_confirmations": ignored,
+        **base,
+        "applicable": True,
+        "promise_set_identity": identity,
+        "recommendation": recommendation,
+        "reason_codes": sorted(top),
+        "promises": rows,
+        "uncovered": uncovered if recommendation == "PROVISIONAL" else [],
+        "promises_total": len(rows),
+        "witnessed": count("WITNESSED"),
+        "uncovered_count": count("UNCOVERED"),
+        "failed": count("FAILED"),
+        "stale": count("STALE"),
+        "malformed_witnesses": malformed,
+        "ignored_confirmations": ignored,
         "ignored_blocks": ignored_blocks,
     }

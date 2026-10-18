@@ -267,6 +267,15 @@ ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
   a commit that contains a listed PR merged after the failure (any such listed PR
   counts as the fix). A failure recorded under an older promise-set identity
   still counts. Every listed PR must be merged, else the report is `BLOCKED`.
+- A post-merge `ACTUAL_FAILED` on an earlier merge keeps counting after another
+  listed PR merges (its commit then lacks the later merge), as long as its commit
+  contains its own PR's merge; only a later PASS on a commit containing a merge
+  made after the failure clears it.
+- All bot comments share one GitHub login, so a confirmation whose comment author
+  is in the author identities is ignored unless that login is a shared login
+  (CLI `--shared-login`, default `james3014-nexus-agent[bot]`); for shared
+  logins only the text-level name check applies. Comments dated after `now` or
+  without an edit timestamp are ignored.
 - Any change of the promise set after work start (including a generation bump),
   an Issue created after work start, or unavailable edit history blocks
   `VERIFIED`; a dropped promise is `BLOCKED`.
