@@ -1174,6 +1174,10 @@ def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monke
         "/usr/lib",
         "/usr/share/zoneinfo",
         "/System/Library",
+        # #2650: one Perl tool file and the system developer toolchain (xcrun git shim)
+        "/usr/bin/shasum",
+        "/Library/Developer/",
+        "/Applications/",
     )
     assert all(root.startswith(allowed_prefixes) for root in roots)
     profile = service._sandbox_profile()
