@@ -77,6 +77,26 @@ EVIDENCE_KEYS = frozenset({
     "junit_sha256",
 })
 MAX_JUNIT_BYTES = 64 * 1024 * 1024
+# Tests the offline executor cannot pass: they need the network or a tool the
+# trusted runtime does not ship.  The nightly full regression (online, ``uv sync
+# --all-extras``) still runs them.  Here a trusted plugin marks them
+# ``xfail(strict=False)`` on both sides, like the nightly quarantine: still run,
+# never a false new failure, and a head-only xfail of a base pass reads as
+# IMPACT_UNKNOWN (#2593).
+OFFLINE_EXCLUDED_TESTS: dict[str, str] = {
+    "tests/ops/test_clean_wheel_entrypoints.py::"
+    "test_clean_wheel_contains_and_runs_registered_cli_entrypoints": (
+        "builds the wheel with uv and installs its dependencies from the network"
+    ),
+    "tests/ops/test_issue_821_core_namespace_retirement.py::"
+    "test_legacy_wheel_releases_product_namespace_and_duplicate_certify_cli": (
+        "builds the wheel with uv and installs its dependencies from the network"
+    ),
+    "tests/services/test_hybrid_retrieval.py::test_index_rebuild_and_semantic_recall": (
+        "needs the sentence-transformers model download; the trusted runtime has no"
+        " sentence-transformers, so the conftest hash stub cannot recall semantically"
+    ),
+}
 _GIT_ENV_OVERRIDES = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_LFS_SKIP_SMUDGE": "1",
@@ -633,7 +653,9 @@ def _prepare_runtime(bundle: Path, manifest: dict[str, Any], work: Path) -> Path
     return site_packages
 
 
-def _materialize(bundle: Path, spec: dict[str, Any], work: Path) -> Path:
+def _materialize(
+    bundle: Path, spec: dict[str, Any], work: Path, repository: str | None = None
+) -> Path:
     source = work / "source"
     environment = _git_env(work / "git-home")
     (work / "git-home").mkdir(exist_ok=True)
@@ -650,6 +672,11 @@ def _materialize(bundle: Path, spec: dict[str, Any], work: Path) -> Path:
     subprocess.run(
         ["git", "init", "-q", str(source)], check=True, capture_output=True, env=environment
     )
+    if repository is not None:
+        # Same physical identity as a CI checkout: code that binds itself to the
+        # canonical repository (execution readiness SOURCE plane) reads
+        # remote.origin.url.  Nothing is ever fetched from it.
+        git("remote", "add", "origin", f"https://github.com/{repository}.git")
     ref = SIDE_REFS[spec["side"]]
     git("fetch", "-q", "--no-tags", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
     git("checkout", "-q", "--detach", spec["revision"])
@@ -660,6 +687,89 @@ def _materialize(bundle: Path, spec: dict[str, Any], work: Path) -> Path:
     ):
         raise GateError("executor worktree does not match the exact planned tree")
     return source
+
+
+_REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+
+
+def _trusted_repository(manifest: dict[str, Any]) -> str:
+    identity_block = manifest.get("workflow_identity")
+    repository = identity_block.get("repository") if isinstance(identity_block, dict) else None
+    if not isinstance(repository, str) or not _REPOSITORY_NAME.fullmatch(repository):
+        raise GateError("controller manifest has no valid repository identity")
+    return repository
+
+
+OFFLINE_PLUGIN = "nexus_trusted_impact_offline"
+_OFFLINE_PLUGIN_SOURCE = """import pytest
+
+_EXCLUDED = {excluded!r}
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        reason = _EXCLUDED.get(item.nodeid)
+        if reason is not None:
+            item.add_marker(
+                pytest.mark.xfail(reason="TRUSTED_IMPACT_OFFLINE[#2593]: " + reason, strict=False)
+            )
+"""
+
+
+def _offline_plugin_dir(work: Path) -> Path:
+    directory = work / "trusted-plugins"
+    directory.mkdir()
+    (directory / f"{OFFLINE_PLUGIN}.py").write_text(
+        _OFFLINE_PLUGIN_SOURCE.format(excluded=dict(sorted(OFFLINE_EXCLUDED_TESTS.items()))),
+        encoding="utf-8",
+    )
+    return directory
+
+
+def _runtime_interpreter(source: Path, site_packages: Path) -> Path:
+    """Give the planned tests the interpreter a synced checkout has (#2593).
+
+    The offline runtime is a bare ``site-packages`` tree.  Running pytest as
+    ``python -S`` with ``PYTHONPATH`` works for the test process itself, but any
+    test that starts ``sys.executable`` with its own environment, or a console
+    tool such as ``ruff``, lost the runtime and failed on base and head alike.
+    So build ``<source>/.venv`` (ignored by Git, where ``uv sync`` puts it) with
+    no system site-packages, link the runtime and the checkout through ``.pth``
+    path lines and expose the runtime's console tools in its ``bin``.  Nothing is downloaded:
+    the only packages are the hash-bound runtime ones.
+    """
+
+    venv = source / ".venv"
+    subprocess.run(
+        [sys.executable, "-I", "-m", "venv", "--without-pip", str(venv)],
+        check=True,
+        capture_output=True,
+    )
+    python = venv / "bin" / "python"
+    purelib = subprocess.run(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    # Path lines only (never ``import`` lines): the runtime, then the checkout
+    # itself, as the editable project install of ``uv sync`` provides.
+    Path(purelib, "_nexus_trusted_runtime.pth").write_text(
+        f"{site_packages}\n{source}\n", encoding="utf-8"
+    )
+    tools = site_packages / "bin"
+    if tools.is_dir():
+        shebang = f"#!{python}\n".encode()
+        for tool in sorted(tools.iterdir()):
+            target = venv / "bin" / tool.name
+            if not tool.is_file() or tool.is_symlink() or target.exists():
+                continue
+            content = tool.read_bytes()
+            if content.startswith(b"#!") and b"python" in content.split(b"\n", 1)[0]:
+                content = shebang + content.split(b"\n", 1)[1]
+            target.write_bytes(content)
+            target.chmod(0o755)
+    return python
 
 
 def _executor(args: argparse.Namespace) -> int:
@@ -680,9 +790,17 @@ def _executor(args: argparse.Namespace) -> int:
         "junit_sha256": None,
     }
     if spec["mode"] == "pytest":
-        work = Path(tempfile.mkdtemp(prefix=f"trusted-impact-{args.side}-"))
+        # Like a CI checkout, the tree lives in the job workspace, not under a
+        # temp root: product code refuses temp roots for durable state and
+        # reports (#2593), while pytest's tmp_path still uses TMPDIR below.
+        work_root = os.environ.get("GITHUB_WORKSPACE") or None
+        if work_root is not None:
+            Path(work_root).mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=f"trusted-impact-{args.side}-", dir=work_root))
         site_packages = _prepare_runtime(bundle, manifest, work)
-        source = _materialize(bundle, spec, work)
+        source = _materialize(bundle, spec, work, _trusted_repository(manifest))
+        interpreter = _runtime_interpreter(source, site_packages)
+        plugins = _offline_plugin_dir(work)
         home = work / "home"
         home.mkdir()
         environment = {
@@ -690,10 +808,14 @@ def _executor(args: argparse.Namespace) -> int:
             "HOME": str(home),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "NEXUS_NIGHTLY_QUARANTINE": "1",
+            "PATH": os.pathsep.join((
+                str(interpreter.parent),
+                os.environ.get("PATH", "/usr/bin:/bin"),
+            )),
             "PIP_NO_INDEX": "1",
             "PYTHONNOUSERSITE": "1",
-            "PYTHONPATH": str(site_packages),
+            "PYTHONPATH": os.pathsep.join((str(site_packages), str(plugins))),
             "TMPDIR": os.environ.get("RUNNER_TEMP", tempfile.gettempdir()),
             "UV_OFFLINE": "1",
             "GIT_AUTHOR_NAME": "Nexus CI",
@@ -705,11 +827,12 @@ def _executor(args: argparse.Namespace) -> int:
         with (output / "pytest-output.log").open("wb") as log:
             completed = subprocess.run(
                 [
-                    sys.executable,
-                    "-S",
+                    str(interpreter),
                     "-m",
                     "pytest",
                     *spec["pytest_args"],
+                    "-p",
+                    OFFLINE_PLUGIN,
                     "-q",
                     f"--junitxml={junit}",
                 ],
