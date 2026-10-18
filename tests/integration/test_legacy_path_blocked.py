@@ -253,6 +253,9 @@ NON_MODEL_JSON_PARSE_ALLOWLIST = {
     ("scripts/ops/break_glass_recovery.py", "_fetch_json_object", "raw.decode('utf-8')"): (
         "HTTP body: GitHub API JSON (structured), not model text."
     ),
+    ("scripts/ops/pr_mechanical_pass.py", "sort_imports", "lint.stdout or '[]'"): (
+        "Local ruff CLI: `ruff check --output-format json` findings list; no model is involved."
+    ),
     (
         "scripts/ops/canary_issue29_physical_local_online.py",
         "call_physical_gemini",
