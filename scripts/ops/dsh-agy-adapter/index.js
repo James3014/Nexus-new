@@ -101,6 +101,14 @@ function preEffectRetries() {
   return boundedEnvInt('NEXUS_DSH_AGY_PRE_EFFECT_RETRIES', 2, 0, 3)
 }
 
+// Total wall-clock budget for waiting out AGY_ACCOUNT_POOL_BUSY_PRE_EFFECT (#2618). The pool
+// is shared by every session, so one busy moment must not fail a long DSH turn. 0 disables the
+// budgeted wait and keeps the count-limited retries above; NEXUS_DSH_AGY_PRE_EFFECT_RETRIES=0
+// disables every retry, including this one.
+function busyRetryBudgetSeconds() {
+  return boundedEnvInt('NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC', 600, 0, 3600)
+}
+
 function poolWaitSeconds() {
   return boundedEnvInt('NEXUS_DSH_AGY_POOL_WAIT_SECONDS', 120, 15, 600)
 }
@@ -589,8 +597,13 @@ export class AgyPoolAdapter extends LlmAdapter {
     const maxRetries = preEffectRetries()
     const backoff = retryBackoffMs()
     const poolWait = poolWaitSeconds()
+    const busyBudgetMs = busyRetryBudgetSeconds() * 1000
+    let busyDeadline = null
+    let busyWaits = 0
+    let otherFailures = 0
     let events
     for (let attempt = 1; ; attempt += 1) {
+      const attemptStartedAt = Date.now()
       try {
         events = await this.runAttempt(options, actionCatalog, poolWait)
         break
@@ -598,12 +611,34 @@ export class AgyPoolAdapter extends LlmAdapter {
         if (error && typeof error === 'object') error.attempts = attempt
         // Only provably pre-effect failures get a new canonical operation; every attempt
         // reserves its own budget slot, so retries cannot bypass the session cap.
-        const retryable = RETRYABLE_PRE_EFFECT_CODES.has(error?.code)
-          && error?.effect === 'none'
-          && attempt <= maxRetries
+        const provablyPreEffect = RETRYABLE_PRE_EFFECT_CODES.has(error?.code) && error?.effect === 'none'
+        // Pool-busy is the only code with a time budget; it never consumes the count-limited
+        // retries. All other pre-effect codes keep the existing count limit.
+        const busy = provablyPreEffect && error.code === POOL_BUSY_CODE && busyBudgetMs > 0 && maxRetries > 0
+        let waitMs = 0
+        let retryable = false
+        if (busy) {
+          if (busyDeadline === null) busyDeadline = attemptStartedAt + busyBudgetMs
+          const remaining = busyDeadline - Date.now()
+          if (remaining > 0) {
+            waitMs = Math.min(backoff[Math.min(busyWaits, backoff.length - 1)], remaining)
+            retryable = true
+            busyWaits += 1
+            process.stderr.write('NEXUS_DSH_AGY_BUSY_RETRY ' + JSON.stringify({
+              attempt,
+              wait_ms: waitMs,
+              budget_remaining_ms: remaining,
+              operation_id: error.operationId ?? null,
+            }) + '\n')
+          }
+        } else if (provablyPreEffect) {
+          otherFailures += 1
+          retryable = otherFailures <= maxRetries
+          if (retryable) waitMs = backoff[Math.min(otherFailures - 1, backoff.length - 1)]
+        }
         if (!retryable) throw error
         try {
-          await delay(backoff[Math.min(attempt - 1, backoff.length - 1)], options.signal)
+          await delay(waitMs, options.signal)
         } catch (abortError) {
           throw new LlmError(
             'DSH request aborted during Agy pre-effect retry backoff',

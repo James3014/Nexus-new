@@ -13,8 +13,8 @@ through ``_service_module()``.
 ``workspace_slot_prepare`` prepares a worktree slot through ``WorktreeManager`` and
 ``apply_workspace_convergence(apply=True)`` runs ``cleanup_tasks(dry_run=False)``; both
 reach those effects through ``self`` / the facade exactly as before. ``state_dir``,
-``_read_state_snapshot``, ``canonical_state_dir``, ``build_contract`` and
-``cleanup_tasks`` stay in the facade class.
+``_read_state_snapshot``, ``canonical_state_dir`` and ``cleanup_tasks`` stay in the facade
+class; ``build_contract`` lives in ``_TaskBuildMixin`` (``parts/task_build.py``, split S8b).
 """
 
 from __future__ import annotations

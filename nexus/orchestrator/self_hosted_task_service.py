@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import inspect
+import inspect  # noqa: F401 - facade surface, late-bound by parts/worker_dispatch.py
 import json
 import logging  # noqa: F401 - facade surface (its only user moved to parts/checkpoint.py)
 import os
@@ -33,7 +33,7 @@ from typing import (
     Iterator,  # noqa: F401 - facade surface (its users moved to parts/state_store.py)
     Mapping,
     Optional,
-    Sequence,
+    Sequence,  # noqa: F401 - facade surface (its only users moved to parts/worker_dispatch.py)
     cast,
 )
 from uuid import uuid4
@@ -230,6 +230,9 @@ from nexus.orchestrator.self_hosted_task_service_parts.state_store import (
 from nexus.orchestrator.self_hosted_task_service_parts.task_build import (
     _TaskBuildMixin as _TaskBuildMixin,
 )
+from nexus.orchestrator.self_hosted_task_service_parts.worker_dispatch import (
+    _WorkerDispatchMixin as _WorkerDispatchMixin,
+)
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,  # noqa: F401 - facade surface, used by parts/task_build.py
@@ -240,7 +243,9 @@ from nexus.orchestrator.task_contract import (
     MutationMode,  # noqa: F401 - facade surface, used by parts/task_build.py
     parse_task_card_expected_evidence,
 )
-from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
+from nexus.orchestrator.worker_escalation import (
+    WorkerEscalationPolicy,  # noqa: F401 - facade surface, late-bound by parts/task_build.py
+)
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -938,6 +943,7 @@ def _require_no_legacy_default_state() -> None:
 
 
 class SelfHostedTaskService(
+    _WorkerDispatchMixin,
     _TaskBuildMixin,
     _CheckpointMixin,
     _OperatorOutcomeMixin,
@@ -1102,446 +1108,6 @@ class SelfHostedTaskService(
                 f"expected {contract.controller_revision}, got {current_revision}"
             )
         return None
-
-    def _select_initial_provider(
-        self,
-        contract: ArchitectTaskContract,
-        *,
-        before_preflight: Callable[[str], None],
-    ) -> tuple[str, Any]:
-        providers = list(contract.provider_order or [str(contract.preferred_provider or "codex")])
-        failures: list[str] = []
-        for provider in providers:
-            before_preflight(provider)
-            preflight = self.worker_registry.preflight(provider)
-            if preflight.ready:
-                return provider, preflight
-            failures.append(f"{provider}: {preflight.reason}")
-        raise RuntimeError("worker preflight failed: " + "; ".join(failures))
-
-    def _next_ready_provider(
-        self,
-        policy: WorkerEscalationPolicy,
-        attempts: Sequence[WorkerExecutionReceipt],
-        *,
-        before_preflight: Callable[[str], None],
-    ) -> Optional[str]:
-        attempted = {attempt.provider for attempt in attempts}
-        for provider in policy.provider_order or (policy.strong_provider,):
-            if provider in attempted:
-                continue
-            before_preflight(provider)
-            if self.worker_registry.preflight(provider).ready:
-                return provider
-        return None
-
-    @staticmethod
-    def _assert_persisted_workforce_dispatch(
-        state: Mapping[str, Any],
-        request: Mapping[str, Any],
-        binding: Optional[Mapping[str, Any]],
-        *,
-        active_provider: Optional[str] = None,
-    ) -> None:
-        if binding is None:
-            return
-        persisted = state.get("workforce_dispatch")
-        if not isinstance(persisted, Mapping):
-            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
-        original_demands, original_admission = _workforce_dispatch_inputs(request)
-        if persisted.get("demands") != _jsonable(original_demands) or persisted.get("admission") != _jsonable(original_admission):
-            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
-        expected = {
-            "selected_worker_id": binding["worker_id"],
-            "selected_provider": binding["provider"],
-            "selected_model": binding["model"],
-            "workforce_policy_hash": binding["policy_hash"],
-            "workforce_binding_hash": binding["binding_hash"],
-            "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
-        }
-        if any(str(state.get(field) or "") != str(value or "") for field, value in expected.items()):
-            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
-        expected_envelope = binding.get("canonical_dispatch_envelope")
-        persisted_envelope = state.get("canonical_dispatch_envelope")
-        if isinstance(expected_envelope, Mapping) or "canonical_dispatch_envelope" in request:
-            if not isinstance(expected_envelope, Mapping) or dict(persisted_envelope or {}) != dict(expected_envelope):
-                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_STATE_DRIFT")
-            persisted_identity = {
-                "task_id": state.get("task_id"),
-                "attempt_id": state.get("attempt_id"),
-                "task_card_path": state.get("task_card_path"),
-                "task_card_hash": state.get("task_card_hash"),
-            }
-            if any(expected_envelope.get(field) != value for field, value in persisted_identity.items()):
-                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
-        if active_provider is not None and str(active_provider) != str(binding["provider"]):
-            raise RuntimeError("WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT")
-
-    def _revalidate_tracked_dispatch_task_card(
-        self,
-        contract: ArchitectTaskContract,
-        request: Mapping[str, Any],
-        state: Mapping[str, Any],
-        binding: Optional[Mapping[str, Any]],
-    ) -> None:
-        """Re-read the tracked card immediately before provider-side work."""
-        if binding is None:
-            if _tracked_dispatch_required(request, state):
-                raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
-            return
-        envelope = binding.get("canonical_dispatch_envelope")
-        if not isinstance(envelope, Mapping):
-            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISSING")
-        if str(request.get("contract_kind") or "") != ContractKind.TRACKED_TASK_CARD.value:
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked dispatch card required")
-
-        validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
-        identity = resolve_lifecycle_identity(
-            contract,
-            request,
-            is_ephemeral=self.ephemeral,
-        )
-        requested_path = str(request.get("task_card_path") or "")
-        expected = {
-            "task_id": contract.task_id,
-            "attempt_id": str(request.get("attempt_id") or ""),
-            "task_card_path": requested_path,
-            "task_card_hash": str(request.get("task_card_hash") or ""),
-        }
-        if not all(expected.values()):
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked identity incomplete")
-        if any(str(envelope.get(field) or "") != value for field, value in expected.items()):
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: dispatch envelope identity drifted")
-        persisted = {
-            "task_id": str(state.get("task_id") or ""),
-            "attempt_id": str(state.get("attempt_id") or ""),
-            "task_card_path": str(state.get("task_card_path") or ""),
-            "task_card_hash": str(state.get("task_card_hash") or ""),
-        }
-        if persisted != expected:
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: persisted card identity drifted")
-        if str(state.get("contract_kind") or "") != ContractKind.TRACKED_TASK_CARD.value:
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: persisted tracked contract missing")
-        if (
-            identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
-            or str(identity.get("task_card_path") or "")
-            != str(_resolve_task_card_path(requested_path))
-            or str(identity.get("task_card_hash") or "") != expected["task_card_hash"]
-        ):
-            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked card changed after submit")
-
-    def _revalidate_provider_boundary(
-        self,
-        contract: ArchitectTaskContract,
-        request: Mapping[str, Any],
-        task_id: str,
-        binding: Optional[Mapping[str, Any]],
-        *,
-        active_provider: Optional[str] = None,
-    ) -> None:
-        """Re-read all governed identity immediately before provider-side work."""
-        state = self._read_state(task_id) or {}
-        if state.get("status") == "BLOCKED_INVALID_STATE" or state.get("state_valid") is False:
-            # An unreadable persisted state cannot prove the task is untracked.
-            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING: persisted state invalid")
-        if binding is None and _tracked_dispatch_required(request, state):
-            # Tracked (Task Card) dispatch never reaches a model worker without
-            # a fresh Workforce Admission binding, on any execution lane.
-            # Untracked ISOLATED_TARGET dispatch has no admission path yet
-            # (known gap, see WORKFORCE_EXECUTION_OVERLAY.md); DIRECT_CANONICAL
-            # is Owner-exempt per AGENTS.md (#1761).
-            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
-        self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
-        self._assert_persisted_workforce_dispatch(
-            state,
-            request,
-            binding,
-            active_provider=active_provider,
-        )
-
-    @staticmethod
-    def _replace_failed_target(
-        manager: WorktreeManager,
-        controller: SelfHostedDevelopmentController,
-        contract: ArchitectTaskContract,
-        lease: TargetWorktreeLease,
-        *,
-        task_states: Optional[Mapping[str, dict]] = None,
-    ) -> TargetWorktreeLease:
-        manager.verify_controller_unchanged(
-            contract,
-            expected_status_sha256=lease.controller_status_sha256,
-        )
-        target_head = manager._run_git(["rev-parse", "HEAD"], cwd=lease.target_worktree)
-        if target_head != lease.initial_head:
-            raise RuntimeError("failed worker changed Target HEAD; escalation is blocked")
-        manager.cleanup(contract.task_id, force=True)
-        prepare_task = controller.prepare_task
-        if "task_states" in inspect.signature(prepare_task).parameters:
-            return prepare_task(contract, task_states=task_states)
-        return prepare_task(contract)
-
-    def _worker_context_materialization(
-        self,
-        *,
-        request: Mapping[str, Any],
-        state: Mapping[str, Any],
-        task_id: str,
-        attempt_id: str,
-        fresh_submission: bool,
-        contract: ArchitectTaskContract,
-        lease: TargetWorktreeLease,
-        base_prompt: str,
-        actual_provider: str,
-        actual_model: str | None,
-    ) -> tuple[str, dict[str, Any]] | None:
-        """Materialize the frozen Planner projection before a WorkerRegistry call.
-
-        The evidence journal is derived state kept beside the signed request and
-        action.  A resumed attempt may consume a completed journal only; it may
-        never execute an absent or incomplete journal a second time.
-        """
-        planner_input = request.get("planner_output")
-        envelope = state.get("canonical_dispatch_envelope") or request.get(
-            "canonical_dispatch_envelope"
-        )
-        if not isinstance(planner_input, Mapping) and not isinstance(envelope, Mapping):
-            if request.get("worker_candidate_ingress") or state.get("workforce_dispatch"):
-                raise RuntimeError("worker_context_binding_missing")
-            return None
-        if not isinstance(planner_input, Mapping) or not isinstance(envelope, Mapping):
-            raise RuntimeError("worker_context_binding_missing")
-
-        from nexus_runtime.task_context import (
-            append_model_context_to_prompt,
-            build_worker_context_package,
-        )
-
-        from nexus.services.mainchain_entry import build_mainchain_capability_invokers
-        from nexus.services.unified_runtime import materialize_selected_capability_evidence
-
-        if request.get("task_id") not in (None, "", task_id):
-            raise RuntimeError("worker_context_task_substitution")
-        if request.get("attempt_id") not in (None, "", attempt_id):
-            raise RuntimeError("worker_context_attempt_substitution")
-        planner = dict(planner_input)
-        planner_context = planner.get("context")
-        planner_codeintel = (
-            planner_context.get("codeintel")
-            if isinstance(planner_context, Mapping)
-            and isinstance(planner_context.get("codeintel"), Mapping)
-            else None
-        )
-        request_codeintel = request.get("codeintel")
-        codeintel = (
-            dict(request_codeintel)
-            if isinstance(request_codeintel, Mapping)
-            else dict(planner_codeintel)
-            if planner_codeintel is not None
-            else None
-        )
-        decision_id = str(envelope.get("planner_decision_hash") or "").strip()
-        plan_hash = str(envelope.get("planner_plan_hash") or "").strip()
-        workspace_revision = str(
-            request.get("workspace_revision")
-            or request.get("controller_revision")
-            or state.get("controller_revision")
-            or ""
-        ).strip()
-        task_statement = str(request.get("what") or request.get("task_statement") or "")
-        preliminary_request = {
-            "task_id": task_id,
-            "attempt_id": attempt_id,
-            "what": task_statement,
-            "planner_output": planner,
-            "canonical_dispatch_envelope": dict(envelope),
-        }
-        preliminary_package = build_worker_context_package(preliminary_request)
-        if preliminary_package.get("status") != "PASS":
-            raise RuntimeError("worker_context_preflight_invalid")
-        selected = [str(item) for item in preliminary_package.get("selected_capability_ids", ())]
-        envelope_provider = str(envelope.get("provider") or "").strip()
-        envelope_model = str(envelope.get("model") or "").strip()
-        if envelope_provider != str(actual_provider) or envelope_model != str(actual_model or ""):
-            raise RuntimeError("worker_context_provider_model_substitution")
-        action_request_hash = str(state.get("action_request_hash") or "").strip()
-        controller_revision = str(state.get("controller_revision") or contract.controller_revision).strip()
-        target_revision = str(lease.initial_head or contract.target_base_revision).strip()
-        revision = controller_revision
-        target_worktree = str(Path(lease.target_worktree).resolve())
-        record = state.get("worker_model_context_materialization")
-
-        if record is not None:
-            if not isinstance(record, Mapping) or record.get("status") != "COMPLETE":
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_incomplete")
-            expected = {
-                "task_id": task_id,
-                "attempt_id": attempt_id,
-                "action_request_hash": action_request_hash,
-                "revision": revision,
-                "planner_decision_id": decision_id,
-                "planner_plan_hash": plan_hash,
-                "selected_capabilities": selected,
-                "controller_revision": controller_revision,
-                "target_revision": target_revision,
-                "target_worktree": target_worktree,
-            }
-            for key, value in expected.items():
-                if record.get(key) != value:
-                    raise RuntimeError(f"worker_context_materialization_{key}_mismatch")
-            bundle = record.get("bundle")
-            if not isinstance(bundle, Mapping):
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_bundle_missing")
-            bundle_hash = str(record.get("bundle_hash") or "")
-            if not bundle_hash or _sha256_json(bundle) != bundle_hash:
-                raise RuntimeError("worker_context_bundle_hash_mismatch")
-        else:
-            if not fresh_submission:
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_missing")
-            started_record = {
-                "schema": "nexus.worker_model_context_materialization.v1",
-                "status": "STARTED",
-                "task_id": task_id,
-                "attempt_id": attempt_id,
-                "action_request_hash": action_request_hash,
-                "revision": revision,
-                "controller_revision": controller_revision,
-                "target_revision": target_revision,
-                "target_worktree": target_worktree,
-                "planner_decision_id": decision_id,
-                "planner_plan_hash": plan_hash,
-                "selected_capabilities": selected,
-            }
-
-            def claim(current: dict[str, Any]) -> None:
-                if current.get("attempt_id") != attempt_id:
-                    raise RuntimeError("worker_context_materialization_attempt_changed")
-                if current.get("worker_model_context_materialization") is not None:
-                    raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_replay")
-                current["worker_model_context_materialization"] = _jsonable(started_record)
-
-            claimed = self._mutate_state(task_id, claim)
-            if not isinstance(claimed, Mapping):
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_claim")
-            state = claimed
-            if (state.get("worker_model_context_materialization") or {}).get("status") != "STARTED":
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_claim_readback")
-            invokers = build_mainchain_capability_invokers(
-                codeintel=codeintel,
-                include_postflight_gates=True,
-            )
-            _, bundle = materialize_selected_capability_evidence(
-                planner_output=planner,
-                selected_capabilities=selected,
-                task_id=task_id,
-                task_statement=task_statement,
-                workspace_revision=workspace_revision,
-                plan_hash=plan_hash,
-                planner_decision_id=decision_id,
-                capability_invokers=invokers,
-                capability_context={
-                    **{
-                        key: request[key]
-                        for key in (
-                            "task_id",
-                            "workspace_revision",
-                            "task_statement",
-                            "planner",
-                            # #1579: optional caller identity hint for RIE knowledge
-                            # applicability; validated by the codeintel hook.
-                            "rie_knowledge_identity",
-                        )
-                        if key in request
-                    },
-                    **_codeintel_lookup_context(
-                        request.get("codeintel_lookup"), target_worktree
-                    ),
-                    "workspace_root": target_worktree,
-                    "target_worktree": target_worktree,
-                    "target_revision": target_revision,
-                    "controller_revision": controller_revision,
-                },
-                codeintel=codeintel,
-            )
-            bundle = dict(bundle)
-            record = {
-                "schema": "nexus.worker_model_context_materialization.v1",
-                "status": "COMPLETE",
-                "task_id": task_id,
-                "attempt_id": attempt_id,
-                "action_request_hash": action_request_hash,
-                "revision": revision,
-                "controller_revision": controller_revision,
-                "target_revision": target_revision,
-                "target_worktree": target_worktree,
-                "planner_decision_id": decision_id,
-                "planner_plan_hash": plan_hash,
-                "selected_capabilities": selected,
-                "bundle_hash": _sha256_json(bundle),
-                "bundle": bundle,
-                "producer_revision": revision,
-            }
-
-            def persist(current: dict[str, Any]) -> None:
-                if current.get("attempt_id") != attempt_id:
-                    raise RuntimeError("worker_context_materialization_attempt_changed")
-                existing = current.get("worker_model_context_materialization")
-                if not isinstance(existing, Mapping) or existing.get("status") != "STARTED":
-                    raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_replay")
-                if any(existing.get(key) != started_record.get(key) for key in started_record):
-                    raise RuntimeError("worker_context_materialization_binding_changed")
-                current["worker_model_context_materialization"] = _jsonable(record)
-
-            persisted = self._mutate_state(task_id, persist)
-            if not isinstance(persisted, Mapping):
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_write")
-            state = persisted
-            record = state.get("worker_model_context_materialization")
-            if not isinstance(record, Mapping) or record.get("status") != "COMPLETE":
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_readback")
-            bundle = record.get("bundle")
-            if not isinstance(bundle, Mapping):
-                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_bundle_readback")
-
-        planner["capability_evidence_bundle"] = dict(bundle)
-        package_request = dict(request)
-        package_request["task_id"] = task_id
-        package_request["attempt_id"] = attempt_id
-        package_request["workspace_revision"] = workspace_revision
-        package_request["task_statement"] = task_statement
-        package_request["planner_output"] = planner
-        package_request["canonical_dispatch_envelope"] = dict(envelope)
-        package = build_worker_context_package(package_request)
-        prompt = append_model_context_to_prompt(base_prompt, package)
-        return prompt, package
-
-    def _run_default_resumable(
-        self,
-        contract: ArchitectTaskContract,
-        request: Mapping[str, Any],
-        update: Callable[[str, dict[str, Any]], None],
-        *,
-        task_id: str,
-        attempt_id: str,
-    ) -> dict[str, Any]:
-        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
-
-        return RuntimeCoordinationBridge(self).execute(
-            task_id,
-            attempt_id,
-            contract=contract,
-            request=request,
-            update=update,
-        )
-
-    def _run_default(self, contract, request, update):
-        return self._run_default_resumable(
-            contract,
-            request,
-            update,
-            task_id=contract.task_id,
-            attempt_id=str((self._read_state(contract.task_id) or {}).get("attempt_id", "")),
-        )
 
     def _ambient_core_required(self, contract, request: Mapping[str, Any]) -> bool:
         return ambient_core_required(request)
