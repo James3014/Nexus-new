@@ -32,6 +32,7 @@ GITHUB_CLOSING_FORMS = [
     ("Resolve James3014/Nexus-new#2532", "resolve"),
     ("resolves: https://github.com/James3014/Nexus-new/issues/2532", "resolves"),
     ("RESOLVED : #2532", "resolved"),
+    ("fixes GH-2532", "fixes"),
 ]
 
 NOT_CLOSING_FORMS = [
@@ -123,7 +124,9 @@ def test_gate_ignores_non_closing_references(text: str) -> None:
 
 @pytest.mark.parametrize(("text", "keyword"), GITHUB_CLOSING_FORMS)
 def test_runtime_guard_matches_github_closing_keyword_grammar(text: str, keyword: str) -> None:
-    assert issue_closure_guard.find_closing_keyword_references(text) == [(keyword, 2532)]
+    assert issue_closure_guard.find_closing_keyword_references(
+        f"Some prose.\n{text} more words"
+    ) == [(keyword, 2532)]
 
 
 @pytest.mark.parametrize("text", NOT_CLOSING_FORMS)
@@ -139,6 +142,15 @@ def test_colon_form_in_pr_body_blocks_keep_open() -> None:
     assert text.startswith("REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN:")
     assert "PR body line 1" in text[:300]
     assert "Refs #2532" in text[:300]
+
+
+def test_body_location_counts_lines_as_written_and_skips_marker_blocks() -> None:
+    intent = gate.render_intent([{"issue": 2532, "on_merge": "KEEP_OPEN"}])
+    body = f"{intent}\n\nIntro line.\nfixes: #2532 here\n"
+    with pytest.raises(gate.IssueClosureIntentError) as exc:
+        gate.validate_issue_closure_intent(body)
+    expected_line = body.splitlines().index("fixes: #2532 here") + 1
+    assert f"PR body line {expected_line}: 'fixes: #2532 here'" in str(exc.value)[:300]
 
 
 def test_colon_form_for_undeclared_issue_in_commit_fails(tmp_path: Path) -> None:
@@ -159,7 +171,7 @@ def test_colon_form_in_pr_title_is_located(tmp_path: Path) -> None:
     messages = gate._candidate_commit_messages(repo, base_sha=base, head_sha=head)
     with pytest.raises(gate.IssueClosureIntentError) as exc:
         _final_binding(body, base=base, head=head, title="Fix: #2532 slice", messages=messages)
-    assert "PR title" in str(exc.value)[:300]
+    assert "PR title line 1: 'Fix: #2532 slice'" in str(exc.value)[:300]
 
 
 def test_close_intent_accepts_colon_form(tmp_path: Path) -> None:

@@ -46,8 +46,8 @@ CLOSING_KEYWORD_FAMILIES = (
 CLOSING_KEYWORD_PATTERN = re.compile(
     r"(?i)\b("
     + "|".join(CLOSING_KEYWORD_FAMILIES)
-    # GitHub also accepts a colon after the keyword ("Fixes: #N", #2589).
-    + r")(?:\s*:\s*|\s+)(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#)(\d+)\b"
+    # GitHub also accepts a colon after the keyword ("Fixes: #N") and the GH-N alias (#2589).
+    + r")(?:\s*:\s*|\s+)(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#|\bGH-)(\d+)\b"
 )
 
 

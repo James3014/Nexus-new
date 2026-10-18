@@ -106,8 +106,8 @@ CLOSING_KEYWORD_FAMILIES = (
 CLOSING_KEYWORD_PATTERN = re.compile(
     r"(?i)\b("
     + "|".join(CLOSING_KEYWORD_FAMILIES)
-    # GitHub also accepts a colon after the keyword ("Fixes: #N", #2589).
-    + r")(?:\s*:\s*|\s+)(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#)(\d+)\b"
+    # GitHub also accepts a colon after the keyword ("Fixes: #N") and the GH-N alias (#2589).
+    + r")(?:\s*:\s*|\s+)(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#|\bGH-)(\d+)\b"
 )
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
@@ -262,6 +262,23 @@ def find_closing_keyword_references(text: str) -> list[tuple[str, int]]:
     return [(keyword.lower(), int(issue_str)) for keyword, issue_str in matches]
 
 
+def _blank_markers_keep_lines(body: Any) -> str:
+    """``strip_markers`` with each removed block replaced by its newlines, so line
+    numbers still match the PR body as written (#2589)."""
+    if type(body) is not str:
+        return ""
+    text = body
+    for start_marker, end_marker in (
+        (INTENT_START_MARKER, INTENT_END_MARKER),
+        (START_MARKER, END_MARKER),
+    ):
+        if start_marker in text and end_marker in text:
+            start = text.index(start_marker)
+            end = text.index(end_marker, start) + len(end_marker)
+            text = text[:start] + "\n" * text[start:end].count("\n") + text[end:]
+    return text
+
+
 def _closing_keyword_location(text: str, issue: int, label: str) -> str:
     """Name the first line of ``text`` that closes ``issue`` (#2589)."""
     for index, line in enumerate(text.splitlines(), start=1):
@@ -295,7 +312,7 @@ def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
     untracked_issues = set(detected_by_issue.keys()) - set(intent_by_issue.keys())
     if untracked_issues:
         first = min(untracked_issues)
-        where = _closing_keyword_location(body if isinstance(body, str) else "", first, "PR body")
+        where = _closing_keyword_location(_blank_markers_keep_lines(body), first, "PR body")
         culprits = ", ".join(
             f"#{num} ({', '.join(detected_by_issue[num])})" for num in sorted(untracked_issues)
         )
@@ -310,7 +327,9 @@ def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
         if action == ON_MERGE_KEEP_OPEN:
             if issue_num in detected_by_issue:
                 kws = ", ".join(detected_by_issue[issue_num])
-                where = _closing_keyword_location(body, issue_num, "PR body")
+                where = _closing_keyword_location(
+                    _blank_markers_keep_lines(body), issue_num, "PR body"
+                )
                 raise IssueClosureIntentError(
                     f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN: {where} would close #{issue_num} "
                     f"(intent KEEP_OPEN); {_closing_remedy(issue_num)}. PR prose contains closing keyword '{kws}' targeting #{issue_num}, "
