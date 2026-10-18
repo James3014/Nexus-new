@@ -386,8 +386,8 @@
 | scripts/ops/trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py, tests/ops/test_trusted_deletion_anchor.py | active | high | trusted_dependency_contract_check |
 | tests/ops/test_trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py | active | high | test_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
-| nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
-| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
+| nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
+| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
 | nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
@@ -551,7 +551,10 @@
 | tests/engine/test_metrics_and_belief_score.py | tests/engine/test_metrics_and_belief_score.py | active | medium | test_contract |
 | nexus/orchestrator/metrics.py | tests/engine/test_metrics_and_belief_score.py, tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_metrics_contract |
 | scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
-| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
+| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | replay_runner_allowlist |
+| nexus/delivery/anti_drift.py | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
+| nexus/schemas/evidence_bundle_v1.json | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
+| scripts/ops/governance_manifest.py | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | tests/ops/test_evidence_verifier_replay_required.py | tests/ops/test_evidence_verifier_replay_required.py | active | medium | test_contract |
 | compliance/sla/metrics/stability_poc_v22.json | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |

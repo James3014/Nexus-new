@@ -92,10 +92,55 @@ def _bundle(test_artifacts: list) -> dict:
 def test_delivery_verifier_notes_only_is_unverified():
     with patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})):
         res = _delivery_verifier().verify(_bundle(["claims_count=7"]))
-    assert res["status"] == "UNVERIFIED"
-    assert res["overall_trust"] == "LOW"
+    # #2624: no replayable command is an advisory coverage gap, never VERIFIED nor REJECTED.
+    assert res["status"] == "UNCOVERED"
+    assert res["advisory"] is True
+    assert res["overall_trust"] not in {"HIGH", "MEDIUM"}
     assert res["reason"] == "no_replayable_commands"
     assert res["replay_verified"] is False
+    assert res["replay_waived"] is False
+
+
+def test_delivery_verifier_no_test_artifacts_is_uncovered_advisory():
+    with (
+        patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})),
+        patch("nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty", return_value=True),
+    ):
+        res = _delivery_verifier().verify(_bundle([]))
+    assert res["status"] == "UNCOVERED"
+    assert res["advisory"] is True
+    assert res["status"] not in {"VERIFIED", "REJECTED"}
+    # Advisory only: not verified (never HIGH/MEDIUM) and not a LOW-trust rejection either.
+    assert res["overall_trust"] == "UNKNOWN"
+    assert res["reject_reasons"] == []
+
+
+def test_delivery_verifier_uncovered_with_empty_diff_stays_low_trust():
+    with (
+        patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})),
+        patch("nexus.delivery.evidence_verifier.EvidenceVerifier._check_git_diff_non_empty", return_value=False),
+    ):
+        res = _delivery_verifier().verify(_bundle(["claims_count=7"]))
+    assert res["status"] == "UNCOVERED"
+    assert res["overall_trust"] == "LOW"
+    assert "empty_git_diff" in res["reject_reasons"]
+
+
+def test_delivery_verifier_uncovered_never_executes_notes(monkeypatch):
+    import subprocess as _sp
+
+    real_run = _sp.run
+    seen: list = []
+
+    def _spy(args, *a, **k):
+        seen.append(args)
+        return real_run(args, *a, **k)
+
+    monkeypatch.setattr("nexus.delivery.evidence_verifier.subprocess.run", _spy)
+    with patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})):
+        res = _delivery_verifier().verify(_bundle(["touch /tmp/nexus_2624_should_not_run"]))
+    assert res["status"] == "UNCOVERED"
+    assert all(isinstance(a, list) and a[0] == "git" for a in seen), seen
 
 
 def test_delivery_verifier_notes_only_allowed_is_labelled_and_capped():
