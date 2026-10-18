@@ -828,9 +828,59 @@ def test_resolve_manager_root_readable_populated_derived_root_unchanged_2638(
 
 
 def test_resolve_manager_root_corrupt_canonical_root_selected_over_fallbacks_2638(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, caplog
 ):
-    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    """A corrupt canonical root is selected *and diagnosed*.
+
+    main already returned the canonical root through its "exists" fallback
+    loop, but silently; the warning naming the path and error kind is what
+    #2638 adds.
+    """
+    _derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
     (canonical / "state.json").write_text("{not json", encoding="utf-8")
 
-    assert AgyAccountPoolManager.resolve_manager_root() == str(canonical.resolve())
+    with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+        root = AgyAccountPoolManager.resolve_manager_root()
+
+    assert root == str(canonical.resolve())
+    assert any(
+        str(canonical) in r.getMessage() and "JSONDecodeError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_untraversable_derived_root_does_not_fall_through_2638(
+    tmp_path, monkeypatch, caplog
+):
+    import os
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    derived, canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    (derived / "accounts" / "acc1").mkdir(parents=True)
+    derived.chmod(0o000)
+    try:
+        with caplog.at_level("WARNING", logger="nexus.services.agy_account_pool"):
+            root = AgyAccountPoolManager.resolve_manager_root()
+    finally:
+        derived.chmod(0o755)
+
+    assert root == str(derived.resolve())
+    assert root != str(canonical.resolve())
+    assert any(
+        str(derived) in r.getMessage() and "PermissionError" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_resolve_manager_root_deeply_nested_state_json_does_not_fall_through_2638(
+    tmp_path, monkeypatch
+):
+    derived, _canonical = _pool_layout_2638(tmp_path, monkeypatch)
+    derived.mkdir(parents=True)
+    depth = 200_000
+    (derived / "state.json").write_text(
+        '{"accounts": ' + "[" * depth + "]" * depth + "}", encoding="utf-8"
+    )
+
+    assert AgyAccountPoolManager.resolve_manager_root() == str(derived.resolve())

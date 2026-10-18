@@ -242,7 +242,7 @@ def _ensure_macos_isolated_keychain(home_dir: str) -> None:
 _LOG = logging.getLogger(__name__)
 
 # #2638: errors that mean "this runtime root exists but cannot be read".
-_RUNTIME_READ_ERRORS = (OSError, UnicodeDecodeError, ValueError)
+_RUNTIME_READ_ERRORS = (OSError, UnicodeDecodeError, ValueError, RecursionError)
 
 RUNTIME_ABSENT = "absent"
 RUNTIME_EMPTY = "empty"
@@ -260,6 +260,12 @@ def _runtime_root_state(path: Path) -> tuple[str, Optional[str]]:
     """
     if not path.exists() or not path.is_dir():
         return RUNTIME_ABSENT, None
+    try:
+        # A root that cannot be listed or traversed makes the child
+        # exists() checks below report False, which would look "empty".
+        os.listdir(path)
+    except OSError as exc:
+        return RUNTIME_UNREADABLE, type(exc).__name__
     error_kind: Optional[str] = None
     state_json = path / "state.json"
     if state_json.exists() and state_json.is_file():
