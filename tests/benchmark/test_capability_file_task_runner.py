@@ -1,17 +1,20 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from scripts.bench import capability_ab_runner, capability_file_task_runner
 from scripts.bench.capability_ab_runner import CapabilityTask
 from scripts.bench.capability_file_task_runner import (
     _build_inline_prompt,
-    _infer_target_function,
     _extract_written_file_from_stdout,
-    _required_behavior_from_task,
+    _infer_target_function,
     _replace_function_source,
-    _write_task_file,
+    _required_behavior_from_task,
     _to_ab_row,
-    run_without_nexus_baseline,
+    _write_task_file,
     run_task,
+    run_without_nexus_baseline,
 )
 
 
@@ -237,3 +240,100 @@ def test_infer_target_function_prefers_task_description(tmp_path: Path):
     target.write_text("def other():\n    pass\n", encoding="utf-8")
 
     assert _infer_target_function("Fix compute_backoff behavior", target) == "compute_backoff"
+
+
+def test_gemini_invocation_env_uses_host_home_not_a_user_name(tmp_path: Path, monkeypatch):
+    fakehome = tmp_path / "fakehome"
+    fakehome.mkdir()
+    monkeypatch.setenv("HOME", str(fakehome))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+
+    fake_bin = tmp_path / "fake_gemini"
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_GEMINI_BIN", str(fake_bin))
+
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return SimpleNamespace(returncode=0, stdout='{"response": "ok"}', stderr="")
+
+    monkeypatch.setattr(capability_file_task_runner.subprocess, "run", fake_run)
+
+    task_file = tmp_path / "task.md"
+    task_file.write_text("task", encoding="utf-8")
+    output_file = tmp_path / "candidate.py"
+    target_file = tmp_path / "target.py"
+    target_file.write_text("target", encoding="utf-8")
+
+    capability_file_task_runner._run_gemini_file_task(
+        task_file=task_file,
+        output_file=output_file,
+        target_file=target_file,
+        task_desc="Fix bug",
+        model="gemini-test",
+        timeout_sec=10,
+    )
+
+    assert captured_env.get("HOME") == str(fakehome)
+    assert "jameschen" not in captured_env.get("PATH", "")
+    assert f"{fakehome}/.npm-global/bin" in captured_env.get("PATH", "")
+
+
+def test_gemini_bin_candidates_use_host_home(tmp_path: Path, monkeypatch):
+    fakehome = tmp_path / "fakehome"
+    gemini_bin = fakehome / ".npm-global" / "bin" / "gemini"
+    gemini_bin.parent.mkdir(parents=True)
+    gemini_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    gemini_bin.chmod(0o755)
+
+    monkeypatch.setenv("HOME", str(fakehome))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+    monkeypatch.delenv("NEXUS_GEMINI_BIN", raising=False)
+    monkeypatch.setattr(capability_file_task_runner.shutil, "which", lambda name, *a, **k: None)
+
+    resolved = None
+    try:
+        resolved = capability_file_task_runner._resolve_gemini_bin()
+    except FileNotFoundError:
+        resolved = None
+
+    assert resolved == str(gemini_bin)
+
+
+def test_codex_direct_patch_env_uses_host_home_not_a_user_name(tmp_path: Path, monkeypatch):
+    fakehome = tmp_path / "fakehome"
+    fakehome.mkdir()
+    monkeypatch.setenv("HOME", str(fakehome))
+    monkeypatch.delenv("NEXUS_BENCH_HOME", raising=False)
+
+    fake_codex = tmp_path / "fake_codex"
+    fake_codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(capability_ab_runner.shutil, "which", lambda name, *a, **k: str(fake_codex) if name == "codex" else None)
+
+    captured_env: dict[str, str] = {}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured_env.update(env)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(capability_ab_runner, "_run_process_group", fake_run_process_group)
+    monkeypatch.setattr(capability_ab_runner, "record_outbound_prompt_ledger", lambda **kw: None)
+
+    capability_ab_runner._ask_direct_codex_patch(prompt="test prompt", timeout_sec=5)
+
+    assert "jameschen" not in captured_env.get("PATH", "")
+    assert f"{fakehome}/.npm-global/bin" in captured_env.get("PATH", "")
+    assert "jameschen" not in capability_ab_runner.DEFAULT_CODEX_BIN
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["capability_ab_runner.py", "capability_file_task_runner.py"],
+    ids=["capability_ab_runner.py", "capability_file_task_runner.py"],
+)
+def test_bench_batch_a_sources_have_no_user_name(filename: str):
+    source_path = Path(__file__).resolve().parents[2] / "scripts" / "bench" / filename
+    text = source_path.read_text(encoding="utf-8")
+    assert "jameschen" not in text
+    assert "/Users/" not in text
