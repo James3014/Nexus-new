@@ -2045,3 +2045,36 @@ def test_no_files_besides_the_state_and_the_lock(service, state_dir, roots) -> N
     service.build_contract(_request())
     service._set_child_pgid("t", "attempt-1", 3)
     assert sorted(p.name for p in state_dir.rglob("*")) == [".state.lock", "t.json"]
+
+
+# ---------------------------------------------------------------------------
+# S8b review NITs (#2583): the two remaining SUPPORTED_WORKER_PROVIDERS sites
+
+
+def test_late_supported_providers_in_the_worker_order_check(service, roots, monkeypatch) -> None:
+    # a first call that reaches the auto worker_order membership check
+    assert service.build_contract(
+        _request(worker="auto", worker_order=["codex"])
+    ).provider_order == ["codex"]
+    monkeypatch.setattr(service_module, "SUPPORTED_WORKER_PROVIDERS", ("late-a", "codex"))
+    contract = service.build_contract(_request(worker="auto", worker_order=["late-a", "codex"]))
+    assert contract.provider_order == ["late-a", "codex"]
+    with pytest.raises(
+        ValueError, match="^worker_order contains an unknown or duplicate provider$"
+    ):
+        service.build_contract(_request(worker="auto", worker_order=["gemini"]))
+
+
+def test_late_supported_providers_in_the_fallback_check(service, roots, monkeypatch) -> None:
+    # a first call that reaches the fallback_worker membership check
+    assert service.build_contract(_request(fallback_worker="gemini")).provider_order == [
+        "codex",
+        "gemini",
+    ]
+    monkeypatch.setattr(service_module, "SUPPORTED_WORKER_PROVIDERS", ("codex", "late-b"))
+    assert service.build_contract(_request(fallback_worker="late-b")).provider_order == [
+        "codex",
+        "late-b",
+    ]
+    with pytest.raises(ValueError, match="^fallback_worker must be one of: codex, late-b$"):
+        service.build_contract(_request(fallback_worker="gemini"))

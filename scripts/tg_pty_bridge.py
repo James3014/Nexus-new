@@ -14,10 +14,13 @@ except ImportError:
     LLMClient = None
 
 # API 設定
-TOKEN = "8765227805:AAFPf3gT12NhgT7i5xdZIa2S3DeV1dEwdZg"
+# SEC-001: credentials come from the environment; the old literals were public and must be revoked.
+TOKEN = os.environ.get("NEXUS_TG_BOT_TOKEN", "")
+if not TOKEN:
+    raise SystemExit("NEXUS_TG_BOT_TOKEN is not set")
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 INBOX_DIR = "/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/Inbox"
-JINA_KEY = "jina_ecccac068fdf49fc8d7e986af7f0436dmd-mudbl_v3lZRWbBoN3kSwi75ze"
+JINA_KEY = os.environ.get("JINA_API_KEY", "")
 
 
 def send_to_tg(chat_id, text):
@@ -38,7 +41,9 @@ def fetch_content_strong(url):
     except:
         pass
     try:
-        headers = {"Authorization": f"Bearer {JINA_KEY}", "X-Return-Format": "markdown"}
+        headers = {"X-Return-Format": "markdown"}
+        if JINA_KEY:
+            headers["Authorization"] = f"Bearer {JINA_KEY}"
         resp = requests.get(f"https://r.jina.ai/{url}", headers=headers, timeout=30)
         if resp.status_code == 200:
             return resp.text
@@ -121,9 +126,21 @@ def handle_message(chat_id, text):
         threading.Thread(target=ask_gemini_worker, args=(chat_id, text, False)).start()
 
 
+# SEC-004: only these Telegram user ids (the sender, not the chat) may drive the
+# bridge. Comma-separated; malformed entries are ignored, empty means nobody.
+ALLOWED_USER_IDS = set()
+for _raw in os.environ.get("NEXUS_TG_ALLOWED_USER_IDS", "").split(","):
+    try:
+        ALLOWED_USER_IDS.add(int(_raw.strip()))
+    except ValueError:
+        pass
+
+
 def poll():
     last_update_id = None
     print("🚀 Muse-Core Telegram Soul (V16 - Battlesuit Powered) 啟動。")
+    if not ALLOWED_USER_IDS:
+        print("⚠️ NEXUS_TG_ALLOWED_USER_IDS is empty: every message will be ignored.")
     while True:
         try:
             req_url = f"{API_URL}/getUpdates?timeout=15&offset={last_update_id + 1 if last_update_id else ''}"
@@ -134,6 +151,8 @@ def poll():
                     msg = update.get("message", {})
                     chat_id = msg.get("chat", {}).get("id")
                     text = msg.get("text", "")
+                    if msg.get("from", {}).get("id") not in ALLOWED_USER_IDS:
+                        continue
                     if chat_id and text:
                         if text == "/start":
                             send_to_tg(chat_id, "🤖 Sir, 移動戰術大腦已對位。具備戰備閘道通訊能力。")
