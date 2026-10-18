@@ -64,7 +64,6 @@ from scripts.bench.agy_account_lease import (
 # Exact id from ``agy models`` (2026-10-12): gemini-3.8-flash-{high,medium,low}. The tier is
 # not documented by the dispatch skill; medium is the neutral middle. Override with NEXUS_AGY_MODEL.
 AGY_DEFAULT_MODEL = "gemini-3.8-flash-medium"
-AGY_FALLBACK_BIN = "/Users/jameschen/.local/bin/agy"
 AGY_MISSING = "agy_missing"
 # The existing timeout category (benchmark_eligibility, capability_ab_runner).
 AGY_TIMEOUT = "timeout"
@@ -101,7 +100,8 @@ def resolve_agy_bin(env: Mapping[str, str] | None = None) -> str | None:
     found = shutil.which("agy", path=values.get("PATH"))
     if found:
         return found
-    return AGY_FALLBACK_BIN if Path(AGY_FALLBACK_BIN).is_file() else None
+    fallback = str(Path.home() / ".local" / "bin" / "agy")
+    return fallback if Path(fallback).is_file() else None
 
 
 AGY_WORKFORCE_BINDINGS_ENV = "NEXUS_BENCH_WORKFORCE_BINDINGS_JSON"
