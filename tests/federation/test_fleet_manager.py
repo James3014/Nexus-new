@@ -19,7 +19,7 @@ def test_start_fleet(mock_popen):
 
 @patch("subprocess.run")
 def test_stop_fleet(mock_run):
-    stop_fleet()
-    assert mock_run.called
-    args, _ = mock_run.call_args
-    assert "pkill" in args[0]
+    # #2637: no name-matching kill; stop_fleet refuses instead of running one.
+    with pytest.raises(RuntimeError, match="#2637"):
+        stop_fleet()
+    assert not mock_run.called

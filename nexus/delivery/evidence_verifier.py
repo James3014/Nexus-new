@@ -5,9 +5,43 @@ Evidence Verifier: 系統級獨立驗證器。
 
 import subprocess
 from pathlib import Path
+from typing import Any, List
 
 from .anti_drift import AntiDrift
-from .replay_runner import ReplayRunner
+from .replay_runner import ReplayRunner, check_pytest_args, split_command
+
+# Test commands in agent-written evidence are data, never shell text (#2634).
+# Only these test-runner prefixes are executed, argv-only and without a shell;
+# their options pass the shared pytest option allowlist and positional paths must
+# resolve inside the project root.  Anything else is recorded as UNCOVERED
+# (advisory, not executed).  A project-relative interpreter such as
+# ``.venv/bin/python`` is deliberately absent: the checked agent can replace it.
+ALLOWED_TEST_RUNNER_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("pytest",),
+    ("python", "-m", "pytest"),
+    ("python3", "-m", "pytest"),
+    ("uv", "run", "pytest"),
+    ("uv", "run", "python", "-m", "pytest"),
+    ("uv", "run", "python3", "-m", "pytest"),
+)
+TEST_COMMAND_TIMEOUT_SECONDS = 30
+
+
+def parse_allowlisted_test_command(cmd: Any, project_root: Any) -> List[str]:
+    """Return the argv for an allowlisted test-runner command, else raise ValueError.
+
+    The command is split with ``shlex`` and never passed to a shell.  The reason in the
+    ValueError is safe to record; the command itself is not executed.
+    """
+    argv = split_command(cmd)
+    prefix = next(
+        (p for p in ALLOWED_TEST_RUNNER_PREFIXES if tuple(argv[: len(p)]) == p),
+        None,
+    )
+    if prefix is None:
+        raise ValueError(f"test_runner_not_allowlisted: {argv[0]}")
+    check_pytest_args(argv[len(prefix) :], Path(project_root))
+    return argv
 
 
 class EvidenceVerifier:
@@ -131,7 +165,13 @@ class EvidenceVerifier:
             if not diff_ok:
                 reject_reasons.append("empty_git_diff")
             if not test_ok:
-                reject_reasons.append("test_execution_fraud_detected")
+                tests_report = results["test_commands_verified"]
+                if tests_report.get("uncovered") and not tests_report.get("not_executed"):
+                    # Non-allowlisted commands were not run: a coverage gap, not fraud, and
+                    # never HIGH trust (#2634).
+                    reject_reasons.append("test_commands_uncovered")
+                else:
+                    reject_reasons.append("test_execution_fraud_detected")
 
             if code_ok and diff_ok and test_ok:
                 results["overall_trust"] = "HIGH"
@@ -221,15 +261,28 @@ class EvidenceVerifier:
     def _verify_test_commands(self, test_artifacts: list) -> dict:
         executed = []
         not_executed = []
-        
+        uncovered = []
+
         for cmd_info in test_artifacts:
             cmd = cmd_info if isinstance(cmd_info, str) else cmd_info.get("command", "")
             if not cmd:
                 continue
             try:
+                argv = parse_allowlisted_test_command(cmd, self.project_root)
+            except ValueError as e:
+                # Not an allowlisted test runner: advisory coverage gap, never executed (#2634).
+                uncovered.append({
+                    "command": cmd if isinstance(cmd, str) else repr(cmd),
+                    "status": "UNCOVERED",
+                    "advisory": True,
+                    "executed": False,
+                    "reason": str(e),
+                })
+                continue
+            try:
                 result = subprocess.run(
-                    cmd, shell=True, cwd=self.project_root,
-                    capture_output=True, text=True, timeout=30
+                    argv, cwd=self.project_root, stdin=subprocess.DEVNULL,
+                    capture_output=True, text=True, timeout=TEST_COMMAND_TIMEOUT_SECONDS,
                 )
                 executed.append({
                     "command": cmd,
@@ -240,13 +293,19 @@ class EvidenceVerifier:
                 not_executed.append({"command": cmd, "reason": "timeout"})
             except Exception as e:
                 not_executed.append({"command": cmd, "reason": str(e)})
-        
-        return {
-            "all_executed": len(not_executed) == 0 and len(executed) > 0,
+
+        report = {
+            # Any UNCOVERED command means not everything claimed was replayed (#2634).
+            "all_executed": len(not_executed) == 0 and len(executed) > 0 and not uncovered,
             "executed": executed,
             "not_executed": not_executed,
+            "uncovered": uncovered,
         }
-    
+        if not executed and not not_executed and uncovered:
+            report["status"] = "UNCOVERED"
+            report["advisory"] = True
+        return report
+
     def _get_tracked_files(self) -> set:
         result = subprocess.run(
             ["git", "ls-files"], cwd=self.project_root,
