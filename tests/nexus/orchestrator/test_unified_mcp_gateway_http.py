@@ -656,6 +656,125 @@ def test_health_hmac_key_is_fsynced_before_link(tmp_path, monkeypatch):
     assert events.index("fsync") < events.index("link")
 
 
+_HMAC_KEY_64 = "0123456789abcdef" * 4
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(_HMAC_KEY_64, id="lower64_no_newline"),
+        pytest.param(_HMAC_KEY_64 + "\n", id="lower64_trailing_newline"),
+        pytest.param(" \t" + _HMAC_KEY_64 + "\r\n\n", id="lower64_outer_whitespace_stripped"),
+    ],
+)
+def test_health_hmac_key_content_rule_accepts_exactly_64_lowercase_hex(tmp_path, content):
+    from scripts.ops.gateway_health_hmac import load_or_create_key
+
+    key_file = tmp_path / "key"
+    key_file.write_text(content)
+    key_file.chmod(0o600)
+    assert load_or_create_key(key_file) == bytes.fromhex(_HMAC_KEY_64)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("\n", id="newline_only"),
+        pytest.param(_HMAC_KEY_64[:62] + "\n", id="len62_even_valid_hex"),
+        pytest.param(_HMAC_KEY_64[:63] + "\n", id="len63"),
+        pytest.param(_HMAC_KEY_64 + "a\n", id="len65"),
+        pytest.param(_HMAC_KEY_64 + "ab\n", id="len66_even_valid_hex"),
+        pytest.param(_HMAC_KEY_64 * 2 + "\n", id="len128_even_valid_hex"),
+        pytest.param(_HMAC_KEY_64.upper() + "\n", id="uppercase64"),
+        pytest.param(_HMAC_KEY_64[:63] + "F\n", id="one_uppercase_char"),
+        pytest.param(_HMAC_KEY_64[:63] + "g\n", id="nonhex_g"),
+        pytest.param("0x" + _HMAC_KEY_64[:62] + "\n", id="0x_prefix_len64"),
+        pytest.param(_HMAC_KEY_64[:32] + " " + _HMAC_KEY_64[33:] + "\n", id="inner_space_len64"),
+        pytest.param(_HMAC_KEY_64[:32] + "\n" + _HMAC_KEY_64[33:] + "\n", id="inner_newline_len64"),
+        pytest.param(_HMAC_KEY_64[:63] + "\u00e9\n", id="non_ascii_char"),
+    ],
+)
+def test_health_hmac_key_content_rule_rejects_and_keeps_file(tmp_path, content):
+    from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
+
+    key_file = tmp_path / "key"
+    key_file.write_bytes(content.encode("utf-8"))
+    key_file.chmod(0o600)
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(key_file)
+    # Fail closed: a malformed key is never replaced by a fresh one.
+    assert key_file.read_bytes() == content.encode("utf-8")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["key"]
+
+
+def _record_key_creation_syscalls(mod, monkeypatch, events):
+    """Record fsync/link calls on the module's ``os``, naming each fd by its opened path."""
+    import os
+
+    real_open, real_fsync, real_link = mod.os.open, mod.os.fsync, mod.os.link
+    fd_paths = {}
+
+    def recording_open(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        fd_paths[fd] = os.fspath(path)
+        return fd
+
+    def recording_fsync(fd):
+        events.append(("fsync", fd_paths.get(fd)))
+        return real_fsync(fd)
+
+    def recording_link(src, dst):
+        events.append(("link", os.fspath(src), os.fspath(dst)))
+        return real_link(src, dst)
+
+    monkeypatch.setattr(mod.os, "open", recording_open)
+    monkeypatch.setattr(mod.os, "fsync", recording_fsync)
+    monkeypatch.setattr(mod.os, "link", recording_link)
+
+
+def test_health_hmac_key_temp_file_fsynced_before_link_and_dir_fsynced_after(tmp_path, monkeypatch):
+    from scripts.ops import gateway_health_hmac as mod
+
+    events = []
+    _record_key_creation_syscalls(mod, monkeypatch, events)
+    key_dir = tmp_path / "state"
+    target = key_dir / "key"
+    key = mod.load_or_create_key(target)
+
+    links = [e for e in events if e[0] == "link"]
+    assert len(links) == 1
+    _, tmp_src, link_dst = links[0]
+    assert link_dst == str(target)
+    assert Path(tmp_src).parent == key_dir  # temp file lives in the same directory
+    link_at = events.index(links[0])
+    # The data fsync is on the temp file's own fd, before it becomes visible.
+    assert ("fsync", tmp_src) in events[:link_at]
+    # The directory entry is fsynced after the link, so the new name survives a crash.
+    assert ("fsync", str(key_dir)) in events[link_at + 1 :]
+    assert bytes.fromhex(target.read_text().strip()) == key
+    assert (target.stat().st_mode & 0o777) == 0o600
+    assert sorted(p.name for p in key_dir.iterdir()) == ["key"]
+
+
+def test_health_hmac_key_fsync_failure_fails_closed_without_linking(tmp_path, monkeypatch):
+    from scripts.ops import gateway_health_hmac as mod
+
+    events = []
+
+    def failing_fsync(_fd):
+        events.append("fsync")
+        raise OSError("EIO")
+
+    monkeypatch.setattr(mod.os, "fsync", failing_fsync)
+    monkeypatch.setattr(mod.os, "link", lambda *_a: events.append("link"))
+    key_dir = tmp_path / "state"
+    with pytest.raises(mod.HealthHmacKeyError):
+        mod.load_or_create_key(key_dir / "key")
+    assert events == ["fsync"]  # never linked an un-synced key into place
+    assert list(key_dir.iterdir()) == []  # temp file cleaned up, no key published
+
+
 def _health_payload():
     server, thread = _server()
     try:
