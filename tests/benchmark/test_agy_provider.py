@@ -108,6 +108,7 @@ def _run_bare_arm(tmp_path: Path, agy_bin: str, pool_env: dict[str, str]) -> dic
     env = {
         **os.environ,
         **pool_env,
+        "HOME": str(tmp_path / "isolated_home"),
         "NEXUS_AGY_BIN": agy_bin,
         "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
         "NEXUS_BENCH_SUBPROCESS_PYTHON": sys.executable,
@@ -193,3 +194,19 @@ def test_lane_bare_arm_without_an_eligible_account_makes_no_model_call(tmp_path:
     assert res["row"]["model_calls"] == 0
     assert res["row"]["run_eligible"] is False
     assert res["row"]["infra_invalid_reason"] == "agy_no_eligible_account"
+
+
+def test_resolve_agy_bin_fallback_uses_home_not_a_user_name(monkeypatch, tmp_path: Path):
+    from scripts.bench.agy_provider import resolve_agy_bin
+
+    home = tmp_path / "home"
+    fake_agy = home / ".local" / "bin" / "agy"
+    fake_agy.parent.mkdir(parents=True, exist_ok=True)
+    fake_agy.write_text("")
+    fake_agy.chmod(0o755)
+
+    empty = tmp_path / "empty"
+    empty.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("HOME", str(home))
+    assert resolve_agy_bin({"PATH": str(empty)}) == str(fake_agy)
