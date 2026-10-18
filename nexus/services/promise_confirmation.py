@@ -456,6 +456,7 @@ def build_promise_confirmation_report(
     issue_created_at: str | None = None,
     shared_logins: Sequence[str] = (),
     author_sessions: Sequence[str] | None = (),
+    pr_author_sessions: Mapping[int, Sequence[str]] | None = None,
     linked_pr_created_at: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
@@ -518,6 +519,11 @@ def build_promise_confirmation_report(
     authors = {a.strip().lower() for a in author_identities}
     shared = {x.strip().lower() for x in shared_logins}
     sessions = {x.strip().lower() for x in (author_sessions or ()) if x.strip()}
+    pr_marked = {
+        int(number): {x.strip().lower() for x in names if x.strip()}
+        for number, names in (pr_author_sessions or {}).items()
+    }
+    excluded = sessions.union(*pr_marked.values())
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
     rows = []
@@ -561,7 +567,7 @@ def build_promise_confirmation_report(
             independent = (
                 who not in all_by
                 and who not in authors
-                and who not in sessions
+                and who not in excluded
                 and (login in shared or login not in authors)
             )
             if not independent:
@@ -599,6 +605,11 @@ def build_promise_confirmation_report(
     if not sessions:
         top.add("AUTHOR_SESSION_UNKNOWN")
         blockers = set(blockers) | {"AUTHOR_SESSION_UNKNOWN"}
+    for listed in prs:
+        if not pr_marked.get(listed["number"]):
+            reason = f"PR_AUTHOR_SESSION_MISSING:{listed['number']}"
+            top.add(reason)
+            blockers = set(blockers) | {reason}
     if not prs:
         top.add("NO_PR_LISTED")
     if any(not p.get("merge_sha") for p in prs):

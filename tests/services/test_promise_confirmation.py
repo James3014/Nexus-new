@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -170,8 +171,13 @@ def report(
     shared=(),
     author_sessions=("author-session",),
     linked=(),
+    pr_sessions: Any = "auto",
 ):
+    listed = [pr()] if prs is None else prs
+    if isinstance(pr_sessions, str):  # "auto": every listed PR carries its own marker
+        pr_sessions = {p["number"]: ["pr-author-session"] for p in listed}
     return build_promise_confirmation_report(
+        pr_author_sessions=pr_sessions,
         author_sessions=None if author_sessions is None else list(author_sessions),
         linked_pr_created_at=None if linked is None else list(linked),
         author_identities=list(authors),
@@ -181,7 +187,7 @@ def report(
         issue_body=body,
         body_history=None if history is None else list(history),
         comments=comments,
-        prs=[pr()] if prs is None else prs,
+        prs=listed,
         contains=contains,
         now=NOW,
     )
@@ -1342,3 +1348,72 @@ def test_cli_null_user_content_edits_means_history_unavailable_without_traceback
     routes["userContentEdits"] = {"data": {"repository": {"issue": {"userContentEdits": None}}}}
     rep = _cli_report(tmp_path, routes)
     assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+
+
+# --- every confirmed PR must carry its own author-session marker ---------------------
+
+
+def _missing(rep, number=2549):
+    return f"PR_AUTHOR_SESSION_MISSING:{number}" in rep["reason_codes"]
+
+
+def test_listed_pr_without_own_marker_blocks_verified_despite_other_names():
+    body, comments = _verified_inputs()
+    rep = report(body, comments, pr_sessions={}, author_sessions=["issue-marker-name"])
+    assert _missing(rep) and rep["recommendation"] == "PROVISIONAL"
+    assert report(body, comments)["recommendation"] == "VERIFIED"
+
+
+def test_issue_marker_name_still_excludes_confirmer_when_pr_marker_missing():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="Issue-Marker-Name"),
+    ]
+    rep = report(body, comments, pr_sessions={}, author_sessions=["issue-marker-name"])
+    assert _not_independent(rep)
+
+
+def test_two_listed_prs_with_only_one_marked_is_blocked():
+    body, comments = _verified_inputs()
+    rep = report(body, comments, prs=[pr(), PR2], pr_sessions={2549: ["pr-author-session"]})
+    assert _missing(rep, 2600) and not _missing(rep, 2549)
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+def test_confirmer_equal_to_listed_pr_marker_is_not_independent():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
+    rep = report(body, comments, pr_sessions={2549: [" Reviewer-B "]})
+    assert _not_independent(rep)
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+@pytest.mark.parametrize("value", [None, {2549: ["   "]}])
+def test_missing_or_blank_pr_author_sessions_fail_closed(value):
+    body, comments = _verified_inputs()
+    rep = report(body, comments, pr_sessions=value)
+    assert _missing(rep) and rep["recommendation"] == "PROVISIONAL"
+
+
+def test_cli_pr_without_own_marker_is_blocked_even_with_issue_marker(tmp_path):
+    rep = _cli_report(tmp_path, _cli_routes(pr_body="", issue_extra="\n" + MARKER + "\n"))
+    assert _missing(rep, 7)
+    assert _not_independent(rep)
+
+
+def test_cli_pr_with_own_marker_has_no_missing_reason(tmp_path):
+    rep = _cli_report(tmp_path, _cli_routes(pr_body=MARKER))
+    assert not _missing(rep, 7)
+
+
+def test_cli_offline_pr_body_marker_is_required_per_pr(tmp_path):
+    bare = _offline(tmp_path, author_sessions=["author-session"])
+    out = _run_cli(tmp_path, ["--offline-input", str(bare), "--json"])
+    assert _missing(json.loads(out.stdout))
+    marked = _offline(tmp_path, author_sessions=["author-session"], prs=[dict(pr(), body=MARKER)])
+    out = _run_cli(tmp_path, ["--offline-input", str(marked), "--json"])
+    assert not _missing(json.loads(out.stdout))

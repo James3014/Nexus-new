@@ -282,6 +282,10 @@ ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
   `[A-Za-z0-9._-]{1,64}`, one per line, several allowed) in the Issue body, the
   listed PR bodies and same-repo PRs linked to the Issue. Authors add that line to
   the PR body; a confirmer whose name equals an author session is ignored.
+- Every listed (`--pr`) PR must carry at least one `NEXUS_AUTHOR_SESSION_V1` marker in its
+  own body, else the report cannot be `VERIFIED` (`PR_AUTHOR_SESSION_MISSING:<n>`); markers
+  from the Issue, linked PRs and `--author-session` only add excluded names and never
+  replace a listed PR's own marker.
 - Work start is the earliest creation among the listed PRs and every PR linked to
   the Issue (cross-reference or connected events). If the link list cannot be
   read completely the report cannot be `VERIFIED` (`PROMISE_HISTORY_UNAVAILABLE`).

@@ -234,6 +234,9 @@ def _main(argv: list[str] | None = None) -> int:
             shared_logins=d.get("shared_logins", args.shared_login),
             issue_created_at=d.get("issue_created_at"),
             author_sessions=sessions,
+            pr_author_sessions={
+                p["number"]: author_session_markers(str(p.get("body") or "")) for p in d["prs"]
+            },
             linked_pr_created_at=d.get("linked_pr_created_at"),
         )
     else:
@@ -259,6 +262,7 @@ def _main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
             return 0
+        pr_markers: dict[int, list[str]] = {}
         prs, authors = [], [(issue.get("user") or {}).get("login", "")]
         bodies = [issue_body]
         for m in args.pr:
@@ -266,6 +270,7 @@ def _main(argv: list[str] | None = None) -> int:
             prs.append(listed)
             authors.append(login)
             bodies.append(pr_body)
+            pr_markers[listed["number"]] = author_session_markers(pr_body)
         linked = gh.linked_prs(args.issue)
         if linked is not None:
             bodies.extend(linked[1])
@@ -283,6 +288,7 @@ def _main(argv: list[str] | None = None) -> int:
             shared_logins=args.shared_login,
             issue_created_at=issue.get("created_at"),
             author_sessions=sessions,
+            pr_author_sessions=pr_markers,
             linked_pr_created_at=None if linked is None else linked[0],
         )
     print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
