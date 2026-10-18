@@ -823,6 +823,7 @@ def test_runtime_interpreter_keeps_runtime_and_checkout_for_scrubbed_children(tm
     runtime = tmp_path / "runtime" / "site-packages"
     (runtime / "bin").mkdir(parents=True)
     (runtime / "trusted_rt_probe.py").write_text("VALUE = 'runtime'\n", encoding="utf-8")
+    (runtime / "pytest.py").write_text("", encoding="utf-8")  # the self-check imports it
     (runtime / "bin" / "probe-tool").write_bytes(
         b"#!/usr/bin/python-from-builder\nimport trusted_rt_probe\nprint(trusted_rt_probe.VALUE)\n"
     )
@@ -846,6 +847,20 @@ def test_runtime_interpreter_keeps_runtime_and_checkout_for_scrubbed_children(tm
     assert tool.read_bytes().split(b"\n", 1)[0] == f"#!{python}".encode()
     ran = subprocess.run([str(tool)], env={}, capture_output=True, text=True, check=False)
     assert ran.stdout.strip() == "runtime", ran.stderr
+
+
+def test_runtime_interpreter_refuses_a_venv_supplied_by_the_tree(tmp_path):
+    runtime = Path(pytest.__file__).resolve().parents[1]
+    source = tmp_path / "source"
+    (source / ".venv" / "bin").mkdir(parents=True)
+    with pytest.raises(tig.GateError, match=r"\.venv"):
+        tig._runtime_interpreter(source, runtime)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".venv").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(tig.GateError, match=r"\.venv"):
+        tig._runtime_interpreter(linked, runtime)
+    assert not (tmp_path / "elsewhere").exists()
 
 
 def test_materialized_tree_has_the_trusted_origin(pr_repo, tmp_path):

@@ -740,6 +740,10 @@ def _runtime_interpreter(source: Path, site_packages: Path) -> Path:
     """
 
     venv = source / ".venv"
+    if venv.exists() or venv.is_symlink():
+        # The tree is exact and clean, so this is a tracked .venv; never build
+        # into (or through) something the reviewed tree supplied.
+        raise GateError("reviewed tree contains a .venv entry; refusing to build the runtime there")
     subprocess.run(
         [sys.executable, "-I", "-m", "venv", "--without-pip", str(venv)],
         check=True,
@@ -769,6 +773,11 @@ def _runtime_interpreter(source: Path, site_packages: Path) -> Path:
                 content = shebang + content.split(b"\n", 1)[1]
             target.write_bytes(content)
             target.chmod(0o755)
+    probe = subprocess.run(
+        [str(python), "-I", "-c", "import pytest"], env={}, capture_output=True, check=False
+    )
+    if probe.returncode != 0:
+        raise GateError("runtime interpreter cannot import pytest from the offline runtime")
     return python
 
 
