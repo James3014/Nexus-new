@@ -6,9 +6,13 @@ resolved real file, so renamed symlinks cannot dodge the rules.  Forwarders
 and ``gh`` are allowlisted to read/stage-only forms; ``find`` loses its
 command-executing and file-writing actions.
 
-Interpreters that accept program text on the command line (``perl -e``,
-``ruby -e``, ``node -e``/``--eval``/``--print``, ``php -r``, ``lua -e``,
-``deno eval``, ``bun -e``) are rejected in those inline-code forms, and the awk
+Interpreters that accept program text on the command line are rejected in
+those inline-code forms: any perl option cluster with ``e``/``E``/``M``/``m``
+(``-le``, ``-0e``, ``-Mstrict;...``), any ruby cluster with ``e`` (``-We``),
+node/bun/deno ``-e``/``-p``/``-r``/``--eval``/``--print``/``--import``/
+``--require``/loaders, ``data:`` module specifiers, ``eval`` subcommands
+(``deno -q eval``, ``bun eval``), ``php -r`` and ``lua -e``.  Scripts given as
+files remain allowed: this is defence in depth, not a sandbox.  The awk
 and make families are forwarders: awk always runs program text from argv and
 make runs Makefile recipes through ``/bin/sh`` (#2634).  ``python -c`` stays
 allowed: it is the documented Task Card verifier form and the fake-worker
@@ -82,32 +86,44 @@ FIND_FORBIDDEN_ARGS = frozenset({
 
 
 _PYTHON_NAME_RE = re.compile(r"python[0-9.]*")
-# Interpreter family -> (regex over the normalised program name, short-option
-# letters that take program text, short-option letters whose attached value
-# ends the cluster, long options that take program text).
-_INLINE_CODE_INTERPRETERS: tuple[tuple[str, re.Pattern[str], str, str, frozenset[str]], ...] = (
-    ("perl", re.compile(r"perl[0-9.]*"), "eE", "IMmixCDd0lF", frozenset()),
-    ("ruby", re.compile(r"ruby[0-9.]*"), "e", "IrCEKWxF0T", frozenset()),
+# Interpreter family -> (regex over the normalised program name, letters that
+# make any single-dash token (option cluster) inline code, long options that
+# make a token inline code, subcommands that evaluate their argument).  Every
+# token is scanned, including option values and script arguments: rejecting a
+# rare harmless spelling (``perl -Ilib/e``) is preferred over parsing each
+# interpreter's option grammar, which is where bypasses hide (#2634).
+_INLINE_CODE_INTERPRETERS: tuple[tuple[str, re.Pattern[str], str, frozenset[str], frozenset[str]], ...] = (
+    # perl: -e/-E program text, -M/-m "use Module LIST" (code after ';').
+    ("perl", re.compile(r"perl[0-9.]*"), "eEMm", frozenset(), frozenset()),
+    # ruby: -e program text (also inside clusters such as -We, -W0e).
+    ("ruby", re.compile(r"ruby[0-9.]*"), "eE", frozenset(), frozenset()),
     (
         "node",
         re.compile(r"node(js)?[0-9.]*"),
-        "ep",
-        "r",
-        frozenset({"--eval", "--print"}),
+        "epri",
+        frozenset({
+            "--eval", "--print", "--import", "--require", "--loader",
+            "--experimental-loader", "--experimental-default-type",
+        }),
+        frozenset(),
     ),
-    ("bun", re.compile(r"bunx?"), "ep", "r", frozenset({"--eval", "--print"})),
-    ("php", re.compile(r"php[0-9.]*"), "rBREF", "cdfz", frozenset({"--run"})),
-    ("lua", re.compile(r"lua(jit)?[0-9.]*"), "e", "lW", frozenset()),
+    (
+        "bun",
+        re.compile(r"bunx?"),
+        "epr",
+        frozenset({"--eval", "--print", "--import", "--require", "--preload"}),
+        frozenset({"eval", "repl"}),
+    ),
+    (
+        "deno",
+        re.compile(r"deno"),
+        "ep",
+        frozenset({"--eval", "--print", "--import", "--require", "--preload", "--ext"}),
+        frozenset({"eval", "repl"}),
+    ),
+    ("php", re.compile(r"php[0-9.]*"), "rBREF", frozenset({"--run"}), frozenset()),
+    ("lua", re.compile(r"lua(jit)?[0-9.]*"), "e", frozenset(), frozenset()),
 )
-
-
-def _short_cluster_has(token: str, code_flags: str, value_flags: str) -> bool:
-    for ch in token[1:]:
-        if ch in code_flags:
-            return True
-        if ch in value_flags:
-            return False
-    return False
 
 
 def _python_inline_code(args: Sequence[str]) -> bool:
@@ -140,22 +156,17 @@ def inline_code_form(executable: str, argv: Iterable[str], *, include_python: bo
     if include_python and any(_PYTHON_NAME_RE.fullmatch(name) for name in names):
         if _python_inline_code(args):
             return "python"
-    if any(name == "deno" for name in names) and args[:1] in {("eval",), ("repl",)}:
-        return "deno"
-    for family, pattern, code_flags, value_flags, long_flags in _INLINE_CODE_INTERPRETERS:
+    for family, pattern, code_letters, long_flags, eval_subcommands in _INLINE_CODE_INTERPRETERS:
         if not any(pattern.fullmatch(name) for name in names):
             continue
-        # Every token is scanned, including script arguments: over-rejecting a
-        # rare ``script -e`` argument is safer than parsing each interpreter's
-        # option grammar (separate option values would otherwise end the scan).
         for token in args:
-            if token == "-" or not token.startswith("-"):
-                continue
+            if token in eval_subcommands or token.lower().startswith("data:"):
+                return family
             if token.startswith("--"):
                 if token.split("=", 1)[0] in long_flags:
                     return family
                 continue
-            if _short_cluster_has(token, code_flags, value_flags):
+            if token.startswith("-") and any(ch in code_letters for ch in token[1:]):
                 return family
     return None
 

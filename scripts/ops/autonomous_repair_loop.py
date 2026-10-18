@@ -110,7 +110,7 @@ def execute_repair_proposals(lines, cwd):
         if not cmd or cmd.startswith("#"):
             continue
         try:
-            argv = parse_allowlisted_test_command(cmd)
+            argv = parse_allowlisted_test_command(cmd, cwd)
         except ValueError as exc:
             print(f"  [not executed] {cmd!r}: {exc}")
             outcomes.append({"command": cmd, "status": "NOT_EXECUTED", "reason": str(exc)})
