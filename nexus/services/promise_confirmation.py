@@ -12,6 +12,13 @@ post-merge witness, a commit that contains every listed merge commit.
 Independence of the confirmer is text-level only: all bot comments share one
 GitHub login, so the confirmer string is compared with witness ``by`` values
 and with the supplied author identities, which proves nothing cryptographic.
+
+Optional ``entrypoints_touched`` (``nexus.entrypoints_touched.v1``, from
+``scripts/governance/entrypoints_touched.py``, #2612) is advisory only: each
+touched entry point that no statement ``entry`` names and that is not declared
+out of scope adds ``ENTRYPOINT_UNCOVERED:<id>`` and makes the separate
+``entrypoint_advisory_recommendation`` PROVISIONAL. It never changes
+``recommendation`` (the VERIFIED rule belongs to #2453) and never blocks.
 """
 
 from __future__ import annotations
@@ -59,6 +66,11 @@ _STALE_REASONS = frozenset({
 })
 
 Contains = Callable[[str, str], "bool | None"]
+
+ENTRYPOINTS_SCHEMA = "nexus.entrypoints_touched.v1"
+OUT_OF_SCOPE_FENCE = "nexus.entrypoints_out_of_scope.v1"
+_ENTRY_ID = re.compile(r"^(gateway|script|launchd|console|workflow):[A-Za-z0-9_.*/@+-]{1,300}$")
+_MAX_ENTRYPOINTS = 2000
 
 
 def _canonical(obj: Any) -> str:
@@ -469,6 +481,123 @@ def _work_start(
     return min(t for t in stamps if t is not None)
 
 
+# --- entry points (advisory, #2612) -----------------------------------------
+
+
+def _entrypoint_ids(raw: Any) -> list[str] | None:
+    """Sorted unique ids from a ``nexus.entrypoints_touched.v1`` document; None if invalid."""
+    if not isinstance(raw, Mapping) or raw.get("schema") != ENTRYPOINTS_SCHEMA:
+        return None
+    items = raw.get("entrypoints")
+    if not isinstance(items, list) or len(items) > _MAX_ENTRYPOINTS:
+        return None
+    ids = set()
+    for item in items:
+        eid = item.get("id") if isinstance(item, Mapping) else None
+        if not isinstance(eid, str) or not _ENTRY_ID.match(eid):
+            return None
+        ids.add(eid)
+    return sorted(ids)
+
+
+def _out_of_scope_items(raw: Any) -> dict[str, str] | None:
+    """id -> reason from a list of {"id", "reason"}; None when anything is malformed."""
+    if not isinstance(raw, list) or len(raw) > _MAX_ENTRYPOINTS:
+        return None
+    out: dict[str, str] = {}
+    for item in raw:
+        if not isinstance(item, Mapping) or set(item) != {"id", "reason"}:
+            return None
+        eid, why = item["id"], item["reason"]
+        if not (isinstance(eid, str) and _ENTRY_ID.match(eid) and _nonempty_str(why)):
+            return None
+        out.setdefault(eid, why.strip())
+    return out
+
+
+def _declared_out_of_scope(issue_body: str, touched: Mapping[str, Any]) -> tuple[dict, set]:
+    """Out-of-scope declarations from the Issue fence and the input document."""
+    reasons: set[str] = set()
+    declared: dict[str, str] = {}
+    try:
+        fence = _parse_single_json_fence(issue_body, OUT_OF_SCOPE_FENCE, "OUT_OF_SCOPE_INVALID")
+    except ValueError:
+        fence, reasons = None, {"ENTRYPOINT_OUT_OF_SCOPE_INVALID"}
+    sources = []
+    if fence is not None:
+        ok = isinstance(fence, dict) and set(fence) == {"out_of_scope"}
+        sources.append(fence["out_of_scope"] if ok else None)
+    if "out_of_scope" in touched:
+        sources.append(touched["out_of_scope"])
+    for source in sources:
+        parsed = _out_of_scope_items(source)
+        if parsed is None:
+            reasons.add("ENTRYPOINT_OUT_OF_SCOPE_INVALID")
+            continue
+        for eid, why in parsed.items():
+            declared.setdefault(eid, why)
+    return declared, reasons
+
+
+def _bounded(token: str, text: str, word: str) -> bool:
+    return re.search(rf"(?<![{word}]){re.escape(token)}(?![{word}])", text) is not None
+
+
+_NAME_CHARS = {
+    "gateway": "A-Za-z0-9_",
+    "script": "A-Za-z0-9_./-",
+    "workflow": "A-Za-z0-9_./-",
+    "launchd": "A-Za-z0-9_.-",
+    "console": "A-Za-z0-9_.-",
+}
+
+
+def _entry_named(eid: str, entries: Sequence[str]) -> bool:
+    """Whether a statement entry names this entry point (bounded, so a prefix never counts).
+
+    The full id always counts; a gateway tool name, script or workflow path
+    (or workflow file name) and a launchd label count on their own. The
+    console id must be written in full, since ``nexus`` alone is too common.
+    """
+    kind, _, name = eid.partition(":")
+    word = _NAME_CHARS.get(kind, "A-Za-z0-9_")
+    tokens = [eid]
+    if kind == "gateway" and name != "*":
+        tokens.append(name)
+    elif kind in ("script", "launchd"):
+        tokens.append(name)
+    elif kind == "workflow":
+        tokens += [name, name.rsplit("/", 1)[-1]]
+    return any(_bounded(token, text, word) for text in entries for token in tokens)
+
+
+def _entrypoint_advisory(
+    raw: Any, issue_body: str, statements: Mapping[str, Mapping[str, str]]
+) -> tuple[dict[str, Any], set[str]]:
+    """(report section, top-level advisory reasons). Never a blocker."""
+    ids = _entrypoint_ids(raw)
+    if ids is None:
+        return {"valid": False, "touched": [], "uncovered": []}, {"ENTRYPOINTS_TOUCHED_INVALID"}
+    declared, reasons = _declared_out_of_scope(issue_body, raw)
+    entries = [s["entry"] for s in statements.values()]
+    named = {eid for eid in ids if _entry_named(eid, entries)}
+    if "gateway:*" in ids and any(e.startswith("gateway:") and e != "gateway:*" for e in named):
+        named.add("gateway:*")
+    out_of_scope = [
+        {"id": eid, "reason": declared[eid]} for eid in ids if eid in declared and eid not in named
+    ]
+    skipped = {item["id"] for item in out_of_scope}
+    uncovered = [eid for eid in ids if eid not in named and eid not in skipped]
+    reasons |= {f"ENTRYPOINT_UNCOVERED:{eid}" for eid in uncovered}
+    return {
+        "valid": True,
+        "touched": ids,
+        "covered": sorted(named),
+        "out_of_scope": out_of_scope,
+        "uncovered": uncovered,
+    }, reasons
+
+
 def build_promise_confirmation_report(
     *,
     issue_body: str,
@@ -484,6 +613,7 @@ def build_promise_confirmation_report(
     author_sessions: Sequence[str] | None = (),
     pr_author_sessions: Mapping[int, Sequence[str]] | None = None,
     linked_pr_created_at: Sequence[str] | None = None,
+    entrypoints_touched: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
     try:
@@ -669,6 +799,19 @@ def build_promise_confirmation_report(
     else:
         recommendation = "PROVISIONAL"
     count = lambda s: sum(r["status"] == s for r in rows)  # noqa: E731
+    extra: dict[str, Any] = {}
+    if entrypoints_touched is not None:
+        # Advisory only: computed after ``recommendation`` and never feeds it.
+        section, advisory = _entrypoint_advisory(entrypoints_touched, issue_body, statements)
+        top |= advisory
+        extra = {
+            "entrypoints": section,
+            "entrypoint_advisory_recommendation": (
+                "PROVISIONAL"
+                if recommendation == "VERIFIED" and (section["uncovered"] or advisory)
+                else recommendation
+            ),
+        }
     return {
         **base,
         "applicable": True,
@@ -685,4 +828,5 @@ def build_promise_confirmation_report(
         "malformed_witnesses": malformed,
         "ignored_confirmations": ignored,
         "ignored_blocks": ignored_blocks,
+        **extra,
     }

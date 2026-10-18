@@ -125,6 +125,9 @@
 | nexus/services/promise_confirmation.py | tests/services/test_promise_confirmation.py | active | high | promise_confirmation_report_contract |
 | scripts/governance/promise_confirmation.py | tests/services/test_promise_confirmation.py | active | medium | promise_confirmation_cli |
 | tests/services/test_promise_confirmation.py | tests/services/test_promise_confirmation.py | active | high | promise_confirmation_red_contract |
+| scripts/governance/entrypoints_touched.py | tests/governance/test_entrypoints_touched.py, tests/services/test_promise_confirmation.py | active | medium | entrypoints_touched_cli |
+| scripts/governance/launchd_entrypoints.json | tests/governance/test_entrypoints_touched.py | active | medium | launchd_entrypoint_registry |
+| tests/governance/test_entrypoints_touched.py | tests/governance/test_entrypoints_touched.py | active | medium | entrypoints_touched_red_contract |
 | nexus/services/livefail_rollback.py | tests/services/test_livefail_rollback.py | active | high | livefail_rollback_trigger_contract |
 | scripts/governance/livefail_rollback.py | tests/services/test_livefail_rollback.py | active | high | livefail_rollback_cli |
 | tests/services/test_livefail_rollback.py | tests/services/test_livefail_rollback.py | active | high | livefail_rollback_red_contract |

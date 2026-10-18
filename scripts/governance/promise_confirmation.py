@@ -4,6 +4,10 @@
 Fetches the live Issue, its comments, edit history and PRs with ``gh api`` GET
 calls (binary from NEXUS_GH_BIN, default ``gh``) and prints the report from
 ``nexus.services.promise_confirmation``. It changes nothing on GitHub.
+
+``--entrypoints-json`` takes the output of
+``scripts/governance/entrypoints_touched.py`` and adds the advisory
+entry-point section (#2612); it never changes ``recommendation``.
 """
 
 from __future__ import annotations
@@ -178,6 +182,14 @@ def _markdown(rep: dict) -> str:
         lines.append("")
     if rep.get("reason_codes"):
         lines += ["Reasons: " + ", ".join(rep["reason_codes"]), ""]
+    if "entrypoints" in rep:
+        section = rep["entrypoints"]
+        lines += [
+            f"Entry points (advisory): {rep['entrypoint_advisory_recommendation']}; "
+            f"touched {len(section['touched'])}, uncovered "
+            + (", ".join(section["uncovered"]) or "none"),
+            "",
+        ]
     return "\n".join(lines) + "\n" + json.dumps(rep, indent=2, sort_keys=True)
 
 
@@ -226,13 +238,19 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("--offline-input")
     ap.add_argument("--emit-blocks")
     ap.add_argument("--generation", type=int, default=1)
+    ap.add_argument("--entrypoints-json", help="nexus.entrypoints_touched.v1 file (advisory)")
     args = ap.parse_args(argv)
     if args.now and not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", args.now):
         ap.error("--now must be RFC3339 UTC ending in Z, e.g. 2026-10-18T12:00:00Z")
     if args.emit_blocks:
         return _emit(args.emit_blocks, args.generation)
+    entrypoints = (
+        json.loads(Path(args.entrypoints_json).read_text()) if args.entrypoints_json else None
+    )
     if args.offline_input:
         d = json.loads(Path(args.offline_input).read_text())
+        if entrypoints is None:
+            entrypoints = d.get("entrypoints_touched")
         sessions = [
             *(d.get("author_sessions") or []),
             *args.author_session,
@@ -253,6 +271,7 @@ def _main(argv: list[str] | None = None) -> int:
             author_sessions=sessions,
             pr_author_sessions=_offline_pr_markers(d["prs"]),
             linked_pr_created_at=d.get("linked_pr_created_at"),
+            entrypoints_touched=entrypoints,
         )
     else:
         if args.issue is None:
@@ -305,6 +324,7 @@ def _main(argv: list[str] | None = None) -> int:
             author_sessions=sessions,
             pr_author_sessions=pr_markers,
             linked_pr_created_at=None if linked is None else linked[0],
+            entrypoints_touched=entrypoints,
         )
     print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
     return 0
