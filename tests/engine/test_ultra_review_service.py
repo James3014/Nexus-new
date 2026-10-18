@@ -1650,7 +1650,11 @@ def test_ultra_review_base_worktree_cleanup_failure_is_surfaced(tmp_path, monkey
     assert any(f["rule_id"] == "base_worktree_cleanup_failed" for f in payload["findings"])
 
 
-# --- #2644: code under review cannot forge the ghost re-run's report --------------------------
+# --- #2644: forgeries by code that does NOT read the HMAC key ---------------------------------
+# Scope (confirmed residual, #2644 stays open): the key lives in pytest's process, so code under
+# review that reads it from the interpreter (gc / closures of the witness plugin) can still sign
+# a forged report. These tests cover code that does not read the key; the real fix is
+# out-of-process result collection.
 # The first three are the #2628 round-2 reviewer's adversarial tests
 # (rev-2628 tests/engine/test_zz_review2628_v3.py), renamed; the exit-0 control now asserts
 # the fixed verdict instead of only printing it.
@@ -1729,7 +1733,8 @@ def test_ultra_review_os_exit0_in_candidate_code_is_not_a_pass(tmp_path, monkeyp
 
 
 def _argv_forger(exit_code, junit_text, *, witness=True):
-    # Stronger than the reviewer's fixed-path forgery: find the real report paths in argv.
+    # Keyless forger: finds the real report paths in argv (stronger than the reviewer's fixed
+    # path) but does not read the key from the interpreter, so it cannot produce a valid MAC.
     return (
         "import json, os, sys\n"
         f"FORGED = {junit_text!r}\n"
@@ -1745,7 +1750,7 @@ def _argv_forger(exit_code, junit_text, *, witness=True):
     )
 
 
-def test_ultra_review_argv_located_forged_report_and_witness_exit0_is_not_a_pass(tmp_path, monkeypatch):
+def test_ultra_review_keyless_argv_forged_report_and_witness_exit0_is_not_a_pass(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(_argv_forger(0, _FORGED_ALL_PASS), encoding="utf-8")
     _allow_ghost_run(monkeypatch)
@@ -1754,7 +1759,7 @@ def test_ultra_review_argv_located_forged_report_and_witness_exit0_is_not_a_pass
     assert payload["ghost_regression"]["head_report"]["reason"] in {"witness_mac_mismatch", "witness_missing"}
 
 
-def test_ultra_review_argv_located_forged_report_exit1_is_a_regression(tmp_path, monkeypatch):
+def test_ultra_review_keyless_argv_forged_report_exit1_is_a_regression(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
     (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
     _commit(tmp_path, "red first")
@@ -1765,8 +1770,8 @@ def test_ultra_review_argv_located_forged_report_exit1_is_a_regression(tmp_path,
     assert payload["ghost_regression"]["pre_existing_failures"] == []
 
 
-def test_ultra_review_junit_rewritten_after_session_is_not_trusted(tmp_path, monkeypatch):
-    # An atexit hook rewrites the junit after pytest signed it: the hash no longer matches.
+def test_ultra_review_keyless_junit_rewrite_after_session_is_not_trusted(tmp_path, monkeypatch):
+    # Keyless: an atexit hook rewrites the junit after pytest signed it: the hash no longer matches.
     _init_app_repo(tmp_path)
     (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
     _commit(tmp_path, "red first")

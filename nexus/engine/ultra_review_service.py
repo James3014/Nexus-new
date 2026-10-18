@@ -63,8 +63,10 @@ JUNIT_MAX_BYTES = 20_000_000
 # finish, signs ``{exit status, junit sha256}`` with HMAC-SHA256 into a witness file. The
 # reviewer accepts a report only when the MAC, the exit code and the junit hash all match.
 # A report written outside pytest's own session finish, or a run that exits before it, has
-# no valid witness. Code that rewrites pytest's reports in-process is out of scope (it could
-# make pytest itself report a pass).
+# no valid witness. This defends only against code that does NOT read the key: the key lives
+# in this same process, and code under review can recover it from the interpreter (gc /
+# closures of the witness plugin) and sign a forged report, or rewrite pytest's own reports.
+# The real fix is collecting results outside the tested process (#2644 stays open for it).
 GHOST_PYTEST_BOOTSTRAP = """
 import hashlib, hmac, json, os, sys
 def _arm():
