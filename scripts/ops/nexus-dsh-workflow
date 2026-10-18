@@ -3067,8 +3067,10 @@ ROUTE_FAMILY_COST = {"flash": 0, "pro": 1}
 ROUTE_TERMINAL_FAILURES = frozenset({"FAILED", "CANCELLED", "OUTCOME_UNKNOWN"})
 # None means "the session default" (the --patch model).
 DEFAULT_ROUTE_TABLE: dict[str, dict[str, str] | None] = {
-    "light": {"model": "gemini-3.8-flash", "effort": "low"},
-    "small": {"model": "gemini-3.8-flash", "effort": "medium"},
+    # The pool serves flash only as effort-suffixed ids (-low/-medium/-high); a bare
+    # gemini-3.8-flash is not served and the start-phase catalog guard blocks it (#2537).
+    "light": {"model": "gemini-3.8-flash-low", "effort": "low"},
+    "small": {"model": "gemini-3.8-flash-medium", "effort": "medium"},
     "mid": None,
 }
 ROUTE_DEFAULT_ID_RE = re.compile(r"^(\s*)(?:-\s+)?id:\s*['\"]?agent-default-model['\"]?\s*$")

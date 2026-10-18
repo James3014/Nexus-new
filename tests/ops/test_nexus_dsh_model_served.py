@@ -180,3 +180,22 @@ def test_non_agy_provider_is_not_checked(tmp_path: Path, ops_root: Path, monkeyp
     _catalog(ops_root, "a", SERVED)
     with pytest.raises(_Spawned):
         _turn(tmp_path, monkeypatch, UNSERVED_PATCH.replace("nexus-agy-pool", "other-provider"))
+
+
+SERVED_POOL_IDS = [
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-low",
+    "gemini-3.1-pro-high",
+    "gemini-3.1-pro-low",
+]
+
+
+def test_default_route_table_models_are_served_pool_ids(ops_root: Path) -> None:
+    _catalog(ops_root, "a", SERVED_POOL_IDS, age=5.0)
+    assert guard.check_model_served("gemini-3.8-flash") is not None  # fixture is discriminating
+    for tier, entry in guard.load_route_table(None).items():
+        if entry is None:
+            continue
+        assert guard.check_model_served(entry["model"]) is None, (tier, entry)
+        assert entry["model"].endswith(f"-{entry['effort']}"), (tier, entry)
