@@ -38,10 +38,17 @@ class FileTaskResult:
     error: str = ""
 
 
+def _bench_home() -> Path:
+    """Host home for bench CLIs: ``NEXUS_BENCH_HOME`` override, else the real home (#2202)."""
+    override = os.getenv("NEXUS_BENCH_HOME", "").strip()
+    return Path(override).expanduser() if override else Path.home()
+
+
 def _resolve_gemini_bin() -> str:
+    home = _bench_home()
     candidates = [
         os.getenv("NEXUS_GEMINI_BIN", ""),
-        "/Users/jameschen/.npm-global/bin/gemini",
+        str(home / ".npm-global" / "bin" / "gemini"),
         "/opt/homebrew/bin/gemini",
         "/usr/local/bin/gemini",
         shutil.which("gemini") or "",
@@ -280,9 +287,10 @@ def _run_gemini_file_task(
     cmd = [gemini_bin, "-m", model, "-p", prompt, "--output-format", "json"]
     if os.getenv("NEXUS_GEMINI_YOLO", "").strip().lower() in {"1", "true", "yes", "on", "yolo"}:
         cmd.insert(1, "-y")
+    home = _bench_home()
     env = os.environ.copy()
-    env["HOME"] = "/Users/jameschen"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    env["HOME"] = str(home)
+    env["PATH"] = f"/opt/homebrew/bin:{home}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
     res = subprocess.run(cmd, cwd=task_file.parent, env=env, text=True, capture_output=True, timeout=timeout_sec, check=False)
     if res.returncode == 0 and invocation_mode == "function":
         function_name = _infer_target_function(task_desc, target_file)
