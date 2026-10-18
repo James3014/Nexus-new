@@ -5,8 +5,10 @@ Evidence Verifier: 系統級獨立驗證器。
 
 import subprocess
 from pathlib import Path
-from .replay_runner import ReplayRunner
+
 from .anti_drift import AntiDrift
+from .replay_runner import ReplayRunner
+
 
 class EvidenceVerifier:
     """
