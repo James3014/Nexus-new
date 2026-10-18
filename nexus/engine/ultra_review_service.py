@@ -2422,14 +2422,21 @@ class UltraReviewService:
                 ["--git-dir", gd, "-c", "protocol.file.allow=always", "fetch", "-q", "--no-tags", "--depth=1",
                  str(self.project_root), sha],
             ),
-            ("update_ref", ["--git-dir", gd, "update-ref", "--no-deref", "HEAD", sha]),
-            ("read_tree", ["--git-dir", gd, "--work-tree", wt, "read-tree", "HEAD"]),
+            ("read_tree", ["--git-dir", gd, "--work-tree", wt, "read-tree", sha]),
         )
         for label, step in steps:
             done = self._git_run(step)
             if done.returncode != 0:
                 shutil.rmtree(git_dir, ignore_errors=True)
                 return {"ok": False, "detail": f"{label}:" + (done.stderr or done.stdout or "")[-200:].strip()}
+            if label == "fetch":
+                # Detached HEAD at the fetched commit, written into the git dir we just created
+                # (not a ref update in any repository the reviewer owns).
+                try:
+                    _write_no_follow(git_dir / "HEAD", f"{sha}\n".encode())
+                except (OSError, SandboxError) as exc:
+                    shutil.rmtree(git_dir, ignore_errors=True)
+                    return {"ok": False, "detail": f"head:{exc}"}
         staged = False
         if diff_path is not None and diff_path.is_file() and diff_path.read_text(encoding="utf-8").strip():
             staged = (
