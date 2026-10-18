@@ -956,6 +956,165 @@ def build_impact_plan(
     )
 
 
+# --write-rows (#2625): propose docs/testing/test_impact_map.md rows for the plan's
+# unmatched paths, from tests that name, import or reference each path. Advisory
+# authoring help only: the gate reads the map like any hand-written row, and a
+# path no test references stays unmatched (reported, never guessed).
+IMPACT_MAP_RELATIVE_PATH = "docs/testing/test_impact_map.md"
+WRITTEN_ROW_RISK_REASON = "mechanical_pass_reference_scan"
+MAX_WRITTEN_ROW_TARGETS = 8
+
+
+@dataclass(frozen=True)
+class ImpactRowProposal:
+    rows: list[str]
+    mapped: dict[str, list[str]]
+    unresolved: list[str]
+    # path -> why no row was proposed: "deleted", "too_many_candidates",
+    # "no_reference" or "unsafe_path".
+    unresolved_reasons: dict[str, str] = field(default_factory=dict)
+
+
+def _test_module_name(path: str) -> str:
+    if not path.endswith(".py"):
+        return ""
+    parts = path[: -len(".py")].split("/")
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    if not parts or not all(part.isidentifier() for part in parts):
+        return ""
+    return ".".join(parts)
+
+
+def _test_file_index(root: Path) -> list[tuple[str, str, set[str]]]:
+    """(relative path, source text, imported module names) for every tests/**/test_*.py."""
+    from scripts.ops.build_test_impact_index import _imports_for
+
+    index: list[tuple[str, str, set[str]]] = []
+    tests_root = root / "tests"
+    if not tests_root.is_dir():
+        return index
+    for path in sorted(tests_root.rglob("test_*.py")):
+        if "__pycache__" in path.parts or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        index.append((path.relative_to(root).as_posix(), text, _imports_for(path)))
+    return index
+
+
+def propose_impact_targets(
+    path: str,
+    *,
+    root: Path = ROOT,
+    test_index: list[tuple[str, str, set[str]]] | None = None,
+) -> list[str]:
+    """Tests that name, import or textually reference ``path``, most direct first.
+
+    Returns ``[]`` when there are more than ``MAX_WRITTEN_ROW_TARGETS`` candidates:
+    a row that silently drops tests which import the file under-selects, which
+    is worse than no row (the gate then runs the full suite).
+    """
+    ordered = _impact_candidates(path, root=root, test_index=test_index)
+    return ordered if len(ordered) <= MAX_WRITTEN_ROW_TARGETS else []
+
+
+def _impact_candidates(
+    path: str,
+    *,
+    root: Path,
+    test_index: list[tuple[str, str, set[str]]] | None,
+) -> list[str]:
+    """Every candidate test for ``path``, untruncated, most direct first."""
+    index = _test_file_index(root) if test_index is None else test_index
+    normalized = path.strip().replace("\\", "/").strip("/")
+    stem = Path(normalized).stem
+    module = _test_module_name(normalized)
+    module_pattern = re.compile(rf"(?<![\w.]){re.escape(module)}(?![\w])") if module else None
+    named_and_linked: list[str] = []
+    imported: list[str] = []
+    referenced: list[str] = []
+    named_only: list[str] = []
+    for test_path, text, imports in index:
+        named = bool(stem) and stem != "__init__" and Path(test_path).name == f"test_{stem}.py"
+        imports_it = bool(module) and any(
+            name == module or name.startswith(f"{module}.") for name in imports
+        )
+        references_it = normalized in text or bool(module_pattern and module_pattern.search(text))
+        if named and (imports_it or references_it):
+            named_and_linked.append(test_path)
+        elif imports_it:
+            imported.append(test_path)
+        elif references_it:
+            referenced.append(test_path)
+        elif named:
+            named_only.append(test_path)
+    # A same-named test that neither imports nor mentions the path is a weak
+    # signal (tests/x/test_utils.py vs nexus/y/utils.py); use it only when it is
+    # the one candidate.
+    return [*named_and_linked, *imported, *referenced] or (
+        named_only if len(named_only) == 1 else []
+    )
+
+
+def propose_impact_rows(paths: Iterable[str], *, root: Path = ROOT) -> ImpactRowProposal:
+    test_index = _test_file_index(root)
+    rows: list[str] = []
+    mapped: dict[str, list[str]] = {}
+    unresolved: list[str] = []
+    reasons: dict[str, str] = {}
+    for path in sorted(dict.fromkeys(paths)):
+        if "|" in path or not path.strip():
+            unresolved.append(path)
+            reasons[path] = "unsafe_path"
+            continue
+        if not (root / path).exists():
+            # No row for code the PR deletes; the gate's fallback stays visible.
+            unresolved.append(path)
+            reasons[path] = "deleted"
+            continue
+        targets = propose_impact_targets(path, root=root, test_index=test_index)
+        if not targets:
+            unresolved.append(path)
+            count = len(_impact_candidates(path, root=root, test_index=test_index))
+            reasons[path] = (
+                "too_many_candidates" if count > MAX_WRITTEN_ROW_TARGETS else "no_reference"
+            )
+            continue
+        mapped[path] = targets
+        rows.append(
+            f"| {path} | {', '.join(targets)} | active | medium | {WRITTEN_ROW_RISK_REASON} |"
+        )
+    return ImpactRowProposal(
+        rows=rows, mapped=mapped, unresolved=unresolved, unresolved_reasons=reasons
+    )
+
+
+def write_impact_rows(rows: Iterable[str], *, map_path: Path) -> list[str]:
+    """Append rows whose code path has no row yet; return the rows written."""
+    existing = map_path.read_text(encoding="utf-8") if map_path.exists() else ""
+    present = {
+        line.split("|")[1].strip().strip("`")
+        for line in existing.splitlines()
+        if line.startswith("|") and line.count("|") >= 4
+    }
+    new_rows = [row for row in rows if row.split("|")[1].strip() not in present]
+    if not new_rows:
+        return []
+    prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
+    map_path.write_text(prefix + "\n".join(new_rows) + "\n", encoding="utf-8")
+    return new_rows
+
+
+def write_missing_impact_rows(paths: Iterable[str], *, root: Path = ROOT) -> ImpactRowProposal:
+    """Propose and append rows for ``paths``; ``rows`` holds only rows actually written."""
+    proposal = propose_impact_rows(paths, root=root)
+    written = write_impact_rows(proposal.rows, map_path=root / IMPACT_MAP_RELATIVE_PATH)
+    return replace(proposal, rows=written)
+
+
 def full_suite_pytest_args(impact_class: str) -> list[str]:
     """Extra pytest arguments for one impact class (only the FULL_SUITE fallback)."""
     return list(FULL_SUITE_PYTEST_ARGS) if impact_class == FULL_SUITE_IMPACT_CLASS else []
@@ -2134,6 +2293,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     plan.add_argument("--base-sha", required=True)
     plan.add_argument("--head-sha", required=True)
     plan.add_argument("--output", type=Path, required=True)
+    plan.add_argument(
+        "--write-rows",
+        action="store_true",
+        help="append test_impact_map.md rows for unmatched paths (authoring aid, #2625)",
+    )
 
     run = subparsers.add_parser("run")
     run.add_argument("--plan", type=Path, required=True)
@@ -2157,6 +2321,16 @@ def main(argv: list[str] | None = None) -> int:
         payload = asdict(build_impact_plan(changed, base_sha=args.base_sha, head_sha=args.head_sha))
         args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         print(_json_log_safe(json.dumps(payload, indent=2)))
+        if args.write_rows:
+            proposal = write_missing_impact_rows(payload["unmatched_paths"], root=ROOT)
+            for row in proposal.rows:
+                print(_log_safe(f"impact-map row written: {row}"), file=sys.stderr)
+            for path in proposal.unresolved:
+                reason = proposal.unresolved_reasons.get(path, "no_reference")
+                print(
+                    _log_safe(f"impact-map row NOT written for {path}: {reason}"),
+                    file=sys.stderr,
+                )
         return 0
     if args.command == "run":
         return run_pytest_plan(
