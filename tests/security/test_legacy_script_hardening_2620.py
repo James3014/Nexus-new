@@ -91,3 +91,8 @@ def test_dashboard_run_route_uses_component_containment() -> None:
     source = DASHBOARD.read_text(encoding="utf-8")
     assert "target_path.is_relative_to(TARGET_DIR)" in source
     assert "if not str(target_path).startswith(str(TARGET_DIR)):" not in source
+
+
+def test_dashboard_clears_rejected_token() -> None:
+    for page in (DASHBOARD.read_text(encoding="utf-8"), SWARM_PAGE.read_text(encoding="utf-8")):
+        assert "if (res.status === 401) sessionStorage.removeItem('museToken');" in page

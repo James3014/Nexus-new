@@ -231,6 +231,10 @@
         window.fetch = (url, opts = {}) => {
             if (typeof url === 'string' && url.startsWith('/api/')) {
                 opts = { ...opts, headers: { ...(opts.headers || {}), 'X-Muse-Token': museToken() } };
+                return _museFetch(url, opts).then((res) => {
+                    if (res.status === 401) sessionStorage.removeItem('museToken');
+                    return res;
+                });
             }
             return _museFetch(url, opts);
         };
