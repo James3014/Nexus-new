@@ -106,7 +106,8 @@ CLOSING_KEYWORD_FAMILIES = (
 CLOSING_KEYWORD_PATTERN = re.compile(
     r"(?i)\b("
     + "|".join(CLOSING_KEYWORD_FAMILIES)
-    + r")\s+(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#)(\d+)\b"
+    # GitHub also accepts a colon after the keyword ("Fixes: #N", #2589).
+    + r")(?:\s*:\s*|\s+)(?:https?://github\.com/[^/\s]+/[^/\s]+/issues/|(?:\b[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+)?#)(\d+)\b"
 )
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
@@ -261,6 +262,25 @@ def find_closing_keyword_references(text: str) -> list[tuple[str, int]]:
     return [(keyword.lower(), int(issue_str)) for keyword, issue_str in matches]
 
 
+def _closing_keyword_location(text: str, issue: int, label: str) -> str:
+    """Name the first line of ``text`` that closes ``issue`` (#2589)."""
+    for index, line in enumerate(text.splitlines(), start=1):
+        if any(num == issue for _kw, num in find_closing_keyword_references(line)):
+            excerpt = " ".join(line.split())[:100]
+            return f"{label} line {index}: '{excerpt}'"
+    return label
+
+
+def _final_fields_location(title: str, message: str, issue: int) -> str:
+    if any(num == issue for _kw, num in find_closing_keyword_references(title)):
+        return _closing_keyword_location(title, issue, "PR title")
+    return _closing_keyword_location(message, issue, "commit messages")
+
+
+def _closing_remedy(issue: int) -> str:
+    return f"reword it to 'Refs #{issue}'"
+
+
 def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
     intents = extract_closure_intents(body)
     cleaned_prose = strip_markers(body)
@@ -274,11 +294,15 @@ def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
 
     untracked_issues = set(detected_by_issue.keys()) - set(intent_by_issue.keys())
     if untracked_issues:
+        first = min(untracked_issues)
+        where = _closing_keyword_location(body if isinstance(body, str) else "", first, "PR body")
         culprits = ", ".join(
             f"#{num} ({', '.join(detected_by_issue[num])})" for num in sorted(untracked_issues)
         )
         raise IssueClosureIntentError(
-            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: PR prose contains GitHub closing keywords targeting {culprits}. "
+            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: {where} would close #{first}, "
+            f"which has no NEXUS_ISSUE_INTENT_V1 entry; {_closing_remedy(first)}. "
+            f"PR prose contains GitHub closing keywords targeting {culprits}. "
             "Declare intent in <!-- NEXUS_ISSUE_INTENT_V1 or rephrase using neutral prose (e.g. '#X remains open')."
         )
 
@@ -286,8 +310,10 @@ def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
         if action == ON_MERGE_KEEP_OPEN:
             if issue_num in detected_by_issue:
                 kws = ", ".join(detected_by_issue[issue_num])
+                where = _closing_keyword_location(body, issue_num, "PR body")
                 raise IssueClosureIntentError(
-                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN: PR prose contains closing keyword '{kws}' targeting #{issue_num}, "
+                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN: {where} would close #{issue_num} "
+                    f"(intent KEEP_OPEN); {_closing_remedy(issue_num)}. PR prose contains closing keyword '{kws}' targeting #{issue_num}, "
                     f"which triggers GitHub auto-close even when negated (e.g. 'does not close #{issue_num}'). "
                     f"Use neutral prose such as '#{issue_num} remains open' instead."
                 )
@@ -379,11 +405,15 @@ def validate_final_merge_intent_binding(
 
     untracked_issues = set(detected_in_final.keys()) - set(intent_by_issue.keys())
     if untracked_issues:
+        first = min(untracked_issues)
+        where = _final_fields_location(commit_title or "", commit_message or "", first)
         culprits = ", ".join(
             f"#{num} ({', '.join(detected_in_final[num])})" for num in sorted(untracked_issues)
         )
         raise IssueClosureIntentError(
-            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: Final merge fields contain GitHub closing keywords targeting {culprits}. "
+            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: {where} would close #{first}, "
+            f"which has no NEXUS_ISSUE_INTENT_V1 entry; {_closing_remedy(first)}. "
+            f"Final merge fields contain GitHub closing keywords targeting {culprits}. "
             "Remove closing keywords or declare explicit intent in PR body."
         )
 
@@ -391,8 +421,10 @@ def validate_final_merge_intent_binding(
         if action == ON_MERGE_KEEP_OPEN:
             if issue_num in detected_in_final:
                 kws = ", ".join(detected_in_final[issue_num])
+                where = _final_fields_location(commit_title or "", commit_message or "", issue_num)
                 raise IssueClosureIntentError(
-                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS: Final merge commit fields contain closing keyword '{kws}' targeting #{issue_num}, "
+                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS: {where} would close "
+                    f"#{issue_num} (intent KEEP_OPEN); {_closing_remedy(issue_num)}. Final merge commit fields contain closing keyword '{kws}' targeting #{issue_num}, "
                     f"which contradicts declared KEEP_OPEN intent and would trigger GitHub auto-close."
                 )
 
