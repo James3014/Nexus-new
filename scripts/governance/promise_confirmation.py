@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ from nexus.services.promise_confirmation import (
     emit_promise_blocks,
     emit_witness_templates,
 )
+
+DEFAULT_TRUSTED = ("James3014", "james3014-nexus-agent[bot]")
 
 
 class Gh:
@@ -43,6 +46,7 @@ class Gh:
         data = self.api("--paginate", "--slurp", f"repos/{self.repo}/issues/{n}/comments?per_page=100")
         flat = [c for part in data for c in (part if isinstance(part, list) else [part])]
         return [{"body": c.get("body") or "", "created_at": c.get("created_at"),
+                 "updated_at": c.get("updated_at"), "author_association": c.get("author_association"),
                  "author": (c.get("user") or {}).get("login", "")} for c in flat]
 
     def history(self, n: int) -> list[dict] | None:
@@ -102,17 +106,29 @@ def _emit(path: str, generation: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
+        detail = (getattr(exc, "stderr", "") or str(exc)).strip().splitlines()
+        print(f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}", file=sys.stderr)
+        return 2
+
+
+def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", default="James3014/Nexus-new")
     ap.add_argument("--issue", type=int)
     ap.add_argument("--pr", type=int, action="append", default=[])
     ap.add_argument("--author-session", action="append", default=[])
+    ap.add_argument("--trusted-login", action="append", default=list(DEFAULT_TRUSTED))
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--now")
     ap.add_argument("--offline-input")
     ap.add_argument("--emit-blocks")
     ap.add_argument("--generation", type=int, default=1)
     args = ap.parse_args(argv)
+    if args.now and not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", args.now):
+        ap.error("--now must be RFC3339 UTC ending in Z, e.g. 2026-10-18T12:00:00Z")
     if args.emit_blocks:
         return _emit(args.emit_blocks, args.generation)
     if args.offline_input:
@@ -121,7 +137,9 @@ def main(argv: list[str] | None = None) -> int:
         rep = build_promise_confirmation_report(
             issue_body=d["issue_body"], body_history=d.get("body_history"), comments=d["comments"],
             prs=d["prs"], contains=lambda a, c: table.get((a, c)), now=d["now"],
-            author_identities=d.get("author_identities", []))
+            author_identities=d.get("author_identities", []),
+            trusted_logins=d.get("trusted_logins", args.trusted_login),
+            issue_created_at=d.get("issue_created_at"))
     else:
         if args.issue is None:
             ap.error("--issue is required")
@@ -136,7 +154,8 @@ def main(argv: list[str] | None = None) -> int:
         rep = build_promise_confirmation_report(
             issue_body=issue.get("body") or "", body_history=gh.history(args.issue),
             comments=gh.comments(args.issue), prs=prs, contains=gh.contains, now=now,
-            author_identities=[a for a in authors if a])
+            author_identities=[a for a in authors if a],
+            trusted_logins=args.trusted_login, issue_created_at=issue.get("created_at"))
     print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
     return 0
 

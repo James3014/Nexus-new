@@ -169,10 +169,35 @@ def _parse_statements(body: str) -> dict[str, dict[str, str]]:
     return out
 
 
-def _blocks(comments: Sequence[Mapping[str, Any]], regex: re.Pattern[str]):
+_TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+def _blocks(
+    comments: Sequence[Mapping[str, Any]],
+    regex: re.Pattern[str],
+    kind: str,
+    trusted: frozenset[str],
+    ignored: list[dict],
+):
+    """Yield (comment, block text) from trusted, unedited comments only."""
     for comment in comments:
-        for text in regex.findall(str(comment.get("body", ""))):
-            yield comment, text
+        texts = regex.findall(str(comment.get("body", "")))
+        if not texts:
+            continue
+        author = str(comment.get("author", ""))
+        reason = None
+        if comment.get("author_association") not in _TRUSTED_ASSOCIATIONS and author.lower() not in trusted:
+            reason = "UNTRUSTED_COMMENT_AUTHOR"
+        else:
+            created, updated = _ts(comment.get("created_at")), _ts(comment.get("updated_at"))
+            if created and updated and updated > created:
+                reason = "COMMENT_EDITED_AFTER_POSTING"
+        for text in texts:
+            if reason:
+                ignored.append({"kind": kind, "author": author,
+                                "created_at": comment.get("created_at"), "reason": reason})
+            else:
+                yield comment, text
 
 
 def _parse_witness(text: str, now: datetime) -> dict[str, Any] | None:
@@ -225,7 +250,7 @@ def _parse_confirmation(text: str) -> dict[str, Any] | None:
 
 def _live_for_all(prs: Sequence[Mapping[str, Any]], commit: str, contains: Contains) -> bool:
     merged = [p["merge_sha"] for p in prs if p.get("merge_sha")]
-    return all(contains(sha, commit) is True for sha in merged)
+    return bool(merged) and all(contains(sha, commit) is True for sha in merged)
 
 
 def _judge_witness(w, *, promise_set, identity, statements, prs, contains) -> str | None:
@@ -280,12 +305,21 @@ def _satisfied(required: set[str], passed: set[str]) -> bool:
     return bool(passed) if required == {"ANY"} else required <= passed
 
 
-def _predeclaration(history, work_start, current_set, current_identity) -> tuple[set[str], set[str]]:
-    """(informational reasons, reasons that block VERIFIED); dropped ids use BLOCKED prefix."""
+def _predeclaration(
+    history, work_start, current_set, current_identity, issue_created_at=None
+) -> tuple[set[str], set[str]]:
+    """(reasons to report, reasons that block VERIFIED); dropped ids use BLOCKED prefix."""
+    created = _ts(issue_created_at) if issue_created_at else None
+    if issue_created_at and (created is None or (_ts(work_start) and created > _ts(work_start))):  # type: ignore[operator]
+        return {"PROMISE_SET_NOT_PREDECLARED"}, {"PROMISE_SET_NOT_PREDECLARED"}
     if history is None:
         return {"PROMISE_HISTORY_UNAVAILABLE"}, {"PROMISE_HISTORY_UNAVAILABLE"}
     if not history:
-        return set(), set()  # never edited: the current body is the original
+        # Never edited: the current body is the original, but only the Issue's
+        # creation time proves it predates the work.
+        if created is None:
+            return {"PROMISE_HISTORY_UNAVAILABLE"}, {"PROMISE_HISTORY_UNAVAILABLE"}
+        return set(), set()
     start = _ts(work_start)
     stamped = [(_ts(h.get("edited_at")), h) for h in history]
     if start is None or any(ts is None for ts, _ in stamped):
@@ -308,15 +342,14 @@ def _predeclaration(history, work_start, current_set, current_identity) -> tuple
         return reasons, reasons
     if issue_promise_set_identity(old_set) != current_identity:
         reason = {"PROMISE_SET_CHANGED_AFTER_WORK_START"}
-        newer = current_set["promise_set_generation"] > old_set["promise_set_generation"]
-        return reason, set() if newer else reason
+        return reason, reason
     return set(), set()
 
 
-def _confirmation(comments, identity, prs, contains, now) -> tuple[dict | None, list[dict]]:
+def _confirmation(comments, identity, prs, contains, trusted, blocks_ignored) -> tuple[dict | None, list[dict]]:
     ignored: list[dict] = []
     candidates: list[tuple[datetime, dict]] = []
-    for comment, text in _blocks(comments, _CONFIRM_RE):
+    for comment, text in _blocks(comments, _CONFIRM_RE, "CONFIRMATION", trusted, blocks_ignored):
         parsed = _parse_confirmation(text)
         created = _ts(comment.get("created_at"))
         if parsed is None or created is None:
@@ -342,6 +375,8 @@ def build_promise_confirmation_report(
     contains: Contains,
     now: str,
     author_identities: Sequence[str],
+    trusted_logins: Sequence[str] = (),
+    issue_created_at: str | None = None,
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
     try:
@@ -363,11 +398,15 @@ def build_promise_confirmation_report(
 
     witnesses: dict[str, list[dict]] = {pid: [] for pid in declared}
     malformed = unknown = 0
-    for _, text in _blocks(comments, _WITNESS_RE):
+    trusted = frozenset(t.lower() for t in trusted_logins)
+    ignored_blocks: list[dict] = []
+    all_by: set[str] = set()
+    for _, text in _blocks(comments, _WITNESS_RE, "WITNESS", trusted, ignored_blocks):
         w = _parse_witness(text, now_dt)
         if w is None:
             malformed += 1
             continue
+        all_by.add(w["by"].lower())
         reason = _judge_witness(w, promise_set=promise_set, identity=identity,
                                 statements=statements, prs=prs, contains=contains)
         if reason == "WITNESS_UNKNOWN_PROMISE":
@@ -375,7 +414,7 @@ def build_promise_confirmation_report(
             continue
         witnesses[w["promise_id"]].append({**w, "valid": reason is None, "reason": reason})
 
-    confirmation, ignored = _confirmation(comments, identity, prs, contains, now_dt)
+    confirmation, ignored = _confirmation(comments, identity, prs, contains, trusted, ignored_blocks)
     authors = {a.lower() for a in author_identities}
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
@@ -388,7 +427,10 @@ def build_promise_confirmation_report(
         passed = {w["phase"] for w in valid if w["result"] == "PASS"}
         required = _required_phases(promise["phase"], promise["risk"])
         live_failures = []
-        for failure in (w for w in valid if w["result"] == "ACTUAL_FAILED"):
+        # A failure whose only defect is an older promise-set identity still counts.
+        failing = [w for w in ws if w["result"] == "ACTUAL_FAILED"
+                   and (w["valid"] or w["reason"] == "WITNESS_PROMISE_SET_MISMATCH")]
+        for failure in failing:
             fix = _superseding_fix(failure, valid, prs, contains)
             if fix is None:
                 live_failures.append(failure)
@@ -413,9 +455,8 @@ def build_promise_confirmation_report(
         verdict = None
         if confirmation is not None and pid in verdicts:
             v = verdicts[pid]
-            by = {w["by"].lower() for w in ws}
             who = confirmation["confirmer"].lower()
-            independent = who not in by and who not in authors
+            independent = who not in all_by and who not in authors
             if not independent:
                 reasons.add("CONFIRMER_NOT_INDEPENDENT")
             verdict = {"verdict": v["verdict"], "counterexample_checked": v["counterexample_checked"],
@@ -430,12 +471,11 @@ def build_promise_confirmation_report(
 
     info, blockers = _predeclaration(
         None if body_history is None else list(body_history),
-        min((p["created_at"] for p in prs), default=now), promise_set, identity)
+        min((p["created_at"] for p in prs), default=now), promise_set, identity, issue_created_at)
     top: set[str] = set(info)
-    needs_post = any(r["phase"] == "POST_MERGE" or r["risk"] == "HIGH" for r in rows)
     if not prs:
         top.add("NO_PR_LISTED")
-    if needs_post and any(not p.get("merge_sha") for p in prs):
+    if any(not p.get("merge_sha") for p in prs):
         top.add("PR_NOT_MERGED")
     if unknown:
         top.add("WITNESS_UNKNOWN_PROMISE")
@@ -463,4 +503,5 @@ def build_promise_confirmation_report(
         "promises_total": len(rows), "witnessed": count("WITNESSED"), "uncovered_count": count("UNCOVERED"),
         "failed": count("FAILED"), "stale": count("STALE"),
         "malformed_witnesses": malformed, "ignored_confirmations": ignored,
+        "ignored_blocks": ignored_blocks,
     }
