@@ -100,17 +100,28 @@ _sha256() {
   fi
 }
 
+# Disposable-HOME / escape guard and the shared Git-config fingerprint;
+# runs under python3 -I from this script's own checkout.
+GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/codex_run_guard.py"
+
 # HEAD, the checked-out branch (name + object), porcelain status, tracked
 # diff, untracked file bytes and the Git common dir's code-bearing metadata
-# (config, hooks/, info/).  Refs are deliberately limited to HEAD and its
-# branch: the common dir is shared with every other worktree, so another
-# session's commit, fetch (refs/remotes) or `gc --auto` (packed-refs) during
+# (config, hooks/, info/).  The config part is not a hash of the whole
+# shared file: another session's `git worktree add -b` / `--set-upstream-to`
+# rewrites it constantly.  It comes from the same Python definition the Agy
+# path uses (nexus/executors/agy_write_admission.py::git_config_fingerprint,
+# #2541/#2547): Git-written branch.* / remote.*.fetch bookkeeping with
+# bookkeeping-shaped values is excluded, every other key (core.hooksPath,
+# filter.*, alias.*, include*, remote.*.url ...) and config.worktree stay
+# covered.  A failed or malformed result fails the snapshot (#2547).
+# Refs are deliberately limited to HEAD and its branch: the common dir is
+# shared with every other worktree, so another session's commit, fetch (refs/remotes) or `gc --auto` (packed-refs) during
 # a multi-minute run would otherwise be a false integrity violation; codex
 # workspace-write already denies writes under .git.  Every step that can fail returns 1 so a snapshot
 # that cannot be taken is never mistaken for an unchanged checkout; a missing
 # hooks/ or info/ directory is a normal state, not a failure.
 _fingerprint_material() {
-  local root="$1" common dir file branch rc
+  local root="$1" common dir file branch rc config
   common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)" || return 1
   git -C "$root" rev-parse --verify HEAD || return 1
   git -C "$root" status --porcelain=v1 -uall -z || return 1
@@ -131,7 +142,9 @@ _fingerprint_material() {
     return 1
   fi
   printf 'config:'
-  _sha256 < "$common/config" || echo missing
+  config="$(python3 -I "$GUARD" git-config-fingerprint "$root")" || return 1
+  [[ "$config" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$config"
   for dir in hooks info; do
     [[ -d "$common/$dir" ]] || continue
     find "$common/$dir" -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
@@ -172,8 +185,7 @@ echo "[nexus-enforced] work_copy=$WORK_DIR"
 # Disposable HOME (#2254): codex gets a copy of its auth file only (0600), an
 # allowlisted environment, and never the host HOME (~/.ssh, ~/.config/gh,
 # ~/.gitconfig, ~/.codex history/sessions/memories/MCP config).  The helper
-# runs under python3 -I from this script's own checkout.  Deleted on exit.
-GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/codex_run_guard.py"
+# ($GUARD, defined above) runs under python3 -I.  Deleted on exit.
 mkdir -p "$CODEX_STATE_DIR"
 RUN_HOME="$(mktemp -d "$CODEX_STATE_DIR/home.XXXXXX")"
 python3 -I "$GUARD" home "$RUN_HOME" || exit 2

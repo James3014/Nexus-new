@@ -2851,3 +2851,39 @@ def test_bookkeeping_entry_requires_bookkeeping_shaped_value():
         ("remote.origin.url", "https://github.com/x/y"),
     ):
         assert not entry(key, value, remotes), (key, value)
+
+
+# ---------------------------------------------------------------------------
+# #2547: the Codex launcher reuses the same config fingerprint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", CONFIG_CHURN)
+def test_git_config_fingerprint_ignores_shared_config_bookkeeping_churn(tmp_path, kind):
+    canonical = _repo_with_origin(tmp_path)
+    before = admission.git_config_fingerprint(canonical)
+    assert before is not None and re.fullmatch(r"[0-9a-f]{64}", before)
+    _config_churn(kind, canonical, tmp_path)
+    assert admission.git_config_fingerprint(canonical) == before
+
+
+@pytest.mark.parametrize("kind", [kind for kind in CODE_BEARING_CHANGES if kind != "hook_file"])
+def test_git_config_fingerprint_still_covers_code_bearing_config(tmp_path, kind):
+    canonical = _repo_with_origin(tmp_path)
+    before = admission.git_config_fingerprint(canonical)
+    assert before is not None
+    _code_bearing_change(kind, canonical, tmp_path)
+    after = admission.git_config_fingerprint(canonical)
+    assert after is not None
+    assert after != before
+
+
+def test_git_config_fingerprint_fails_closed(tmp_path):
+    canonical = _repo(tmp_path)
+    assert admission.git_config_fingerprint(canonical) is not None
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    assert admission.git_config_fingerprint(not_a_repo) is None
+    with (canonical / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write('[branch "unterminated\n\tmerge = x\n')
+    assert admission.git_config_fingerprint(canonical) is None

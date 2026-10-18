@@ -66,6 +66,19 @@ case "$FAKE_CODEX_MODE" in
     git -C "$FAKE_CANONICAL" update-ref refs/heads/side "$moved"
     git -C "$FAKE_CANONICAL" pack-refs --all
     echo '{"type":"turn.completed"}' ;;
+  churn|codecfg:*)
+    # #2547: what other sessions do to the shared config during a run.
+    branch="$(git -C "$FAKE_CANONICAL" symbolic-ref --short HEAD)"
+    git -C "$FAKE_CANONICAL" worktree add -q -b concurrent-2547 "$FAKE_CANONICAL/../other-wt" "origin/$branch"
+    git -C "$FAKE_CANONICAL" branch -q --set-upstream-to "origin/$branch"
+    git -C "$FAKE_CANONICAL" remote set-branches --add origin feat/x
+    git -C "$FAKE_CANONICAL" config branch.feat/x.description work
+    if [[ "$FAKE_CODEX_MODE" == codecfg:* ]]; then
+      spec="${FAKE_CODEX_MODE#codecfg:}"
+      git -C "$FAKE_CANONICAL" config "${spec%%=*}" "${spec#*=}"
+    fi
+    echo '{"type":"turn.completed"}' ;;
+  *) echo '{"type":"turn.completed"}' ;;
 esac
 """
 
@@ -82,6 +95,7 @@ def _launch(
     model: str = "gpt-test",
     commit: bool = True,
     default_work_root: bool = False,
+    origin: bool = False,
 ):
     canonical = tmp_path / "canonical"
     ops = canonical / "scripts" / "ops"
@@ -94,6 +108,12 @@ def _launch(
     if commit:
         _git(canonical, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
         _git(canonical, "branch", "side")
+    if origin:
+        # A fetched remote, so upstream bookkeeping during the run is real (#2547).
+        upstream = tmp_path / "upstream"
+        _git(tmp_path, "clone", "-q", "--bare", str(canonical), str(upstream))
+        _git(canonical, "remote", "add", "origin", str(upstream))
+        _git(canonical, "fetch", "-q", "origin")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "codex"
@@ -104,6 +124,25 @@ def _launch(
         stub = bin_dir / "python3"
         stub.write_text(
             f'#!/usr/bin/env bash\n[[ "$1" == "-I" && "$2" == "-" ]] && exit 1\nexec "{sys.executable}" "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+    if mode.startswith("cfg"):
+        # The shared Git-config fingerprint fails (cfgfail), prints nothing
+        # (cfgempty) or prints garbage (cfgjunk); cfglate fails only on the
+        # second (after-run) call.  Every other python3 call runs for real.
+        behaviour = {
+            "cfgfail": "exit 1",
+            "cfgempty": "exit 0",
+            "cfgjunk": "echo not-a-sha256; exit 0",
+            "cfglate": f'n=$(cat "{tmp_path}/cfg-calls" 2>/dev/null || echo 0); '
+            f'echo $((n + 1)) > "{tmp_path}/cfg-calls"; [[ "$n" -ge 1 ]] && exit 1',
+        }[mode]
+        stub = bin_dir / "python3"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f'if [[ "$1" == "-I" && "$3" == "git-config-fingerprint" ]]; then {behaviour}; fi\n'
+            f'exec "{sys.executable}" "$@"\n',
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -283,3 +322,85 @@ def test_codex_launcher_denial_classifier_failure_is_non_delivery(tmp_path):
 
     assert res.returncode == 4, res.stderr
     assert "codex_action_denied" in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# #2547: shared .git/config churn vs code-bearing config (one definition)
+# ---------------------------------------------------------------------------
+
+_GUARD = _LAUNCHER.parent / "codex_run_guard.py"
+
+
+def _config_get(root: Path, key: str) -> str:
+    return subprocess.run(
+        ["git", "config", "--get", key], cwd=root, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_codex_launcher_survives_concurrent_branch_and_worktree_bookkeeping(tmp_path):
+    # Another session's `worktree add -b`, `--set-upstream-to`, fetch refspec
+    # and branch description rewrite the shared config mid-run: not a violation.
+    res, _, canonical = _launch(tmp_path, "churn", origin=True)
+
+    assert res.returncode == 0, res.stderr
+    assert "canonical_checkout_integrity_violation" not in res.stderr
+    # The churn really happened, so a whole-file hash would have failed.
+    assert _config_get(canonical, "branch.concurrent-2547.merge").startswith("refs/heads/")
+    assert _config_get(canonical, "branch.feat/x.description") == "work"
+
+
+def test_codex_launcher_still_fails_on_code_bearing_config_changes(tmp_path):
+    for index, change in enumerate((
+        "core.hooksPath=/tmp/evil-hooks-2547",
+        "filter.x.clean=sh -c true",
+        "alias.st=!sh -c true",
+        "remote.origin.url=https://evil.example/repo.git",
+        "branch.side.remote=/tmp/evil-2547.git",
+    )):
+        res, _, _ = _launch(tmp_path / str(index), f"codecfg:{change}", origin=True)
+        assert res.returncode == 5, (change, res.stderr)
+        assert "canonical_checkout_integrity_violation" in res.stderr, change
+
+
+def test_codex_launcher_refuses_when_the_config_fingerprint_fails(tmp_path):
+    for mode in ("cfgfail", "cfgempty", "cfgjunk"):
+        res, argv, _ = _launch(tmp_path / mode, mode)
+        assert res.returncode == 2, (mode, res.stderr)
+        assert "canonical_checkout_snapshot_unavailable" in res.stderr, mode
+        assert argv == [], mode
+
+
+def test_codex_launcher_fails_when_the_config_fingerprint_fails_after_the_run(tmp_path):
+    res, argv, _ = _launch(tmp_path, "cfglate")
+
+    assert argv, res.stderr  # codex ran: the before-snapshot succeeded
+    assert res.returncode == 5, res.stderr
+    assert "canonical_snapshot_failed" in res.stderr
+
+
+def test_guard_git_config_fingerprint_is_the_shared_definition(tmp_path):
+    from nexus.executors import agy_write_admission as admission
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    ok = subprocess.run(
+        [sys.executable, "-I", str(_GUARD), "git-config-fingerprint", str(repo)],
+        capture_output=True,
+        text=True,
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.strip() == admission.git_config_fingerprint(repo)
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    bad = subprocess.run(
+        [sys.executable, "-I", str(_GUARD), "git-config-fingerprint", str(plain)],
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode == 2
+    assert bad.stdout == ""
+    assert "git_config_unreadable" in bad.stderr

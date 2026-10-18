@@ -10,6 +10,8 @@ file's location, never from the caller's cwd or PYTHONPATH.
   writeback <run_home>                     copy a refreshed auth.json back to the host
   exec <run_home> [<work_dir>] -- <cmd>    run cmd with the allowlisted env, then
                                            kill every descendant it left (#2367)
+  git-config-fingerprint <root>            print the sha256 of the code-bearing Git
+                                           config behind root; exit 2 if unreadable (#2547)
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from nexus.executors import cli_worker  # noqa: E402
+from nexus.executors import agy_write_admission, cli_worker  # noqa: E402
 from nexus.executors import codex_run_boundary as boundary  # noqa: E402
 
 ESCAPE_EXIT = 6
@@ -154,6 +156,13 @@ def main(argv: list[str]) -> int:
             print(f"[nexus-enforced] {failure}: {argv[1]}", file=sys.stderr)
             return ESCAPE_EXIT
         return 0
+    if len(argv) == 2 and argv[0] == "git-config-fingerprint":
+        value = agy_write_admission.git_config_fingerprint(Path(argv[1]))
+        if value is None:
+            print(f"[nexus-enforced] git_config_unreadable: {argv[1]}", file=sys.stderr)
+            return 2
+        print(value)
+        return 0
     if len(argv) == 2 and argv[0] == "writeback":
         boundary.write_back_refreshed_auth(Path(argv[1]))
         return 0
@@ -166,7 +175,10 @@ def main(argv: list[str]) -> int:
             return 64
         env = boundary.codex_child_env(None, home=home, tmpdir=home / "tmp")
         return run_in_own_group(command, env, work_dir)
-    print("usage: codex_run_guard.py home|snapshot|verify|exec ...", file=sys.stderr)
+    print(
+        "usage: codex_run_guard.py home|snapshot|verify|exec|git-config-fingerprint ...",
+        file=sys.stderr,
+    )
     return 64
 
 
