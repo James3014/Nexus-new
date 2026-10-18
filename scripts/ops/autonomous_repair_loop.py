@@ -5,7 +5,8 @@
 Orchestrates the self-healing process:
 1. Reads failure summary from ci_gate
 2. Invokes Gemini for repair strategy
-3. Executes repairs
+3. Treats the model's reply as data: only allowlisted test-runner commands are
+   run (argv-only, no shell); every other line is recorded, never executed (#2634)
 4. Re-verifies via ci_gate --dry-run
 5. Rolls back on persistent failure
 """
@@ -94,6 +95,36 @@ def _deep_breath(failure_context: str, root_path: Path) -> str:
     return ""
 
 
+def execute_repair_proposals(lines, cwd):
+    """Run model-proposed lines without a shell, behind the test-runner allowlist.
+
+    Model output (which can echo CI failure text) is never shell text (#2634): a line
+    is split with shlex and run argv-only when it is an allowlisted test-runner
+    command; any other line is recorded as NOT_EXECUTED.
+    """
+    from nexus.delivery.evidence_verifier import parse_allowlisted_test_command
+
+    outcomes = []
+    for line in lines:
+        cmd = line.strip()
+        if not cmd or cmd.startswith("#"):
+            continue
+        try:
+            argv = parse_allowlisted_test_command(cmd)
+        except ValueError as exc:
+            print(f"  [not executed] {cmd!r}: {exc}")
+            outcomes.append({"command": cmd, "status": "NOT_EXECUTED", "reason": str(exc)})
+            continue
+        print(f"  > {cmd}")
+        try:
+            res = subprocess.run(argv, cwd=str(cwd), stdin=subprocess.DEVNULL, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            outcomes.append({"command": cmd, "status": "FAILED_TO_RUN", "reason": str(exc)})
+            continue
+        outcomes.append({"command": cmd, "status": "EXECUTED", "exit_code": res.returncode})
+    return outcomes
+
+
 @nexus_metabolize(task_name="Autonomous Repair Loop")
 def run_repair_loop():
     print("🧠 [Autonomous-Repair] Initializing ReAct Healing Cycle...")
@@ -170,12 +201,9 @@ def run_repair_loop():
         strategy_summary = "; ".join([c for c in repair_commands if not c.startswith("#")])[:200]
         repair_history.append(strategy_summary)
 
-        # 4. Execute Repairs
-        print(f"🛠️ Executing {len(repair_commands)} repair commands...")
-        for cmd in repair_commands:
-            if cmd.strip() and not cmd.startswith("#"):
-                print(f"  > {cmd}")
-                subprocess.run(cmd, shell=True, cwd=str(ROOT))
+        # 4. Model output is data: never run through a shell (#2634)
+        print(f"🛠️ Reviewing {len(repair_commands)} proposed repair lines...")
+        execute_repair_proposals(repair_commands, ROOT)
 
         # 5. Verify with CI Gate (Dry-run)
         print("🔎 Verifying repair...")
