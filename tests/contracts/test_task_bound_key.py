@@ -78,3 +78,10 @@ def test_planner_binding_routes_through_task_bound_key(monkeypatch: pytest.Monke
     assert not psb.is_planner_bound(SNAPSHOT, task_id="task-1")
     assert [c[0] for c in calls] == ["task-1", "task-1"]
     assert calls[0][1] == psb.planner_snapshot_digest(SNAPSHOT)
+
+
+def test_invalid_task_is_refused_before_hashing_the_snapshot() -> None:
+    # main returned False here without hashing; an unsortable snapshot must not raise instead
+    unsortable = {1: "a", "b": 2}
+    for task_id in (None, "", "  ", 0):
+        assert psb.is_planner_bound(unsortable, task_id=task_id) is False

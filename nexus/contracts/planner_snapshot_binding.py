@@ -24,7 +24,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from typing import Any
 
-from nexus.contracts.task_bound_key import TaskBoundKey, task_bound_key
+from nexus.contracts.task_bound_key import TaskBoundKey, task_bound_key, task_identity
 
 ROUTE_CONTEXT_NOT_PLANNER_BOUND = "ROUTE_CONTEXT_NOT_PLANNER_BOUND"
 _MAX_BOUND_SNAPSHOTS = 1024
@@ -53,7 +53,8 @@ def register_planner_snapshot(snapshot: Mapping[str, Any], *, task_id: str) -> s
 
 
 def is_planner_bound(snapshot: object, *, task_id: object) -> bool:
-    if not isinstance(snapshot, Mapping) or not snapshot:
+    # Task check first (no digest work for an invalid task id), as before the helper existed.
+    if task_identity(task_id) is None or not isinstance(snapshot, Mapping) or not snapshot:
         return False
     key = task_bound_key(task_id, planner_snapshot_digest(snapshot))
     if key is None:
