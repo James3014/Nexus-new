@@ -46,7 +46,12 @@ _T = TypeVar("_T")
 
 DEFAULT_FLEET_LANES = ("security_sentry", "logic_breaker", "ghost_regression")
 SCHEMA_VERSION = "ultra-review.v1"
-GHOST_REGRESSION_TIMEOUT_SEC = 30
+# Default ghost-regression pytest timeout (one real mapped test file takes ~76 s, #2623);
+# override per service (``test_timeout_sec``) or with ULTRA_TEST_TIMEOUT_ENV.
+GHOST_REGRESSION_TIMEOUT_SEC = 300
+ULTRA_TEST_TIMEOUT_ENV = "NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC"
+# pytest short-summary lines ("FAILED tests/x.py::test_y - msg", "ERROR tests/x.py").
+PYTEST_FAILED_LINE = re.compile(r"^(?:FAILED|ERROR) (.+?)(?: - .*)?$")
 LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
@@ -110,13 +115,35 @@ def _as_review_error(func: Callable[..., _T]) -> Callable[..., _T]:
     return wrapper
 
 
+def _mode_phrase(mode: str) -> str:
+    """How a finding summary names the run (review mode is not a dry-run, #2623)."""
+    return "ultra-review dry-run" if mode == DRY_RUN_MODE else "ultra-review review mode"
+
+
 sbpl_path = _as_review_error(_lane_sbpl_path)
 _write_no_follow = _as_review_error(write_no_follow)
 
 
 class UltraReviewService:
-    def __init__(self, project_root: Path | str):
+    def __init__(self, project_root: Path | str, *, test_timeout_sec: float | None = None):
         self.project_root = Path(project_root).resolve()
+        if test_timeout_sec is not None and test_timeout_sec <= 0:
+            raise ValueError("test_timeout_sec must be positive")
+        self._test_timeout_sec = test_timeout_sec
+
+    def _ghost_timeout_sec(self) -> float:
+        """Ghost-regression pytest timeout: constructor value, else the env var, else the default."""
+        if self._test_timeout_sec is not None:
+            return float(self._test_timeout_sec)
+        raw = os.getenv(ULTRA_TEST_TIMEOUT_ENV, "").strip()
+        if raw:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = 0.0
+            if value > 0:
+                return value
+        return float(GHOST_REGRESSION_TIMEOUT_SEC)
 
     def run(
         self,
@@ -239,6 +266,7 @@ class UltraReviewService:
             diff_path=diff_path,
             execution_root=execution_root,
             sandbox_path=sandbox_path,
+            mode=mode,
         )
         for rule_id, tool, paths, summary in (
             (
@@ -273,7 +301,43 @@ class UltraReviewService:
                 }
             )
         self._record_progress(progress, progress_path, "logic_breaker_complete", passed=logic_breaker["passed"])
-        ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
+        explicit_tests = tuple(
+            text for text in (str(rel).strip() for rel in regression_tests) if text and text in test_candidates
+        )
+        ghost_regression = self._run_ghost_regression(
+            test_candidates,
+            execution_root=execution_root,
+            base_ref=base_ref,
+            sandbox_path=sandbox_path,
+            explicit_tests=explicit_tests,
+            mode=mode,
+        )
+        unmapped_paths = [str(item.get("changed_file") or "") for item in regression_map if not item.get("existing")]
+        ghost_regression["uncovered_paths"] = unmapped_paths
+        if (
+            changed_files
+            and not ghost_regression.get("executed_tests")
+            and not ghost_regression.get("blocked")
+            and ghost_regression.get("execution_mode") != "skipped_by_env"
+        ):
+            # No mapped test (mapping is Python-only): advisory, never a block on its own (#2623).
+            ghost_regression["coverage"] = "UNCOVERED"
+            ghost_regression["findings"].append(
+                {
+                    "id": f"ghost-regression-{len(ghost_regression['findings']) + 1}",
+                    "lane": "ghost_regression",
+                    "rule_id": "no_mapped_tests",
+                    "state": "UNCOVERED",
+                    "severity": "info",
+                    "file": unmapped_paths[0] if unmapped_paths else "",
+                    "line": 0,
+                    "repro_command": "",
+                    "summary": "No regression test maps to the changed paths; ghost regression did not run"
+                    " (advisory): " + ", ".join(unmapped_paths[:20]),
+                    "unmapped_paths": unmapped_paths,
+                    "execution_cwd": str(execution_root),
+                }
+            )
         self._record_progress(progress, progress_path, "ghost_regression_complete", passed=ghost_regression["passed"])
         findings = [*security_sentry["findings"], *logic_breaker["findings"], *ghost_regression["findings"]]
         sub_checks_passed = bool(security_sentry["passed"] and logic_breaker["passed"] and ghost_regression["passed"])
@@ -300,8 +364,6 @@ class UltraReviewService:
             blocked_reason = f"ghost_regression_not_executed:{ghost_regression.get('blocked_reason')}"
         elif ghost_regression.get("execution_mode") == "skipped_by_env":
             blocked_reason = "ghost_regression_not_executed:skipped_by_env"
-        elif not ghost_regression.get("executed_tests"):
-            blocked_reason = "ghost_regression_not_executed:no_mapped_tests"
         elif not security_sentry.get("executed_checks") or not logic_breaker.get("executed_checks"):
             blocked_reason = "lane_not_executed"
         if dry_run:
@@ -314,6 +376,11 @@ class UltraReviewService:
             if blocked_reason:
                 gate_passed = False
                 status = "BLOCKED"
+            elif sub_checks_passed and ghost_regression.get("inconclusive"):
+                # A timeout or an unpreparable base proves nothing either way: not a pass,
+                # and not a verified failure (#2623).
+                gate_passed = False
+                status = "INCONCLUSIVE"
             else:
                 gate_passed = sub_checks_passed
                 status = "PASS" if sub_checks_passed else "FAIL"
@@ -353,6 +420,9 @@ class UltraReviewService:
                 "logic_breaker_passed": logic_breaker["passed"],
                 "ghost_regression_passed": ghost_regression["passed"],
                 "executed_regression_tests": len(ghost_regression["executed_tests"]),
+                "ghost_regression_inconclusive": bool(ghost_regression.get("inconclusive")),
+                "pre_existing_test_failures": len(ghost_regression.get("pre_existing_failures") or []),
+                "uncovered_paths": len(unmapped_paths),
                 "verified_findings": sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING"),
             },
             "progress": progress,
@@ -1171,6 +1241,8 @@ class UltraReviewService:
         ghost_status = "SKIPPED"
         if test_candidates:
             ghost_status = "PASS" if bool(ghost_regression.get("passed", False)) else "FAIL"
+            if ghost_status == "PASS" and ghost_regression.get("inconclusive"):
+                ghost_status = "INCONCLUSIVE"
         logic_status = "PASS" if bool(logic_breaker.get("passed", False)) else "FAIL"
         return [
             {
@@ -1201,6 +1273,8 @@ class UltraReviewService:
                 "failed_checks": ghost_regression.get("failed_tests", []),
                 "skipped_checks": ghost_regression.get("skipped_tests", []),
                 "skip_reason": "" if test_candidates else "no_existing_regression_candidates",
+                "pre_existing_failures": ghost_regression.get("pre_existing_failures", []),
+                "inconclusive_checks": ghost_regression.get("inconclusive_tests", []),
                 "verified_findings": len(ghost_regression.get("failed_tests", [])),
             },
         ]
@@ -1335,7 +1409,9 @@ class UltraReviewService:
             "findings": findings,
         }
 
-    def _run_logic_breaker(self, *, diff_path: Path, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
+    def _run_logic_breaker(
+        self, *, diff_path: Path, execution_root: Path, sandbox_path: Path, mode: str = DRY_RUN_MODE
+    ) -> dict[str, Any]:
         repro_script = sandbox_path / "ultra_logic_repro.py"
         mirror_diff_path = execution_root / ".nexus_ultra_changes.diff"
         _write_no_follow(mirror_diff_path, Path(diff_path).read_bytes())
@@ -1381,14 +1457,14 @@ class UltraReviewService:
             stdout_tail = (result.stdout or "")[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
             rule_id = "logic_repro_failed"
-            summary = "Logic Breaker deterministic repro failed in ultra-review dry-run."
+            summary = f"Logic Breaker deterministic repro failed in {_mode_phrase(mode)}."
         except subprocess.TimeoutExpired as exc:
             passed = False
             timeout = True
             stdout_tail = str(exc.output or "")[-2000:]
             stderr_tail = str(exc.stderr or "")[-2000:]
             rule_id = "logic_repro_timeout"
-            summary = "Logic Breaker deterministic repro timed out in ultra-review dry-run."
+            summary = f"Logic Breaker deterministic repro timed out in {_mode_phrase(mode)}."
 
         findings = []
         executed_checks = ["ultra_logic_repro.py"]
@@ -1530,7 +1606,17 @@ class UltraReviewService:
             "findings": findings,
         }
 
-    def _run_ghost_regression(self, test_candidates: list[str], *, execution_root: Path) -> dict[str, Any]:
+    def _run_ghost_regression(
+        self,
+        test_candidates: list[str],
+        *,
+        execution_root: Path,
+        base_ref: str = "HEAD",
+        sandbox_path: Path | None = None,
+        explicit_tests: Sequence[str] = (),
+        mode: str = DRY_RUN_MODE,
+    ) -> dict[str, Any]:
+        timeout_sec = self._ghost_timeout_sec()
         if os.getenv(ULTRA_SKIP_GHOST_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
             return {
                 "passed": True,
@@ -1539,7 +1625,7 @@ class UltraReviewService:
                 "skipped_tests": list(test_candidates),
                 "findings": [],
                 "execution_mode": "skipped_by_env",
-                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "timeout_sec": timeout_sec,
                 "dependency_mode": "active_venv",
                 "sanitized_env": self._benchmark_env_keys_removed(),
                 "execution_cwd": str(execution_root),
@@ -1555,30 +1641,13 @@ class UltraReviewService:
                 "execution_mode": "sandbox_mirror",
                 "execution_cwd": str(execution_root),
                 "timeout": False,
-                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "timeout_sec": timeout_sec,
                 "dependency_mode": "active_venv",
                 "pytest_stdout_tail": "",
                 "pytest_stderr_tail": "",
             }
 
-        # rootdir pins conftest discovery to the sandbox mirror (the sandbox may sit inside the
-        # reviewed repo); no cache dir is written into the mirror.
-        # -I: no PYTHONPATH, user site or cwd at start-up, so a PR sitecustomize/.pth never
-        # loads; the mirror is put on sys.path by pytest's ``pythonpath`` ini override.
-        cmd = [
-            sys.executable,
-            "-I",
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--rootdir",
-            str(execution_root),
-            "-o",
-            f"pythonpath={sbpl_path(execution_root)}",
-            *test_candidates,
-        ]
+        cmd = self._ghost_pytest_cmd(execution_root, test_candidates)
         sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
         test_candidates = [
             rel for rel in test_candidates if self._contained_path(rel, execution_root) is not None
@@ -1597,63 +1666,263 @@ class UltraReviewService:
                 "execution_mode": "refused_uncontained",
                 "execution_cwd": str(execution_root),
                 "timeout": False,
-                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "timeout_sec": timeout_sec,
                 "dependency_mode": "active_venv",
                 "sanitized_env": sanitized_env,
                 "isolation": self.sandbox_isolation(),
                 "pytest_stdout_tail": "",
                 "pytest_stderr_tail": "",
             }
+        phrase = _mode_phrase(mode)
         timeout = False
+        passed = False
+        head_stdout = ""
         try:
-            result = self._sandboxed_run(cmd, cwd=execution_root, timeout=GHOST_REGRESSION_TIMEOUT_SEC)
+            result = self._sandboxed_run(cmd, cwd=execution_root, timeout=timeout_sec)
             passed = result.returncode == 0
-            stdout_tail = (result.stdout or "")[-2000:]
+            head_stdout = result.stdout or ""
+            stdout_tail = head_stdout[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
-            rule_id = "regression_test_failed"
-            summary = "Ghost regression candidate failed in ultra-review dry-run."
         except subprocess.TimeoutExpired as exc:
-            passed = False
             timeout = True
             stdout_tail = str(exc.output or "")[-2000:]
             stderr_tail = str(exc.stderr or "")[-2000:]
-            rule_id = "regression_test_timeout"
-            summary = "Ghost regression candidate timed out in ultra-review dry-run."
-        failed_tests = [] if passed else list(test_candidates)
-        findings = []
-        if not passed:
+
+        findings: list[dict[str, Any]] = []
+        regressions: list[str] = []
+        pre_existing: list[str] = []
+        inconclusive_tests: list[str] = []
+        base_comparison: dict[str, Any] = {}
+
+        def add_finding(rule_id: str, state: str, severity: str, summary: str, tests: list[str]) -> None:
             findings.append(
                 {
-                    "id": "ghost-regression-1",
+                    "id": f"ghost-regression-{len(findings) + 1}",
                     "lane": "ghost_regression",
                     "rule_id": rule_id,
-                    "state": "VERIFIED_FINDING",
-                    "severity": "high",
+                    "state": state,
+                    "severity": severity,
                     "file": "",
                     "line": 0,
                     "repro_command": " ".join(cmd),
                     "summary": summary,
+                    "tests": tests[:50],
                     "execution_cwd": str(execution_root),
                     "stdout_tail": stdout_tail,
                     "stderr_tail": stderr_tail,
                 }
             )
+
+        if timeout:
+            # Our own time budget ran out: nothing about the change is proven (#2623).
+            inconclusive_tests = list(test_candidates)
+            add_finding(
+                "regression_test_timeout",
+                "INCONCLUSIVE_TIMEOUT",
+                "info",
+                f"Ghost regression candidate timed out after {timeout_sec:g}s in {phrase}"
+                " (inconclusive, not a finding).",
+                inconclusive_tests,
+            )
+        elif not passed:
+            regressions, comparable = self._attribute_head_failures(
+                self._failed_test_ids(head_stdout), test_candidates, explicit_tests
+            )
+            if comparable:
+                # Only base-pass -> head-fail counts against the change: re-run the failing
+                # mapped tests on an isolated checkout of the base.
+                base_comparison = self._compare_failures_on_base(
+                    comparable, base_ref=base_ref, sandbox_path=sandbox_path, timeout_sec=timeout_sec
+                )
+                regressions.extend(base_comparison.pop("regressions"))
+                pre_existing = base_comparison.pop("pre_existing")
+                inconclusive_tests = base_comparison.pop("inconclusive")
+            if regressions:
+                add_finding(
+                    "regression_test_failed",
+                    "VERIFIED_FINDING",
+                    "high",
+                    f"Ghost regression candidate failed in {phrase}: " + ", ".join(regressions[:10]),
+                    regressions,
+                )
+            if pre_existing:
+                add_finding(
+                    "pre_existing_test_failure",
+                    "PRE_EXISTING_FAILURE",
+                    "info",
+                    f"Mapped test fails on base and head alike in {phrase} (not introduced by the change): "
+                    + ", ".join(pre_existing[:10]),
+                    pre_existing,
+                )
+            if inconclusive_tests:
+                timed_out = bool(base_comparison.get("timeout"))
+                add_finding(
+                    "regression_test_timeout" if timed_out else "base_comparison_unavailable",
+                    "INCONCLUSIVE_TIMEOUT" if timed_out else "INCONCLUSIVE",
+                    "info",
+                    f"Mapped test fails on head but its base result is unknown in {phrase} "
+                    f"({base_comparison.get('reason') or 'base unavailable'}): " + ", ".join(inconclusive_tests[:10]),
+                    inconclusive_tests,
+                )
         return {
-            "passed": passed,
+            "passed": not regressions,
+            "inconclusive": bool(inconclusive_tests),
             "executed_tests": list(test_candidates),
-            "failed_tests": failed_tests,
+            "failed_tests": regressions,
+            "pre_existing_failures": pre_existing,
+            "inconclusive_tests": inconclusive_tests,
+            "base_comparison": base_comparison,
             "skipped_tests": [],
             "findings": findings,
             "execution_mode": "sandbox_mirror",
             "execution_cwd": str(execution_root),
             "timeout": timeout,
-            "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+            "timeout_sec": timeout_sec,
             "dependency_mode": "active_venv",
             "sanitized_env": sanitized_env,
             "isolation": self.sandbox_isolation(),
             "pytest_stdout_tail": stdout_tail,
             "pytest_stderr_tail": stderr_tail,
         }
+
+    @staticmethod
+    def _ghost_pytest_cmd(root: Path, tests: Sequence[str]) -> list[str]:
+        # rootdir pins conftest discovery to the checkout under test (the sandbox may sit inside
+        # the reviewed repo); no cache dir is written into it. -I: no PYTHONPATH, user site or
+        # cwd at start-up, so a PR sitecustomize/.pth never loads; the checkout is put on
+        # sys.path by pytest's ``pythonpath`` ini override. -rfE lists failing test ids.
+        return [
+            sys.executable,
+            "-I",
+            "-m",
+            "pytest",
+            "-q",
+            "-rfE",
+            "-p",
+            "no:cacheprovider",
+            "--rootdir",
+            str(root),
+            "-o",
+            f"pythonpath={sbpl_path(root)}",
+            *tests,
+        ]
+
+    @staticmethod
+    def _failed_test_ids(stdout: str) -> list[str]:
+        """Test ids from pytest's short summary (``FAILED id - msg`` / ``ERROR id``)."""
+        ids: list[str] = []
+        for line in stdout.splitlines():
+            match = PYTEST_FAILED_LINE.match(line.rstrip())
+            if match and match.group(1).strip() not in ids:
+                ids.append(match.group(1).strip())
+        return ids
+
+    @staticmethod
+    def _attribute_head_failures(
+        failed_ids: list[str], test_candidates: list[str], explicit_tests: Sequence[str]
+    ) -> tuple[list[str], list[str]]:
+        """Split head failures into (regressions now, ids to compare on base).
+
+        Fail closed: a failing run with no parseable ids, an id outside the candidate files, or
+        an explicit caller-required test (``regression_tests``) is a regression outright; only
+        mapped tests get the base comparison."""
+        if not failed_ids:
+            return list(test_candidates), []
+        candidates = set(test_candidates)
+        explicit = set(explicit_tests)
+        regressions: list[str] = []
+        comparable: list[str] = []
+        for test_id in failed_ids:
+            path = test_id.split("::", 1)[0]
+            if path in candidates and path not in explicit:
+                comparable.append(test_id)
+            else:
+                regressions.append(test_id)
+        return regressions, comparable
+
+    def _compare_failures_on_base(
+        self, failed_ids: list[str], *, base_ref: str, sandbox_path: Path | None, timeout_sec: float
+    ) -> dict[str, Any]:
+        """Re-run the files of head-failing mapped tests on a detached worktree of ``base_ref``.
+
+        An id that also fails on base is pre-existing; one that passes on base, or whose test
+        file does not exist on base (a failing test the change added), is a regression; when
+        the base cannot be prepared or its result is unknown the id is inconclusive."""
+        outcome: dict[str, Any] = {
+            "base_ref": base_ref,
+            "regressions": [],
+            "pre_existing": [],
+            "inconclusive": [],
+            "reason": "",
+            "timeout": False,
+        }
+
+        def file_of(test_id: str) -> str:
+            return test_id.split("::", 1)[0]
+
+        if sandbox_path is None or not base_ref or base_ref.startswith("-"):
+            outcome["inconclusive"] = list(failed_ids)
+            outcome["reason"] = "base_ref_unusable"
+            return outcome
+        base_root = sandbox_path / "base_worktree"
+        add = self._git_run(["worktree", "add", "--detach", str(base_root), base_ref])
+        if add.returncode != 0:
+            outcome["inconclusive"] = list(failed_ids)
+            outcome["reason"] = "base_worktree_unavailable: " + (add.stderr or add.stdout or "")[-300:].strip()
+            return outcome
+        try:
+            violations = self._neutralize_base_links(base_root)
+            if violations:
+                outcome["inconclusive"] = list(failed_ids)
+                outcome["reason"] = "base_tree_special_entries: " + ", ".join(violations[:5])
+                return outcome
+            files = sorted({file_of(test_id) for test_id in failed_ids})
+            present = [
+                rel for rel in files if self._contained_path(rel, base_root) is not None and (base_root / rel).is_file()
+            ]
+            remaining = [test_id for test_id in failed_ids if file_of(test_id) in present]
+            outcome["regressions"] = [test_id for test_id in failed_ids if file_of(test_id) not in present]
+            if not remaining:
+                return outcome
+            cmd = self._ghost_pytest_cmd(base_root, present)
+            outcome["repro_command"] = " ".join(cmd)
+            try:
+                result = self._sandboxed_run(cmd, cwd=base_root, timeout=timeout_sec)
+            except subprocess.TimeoutExpired:
+                outcome["inconclusive"] = remaining
+                outcome["reason"] = f"base_run_timeout_{timeout_sec:g}s"
+                outcome["timeout"] = True
+                return outcome
+            base_failed = set(self._failed_test_ids(result.stdout or ""))
+            outcome["base_returncode"] = result.returncode
+            if result.returncode == 0:
+                outcome["regressions"].extend(remaining)
+            elif result.returncode == 1 and base_failed:
+                for test_id in remaining:
+                    if test_id in base_failed or file_of(test_id) in base_failed:
+                        outcome["pre_existing"].append(test_id)
+                    else:
+                        outcome["regressions"].append(test_id)
+            else:
+                outcome["inconclusive"] = remaining
+                outcome["reason"] = f"base_pytest_exit_{result.returncode}"
+            return outcome
+        finally:
+            self._git_run(["worktree", "remove", "--force", str(base_root)])
+
+    @staticmethod
+    def _neutralize_base_links(base_root: Path) -> list[str]:
+        """lstat-walk the base checkout: unlink symlinks resolving outside it; return any other
+        non-regular entry (the base run is then inconclusive)."""
+        root = base_root.resolve()
+
+        def accept_symlink(path: Path, rel: str) -> bool:
+            resolved = path.resolve()
+            if resolved != root and root not in resolved.parents:
+                os.unlink(path)
+            return True
+
+        return [rel for rel in lstat_walk_violations(base_root, on_symlink=accept_symlink) if rel != ".git"]
 
     def _changed_files(self, diff_text: str) -> list[str]:
         files: list[str] = []
