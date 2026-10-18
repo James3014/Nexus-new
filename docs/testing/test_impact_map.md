@@ -42,6 +42,7 @@
 | nexus-core | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
 | scratch/final_parity_check.py | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
 | scripts/test_l6_mechanical_gate.py | tests/ops/test_nightly_quarantine_items_layout.py, tests/ops/test_nightly_quarantine.py | active | low | governed_deletion_retired_path |
+| nexus/delivery/gate.py | tests/delivery, tests/test_task_runner_completion_gate.py, tests/security/test_low_severity_hardening_2635.py | active | high | completion_gate_no_shell_2635 |
 | nexus/delivery/suggestions.py | tests/delivery/test_suggestions.py, tests/test_cli_thinning.py | active | medium | verification_command_suggestion_contract |
 | nexus/bridge | tests/integration/test_capability_existence_155.py, tests/integration/test_rust_wave3_cutover.py, tests/core/test_l1_l4_realization.py | active | low | rust_bridge_python_scan_contract |
 | nexus-core-rs | tests/ops/test_retired_rust_crate_removed.py | active | low | governed_deletion_retired_path |
@@ -99,6 +100,9 @@
 | nexus/core/context_budget_sources.py | tests/core/test_context_budget_sources.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder | active | high | context_hub_split_contract |
 | nexus/core/context_text_store.py | tests/core/test_context_text_store.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_text_store | active | high | context_hub_split_contract |
 | nexus/core/memory_manager.py | tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
+| nexus/core/argv_command.py | tests/security/test_low_severity_hardening_2635.py, tests/core, tests/delivery, tests/health | active | high | no_shell_legacy_command_runner_2635 |
+| nexus/core/notifier.py | tests/security/test_low_severity_hardening_2635.py, tests/core | active | medium | notifier_osascript_argv_2635 |
+| scripts/core/guard_executor.py | tests/security/test_low_severity_hardening_2635.py, tests/test_guard_allowlist.py | active | medium | guard_executor_no_shell_2635 |
 | nexus/learning | tests/learning | active | high | learning_contract |
 | nexus/learning/skill_registry.py | tests/test_skill_sharing.py::test_skill_registry_upsert_retries_sqlite_busy_then_success, tests/test_skill_sharing.py::test_skill_registry_upsert_keeps_non_busy_errors_fail_fast, tests/test_skill_sharing.py, tests/infrastructure/test_sqlite_retry.py | active | high | skill_registry_sqlite_retry_contract |
 | nexus/learning/skill_fit_status.py | tests/learning/test_skill_fit_data_shape_pregate.py, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_finds_skill_but_blocks_benchmark_until_threshold_clean, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_uses_threshold_alternate_candidate_even_if_policy_needs_more_data | active | high | skill_fit_data_shape_pregate_contract |
@@ -142,7 +146,7 @@
 | tests/services/test_livefail_rollback.py | tests/services/test_livefail_rollback.py | active | high | livefail_rollback_red_contract |
 | docs/runbooks/declaring_expected_evidence_universe.md | tests/nexus/orchestrator/test_task_card_create_expected_evidence.py, tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_issue_promise_coverage.py | active | medium | task_card_expected_evidence_declaration |
 | docs/runbooks/gateway_r1_lost_ledger_runbook.md | tests/ops/test_mcp_gateway_durable.py | active | medium | gateway_r1_lost_ledger_runbook |
-| nexus/orchestrator/candidate_verifier.py | tests/nexus/orchestrator/test_candidate_verifier.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | verifier_static_contract_and_retry_recovery |
+| nexus/orchestrator/candidate_verifier.py | tests/nexus/orchestrator/test_candidate_verifier.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/ops/test_no_shell_model_text_2634.py | active | high | verifier_static_contract_and_retry_recovery |
 | nexus/orchestrator/code_integrity_verifier.py | tests/nexus/orchestrator/test_code_integrity_verifier.py, tests/nexus/orchestrator/test_candidate_verifier.py | active | high | code_integrity_candidate_evidence_contract |
 | nexus/orchestrator/managed_local_agent.py | tests/nexus/orchestrator/test_managed_local_agent.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | managed_local_agent_effect_binding_contract |
 | nexus/orchestrator/worktree_manager.py | tests/nexus/orchestrator/test_worktree_manager.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | high | target_ownership_release_contract |
@@ -305,7 +309,7 @@
 | nexus/services/executor_self_check.py | tests/services/test_executor_resolution_observable.py, tests/services/test_runtime_compat.py | active | high | executor_resolution_observable_self_check_contract |
 | nexus/services/post_candidate_seam.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py, tests/services/test_escalate_planner_signal_triggers.py | active | high | post_candidate_seam_sandbox_ultra_review_file_lock_contract |
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
-| nexus/executors/exec_policy.py | tests/nexus/executors/test_exec_policy.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_candidate_verifier.py, tests/engine/test_cli_pregate.py | active | high | worker_exec_policy_contract |
+| nexus/executors/exec_policy.py | tests/nexus/executors/test_exec_policy.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_candidate_verifier.py, tests/engine/test_cli_pregate.py, tests/ops/test_no_shell_model_text_2634.py | active | high | worker_exec_policy_contract |
 | nexus/executors/codex_executor.py | tests/nexus/executors/test_codex_executor.py, tests/nexus/executors/test_codex_run_boundary_executor.py, tests/nexus/executors/test_worker_contract.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_worker_planner_context_input.py | active | high | codex_receipt_attempt_count_and_worker_context_contract |
 | nexus/executors/codex_run_boundary.py | tests/ops/test_codex_run_boundary.py, tests/nexus/executors/test_codex_run_boundary_executor.py | active | high | codex_disposable_home_env_allowlist_and_target_escape_check |
 | scripts/ops/nexus-agy-dispatch | tests/services/test_agy_dispatch.py, tests/services/test_agy_dispatch_catalog_followups_2388.py, tests/services/test_agy_dispatch_attestation_channel_2314.py, tests/services/test_agy_dispatch_fast_failover.py, tests/services/test_agy_dispatch_total_deadline.py, tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch_pool_queue.py, tests/services/test_account_concurrency.py, tests/services/test_agy_review.py, tests/services/test_agy_account_pool.py, tests/nexus/executors/test_agy_dispatch_seatbelt_physical_witness.py, tests/nexus/executors/test_agy_write_admission.py, tests/ops, tests/services/test_agy_failure_signals_2415.py, tests/services/test_agy_dispatch_capability_quota_2432.py | active | high | agy_dispatch_pool_queue_rotation_contract |
@@ -566,7 +570,10 @@
 | tests/engine/test_metrics_and_belief_score.py | tests/engine/test_metrics_and_belief_score.py | active | medium | test_contract |
 | nexus/orchestrator/metrics.py | tests/engine/test_metrics_and_belief_score.py, tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_metrics_contract |
 | scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
-| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | replay_runner_allowlist |
+| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_no_shell_model_text_2634.py | active | high | replay_runner_allowlist |
+| scripts/ops/autonomous_repair_loop.py | tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |
+| nexus/engine/cli_pregate.py | tests/engine/test_cli_pregate.py, tests/engine/test_cli_pregate_isolation.py, tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |
+| tests/ops/test_no_shell_model_text_2634.py | tests/ops/test_no_shell_model_text_2634.py | active | medium | test_contract |
 | nexus/delivery/anti_drift.py | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | nexus/schemas/evidence_bundle_v1.json | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | scripts/ops/governance_manifest.py | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |

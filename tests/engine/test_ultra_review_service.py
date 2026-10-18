@@ -1648,3 +1648,193 @@ def test_ultra_review_base_worktree_cleanup_failure_is_surfaced(tmp_path, monkey
     payload = _review(tmp_path)
     assert payload["ghost_regression"]["base_comparison"]["base_cleanup"] == {"removed": False, "detail": "cannot remove"}
     assert any(f["rule_id"] == "base_worktree_cleanup_failed" for f in payload["findings"])
+
+
+# --- #2644: forgeries by code that does NOT read the HMAC key ---------------------------------
+# Scope (confirmed residual, #2644 stays open): the key lives in pytest's process, so code under
+# review that reads it from the interpreter (gc / closures of the witness plugin) can still sign
+# a forged report. These tests cover code that does not read the key; the real fix is
+# out-of-process result collection.
+# The first three are the #2628 round-2 reviewer's adversarial tests
+# (rev-2628 tests/engine/test_zz_review2628_v3.py), renamed; the exit-0 control now asserts
+# the fixed verdict instead of only printing it.
+
+_RED_FIRST = (
+    "from app import handler\n\ndef test_a_always_red():\n    assert False\n\n"
+    "def test_handler_strips():\n    assert handler('  a ') == 'a'\n"
+)
+_FORGED_JUNIT = (
+    '<?xml version="1.0"?><testsuites><testsuite><testcase classname="tests.test_app" '
+    'name="test_a_always_red" file="tests/test_app.py"><failure message="x"/></testcase>'
+    "</testsuite></testsuites>"
+)
+_FORGED_ALL_PASS = (
+    '<?xml version="1.0"?><testsuites><testsuite><testcase classname="tests.test_app" '
+    'name="test_handler_strips" file="tests/test_app.py"/></testsuite></testsuites>'
+)
+
+
+def test_ultra_review_crafted_param_ids_cannot_collide_with_base_failure(tmp_path, monkeypatch):
+    # A head-only failure must not pass as pre-existing by crafting '::', '.', ' - ' into ids.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import pytest\nfrom app import handler\n\n"
+        "class TestK:\n    def test_m(self):\n        assert False\n\n"
+        "@pytest.mark.parametrize('v', ['x', 'y'], ids=['TestK::test_m', 'K.test_m - z'])\n"
+        "def test_p(v):\n    assert handler(' ' + v) == v\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "crafted")
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL"
+    assert sorted(ghost["failed_tests"]) == [
+        "tests/test_app.py::test_p[K.test_m - z]",
+        "tests/test_app.py::test_p[TestK::test_m]",
+    ]
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::TestK::test_m"]
+
+
+def test_ultra_review_forged_junit_then_exit1_is_not_a_pass(tmp_path, monkeypatch):
+    # Candidate code writes a junit naming only the pre-existing failure, then os._exit(1).
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(
+        "import os\n"
+        f"FORGED = {_FORGED_JUNIT!r}\n"
+        "def handler(value):\n"
+        "    for p in ['../ghost-head-junit.xml']:\n"
+        "        try:\n            open(p, 'w').write(FORGED)\n"
+        "        except OSError as e:\n            print('WRITE_FAIL', e)\n"
+        "    os._exit(1)\n",
+        encoding="utf-8",
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] != "PASS"
+    assert payload["status"] == "FAIL"
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+
+
+def test_ultra_review_os_exit0_in_candidate_code_is_not_a_pass(tmp_path, monkeypatch):
+    # Before #2644 an os._exit(0) in the code under test made the review PASS.
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("import os\ndef handler(value):\n    os._exit(0)\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] != "PASS"
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["gate_passed"] is False
+    assert any(f["rule_id"] == "pytest_report_unverified" for f in payload["findings"])
+    assert payload["ghost_regression"]["head_report"]["verified"] is False
+
+
+def _argv_forger(exit_code, junit_text, *, witness=True):
+    # Keyless forger: finds the real report paths in argv (stronger than the reviewer's fixed
+    # path) but does not read the key from the interpreter, so it cannot produce a valid MAC.
+    return (
+        "import json, os, sys\n"
+        f"FORGED = {junit_text!r}\n"
+        "def handler(value):\n"
+        "    paths = [a for a in sys.argv if a.startswith('/') and a.endswith(('junit.xml', 'witness.json'))]\n"
+        "    for p in paths:\n"
+        "        if p.endswith('junit.xml'):\n"
+        "            open(p, 'w').write(FORGED)\n"
+        f"        elif {witness!r}:\n"
+        "            payload = json.dumps({'exitstatus': " + str(exit_code) + ", 'junit_sha256': ''})\n"
+        "            open(p, 'w').write(json.dumps({'payload': payload, 'mac': '0' * 64}))\n"
+        f"    os._exit({exit_code})\n"
+    )
+
+
+def test_ultra_review_keyless_argv_forged_report_and_witness_exit0_is_not_a_pass(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(_argv_forger(0, _FORGED_ALL_PASS), encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["ghost_regression"]["head_report"]["reason"] in {"witness_mac_mismatch", "witness_missing"}
+
+
+def test_ultra_review_keyless_argv_forged_report_exit1_is_a_regression(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(_argv_forger(1, _FORGED_JUNIT), encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL"
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+
+
+def test_ultra_review_keyless_junit_rewrite_after_session_is_not_trusted(tmp_path, monkeypatch):
+    # Keyless: an atexit hook rewrites the junit after pytest signed it: the hash no longer matches.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(
+        "import atexit, sys\n"
+        f"FORGED = {_FORGED_JUNIT!r}\n"
+        "def _rewrite():\n"
+        "    for p in sys.argv:\n"
+        "        if p.startswith('/') and p.endswith('junit.xml'):\n"
+        "            open(p, 'w').write(FORGED)\n"
+        "atexit.register(_rewrite)\n"
+        "def handler(value):\n    return value\n",
+        encoding="utf-8",
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL"
+    assert ghost["head_report"] == {"verified": False, "reason": "junit_hash_mismatch"}
+    assert ghost["pre_existing_failures"] == []
+
+
+def test_ultra_review_honest_run_has_verified_report(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert ghost["head_report"] == {"verified": True, "reason": ""}
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_always_red"]
+    assert payload["status"] == "PASS", payload["findings"]
+    assert "<ghost-pytest-bootstrap>" in ghost["base_comparison"]["repro_command"]
+
+
+def test_verify_ghost_report_rejects_wrong_key_exit_code_and_swapped_dir(tmp_path):
+    import hashlib
+    import hmac as hmac_mod
+
+    def signed(report, exitstatus, junit_bytes, key=None):
+        report["junit"].write_bytes(junit_bytes)
+        payload = json.dumps(
+            {"exitstatus": exitstatus, "junit_sha256": hashlib.sha256(junit_bytes).hexdigest()}, sort_keys=True
+        )
+        mac = hmac_mod.new(key or report["key"], payload.encode(), hashlib.sha256).hexdigest()
+        report["witness"].write_text(json.dumps({"payload": payload, "mac": mac}), encoding="utf-8")
+
+    verify = UltraReviewService._verify_ghost_report
+    report = UltraReviewService._new_ghost_report(tmp_path, "head")
+    assert verify(report, 0)["reason"] == "witness_missing"
+    signed(report, 0, _FORGED_ALL_PASS.encode())
+    good = verify(report, 0)
+    assert good["verified"] is True and good["junit_bytes"] == _FORGED_ALL_PASS.encode()
+    assert verify(report, 1)["reason"] == "exit_code_mismatch"
+
+    other = UltraReviewService._new_ghost_report(tmp_path, "head")
+    signed(other, 0, b"<testsuites/>", key=b"k" * 32)
+    assert verify(other, 0)["reason"] == "witness_mac_mismatch"
+
+    swapped = UltraReviewService._new_ghost_report(tmp_path, "head")
+    signed(swapped, 0, b"<testsuites/>")
+    moved = tmp_path / "moved"
+    swapped["dir"].rename(moved)
+    swapped["dir"].mkdir()
+    for name in ("junit.xml", "witness.json"):
+        (swapped["dir"] / name).write_bytes((moved / name).read_bytes())
+    assert verify(swapped, 0)["reason"] == "report_dir_replaced"

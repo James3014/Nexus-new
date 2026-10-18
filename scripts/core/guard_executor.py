@@ -4,6 +4,7 @@ import random
 import logging
 import os
 import math
+from pathlib import Path
 from typing import List
 
 # 🛡️ Nexus v9-v22 架構導入 (與主幹一致)
@@ -71,6 +72,25 @@ class EntropyAuditor:
                 # Audit Mode (Default)
                 logger.warning(msg)
 
+def preview_argv_for_rm(cmd: List[str]) -> List[str] | None:
+    """Map an ``rm`` argv to a read-only ``ls`` argv, or None if it is not one."""
+    if not cmd or os.path.basename(cmd[0]) != "rm":
+        return None
+    recursive = False
+    operands: List[str] = []
+    end_of_options = False
+    for arg in cmd[1:]:
+        if not end_of_options and arg == "--":
+            end_of_options = True
+        elif not end_of_options and arg.startswith("--"):
+            recursive = recursive or arg == "--recursive"
+        elif not end_of_options and arg.startswith("-") and arg != "-":
+            recursive = recursive or "r" in arg[1:].lower()
+        else:
+            operands.append(arg)
+    return ["ls", "-ld" if recursive else "-l", "--", *operands]
+
+
 def secure_execute():
     cmd = sys.argv[1:]
     if not cmd:
@@ -93,14 +113,15 @@ def secure_execute():
 
         # 1. 強制顯示影響範圍
         print("\n🔍 影響範圍預覽 (Dry Run):")
-        preview_cmd = (
-            cmd_str.replace("rm -rf", "ls -ld")
-            .replace("rm -f", "ls -l")
-            .replace("rm -r", "ls -ld")
-        )
+        # #2635 SEC-007: the preview runs before the human challenge, so it
+        # must never go through a shell (a file name such as "x; evil" would
+        # otherwise execute unconfirmed). Build an ls argv from the operands.
+        preview_argv = preview_argv_for_rm(cmd)
         try:
-            subprocess.run(preview_cmd, shell=True, check=False)
-        except:
+            if preview_argv is None:
+                raise ValueError("not a plain rm invocation")
+            subprocess.run(preview_argv, check=False)
+        except Exception:
             print("  無法預覽影響範圍。")
 
         # 2. 強制需要人類輸入動態驗證碼 (無法被 AI 自動繞過)
@@ -132,13 +153,30 @@ def secure_execute():
 
     # 🧬 P5: 投機指令改寫 (Speculative Rewrite)
     hook = SpeculativeToolHook()
-    cmd_str = hook.rewrite(cmd_str)
+    original_cmd_str = cmd_str
+    rewritten = hook.rewrite(cmd_str)
 
-    # 執行原始指令 (或重寫後的現代指令)
-    try:
-        subprocess.run(cmd_str, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
-        sys.exit(e.returncode)
+    # 執行原始指令 (或重寫後的現代指令)。#2635 SEC-007: no shell. The
+    # original argv keeps its quoting; a rewritten string is tokenized and run
+    # without a shell (unsupported operators are refused).
+    if rewritten == original_cmd_str:
+        try:
+            subprocess.run(list(cmd), check=True)
+        except subprocess.CalledProcessError as e:
+            sys.exit(e.returncode)
+        except FileNotFoundError:
+            sys.exit(127)
+    else:
+        repo_root = str(Path(__file__).resolve().parents[2])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from nexus.core.argv_command import run_command_string
+
+        result = run_command_string(rewritten, capture_output=False)
+        if result.returncode != 0:
+            if result.stderr:
+                print(result.stderr, end="", file=sys.stderr)
+            sys.exit(result.returncode)
 
 
 if __name__ == "__main__":

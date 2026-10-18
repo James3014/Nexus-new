@@ -3087,7 +3087,9 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 cline_model = f"cline-pass/{cline_model}"
             command = [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", cline_model, prompt]
         elif requested == "gemini":
-            command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
+            # #2635 SEC-010: the assist contract is read-only (return a patch
+            # as JSON), so Gemini runs in plan mode and cannot edit files.
+            command = [executable, "--skip-trust", "--approval-mode", "plan", "-m", selected_model, "-p", prompt, "--output-format", "json"]
         elif requested == "opencode":
             command = [executable, "run", "--model", selected_model, prompt]
         elif requested == "codex":

@@ -217,3 +217,19 @@ def test_ops_entrypoint_handles_keyboard_interrupt_without_traceback(monkeypatch
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+@pytest.mark.parametrize("authorization", ["Bearer tést-token", "Bearer 測試"])
+def test_non_ascii_authorization_header_is_401_not_an_exception(authorization):
+    """#2635 SEC-008: compare_digest on a non-ASCII str raised TypeError."""
+    mcp = RecordingMCP()
+    status, headers, body = exercise_handler(
+        handler_for("test-token", mcp_server=mcp),
+        "POST",
+        "/mcp",
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        headers={"Authorization": authorization},
+    )
+    assert status == 401
+    assert headers.get("WWW-Authenticate") == "Bearer"
+    assert mcp.requests == []

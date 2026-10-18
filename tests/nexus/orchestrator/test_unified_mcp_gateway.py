@@ -2046,6 +2046,24 @@ def test_grok_runner_uses_positional_prompt(monkeypatch, tmp_path):
     assert "--output-format" in captured["command"]
 
 
+def test_gemini_assist_runner_uses_read_only_plan_mode(monkeypatch, tmp_path):
+    """#2635 SEC-010: the assist contract is read-only, so Gemini must not get auto_edit."""
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/a b/a"}), stderr="")
+
+    monkeypatch.setenv("NEXUS_GEMINI_BIN", _fake_provider_executable(tmp_path, "gemini"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    UnifiedMCPGateway._run_agy_plan(prompt="Return a patch", allowed_files=["a"], provider="gemini", model="gemini-3.6-flash")
+
+    command = captured["command"]
+    assert command[command.index("--approval-mode") + 1] == "plan"
+    assert "auto_edit" not in command
+    assert "--yolo" not in command and "-y" not in command
+
+
 def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_path):
     import subprocess as real_subprocess
     real_popen = real_subprocess.Popen
