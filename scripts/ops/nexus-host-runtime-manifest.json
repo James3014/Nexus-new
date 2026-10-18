@@ -104,6 +104,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/exact_base_tool_gate.py",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/ops/nexus-core-issue-check-local",
       "mode": "0755"
     },
