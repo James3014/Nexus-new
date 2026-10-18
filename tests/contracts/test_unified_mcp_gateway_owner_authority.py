@@ -19,6 +19,7 @@ every success and denial path, and that facade patches keep reaching the moved c
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import stat
@@ -470,7 +471,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
+class _IssuedAtOffset:
+    """An ``issuedAt`` relative to the moment the test runs, not when it is collected.
+
+    Parametrize values are built at collection time; in the nightly full run
+    (about 28k tests) a test can execute many minutes later, so a fixed
+    "+5 minutes" timestamp drifts inside the gateway's 1-minute clock-skew
+    allowance (#2581).
+    """
+
+    def __init__(self, minutes: int) -> None:
+        self.minutes = minutes
+
+    def resolve(self) -> str:
+        return (_now() + timedelta(minutes=self.minutes)).isoformat()
+
+
 def _issue_args(**overrides: Any) -> dict[str, Any]:
+    overrides = {
+        key: value.resolve() if isinstance(value, _IssuedAtOffset) else value
+        for key, value in overrides.items()
+    }
     arguments: dict[str, Any] = {
         "repository": REPO,
         "coordinatorId": "coord-g9",
@@ -733,12 +754,12 @@ def test_issue_refuses_a_model_supplied_confirmation_first(events, probes, value
             ("_text", "issuedAt", 64),
         ),
         (
-            {"issuedAt": (_now() + timedelta(minutes=5)).isoformat()},
+            {"issuedAt": _IssuedAtOffset(5)},
             "^STANDING_GRANT_ISSUED_AT_FUTURE$",
             ("_text", "issuedAt", 64),
         ),
         (
-            {"issuedAt": (_now() - timedelta(minutes=31)).isoformat()},
+            {"issuedAt": _IssuedAtOffset(-31)},
             "^STANDING_GRANT_REQUEST_EXPIRED$",
             ("_text", "issuedAt", 64),
         ),
@@ -820,25 +841,23 @@ def test_issue_cas_denials_ask_nobody(events, probes, authority_dir, expected, m
     assert len(_audit_lines(authority_dir)) == 2
 
 
+def _structural_predecessor(*, revoked: bool, issued_in: timedelta = timedelta(0)) -> SimpleNamespace:
+    now = datetime.now(timezone.utc)
+    return SimpleNamespace(
+        context=SimpleNamespace(revoked_at=now if revoked else None, issued_at=now + issued_in),
+        receipt_hash=H64,
+    )
+
+
 @pytest.mark.parametrize(
     ("current", "message"),
     [
+        # Built when the test runs, not at collection: the nightly full run can
+        # execute this an hour or more after collection (#2581). ``partial``
+        # keeps the parametrize ids (current0/current1) unchanged.
+        (functools.partial(_structural_predecessor, revoked=True), "^REVOKED$"),
         (
-            SimpleNamespace(
-                context=SimpleNamespace(
-                    revoked_at=datetime.now(timezone.utc), issued_at=datetime.now(timezone.utc)
-                ),
-                receipt_hash=H64,
-            ),
-            "^REVOKED$",
-        ),
-        (
-            SimpleNamespace(
-                context=SimpleNamespace(
-                    revoked_at=None, issued_at=datetime.now(timezone.utc) + timedelta(hours=1)
-                ),
-                receipt_hash=H64,
-            ),
+            functools.partial(_structural_predecessor, revoked=False, issued_in=timedelta(hours=1)),
             "^NOT_YET_VALID$",
         ),
     ],
@@ -846,7 +865,7 @@ def test_issue_cas_denials_ask_nobody(events, probes, authority_dir, expected, m
 def test_issue_refuses_an_unusable_structural_predecessor(
     events, probes, authority_dir, current, message
 ) -> None:
-    probes.structural = current
+    probes.structural = current()
     with pytest.raises(GatewayInputError, match=message):
         _gateway(events)._owner_standing_grant_issue(_issue_args(expectedCurrentReceiptHash=H64))
     assert _names(events)[-1] == "store.load_keyed_standing_grant_receipt_structural"
