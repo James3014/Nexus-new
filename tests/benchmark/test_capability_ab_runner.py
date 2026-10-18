@@ -12264,6 +12264,11 @@ def test_run_with_nexus_llm_requires_model_and_nexus_evidence(tmp_path: Path, mo
         returncode = 0
 
     monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", lambda *_args, **_kwargs: _Proc())
+    # The Nexus subprocess now runs through _run_process_group (Popen), not
+    # subprocess.run; stub it too so the test never needs a host `uv` (#2593).
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", lambda *_args, **_kwargs: _Proc()
+    )
 
     out = run_with_nexus(
         repo_root=tmp_path,

@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 BC_DIR = REPO_ROOT / "artifacts" / "runtime" / "bc_nexus_armor_optimization_v0"
 AY_DIR = REPO_ROOT / "artifacts" / "runtime" / "ay_limited_broader_ceiling_v0"
 

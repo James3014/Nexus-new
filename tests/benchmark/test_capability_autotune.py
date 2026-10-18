@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from scripts.bench.capability_autotune import compute_tuning
@@ -146,9 +147,7 @@ def test_cli_apply_writes_tuning_and_backup(tmp_path: Path):
     tuning_file.write_text(json.dumps({"old": True}), encoding="utf-8")
 
     cmd = [
-        "uv",
-        "run",
-        "python",
+        sys.executable,
         "scripts/bench/capability_autotune.py",
         "--eval-file",
         str(eval_file),

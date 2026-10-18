@@ -141,7 +141,13 @@ from scripts.bench.run_contracts import (
 from scripts.bench.s2t_shadow_report import build_promoted_s2t_policy, build_s2t_shadow_report
 from scripts.engine.nexus_cli import nexus as nexus_root
 
-DEFAULT_CODEX_BIN = "/Users/jameschen/.npm-global/bin/codex"
+def _bench_home() -> Path:
+    """Host home for bench CLIs: ``NEXUS_BENCH_HOME`` override, else the real home (#2202)."""
+    override = os.getenv("NEXUS_BENCH_HOME", "").strip()
+    return Path(override).expanduser() if override else Path.home()
+
+
+DEFAULT_CODEX_BIN = str(_bench_home() / ".npm-global" / "bin" / "codex")
 
 
 class BenchmarkTotalTimeout(RuntimeError):
@@ -5140,8 +5146,9 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
     with tempfile.NamedTemporaryFile(prefix="nexus_codex_patch_", suffix=".txt", delete=False) as handle:
         last_message_path = Path(handle.name)
     session_meta = _codex_benchmark_session_meta()
+    home = _bench_home()
     env = dict(os.environ)
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    env["PATH"] = f"/opt/homebrew/bin:{home}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
     codex_cwd = str(Path(env.get("NEXUS_CODEX_EXEC_CWD") or os.getcwd()).resolve())
     prompt = _redact_sanitized_temp_runner_paths(text=prompt, cwd=codex_cwd, env=env)
     if session_meta["enabled"] and session_meta["resume"]:

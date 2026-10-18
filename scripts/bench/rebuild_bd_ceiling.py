@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 BD_DIR = REPO_ROOT / "artifacts" / "runtime" / "bd_local_nexus_ceiling_discovery_v0"
 
 # Original 17 tasks
@@ -173,7 +173,7 @@ import json
 import sys
 from pathlib import Path
 
-DEFAULT_OUTPUT = Path("/Users/jameschen/Workspace/nexus/artifacts/runtime/av_executable_benchmark_substrate_v0/execution_results/{tid}.json")
+DEFAULT_OUTPUT = Path("{REPO_ROOT}/artifacts/runtime/av_executable_benchmark_substrate_v0/execution_results/{tid}.json")
 
 def main():
     result = {{

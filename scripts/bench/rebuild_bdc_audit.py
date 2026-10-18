@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 BD_DIR = REPO_ROOT / "artifacts" / "runtime" / "bd_local_nexus_ceiling_discovery_v0"
 BDC_DIR = REPO_ROOT / "artifacts" / "runtime" / "bdc_ceiling_capability_coverage_audit_v0"
 

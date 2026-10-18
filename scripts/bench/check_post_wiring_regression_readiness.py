@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_json(path: str) -> dict | None:
