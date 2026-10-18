@@ -184,7 +184,7 @@ def test_route_off_explicit_patch_override_is_authoritative(tmp_path: Path, monk
 
 @pytest.mark.parametrize(
     ("tier", "model", "effort"),
-    [("light", "gemini-3.8-flash", "low"), ("small", "gemini-3.8-flash", "medium")],
+    [("light", "gemini-3.8-flash-low", "low"), ("small", "gemini-3.8-flash-medium", "medium")],
 )
 def test_auto_cheap_tier_appends_derived_patch_after_caller_patch(
     tmp_path: Path, monkeypatch, tier: str, model: str, effort: str
@@ -230,10 +230,10 @@ def test_derived_patch_comments_cannot_inject_yaml(tmp_path: Path, monkeypatch) 
         "- id: agent-default-model",
         "  config:",
         "    provider: nexus-agy-pool",
-        "    model: gemini-3.8-flash",
+        "    model: gemini-3.8-flash-low",
         "    reasoningEffort: low",
     ]
-    assert guard.default_model_from_patches([str(derived)])["model"] == "gemini-3.8-flash"
+    assert guard.default_model_from_patches([str(derived)])["model"] == "gemini-3.8-flash-low"
 
 
 def test_auto_mid_tier_keeps_session_default_without_derived_patch(
@@ -551,7 +551,7 @@ def test_route_decision_is_deterministic_replay() -> None:
     )
     first = guard.decide_route(**kwargs)
     assert first == guard.decide_route(**kwargs)
-    assert first["tier"] == "small" and first["model"] == "gemini-3.8-flash"
+    assert first["tier"] == "small" and first["model"] == "gemini-3.8-flash-medium"
     assert first["decision_inputs_sha256"].startswith("sha256:")
     other = guard.decide_route(**{**kwargs, "answer_text": _answer("light", 0.7, "reads code")})
     assert other["decision_inputs_sha256"] != first["decision_inputs_sha256"]
@@ -691,7 +691,7 @@ def test_file_at_threshold_does_not_floor(tmp_path: Path, monkeypatch) -> None:
     _contract(ctx, "Rename a constant in scripts/edge.py.\n")
     route = _auto(ctx, _answer("light", 0.95))["route"]
     assert (route["tier"], route["floor_reason"]) == ("light", None)
-    assert route["model"] == "gemini-3.8-flash"
+    assert route["model"] == "gemini-3.8-flash-low"
 
 
 def test_red_phase_floors_route_at_mid(tmp_path: Path, monkeypatch) -> None:
@@ -735,7 +735,7 @@ def test_repair_without_oracle_feedback_keeps_classified_tier(tmp_path: Path, mo
     _contract(ctx, "Fix mod.py.\nReason codes: TARGET_TESTS_NOT_PASSING\n")
     route = _auto(ctx, _answer("light", 0.95), phase="repair")["route"]
     assert (route["tier"], route["floor_reason"]) == ("light", None)
-    assert route["model"] == "gemini-3.8-flash"
+    assert route["model"] == "gemini-3.8-flash-low"
 
 
 def test_oracle_defect_words_do_not_floor_green_phase(tmp_path: Path, monkeypatch) -> None:
@@ -751,7 +751,7 @@ def test_small_file_green_phase_can_still_route_to_flash(tmp_path: Path, monkeyp
     _contract(ctx, "Change one default in scripts/small.py.\n")
     route = _auto(ctx, _answer("small", 0.9))["route"]
     assert (route["tier"], route["floor_reason"]) == ("small", None)
-    assert (route["model"], route["effort"]) == ("gemini-3.8-flash", "medium")
+    assert (route["model"], route["effort"]) == ("gemini-3.8-flash-medium", "medium")
     (argv,) = pc._calls(ctx)
     assert _patches(argv)[-1] == route["derived_patch_path"]
 
@@ -828,7 +828,7 @@ def test_chain_records_route_per_turn_and_routes_each_phase_afresh(
     assert red_entry["route"]["model"] == "gemini-3.1-pro-high"
     assert red_entry["route"] == red_entry["run"]["route"]
     assert green_entry["route"]["tier"] == "light"
-    assert green_entry["route"]["model"] == "gemini-3.8-flash"
+    assert green_entry["route"]["model"] == "gemini-3.8-flash-low"
     assert green_entry["route"]["floor_reason"] is None
     red_argv, green_argv = pc._calls(ctx)
     assert _patches(red_argv) == [str(ctx["patch"])]
@@ -893,3 +893,42 @@ def test_chain_repair_turn_is_classified_with_its_gate_feedback(
     assert "Phase: repair" in repair_prompt
     assert "GREEN GATE FEEDBACK" in repair_prompt
     assert "TARGET_TESTS_NOT_PASSING" in repair_prompt
+
+
+# --- #2537: every table model must be a served pool id ------------------------------------
+
+# Checked-in fixture of the ids the Agy pool catalog serves (host state otherwise); mirrors
+# the per-account model-catalog cache that check_model_served reads.
+SERVED_POOL_IDS = [
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-low",
+    "gemini-3.1-pro-high",
+    "gemini-3.1-pro-low",
+]
+
+
+def test_default_route_table_models_are_served_pool_ids(tmp_path: Path, monkeypatch) -> None:
+    import hashlib
+    import time
+
+    root = tmp_path / "agy-ops"
+    (root / "model-catalog").mkdir(parents=True)
+    (root / "model-catalog" / "a.json").write_text(
+        json.dumps({
+            "ids": SERVED_POOL_IDS,
+            "checked_at_epoch": time.time() - 5,
+            "catalog_sha256": hashlib.sha256(
+                "\n".join(sorted(SERVED_POOL_IDS)).encode()
+            ).hexdigest(),
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_AGY_OPERATION_ROOT", str(root))
+    monkeypatch.delenv("NEXUS_DSH_SKIP_MODEL_CATALOG_CHECK", raising=False)
+    assert guard.check_model_served("gemini-3.8-flash") is not None  # fixture is discriminating
+    for tier, entry in guard.load_route_table(None).items():
+        if entry is None:
+            continue
+        assert guard.check_model_served(entry["model"]) is None, (tier, entry)
+        assert entry["model"].endswith(f"-{entry['effort']}"), (tier, entry)
