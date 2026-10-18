@@ -455,7 +455,7 @@ def build_promise_confirmation_report(
     trusted_logins: Sequence[str] = (),
     issue_created_at: str | None = None,
     shared_logins: Sequence[str] = (),
-    author_sessions: Sequence[str] = (),
+    author_sessions: Sequence[str] | None = (),
     linked_pr_created_at: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
@@ -517,7 +517,7 @@ def build_promise_confirmation_report(
     )
     authors = {a.strip().lower() for a in author_identities}
     shared = {x.strip().lower() for x in shared_logins}
-    sessions = {x.strip().lower() for x in author_sessions if x.strip()}
+    sessions = {x.strip().lower() for x in (author_sessions or ()) if x.strip()}
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
     rows = []

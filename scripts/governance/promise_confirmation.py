@@ -85,13 +85,13 @@ class Gh:
             edits = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"][
                 "userContentEdits"
             ]
-        except (subprocess.CalledProcessError, KeyError, TypeError, ValueError):
+            if edits["totalCount"] > len(edits["nodes"]) or any(
+                e.get("diff") is None for e in edits["nodes"]
+            ):
+                return None
+            return [{"edited_at": e["editedAt"], "body": e["diff"]} for e in edits["nodes"]]
+        except (subprocess.CalledProcessError, KeyError, TypeError, ValueError, AttributeError):
             return None
-        if edits["totalCount"] > len(edits["nodes"]) or any(
-            e.get("diff") is None for e in edits["nodes"]
-        ):
-            return None
-        return [{"edited_at": e["editedAt"], "body": e["diff"]} for e in edits["nodes"]]
 
     def linked_prs(self, n: int) -> tuple[list[str], list[str]] | None:
         """(createdAt of every linked PR, bodies of same-repo ones); None if incomplete."""
@@ -101,8 +101,8 @@ class Gh:
             'query{repository(owner:"%s",name:"%s"){issue(number:%d){timelineItems('
             "itemTypes:[CROSS_REFERENCED_EVENT,CONNECTED_EVENT],first:100){pageInfo{hasNextPage} "
             "nodes{__typename ... on CrossReferencedEvent{source{%s}} "
-            "... on ConnectedEvent{subject{%s}}}}}}}"
-        ) % (owner, name, n, pr_fields, pr_fields)
+            "... on ConnectedEvent{source{%s} subject{%s}}}}}}}"
+        ) % (owner, name, n, pr_fields, pr_fields, pr_fields)
         try:
             items = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"][
                 "timelineItems"
@@ -111,12 +111,14 @@ class Gh:
                 return None
             created, bodies = [], []
             for node in items["nodes"]:
-                src = node.get("source") or node.get("subject") or {}
-                if src.get("__typename") != "PullRequest":
-                    continue
-                created.append(src["createdAt"])
-                if (src.get("repository") or {}).get("nameWithOwner") == self.repo:
-                    bodies.append(src.get("body") or "")
+                for key in ("source", "subject"):
+                    src = node.get(key)
+                    if not isinstance(src, dict) or src.get("__typename") != "PullRequest":
+                        continue
+                    created.append(src["createdAt"])
+                    same = (src.get("repository") or {}).get("nameWithOwner", "")
+                    if same.lower() == self.repo.lower():
+                        bodies.append(src.get("body") or "")
             return created, bodies
         except (subprocess.CalledProcessError, KeyError, TypeError, ValueError, AttributeError):
             return None
@@ -185,7 +187,7 @@ def _emit(path: str, generation: int) -> int:
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
-    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError, TypeError) as exc:
         detail = (getattr(exc, "stderr", "") or str(exc)).strip().splitlines()
         print(
             f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}",
@@ -214,6 +216,11 @@ def _main(argv: list[str] | None = None) -> int:
         return _emit(args.emit_blocks, args.generation)
     if args.offline_input:
         d = json.loads(Path(args.offline_input).read_text())
+        sessions = [
+            *(d.get("author_sessions") or []),
+            *args.author_session,
+            *author_session_markers(d["issue_body"], *(str(p.get("body") or "") for p in d["prs"])),
+        ]
         table = {(a, c): v for a, c, v in d.get("contains", [])}
         rep = build_promise_confirmation_report(
             issue_body=d["issue_body"],
@@ -226,7 +233,7 @@ def _main(argv: list[str] | None = None) -> int:
             trusted_logins=d.get("trusted_logins", args.trusted_login),
             shared_logins=d.get("shared_logins", args.shared_login),
             issue_created_at=d.get("issue_created_at"),
-            author_sessions=d.get("author_sessions", []),
+            author_sessions=sessions,
             linked_pr_created_at=d.get("linked_pr_created_at"),
         )
     else:

@@ -285,6 +285,9 @@ ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
 - Work start is the earliest creation among the listed PRs and every PR linked to
   the Issue (cross-reference or connected events). If the link list cannot be
   read completely the report cannot be `VERIFIED` (`PROMISE_HISTORY_UNAVAILABLE`).
+- Every PR that mentions the Issue, in any repo, counts for work start, so an unrelated
+  mention can only make the result stricter (`PROVISIONAL`), never `VERIFIED`; more
+  than 100 cross-references make the link list unavailable.
 - For an Issue without a promise set the CLI reads only the Issue and returns
   `NOT_APPLICABLE`.
 - Any change of the promise set after work start (including a generation bump),
