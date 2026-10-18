@@ -101,6 +101,12 @@ def _check_tool_args(
     long_flags: frozenset,
     long_value_flags: Dict[str, Any],
 ) -> None:
+    for arg in args:
+        # pytest (argparse fromfile_prefix_chars="@") expands "@file" into more
+        # options, so a file holding --basetemp=<dir> would bypass this list.
+        # Refuse "@" at the start of any token or option value (#2634, B4).
+        if arg.startswith("@") or "=@" in arg:
+            raise _option_reject("@file")
     index = 0
     while index < len(args):
         arg = args[index]
@@ -142,7 +148,7 @@ def _check_tool_args(
                         raise _option_reject(f"-{ch}")
                     value = args[index]
                     index += 1
-                if not short_value_flags[ch](value):
+                if value.startswith("@") or not short_value_flags[ch](value):
                     raise _option_reject(f"-{ch}")
                 break
             raise _option_reject(f"-{ch}")

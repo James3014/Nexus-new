@@ -125,6 +125,8 @@ def test_evidence_verifier_non_allowlisted_command_is_uncovered(tmp_path, cmd):
         ("python -m pytest -q", ["python", "-m", "pytest", "-q"]),
         ("python3 -m pytest tests/a.py::t", ["python3", "-m", "pytest", "tests/a.py::t"]),
         ("uv run pytest -q", ["uv", "run", "pytest", "-q"]),
+        ("uv run python -m pytest -q", ["uv", "run", "python", "-m", "pytest", "-q"]),
+        ("uv run python3 -m pytest", ["uv", "run", "python3", "-m", "pytest"]),
     ],
 )
 def test_allowlisted_runner_is_run_argv_only_without_shell(tmp_path, monkeypatch, cmd, argv):
@@ -440,6 +442,15 @@ PARSERS = pytest.mark.parametrize(
         "../outside",
         "--deselect=../outside",
         "sub/../../outside",
+        # B4: pytest expands @file into options (fromfile_prefix_chars="@").
+        "@args.txt",
+        "@/tmp/args.txt",
+        "--deselect=@args.txt",
+        "--deselect @args.txt",
+        "-k @args.txt",
+        "-k@args.txt",
+        "-m @args.txt",
+        "--tb=@args.txt",
     ],
 )
 def test_pytest_option_allowlist_rejects(tmp_path, parse, args):
@@ -537,3 +548,29 @@ def test_replay_runner_still_runs_an_allowed_pytest(tmp_path):
     })
     assert replay["status"] == "COMPLETED"
     assert replay["replay_count"] == 1
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_fromfile_basetemp_deletion_repro_is_refused(tmp_path, relative):
+    """Round-2 repro (B4): an @file holding --basetemp=<victim> deleted the victim."""
+    (tmp_path / "proj").mkdir()
+    root = _project(tmp_path / "proj")
+    victim = tmp_path / "victim"
+    (victim / "keep").mkdir(parents=True)
+    (victim / "keep" / "precious.txt").write_text("keep", encoding="utf-8")
+    # A test that uses tmp_path makes pytest empty --basetemp (verified unguarded).
+    (root / "test_ok.py").write_text("def test_ok(tmp_path):\n    assert True\n", encoding="utf-8")
+    args_file = root / "args.txt"
+    args_file.write_text(f"--basetemp={victim}\n", encoding="utf-8")
+    ref = "args.txt" if relative else str(args_file)
+    cmd = f"python3 -m pytest -q test_ok.py @{ref}"
+    for parse in (_evidence_parse, _replay_parse):
+        with pytest.raises(ValueError, match="@file"):
+            parse(cmd, root)
+    report = EvidenceVerifier(root)._verify_test_commands([{"command": cmd}])
+    replay = ReplayRunner(root).run_replay({"test_artifacts": [{"command": cmd}]})
+    assert report["executed"] == []
+    assert report["status"] == "UNCOVERED"
+    assert replay["status"] == "REJECTED"
+    assert replay["replay_count"] == 0
+    assert (victim / "keep" / "precious.txt").exists()

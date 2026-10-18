@@ -21,6 +21,8 @@ ALLOWED_TEST_RUNNER_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("python", "-m", "pytest"),
     ("python3", "-m", "pytest"),
     ("uv", "run", "pytest"),
+    ("uv", "run", "python", "-m", "pytest"),
+    ("uv", "run", "python3", "-m", "pytest"),
 )
 TEST_COMMAND_TIMEOUT_SECONDS = 30
 

@@ -92,7 +92,9 @@ _PYTHON_NAME_RE = re.compile(r"python[0-9.]*")
 # token is scanned, including option values and script arguments: rejecting a
 # rare harmless spelling (``perl -Ilib/e``) is preferred over parsing each
 # interpreter's option grammar, which is where bypasses hide (#2634).
-_INLINE_CODE_INTERPRETERS: tuple[tuple[str, re.Pattern[str], str, frozenset[str], frozenset[str]], ...] = (
+_INLINE_CODE_INTERPRETERS: tuple[
+    tuple[str, re.Pattern[str], str, frozenset[str], frozenset[str]], ...
+] = (
     # perl: -e/-E program text, -M/-m "use Module LIST" (code after ';').
     ("perl", re.compile(r"perl[0-9.]*"), "eEMm", frozenset(), frozenset()),
     # ruby: -e program text (also inside clusters such as -We, -W0e).
@@ -102,8 +104,13 @@ _INLINE_CODE_INTERPRETERS: tuple[tuple[str, re.Pattern[str], str, frozenset[str]
         re.compile(r"node(js)?[0-9.]*"),
         "epri",
         frozenset({
-            "--eval", "--print", "--import", "--require", "--loader",
-            "--experimental-loader", "--experimental-default-type",
+            "--eval",
+            "--print",
+            "--import",
+            "--require",
+            "--loader",
+            "--experimental-loader",
+            "--experimental-default-type",
         }),
         frozenset(),
     ),
