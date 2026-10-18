@@ -222,7 +222,10 @@ class FindingsMemoryStore:
         ``nexus.services.bm25_retrieval`` scorer, so a multi-word failure sentence finds cards
         that share its words. A card whose title, a tag or a hint contains the whole query as
         a substring (the previous matching rule) is still returned and ranked first, so
-        single-keyword callers keep their results. Cards with no match are not returned.
+        single-keyword callers keep their results. A relevance floor applies: a card must
+        contain at least two distinct informative query terms (one for a one-word query;
+        stoplist words and terms shared by most cards do not count), so a generic sentence
+        does not match every card. Cards with no match are not returned.
         Every card in the requested scopes is considered (no recency cut-off).
         """
         all_cards: List[FindingsCard] = []
@@ -246,7 +249,7 @@ class FindingsMemoryStore:
                 [card.title, " ".join(map(str, card.tags)), " ".join(map(str, card.retrieval_hints)), card.body]
             )
 
-        scores = BM25Index((i, _text(c)) for i, c in enumerate(all_cards)).scores(query)
+        scores = BM25Index((i, _text(c)) for i, c in enumerate(all_cards)).floored_scores(query)
         ranked = []
         for i, card in enumerate(all_cards):
             hit = _substring_hit(card)

@@ -61,10 +61,33 @@ def test_search_fts_skips_missing_fallback_columns_instead_of_keyerror(tmp_path)
     assert list(frame["id"]) == ["x"]
 
 
-def test_search_fts_without_fallback_columns_uses_string_columns(tmp_path):
+def test_search_fts_without_fallback_columns_has_no_fallback(tmp_path):
+    """#2640 review F1: no fallback columns keeps the old "no FTS index -> empty" rule."""
     repo = _repo(tmp_path)
-    repo.add_rows("t", [{"id": "x", "note": "quantum retry"}, {"id": "y", "note": "other"}])
-    assert list(repo.search_fts("t", "quantum")["id"]) == ["x"]
+    repo.add_rows("t", [{"id": "x", "content": "quantum retry failed with error"}])
+    assert repo.search_fts("t", "quantum retry").empty
+    assert repo.search_fts_across_tables("quantum retry", ["t"], limit=3).empty
+
+
+def test_search_fts_fallback_applies_relevance_floor(tmp_path):
+    repo = _repo(tmp_path)
+    repo.add_rows(
+        "t",
+        [
+            {
+                "id": f"c{i}",
+                "content": f"LocalHeal lesson {i}: verifier failed with error in module",
+            }
+            for i in range(6)
+        ]
+        + [{"id": "hit", "content": "websocket reconnect timeout race in coordinator"}],
+    )
+    generic = repo.search_fts(
+        "t", "the test fails with an error in the module", fallback_columns=["content"]
+    )
+    assert generic.empty
+    specific = repo.search_fts("t", "coordinator websocket timeout", fallback_columns=["content"])
+    assert list(specific["id"]) == ["hit"]
 
 
 def test_bm25_frame_search_edge_cases():
@@ -73,3 +96,4 @@ def test_bm25_frame_search_edge_cases():
     assert bm25_frame_search(df, "gamma", limit=3).empty
     assert bm25_frame_search(df, "alpha", columns=["missing"]).empty
     assert list(bm25_frame_search(df, "beta", columns=["a"]).index) == [1]
+    assert list(bm25_frame_search(df, "beta").index) == [1]  # columns=None: every string column

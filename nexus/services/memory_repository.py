@@ -440,8 +440,9 @@ class MemoryRepository:
         ``fallback_columns`` (#2640) instead of matching the whole query as one substring.
         Fallback rows carry a ``_score`` column and are sorted by it, highest first. Columns
         named in ``fallback_columns`` that the table does not have are skipped (an absent
-        ``aaak_content`` used to raise ``KeyError``). Without ``fallback_columns`` the
-        fallback uses every string column.
+        ``aaak_content`` used to raise ``KeyError``). Without ``fallback_columns`` there is
+        no fallback and the result is empty, as before. The fallback applies the BM25
+        relevance floor (``BM25Index.floored_scores``).
         """
         import pandas as pd
         db = self._get_db()
@@ -454,6 +455,8 @@ class MemoryRepository:
             return table.search(query).limit(limit).to_pandas()
         except Exception:
             # 如果 FTS 索引不存在，退回到 BM25 關鍵字排序
+            if not fallback_columns:
+                return pd.DataFrame()
             df = table.to_pandas()
             ranked = bm25_frame_search(df, query, limit=limit, columns=fallback_columns)
             return pd.DataFrame() if ranked.empty else ranked
@@ -462,7 +465,8 @@ class MemoryRepository:
 def bm25_frame_search(df: Any, query: str, *, limit: int = 10, columns: Optional[List[str]] = None):
     """Rank DataFrame rows by tokenised BM25 over ``columns`` (missing columns are skipped).
 
-    Returns an empty slice of ``df`` when nothing matches.
+    Rows must pass the relevance floor (``BM25Index.floored_scores``). ``columns=None``
+    means every string column. Returns an empty slice of ``df`` when nothing matches.
     """
     from nexus.services.bm25_retrieval import BM25Index
 
@@ -479,7 +483,7 @@ def bm25_frame_search(df: Any, query: str, *, limit: int = 10, columns: Optional
         .apply(lambda row: "\n".join(str(v) for v in row if isinstance(v, str) and v), axis=1)
         .tolist()
     )
-    scores = BM25Index(enumerate(texts)).scores(query)
+    scores = BM25Index(enumerate(texts)).floored_scores(query)
     if not scores:
         return df.iloc[0:0]
     order = sorted(scores, key=lambda index: (-scores[index], index))

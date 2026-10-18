@@ -58,3 +58,22 @@ def test_multi_word_sentence_matches_on_shared_words():
 def test_empty_corpus_and_empty_query():
     assert BM25Index([]).rank("anything") == []
     assert BM25Index([(1, "text")]).rank("") == []
+
+
+def test_floor_needs_two_informative_terms_for_a_sentence():
+    docs = [(0, "websocket reconnect timeout"), (1, "websocket only"), (2, "unrelated words here")]
+    index = BM25Index(docs)
+    assert set(index.floored_scores("websocket timeout in the coordinator")) == {0}
+    assert set(index.floored_scores("websocket")) == {0, 1}  # one-word query needs its word
+
+
+def test_floor_ignores_stopwords_and_terms_most_documents_share():
+    docs = [(i, f"LocalHeal lesson memory trace nexus card {i}") for i in range(10)]
+    docs.append((10, "gateway deploy restarts"))
+    index = BM25Index(docs)
+    assert "the" not in index.informative_terms("the gateway")
+    assert "memory" not in index.informative_terms("memory gateway")  # in 10 of 11 documents
+    # every card shares "memory"/"nexus": a generic sentence matches none of them
+    assert index.floored_scores("Fix the failing test in nexus/services/memory.py") == {}
+    assert index.floored_scores("the of and") == {}
+    assert set(index.floored_scores("gateway deploy")) == {10}

@@ -179,3 +179,20 @@ def test_search_is_not_limited_to_the_100_most_recent_cards(memory_store):
     for index in range(105):
         memory_store.write(FindingsCard(id=f"n{index}", title=f"filler {index}", kind="knowledge"))
     assert [card.id for card in memory_store.search("retry ladder quirk")] == ["old"]
+
+
+def test_search_generic_sentence_does_not_hit_unrelated_cards(memory_store):
+    """#2640 review F1: 11 similar LocalHeal cards; the generic query used to hit 11 of 11."""
+    for index in range(11):
+        memory_store.write(FindingsCard(
+            id=f"lh{index}", kind="episodes", title=f"LocalHeal lesson: c15-{index}-case",
+            body=(f"Local-heal outcome: correct_abstain Task: c15-{index}-case Summary: MODEL_EMPTY_RESPONSE "
+                  f"Receipt: /repo/nexus/.nexus/reports/local_heal/c15-{index}/receipt.json Memory trace status: "
+                  "TRACE_MISSING"),
+            tags=["local_heal", "correct_abstain"], retrieval_hints=[f"c15-{index}-case", "correct_abstain"],
+        ))
+    assert memory_store.search("Fix the failing test in nexus/services/memory.py") == []
+    assert memory_store.search("the test fails with an error in the module") == []
+    memory_store.write(FindingsCard(id="ws", kind="episodes", title="LocalHeal lesson: websocket",
+                                    body="websocket reconnect loop after coordinator timeout"))
+    assert [card.id for card in memory_store.search("websocket reconnect regression")] == ["ws"]
