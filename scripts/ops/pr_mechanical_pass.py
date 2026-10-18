@@ -53,6 +53,7 @@ class PassReport:
     imports_sorted: list[str] = field(default_factory=list)
     impact_rows: dict[str, list[str]] = field(default_factory=dict)
     impact_unresolved: list[str] = field(default_factory=list)
+    impact_unresolved_reasons: dict[str, str] = field(default_factory=dict)
     bindings: str = "SKIP"
     bindings_detail: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -119,9 +120,15 @@ def _overlaps(start: int, end: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= r_end and r_start <= end for r_start, r_end in ranges)
 
 
-def _ruff(ruff: str, args: list[str], source: str, filename: str) -> subprocess.CompletedProcess:
+def _ruff(
+    ruff: str, args: list[str], source: str, filename: str, cwd: Path
+) -> subprocess.CompletedProcess:
+    # Run inside the repo with an absolute stdin filename, so ruff always resolves
+    # the repo's own pyproject config (isort first-party, line length, excludes),
+    # whatever directory the pass was started from.
     return subprocess.run(
-        [ruff, *args, "--stdin-filename", filename, "-"],
+        [ruff, *args, "--stdin-filename", str((cwd / filename).resolve()), "-"],
+        cwd=cwd,
         input=source,
         text=True,
         capture_output=True,
@@ -134,7 +141,7 @@ def _offset(lines: list[str], row: int, column: int) -> int:
 
 
 def sort_imports(
-    ruff: str, source: str, filename: str, ranges: list[tuple[int, int]] | None
+    ruff: str, source: str, filename: str, ranges: list[tuple[int, int]] | None, cwd: Path
 ) -> str:
     """Apply ruff's isort fixes whose span overlaps ``ranges`` (None = whole file)."""
     lint = _ruff(
@@ -142,6 +149,7 @@ def sort_imports(
         ["check", "--select", "I", "--output-format", "json", "--force-exclude", "--exit-zero"],
         source,
         filename,
+        cwd,
     )
     if lint.returncode != 0:
         raise RuntimeError(f"ruff check failed on {filename}: {lint.stderr.strip()}")
@@ -162,14 +170,16 @@ def sort_imports(
 
 
 def format_ranges(
-    ruff: str, source: str, filename: str, ranges: list[tuple[int, int]] | None
+    ruff: str, source: str, filename: str, ranges: list[tuple[int, int]] | None, cwd: Path
 ) -> str:
     """``ruff format --preview`` on ``ranges`` bottom-up (None = whole file)."""
     spans: list[list[str]] = (
         [[]] if ranges is None else [[f"--range={s}:1-{e + 1}:1"] for s, e in reversed(ranges)]
     )
     for span in spans:
-        result = _ruff(ruff, ["format", "--preview", "--force-exclude", *span], source, filename)
+        result = _ruff(
+            ruff, ["format", "--preview", "--force-exclude", *span], source, filename, cwd
+        )
         if result.returncode != 0:
             raise RuntimeError(f"ruff format failed on {filename}: {result.stderr.strip()}")
         source = result.stdout
@@ -198,14 +208,14 @@ def ruff_step(
             ranges = None if whole else changed_line_ranges(base, original)
             if ranges == []:
                 continue
-            text = sort_imports(ruff, original, path, ranges)
+            text = sort_imports(ruff, original, path, ranges, repo)
             if text != original:
                 report.imports_sorted.append(path)
             ranges = None if whole else changed_line_ranges(base, text)
             if ranges == []:
                 formatted = text
             else:
-                formatted = format_ranges(ruff, text, path, ranges)
+                formatted = format_ranges(ruff, text, path, ranges, repo)
         except (RuntimeError, ValueError, KeyError) as exc:
             report.errors.append(str(exc))
             continue
@@ -228,6 +238,7 @@ def impact_step(repo: Path, paths: list[str], report: PassReport) -> None:
         proposal = gate.write_missing_impact_rows(unmatched, root=repo)
     report.impact_rows = proposal.mapped
     report.impact_unresolved = proposal.unresolved
+    report.impact_unresolved_reasons = proposal.unresolved_reasons
 
 
 def bindings_step(repo: Path, base_ref: str, body_file: Path, report: PassReport) -> None:
@@ -280,8 +291,15 @@ def render(report: PassReport) -> str:
         lines.append(f"format:   {verb}format {hunks} changed hunk(s) in {path}")
     for path, targets in sorted(report.impact_rows.items()):
         lines.append(f"impact:   {verb}add map row {path} -> {', '.join(targets)}")
+    why = {
+        "deleted": "the PR deletes it; the gate will run the full suite unless it is mapped",
+        "too_many_candidates": "more candidate tests than a row may list; map it by hand",
+        "unsafe_path": "path cannot be written into the Markdown table",
+    }
     for path in report.impact_unresolved:
-        lines.append(f"impact:   NO ROW for {path}: no test names, imports or mentions it")
+        reason = report.impact_unresolved_reasons.get(path, "")
+        detail = why.get(reason, "no test names, imports or mentions it")
+        lines.append(f"impact:   NO ROW for {path}: {detail}")
     lines.append(f"bindings: {report.bindings}")
     lines.extend(f"          {line}" for line in report.bindings_detail)
     lines.extend(f"error:    {error}" for error in report.errors)
@@ -302,10 +320,12 @@ def run_pass(
     skip_ruff: bool = False,
     skip_impact: bool = False,
 ) -> PassReport:
+    repo = repo.resolve()
     base_sha = _git(repo, "merge-base", base_ref, "HEAD").stdout.strip()
     report = PassReport(base_sha=base_sha, check_only=check_only)
     paths, added = changed_paths(repo, base_sha)
-    if not skip_ruff:
+    # A docs-only diff needs no ruff at all.
+    if not skip_ruff and any(path.endswith(".py") for path in paths):
         ruff_step(repo, base_sha, paths, added, _resolve_ruff(repo, ruff), report)
     if not skip_impact:
         impact_step(repo, paths, report)

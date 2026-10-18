@@ -970,6 +970,9 @@ class ImpactRowProposal:
     rows: list[str]
     mapped: dict[str, list[str]]
     unresolved: list[str]
+    # path -> why no row was proposed: "deleted", "too_many_candidates",
+    # "no_reference" or "unsafe_path".
+    unresolved_reasons: dict[str, str] = field(default_factory=dict)
 
 
 def _test_module_name(path: str) -> str:
@@ -1008,7 +1011,23 @@ def propose_impact_targets(
     root: Path = ROOT,
     test_index: list[tuple[str, str, set[str]]] | None = None,
 ) -> list[str]:
-    """Tests that name, import or textually reference ``path``, most direct first."""
+    """Tests that name, import or textually reference ``path``, most direct first.
+
+    Returns ``[]`` when there are more than ``MAX_WRITTEN_ROW_TARGETS`` candidates:
+    a row that silently drops tests which import the file under-selects, which
+    is worse than no row (the gate then runs the full suite).
+    """
+    ordered = _impact_candidates(path, root=root, test_index=test_index)
+    return ordered if len(ordered) <= MAX_WRITTEN_ROW_TARGETS else []
+
+
+def _impact_candidates(
+    path: str,
+    *,
+    root: Path,
+    test_index: list[tuple[str, str, set[str]]] | None,
+) -> list[str]:
+    """Every candidate test for ``path``, untruncated, most direct first."""
     index = _test_file_index(root) if test_index is None else test_index
     normalized = path.strip().replace("\\", "/").strip("/")
     stem = Path(normalized).stem
@@ -1035,10 +1054,9 @@ def propose_impact_targets(
     # A same-named test that neither imports nor mentions the path is a weak
     # signal (tests/x/test_utils.py vs nexus/y/utils.py); use it only when it is
     # the one candidate.
-    ordered = [*named_and_linked, *imported, *referenced] or (
+    return [*named_and_linked, *imported, *referenced] or (
         named_only if len(named_only) == 1 else []
     )
-    return ordered[:MAX_WRITTEN_ROW_TARGETS]
 
 
 def propose_impact_rows(paths: Iterable[str], *, root: Path = ROOT) -> ImpactRowProposal:
@@ -1046,19 +1064,32 @@ def propose_impact_rows(paths: Iterable[str], *, root: Path = ROOT) -> ImpactRow
     rows: list[str] = []
     mapped: dict[str, list[str]] = {}
     unresolved: list[str] = []
+    reasons: dict[str, str] = {}
     for path in sorted(dict.fromkeys(paths)):
         if "|" in path or not path.strip():
             unresolved.append(path)
+            reasons[path] = "unsafe_path"
+            continue
+        if not (root / path).exists():
+            # No row for code the PR deletes; the gate's fallback stays visible.
+            unresolved.append(path)
+            reasons[path] = "deleted"
             continue
         targets = propose_impact_targets(path, root=root, test_index=test_index)
         if not targets:
             unresolved.append(path)
+            count = len(_impact_candidates(path, root=root, test_index=test_index))
+            reasons[path] = (
+                "too_many_candidates" if count > MAX_WRITTEN_ROW_TARGETS else "no_reference"
+            )
             continue
         mapped[path] = targets
         rows.append(
             f"| {path} | {', '.join(targets)} | active | medium | {WRITTEN_ROW_RISK_REASON} |"
         )
-    return ImpactRowProposal(rows=rows, mapped=mapped, unresolved=unresolved)
+    return ImpactRowProposal(
+        rows=rows, mapped=mapped, unresolved=unresolved, unresolved_reasons=reasons
+    )
 
 
 def write_impact_rows(rows: Iterable[str], *, map_path: Path) -> list[str]:
@@ -2295,8 +2326,9 @@ def main(argv: list[str] | None = None) -> int:
             for row in proposal.rows:
                 print(_log_safe(f"impact-map row written: {row}"), file=sys.stderr)
             for path in proposal.unresolved:
+                reason = proposal.unresolved_reasons.get(path, "no_reference")
                 print(
-                    _log_safe(f"impact-map row NOT written for {path}: no test references it"),
+                    _log_safe(f"impact-map row NOT written for {path}: {reason}"),
                     file=sys.stderr,
                 )
         return 0

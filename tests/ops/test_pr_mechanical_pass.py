@@ -288,3 +288,66 @@ def test_plan_write_rows_cli_appends_rows_for_unmatched_paths(
     # Without the flag the planner never touches the map.
     assert gate.main(argv) == 0
     assert map_path.read_text(encoding="utf-8") == text
+
+
+def test_pass_uses_the_repo_ruff_config_from_any_working_directory(tmp_path: Path) -> None:
+    # line-length 120 in the repo: a 110-char line is formatted. Under ruff's
+    # default (88) or Nexus-new's own (100) config it would be wrapped.
+    long_call = "VALUE = some_function_name(" + ", ".join(f"arg{i}" for i in range(13)) + ")\n"
+    assert 100 < len(long_call) < 120
+    repo = _repo(
+        tmp_path,
+        {"pyproject.toml": "[tool.ruff]\nline-length = 120\n", "pkg/legacy.py": LEGACY},
+    )
+    (repo / "pkg/new.py").write_text(long_call, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    run = subprocess.run(
+        [sys.executable, str(Path(mp.__file__)), "--repo", str(repo), "--base-ref", "base",
+         "--ruff", _ruff(), "--skip-impact", "--check"],
+        cwd=elsewhere, text=True, capture_output=True, check=False,
+    )  # fmt: skip
+
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "RESULT: CLEAN" in run.stdout
+    assert (repo / "pkg/new.py").read_text(encoding="utf-8") == long_call
+
+
+def test_more_direct_importers_than_the_cap_writes_no_row(tmp_path: Path) -> None:
+    from scripts.ops.pr_impact_gate import MAX_WRITTEN_ROW_TARGETS
+
+    root = _impact_root(tmp_path)
+    for i in range(MAX_WRITTEN_ROW_TARGETS + 1):
+        test_file = root / f"tests/many/test_user_{i}.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("from nexus.alpha import X\n", encoding="utf-8")
+    map_path = root / "docs/testing/test_impact_map.md"
+    before = map_path.read_text(encoding="utf-8")
+
+    assert propose_impact_targets("nexus/alpha.py", root=root) == []
+    proposal = write_missing_impact_rows(["nexus/alpha.py"], root=root)
+
+    assert proposal.rows == [] and proposal.mapped == {}
+    assert proposal.unresolved == ["nexus/alpha.py"]
+    assert proposal.unresolved_reasons == {"nexus/alpha.py": "too_many_candidates"}
+    assert map_path.read_text(encoding="utf-8") == before
+
+
+def test_deleted_path_gets_no_row(tmp_path: Path) -> None:
+    root = _impact_root(tmp_path)
+    (root / "tests/c/test_mentions.py").write_text("PATH = 'nexus/gone.py'\n", encoding="utf-8")
+
+    proposal = propose_impact_rows(["nexus/gone.py"], root=root)
+
+    assert proposal.rows == []
+    assert proposal.unresolved_reasons == {"nexus/gone.py": "deleted"}
+
+
+def test_docs_only_diff_does_not_need_ruff(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, {"README.md": "a\n", "pkg/legacy.py": LEGACY})
+    (repo / "README.md").write_text("b\n", encoding="utf-8")
+
+    report = mp.run_pass(repo, base_ref="base", ruff="/nonexistent/ruff", skip_impact=True)
+
+    assert report.errors == [] and not report.changed
