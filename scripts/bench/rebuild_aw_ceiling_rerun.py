@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 AV_DIR = REPO_ROOT / "artifacts" / "runtime" / "av_executable_benchmark_substrate_v0"
 AW_DIR = REPO_ROOT / "artifacts" / "runtime" / "aw_executable_subset_ceiling_v0"
 

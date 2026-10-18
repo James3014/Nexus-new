@@ -15,7 +15,7 @@ import subprocess
 import time
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = REPO_ROOT / "artifacts" / "runtime" / "asr_auditable_post_wiring_ceiling_v0"
 REPORTS_DIR = REPO_ROOT / "docs" / "reports"
 
