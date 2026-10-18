@@ -412,7 +412,9 @@ def test_cli_gateway_hold_written_only_with_flag_and_not_live(tmp_path, repo):
     state = _deploy_state(tmp_path, live)
     dry = _cli(tmp_path, repo, bad)
     assert dry["gateway"]["action"] == "HOLD" and not (state / "HOLD").exists()
-    res = _cli(tmp_path, repo, bad, "--apply-hold")
+    alone = _cli(tmp_path, repo, bad, "--apply-hold")
+    assert not (state / "HOLD").exists() and "applied" not in alone["gateway"]
+    res = _cli(tmp_path, repo, bad, "--apply-hold", "--apply")
     assert res["gateway"]["applied"] is True
     text = (state / "HOLD").read_text()
     assert text.startswith(HOLD_PREFIX) and "#77" in text
@@ -474,7 +476,7 @@ else:
 """
 
 
-def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None):
+def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None, extra_comments=()):
     bare = tmp_path / "origin.git"
     if not bare.exists():
         subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
@@ -489,7 +491,8 @@ def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None):
                 **comment(block(merge_sha=bad, live_commit=bad)),
                 "user": {"login": BOT},
                 "html_url": "u",
-            }
+            },
+            *[{**c, "user": {"login": c["author"]}} for c in extra_comments],
         ],
         "pulls": {
             "77": {
@@ -599,8 +602,8 @@ def test_cli_release_hold_only_own_text_after_merge(tmp_path, repo):
     live = _git(repo, "rev-parse", "HEAD")
     bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
     state = _deploy_state(tmp_path, live)
-    out, _, _ = _online(tmp_path, repo, bad, "--apply-hold")
-    assert json.loads(out.stdout)["gateway"]["applied"] is True
+    out, _, _ = _online(tmp_path, repo, bad, "--apply-hold", "--apply")
+    assert json.loads(out.stdout)["gateway"]["applied"] is True, out.stderr
     written = (state / "HOLD").read_text()
     # revert not merged yet -> kept
     out, _, _ = _online(tmp_path, repo, bad, "--release-hold")
@@ -635,3 +638,82 @@ def test_cli_author_session_flag_supplies_missing_marker(tmp_path, repo):
         origin_extra={"author_sessions": []},
     )
     assert res["verdict"]["ignored"][0]["reason"] == "CONFIRMER_NOT_INDEPENDENT"
+
+
+def test_defuse_closing_keywords_in_copied_text():
+    sys.path.insert(0, str(CLI.parent))
+    try:
+        import livefail_rollback as cli  # type: ignore[import-not-found]
+    finally:
+        sys.path.remove(str(CLI.parent))
+    text = "fix #12, Closes: #13, resolved owner/repo#14, fixes  #15, see #16, prefix #17"
+    out = cli.defuse_closing_keywords(text)
+    for n in ("#12", "#13", "repo#14", "#15"):
+        assert n not in out
+    assert "see #16" in out and "prefix #17" in out
+
+
+def test_cli_apply_body_never_closes_issues_named_in_dependent_subjects(tmp_path, repo):
+    lines = [f"x{i} = {i}" for i in range(12)]
+    _commit(repo, "nexus/a.py", "\n".join(lines) + "\n", "widen a")
+    bad = _commit(repo, "nexus/a.py", "\n".join(["x0 = 9", *lines[1:]]) + "\n", "feat (#77)")
+    later = ["x0 = 9", *lines[1:-1], "x11 = 0"]
+    _commit(repo, "nexus/a.py", "\n".join(later) + "\n", "fix #4242 crash (#79)")
+    (tmp_path / "deploy").mkdir()
+    out, _, _ = _online(tmp_path, repo, bad, "--apply")
+    assert json.loads(out.stdout)["outcome"] == "REVERT_PR_OPENED", out.stderr
+    body = (tmp_path / "gh.log.body").read_text()
+    assert "4242" in body and "fix #4242" not in body.lower()
+
+
+def test_cli_hold_file_is_owner_only(tmp_path, repo):
+    live = _git(repo, "rev-parse", "HEAD")
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    state = _deploy_state(tmp_path, live)
+    _cli(tmp_path, repo, bad, "--apply-hold", "--apply")
+    assert (state / "HOLD").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize(
+    "confirmer",
+    [
+        "someone/worker",
+        "x/author-session",
+        "/author-session",
+        "author-session\\sub",
+        "a b",
+        "a/b/c",
+    ],
+)
+def test_confirmer_segment_and_format_tricks_do_not_trigger(confirmer):
+    out = ev([comment(block(confirmer=confirmer))])
+    assert out["triggered"] is False
+
+
+def test_future_promise_judged_at_does_not_trigger():
+    out = ev(
+        [],
+        promise_report=_report("REJECT"),
+        promise_judged_at="2026-10-19T00:00:00Z",
+        promise_prs=[77],
+    )
+    assert out["triggered"] is False
+
+
+def test_cli_hold_without_clean_revert_is_not_written(tmp_path, repo):
+    live = _git(repo, "rev-parse", "HEAD")
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    _commit(repo, "nexus/a.py", "a = 3\n", "later (#80)")
+    state = _deploy_state(tmp_path, live)
+    res = _cli(tmp_path, repo, bad, "--apply-hold", "--apply")
+    assert res["plan"]["status"] == "MANUAL" and not (state / "HOLD").exists()
+
+
+def test_cli_untrusted_block_pr_is_never_fetched(tmp_path, repo):
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    (tmp_path / "deploy").mkdir()
+    data_hook = {"comments_extra": [comment(block(origin_pr=999999), author="x", assoc="NONE")]}
+    out, _, _ = _online(tmp_path, repo, bad, extra_comments=data_hook["comments_extra"])
+    assert out.returncode == 0, out.stderr
+    calls = (tmp_path / "gh.log").read_text()
+    assert "pulls/999999" not in calls

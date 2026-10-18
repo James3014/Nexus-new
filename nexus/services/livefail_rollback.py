@@ -52,6 +52,9 @@ _WITNESS_DECL_RE = re.compile(
 _BLOCK_KEYS = frozenset({"origin_pr", "merge_sha", "live_commit", "confirmer", "witness", "reason"})
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# "session" or "session/role": one or two plain segments, nothing else (no leading
+# or trailing slash, backslash, spaces), so every segment can be compared.
+_CONFIRMER_RE = re.compile(r"^[A-Za-z0-9._\[\]-]{1,64}(/[A-Za-z0-9._\[\]-]{1,64})?$")
 
 Contains = Callable[[str, str], "bool | None"]
 
@@ -95,6 +98,8 @@ def parse_block(text: str) -> dict[str, Any] | None:
         return None
     if not all(_text(b[k]) for k in ("confirmer", "witness", "reason")):
         return None
+    if not _CONFIRMER_RE.match(b["confirmer"]):
+        return None
     return {**b, "confirmer": b["confirmer"].strip()}
 
 
@@ -125,6 +130,16 @@ def _comment_trust(
     if updated > created:
         return "COMMENT_EDITED_AFTER_POSTING"
     return None
+
+
+def comment_trust_reason(
+    comment: Mapping[str, Any], trusted_logins: Sequence[str], now: str
+) -> str | None:
+    """Public form of the trust rule: None when the comment may carry a verdict."""
+    now_dt = _ts(now)
+    if now_dt is None:
+        raise ValueError("now must be RFC3339 UTC ending in Z")
+    return _comment_trust(comment, frozenset(t.lower() for t in trusted_logins), now_dt)
 
 
 def evaluate_trigger(
@@ -183,13 +198,9 @@ def evaluate_trigger(
                 ignored.append({**entry, "reason": "AUTHOR_SESSION_UNKNOWN"})
                 continue
             who = block["confirmer"].lower()
+            names = {who, *who.split("/")}
             login = str(comment.get("author", "")).lower()
-            if (
-                who in authors
-                or who in sessions
-                or who.split("/")[0] in sessions
-                or (login in authors and login not in shared)
-            ):
+            if names & (authors | sessions) or (login in authors and login not in shared):
                 ignored.append({**entry, "reason": "CONFIRMER_NOT_INDEPENDENT"})
                 continue
             accepted.append({
@@ -219,7 +230,7 @@ def evaluate_trigger(
                 "source": "PROMISE_REPORT",
                 "reason": "ORIGIN_PR_NOT_MERGED_OR_UNKNOWN",
             })
-        elif _ts(promise_judged_at) is None:
+        elif _ts(promise_judged_at) is None or _ts(promise_judged_at) > now_dt:  # type: ignore[operator]
             ignored.append({"source": "PROMISE_REPORT", "reason": "JUDGED_AT_UNKNOWN"})
         else:
             accepted.append({

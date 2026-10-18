@@ -18,6 +18,9 @@ labelling it.  This tool:
    ``--apply-hold``, only when no HOLD file or HOLD env exists (O_CREAT|O_EXCL);
    ``--release-hold`` removes only the exact HOLD text this tool wrote, only after
    the revert merged and within 6 h;
+   ``status.json`` can lag the deployer by one cycle, so "not yet live" is a
+   snapshot: a deploy finishing in the same minute wins and the plan falls back
+   to the fast-revert advice on the next run;
 4. appends a timing event to ``~/.local/state/nexus-livefail-rollback/events.jsonl``.
 
 Without ``--apply`` nothing is written anywhere except the local throwaway worktree
@@ -45,6 +48,7 @@ if __package__ in (None, ""):
 
 from nexus.services.livefail_rollback import (  # noqa: E402
     LIVE_FAILED_LABEL,
+    comment_trust_reason,
     evaluate_trigger,
     gateway_hold_plan,
     hold_text,
@@ -255,9 +259,10 @@ def plan_revert(git: Git, merge_shas: list[str]) -> dict[str, Any]:
 
 
 def cleanup(git: Git, wt: Path, tmp: Path) -> None:
-    with contextlib.suppress(subprocess.CalledProcessError):
-        git("revert", "--abort", cwd=wt, check=False)
-    with contextlib.suppress(subprocess.CalledProcessError):
+    if wt.is_dir():
+        with contextlib.suppress(subprocess.CalledProcessError, OSError):
+            git("revert", "--abort", cwd=wt, check=False)
+    with contextlib.suppress(subprocess.CalledProcessError, OSError):
         git("worktree", "remove", "--force", str(wt), check=False)
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -285,7 +290,23 @@ def _advice_lines(plan: dict, gw: dict | None) -> list[str]:
     return lines
 
 
+_CLOSING = re.compile(
+    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s*:?\s*)((?:[\w.-]+/[\w.-]+)?#)(\d+)", re.I
+)
+
+
+def defuse_closing_keywords(text: str) -> str:
+    """'fix #12' in copied subjects/witness text must not close Issue 12 on merge."""
+    return _CLOSING.sub(lambda m: f"{m.group(1)}{m.group(2)}PR/issue {m.group(4)}", text)
+
+
 def revert_pr_body(issue: int, trig: dict, prs: dict, plan: dict, gw: dict | None) -> str:
+    return defuse_closing_keywords(_prose(issue, trig, prs, plan, gw)) + _blocks(
+        issue, prs, trig, gw
+    )
+
+
+def _prose(issue: int, trig: dict, prs: dict, plan: dict, gw: dict | None) -> str:
     origin = ", ".join(f"#{n} ({prs[n]['merge_sha'][:12]})" for n in trig["origin_prs"])
     lines = [
         f"Draft revert after an independent LIVE_FAILED verdict on #{issue} (Refs #{issue}, Refs #2532).",
@@ -303,6 +324,14 @@ def revert_pr_body(issue: int, trig: dict, prs: dict, plan: dict, gw: dict | Non
         f"`python scripts/governance/livefail_rollback.py --issue {issue} --release-hold`.",
         "",
         *_advice_lines(plan, gw),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _blocks(issue: int, prs: dict, trig: dict, gw: dict | None) -> str:
+    origin = ", ".join(f"PR {n} ({prs[n]['merge_sha'][:12]})" for n in trig["origin_prs"])
+    lines = [
         "",
         f"<!-- NEXUS_CORE_ISSUE: {issue} -->",
         "<!-- NEXUS_ISSUE_INTENT_V1",
@@ -358,7 +387,7 @@ def read_deployer(state_dir: Path) -> tuple[dict | None, dict | None, bool]:
 def write_hold(state_dir: Path, text: str) -> bool:
     """O_CREAT|O_EXCL: never overwrite anyone's HOLD."""
     try:
-        fd = os.open(state_dir / "HOLD", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        fd = os.open(state_dir / "HOLD", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -389,7 +418,21 @@ def release_hold(
     if ok and not apply:
         return False, "RELEASE_DUE_DRY_RUN"
     if ok:
-        (state_dir / "HOLD").unlink()
+        # Move it aside atomically, re-check the moved bytes, and only then delete;
+        # a HOLD rewritten in between is put back (never over a newer one).
+        aside = state_dir / f"HOLD.livefail-release-{os.getpid()}"
+        try:
+            os.rename(state_dir / "HOLD", aside)
+        except FileNotFoundError:
+            return False, "HOLD_ABSENT"
+        if aside.read_text(encoding="utf-8") != written:
+            try:
+                os.link(aside, state_dir / "HOLD")
+                aside.unlink()
+            except FileExistsError:
+                pass  # a newer HOLD exists; keep both, the aside copy is evidence
+            return False, "HOLD_TEXT_CHANGED"
+        aside.unlink()
         rec.rename(rec.with_suffix(".released"))
     return ok, why
 
@@ -437,7 +480,12 @@ def make_event(
 # --- main ------------------------------------------------------------------------
 
 
+def trusted(comments: list[dict], logins: list[str], now: str) -> list[dict]:
+    return [c for c in comments if comment_trust_reason(c, logins, now) is None]
+
+
 def latest_confirmation_at(comments: list[dict]) -> str | None:
+    """Callers pass trusted, unedited comments only."""
     stamps = [c["created_at"] for c in comments if _CONFIRM_RE.search(c.get("body") or "")]
     return max(stamps) if stamps else None
 
@@ -472,18 +520,24 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
         issue = gh.issue(args.issue)
         labels = [lb["name"] for lb in issue.get("labels", [])]
         comments = gh.comments(args.issue)
+        good = trusted(comments, args.trusted_login, now)
         numbers = set(args.pr) | {
             int(n)
-            for c in comments
+            for c in good
             for n in _BLOCK_PR_RE.findall(c["body"])
             if "NEXUS_LIVE_FAILED_V1" in c["body"]
         }
-        prs = {n: gh.pr(n) for n in sorted(numbers)}
+        prs = {}
+        for n in sorted(numbers)[:20]:
+            try:
+                prs[n] = gh.pr(n)
+            except (subprocess.CalledProcessError, KeyError, ValueError, TypeError):
+                continue  # unknown PR: the block is then ignored as ORIGIN_PR_NOT_MERGED_OR_UNKNOWN
         issue_sessions = sessions_in(issue.get("body") or "")
         for p in prs.values():
             p["author_sessions"] = [*p["author_sessions"], *issue_sessions, *args.author_session]
         report = promise_report(args.issue, args.pr, args.repo) if args.pr else None
-        judged = latest_confirmation_at(comments)
+        judged = latest_confirmation_at(good)
         promise_prs = list(args.pr)
         contains = git.contains
     verdict = evaluate_trigger(
@@ -529,7 +583,15 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
     result["plan"] = {k: v for k, v in plan.items() if not k.startswith("_")}
     gw_at = revert_at = None
     try:
-        if gw and gw["action"] == "HOLD" and args.apply_hold:
+        # A HOLD needs a revert PR that can merge and release it: --apply, a clean
+        # plan, and --apply-hold (workspace-86: off by default).
+        if (
+            gw
+            and gw["action"] == "HOLD"
+            and args.apply_hold
+            and args.apply
+            and plan["status"] == "CLEAN"
+        ):
             text = hold_text(
                 args.issue, trig["origin_prs"], trig["merge_shas"], args.now or utcnow()
             )
@@ -663,7 +725,17 @@ def main(argv: list[str] | None = None) -> int:
             rows = []
             for n in gh.live_failed_issues():
                 sub = argparse.Namespace(**{**vars(args), "issue": n, "pr": []})
-                res = handle_issue(sub, gh, git, None)
+                try:
+                    res = handle_issue(sub, gh, git, None)
+                except (
+                    subprocess.CalledProcessError,
+                    OSError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                ) as exc:
+                    rows.append({"issue": n, "outcome": "ERROR", "error": type(exc).__name__})
+                    continue
                 rows.append({
                     "issue": n,
                     "outcome": res.get("outcome"),
