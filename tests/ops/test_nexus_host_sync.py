@@ -31,6 +31,7 @@ EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 DSH_WORKFLOW = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
+EXACT_BASE_TOOL_GATE = ROOT / "scripts" / "ops" / "exact_base_tool_gate.py"
 CORE_ISSUE_CHECK_LOCAL = ROOT / "scripts" / "ops" / "nexus-core-issue-check-local"
 DSH_AGY_ADAPTER = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 DSH_AGY_ADAPTER_INDEX = DSH_AGY_ADAPTER / "index.js"
@@ -120,6 +121,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
         (DSH_WORKFLOW, "scripts/ops/nexus-dsh-workflow"),
+        (EXACT_BASE_TOOL_GATE, "scripts/ops/exact_base_tool_gate.py"),
         (CORE_ISSUE_CHECK_LOCAL, "scripts/ops/nexus-core-issue-check-local"),
         (DSH_AGY_ADAPTER_INDEX, "scripts/ops/dsh-agy-adapter/index.js"),
         (DSH_AGY_ADAPTER_PACKAGE, "scripts/ops/dsh-agy-adapter/package.json"),
@@ -415,6 +417,9 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     dsh_workflow_target = dispatch_target.parent / "nexus-dsh-workflow"
     assert dsh_workflow_target.is_symlink()
     assert dsh_workflow_target.resolve().read_bytes() == DSH_WORKFLOW.read_bytes()
+    assert (
+        dsh_workflow_target.resolve().parent / "exact_base_tool_gate.py"
+    ).read_bytes() == EXACT_BASE_TOOL_GATE.read_bytes()
     hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
     hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
     hermes_core_completion_target = dispatch_target.parent / "nexus-hermes-core-completion"
