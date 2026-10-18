@@ -5,8 +5,10 @@ Evidence Verifier: 系統級獨立驗證器。
 
 import subprocess
 from pathlib import Path
-from .replay_runner import ReplayRunner
+
 from .anti_drift import AntiDrift
+from .replay_runner import ReplayRunner
+
 
 class EvidenceVerifier:
     """
@@ -24,9 +26,14 @@ class EvidenceVerifier:
         """Verify an evidence bundle.
 
         Without at least one really replayed (allowlisted) command, the bundle is returned as
-        UNVERIFIED / LOW (reason ``no_replayable_commands``): replay status SKIPPED or
-        NOT_REPLAYED is not verification. ``allow_no_replay=True`` is the explicit waiver; the
-        result is then labelled ``replay_waived`` and trust is capped at MEDIUM.
+        UNCOVERED (reason ``no_replayable_commands``, ``advisory: True``; trust UNKNOWN, or LOW
+        when code artifacts are missing or the git diff is empty): replay
+        status SKIPPED or NOT_REPLAYED is not verification, but missing coverage is not a
+        rejection either (#2624). ``allow_no_replay=True`` is the explicit waiver; the result is
+        then labelled ``replay_waived`` and trust is capped at MEDIUM.
+
+        A project without ``nexus/config/governance_manifest.json`` is reported as
+        NOT_CONFIGURED (reason ``governance_manifest_not_configured``), not as drift.
         """
         reject_reasons = []
         try:
@@ -43,6 +50,17 @@ class EvidenceVerifier:
 
             # Stage 3: Anti-Drift Check
             drift_passed, drift_results = self.anti_drift.verify_drift()
+            if not drift_passed and drift_results.get("error") == "manifest_not_found":
+                # No manifest means the anti-drift seal was never set up for this project
+                # (e.g. a sibling repo); that is not evidence of drift (#2624).
+                return {
+                    "overall_trust": "LOW",
+                    "status": "NOT_CONFIGURED",
+                    "reason": "governance_manifest_not_configured",
+                    "drift_results": drift_results,
+                    "code_artifacts_verified": {"all_exist": False},
+                    "test_commands_verified": {"all_executed": False},
+                }
             if not drift_passed:
                 return {
                     "overall_trust": "LOW",
@@ -63,15 +81,27 @@ class EvidenceVerifier:
 
             replay_executed = int(replay_report.get("replay_count", 0) or 0) > 0
             if not replay_executed and not allow_no_replay:
+                # Advisory: nothing was replayed, so nothing is verified, but the absence of a
+                # replayable command is a coverage gap, not a rejection (#2624). Code artifacts
+                # and the git diff are still checked (no command is executed): missing
+                # artifacts or an empty diff keep trust LOW.
+                code_artifacts = self._verify_code_artifacts(evidence_bundle.get("code_artifacts", []))
+                diff_ok = self._check_git_diff_non_empty()
+                if not code_artifacts["all_exist"]:
+                    reject_reasons.append("code_artifacts_missing_or_invalid")
+                if not diff_ok:
+                    reject_reasons.append("empty_git_diff")
                 return {
-                    "overall_trust": "LOW",
-                    "status": "UNVERIFIED",
+                    "overall_trust": "UNKNOWN" if not reject_reasons else "LOW",
+                    "status": "UNCOVERED",
+                    "advisory": True,
                     "reason": "no_replayable_commands",
                     "replay_verified": False,
                     "replay_waived": False,
                     "replay_report": replay_report,
-                    "reject_reasons": ["no_replayable_commands"],
-                    "code_artifacts_verified": {"all_exist": False},
+                    "reject_reasons": reject_reasons,
+                    "code_artifacts_verified": code_artifacts,
+                    "git_diff_non_empty": diff_ok,
                     "test_commands_verified": {"all_executed": False},
                 }
 
