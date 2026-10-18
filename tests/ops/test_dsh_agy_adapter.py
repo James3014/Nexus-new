@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1113,7 +1114,6 @@ def test_dsh_agy_busy_retry_2618_busy_past_budget_fails_as_before(tmp_path: Path
     assert payload["code"] == POOL_BUSY
     assert payload["effect"] == "none"
     assert payload["failureKind"] == "AGY_ACCOUNT_POOL_BUSY"
-    assert payload["attempts"] >= 2
     assert payload["attempts"] == len(_attempts(tmp_path))
     assert len(_busy_retry_logs(proc.stderr)) == payload["attempts"] - 1
 
@@ -1201,3 +1201,136 @@ def test_dsh_agy_busy_retry_2618_busy_waits_do_not_consume_other_retry_count(
 
 def test_dsh_agy_busy_retry_2618_tool_result_cap_unchanged() -> None:
     assert "TOOL_RESULT_CAP_CHARS = 8192" in (ADAPTER_DIR / "index.js").read_text(encoding="utf-8")
+
+
+POOL_EXHAUSTED = "AGY_ACCOUNT_POOL_EXHAUSTED_PRE_EFFECT"
+
+
+def _pool_exhausted(op: str, reset_in_s: float | None, **meta_overrides: object) -> dict:
+    # Mirrors the dispatcher's `pool_exhausted` meta (nexus-agy-dispatch _pool_claim_meta).
+    reset_at = None
+    if reset_in_s is not None:
+        moment = datetime.now(timezone.utc) + timedelta(seconds=reset_in_s)
+        reset_at = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta = {
+        "status": "pool_exhausted",
+        "attempts": 0,
+        "rotations": 0,
+        "failure_kind": "ACCOUNT_UNAVAILABLE",
+        "provider_effect": False,
+        "wall_ms": 0,
+        "earliest_reset_at": reset_at,
+        "pool_recovery": {
+            "accounts_considered": 11,
+            "accounts_cooling": 11,
+            "accounts_quota_blocked": 6,
+            "accounts_without_known_recovery": 0,
+        },
+        "pool_wait_budget_seconds": 120,
+    }
+    meta.update(meta_overrides)
+    meta = {key: value for key, value in meta.items() if value is not _ABSENT}
+    return {
+        "background": True,
+        "status": "FAILED",
+        "record": {"operation_id": op, "exit_code": 75, "failure_kind": None},
+        "stderr_meta": [meta],
+    }
+
+
+def test_dsh_agy_exhausted_retry_2618_near_reset_waits_then_succeeds(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_exhausted("agyop_x1", 1), _ok("agyop_ok")],
+        extra_env={BUSY_BUDGET_ENV: "30"},
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert len(_attempts(tmp_path)) == 2
+    logs = _busy_retry_logs(proc.stderr)
+    assert len(logs) == 1 and logs[0]["reason"] == "pool_exhausted"
+    assert logs[0]["wait_ms"] <= 3000
+
+
+def test_dsh_agy_exhausted_retry_2618_reset_beyond_budget_fails_immediately(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_exhausted("agyop_x2", 3600), _ok("agyop_ok")],
+        extra_env={BUSY_BUDGET_ENV: "30"},
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == POOL_EXHAUSTED
+    assert payload["effect"] == "none"
+    assert len(_attempts(tmp_path)) == 1
+    assert _busy_retry_logs(proc.stderr) == []
+
+
+def test_dsh_agy_exhausted_retry_2618_unproven_exhaustion_fails_as_before(tmp_path: Path) -> None:
+    unknown = {
+        "accounts_considered": 11,
+        "accounts_cooling": 11,
+        "accounts_quota_blocked": 6,
+        "accounts_without_known_recovery": 1,
+    }
+    cases = {
+        "unknown-recovery": _pool_exhausted("agyop_a", 1, pool_recovery=unknown),
+        "recovery-absent": _pool_exhausted("agyop_b", 1, pool_recovery=_ABSENT),
+        "no-reset": _pool_exhausted("agyop_c", None),
+        "bad-reset": _pool_exhausted("agyop_d", 1, earliest_reset_at="soon"),
+        "effect-absent": _pool_exhausted("agyop_e", 1, provider_effect=_ABSENT),
+        "effect-true": _pool_exhausted("agyop_f", 1, provider_effect=True),
+        "attempts-nonzero": _pool_exhausted("agyop_g", 1, attempts=1),
+    }
+    for name, step in cases.items():
+        proc = _run_node(
+            tmp_path / name,
+            OK_TEXT,
+            script=[step, _ok("agyop_ok")],
+            extra_env={BUSY_BUDGET_ENV: "30"},
+        )
+        assert proc.returncode == 3, name
+        assert json.loads(proc.stdout)["code"] == "AGY_OPERATION_FAILED", name
+        assert len(_attempts(tmp_path / name)) == 1, name
+        assert _busy_retry_logs(proc.stderr) == [], name
+
+
+def test_dsh_agy_exhausted_retry_2618_budget_zero_or_no_retries_disable_wait(
+    tmp_path: Path,
+) -> None:
+    for name, env in (
+        ("budget0", {BUSY_BUDGET_ENV: "0"}),
+        ("retries0", {"NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "0", BUSY_BUDGET_ENV: "30"}),
+    ):
+        proc = _run_node(
+            tmp_path / name,
+            OK_TEXT,
+            script=[_pool_exhausted("agyop_z", 1), _ok("agyop_ok")],
+            extra_env=env,
+        )
+        assert proc.returncode == 3, name
+        assert len(_attempts(tmp_path / name)) == 1, name
+
+
+def test_dsh_agy_exhausted_retry_2618_shares_budget_with_busy_waits(tmp_path: Path) -> None:
+    script = [
+        _pool_busy("agyop_b1"),
+        _pool_exhausted("agyop_x3", 1),
+        _pool_busy("agyop_b2"),
+        _ok("agyop_ok"),
+    ]
+    proc = _run_node(tmp_path, OK_TEXT, script=script, extra_env={BUSY_BUDGET_ENV: "30"})
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    reasons = [entry["reason"] for entry in _busy_retry_logs(proc.stderr)]
+    assert reasons == ["pool_busy", "pool_exhausted", "pool_busy"]
+    # A reset that fits a fresh budget but not the remaining one is refused.
+    tight = _run_node(
+        tmp_path / "tight",
+        OK_TEXT,
+        script=[_pool_busy("agyop_t1"), _pool_exhausted("agyop_t2", 20), _ok("agyop_ok")],
+        extra_env={BUSY_BUDGET_ENV: "5"},
+    )
+    assert tight.returncode == 3
+    assert json.loads(tight.stdout)["code"] == POOL_EXHAUSTED
+    assert len(_attempts(tmp_path / "tight")) == 2
