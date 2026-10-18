@@ -464,6 +464,9 @@ if args[:2] == ["pr", "create"]:
     sys.exit(0)
 if args[:2] == ["issue", "comment"]:
     sys.exit(0)
+if "search/issues" in args:
+    print(json.dumps({"items": [{"number": n} for n in data.get("search", [])]}))
+    sys.exit(0)
 path = [a for a in args if a.startswith("repos/")][0]
 if path.endswith("/comments?per_page=100"):
     print(json.dumps([data["comments"]]))
@@ -506,6 +509,7 @@ def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None, ex
             }
         },
         "head_prs": head_prs or [],
+        "search": [5],
     }
     (tmp_path / "gh.json").write_text(json.dumps(data))
     home = tmp_path / "home"
@@ -770,3 +774,17 @@ def test_cli_revert_that_changes_nothing_is_manual(tmp_path, repo):
     res = _cli(tmp_path, repo, bad)
     assert res["plan"]["status"] == "MANUAL"
     assert res["plan"]["reason"] in ("REVERT_IS_EMPTY", "REVERT_CONFLICT")
+
+
+def test_cli_sweep_prints_one_summary_line(tmp_path, repo):
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    (tmp_path / "deploy").mkdir()
+    out, _, _ = _online(tmp_path, repo, bad, "--sweep")
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.strip().splitlines()
+    assert len(lines) == 1
+    summary = json.loads(lines[0])
+    assert summary["sweep"][0]["issue"] == 5
+    assert summary["sweep"][0]["outcome"] == "DRY_RUN_CLEAN"
+    calls = (tmp_path / "gh.log").read_text()
+    assert '"create"' not in calls and '"comment"' not in calls
