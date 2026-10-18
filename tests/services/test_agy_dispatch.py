@@ -6932,3 +6932,80 @@ def test_background_capability_check_pool_busy_records_failure_kind(
     assert record["status"] == "FAILED"
     assert record["failure_kind"] == "AGY_ACCOUNT_POOL_BUSY"
     assert record["first_effect_at"] is None
+
+
+def test_2619_stale_quota_row_after_failed_refresh_is_unknown_not_available(
+    tmp_path: Path,
+) -> None:
+    """#2619: a row the quota writer demoted after a failed refresh must not rank as available."""
+    quota = SourceFileLoader(
+        "nexus_agy_quota_canonical_2619", str(ROOT / "scripts" / "ops" / "nexus-agy-quota")
+    ).load_module()
+    now = 2_000_000_000.0
+    prior_checked = _iso(now - 60)
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps({
+            "checked_at": prior_checked,
+            "accounts": [
+                {
+                    "account": "exhausted",
+                    "ok": True,
+                    "checked_at": prior_checked,
+                    "groups": {
+                        "Gemini Models": {
+                            "weekly": _window(100.0, reset_at=_iso(now + 6 * 86400)),
+                            "5h": _window(99.0, reset_at=_iso(now + 3600)),
+                        }
+                    },
+                },
+                {
+                    "account": "healthy",
+                    "ok": True,
+                    "checked_at": prior_checked,
+                    "groups": {
+                        "Gemini Models": {
+                            "weekly": _window(50.0, reset_at=_iso(now + 6 * 86400)),
+                            "5h": _window(50.0, reset_at=_iso(now + 3600)),
+                        }
+                    },
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    snapshot = quota.merge_snapshot(
+        snapshot_path=snapshot_path,
+        current_names={"exhausted", "healthy"},
+        refreshed_rows=[
+            {
+                "account": "exhausted",
+                "ok": False,
+                "error": "quota_exhausted",
+                "reset_at": _iso(now + 5 * 86400),
+                "checked_at": _iso(now),
+            }
+        ],
+        partial=True,
+        checked_at=_iso(now),
+    )
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium", snapshot, now_ts=now, max_age_seconds=900
+    )
+    assert state["snapshot_fresh"] is True
+    assert state["unknown"] == ["exhausted"]
+    assert "exhausted" not in state["preferred"] + state["reserve"] + state["fallback"]
+    assert "healthy" in state["preferred"] + state["reserve"] + state["fallback"]
+
+    quota_state, _reset, fresh = dispatch._account_family_quota_state(
+        snapshot, account_name="exhausted", model_family="gemini", now_ts=now
+    )
+    assert (quota_state, fresh) == ("unknown", True)
+
+    groups = next(r for r in snapshot["accounts"] if r["account"] == "exhausted")["groups"]
+    weekly = groups["Gemini Models"]["weekly"]
+    assert dispatch._quota_window_state(weekly, now_ts=now)[0] == "unknown"
+    assert dispatch._known_remaining_pct(weekly, now_ts=now) is None
+    assert dispatch._quota_window_drain_pressure(weekly, now_ts=now) is None
+    assert dispatch._family_remaining_pct(groups, "Gemini Models", now_ts=now) is None

@@ -460,3 +460,57 @@ def test_eligible_accounts_from_a_snapshot_shape_like_the_live_one():
     assert {n for n, info in result.items() if info["eligible"]} == {"a"}
     assert result["b"]["state"] == lease.QUOTA_WEEKLY_EXHAUSTED
     assert result["c"]["state"] == lease.QUOTA_WINDOW_UNKNOWN
+
+
+def test_2619_stale_row_after_failed_refresh_is_not_eligible(tmp_path: Path):
+    """#2619: the bench lease reader treats a writer-demoted stale row as unknown."""
+    from importlib.machinery import SourceFileLoader
+
+    root = Path(__file__).resolve().parents[2]
+    quota = SourceFileLoader(
+        "nexus_agy_quota_canonical_bench_2619", str(root / "scripts" / "ops" / "nexus-agy-quota")
+    ).load_module()
+    checked = "2096-10-02T07:06:00+00:00"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps({
+            "checked_at": checked,
+            "accounts": [
+                {
+                    "account": "a",
+                    "ok": True,
+                    "checked_at": checked,
+                    "groups": {"Gemini Models": {"weekly": WEEKLY_OK, "5h": FIVE_HOUR_OK}},
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+    snapshot = quota.merge_snapshot(
+        snapshot_path=snapshot_path,
+        current_names={"a"},
+        refreshed_rows=[
+            {
+                "account": "a",
+                "ok": False,
+                "error": "quota_exhausted",
+                "checked_at": "2096-10-02T07:06:40+00:00",
+            }
+        ],
+        partial=True,
+        checked_at="2096-10-02T07:06:40+00:00",
+    )
+    row = snapshot["accounts"][0]
+    info = lease.classify_account_quota(
+        row,
+        snapshot_checked_at=snapshot["checked_at"],
+        family="gemini",
+        now_ts=4_000_000_000.0,
+        max_age_seconds=300,
+    )
+    assert info["state"] == lease.QUOTA_WINDOW_UNKNOWN
+    assert info["five_hour_remaining_pct"] is None
+    result = lease.account_eligibility(
+        ["a"], snapshot, family="gemini", allowlist=["a"], now_ts=4_000_000_000.0
+    )
+    assert result["a"]["eligible"] is False

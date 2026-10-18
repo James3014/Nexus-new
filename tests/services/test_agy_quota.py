@@ -120,7 +120,10 @@ def test_merge_snapshot_preserves_prior_known_freshness_on_failure(tmp_path: Pat
     assert acct["account"] == "acct1"
     assert acct["ok"] is True
     assert acct["checked_at"] == "2026-10-01T00:00:00+00:00"
-    assert acct["groups"]["Gemini Models"]["weekly"]["remaining_pct"] == 80.0
+    # #2619: the old reading is kept for humans but no longer reads as live.
+    assert acct["groups"]["Gemini Models"]["weekly"]["status"] == "stale"
+    assert acct["groups"]["Gemini Models"]["weekly"]["remaining_pct"] is None
+    assert acct["groups"]["Gemini Models"]["weekly"]["last_known_remaining_pct"] == 80.0
 
 
 def test_merge_snapshot_retains_failed_accounts_without_silent_removal(tmp_path: Path) -> None:
@@ -371,3 +374,220 @@ def test_wrapper_sigterm_reaps_active_usage_process(tmp_path: Path) -> None:
         if wrapper.poll() is None:
             wrapper.kill()
             wrapper.wait()
+
+
+# --- #2619: a failed refresh must not leave a "known" reading in place -------
+
+QUOTA_2619_STDERR = (
+    "error: Individual quota reached. Please upgrade your subscription to increase your "
+    "limits. Resets in 130h32m20s.\n"
+    'AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. '
+    'Please upgrade your subscription to increase your limits. Resets in 130h32m20s.",'
+    '"status":"RESOURCE_EXHAUSTED","error_code":429,"code_kind":"http","retryable":true}\n'
+)
+CHECKED_2619 = "2026-10-18T14:16:00+00:00"
+
+
+def _fake_agy(tmp_path: Path, *, stdout: str = "", stderr: str = "", code: int = 0) -> Path:
+    import sys
+
+    executable = tmp_path / "fake-agy"
+    executable.write_text(
+        "#!" + sys.executable + "\n"
+        "import sys\n"
+        f"sys.stdout.write({stdout!r})\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"raise SystemExit({code})\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+    return executable
+
+
+def _query(tmp_path: Path, executable: Path) -> dict:
+    home = tmp_path / "account"
+    home.mkdir(exist_ok=True)
+    return quota.query_account(
+        account_home=home,
+        account_name="google-02",
+        email=None,
+        agy_binary=str(executable),
+        timeout=10,
+        checked_at=CHECKED_2619,
+    )
+
+
+def _known_prior_snapshot(path: Path, *, checked_at: str = "2026-10-17T00:18:00+00:00") -> None:
+    path.write_text(
+        json.dumps({
+            "checked_at": checked_at,
+            "accounts": [
+                {
+                    "account": "google-02",
+                    "ok": True,
+                    "checked_at": checked_at,
+                    "groups": {
+                        "Gemini Models": {
+                            "weekly": {
+                                "status": "known",
+                                "remaining_pct": 100.0,
+                                "reset_at": "2026-10-24T00:00:00Z",
+                            },
+                            "5h": {
+                                "status": "known",
+                                "remaining_pct": 99.0,
+                                "reset_at": "2026-10-17T05:00:00Z",
+                            },
+                        },
+                        "Claude and GPT models": {
+                            "5h": {"status": "disabled", "remaining_pct": None, "reset_at": None},
+                        },
+                    },
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+
+def _all_windows(row: dict) -> list[dict]:
+    return [w for group in row.get("groups", {}).values() for w in group.values()]
+
+
+def test_2619_query_classifies_structured_quota_exhaustion_with_reset(tmp_path: Path) -> None:
+    row = _query(tmp_path, _fake_agy(tmp_path, stderr=QUOTA_2619_STDERR, code=1))
+
+    assert row["ok"] is False
+    assert row["error"] == "quota_exhausted"
+    # checked_at + 130h32m20s
+    assert row["reset_at"] == "2026-10-24T00:48:20Z"
+    assert "groups" not in row  # the provider does not say which group is exhausted
+
+
+def test_2619_query_quota_without_reset_text_has_no_reset(tmp_path: Path) -> None:
+    stderr = 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","error_code":429,"code_kind":"http"}\n'
+    row = _query(tmp_path, _fake_agy(tmp_path, stderr=stderr, code=1))
+
+    assert row["error"] == "quota_exhausted"
+    assert "reset_at" not in row
+
+
+def test_2619_query_other_failures_keep_plain_error_kinds(tmp_path: Path) -> None:
+    unavailable = (
+        'AGY_ERROR: {"short_error":"No capacity. Resets in 1h0m0s.","status":"UNAVAILABLE",'
+        '"error_code":503,"code_kind":"http"}\n'
+    )
+    row = _query(tmp_path, _fake_agy(tmp_path, stderr=unavailable, code=3))
+    assert row["error"] == "exit_3"
+    assert "reset_at" not in row
+
+    # stdout is never scanned: quota words there do not classify.
+    row = _query(
+        tmp_path,
+        _fake_agy(tmp_path, stdout="Individual quota reached. Resets in 2h0m0s.\n", code=1),
+    )
+    assert row["error"] == "exit_1"
+    assert "reset_at" not in row
+
+    row = _query(tmp_path, _fake_agy(tmp_path, stdout="no usage table here\n", code=0))
+    assert row["error"] == "usage_unparseable"
+
+
+def test_2619_failed_refresh_marks_known_windows_stale(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    _known_prior_snapshot(snapshot)
+    failure = {
+        "account": "google-02",
+        "ok": False,
+        "error": "quota_exhausted",
+        "reset_at": "2026-10-24T00:48:20Z",
+        "checked_at": CHECKED_2619,
+    }
+
+    payload = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"google-02"},
+        refreshed_rows=[failure],
+        partial=True,
+        checked_at=CHECKED_2619,
+    )
+    row = payload["accounts"][0]
+
+    assert row["stale"] is True
+    assert row["last_refresh"] == {
+        "ok": False,
+        "error": "quota_exhausted",
+        "checked_at": CHECKED_2619,
+        "reset_at": "2026-10-24T00:48:20Z",
+    }
+    assert all(w["status"] != "known" for w in _all_windows(row))
+    weekly = row["groups"]["Gemini Models"]["weekly"]
+    assert weekly["status"] == "stale"
+    assert weekly["remaining_pct"] is None
+    assert weekly["last_known_remaining_pct"] == 100.0
+    assert weekly["reset_at"] == "2026-10-24T00:00:00Z"
+    assert row["groups"]["Gemini Models"]["5h"]["last_known_remaining_pct"] == 99.0
+    # disabled stays disabled (it never claimed availability)
+    assert row["groups"]["Claude and GPT models"]["5h"]["status"] == "disabled"
+
+    # A second failure keeps the original last-known numbers and the latest failure.
+    snapshot.write_text(json.dumps(payload), encoding="utf-8")
+    again = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"google-02"},
+        refreshed_rows=[
+            {"account": "google-02", "ok": False, "error": "timeout", "checked_at": CHECKED_2619}
+        ],
+        partial=True,
+        checked_at=CHECKED_2619,
+    )["accounts"][0]
+    assert again["stale"] is True
+    assert again["groups"]["Gemini Models"]["weekly"]["last_known_remaining_pct"] == 100.0
+    assert again["last_refresh"] == {"ok": False, "error": "timeout", "checked_at": CHECKED_2619}
+
+    # A later successful refresh replaces the stale row entirely.
+    snapshot.write_text(json.dumps({"checked_at": CHECKED_2619, "accounts": [again]}))
+    fresh_groups = {
+        "Gemini Models": {
+            "weekly": {"status": "known", "remaining_pct": 40.0, "reset_at": None},
+        }
+    }
+    fresh = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"google-02"},
+        refreshed_rows=[
+            {
+                "account": "google-02",
+                "email": None,
+                "ok": True,
+                "groups": fresh_groups,
+                "checked_at": "2026-10-24T01:00:00+00:00",
+            }
+        ],
+        partial=True,
+        checked_at="2026-10-24T01:00:00+00:00",
+    )["accounts"][0]
+    assert "stale" not in fresh
+    assert "last_refresh" not in fresh
+    assert fresh["groups"] == fresh_groups
+
+
+def test_2619_main_writes_stale_row_for_quota_exhausted_account(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pool = tmp_path / "pool"
+    (pool / "accounts" / "google-02").mkdir(parents=True)
+    snapshot = tmp_path / "snapshot.json"
+    _known_prior_snapshot(snapshot)
+    executable = _fake_agy(tmp_path, stderr=QUOTA_2619_STDERR, code=1)
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(pool))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_SNAPSHOT", str(snapshot))
+    monkeypatch.setenv("NEXUS_AGY_BINARY", str(executable))
+
+    assert quota.main(["google-02", "--timeout", "10"]) == 2
+
+    row = json.loads(snapshot.read_text(encoding="utf-8"))["accounts"][0]
+    assert row["ok"] is True and row["stale"] is True
+    assert row["last_refresh"]["error"] == "quota_exhausted"
+    assert row["last_refresh"]["reset_at"].startswith("20")
+    assert all(w["status"] != "known" for w in _all_windows(row))

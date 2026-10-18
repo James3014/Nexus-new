@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +105,109 @@ def parse_usage(text: str) -> dict[str, dict[str, dict[str, Any]]]:
             }
         groups.setdefault(group, {})[window] = value
     return groups
+
+
+# #2619: "Resets in 130h32m20s" in agy's own error text (same shape as
+# nexus/executors/worker_registry.py _AGY_RESET_IN_RE).
+_RESET_IN_RE = re.compile(r"[Rr]esets in\s+((?:\d+\s*[dhms]\s*)+)")
+_DURATION_PART_RE = re.compile(r"(\d+)\s*([dhms])")
+_DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+
+
+def _failure_signals() -> Any:
+    """``nexus.services.agy_failure_signals`` or None when no Nexus tree is importable.
+
+    The installed copy lives in ``~/.local/bin`` beside the host-runtime
+    snapshot the dispatcher imports from; without one, failures keep their
+    plain ``exit_N`` kind.
+    """
+    try:
+        from nexus.services import agy_failure_signals
+
+        return agy_failure_signals
+    except Exception:  # noqa: BLE001 - a broken import must not break the quota run
+        pass
+    candidates = [
+        os.getenv("NEXUS_AGY_SNAPSHOT", "").strip(),
+        str(Path.home() / ".local/share/nexus-host-runtime/current/snapshot"),
+        str(Path(__file__).resolve().parents[2]),
+    ]
+    for root in candidates:
+        if root and (Path(root) / "nexus/services/agy_failure_signals.py").is_file():
+            if root not in sys.path:
+                sys.path.insert(0, root)
+            try:
+                from nexus.services import agy_failure_signals
+
+                return agy_failure_signals
+            except Exception:  # noqa: BLE001
+                continue
+    return None
+
+
+def classify_usage_failure(stdout: str, stderr: str, *, checked_at: str) -> dict[str, Any] | None:
+    """``{"error": "quota_exhausted", "reset_at"?}`` for a quota-exhausted /usage run.
+
+    Reads agy's own error channels only (structured ``AGY_ERROR`` first, see
+    ``agy_failure_signals``).  The provider message does not name the model
+    group, so no group is marked exhausted here.
+    """
+    signals = _failure_signals()
+    if signals is None:
+        return None
+    try:
+        kind = signals.classify_agy_account_failure(stdout, stderr, stdout_is_envelope=False)
+        if kind is not signals.AccountFailureKind.QUOTA_EXHAUSTED:
+            return None
+        text = signals.agy_error_text(stdout, stderr, stdout_is_envelope=False)
+    except Exception:  # noqa: BLE001
+        return None
+    result: dict[str, Any] = {"error": "quota_exhausted"}
+    match = _RESET_IN_RE.search(text)
+    if match is not None:
+        seconds = sum(
+            int(amount) * _DURATION_UNITS[unit]
+            for amount, unit in _DURATION_PART_RE.findall(match.group(1))
+        )
+        try:
+            base = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+        except ValueError:
+            base = None
+        if base is not None and base.tzinfo is not None:
+            reset = base.astimezone(timezone.utc) + timedelta(seconds=seconds)
+            result["reset_at"] = reset.isoformat().replace("+00:00", "Z")
+    return result
+
+
+def mark_row_stale(row: dict[str, Any]) -> dict[str, Any]:
+    """Demote every ``known`` window of a preserved row to ``stale`` (#2619).
+
+    Readers (dispatcher, bench lease, doctor) only trust ``status == "known"``;
+    ``remaining_pct`` is cleared so no reader can use the old number, which is
+    kept as ``last_known_remaining_pct``.
+    """
+    stale = dict(row)
+    stale["stale"] = True
+    groups = row.get("groups")
+    if isinstance(groups, dict):
+        new_groups: dict[str, Any] = {}
+        for group_name, windows in groups.items():
+            if not isinstance(windows, dict):
+                new_groups[group_name] = windows
+                continue
+            new_windows: dict[str, Any] = {}
+            for window_name, window in windows.items():
+                if isinstance(window, dict) and window.get("status") == "known":
+                    window = {
+                        **window,
+                        "status": "stale",
+                        "remaining_pct": None,
+                        "last_known_remaining_pct": window.get("remaining_pct"),
+                    }
+                new_windows[window_name] = window
+            new_groups[group_name] = new_windows
+        stale["groups"] = new_groups
+    return stale
 
 
 def _state(pool_root: Path) -> dict[str, Any]:
@@ -241,6 +344,9 @@ def query_account(
             "error": f"exit_{proc.returncode}",
             "checked_at": checked_at,
         }
+        quota_failure = classify_usage_failure(stdout or "", stderr or "", checked_at=checked_at)
+        if quota_failure is not None:
+            result.update(quota_failure)
         emit_progress(
             "ACCOUNT_RESULT",
             account=account_name,
@@ -314,12 +420,15 @@ def merge_snapshot(
         if row.get("ok") is True or name not in merged or not merged[name].get("ok"):
             merged[name] = row
             continue
-        prior_row = dict(merged[name])
-        prior_row["last_refresh"] = {
+        prior_row = mark_row_stale(merged[name])
+        last_refresh: dict[str, Any] = {
             "ok": False,
             "error": row.get("error"),
             "checked_at": row.get("checked_at", checked_at),
         }
+        if isinstance(row.get("reset_at"), str):
+            last_refresh["reset_at"] = row["reset_at"]
+        prior_row["last_refresh"] = last_refresh
         merged[name] = prior_row
 
     all_names = current_names | {
