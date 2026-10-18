@@ -32,6 +32,20 @@ DEFAULT_SHARED = ("james3014-nexus-agent[bot]",)
 DEFAULT_TRUSTED = ("James3014", "james3014-nexus-agent[bot]")
 
 
+_MARKER_RE = re.compile(r"^<!-- NEXUS_AUTHOR_SESSION_V1: ([A-Za-z0-9._-]{1,64}) -->$")
+
+
+def author_session_markers(*bodies: str) -> list[str]:
+    """Names from strict `<!-- NEXUS_AUTHOR_SESSION_V1: name -->` lines in the bodies."""
+    found = []
+    for body in bodies:
+        for line in body.splitlines():
+            match = _MARKER_RE.match(line.strip())
+            if match:
+                found.append(match.group(1))
+    return found
+
+
 class Gh:
     def __init__(self, repo: str) -> None:
         self.repo, self.bin = repo, os.environ.get("NEXUS_GH_BIN", "gh")
@@ -71,15 +85,45 @@ class Gh:
             edits = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"][
                 "userContentEdits"
             ]
-        except (subprocess.CalledProcessError, KeyError, TypeError, ValueError):
+            if edits["totalCount"] > len(edits["nodes"]) or any(
+                e.get("diff") is None for e in edits["nodes"]
+            ):
+                return None
+            return [{"edited_at": e["editedAt"], "body": e["diff"]} for e in edits["nodes"]]
+        except (subprocess.CalledProcessError, KeyError, TypeError, ValueError, AttributeError):
             return None
-        if edits["totalCount"] > len(edits["nodes"]) or any(
-            e.get("diff") is None for e in edits["nodes"]
-        ):
-            return None
-        return [{"edited_at": e["editedAt"], "body": e["diff"]} for e in edits["nodes"]]
 
-    def pr(self, m: int) -> tuple[dict, str]:
+    def linked_prs(self, n: int) -> tuple[list[str], list[str]] | None:
+        """(createdAt of every linked PR, bodies of same-repo ones); None if incomplete."""
+        owner, name = self.repo.split("/")
+        pr_fields = "__typename ... on PullRequest{createdAt body repository{nameWithOwner}}"
+        query = (
+            'query{repository(owner:"%s",name:"%s"){issue(number:%d){timelineItems('
+            "itemTypes:[CROSS_REFERENCED_EVENT,CONNECTED_EVENT],first:100){pageInfo{hasNextPage} "
+            "nodes{__typename ... on CrossReferencedEvent{source{%s}} "
+            "... on ConnectedEvent{source{%s} subject{%s}}}}}}}"
+        ) % (owner, name, n, pr_fields, pr_fields, pr_fields)
+        try:
+            items = self.api("graphql", "-f", f"query={query}")["data"]["repository"]["issue"][
+                "timelineItems"
+            ]
+            if items["pageInfo"]["hasNextPage"]:
+                return None
+            created, bodies = [], []
+            for node in items["nodes"]:
+                for key in ("source", "subject"):
+                    src = node.get(key)
+                    if not isinstance(src, dict) or src.get("__typename") != "PullRequest":
+                        continue
+                    created.append(src["createdAt"])
+                    same = (src.get("repository") or {}).get("nameWithOwner", "")
+                    if same.lower() == self.repo.lower():
+                        bodies.append(src.get("body") or "")
+            return created, bodies
+        except (subprocess.CalledProcessError, KeyError, TypeError, ValueError, AttributeError):
+            return None
+
+    def pr(self, m: int) -> tuple[dict, str, str]:
         p = self.api(f"repos/{self.repo}/pulls/{m}")
         return (
             {
@@ -90,6 +134,7 @@ class Gh:
                 "merged_at": p.get("merged_at"),
             },
             (p.get("user") or {}).get("login", ""),
+            p.get("body") or "",
         )
 
     def contains(self, ancestor: str, commit: str) -> bool | None:
@@ -142,7 +187,7 @@ def _emit(path: str, generation: int) -> int:
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
-    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError, TypeError) as exc:
         detail = (getattr(exc, "stderr", "") or str(exc)).strip().splitlines()
         print(
             f"promise_confirmation: {type(exc).__name__}: {detail[0] if detail else ''}",
@@ -171,6 +216,11 @@ def _main(argv: list[str] | None = None) -> int:
         return _emit(args.emit_blocks, args.generation)
     if args.offline_input:
         d = json.loads(Path(args.offline_input).read_text())
+        sessions = [
+            *(d.get("author_sessions") or []),
+            *args.author_session,
+            *author_session_markers(d["issue_body"], *(str(p.get("body") or "") for p in d["prs"])),
+        ]
         table = {(a, c): v for a, c, v in d.get("contains", [])}
         rep = build_promise_confirmation_report(
             issue_body=d["issue_body"],
@@ -183,20 +233,46 @@ def _main(argv: list[str] | None = None) -> int:
             trusted_logins=d.get("trusted_logins", args.trusted_login),
             shared_logins=d.get("shared_logins", args.shared_login),
             issue_created_at=d.get("issue_created_at"),
+            author_sessions=sessions,
+            linked_pr_created_at=d.get("linked_pr_created_at"),
         )
     else:
         if args.issue is None:
             ap.error("--issue is required")
         gh = Gh(args.repo)
         issue = gh.issue(args.issue)
-        prs, authors = [], [(issue.get("user") or {}).get("login", ""), *args.author_session]
+        issue_body = issue.get("body") or ""
+        now = args.now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            has_set = parse_issue_promise_set(issue_body) is not None
+        except ValueError:
+            has_set = False  # the library reports an invalid set (BLOCKED) without more fetching
+        if not has_set:
+            rep = build_promise_confirmation_report(
+                issue_body=issue_body,
+                body_history=None,
+                comments=[],
+                prs=[],
+                contains=lambda a, c: None,
+                now=now,
+                author_identities=[],
+            )
+            print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
+            return 0
+        prs, authors = [], [(issue.get("user") or {}).get("login", "")]
+        bodies = [issue_body]
         for m in args.pr:
-            listed, login = gh.pr(m)
+            listed, login, pr_body = gh.pr(m)
             prs.append(listed)
             authors.append(login)
+            bodies.append(pr_body)
+        linked = gh.linked_prs(args.issue)
+        if linked is not None:
+            bodies.extend(linked[1])
+        sessions = [*args.author_session, *author_session_markers(*bodies)]
         now = args.now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         rep = build_promise_confirmation_report(
-            issue_body=issue.get("body") or "",
+            issue_body=issue_body,
             body_history=gh.history(args.issue),
             comments=gh.comments(args.issue),
             prs=prs,
@@ -206,6 +282,8 @@ def _main(argv: list[str] | None = None) -> int:
             trusted_logins=args.trusted_login,
             shared_logins=args.shared_login,
             issue_created_at=issue.get("created_at"),
+            author_sessions=sessions,
+            linked_pr_created_at=None if linked is None else linked[0],
         )
     print(json.dumps(rep, indent=2, sort_keys=True) if args.json else _markdown(rep))
     return 0

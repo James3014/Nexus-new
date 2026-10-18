@@ -168,8 +168,12 @@ def report(
     trusted=(),
     issue_created_at: str | None = "2026-01-01T00:00:00Z",
     shared=(),
+    author_sessions=("author-session",),
+    linked=(),
 ):
     return build_promise_confirmation_report(
+        author_sessions=None if author_sessions is None else list(author_sessions),
+        linked_pr_created_at=None if linked is None else list(linked),
         author_identities=list(authors),
         trusted_logins=list(trusted),
         issue_created_at=issue_created_at,
@@ -958,3 +962,383 @@ def test_cli_offline_invalid_now_is_one_line_exit_2(tmp_path):
     )
     out = _run_cli(tmp_path, ["--offline-input", str(path), "--json"])
     assert out.returncode == 2 and len(out.stderr.strip().splitlines()) == 1
+
+
+# --- hardening: author sessions, linked PRs, early NOT_APPLICABLE -----------------
+
+
+def _verified_inputs():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}),
+    ]
+    return body, comments
+
+
+def test_confirmer_equal_to_author_session_is_not_independent():
+    body, ident = setup()
+    comments = [
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="  Dev-Session "),
+    ]
+    rep = report(body, comments, author_sessions=["dev-session"])
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+@pytest.mark.parametrize("sessions", [(), ("  ",)])
+def test_unknown_author_session_blocks_verified(sessions):
+    body, comments = _verified_inputs()
+    rep = report(body, comments, author_sessions=sessions)
+    assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+    assert report(body, comments)["recommendation"] == "VERIFIED"
+
+
+def test_linked_pr_created_earlier_moves_work_start_back():
+    old, _ = setup(pids=("P1", "P2"), generation=1)
+    new, ident = setup(pids=("P1",), generation=2)
+    history = [
+        {"edited_at": "2026-10-16T00:00:00Z", "body": old},
+        {"edited_at": "2026-10-17T05:00:00Z", "body": new},
+    ]
+    late_pr = dict(pr(), created_at="2026-10-17T10:00:00Z", merged_at="2026-10-17T11:00:00Z")
+    comments = [witness_comment("P1", identity=ident, observed="2026-10-17T12:00:00Z")]
+    without = report(new, comments, prs=[late_pr], history=history)
+    assert without["recommendation"] != "BLOCKED"
+    linked = report(new, comments, prs=[late_pr], history=history, linked=["2026-10-17T00:00:00Z"])
+    assert linked["recommendation"] == "BLOCKED"
+    assert "PROMISE_DROPPED_AFTER_WORK_START:P2" in linked["reason_codes"]
+
+
+@pytest.mark.parametrize("linked", [None, ["garbage"]])
+def test_unknown_or_unparseable_linked_prs_block_verified(linked):
+    body, comments = _verified_inputs()
+    rep = report(body, comments, linked=linked)
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+FAKE_GH = """#!/usr/bin/env python3
+import json, sys
+routes = json.load(open(__FILE__))
+args = sys.argv[1:]
+text = " ".join(args)
+for key, value in routes.items():
+    if (text.endswith(key[1:]) if key.startswith("=") else key in text):
+        print(json.dumps(value)); sys.exit(0)
+sys.stderr.write("unexpected call: " + text + "\\n"); sys.exit(9)
+"""
+
+
+def _fake_gh(tmp_path, routes):
+    data = tmp_path / "routes.json"
+    data.write_text(json.dumps(routes))
+    fake = tmp_path / "gh"
+    fake.write_text(FAKE_GH.replace("__FILE__", repr(str(data))))
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    return fake
+
+
+def _run_with_fake(tmp_path, routes, extra=()):
+    fake = _fake_gh(tmp_path, routes)
+    env = dict(
+        os.environ, NEXUS_GH_BIN=str(fake), PYTHONPATH=_cli_pythonpath(), PYTHONWARNINGS="ignore"
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/governance/promise_confirmation.py"),
+            "--issue",
+            "1",
+            "--pr",
+            "7",
+            "--json",
+            "--now",
+            NOW,
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+    )
+
+
+def test_cli_not_applicable_fetches_only_the_issue(tmp_path):
+    out = _run_with_fake(
+        tmp_path, {"=issues/1": {"number": 1, "body": "plain", "user": {"login": "x"}}}
+    )
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["recommendation"] == "NOT_APPLICABLE"
+
+
+MARKER = "<!-- NEXUS_AUTHOR_SESSION_V1: sess-a -->"
+
+
+def _cli_routes(*, pr_body="", timeline=None, issue_extra="", edits=None):
+    body, ident = setup()
+    rest_comments = []
+    for c in (
+        witness_comment("P1", identity=ident),
+        confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer="sess-a"),
+    ):
+        rest_comments.append({
+            "body": c["body"],
+            "created_at": c["created_at"],
+            "updated_at": c["updated_at"],
+            "author_association": "OWNER",
+            "user": {"login": "James3014"},
+        })
+    timeline = timeline or {
+        "pageInfo": {"hasNextPage": False},
+        "nodes": [],
+    }
+    return {
+        "timelineItems": {"data": {"repository": {"issue": {"timelineItems": timeline}}}},
+        "userContentEdits": {
+            "data": {
+                "repository": {
+                    "issue": {
+                        "userContentEdits": {"totalCount": 0, "nodes": []}
+                        if edits is None
+                        else edits
+                    }
+                }
+            }
+        },
+        "issues/1/comments": [rest_comments],
+        "=issues/1": {
+            "number": 1,
+            "body": body + issue_extra,
+            "created_at": "2026-01-01T00:00:00Z",
+            "user": {"login": "issue-author"},
+        },
+        "pulls/7": {
+            "number": 7,
+            "head": {"sha": HEAD},
+            "merge_commit_sha": MERGE,
+            "created_at": PR_CREATED,
+            "merged_at": PR_MERGED,
+            "user": {"login": "pr-author"},
+            "body": pr_body,
+        },
+        "compare/": {"status": "ahead"},
+    }
+
+
+def test_cli_reads_author_session_marker_from_pr_body(tmp_path):
+    out = _run_with_fake(tmp_path, _cli_routes(pr_body="text\n" + MARKER + "\n"))
+    assert out.returncode == 0, out.stderr
+    rep = json.loads(out.stdout)
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+def test_cli_without_any_author_session_cannot_verify(tmp_path):
+    rep = json.loads(_run_with_fake(tmp_path, _cli_routes()).stdout)
+    assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
+    assert rep["recommendation"] == "PROVISIONAL"
+
+
+def test_cli_author_session_flag_counts(tmp_path):
+    out = _run_with_fake(tmp_path, _cli_routes(), ["--author-session", "sess-a"])
+    rep = json.loads(out.stdout)
+    assert "AUTHOR_SESSION_UNKNOWN" not in rep["reason_codes"]
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+
+
+def test_cli_timeline_pagination_blocks_verified(tmp_path):
+    timeline = {"pageInfo": {"hasNextPage": True}, "nodes": []}
+    rep = json.loads(_run_with_fake(tmp_path, _cli_routes(timeline=timeline)).stdout)
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+
+
+def test_cli_linked_same_repo_pr_marker_and_created_at_are_used(tmp_path):
+    node = {
+        "source": {
+            "__typename": "PullRequest",
+            "createdAt": "2026-10-16T00:00:00Z",
+            "body": MARKER,
+            "repository": {"nameWithOwner": "James3014/Nexus-new"},
+        }
+    }
+    timeline = {"pageInfo": {"hasNextPage": False}, "nodes": [node]}
+    rep = json.loads(_run_with_fake(tmp_path, _cli_routes(timeline=timeline)).stdout)
+    assert "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+    cross = {
+        "source": dict(node["source"], repository={"nameWithOwner": "other/repo"}),
+    }
+    timeline = {"pageInfo": {"hasNextPage": False}, "nodes": [cross]}
+    rep = json.loads(_run_with_fake(tmp_path, _cli_routes(timeline=timeline)).stdout)
+    assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
+
+
+def test_cli_offline_input_accepts_author_sessions_and_linked_prs(tmp_path):
+    body, ident = setup()
+    data = {
+        "issue_body": body,
+        "body_history": [],
+        "author_identities": [],
+        "author_sessions": ["author-session"],
+        "linked_pr_created_at": [],
+        "issue_created_at": "2026-01-01T00:00:00Z",
+        "comments": [witness_comment("P1", identity=ident)],
+        "prs": [pr()],
+        "contains": [[MERGE, LIVE, True]],
+        "now": NOW,
+    }
+    path = tmp_path / "in.json"
+    path.write_text(json.dumps(data))
+    out = _run_cli(tmp_path, ["--offline-input", str(path), "--json"])
+    rep = json.loads(out.stdout)
+    assert "AUTHOR_SESSION_UNKNOWN" not in rep["reason_codes"]
+    assert "PROMISE_HISTORY_UNAVAILABLE" not in rep["reason_codes"]
+
+
+# --- hardening round 2 (PR #2599 review) -------------------------------------------
+
+
+def _pr_node(created="2026-10-16T00:00:00Z", body=MARKER, repo="James3014/Nexus-new"):
+    return {
+        "__typename": "PullRequest",
+        "createdAt": created,
+        "body": body,
+        "repository": {"nameWithOwner": repo},
+    }
+
+
+def _timeline(*nodes):
+    return {"pageInfo": {"hasNextPage": False}, "nodes": list(nodes)}
+
+
+def _not_independent(rep):
+    return "CONFIRMER_NOT_INDEPENDENT" in row(rep, "P1")["reason_codes"]
+
+
+def _cli_report(tmp_path, routes, extra=()):
+    out = _run_with_fake(tmp_path, routes, extra)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.parametrize("side", ["source", "subject"])
+def test_cli_connected_event_pr_on_either_side_is_used(tmp_path, side):
+    other = "subject" if side == "source" else "source"
+    node = {"__typename": "ConnectedEvent", side: _pr_node(), other: {"__typename": "Issue"}}
+    rep = _cli_report(tmp_path, _cli_routes(timeline=_timeline(node)))
+    assert _not_independent(rep)
+
+
+def test_cli_connected_event_with_prs_on_both_sides_uses_both(tmp_path):
+    node = {
+        "__typename": "ConnectedEvent",
+        "source": _pr_node(body="no marker"),
+        "subject": _pr_node(body=MARKER),
+    }
+    assert _not_independent(_cli_report(tmp_path, _cli_routes(timeline=_timeline(node))))
+
+
+def test_cli_same_repo_check_is_case_insensitive(tmp_path):
+    node = {"source": _pr_node(repo="JAMES3014/NEXUS-NEW")}
+    assert _not_independent(_cli_report(tmp_path, _cli_routes(timeline=_timeline(node))))
+
+
+def test_library_author_sessions_none_is_treated_as_empty():
+    body, comments = _verified_inputs()
+    rep = report(body, comments, author_sessions=None)
+    assert "AUTHOR_SESSION_UNKNOWN" in rep["reason_codes"]
+
+
+def _offline(tmp_path, comments_confirmer="sess-a", **overrides):
+    body, ident = setup()
+    data = {
+        "issue_body": body,
+        "body_history": [],
+        "author_identities": [],
+        "author_sessions": None,
+        "linked_pr_created_at": [],
+        "issue_created_at": "2026-01-01T00:00:00Z",
+        "comments": [
+            witness_comment("P1", identity=ident),
+            confirmation_comment(ident, {"P1": "ACCEPT"}, confirmer=comments_confirmer),
+        ],
+        "prs": [pr()],
+        "contains": [[MERGE, LIVE, True]],
+        "now": NOW,
+    }
+    data.update(overrides)
+    path = tmp_path / "in.json"
+    path.write_text(json.dumps(data))
+    return path
+
+
+def test_cli_offline_null_author_sessions_fails_closed(tmp_path):
+    out = _run_cli(tmp_path, ["--offline-input", str(_offline(tmp_path)), "--json"])
+    assert out.returncode == 0, out.stderr
+    assert "AUTHOR_SESSION_UNKNOWN" in json.loads(out.stdout)["reason_codes"]
+
+
+def test_cli_offline_type_error_is_one_line_exit_2(tmp_path):
+    path = _offline(tmp_path, prs=None)
+    out = _run_cli(tmp_path, ["--offline-input", str(path), "--json"])
+    assert out.returncode == 2 and len(out.stderr.strip().splitlines()) == 1
+
+
+@pytest.mark.parametrize("where", ["issue_body", "pr_body", "flag", "list"])
+def test_cli_offline_author_sessions_come_from_all_sources(tmp_path, where):
+    extra = []
+    overrides: dict = {}
+    body, _ = setup()
+    if where == "issue_body":
+        overrides["issue_body"] = body + "\n" + MARKER + "\n"
+    elif where == "pr_body":
+        overrides["prs"] = [dict(pr(), body=MARKER)]
+    elif where == "flag":
+        extra = ["--author-session", "sess-a"]
+    else:
+        overrides["author_sessions"] = ["sess-a"]
+    path = _offline(tmp_path, **overrides)
+    out = _run_cli(tmp_path, ["--offline-input", str(path), "--json", *extra])
+    rep = json.loads(out.stdout)
+    assert _not_independent(rep)
+    assert "AUTHOR_SESSION_UNKNOWN" not in rep["reason_codes"]
+
+
+def test_cli_issue_body_marker_blocks_confirmer_with_that_name(tmp_path):
+    rep = _cli_report(tmp_path, _cli_routes(issue_extra="\n" + MARKER + "\n"))
+    assert _not_independent(rep)
+
+
+def test_cli_cross_repo_linked_pr_created_at_moves_work_start_earlier(tmp_path):
+    edits = {
+        "totalCount": 1,
+        "nodes": [{"editedAt": "2026-10-16T12:00:00Z", "diff": setup()[0]}],
+    }
+    base = _cli_report(tmp_path, _cli_routes(edits=edits))
+    assert "PROMISE_SET_NOT_PREDECLARED" not in base["reason_codes"]
+    cross = {"source": _pr_node(created="2026-10-16T00:00:00Z", repo="other/repo")}
+    rep = _cli_report(tmp_path, _cli_routes(edits=edits, timeline=_timeline(cross)))
+    assert "PROMISE_SET_NOT_PREDECLARED" in rep["reason_codes"]
+
+
+def test_cli_timeline_query_failure_makes_history_unavailable(tmp_path):
+    routes = _cli_routes()
+    del routes["timelineItems"]
+    rep = _cli_report(tmp_path, routes)
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+    assert rep["recommendation"] != "VERIFIED"
+
+
+def test_cli_linked_pr_node_without_created_at_makes_history_unavailable(tmp_path):
+    node = {"source": {k: v for k, v in _pr_node().items() if k != "createdAt"}}
+    rep = _cli_report(tmp_path, _cli_routes(timeline=_timeline(node)))
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
+
+
+def test_cli_null_user_content_edits_means_history_unavailable_without_traceback(tmp_path):
+    routes = _cli_routes(edits=None)
+    routes["userContentEdits"] = {"data": {"repository": {"issue": {"userContentEdits": None}}}}
+    rep = _cli_report(tmp_path, routes)
+    assert "PROMISE_HISTORY_UNAVAILABLE" in rep["reason_codes"]
