@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -238,29 +240,103 @@ def _ensure_macos_isolated_keychain(home_dir: str) -> None:
     ensure_macos_isolated_keychain(home_dir)
 
 
-def _is_populated_runtime(path: Path) -> bool:
-    if not path.exists() or not path.is_dir():
-        return False
+_LOG = logging.getLogger(__name__)
+
+# #2638: errors that mean "this runtime root exists but cannot be read".
+_RUNTIME_READ_ERRORS = (OSError, UnicodeDecodeError, ValueError, RecursionError)
+
+RUNTIME_ABSENT = "absent"
+RUNTIME_EMPTY = "empty"
+RUNTIME_POPULATED = "populated"
+RUNTIME_UNREADABLE = "unreadable"
+
+
+def _stat_child(path: Path) -> tuple[Optional[os.stat_result], Optional[str]]:
+    """``os.stat`` a runtime child: ``(None, None)`` when absent.
+
+    Unlike ``Path.exists()``, a permission error is not reported as absent:
+    it comes back as ``(None, <error kind>)``.
+    """
+    try:
+        return path.stat(), None
+    except (FileNotFoundError, NotADirectoryError):
+        return None, None
+    except OSError as exc:
+        return None, type(exc).__name__
+
+
+def _runtime_root_state(path: Path) -> tuple[str, Optional[str]]:
+    """Classify a candidate pool runtime root.
+
+    Returns ``(state, error_kind)``.  ``RUNTIME_UNREADABLE`` means the root
+    exists with a ``state.json`` or ``accounts/`` that could not be stat'ed,
+    read, listed or parsed, and nothing readable showed it populated.
+    ``error_kind`` is the exception class name only (never file contents).
+    """
+    if not path.is_dir():
+        return RUNTIME_ABSENT, None
+    error_kind: Optional[str] = None
     state_json = path / "state.json"
-    if state_json.exists() and state_json.is_file():
+    st, err = _stat_child(state_json)
+    if err is not None:
+        error_kind = err
+    elif st is not None and stat.S_ISREG(st.st_mode):
         try:
             data = json.loads(state_json.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("state.json is not a JSON object")
             accounts = data.get("accounts")
-            if isinstance(accounts, dict) and len(accounts) > 0:
-                return True
-            if isinstance(accounts, list) and len(accounts) > 0:
-                return True
-        except Exception:
-            pass
+            if isinstance(accounts, (dict, list)) and len(accounts) > 0:
+                return RUNTIME_POPULATED, None
+        except _RUNTIME_READ_ERRORS as exc:
+            error_kind = type(exc).__name__
     accounts_dir = path / "accounts"
-    if accounts_dir.exists() and accounts_dir.is_dir():
+    st, err = _stat_child(accounts_dir)
+    if err is not None:
+        error_kind = error_kind or err
+    elif st is not None and stat.S_ISDIR(st.st_mode):
         try:
-            subdirs = [x for x in accounts_dir.iterdir() if x.is_dir()]
-            if len(subdirs) > 0:
-                return True
-        except Exception:
-            pass
-    return False
+            with os.scandir(accounts_dir) as entries:
+                for entry in entries:
+                    # entry.stat() (not the d_type-based is_dir()) so an
+                    # accounts/ without +x fails here instead of
+                    # looking populated or empty.  Follows symlinks like
+                    # main's Path.is_dir(); a dangling link is not a dir.
+                    try:
+                        entry_mode = entry.stat().st_mode
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    if stat.S_ISDIR(entry_mode):
+                        return RUNTIME_POPULATED, None
+        except OSError as exc:
+            error_kind = error_kind or type(exc).__name__
+    if error_kind is not None:
+        return RUNTIME_UNREADABLE, error_kind
+    return RUNTIME_EMPTY, None
+
+
+def _is_populated_runtime(path: Path) -> bool:
+    return _runtime_root_state(path)[0] == RUNTIME_POPULATED
+
+
+def _selects_runtime_root(path: Path) -> bool:
+    """True when root resolution must stop at ``path``.
+
+    A populated root is selected as before.  A root that exists but is
+    unreadable is selected too (#2638): skipping it would silently fall
+    through to a different runtime or to "no accounts", hiding the real
+    error.  Returning it lets the downstream read fail loudly.
+    """
+    state, error_kind = _runtime_root_state(path)
+    if state == RUNTIME_UNREADABLE:
+        _LOG.warning(
+            "AGY account pool runtime root %s exists but is unreadable (%s); "
+            "selecting it instead of falling through to another runtime",
+            path,
+            error_kind,
+        )
+        return True
+    return state == RUNTIME_POPULATED
 
 
 class AgyAccountPoolManager:
@@ -339,7 +415,10 @@ class AgyAccountPoolManager:
                 derived_from_mgr = base / "runtime"
 
         if derived_from_mgr:
-            if _is_populated_runtime(derived_from_mgr) or manager_path is not None:
+            # Classify first even when manager_path is given: the result is
+            # then only diagnostic (an unreadable root still logs), and the
+            # derived root is returned unconditionally as before.
+            if _selects_runtime_root(derived_from_mgr) or manager_path is not None:
                 return (
                     str(derived_from_mgr.resolve())
                     if derived_from_mgr.exists()
@@ -349,7 +428,7 @@ class AgyAccountPoolManager:
         candidates = [Path.home() / ".nexus/agy-account-pool/runtime"]
 
         for cand in candidates:
-            if _is_populated_runtime(cand):
+            if _selects_runtime_root(cand):
                 return str(cand.resolve())
 
         for cand in candidates:
