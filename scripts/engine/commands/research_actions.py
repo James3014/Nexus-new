@@ -949,13 +949,20 @@ def run_research_run(
             if findings_query:
                 continuation_cmd.extend(["--findings-query", findings_query])
 
-            continuation_proc = (subprocess_runner or subprocess.run)(
-                continuation_cmd,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                continuation_proc = (subprocess_runner or subprocess.run)(
+                    continuation_cmd,
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError as exc:
+                # A missing launcher (no `uv` on PATH) is a failed continuation,
+                # not a crash: fall through to the handoff and the JSON report (#2593).
+                continuation_proc = subprocess.CompletedProcess(
+                    continuation_cmd, 127, stdout="", stderr=str(exc)
+                )
             summary_payload["continuation"] = {
                 "attempted": True,
                 "attempts_left_after_call": continuation_attempts - 1,

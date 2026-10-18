@@ -33536,3 +33536,21 @@ def test_nexus_cli_subprocess_cmd_resolves_venv_against_subprocess_repo_root(mon
 
     assert _nexus_cli_subprocess_cmd(["task"], without_venv)[:2] == ["uv", "run"]
     assert _nexus_cli_subprocess_cmd(["task"], with_venv)[0] == str(venv_python.resolve())
+
+
+def test_nexus_cli_subprocess_cmd_keeps_symlinked_venv_python_inside_the_venv(
+    monkeypatch, tmp_path
+):
+    """A real venv python is a symlink to the base interpreter; resolving it would run the
+    subprocess outside the venv, without the project's packages (#2593)."""
+    monkeypatch.delenv("NEXUS_BENCH_SUBPROCESS_PYTHON", raising=False)
+    base = tmp_path / "base-python"
+    base.write_text("", encoding="utf-8")
+    venv_python = tmp_path / "repo" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base)
+
+    command = _nexus_cli_subprocess_cmd(["task"], tmp_path / "repo")
+
+    assert command[0] == str(venv_python.absolute())
+    assert command[0] != str(base.resolve())

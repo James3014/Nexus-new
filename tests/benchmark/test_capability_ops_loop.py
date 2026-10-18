@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.bench.capability_ops_loop import (
     _compute_health_score,
     _compute_overhead_breakdown,
@@ -11,6 +13,9 @@ from scripts.bench.capability_ops_loop import (
 )
 
 
+# The bench subprocesses now really run inside the checkout venv (#2593); before, they
+# died on import and the loop finished in seconds.
+@pytest.mark.timeout(600)
 def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[2]
     output_dir = tmp_path / "ops"
@@ -36,6 +41,9 @@ def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     assert Path(out["report_file"]).exists()
 
 
+# The bench subprocesses now really run inside the checkout venv (#2593); before, they
+# died on import and the loop finished in seconds.
+@pytest.mark.timeout(600)
 def test_run_ops_loop_rounds_outputs_median_kpi(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[2]
     output_dir = tmp_path / "ops_rounds"

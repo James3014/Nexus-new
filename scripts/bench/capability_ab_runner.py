@@ -161,7 +161,9 @@ def _nexus_cli_subprocess_cmd(args: list[str], repo_root: Path | str | None = No
         # process's cwd; otherwise a relative path that exists here is missing there.
         venv_python = Path(repo_root or ".") / ".venv" / "bin" / "python"
         if venv_python.exists():
-            python_bin = str(venv_python.resolve())
+            # absolute(), not resolve(): a venv python is a symlink to the base
+            # interpreter, and resolving it escapes the venv (no packages, #2593).
+            python_bin = str(venv_python.absolute())
     if python_bin:
         return [python_bin, "scripts/engine/nexus_cli.py", *args]
     return ["uv", "run", "scripts/engine/nexus_cli.py", *args]

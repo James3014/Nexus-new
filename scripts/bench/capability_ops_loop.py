@@ -3,11 +3,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+def _python_cmd(repo_root: Path) -> list[str]:
+    """Interpreter prefix for the bench subprocesses.
+
+    Same resolution as ``capability_ab_runner._nexus_cli_subprocess_cmd``: an
+    explicit ``NEXUS_BENCH_SUBPROCESS_PYTHON``, else the checkout's synced
+    ``.venv``, else ``uv run python`` (#2593: hosts without ``uv``).
+    """
+
+    python_bin = os.environ.get("NEXUS_BENCH_SUBPROCESS_PYTHON", "").strip()
+    if not python_bin:
+        venv_python = Path(repo_root) / ".venv" / "bin" / "python"
+        if venv_python.exists():
+            # absolute(), not resolve(): resolving the venv symlink escapes the venv.
+            python_bin = str(venv_python.absolute())
+    if python_bin:
+        return [python_bin]
+    return ["uv", "run", "python"]
+
 
 
 PROFILE_TO_TASKS = {
@@ -295,9 +315,7 @@ def run_ops_loop(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ab_runner_cmd = [
-        "uv",
-        "run",
-        "python",
+        *_python_cmd(repo_root),
         "scripts/bench/capability_ab_runner.py",
         "--tasks-file",
         "scripts/bench/capability_tasks_v1.json",
@@ -329,9 +347,7 @@ def run_ops_loop(
     ts = int(datetime.now(timezone.utc).timestamp())
     eval_file = output_dir / f"ab_eval_{ts}.json"
     eval_cmd = [
-        "uv",
-        "run",
-        "python",
+        *_python_cmd(repo_root),
         "scripts/bench/ab_eval.py",
         "--a",
         str(with_file),
@@ -358,9 +374,7 @@ def run_ops_loop(
     llm_probe_payload: dict[str, Any] | None = None
     if run_llm_probe:
         llm_cmd = [
-            "uv",
-            "run",
-            "python",
+            *_python_cmd(repo_root),
             "scripts/bench/capability_ab_runner.py",
             "--tasks-file",
             "scripts/bench/capability_tasks_v1.json",
@@ -387,9 +401,7 @@ def run_ops_loop(
             if llm_raw.get("with_nexus_file") and llm_raw.get("without_nexus_file"):
                 llm_eval_file = output_dir / f"ab_eval_llm_probe_{ts}.json"
                 llm_eval_cmd = [
-                    "uv",
-                    "run",
-                    "python",
+                    *_python_cmd(repo_root),
                     "scripts/bench/ab_eval.py",
                     "--a",
                     str(llm_raw["with_nexus_file"]),
@@ -417,9 +429,7 @@ def run_ops_loop(
             }
         else:
             cross_cmd = [
-                "uv",
-                "run",
-                "python",
+                *_python_cmd(repo_root),
                 "scripts/bench/capability_ab_runner.py",
                 "--tasks-file",
                 "scripts/bench/capability_tasks_cross_module_v1.json",
@@ -447,9 +457,7 @@ def run_ops_loop(
                 if cross_raw.get("with_nexus_file") and cross_raw.get("without_nexus_file"):
                     cross_eval_file = output_dir / f"ab_eval_cross_module_probe_{ts}.json"
                     cross_eval_cmd = [
-                        "uv",
-                        "run",
-                        "python",
+                        *_python_cmd(repo_root),
                         "scripts/bench/ab_eval.py",
                         "--a",
                         str(cross_raw["with_nexus_file"]),
@@ -478,9 +486,7 @@ def run_ops_loop(
     autotune_payload: dict[str, Any] = {}
     if apply_autotune:
         tune_cmd = [
-            "uv",
-            "run",
-            "python",
+            *_python_cmd(repo_root),
             "scripts/bench/capability_autotune.py",
             "--eval-file",
             str(eval_file),
