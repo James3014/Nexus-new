@@ -153,3 +153,29 @@ def test_keyword_search(memory_store):
     results = memory_store.search("vision", kind="knowledge")
     assert len(results) == 1
     assert results[0].title == "ResNet Baseline"
+
+
+def test_search_ranks_multi_word_failure_sentence_by_bm25(memory_store):
+    """#2640: a real failure sentence used to match nothing (whole-query substring rule)."""
+    memory_store.write(FindingsCard(id="lan", title="LanceDB search_fts fallback", body="whole query substring never matches", kind="episodes"))
+    memory_store.write(FindingsCard(id="gw", title="Gateway deploy", body="deployer restarts the gateway", kind="episodes"))
+    results = memory_store.search("search_fts fallback returned no rows because substring matching never matches")
+    assert [card.id for card in results] == ["lan"]
+
+
+def test_search_keeps_substring_hits_first_and_honours_limit(memory_store):
+    memory_store.write(FindingsCard(id="sub", title="Authentication flow", kind="knowledge"))
+    memory_store.write(FindingsCard(id="tok", title="auth token", body="auth auth auth", kind="knowledge"))
+    results = memory_store.search("auth")
+    assert results[0].id in {"sub", "tok"}
+    assert {card.id for card in results} == {"sub", "tok"}  # "Authentication" kept via substring rule
+    assert len(memory_store.search("auth", limit=1)) == 1
+    assert memory_store.search("   ") == []
+
+
+def test_search_is_not_limited_to_the_100_most_recent_cards(memory_store):
+    target = FindingsCard(id="old", title="ancient quirk in retry ladder", kind="knowledge")
+    memory_store.write(target)
+    for index in range(105):
+        memory_store.write(FindingsCard(id=f"n{index}", title=f"filler {index}", kind="knowledge"))
+    assert [card.id for card in memory_store.search("retry ladder quirk")] == ["old"]

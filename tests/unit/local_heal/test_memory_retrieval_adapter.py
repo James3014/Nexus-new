@@ -699,3 +699,86 @@ def test_adapter_fails_closed_when_receipt_binding_fails(tmp_path, monkeypatch):
     assert adapter.last_metadata["status"] == "binding_failed"
     assert adapter.last_metadata["failure_reason"] == "retrieval_receipt_binding_failed"
     assert adapter.last_metadata["accepted"] == 0
+
+
+class _FixedStore:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def query(self, *, query_text, limit):
+        return [dict(row) for row in self.rows[:limit]]
+
+
+class _OtherFixedStore(_FixedStore):
+    pass
+
+
+def test_composite_merge_does_not_starve_later_stores():
+    """#2640: concatenate-then-truncate let the first store fill every slot."""
+    first = _FixedStore([{"task_id": f"a{i}", "summary": "x"} for i in range(20)])
+    second = _OtherFixedStore([{"task_id": f"b{i}", "summary": "y"} for i in range(20)])
+    composite = NexusCompositeLessonStore([first, second])
+    rows = composite.query(query_text="q", limit=20)
+    assert len(rows) == 20
+    assert sum(1 for row in rows if row["task_id"].startswith("b")) == 10
+    assert rows[0]["task_id"] == "a0"  # ties keep store order: first store still leads
+    assert composite.last_metadata["merge"] == "reciprocal_rank_fusion"
+    assert composite.last_metadata["source_counts"] == {"_FixedStore": 20, "_OtherFixedStore": 20}
+
+
+def test_composite_merge_fuses_same_task_across_stores():
+    first = _FixedStore([{"task_id": "t1"}, {"task_id": "t2"}, {"task_id": "t3"}])
+    second = _OtherFixedStore([{"task_id": "t3"}, {"task_id": "t9"}])
+    rows = NexusCompositeLessonStore([first, second]).query(query_text="q", limit=10)
+    assert rows[0]["task_id"] == "t3"
+    assert rows[0]["fused_sources"] == ["_FixedStore", "_OtherFixedStore"]
+    assert [row["task_id"] for row in rows].count("t3") == 1
+    assert len(rows) == 4
+
+
+def test_composite_merge_keeps_repeated_keys_within_one_store():
+    rows = NexusCompositeLessonStore([_FixedStore([{"task_id": "t"}, {"task_id": "t"}, {}])]).query(
+        query_text="q", limit=10
+    )
+    assert len(rows) == 3
+
+
+def test_memory_repository_lesson_store_reads_findings_writer_root(tmp_path, monkeypatch):
+    from nexus.services.lancedb_roots import MEMORY_DB_PATH_ENV, MEMORY_INDEX, resolve_lancedb_root
+    from nexus.services.local_heal.memory_retrieval_adapter import MemoryRepositoryLessonStore
+
+    monkeypatch.delenv(MEMORY_DB_PATH_ENV, raising=False)
+    store = MemoryRepositoryLessonStore(project_root=tmp_path)
+    assert store._repository().db_path == resolve_lancedb_root(MEMORY_INDEX, tmp_path)
+
+
+def test_findings_write_path_feeds_lancedb_lesson_store(tmp_path, monkeypatch):
+    """#2640: the writer (MEMORY_INDEX) and reader (was REPOSITORY) used different roots."""
+    import pytest
+
+    pytest.importorskip("lancedb")
+    from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+    from nexus.research.findings_vector_sync import reset_shared_registry
+    from nexus.services.lancedb_roots import MEMORY_DB_PATH_ENV
+    from nexus.services.local_heal.memory_retrieval_adapter import MemoryRepositoryLessonStore
+
+    monkeypatch.delenv(MEMORY_DB_PATH_ENV, raising=False)
+    monkeypatch.delenv("NEXUS_MEMORY_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.setenv("NEXUS_FINDINGS_LANCEDB_SYNC", "1")
+    reset_shared_registry()
+    try:
+        FindingsMemoryStore(tmp_path).write(
+            FindingsCard(
+                id="f1",
+                kind="episodes",
+                title="retry ladder stalls",
+                body="retry ladder stalls on timeout",
+                task_id="pr1",
+            )
+        )
+        store = MemoryRepositoryLessonStore(project_root=tmp_path)
+        rows = store.query(query_text="why does the retry ladder stall", limit=5)
+    finally:
+        reset_shared_registry()
+    assert store.last_error == ""
+    assert [row["task_id"] for row in rows] == ["pr1"]

@@ -3,9 +3,11 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import json
+import sys
 import uuid
 
 from nexus.research.findings_store import FindingsFileStore
+from nexus.services.bm25_retrieval import BM25Index
 from nexus.research.findings_vector_sync import (
     FindingsVectorSync,
     MemoryRepositoryFindingsVectorSync,
@@ -207,22 +209,50 @@ class FindingsMemoryStore:
         """
         return self.list_recent(scope=scope, kind=kind, limit=1000)
     
-    def search(self, query: str, kind: Optional[str] = None, scope: str = "both") -> List[FindingsCard]:
+    def search(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        scope: str = "both",
+        limit: Optional[int] = None,
+    ) -> List[FindingsCard]:
+        """Rank cards by tokenised BM25 relevance to ``query`` (#2640).
+
+        Each card is scored over title, tags, retrieval hints and body with the shared
+        ``nexus.services.bm25_retrieval`` scorer, so a multi-word failure sentence finds cards
+        that share its words. A card whose title, a tag or a hint contains the whole query as
+        a substring (the previous matching rule) is still returned and ranked first, so
+        single-keyword callers keep their results. Cards with no match are not returned.
+        Every card in the requested scopes is considered (no recency cut-off).
         """
-        🔍 語義檢索關鍵字 (此處先實現關鍵字匹配，待對接 Embedding Service)
-        """
-        all_cards = []
+        all_cards: List[FindingsCard] = []
         scopes = ["task", "global"] if scope == "both" else [scope]
-        
         for s in scopes:
-            all_cards.extend(self.list_recent(scope=s, kind=kind, limit=100))
-            
-        # 簡易關鍵字過濾 (Title & Tags & Retrieval Hints)
-        query = query.lower()
-        matched = [
-            c for c in all_cards 
-            if query in c.title.lower() or 
-               any(query in t.lower() for t in c.tags) or
-               any(query in h.lower() for h in c.retrieval_hints)
-        ]
-        return matched
+            all_cards.extend(self.list_recent(scope=s, kind=kind, limit=sys.maxsize))
+        if not all_cards or not str(query or "").strip():
+            return []
+
+        needle = query.lower()
+
+        def _substring_hit(card: FindingsCard) -> bool:
+            return (
+                needle in card.title.lower()
+                or any(needle in str(t).lower() for t in card.tags)
+                or any(needle in str(h).lower() for h in card.retrieval_hints)
+            )
+
+        def _text(card: FindingsCard) -> str:
+            return "\n".join(
+                [card.title, " ".join(map(str, card.tags)), " ".join(map(str, card.retrieval_hints)), card.body]
+            )
+
+        scores = BM25Index((i, _text(c)) for i, c in enumerate(all_cards)).scores(query)
+        ranked = []
+        for i, card in enumerate(all_cards):
+            hit = _substring_hit(card)
+            score = scores.get(i, 0.0)
+            if hit or score > 0:
+                ranked.append((1 if hit else 0, score, i, card))
+        ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
+        matched = [card for *_rest, card in ranked]
+        return matched[:limit] if limit is not None and limit >= 0 else matched
