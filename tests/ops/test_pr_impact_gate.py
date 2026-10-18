@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from scripts.ops.pr_impact_gate import (
+    ALWAYS_RUN_TARGETS,
     EXACT_CONFIG_TARGETS,
     EXACT_GIT_EVIDENCE_ONLY,
     MANDATORY_TIER2_TARGETS,
@@ -2979,3 +2980,72 @@ def test_non_blocking_classification_has_no_annotations():
     head = _run(0, [], revision="head")
 
     assert _blocking_annotations(classify_regression(base, head)) == []
+
+
+# --- #2613: repo-wide inventory tests run on every plan that runs pytest -------------
+
+
+def test_always_run_targets_are_the_three_inventory_tests_and_exist():
+    assert ALWAYS_RUN_TARGETS == (
+        "tests/ops/test_wiki_coverage_policy.py",
+        "tests/ops/test_source_inventory_integrity.py",
+        "tests/integration/test_legacy_path_blocked.py",
+    )
+    root = Path(__file__).resolve().parents[2]
+    assert all((root / target).is_file() for target in ALWAYS_RUN_TARGETS)
+    assert set(ALWAYS_RUN_TARGETS).issubset(MANDATORY_TIER2_TARGETS)
+
+
+@pytest.mark.parametrize(
+    ("changed_paths", "impact_class"),
+    [
+        # #2420 (docs-only) broke the OpenWiki crosswalk count -> #2486
+        (
+            [
+                "openwiki/quickstart.md",
+                "openwiki/routing/capability-execution-status.md",
+                "openwiki/workflows/github-actions.md",
+                "openwiki/workflows/index.md",
+            ],
+            "DOCS_GOVERNANCE",
+        ),
+        # #2519 (scoped) broke the model-JSON read allowlist -> #2534
+        (
+            [
+                "nexus/services/nightshift_queue_consumer.py",
+                "tests/services/test_nightshift_queue_consumer.py",
+            ],
+            "SCOPED_IMPLEMENTATION",
+        ),
+        (["nexus/orchestrator/unified_mcp_gateway.py"], "HIGH_RISK_INTEGRATION"),
+        ([".github/workflows/pytest.yml"], "CI_INFRASTRUCTURE"),
+        (["mystery/runtime.surface"], "UNMAPPED_FULL_SUITE"),
+        ([], "IMPACT_UNKNOWN"),
+    ],
+    ids=["docs-only", "scoped", "high-risk", "workflow", "full-suite", "empty-diff"],
+)
+def test_every_pytest_plan_runs_the_inventory_tests(changed_paths, impact_class):
+    plan = build_impact_plan(changed_paths)
+
+    assert plan.impact_class == impact_class
+    assert plan.pytest_required is True
+    assert set(ALWAYS_RUN_TARGETS).issubset(plan.pytest_targets)
+
+
+def test_inventory_targets_never_fill_an_otherwise_empty_selection(tmp_path: Path):
+    # The always-run targets are added after the empty-set check, not instead of
+    # it: even when they exist under the root, an empty mapped selection still
+    # fails closed as IMPACT_UNKNOWN.
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    for target in ALWAYS_RUN_TARGETS:
+        (tmp_path / target).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / target).touch()
+
+    plan = build_impact_plan(["configs/codex_dx_failure_prevention.json"], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert "empty verification set failed closed" in plan.reasons
+    assert set(ALWAYS_RUN_TARGETS).issubset(plan.pytest_targets)
