@@ -86,6 +86,9 @@ def honest_telemetries_from_payload(
     return out
 
 
+GATE_WITHOUT_INVOCATION_OR_EVIDENCE = "gate_without_invocation_or_evidence"
+
+
 def merge_capability_receipt(
     *,
     name: str,
@@ -114,6 +117,12 @@ def merge_capability_receipt(
         )
     # Semantic invariant: outcome_contributed → gate_passed → evidence_present → invoked
     evidence_present = bool(refs)
+    # RULE-217: enforce the lower rungs too. A gate cannot pass for a capability that
+    # was never invoked or left no evidence (false-green in receipts/telemetry).
+    if gate_passed and not (invoked and evidence_present):
+        gate_passed = False
+        if not failure_reason:
+            failure_reason = GATE_WITHOUT_INVOCATION_OR_EVIDENCE
     if not gate_passed:
         outcome_contributed = False
     if outcome_contributed and not evidence_present:
