@@ -24,7 +24,9 @@ labelling it.  This tool:
 4. appends a timing event to ``~/.local/state/nexus-livefail-rollback/events.jsonl``.
 
 Without ``--apply`` nothing is written anywhere except the local throwaway worktree
-(removed again).  ``--sweep`` lists open ``nexus:live-failed`` Issues and reports
+(removed again); ``--apply-hold`` has no effect without ``--apply``.
+Independence is text-level, as in #2595: every bot comment shares one login, so a
+``confirmer`` name is trusted as written by a trusted, unedited comment.  ``--sweep`` lists open ``nexus:live-failed`` Issues and reports
 which still lack a revert PR (read-only unless ``--apply``).
 """
 
@@ -490,11 +492,13 @@ def latest_confirmation_at(comments: list[dict]) -> str | None:
     return max(stamps) if stamps else None
 
 
-def promise_report(issue: int, prs: list[int], repo: str) -> dict | None:
+def promise_report(issue: int, prs: list[int], repo: str, sessions: list[str]) -> dict | None:
     script = Path(__file__).with_name("promise_confirmation.py")
     cmd = [sys.executable, str(script), "--repo", repo, "--issue", str(issue), "--json"]
     for n in prs:
         cmd += ["--pr", str(n)]
+    for name in sessions:
+        cmd += ["--author-session", name]
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         return None
@@ -536,7 +540,11 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
         issue_sessions = sessions_in(issue.get("body") or "")
         for p in prs.values():
             p["author_sessions"] = [*p["author_sessions"], *issue_sessions, *args.author_session]
-        report = promise_report(args.issue, args.pr, args.repo) if args.pr else None
+        report = (
+            promise_report(args.issue, args.pr, args.repo, [*issue_sessions, *args.author_session])
+            if args.pr
+            else None
+        )
         judged = latest_confirmation_at(good)
         promise_prs = list(args.pr)
         contains = git.contains
@@ -595,16 +603,27 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
             text = hold_text(
                 args.issue, trig["origin_prs"], trig["merge_shas"], args.now or utcnow()
             )
-            if write_hold(args.deploy_state, text):
-                record_path(args.issue).parent.mkdir(parents=True, exist_ok=True)
-                record_path(args.issue).write_text(
-                    json.dumps({
-                        "text": text,
-                        "branch": branch,
-                        "event": make_event(args.repo, args.issue, trig, None, None, "HOLD"),
-                    }),
-                    encoding="utf-8",
-                )
+            # Re-read the deployer right before writing: planning took seconds and a
+            # switch in between would make the HOLD block the revert's own deploy.
+            status, receipt, present = read_deployer(args.deploy_state)
+            again = gateway_hold_plan(
+                merge_shas=trig["merge_shas"],
+                status=status,
+                hold_present=present,
+                hold_env=os.environ.get(HOLD_ENV, "") not in ("", "0"),
+                contains=git.contains,
+                last_receipt=receipt,
+            )
+            rec = record_path(args.issue)
+            rec.parent.mkdir(parents=True, exist_ok=True)
+            record = {
+                "text": text,
+                "branch": branch,
+                "event": make_event(args.repo, args.issue, trig, None, None, "HOLD"),
+            }
+            # Record first, so a HOLD can never exist without the record that releases it.
+            rec.write_text(json.dumps(record), encoding="utf-8")
+            if again["action"] == "HOLD" and write_hold(args.deploy_state, text):
                 gw_at = utcnow()
                 gw["applied"] = True
                 if gh is not None:
@@ -613,8 +632,11 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
                         f"livefail-rollback: Gateway auto-deployer HOLD written at {gw_at} so the failed merge does not go live.\n\n```\n{text}```\nRelease: `python scripts/governance/livefail_rollback.py --issue {args.issue} --release-hold` after the revert merges (only this exact text is removed; after 6 h workspace-86 decides).",
                     )
             else:
+                rec.unlink()
                 gw["applied"] = False
-                gw["reason"] = "HOLD_APPEARED_CONCURRENTLY"
+                gw["reason"] = (
+                    "HOLD_APPEARED_CONCURRENTLY" if again["action"] == "HOLD" else again["reason"]
+                )
         if not args.apply or gh is None:
             result["outcome"] = "DRY_RUN_" + plan["status"]
             if gw_at:
@@ -645,6 +667,7 @@ def handle_issue(args: argparse.Namespace, gh: Gh | None, git: Git, offline: dic
                 f"credential.helper=!{args.gh_write} auth git-credential",
                 "push",
                 "-q",
+                "--force",  # tool-owned livefail/ branch; a run that died before `pr create`
                 "origin",
                 f"HEAD:refs/heads/{branch}",
                 cwd=wt,
@@ -748,6 +771,12 @@ def main(argv: list[str] | None = None) -> int:
                 pr = gh.open_revert_pr(data["branch"])
                 merged = bool(pr and pr.get("merged_at"))
                 ok, why = release_hold(args.deploy_state, n, merged, utcnow(), apply=args.apply)
+                if ok:
+                    append_event({
+                        **data["event"],
+                        "outcome": "HOLD_RELEASED",
+                        "released_at": utcnow(),
+                    })
                 if why == "HOLD_OLDER_THAN_6H_ASK_WORKSPACE_86":
                     notify_86(n, data["text"])
                 rows.append({

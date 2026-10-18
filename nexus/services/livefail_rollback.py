@@ -7,8 +7,7 @@ Pure logic over immutable inputs, no network or subprocess.  Two things live her
     A. a strict ``NEXUS_LIVE_FAILED_V1`` block in a trusted, unedited comment whose
        ``confirmer`` is not an author of the origin PR (the #2453 pilot path); or
     B. a promise-confirmation report (#2595) whose recommendation is LIVE_FAILED
-       and where an independent (not ignored) confirmer verdict covers a FAILED
-       promise or says REJECT.
+       and where an independent (not ignored) confirmer verdict says REJECT.
   An author's own failure witness, a bare ``nexus:live-failed`` label or any
   untrusted comment never triggers anything.
 * ``gateway_hold_plan`` / ``hold_text`` / ``release_allowed`` encode the deployer
@@ -220,7 +219,9 @@ def evaluate_trigger(
             for r in promise_report.get("promises") or []
             if r.get("confirmer_verdict")
             and not r["confirmer_verdict"].get("ignored")
-            and (r.get("status") == "FAILED" or r["confirmer_verdict"].get("verdict") == "REJECT")
+            # Only the confirmer's own REJECT counts: a FAILED status may rest on the
+            # author's witness alone, which must never trigger (reviewer, PR #2617).
+            and r["confirmer_verdict"].get("verdict") == "REJECT"
         ]
         merged = [n for n in promise_prs if (origin_prs.get(n) or {}).get("merge_sha")]
         if not independent:

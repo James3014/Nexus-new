@@ -182,7 +182,7 @@ def test_promise_live_failed_with_ignored_confirmer_does_not_trigger():
     assert out["triggered"] is False
 
 
-@pytest.mark.parametrize("verdict,status", [("REJECT", "UNCOVERED"), ("ACCEPT", "FAILED")])
+@pytest.mark.parametrize("verdict,status", [("REJECT", "UNCOVERED"), ("REJECT", "FAILED")])
 def test_promise_live_failed_with_independent_confirmer_triggers(verdict, status):
     out = ev([], promise_report=_report(verdict, status), promise_judged_at=T, promise_prs=[77])
     assert out["triggered"] is True
@@ -717,3 +717,56 @@ def test_cli_untrusted_block_pr_is_never_fetched(tmp_path, repo):
     assert out.returncode == 0, out.stderr
     calls = (tmp_path / "gh.log").read_text()
     assert "pulls/999999" not in calls
+
+
+def test_promise_failed_status_with_confirmer_accept_does_not_trigger():
+    # FAILED may rest on the author's own witness; only the confirmer's REJECT counts.
+    out = ev([], promise_report=_report("ACCEPT", "FAILED"), promise_judged_at=T, promise_prs=[77])
+    assert out["triggered"] is False
+
+
+def test_future_comment_is_ignored():
+    c = {
+        **comment(block()),
+        "created_at": "2026-10-19T00:00:00Z",
+        "updated_at": "2026-10-19T00:00:00Z",
+    }
+    assert ev([c])["ignored"][0]["reason"] == "FUTURE_COMMENT"
+
+
+def test_promise_path_needs_every_listed_pr_merged():
+    origin = {**prs(), 78: {"merge_sha": None, "author": "x", "author_sessions": ["s"]}}
+    out = ev(
+        [],
+        origin=origin,
+        promise_report=_report("REJECT"),
+        promise_judged_at=T,
+        promise_prs=[77, 78],
+    )
+    assert out["triggered"] is False
+
+
+def _cli_module():
+    sys.path.insert(0, str(CLI.parent))
+    try:
+        import livefail_rollback as cli  # type: ignore[import-not-found]
+    finally:
+        sys.path.remove(str(CLI.parent))
+    return cli
+
+
+def test_write_hold_never_overwrites(tmp_path):
+    cli = _cli_module()
+    (tmp_path / "HOLD").write_text("86 manual\n")
+    assert cli.write_hold(tmp_path, "livefail-rollback: x\n") is False
+    assert (tmp_path / "HOLD").read_text() == "86 manual\n"
+    (tmp_path / "HOLD").unlink()
+    assert cli.write_hold(tmp_path, "livefail-rollback: x\n") is True
+
+
+def test_cli_revert_that_changes_nothing_is_manual(tmp_path, repo):
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    _commit(repo, "nexus/a.py", "a = 1\n", "hand undo without revert marker (#81)")
+    res = _cli(tmp_path, repo, bad)
+    assert res["plan"]["status"] == "MANUAL"
+    assert res["plan"]["reason"] in ("REVERT_IS_EMPTY", "REVERT_CONFLICT")
