@@ -77,6 +77,7 @@ def test_entry_claiming_success_with_stub_status_is_not_consumed() -> None:
     bad = {**_entry("codeintel", "STUB_INVOKED", "ev_codeintel_stub"), "success": True}
     lineage = _lineage(_bundle(bad))
     assert lineage["consumed_evidence_ids"] == []
+    assert lineage["capability_consumed"] is False
 
 
 def test_real_entry_is_consumed_and_stub_is_not() -> None:
@@ -88,3 +89,21 @@ def test_real_entry_is_consumed_and_stub_is_not() -> None:
     )
     assert lineage["consumed_evidence_ids"] == ["ev_codeintel_real"]
     assert lineage["capability_consumed"] is True
+
+
+def test_stub_claiming_success_does_not_consume_its_payload() -> None:
+    """Review r1: the payload path re-admitted a stub's payload via the top-level list."""
+    bad = {
+        **_entry("codeintel", "STUB_INVOKED", "ev_codeintel_stub"),
+        "success": True,
+        "consumer_payload": {
+            "capability": "codeintel",
+            "payload_hash": "c" * 64,
+            "fields": {"risk": 1},
+            "markers": ["codeintel:payload"],
+        },
+    }
+    lineage = _lineage(_bundle(bad))
+    assert lineage["consumed_evidence_ids"] == []
+    assert lineage["capability_payload_consumed"] is False
+    assert lineage.get("consumed_capability_payloads", []) == []

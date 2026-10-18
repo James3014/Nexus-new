@@ -518,9 +518,10 @@ def compact_capability_evidence_for_prompt(
     for entry in b.get("entries") or []:
         if not isinstance(entry, Mapping):
             continue
-        # Failed / non-success entries never forward payload.
+        # Only entries that did real work forward a payload; failed, stub and skipped
+        # entries never do, whatever ``success`` says (#2596).
         success = bool(entry.get("success") or entry.get("invoked_real"))
-        cp = entry.get("consumer_payload") if success else None
+        cp = entry.get("consumer_payload") if _entry_did_real_work(entry) else None
         cp_map = dict(cp) if isinstance(cp, Mapping) and cp else {}
         row = {
             "name": str(entry.get("name") or ""),
@@ -729,9 +730,9 @@ def build_online_nexus_context(
                 continue
             if not _entry_did_real_work(ent):
                 continue
-            for eid in ent.get("evidence_ids") or []:
+            for eid in list(ent.get("evidence_ids") or []) + list(ent.get("evidence_refs") or []):
                 s = str(eid).strip()
-                if s and not s.startswith("bundle:"):
+                if s and not s.startswith("bundle:") and s not in entry_ids:
                     entry_ids.append(s)
             cp = ent.get("consumer_payload")
             if isinstance(cp, Mapping) and cp:
@@ -742,8 +743,10 @@ def build_online_nexus_context(
             ms = str(m)
             if ms and ms in evidence_prompt and ms not in payload_markers_serialized:
                 payload_markers_serialized.append(ms)
-        # Also accept payloads listed at compact top-level.
-        if not consumed_capability_payloads:
+        # Also accept payloads listed at compact top-level, but only for a compact view
+        # without entry rows: with rows, each payload must come from a real-work row
+        # (#2596; the top-level list would re-admit the rows filtered above).
+        if not consumed_capability_payloads and not evidence_compact.get("entries"):
             for p in evidence_compact.get("consumer_payloads") or []:
                 if isinstance(p, Mapping) and p:
                     consumed_capability_payloads.append(dict(p))
