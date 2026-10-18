@@ -95,6 +95,9 @@ def build_local_compact_evidence(
         hash_consumer_payloads,
     )
 
+    # One real-work rule for Local and Online consumers (#2601, #2596, nexus-runtime#232).
+    from nexus.services.online_nexus_context import _entry_did_real_work
+
     b = dict(bundle) if isinstance(bundle, Mapping) else {}
     if not b:
         return {
@@ -136,7 +139,8 @@ def build_local_compact_evidence(
         ename = str(ent.get("name") or "")
         if local_set and ename not in local_set:
             continue
-        if not bool(ent.get("success") or ent.get("invoked_real")):
+        # Stub / skipped / failed rows never count, whatever ``success`` says (#2601).
+        if not _entry_did_real_work(ent):
             continue
         eids = [
             str(x).strip()
