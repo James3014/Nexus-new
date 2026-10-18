@@ -862,7 +862,12 @@ def test_pool_busy_twice_then_success_uses_canonical_pool_wait(tmp_path: Path) -
 
 
 def test_pool_busy_retry_exhausted_is_typed_and_honest(tmp_path: Path) -> None:
-    proc = _run_node(tmp_path, OK_TEXT, script=[_pool_busy("agyop_busy")])
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_busy("agyop_busy")],
+        extra_env={"NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC": "0"},
+    )
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
     assert payload["code"] == POOL_BUSY
@@ -1075,3 +1080,124 @@ def test_contradictory_effect_evidence_is_never_retried(tmp_path: Path) -> None:
         assert failed.returncode == 3, name
         assert json.loads(failed.stdout)["code"] == "AGY_OPERATION_FAILED", name
         assert len(_attempts(tmp_path / ("busy-" + name))) == 1, name
+
+
+BUSY_BUDGET_ENV = "NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC"
+
+
+def _busy_retry_logs(stderr: str) -> list[dict]:
+    prefix = "NEXUS_DSH_AGY_BUSY_RETRY "
+    return [json.loads(x[len(prefix) :]) for x in stderr.splitlines() if x.startswith(prefix)]
+
+
+def test_dsh_agy_busy_retry_2618_busy_many_times_then_success_logs_waits(tmp_path: Path) -> None:
+    script = [_pool_busy(f"agyop_b{i}") for i in range(5)] + [_ok("agyop_ok")]
+    proc = _run_node(tmp_path, OK_TEXT, script=script)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert json.loads(proc.stdout)["ok"] is True
+    assert len(_attempts(tmp_path)) == 6
+    logs = _busy_retry_logs(proc.stderr)
+    assert [entry["attempt"] for entry in logs] == [1, 2, 3, 4, 5]
+    assert all(entry["wait_ms"] == 1 for entry in logs)
+
+
+def test_dsh_agy_busy_retry_2618_busy_past_budget_fails_as_before(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_busy("agyop_busy")],
+        extra_env={BUSY_BUDGET_ENV: "1", "NEXUS_DSH_AGY_RETRY_BACKOFF_MS": "300"},
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == POOL_BUSY
+    assert payload["effect"] == "none"
+    assert payload["failureKind"] == "AGY_ACCOUNT_POOL_BUSY"
+    assert payload["attempts"] >= 2
+    assert payload["attempts"] == len(_attempts(tmp_path))
+    assert len(_busy_retry_logs(proc.stderr)) == payload["attempts"] - 1
+
+
+def test_dsh_agy_busy_retry_2618_budget_zero_disables_budgeted_retry(tmp_path: Path) -> None:
+    script = [_pool_busy(f"agyop_b{i}") for i in range(5)] + [_ok("agyop_ok")]
+    proc = _run_node(tmp_path, OK_TEXT, script=script, extra_env={BUSY_BUDGET_ENV: "0"})
+    assert proc.returncode == 3
+    assert json.loads(proc.stdout)["code"] == POOL_BUSY
+    assert len(_attempts(tmp_path)) == 3
+    assert _busy_retry_logs(proc.stderr) == []
+
+
+def test_dsh_agy_busy_retry_2618_budget_env_is_honoured_and_validated(tmp_path: Path) -> None:
+    script = [_pool_busy(f"agyop_b{i}") for i in range(5)] + [_ok("agyop_ok")]
+    # A positive budget waits through 5 busy results; budget 0 gave up after 3 (see above).
+    ok = _run_node(tmp_path / "ok", OK_TEXT, script=script, extra_env={BUSY_BUDGET_ENV: "30"})
+    assert ok.returncode == 0, ok.stderr + ok.stdout
+    for name, value in (("text", "soon"), ("negative", "-1"), ("huge", "3601")):
+        bad = _run_node(
+            tmp_path / name,
+            OK_TEXT,
+            script=[_pool_busy("agyop_x")],
+            extra_env={BUSY_BUDGET_ENV: value},
+        )
+        assert bad.returncode == 3, name
+        assert json.loads(bad.stdout)["code"] == "AGY_PROTOCOL_INVALID", name
+        assert _attempts(tmp_path / name) == [], name
+
+
+def test_dsh_agy_busy_retry_2618_unproven_or_other_errors_are_not_busy_retried(
+    tmp_path: Path,
+) -> None:
+    cases = {
+        "meta-effect-true": _pool_busy("agyop_t", provider_effect=True),
+        "recorded-effect": dict(
+            _pool_busy("agyop_e"),
+            record={
+                "operation_id": "agyop_e",
+                "exit_code": 75,
+                "first_effect_at": "2026-10-10T00:00:00Z",
+            },
+        ),
+        "outcome-unknown": {
+            "background": True,
+            "status": "OUTCOME_UNKNOWN",
+            "record": {"operation_id": "agyop_u"},
+        },
+    }
+    for name, step in cases.items():
+        proc = _run_node(
+            tmp_path / name,
+            OK_TEXT,
+            script=[step, _ok("agyop_ok")],
+            extra_env={BUSY_BUDGET_ENV: "30"},
+        )
+        assert proc.returncode == 3, name
+        assert len(_attempts(tmp_path / name)) == 1, name
+        assert _busy_retry_logs(proc.stderr) == [], name
+
+
+def test_dsh_agy_busy_retry_2618_busy_waits_do_not_consume_other_retry_count(
+    tmp_path: Path,
+) -> None:
+    quota = {
+        "background": True,
+        "status": "FAILED",
+        "record": {"operation_id": "agyop_q", "exit_code": 75, "failure_kind": QUOTA_PRE_EFFECT},
+        "stderr_meta": [
+            {
+                "status": "failed",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": QUOTA_PRE_EFFECT,
+                "provider_effect": False,
+                "wall_ms": 0,
+            }
+        ],
+    }
+    script = [_pool_busy("agyop_1")] * 3 + [quota, _ok("agyop_ok")]
+    proc = _run_node(tmp_path, OK_TEXT, script=script)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert len(_attempts(tmp_path)) == 5
+
+
+def test_dsh_agy_busy_retry_2618_tool_result_cap_unchanged() -> None:
+    assert "TOOL_RESULT_CAP_CHARS = 8192" in (ADAPTER_DIR / "index.js").read_text(encoding="utf-8")
