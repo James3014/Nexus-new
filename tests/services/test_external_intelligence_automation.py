@@ -2651,7 +2651,10 @@ def test_read_git_blob_fails_closed_on_non_utf8_source(tmp_path):
     blob_repo.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init"], cwd=blob_repo, capture_output=True, check=True)
     subprocess.run(
-        ["git", "config", "user.name", "Test Runner"], cwd=blob_repo, capture_output=True, check=True
+        ["git", "config", "user.name", "Test Runner"],
+        cwd=blob_repo,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
@@ -2668,9 +2671,7 @@ def test_read_git_blob_fails_closed_on_non_utf8_source(tmp_path):
     (blob_repo / "bin.py").write_bytes(b"\xff\xfe\x00bad")
     (blob_repo / "ok.py").write_text("ok content\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=blob_repo, capture_output=True, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", "x"], cwd=blob_repo, capture_output=True, check=True
-    )
+    subprocess.run(["git", "commit", "-m", "x"], cwd=blob_repo, capture_output=True, check=True)
     sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=blob_repo, capture_output=True, text=True, check=True
     ).stdout.strip()
