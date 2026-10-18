@@ -431,8 +431,13 @@ def _normalize_pr(p: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _work_start(prs: Sequence[Mapping[str, Any]]) -> datetime | None:
-    stamps = [_ts(p.get("created_at")) for p in prs]
+def _work_start(
+    prs: Sequence[Mapping[str, Any]], linked_pr_created_at: Sequence[str] | None
+) -> datetime | None:
+    """Earliest creation among the listed and all Issue-linked PRs; None when unknown."""
+    if linked_pr_created_at is None:
+        return None
+    stamps = [_ts(p.get("created_at")) for p in prs] + [_ts(t) for t in linked_pr_created_at]
     if not stamps or any(t is None for t in stamps):
         return None
     return min(t for t in stamps if t is not None)
@@ -450,6 +455,8 @@ def build_promise_confirmation_report(
     trusted_logins: Sequence[str] = (),
     issue_created_at: str | None = None,
     shared_logins: Sequence[str] = (),
+    author_sessions: Sequence[str] = (),
+    linked_pr_created_at: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     base = {"schema": SCHEMA, "claim_ceiling": CLAIM_CEILING}
     try:
@@ -510,6 +517,7 @@ def build_promise_confirmation_report(
     )
     authors = {a.strip().lower() for a in author_identities}
     shared = {x.strip().lower() for x in shared_logins}
+    sessions = {x.strip().lower() for x in author_sessions if x.strip()}
     verdicts = {p["promise_id"]: p for p in confirmation["promises"]} if confirmation else {}
 
     rows = []
@@ -553,6 +561,7 @@ def build_promise_confirmation_report(
             independent = (
                 who not in all_by
                 and who not in authors
+                and who not in sessions
                 and (login in shared or login not in authors)
             )
             if not independent:
@@ -581,12 +590,15 @@ def build_promise_confirmation_report(
 
     info, blockers = _predeclaration(
         None if body_history is None else list(body_history),
-        _work_start(prs),
+        _work_start(prs, linked_pr_created_at),
         promise_set,
         identity,
         issue_created_at,
     )
     top: set[str] = set(info)
+    if not sessions:
+        top.add("AUTHOR_SESSION_UNKNOWN")
+        blockers = set(blockers) | {"AUTHOR_SESSION_UNKNOWN"}
     if not prs:
         top.add("NO_PR_LISTED")
     if any(not p.get("merge_sha") for p in prs):

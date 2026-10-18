@@ -276,6 +276,17 @@ ceiling `PROMISE_CONFIRMATION_INPUT_ONLY`: it grants nothing.
   (CLI `--shared-login`, default `james3014-nexus-agent[bot]`); for shared
   logins only the text-level name check applies. Comments dated after `now` or
   without an edit timestamp are ignored.
+- Author sessions must be known, or the report cannot be `VERIFIED`
+  (`AUTHOR_SESSION_UNKNOWN`). The CLI collects them from `--author-session` and
+  from marker lines `<!-- NEXUS_AUTHOR_SESSION_V1: <name> -->` (name
+  `[A-Za-z0-9._-]{1,64}`, one per line, several allowed) in the Issue body, the
+  listed PR bodies and same-repo PRs linked to the Issue. Authors add that line to
+  the PR body; a confirmer whose name equals an author session is ignored.
+- Work start is the earliest creation among the listed PRs and every PR linked to
+  the Issue (cross-reference or connected events). If the link list cannot be
+  read completely the report cannot be `VERIFIED` (`PROMISE_HISTORY_UNAVAILABLE`).
+- For an Issue without a promise set the CLI reads only the Issue and returns
+  `NOT_APPLICABLE`.
 - Any change of the promise set after work start (including a generation bump),
   an Issue created after work start, or unavailable edit history blocks
   `VERIFIED`; a dropped promise is `BLOCKED`.
