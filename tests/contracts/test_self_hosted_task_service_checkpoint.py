@@ -1073,6 +1073,21 @@ def test_core_record_claims_universe_builds_the_contract(
     assert record["record_status"] == "RECORDED" and port.calls[0]["contract"] is contract
 
 
+@pytest.mark.parametrize("truthy", [1, 1.0, "yes", "True", [True]])
+def test_core_record_truthy_non_true_envelope_flag_claims_nothing(
+    state_dir, monkeypatch, verdicts, truthy
+) -> None:
+    # only the literal True claims a universe (S8a review NIT): a truthy look-alike
+    # without expected evidence is a legacy task -- nothing built, asked or recorded
+    port = Port(answer={})
+    svc = _core_service(state_dir, port, monkeypatch)
+    built: list[Any] = []
+    monkeypatch.setattr(svc, "build_contract", lambda request: built.append(request))
+    state = _terminal_state(request={"task_id": "t", "core_envelope_required": truthy})
+    assert svc._build_terminal_core_record(state) is None
+    assert built == [] and port.calls == [] and verdicts.calls == []
+
+
 def test_core_record_contract_unavailable(state_dir, monkeypatch, verdicts) -> None:
     port = Port(answer={})
     svc = _core_service(state_dir, port, monkeypatch)
@@ -1329,6 +1344,44 @@ def test_record_attach_runs_under_the_lock(state_dir, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "_jsonable", jsonable)
     svc._record_terminal_core_not_covered("t", _terminal_state())
     assert seen == [True]
+
+
+def test_record_attach_stores_the_facade_jsonable_of_the_record(state_dir, monkeypatch) -> None:
+    # the attach puts _jsonable(record), resolved on the facade, into the state -- a
+    # converted copy, never the record object itself (S8a review NIT; the store's own
+    # serialisation would hide the difference on disk)
+    svc, _ = _recording_service(state_dir, monkeypatch, RECORD)
+    svc._write_state("t", _terminal_state())
+    real_jsonable = service_module._jsonable
+    converted: list[Any] = []
+
+    def jsonable(value: Any) -> Any:
+        if value is RECORD:
+            converted.append({**real_jsonable(value), "via": "facade-jsonable"})
+            return converted[-1]
+        return real_jsonable(value)
+
+    monkeypatch.setattr(service_module, "_jsonable", jsonable)
+    real_mutate = svc._mutate_state
+    attached: list[Any] = []
+
+    def mutate(task_id: str, mutator: Any) -> Any:
+        def spy(current: dict[str, Any]) -> None:
+            mutator(current)
+            attached.append(current.get("terminal_core_record"))
+
+        return real_mutate(task_id, spy)
+
+    monkeypatch.setattr(svc, "_mutate_state", mutate)
+    svc._record_terminal_core_not_covered("t", _terminal_state())
+    assert len(converted) == 1 and attached == converted and attached[0] is converted[0]
+    assert attached[0] is not RECORD
+    assert _read(state_dir)["terminal_core_record"] == {
+        "attempt_id": "attempt-1",
+        "record_status": "RECORDED",
+        "pair": [1, 2],
+        "via": "facade-jsonable",
+    }
 
 
 @pytest.mark.parametrize("where", ["build", "mutate"])
