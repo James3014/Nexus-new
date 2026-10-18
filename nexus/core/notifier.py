@@ -16,9 +16,7 @@ def _side_effects_suppressed() -> bool:
 # ``on run argv``; they are never spliced into AppleScript source, so a quote
 # in a file name or message cannot inject AppleScript (e.g. ``do shell script``).
 _NOTIFICATION_SCRIPT = (
-    "on run argv\n"
-    "display notification (item 2 of argv) with title (item 1 of argv)\n"
-    "end run"
+    "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
 )
 
 

@@ -1053,7 +1053,9 @@ def test_handler_exception_text_is_not_returned_to_client(capsys):
         def handle(self, request):
             raise RuntimeError(secret_detail)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(ExplodingGateway(), token="secret"))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), build_handler(ExplodingGateway(), token="secret")
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
