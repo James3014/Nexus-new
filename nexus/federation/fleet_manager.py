@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import os
-import argparse
 import random
 import warnings
 
@@ -38,18 +37,14 @@ def start_fleet(count: int, token: str) -> None:
     print(f"✅ Fleet of {count} nodes is live. They will self-register via heartbeat.")
 
 def stop_fleet() -> None:
-    print("🛑 Shutting down all Nexus nodes...")
-    subprocess.run(["pkill", "-f", "nexus_cli.py --swarm-mode"])
-    print("✅ All nodes stopped.")
+    # #2637: the old body killed every process whose command line matched
+    # "nexus_cli.py --swarm-mode" (name-matching kill), which breaks the
+    # kill-by-PID-only rule and could hit other sessions' processes.
+    raise RuntimeError(
+        "ARCHIVED (#2637): stop_fleet no longer kills processes by name; "
+        "stop nodes by PID. See ARCHIVED_2026-10-19-swarm-scripts.md."
+    )
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["start", "stop"])
-    parser.add_argument("--count", type=int, default=10)
-    parser.add_argument("--token", type=str, default="nexus-secret-2026")
-    
-    args = parser.parse_args()
-    if args.action == "start":
-        start_fleet(args.count, args.token)
-    elif args.action == "stop":
-        stop_fleet()
+    # #2637: the CLI (hard-coded default token, name-matching stop) is retired.
+    raise SystemExit("ARCHIVED (#2637): fleet manager CLI retired; see ARCHIVED_2026-10-19-swarm-scripts.md.")
