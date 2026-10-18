@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -53,6 +56,43 @@ ULTRA_TEST_TIMEOUT_ENV = "NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC"
 # Per-test outcomes come from pytest's junit XML (xunit1 keeps the ``file`` attribute), never
 # from parsing terminal text; reports larger than this are treated as unparseable.
 JUNIT_MAX_BYTES = 20_000_000
+# The ghost re-run executes PR-controlled code in the same process as pytest, so that code
+# can write a fake junit report and then ``os._exit`` (#2644). The re-run is therefore started
+# through this trusted ``-c`` bootstrap: it reads a fresh per-run key from stdin (then points
+# fd 0 at /dev/null), and an in-memory pytest plugin, run after the junit writer at session
+# finish, signs ``{exit status, junit sha256}`` with HMAC-SHA256 into a witness file. The
+# reviewer accepts a report only when the MAC, the exit code and the junit hash all match.
+# A report written outside pytest's own session finish, or a run that exits before it, has
+# no valid witness. Code that rewrites pytest's reports in-process is out of scope (it could
+# make pytest itself report a pass).
+GHOST_PYTEST_BOOTSTRAP = """
+import hashlib, hmac, json, os, sys
+def _arm():
+    key = bytes.fromhex(sys.stdin.readline().strip())
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    junit, witness, args = sys.argv[2], sys.argv[3], sys.argv[4:]
+    import pytest
+    class _GhostWitness:
+        @pytest.hookimpl(trylast=True)
+        def pytest_sessionfinish(self, session, exitstatus):
+            try:
+                with open(junit, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                digest = ""
+            payload = json.dumps({"exitstatus": int(exitstatus), "junit_sha256": digest}, sort_keys=True)
+            mac = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+            fd = os.open(witness, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "w") as fh:
+                json.dump({"payload": payload, "mac": mac}, fh)
+    return pytest, _GhostWitness(), args
+_pytest, _witness, _args = _arm()
+del _arm
+sys.exit(int(_pytest.main(_args, plugins=[_witness])))
+"""
+GHOST_WITNESS_MAX_BYTES = 4096
 LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
@@ -792,7 +832,9 @@ class UltraReviewService:
         }
 
     @_as_review_error
-    def _sandboxed_run(self, cmd: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
+    def _sandboxed_run(
+        self, cmd: list[str], *, cwd: Path, timeout: float, stdin_text: str | None = None
+    ) -> subprocess.CompletedProcess:
         """Run a lane command on PR-controlled content: scrubbed env, sandbox cwd, timeout,
         and (when available) an OS barrier denying network, credential reads and writes
         outside the sandbox. Never a shell; raises subprocess.TimeoutExpired on timeout."""
@@ -811,6 +853,7 @@ class UltraReviewService:
             profile=self._sandbox_profile,
             env=self._sandbox_env(),
             timeout=timeout,
+            stdin_text=stdin_text,
         )
 
     def _cleanup_execution_worktree(self, execution_root: Path, mirror_metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1648,8 +1691,8 @@ class UltraReviewService:
                 "pytest_stderr_tail": "",
             }
 
-        head_junit = (sandbox_path or execution_root) / "ghost-head-junit.xml"
-        cmd = self._ghost_pytest_cmd(execution_root, test_candidates, head_junit)
+        head_report = self._new_ghost_report(sandbox_path or execution_root, "head")
+        cmd = self._ghost_pytest_cmd(execution_root, test_candidates, head_report["junit"], head_report["witness"])
         sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
         test_candidates = [
             rel for rel in test_candidates if self._contained_path(rel, execution_root) is not None
@@ -1679,10 +1722,12 @@ class UltraReviewService:
         timeout = False
         passed = False
         head_returncode: int | None = None
+        head_check: dict[str, Any] = {"verified": False, "reason": "not_run", "junit_bytes": None}
         try:
-            result = self._sandboxed_run(cmd, cwd=execution_root, timeout=timeout_sec)
+            result = self._run_witnessed(cmd, head_report, cwd=execution_root, timeout=timeout_sec)
             head_returncode = result.returncode
-            passed = result.returncode == 0
+            head_check = self._verify_ghost_report(head_report, result.returncode)
+            passed = result.returncode == 0 and head_check["verified"]
             stdout_tail = (result.stdout or "")[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
         except subprocess.TimeoutExpired as exc:
@@ -1706,7 +1751,7 @@ class UltraReviewService:
                     "severity": severity,
                     "file": "",
                     "line": 0,
-                    "repro_command": " ".join(cmd),
+                    "repro_command": self._display_cmd(cmd),
                     "summary": summary,
                     "tests": tests[:50],
                     "execution_cwd": str(execution_root),
@@ -1726,10 +1771,27 @@ class UltraReviewService:
                 " (inconclusive, not a finding).",
                 inconclusive_tests,
             )
+        elif head_returncode == 0 and not head_check["verified"]:
+            # Exit 0 without a valid witness: pytest never finished its own session (e.g. an
+            # ``os._exit(0)`` in the code under test) or its report was replaced. Not a pass (#2644).
+            inconclusive_tests = list(test_candidates)
+            add_finding(
+                "pytest_report_unverified",
+                "INCONCLUSIVE",
+                "info",
+                f"Ghost regression run exited 0 but its pytest report is unverified ({head_check['reason']})"
+                f" in {phrase}: not a pass.",
+                inconclusive_tests,
+            )
         elif not passed:
             # Base comparison only for an ordinary "some tests failed" run (exit 1) with a
-            # parseable report; an interrupted/crashed/usage-error run stays a regression.
-            head_outcomes = self._junit_outcomes(head_junit) if head_returncode == 1 else None
+            # verified, parseable report; an interrupted/crashed/usage-error run, or one whose
+            # report is unverified (#2644), stays a regression.
+            head_outcomes = (
+                self._junit_outcomes_from_bytes(head_check["junit_bytes"])
+                if head_returncode == 1 and head_check["verified"]
+                else None
+            )
             failed_ids = (
                 [test_id for test_id, state in head_outcomes.items() if state in ("failed", "error_file")]
                 if head_outcomes is not None
@@ -1800,20 +1862,110 @@ class UltraReviewService:
             "isolation": self.sandbox_isolation(),
             "pytest_stdout_tail": stdout_tail,
             "pytest_stderr_tail": stderr_tail,
+            "head_report": {"verified": head_check["verified"], "reason": head_check["reason"]},
         }
 
     @staticmethod
-    def _ghost_pytest_cmd(root: Path, tests: Sequence[str], junit_path: Path) -> list[str]:
+    def _display_cmd(cmd: Sequence[str]) -> str:
+        return " ".join("<ghost-pytest-bootstrap>" if part == GHOST_PYTEST_BOOTSTRAP else part for part in cmd)
+
+    @staticmethod
+    def _new_ghost_report(parent: Path, label: str) -> dict[str, Any]:
+        """A fresh, unguessable report dir created by the reviewer, plus the per-run HMAC key.
+        The dir's identity is recorded so a swapped dir is detected after the run."""
+        report_dir = parent / f"ghost-{label}-report-{secrets.token_hex(8)}"
+        os.mkdir(report_dir, 0o700)
+        info = os.lstat(report_dir)
+        return {
+            "dir": report_dir,
+            "junit": report_dir / "junit.xml",
+            "witness": report_dir / "witness.json",
+            "key": secrets.token_bytes(32),
+            "dir_identity": (info.st_dev, info.st_ino),
+            "started": 0.0,
+        }
+
+    def _run_witnessed(
+        self, cmd: list[str], report: dict[str, Any], *, cwd: Path, timeout: float
+    ) -> subprocess.CompletedProcess:
+        report["started"] = datetime.now(timezone.utc).timestamp()
+        return self._sandboxed_run(cmd, cwd=cwd, timeout=timeout, stdin_text=report["key"].hex() + "\n")
+
+    @staticmethod
+    def _verify_ghost_report(report: dict[str, Any], returncode: int) -> dict[str, Any]:
+        """``{"verified", "reason", "junit_bytes"}`` for one witnessed pytest run (#2644).
+
+        Verified only when the report dir is still the one the reviewer created, the witness and
+        junit files are regular files owned by this user and written after the run started, the
+        witness MAC matches this run's key, its exit status equals the process exit code and its
+        junit hash equals the junit bytes returned (read once, so a later rewrite cannot race)."""
+
+        def fail(reason: str) -> dict[str, Any]:
+            return {"verified": False, "reason": reason, "junit_bytes": None}
+
+        uid = os.getuid() if hasattr(os, "getuid") else None
+        started = float(report.get("started") or 0.0)
+
+        def regular_file(path: Path, max_bytes: int) -> bytes | None:
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+                return None
+            if uid is not None and info.st_uid != uid:
+                return None
+            if info.st_mtime < started - 2:
+                return None
+            return path.read_bytes()
+
+        try:
+            dir_info = os.lstat(report["dir"])
+            if not stat.S_ISDIR(dir_info.st_mode) or (dir_info.st_dev, dir_info.st_ino) != report["dir_identity"]:
+                return fail("report_dir_replaced")
+            witness = regular_file(report["witness"], GHOST_WITNESS_MAX_BYTES)
+            if witness is None:
+                return fail("witness_not_regular")
+            doc = json.loads(witness)
+            payload, mac = doc["payload"], doc["mac"]
+            if not isinstance(payload, str) or not isinstance(mac, str):
+                return fail("witness_malformed")
+        except FileNotFoundError:
+            return fail("witness_missing")
+        except (OSError, ValueError, KeyError, TypeError):
+            return fail("witness_unreadable")
+        expected = hmac.new(report["key"], payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, mac):
+            return fail("witness_mac_mismatch")
+        try:
+            fields = json.loads(payload)
+        except ValueError:
+            return fail("witness_malformed")
+        if not isinstance(fields, dict) or fields.get("exitstatus") != returncode:
+            return fail("exit_code_mismatch")
+        try:
+            junit = regular_file(report["junit"], JUNIT_MAX_BYTES)
+        except OSError:
+            return fail("junit_missing")
+        if junit is None:
+            return fail("junit_not_regular")
+        if not hmac.compare_digest(hashlib.sha256(junit).hexdigest(), str(fields.get("junit_sha256") or "")):
+            return fail("junit_hash_mismatch")
+        return {"verified": True, "reason": "", "junit_bytes": junit}
+
+    @staticmethod
+    def _ghost_pytest_cmd(root: Path, tests: Sequence[str], junit_path: Path, witness_path: Path) -> list[str]:
         # rootdir pins conftest discovery to the checkout under test (the sandbox may sit inside
         # the reviewed repo); no cache dir is written into it. -I: no PYTHONPATH, user site or
         # cwd at start-up, so a PR sitecustomize/.pth never loads; the checkout is put on
         # sys.path by pytest's ``pythonpath`` ini override. Per-test outcomes are read from the
-        # junit XML (xunit1 records each test's file).
+        # junit XML (xunit1 records each test's file), accepted only with a valid witness
+        # (GHOST_PYTEST_BOOTSTRAP, #2644). ``pytest`` after the bootstrap is a label only.
         return [
             sys.executable,
             "-I",
-            "-m",
+            "-c",
+            GHOST_PYTEST_BOOTSTRAP,
             "pytest",
+            sbpl_path(junit_path),
+            sbpl_path(witness_path),
             "-q",
             "-p",
             "no:cacheprovider",
@@ -1829,6 +1981,18 @@ class UltraReviewService:
 
     @staticmethod
     def _junit_outcomes(junit_path: Path) -> dict[str, str] | None:
+        """``_junit_outcomes_from_bytes`` of a report file (None when missing or not regular)."""
+        try:
+            info = os.lstat(junit_path)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > JUNIT_MAX_BYTES:
+                return None
+            data = junit_path.read_bytes()
+        except OSError:
+            return None
+        return UltraReviewService._junit_outcomes_from_bytes(data)
+
+    @staticmethod
+    def _junit_outcomes_from_bytes(data: bytes | None) -> dict[str, str] | None:
         """``{test id: passed|failed|skipped|error_file}`` from a pytest junit XML, or None when
         the report is missing, oversized, unparseable or names a test without a file.
 
@@ -1838,11 +2002,9 @@ class UltraReviewService:
         with state ``error_file``."""
         import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 - DTD/entities rejected below
 
+        if data is None or len(data) > JUNIT_MAX_BYTES:
+            return None
         try:
-            info = os.lstat(junit_path)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > JUNIT_MAX_BYTES:
-                return None
-            data = junit_path.read_bytes()
             # Written by PR-controlled test code: refuse any DTD/entity declaration (entity
             # expansion), the only XML feature that makes the stdlib parser unsafe here.
             if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
@@ -1948,21 +2110,30 @@ class UltraReviewService:
             outcome["regressions"] = [test_id for test_id in failed_ids if file_of(test_id) not in present]
             if not remaining:
                 return outcome
-            base_junit = sandbox_path / "ghost-base-junit.xml"
-            cmd = self._ghost_pytest_cmd(base_root, present, base_junit)
-            outcome["repro_command"] = " ".join(cmd)
+            base_report = self._new_ghost_report(sandbox_path, "base")
+            cmd = self._ghost_pytest_cmd(base_root, present, base_report["junit"], base_report["witness"])
+            outcome["repro_command"] = self._display_cmd(cmd)
             try:
-                result = self._sandboxed_run(cmd, cwd=base_root, timeout=timeout_sec)
+                result = self._run_witnessed(cmd, base_report, cwd=base_root, timeout=timeout_sec)
             except subprocess.TimeoutExpired:
                 outcome["inconclusive"] = remaining
                 outcome["reason"] = f"base_run_timeout_{timeout_sec:g}s"
                 outcome["timeout"] = True
                 return outcome
             outcome["base_returncode"] = result.returncode
-            base_outcomes = self._junit_outcomes(base_junit) if result.returncode in (0, 1) else None
+            base_check = self._verify_ghost_report(base_report, result.returncode)
+            base_outcomes = (
+                self._junit_outcomes_from_bytes(base_check["junit_bytes"])
+                if result.returncode in (0, 1) and base_check["verified"]
+                else None
+            )
             if base_outcomes is None:
                 outcome["inconclusive"] = remaining
-                outcome["reason"] = f"base_result_unknown_exit_{result.returncode}"
+                outcome["reason"] = (
+                    f"base_report_unverified_{base_check['reason']}"
+                    if result.returncode in (0, 1) and not base_check["verified"]
+                    else f"base_result_unknown_exit_{result.returncode}"
+                )
                 return outcome
             reasons: set[str] = set()
             for test_id in remaining:

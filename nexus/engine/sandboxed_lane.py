@@ -460,9 +460,11 @@ def run_confined(
     env: dict[str, str],
     timeout: float,
     require_barrier: bool = False,
+    stdin_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run ``argv`` (never a shell) with ``env`` in a ``cwd`` inside ``confine_roots``, wrapped
     in ``sandbox-exec`` when available. ``require_barrier`` refuses to run without one.
+    ``stdin_text``, when given, is the child's whole stdin (a pipe, never the caller's).
     Raises subprocess.TimeoutExpired on timeout."""
 
     if not argv:
@@ -485,6 +487,7 @@ def run_confined(
         text=True,
         check=False,
         timeout=timeout,
+        input=stdin_text,
     )
 
 
