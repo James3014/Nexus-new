@@ -30,9 +30,14 @@ TESTS_ROOT = REPO_ROOT / "tests"
 # (datetime.now(), datetime.datetime.utcnow(), date.today(), pd.Timestamp.now()).
 _CLOCK_ATTRS_ANY_RECEIVER = frozenset({"now", "utcnow", "today"})
 # Functions of the ``time`` module.
-_TIME_MODULE_FUNCS = frozenset(
-    {"time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns"}
-)
+_TIME_MODULE_FUNCS = frozenset({
+    "time",
+    "time_ns",
+    "monotonic",
+    "monotonic_ns",
+    "perf_counter",
+    "perf_counter_ns",
+})
 
 
 def _is_parametrize_call(node: ast.Call) -> bool:
