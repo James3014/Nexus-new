@@ -221,6 +221,23 @@
     </div>
 
     <script>
+        // SEC-002: every /api/ call carries the operator-entered token (kept only in this tab's sessionStorage).
+        const _museFetch = window.fetch.bind(window);
+        function museToken() {
+            let t = sessionStorage.getItem('museToken');
+            if (!t) { t = prompt('Muse dashboard token') || ''; sessionStorage.setItem('museToken', t); }
+            return t;
+        }
+        window.fetch = (url, opts = {}) => {
+            if (typeof url === 'string' && url.startsWith('/api/')) {
+                opts = { ...opts, headers: { ...(opts.headers || {}), 'X-Muse-Token': museToken() } };
+                return _museFetch(url, opts).then((res) => {
+                    if (res.status === 401) sessionStorage.removeItem('museToken');
+                    return res;
+                });
+            }
+            return _museFetch(url, opts);
+        };
         // --- 拖拽縮放邏輯 ---
         const grid = document.getElementById('main-grid');
         const resizer1 = document.getElementById('resizer-1');

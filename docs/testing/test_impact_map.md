@@ -348,6 +348,9 @@
 | nexus/benchmark | tests/benchmark | active | medium | benchmark_contract |
 | nexus/connectors | tests/connectors | active | medium | connector_contract |
 | nexus/security | tests/security | active | high | security |
+| scripts/tg_pty_bridge.py | tests/security/test_legacy_script_hardening_2620.py | active | medium | legacy_script_credential_and_auth_hardening_2620 |
+| scripts/script_dashboard.py | tests/security/test_legacy_script_hardening_2620.py | active | medium | legacy_script_credential_and_auth_hardening_2620 |
+| scripts/Swarm_Dashboard.html | tests/security/test_legacy_script_hardening_2620.py | active | medium | legacy_script_credential_and_auth_hardening_2620 |
 | nexus/pilot_cli | tests/pilot_cli | active | medium | cli_runtime |
 | nexus/health | tests/health | active | medium | health_signal |
 | nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium | workflow_contract |
