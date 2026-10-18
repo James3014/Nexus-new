@@ -1,6 +1,5 @@
 import os
 import time
-import subprocess
 import logging
 import json
 from datetime import datetime
@@ -9,6 +8,7 @@ from pathlib import Path
 
 # Ensure nexus package is in path for metabolism
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nexus.core.argv_command import run_command_string
 from nexus.core.decorators import nexus_metabolize
 
 # Path Configuration
@@ -26,7 +26,7 @@ logging.basicConfig(
 def run_command(cmd, cwd=REPO_ROOT):
     logging.info(f"Executing: {cmd}")
     try:
-        result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+        result = run_command_string(cmd, cwd=cwd)
         if result.returncode != 0:
             logging.error(f"Command failed (RC={result.returncode}): {result.stderr}")
         return result.returncode, result.stdout

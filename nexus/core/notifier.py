@@ -1,7 +1,6 @@
-import subprocess
 import logging
 import os
-import shlex
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +10,21 @@ def _side_effects_suppressed() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) or os.environ.get(
         "NEXUS_NOTIFIER_SILENT", ""
     ).strip() in {"1", "true", "True"}
+
+
+# #2635 SEC-006: title and message travel as osascript argv items read by
+# ``on run argv``; they are never spliced into AppleScript source, so a quote
+# in a file name or message cannot inject AppleScript (e.g. ``do shell script``).
+_NOTIFICATION_SCRIPT = (
+    "on run argv\n"
+    "display notification (item 2 of argv) with title (item 1 of argv)\n"
+    "end run"
+)
+
+
+def build_notification_argv(title: str, message: str) -> list[str]:
+    """Return the osascript argv that shows *message* without code injection."""
+    return ["osascript", "-e", _NOTIFICATION_SCRIPT, f"🛡️ Nexus {title}", str(message)]
 
 
 class NexusNotifier:
@@ -37,9 +51,8 @@ class NexusNotifier:
         """🍎 macOS osascript 物理彈窗"""
         if _side_effects_suppressed():
             return
-        script = f'display notification "{message}" with title "🛡️ Nexus {title}"'
         try:
-            subprocess.run(["osascript", "-e", script], check=True)
+            subprocess.run(build_notification_argv(title, message), check=True)
         except Exception as e:
             logger.error(f"❌ [Notifier:UI] Failed to trigger notification: {e}")
 
@@ -48,11 +61,15 @@ class NexusNotifier:
         """🔊 Nexus 全域語音告警 (符合 Nexus 戰甲規範)"""
         if _side_effects_suppressed():
             return
-        # 使用 nohup 並導向 /dev/null 以免阻塞
-        # 遵循全域規則：nohup say "..." > /dev/null 2>&1 &
-        cmd = f"nohup say {shlex.quote(text)} > /dev/null 2>&1 &"
+        # 背景執行、輸出導向 /dev/null 以免阻塞 (#2635: argv, no shell)
         try:
-            subprocess.Popen(cmd, shell=True)  # nosec B602
+            subprocess.Popen(
+                ["say", str(text)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         except Exception as e:
             logger.error(f"❌ [Notifier:Voice] Failed to trigger voice alert: {e}")
 

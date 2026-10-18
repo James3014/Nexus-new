@@ -156,7 +156,9 @@ class SecureRegistrySync:
         self._server_sock = None
         self._thread = None
 
-    def serve(self, host: str = "0.0.0.0", port: int = 8443) -> None:
+    def serve(self, host: str = "127.0.0.1", port: int = 8443) -> None:
+        # #2635 SEC-011: loopback by default; a swarm peer must pass an
+        # explicit host to listen on other interfaces.
         """Start mTLS server daemon to listen for swarm skill requests."""
         if not self.registry:
             return

@@ -6,11 +6,11 @@
 import os
 import json
 import logging
-import subprocess
 import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from nexus.core.argv_command import run_command_string
 from nexus.core.drone_protocol import DroneProtocol
 
 logger = logging.getLogger("nexus.drone")
@@ -91,7 +91,7 @@ class DroneToolBox:
 
     def bash_exec(self, command: str) -> Dict[str, Any]:
         try:
-            res = subprocess.run(command, shell=True, cwd=self.sandbox_dir, capture_output=True, text=True, timeout=30)  # nosec B602
+            res = run_command_string(command, cwd=self.sandbox_dir, timeout=30)
             return {"exit_code": res.returncode, "stdout": res.stdout, "stderr": res.stderr}
         except Exception as e:
             return {"exit_code": -1, "stderr": str(e)}
