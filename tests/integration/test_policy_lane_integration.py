@@ -9,24 +9,59 @@ Policy Lane Integration Tests — 窄而關鍵的 integration slice。
 4. Cutover → always human-gated
 5. Manifest ↔ lane gate ↔ override consistency
 """
+
+import hashlib
+import importlib.util
 import json
-import pytest
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+
+import pytest
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
 LANE_GATE = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "check_policy_lane_gate.py"
-OVERRIDE_LIFECYCLE = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "policy_override_lifecycle.py"
+OVERRIDE_LIFECYCLE = (
+    Path(__file__).resolve().parents[2] / "scripts" / "ops" / "policy_override_lifecycle.py"
+)
 OVERRIDE_DIR = Path(__file__).resolve().parents[2] / ".nexus" / "policy_overrides"
 
 
-def run_script(script: Path, args: list[str]) -> dict:
+def _compute_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _is_file_changed(path: Path, baseline_hash: str) -> bool:
+    return _compute_sha256(path) != baseline_hash
+
+
+@pytest.fixture(scope="module", autouse=True)
+def guard_real_manifest():
+    initial_hash = _compute_sha256(MANIFEST_PATH)
+    yield
+    assert not _is_file_changed(MANIFEST_PATH, initial_hash), (
+        "Real manifest was modified during test run!"
+    )
+
+
+@pytest.fixture
+def tmp_manifest_env(tmp_path: Path) -> dict[str, str]:
+    tmp_manifest = tmp_path / "policy-manifest.v2.json"
+    shutil.copyfile(MANIFEST_PATH, tmp_manifest)
+    tmp_overrides = tmp_path / "overrides"
+    tmp_overrides.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["NEXUS_POLICY_MANIFEST_PATH"] = str(tmp_manifest)
+    env["NEXUS_POLICY_OVERRIDE_DIR"] = str(tmp_overrides)
+    return env
+
+
+def run_script(script: Path, args: list[str], env: dict[str, str] | None = None) -> dict:
     """Run a Python script and return parsed JSON output (handles exit code 1)."""
     result = subprocess.run(
-        [sys.executable, str(script)] + args,
-        capture_output=True, text=True, timeout=30
+        [sys.executable, str(script)] + args, capture_output=True, text=True, timeout=30, env=env
     )
     # Scripts return JSON on stdout even when exit code is 1
     output = result.stdout.strip() or result.stderr.strip()
@@ -43,6 +78,7 @@ def load_manifest() -> dict:
 
 
 # ─── 1. Override → Lane Policy → Authority Contract ────────────────────
+
 
 class TestOverrideAuthorityContract:
     """Override creates must respect lane authority boundaries."""
@@ -80,70 +116,120 @@ class TestOverrideAuthorityContract:
 
 # ─── 2. Override Lifecycle → Receipt Trail ─────────────────────────────
 
+
 class TestOverrideLifecycle:
     """Override create → check → TTL → rollback → receipt trail."""
 
-    def test_override_create_and_check(self):
+    def test_override_create_and_check(self, tmp_manifest_env):
         """Create override → check it's active → verify receipt exists."""
         # Create
-        create_result = run_script(OVERRIDE_LIFECYCLE, [
-            "create", "--policy-id", "P-BUDGET-01", "--who", "integration-test",
-            "--why", "Integration test override", "--scope", "budget threshold",
-            "--expiry", "2099-12-31T23:59:59Z", "--rollback-target", "P-BUDGET-01.1.0.0"
-        ])
+        create_result = run_script(
+            OVERRIDE_LIFECYCLE,
+            [
+                "create",
+                "--policy-id",
+                "P-BUDGET-01",
+                "--who",
+                "integration-test",
+                "--why",
+                "Integration test override",
+                "--scope",
+                "budget threshold",
+                "--expiry",
+                "2099-12-31T23:59:59Z",
+                "--rollback-target",
+                "P-BUDGET-01.1.0.0",
+            ],
+            env=tmp_manifest_env,
+        )
         assert "override_id" in create_result
         override_id = create_result["override_id"]
 
         # Check
-        check_result = run_script(OVERRIDE_LIFECYCLE, ["check", "--override-id", override_id])
+        check_result = run_script(
+            OVERRIDE_LIFECYCLE, ["check", "--override-id", override_id], env=tmp_manifest_env
+        )
         assert check_result.get("status") == "active"
         assert check_result.get("policy_id") == "P-BUDGET-01"
         assert check_result.get("remaining_hours", 0) > 0
 
         # Verify receipt file exists
-        receipt_path = OVERRIDE_DIR / f"{override_id}.json"
+        override_dir = Path(tmp_manifest_env["NEXUS_POLICY_OVERRIDE_DIR"])
+        receipt_path = override_dir / f"{override_id}.json"
         assert receipt_path.exists()
         receipt = json.loads(receipt_path.read_text())
         assert receipt["policy_id"] == "P-BUDGET-01"
         assert receipt["who"] == "integration-test"
 
-    def test_override_rollback_integrity(self):
+    def test_override_rollback_integrity(self, tmp_manifest_env):
         """Create override → rollback → verify rollback recorded."""
         # Create
-        create_result = run_script(OVERRIDE_LIFECYCLE, [
-            "create", "--policy-id", "P-LEARN-01", "--who", "integration-test",
-            "--why", "Rollback test", "--scope", "learning params",
-            "--expiry", "2099-12-31T23:59:59Z", "--rollback-target", "P-LEARN-01.1.0.0"
-        ])
+        create_result = run_script(
+            OVERRIDE_LIFECYCLE,
+            [
+                "create",
+                "--policy-id",
+                "P-LEARN-01",
+                "--who",
+                "integration-test",
+                "--why",
+                "Rollback test",
+                "--scope",
+                "learning params",
+                "--expiry",
+                "2099-12-31T23:59:59Z",
+                "--rollback-target",
+                "P-LEARN-01.1.0.0",
+            ],
+            env=tmp_manifest_env,
+        )
         override_id = create_result["override_id"]
 
         # Rollback
-        rollback_result = run_script(OVERRIDE_LIFECYCLE, ["rollback", "--override-id", override_id])
+        rollback_result = run_script(
+            OVERRIDE_LIFECYCLE, ["rollback", "--override-id", override_id], env=tmp_manifest_env
+        )
         assert rollback_result.get("status") == "rolled_back"
         assert rollback_result.get("rollback_to") == "P-LEARN-01.1.0.0"
 
         # Verify receipt shows rolled_back status
-        receipt_path = OVERRIDE_DIR / f"{override_id}.json"
+        override_dir = Path(tmp_manifest_env["NEXUS_POLICY_OVERRIDE_DIR"])
+        receipt_path = override_dir / f"{override_id}.json"
         receipt = json.loads(receipt_path.read_text())
         assert receipt["status"] == "rolled_back"
 
-    def test_hard_lane_override_create_blocked(self):
+    def test_hard_lane_override_create_blocked(self, tmp_manifest_env):
         """Hard lane override create → blocked at creation."""
-        result = run_script(OVERRIDE_LIFECYCLE, [
-            "create", "--policy-id", "P-CLAIM-02", "--who", "integration-test",
-            "--why", "Should be blocked", "--scope", "evidence verifier",
-            "--expiry", "2099-12-31T23:59:59Z", "--rollback-target", "P-CLAIM-02.1.0.0"
-        ])
+        result = run_script(
+            OVERRIDE_LIFECYCLE,
+            [
+                "create",
+                "--policy-id",
+                "P-CLAIM-02",
+                "--who",
+                "integration-test",
+                "--why",
+                "Should be blocked",
+                "--scope",
+                "evidence verifier",
+                "--expiry",
+                "2099-12-31T23:59:59Z",
+                "--rollback-target",
+                "P-CLAIM-02.1.0.0",
+            ],
+            env=tmp_manifest_env,
+        )
         assert result.get("error") == "HARD_LANE_OVERRIDE_BLOCKED"
 
-    def test_override_list_shows_active(self):
+    def test_override_list_shows_active(self, tmp_manifest_env):
         """Override list shows active overrides."""
-        result = run_script(OVERRIDE_LIFECYCLE, ["list"])
+        result = run_script(OVERRIDE_LIFECYCLE, ["list"], env=tmp_manifest_env)
         assert "overrides" in result
         assert result["total"] >= 0  # May have leftovers from other tests
 
 
 # ─── 3. Hard-Lane Drill → Claim/Delivery/Contamination Gating ──────────
+
 
 class TestHardLaneDrillGating:
     """Hard lane drill requirement for claim/delivery/contamination families."""
@@ -181,6 +267,7 @@ class TestHardLaneDrillGating:
 
 # ─── 4. Cutover → Always Human-Gated ───────────────────────────────────
 
+
 class TestCutoverHumanGating:
     """Cutover action is always blocked (requires human approval)."""
 
@@ -201,6 +288,7 @@ class TestCutoverHumanGating:
 
 
 # ─── 5. Manifest ↔ Lane Gate ↔ Override Consistency ────────────────────
+
 
 class TestManifestConsistency:
     """Verify manifest, lane gate, and override system are consistent."""
@@ -245,16 +333,135 @@ class TestManifestConsistency:
             result = run_script(LANE_GATE, ["--policy-id", pid, "--action", "modify"])
             assert result.get("allowed") is True, f"{pid} soft lane should pass modify"
 
-    def test_override_expiry_enforcement(self):
+    def test_override_expiry_enforcement(self, tmp_manifest_env):
         """Expired override should be detected as expired."""
         # Create override with near-expiry
-        create_result = run_script(OVERRIDE_LIFECYCLE, [
-            "create", "--policy-id", "P-BELIEF-01", "--who", "integration-test",
-            "--why", "Expiry test", "--scope", "belief blending",
-            "--expiry", "2020-01-01T00:00:00Z",  # Already expired
-            "--rollback-target", "P-BELIEF-01.1.0.0"
-        ])
+        create_result = run_script(
+            OVERRIDE_LIFECYCLE,
+            [
+                "create",
+                "--policy-id",
+                "P-BELIEF-01",
+                "--who",
+                "integration-test",
+                "--why",
+                "Expiry test",
+                "--scope",
+                "belief blending",
+                "--expiry",
+                "2020-01-01T00:00:00Z",  # Already expired
+                "--rollback-target",
+                "P-BELIEF-01.1.0.0",
+            ],
+            env=tmp_manifest_env,
+        )
         override_id = create_result.get("override_id")
         if override_id:
-            check_result = run_script(OVERRIDE_LIFECYCLE, ["check", "--override-id", override_id])
+            check_result = run_script(
+                OVERRIDE_LIFECYCLE, ["check", "--override-id", override_id], env=tmp_manifest_env
+            )
             assert check_result.get("status") == "expired"
+
+
+# ─── 6. Hermetic Lifecycle Env Overrides (Issue #2266) ──────────────────
+
+
+def _load_fresh_lifecycle():
+    spec = importlib.util.spec_from_file_location(
+        "policy_override_lifecycle_fresh", OVERRIDE_LIFECYCLE
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_lifecycle_manifest_path_env_override(monkeypatch, tmp_path):
+    manifest_target = tmp_path / "m.json"
+    monkeypatch.setenv("NEXUS_POLICY_MANIFEST_PATH", str(manifest_target))
+    module = _load_fresh_lifecycle()
+    assert module.MANIFEST_PATH == manifest_target
+
+
+def test_lifecycle_override_dir_env_override(monkeypatch, tmp_path):
+    override_target = tmp_path / "ovr"
+    monkeypatch.setenv("NEXUS_POLICY_OVERRIDE_DIR", str(override_target))
+    module = _load_fresh_lifecycle()
+    assert module.OVERRIDE_DIR == override_target
+
+
+def test_lifecycle_defaults_unchanged_without_env(monkeypatch):
+    monkeypatch.delenv("NEXUS_POLICY_MANIFEST_PATH", raising=False)
+    monkeypatch.delenv("NEXUS_POLICY_OVERRIDE_DIR", raising=False)
+    module = _load_fresh_lifecycle()
+    assert str(module.MANIFEST_PATH).endswith("docs/reports/policy-manifest.v2.json")
+    assert str(module.OVERRIDE_DIR).endswith(".nexus/policy_overrides")
+
+
+def test_lifecycle_env_override_isolates_save_manifest(monkeypatch, tmp_path):
+    manifest_override = tmp_path / "m.json"
+    override_dir = tmp_path / "ovr"
+    monkeypatch.setenv("NEXUS_POLICY_MANIFEST_PATH", str(manifest_override))
+    monkeypatch.setenv("NEXUS_POLICY_OVERRIDE_DIR", str(override_dir))
+
+    real_bytes = MANIFEST_PATH.read_bytes()
+    manifest_override.write_bytes(real_bytes)
+
+    module = _load_fresh_lifecycle()
+    try:
+        module.save_manifest({"policies": []})
+        assert MANIFEST_PATH.read_bytes() == real_bytes
+        assert json.loads(manifest_override.read_text()) == {"policies": []}
+    finally:
+        if MANIFEST_PATH.read_bytes() != real_bytes:
+            MANIFEST_PATH.write_bytes(real_bytes)
+
+
+# ─── 7. Manifest Guard Verifications (Issue #2266) ─────────────────────
+
+
+def test_real_manifest_untouched_by_lifecycle_runs(tmp_manifest_env):
+    real_initial_hash = _compute_sha256(MANIFEST_PATH)
+    tmp_manifest_path = Path(tmp_manifest_env["NEXUS_POLICY_MANIFEST_PATH"])
+    tmp_initial_hash = _compute_sha256(tmp_manifest_path)
+
+    create_result = run_script(
+        OVERRIDE_LIFECYCLE,
+        [
+            "create",
+            "--policy-id",
+            "P-BUDGET-01",
+            "--who",
+            "guard-test",
+            "--why",
+            "Guard test override",
+            "--scope",
+            "budget threshold",
+            "--expiry",
+            "2099-12-31T23:59:59Z",
+            "--rollback-target",
+            "P-BUDGET-01.1.0.0",
+        ],
+        env=tmp_manifest_env,
+    )
+    assert "override_id" in create_result
+    override_id = create_result["override_id"]
+
+    rollback_result = run_script(
+        OVERRIDE_LIFECYCLE,
+        ["rollback", "--override-id", override_id],
+        env=tmp_manifest_env,
+    )
+    assert rollback_result.get("status") == "rolled_back"
+
+    assert _compute_sha256(MANIFEST_PATH) == real_initial_hash
+    assert _compute_sha256(tmp_manifest_path) != tmp_initial_hash
+
+
+def test_manifest_guard_detects_a_write(tmp_path: Path):
+    test_file = tmp_path / "test-manifest.json"
+    test_file.write_text("initial content")
+    initial_hash = _compute_sha256(test_file)
+    assert not _is_file_changed(test_file, initial_hash)
+
+    test_file.write_text("modified content")
+    assert _is_file_changed(test_file, initial_hash)
