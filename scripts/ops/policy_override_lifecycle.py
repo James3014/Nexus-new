@@ -22,17 +22,29 @@ Usage:
     python scripts/ops/policy_override_lifecycle.py check --override-id OVR-2026-06-15-001
     python scripts/ops/policy_override_lifecycle.py list
     python scripts/ops/policy_override_lifecycle.py cleanup
+
+Environment overrides: NEXUS_POLICY_OVERRIDE_DIR and NEXUS_POLICY_MANIFEST_PATH.
 """
-import json
-import sys
+
 import argparse
 import hashlib
-from pathlib import Path
+import json
+import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-OVERRIDE_DIR = Path(__file__).resolve().parents[2] / ".nexus" / "policy_overrides"
-MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
+OVERRIDE_DIR = (
+    Path(os.environ["NEXUS_POLICY_OVERRIDE_DIR"])
+    if os.environ.get("NEXUS_POLICY_OVERRIDE_DIR")
+    else Path(__file__).resolve().parents[2] / ".nexus" / "policy_overrides"
+)
+MANIFEST_PATH = (
+    Path(os.environ["NEXUS_POLICY_MANIFEST_PATH"])
+    if os.environ.get("NEXUS_POLICY_MANIFEST_PATH")
+    else Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
+)
 
 
 def ensure_dirs():
@@ -72,6 +84,7 @@ def find_version_history(manifest: dict, policy_id: str, version: str) -> dict |
 
 # ─── Commands ──────────────────────────────────────────────────────────
 
+
 def cmd_create(args):
     """Create a new override receipt."""
     ensure_dirs()
@@ -97,7 +110,7 @@ def cmd_create(args):
         "expiry": args.expiry,
         "rollback_plan": args.rollback_target,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "status": "active"
+        "status": "active",
     }
 
     receipt_path = OVERRIDE_DIR / f"{override_id}.json"
@@ -111,19 +124,24 @@ def cmd_create(args):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "diff_summary": f"Override applied: {args.why}",
         "lane": policy["lane"],
-        "override_id": override_id
+        "override_id": override_id,
     }
     policy.setdefault("version_history", []).append(version_record)
     save_manifest(manifest)
 
-    print(json.dumps({
-        "status": "created",
-        "override_id": override_id,
-        "receipt_path": str(receipt_path),
-        "policy_id": args.policy_id,
-        "expiry": args.expiry,
-        "rollback_target": args.rollback_target
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "created",
+                "override_id": override_id,
+                "receipt_path": str(receipt_path),
+                "policy_id": args.policy_id,
+                "expiry": args.expiry,
+                "rollback_target": args.rollback_target,
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_check(args):
@@ -148,7 +166,7 @@ def cmd_check(args):
         "remaining_hours": round(remaining_hours, 1),
         "who": receipt["who"],
         "why": receipt["why"],
-        "rollback_target": receipt["rollback_plan"]
+        "rollback_target": receipt["rollback_plan"],
     }
 
     if is_expired:
@@ -207,7 +225,7 @@ def cmd_rollback(args):
         "diff_summary": f"Rollback from override {args.override_id} to {rollback_target}",
         "lane": policy["lane"],
         "rollback_from": args.override_id,
-        "rollback_to": rollback_target
+        "rollback_to": rollback_target,
     }
     policy.setdefault("version_history", []).append(rollback_record)
     save_manifest(manifest)
@@ -217,12 +235,17 @@ def cmd_rollback(args):
     receipt["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
     receipt_path.write_text(json.dumps(receipt, indent=2))
 
-    print(json.dumps({
-        "status": "rolled_back",
-        "override_id": args.override_id,
-        "policy_id": receipt["policy_id"],
-        "rollback_to": rollback_target
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "rolled_back",
+                "override_id": args.override_id,
+                "policy_id": receipt["policy_id"],
+                "rollback_to": rollback_target,
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_list(args):
@@ -242,7 +265,7 @@ def cmd_list(args):
             "who": receipt["who"],
             "why": receipt["why"],
             "expiry": receipt["expiry"],
-            "remaining_hours": round((expiry - now).total_seconds() / 3600, 1)
+            "remaining_hours": round((expiry - now).total_seconds() / 3600, 1),
         })
 
     # Sort: active first, then by expiry
