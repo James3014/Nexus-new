@@ -481,6 +481,21 @@ def withhold_fed_gate_verdicts(bundle: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _entry_did_real_work(entry: Mapping[str, Any]) -> bool:
+    """A compact bundle row whose evidence may count as consumed (#2596).
+
+    Same rule as ``nexus_runtime`` ``entry_did_real_work`` (nexus-runtime#232, PR #233):
+    only a real, successful run; stub, skipped and failed rows never qualify, whatever
+    ``success`` says. Switch to the runtime helper once the runtime pin includes it.
+    """
+    if not bool(entry.get("success") or entry.get("invoked_real")):
+        return False
+    if entry.get("invoked_stub") or entry.get("skipped") or entry.get("stub"):
+        return False
+    status = str(entry.get("status") or "")
+    return not status or status == "REAL_INVOKED"
+
+
 def compact_capability_evidence_for_prompt(
     bundle: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -705,14 +720,14 @@ def build_online_nexus_context(
     if evidence_compact and evidence_prompt:
         prompt_parts.append(f"\n{NEXUS_EVIDENCE_MARKER}\n{evidence_prompt}\n")
         sections.append(EVIDENCE_SECTION)
-        # Only IDs actually present in successful entries may be recorded as consumed.
-        # Never synthesize bundle:<hash> as a consumption proof.
-        raw_ids = [str(x) for x in (evidence_compact.get("evidence_ids") or []) if str(x).strip()]
+        # Only IDs of entries that did real work may be recorded as consumed; the
+        # top-level id list also names stub / skipped / failed entries, so it is never
+        # a fallback (#2596). Never synthesize bundle:<hash> as a consumption proof.
         entry_ids: list[str] = []
         for ent in evidence_compact.get("entries") or []:
             if not isinstance(ent, Mapping):
                 continue
-            if not bool(ent.get("success") or ent.get("invoked_real")):
+            if not _entry_did_real_work(ent):
                 continue
             for eid in ent.get("evidence_ids") or []:
                 s = str(eid).strip()
@@ -721,7 +736,7 @@ def build_online_nexus_context(
             cp = ent.get("consumer_payload")
             if isinstance(cp, Mapping) and cp:
                 consumed_capability_payloads.append(dict(cp))
-        consumed_evidence_ids = entry_ids or [i for i in raw_ids if not i.startswith("bundle:")]
+        consumed_evidence_ids = entry_ids
         # Payload markers only count when actually present in the serialized prompt.
         for m in evidence_compact.get("payload_markers") or []:
             ms = str(m)
