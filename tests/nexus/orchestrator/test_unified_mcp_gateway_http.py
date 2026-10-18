@@ -657,22 +657,33 @@ def test_health_hmac_key_is_fsynced_before_link(tmp_path, monkeypatch):
 
 
 _HMAC_KEY_64 = "0123456789abcdef" * 4
+_CANONICAL_KEY_FILE = (_HMAC_KEY_64 + "\n").encode("ascii")
+
+
+def _private_dir(path):
+    """Create ``path`` with mode 0700 regardless of the runner's umask."""
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o700)
+    return path
+
+
+def _write_key_file(path, data, mode=0o600):
+    path.write_bytes(data)
+    path.chmod(mode)
+    return path
 
 
 @pytest.mark.parametrize(
     "content",
     [
         pytest.param(_HMAC_KEY_64, id="lower64_no_newline"),
-        pytest.param(_HMAC_KEY_64 + "\n", id="lower64_trailing_newline"),
-        pytest.param(" \t" + _HMAC_KEY_64 + "\r\n\n", id="lower64_outer_whitespace_stripped"),
+        pytest.param(_HMAC_KEY_64 + "\n", id="lower64_single_newline"),
     ],
 )
 def test_health_hmac_key_content_rule_accepts_exactly_64_lowercase_hex(tmp_path, content):
     from scripts.ops.gateway_health_hmac import load_or_create_key
 
-    key_file = tmp_path / "key"
-    key_file.write_text(content)
-    key_file.chmod(0o600)
+    key_file = _write_key_file(_private_dir(tmp_path / "keys") / "key", content.encode("ascii"))
     assert load_or_create_key(key_file) == bytes.fromhex(_HMAC_KEY_64)
 
 
@@ -698,18 +709,76 @@ def test_health_hmac_key_content_rule_accepts_exactly_64_lowercase_hex(tmp_path,
 def test_health_hmac_key_content_rule_rejects_and_keeps_file(tmp_path, content):
     from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
 
-    key_file = tmp_path / "key"
-    key_file.write_bytes(content.encode("utf-8"))
-    key_file.chmod(0o600)
+    key_dir = _private_dir(tmp_path / "keys")
+    key_file = _write_key_file(key_dir / "key", content.encode("utf-8"))
     with pytest.raises(HealthHmacKeyError):
         load_or_create_key(key_file)
     # Fail closed: a malformed key is never replaced by a fresh one.
     assert key_file.read_bytes() == content.encode("utf-8")
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["key"]
+    assert sorted(p.name for p in key_dir.iterdir()) == ["key"]
 
 
-def _record_key_creation_syscalls(mod, monkeypatch, events):
-    """Record fsync/link calls on the module's ``os``, naming each fd by its opened path."""
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("key_mode_0644", id="key_mode_0644"),
+        pytest.param("key_mode_0660", id="key_mode_0660"),
+        pytest.param("key_mode_0777", id="key_mode_0777"),
+        pytest.param("parent_mode_0770_existing_key", id="parent_mode_0770_existing_key"),
+        pytest.param("parent_mode_0777_existing_key", id="parent_mode_0777_existing_key"),
+        pytest.param("parent_mode_0777_no_key", id="parent_mode_0777_no_key"),
+        pytest.param("symlink_to_valid_key", id="symlink_to_valid_key"),
+        pytest.param("directory_at_key_path", id="directory_at_key_path"),
+        pytest.param("fifo_holding_valid_key", id="fifo_holding_valid_key"),
+    ],
+)
+def test_health_hmac_key_unsafe_file_or_dir_fails_closed_and_is_untouched(tmp_path, case):
+    """Unsafe key files/dirs are rejected and nothing in the key dir is changed."""
+    import os
+
+    from scripts.ops.gateway_health_hmac import HealthHmacKeyError, load_or_create_key
+
+    key_dir = _private_dir(tmp_path / "keys")
+    key_path = key_dir / "key"
+    fifo_fd = None
+    if case.startswith("key_mode_"):
+        _write_key_file(key_path, _CANONICAL_KEY_FILE, mode=int(case[-4:], 8))
+    elif case.startswith("parent_mode_"):
+        if case.endswith("_existing_key"):
+            _write_key_file(key_path, _CANONICAL_KEY_FILE)
+        key_dir.chmod(int(case.split("_")[2], 8))
+    elif case == "symlink_to_valid_key":
+        _write_key_file(key_dir / "real.key", _CANONICAL_KEY_FILE)
+        key_path.symlink_to(key_dir / "real.key")
+    elif case == "directory_at_key_path":
+        key_path.mkdir(mode=0o700)
+    elif case == "fifo_holding_valid_key":
+        # A FIFO whose buffer already holds a well-formed key: only the
+        # regular-file check rejects it.
+        os.mkfifo(key_path, 0o600)
+        fifo_fd = os.open(key_path, os.O_RDWR | os.O_NONBLOCK)
+        os.write(fifo_fd, _CANONICAL_KEY_FILE)
+    before = {
+        p.name: (os.lstat(p).st_mode, p.is_file() and p.read_bytes()) for p in key_dir.iterdir()
+    }
+    with pytest.raises(HealthHmacKeyError):
+        load_or_create_key(key_path)
+    after = {
+        p.name: (os.lstat(p).st_mode, p.is_file() and p.read_bytes()) for p in key_dir.iterdir()
+    }
+    assert after == before  # nothing created, rewritten, re-moded or left behind
+    if fifo_fd is not None:
+        os.close(fifo_fd)
+    key_dir.chmod(0o700)
+
+
+def _record_key_creation_syscalls(mod, monkeypatch, events, fail_fsync_on_tmp=False):
+    """Record fsync/link on the module's ``os``, naming each fd by its opened path.
+
+    Other fds pass through unchanged; with ``fail_fsync_on_tmp`` only the
+    fsync of the temp key file (``.<name>.*.tmp``) raises EIO.
+    """
+    import errno
     import os
 
     real_open, real_fsync, real_link = mod.os.open, mod.os.fsync, mod.os.link
@@ -721,8 +790,13 @@ def _record_key_creation_syscalls(mod, monkeypatch, events):
         return fd
 
     def recording_fsync(fd):
-        events.append(("fsync", fd_paths.get(fd)))
-        return real_fsync(fd)
+        path = fd_paths.get(fd)
+        if fail_fsync_on_tmp and path is not None and path.endswith(".tmp"):
+            events.append(("fsync", path, "EIO"))
+            raise OSError(errno.EIO, "injected EIO")
+        result = real_fsync(fd)
+        events.append(("fsync", path, "ok"))
+        return result
 
     def recording_link(src, dst):
         events.append(("link", os.fspath(src), os.fspath(dst)))
@@ -734,11 +808,13 @@ def _record_key_creation_syscalls(mod, monkeypatch, events):
 
 
 def test_health_hmac_key_temp_file_fsynced_before_link_and_dir_fsynced_after(tmp_path, monkeypatch):
+    import re
+
     from scripts.ops import gateway_health_hmac as mod
 
     events = []
     _record_key_creation_syscalls(mod, monkeypatch, events)
-    key_dir = tmp_path / "state"
+    key_dir = _private_dir(tmp_path / "state")
     target = key_dir / "key"
     key = mod.load_or_create_key(target)
 
@@ -748,12 +824,15 @@ def test_health_hmac_key_temp_file_fsynced_before_link_and_dir_fsynced_after(tmp
     assert link_dst == str(target)
     assert Path(tmp_src).parent == key_dir  # temp file lives in the same directory
     link_at = events.index(links[0])
-    # The data fsync is on the temp file's own fd, before it becomes visible.
-    assert ("fsync", tmp_src) in events[:link_at]
-    # The directory entry is fsynced after the link, so the new name survives a crash.
-    assert ("fsync", str(key_dir)) in events[link_at + 1 :]
-    assert bytes.fromhex(target.read_text().strip()) == key
-    assert (target.stat().st_mode & 0o777) == 0o600
+    # The data fsync is on the temp file's own fd and succeeded before it became visible.
+    assert ("fsync", tmp_src, "ok") in events[:link_at]
+    # The directory fsync is issued (and succeeded) after the link, so the name survives a crash.
+    assert ("fsync", str(key_dir), "ok") in events[link_at + 1 :]
+    assert len(key) == 32
+    on_disk = target.read_bytes()
+    assert re.fullmatch(rb"[0-9a-f]{64}\n", on_disk)
+    assert on_disk == key.hex().encode("ascii") + b"\n"
+    assert (target.stat().st_mode & 0o077) == 0
     assert sorted(p.name for p in key_dir.iterdir()) == ["key"]
 
 
@@ -761,18 +840,35 @@ def test_health_hmac_key_fsync_failure_fails_closed_without_linking(tmp_path, mo
     from scripts.ops import gateway_health_hmac as mod
 
     events = []
-
-    def failing_fsync(_fd):
-        events.append("fsync")
-        raise OSError("EIO")
-
-    monkeypatch.setattr(mod.os, "fsync", failing_fsync)
-    monkeypatch.setattr(mod.os, "link", lambda *_a: events.append("link"))
-    key_dir = tmp_path / "state"
+    _record_key_creation_syscalls(mod, monkeypatch, events, fail_fsync_on_tmp=True)
+    key_dir = _private_dir(tmp_path / "state")
     with pytest.raises(mod.HealthHmacKeyError):
         mod.load_or_create_key(key_dir / "key")
-    assert events == ["fsync"]  # never linked an un-synced key into place
-    assert list(key_dir.iterdir()) == []  # temp file cleaned up, no key published
+    assert [e for e in events if e[0] == "link"] == []  # never linked an un-synced key
+    assert [e[2] for e in events if e[0] == "fsync"] == ["EIO"]
+    # Real os.link stays in place, so a buggy link would leave a file here.
+    assert list(key_dir.iterdir()) == []
+
+
+def test_health_hmac_key_concurrent_creator_wins_and_temp_is_cleaned(tmp_path, monkeypatch):
+    from scripts.ops import gateway_health_hmac as mod
+
+    winner = ("fedcba9876543210" * 4 + "\n").encode("ascii")
+    real_link = mod.os.link
+    links = []
+
+    def racing_link(src, dst):
+        links.append(dst)
+        _write_key_file(Path(dst), winner)  # another process publishes its key first
+        return real_link(src, dst)  # -> FileExistsError
+
+    monkeypatch.setattr(mod.os, "link", racing_link)
+    key_dir = _private_dir(tmp_path / "state")
+    key = mod.load_or_create_key(key_dir / "key")
+    assert len(links) == 1
+    assert key == bytes.fromhex(winner.decode("ascii").strip())  # the winner's key, not ours
+    assert (key_dir / "key").read_bytes() == winner
+    assert sorted(p.name for p in key_dir.iterdir()) == ["key"]  # our temp file removed
 
 
 def _health_payload():
