@@ -1497,7 +1497,7 @@ def test_ultra_review_explicit_regression_test_gets_no_base_exemption(tmp_path, 
     assert payload["ghost_regression"]["pre_existing_failures"] == []
 
 
-def test_ultra_review_head_failure_attribution_fails_closed():
+def test_ultra_review_head_failure_attribution_fails_closed(tmp_path):
     attribute = UltraReviewService._attribute_head_failures
     candidates = ["tests/test_a.py", "tests/test_b.py"]
     # unparseable failing run: every candidate counts, nothing is compared on base
@@ -1506,8 +1506,28 @@ def test_ultra_review_head_failure_attribution_fails_closed():
         ["other.py::t", "tests/test_b.py"],
         ["tests/test_a.py::t"],
     )
-    stdout = "x\nFAILED tests/test_a.py::t[a b] - AssertionError: x - y\nERROR tests/test_b.py\n1 failed\n"
-    assert UltraReviewService._failed_test_ids(stdout) == ["tests/test_a.py::t[a b]", "tests/test_b.py"]
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        '<?xml version="1.0"?><testsuites><testsuite>'
+        '<testcase classname="tests.test_a" name="t[a - b]" file="tests/test_a.py"><failure message="x"/></testcase>'
+        '<testcase classname="tests.test_a" name="t[a - c]" file="tests/test_a.py"/>'
+        '<testcase classname="tests.test_a.TestK" name="m" file="tests/test_a.py"><skipped/></testcase>'
+        '<testcase classname="" name="tests.test_b"><error message="collection failure"/></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    assert UltraReviewService._junit_outcomes(junit) == {
+        "tests/test_a.py::t[a - b]": "failed",
+        "tests/test_a.py::t[a - c]": "passed",
+        "tests/test_a.py::TestK::m": "skipped",
+        "tests/test_b.py": "error_file",
+    }
+    junit.write_text("<testsuites><testcase classname='x' name='y'/>", encoding="utf-8")
+    assert UltraReviewService._junit_outcomes(junit) is None  # unparseable -> fail closed
+    assert UltraReviewService._junit_outcomes(tmp_path / "missing.xml") is None
+    junit.write_text('<!DOCTYPE x [<!ENTITY a "b">]><testsuites/>', encoding="utf-8")
+    assert UltraReviewService._junit_outcomes(junit) is None  # entity declarations refused
+
 
 
 def test_ultra_review_review_mode_summaries_do_not_say_dry_run(tmp_path, monkeypatch):
@@ -1529,3 +1549,102 @@ def test_ultra_review_review_mode_summaries_do_not_say_dry_run(tmp_path, monkeyp
     dry_logic = next(f for f in dry["findings"] if f["rule_id"] == "logic_repro_failed")
     assert review_logic["summary"] == "Logic Breaker deterministic repro failed in ultra-review review mode."
     assert dry_logic["summary"] == "Logic Breaker deterministic repro failed in ultra-review dry-run."
+
+
+def _commit(path, msg):
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", msg], cwd=path, check=True, capture_output=True)
+
+
+# Adversarial cases from the independent review of PR #2628.
+def test_ultra_review_new_head_failure_beside_passing_base_is_regression(tmp_path, monkeypatch):
+    # base: both tests pass. head: change breaks a second behaviour.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler\n\ndef test_handler_strips():\n    assert handler('  a ') == 'a'\n\n"
+        "def test_handler_type():\n    assert isinstance(handler(' b'), str)\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "two tests")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return 1 if value == ' b' else value.strip()\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["failed_tests"] == ["tests/test_app.py::test_handler_type"]
+
+
+def test_ultra_review_head_session_abort_is_never_excused_by_base(tmp_path, monkeypatch):
+    # base: red test first, handler test passes. head: handler raises KeyboardInterrupt, so
+    # pytest aborts (exit 2) and only the pre-existing failure is reported.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler\n\ndef test_a_always_red():\n    assert False\n\n"
+        "def test_handler_strips():\n    assert handler('  a ') == 'a'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text("def handler(value):\n    raise KeyboardInterrupt\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+    assert payload["ghost_regression"]["base_comparison"] == {}
+
+
+def test_ultra_review_parametrized_ids_with_dash_do_not_collide(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import pytest\nfrom app import handler\n\n"
+        "@pytest.mark.parametrize('v', ['a - b', 'a - c'], ids=['a - b', 'a - c'])\n"
+        "def test_p(v):\n    assert handler(v) == v.strip() and v != 'a - b'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "param")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return '' if value == 'a - c' else value.strip()\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert ghost["failed_tests"] == ["tests/test_app.py::test_p[a - c]"]
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_p[a - b]"]
+
+
+def test_ultra_review_base_collection_error_is_inconclusive_not_pre_existing(tmp_path, monkeypatch):
+    # base: the test file does not even import; head fixes the import but the test fails.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler, missing\n\n\ndef test_handler_strips():\n    assert handler('  a ') == 'a'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "broken import on base")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value\n\n\ndef missing():\n    return 1\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "INCONCLUSIVE", payload["findings"]
+    assert ghost["pre_existing_failures"] == []
+    assert ghost["inconclusive_tests"] == ["tests/test_app.py::test_handler_strips"]
+
+
+def test_ultra_review_base_worktree_cleanup_failure_is_surfaced(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    original_git_run = UltraReviewService._git_run
+
+    def failing_base_removal(self, args, **kwargs):
+        if args[:2] == ["worktree", "remove"] and str(args[-1]).endswith("base_worktree"):
+            original_git_run(self, args, **kwargs)
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="cannot remove")
+        return original_git_run(self, args, **kwargs)
+
+    monkeypatch.setattr(UltraReviewService, "_git_run", failing_base_removal)
+    payload = _review(tmp_path)
+    assert payload["ghost_regression"]["base_comparison"]["base_cleanup"] == {"removed": False, "detail": "cannot remove"}
+    assert any(f["rule_id"] == "base_worktree_cleanup_failed" for f in payload["findings"])

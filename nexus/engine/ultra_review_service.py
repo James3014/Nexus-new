@@ -50,8 +50,9 @@ SCHEMA_VERSION = "ultra-review.v1"
 # override per service (``test_timeout_sec``) or with ULTRA_TEST_TIMEOUT_ENV.
 GHOST_REGRESSION_TIMEOUT_SEC = 300
 ULTRA_TEST_TIMEOUT_ENV = "NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC"
-# pytest short-summary lines ("FAILED tests/x.py::test_y - msg", "ERROR tests/x.py").
-PYTEST_FAILED_LINE = re.compile(r"^(?:FAILED|ERROR) (.+?)(?: - .*)?$")
+# Per-test outcomes come from pytest's junit XML (xunit1 keeps the ``file`` attribute), never
+# from parsing terminal text; reports larger than this are treated as unparseable.
+JUNIT_MAX_BYTES = 20_000_000
 LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
@@ -1647,7 +1648,8 @@ class UltraReviewService:
                 "pytest_stderr_tail": "",
             }
 
-        cmd = self._ghost_pytest_cmd(execution_root, test_candidates)
+        head_junit = (sandbox_path or execution_root) / "ghost-head-junit.xml"
+        cmd = self._ghost_pytest_cmd(execution_root, test_candidates, head_junit)
         sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
         test_candidates = [
             rel for rel in test_candidates if self._contained_path(rel, execution_root) is not None
@@ -1676,12 +1678,12 @@ class UltraReviewService:
         phrase = _mode_phrase(mode)
         timeout = False
         passed = False
-        head_stdout = ""
+        head_returncode: int | None = None
         try:
             result = self._sandboxed_run(cmd, cwd=execution_root, timeout=timeout_sec)
+            head_returncode = result.returncode
             passed = result.returncode == 0
-            head_stdout = result.stdout or ""
-            stdout_tail = head_stdout[-2000:]
+            stdout_tail = (result.stdout or "")[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
         except subprocess.TimeoutExpired as exc:
             timeout = True
@@ -1725,9 +1727,15 @@ class UltraReviewService:
                 inconclusive_tests,
             )
         elif not passed:
-            regressions, comparable = self._attribute_head_failures(
-                self._failed_test_ids(head_stdout), test_candidates, explicit_tests
+            # Base comparison only for an ordinary "some tests failed" run (exit 1) with a
+            # parseable report; an interrupted/crashed/usage-error run stays a regression.
+            head_outcomes = self._junit_outcomes(head_junit) if head_returncode == 1 else None
+            failed_ids = (
+                [test_id for test_id, state in head_outcomes.items() if state in ("failed", "error_file")]
+                if head_outcomes is not None
+                else []
             )
+            regressions, comparable = self._attribute_head_failures(failed_ids, test_candidates, explicit_tests)
             if comparable:
                 # Only base-pass -> head-fail counts against the change: re-run the failing
                 # mapped tests on an isolated checkout of the base.
@@ -1735,6 +1743,15 @@ class UltraReviewService:
                     comparable, base_ref=base_ref, sandbox_path=sandbox_path, timeout_sec=timeout_sec
                 )
                 regressions.extend(base_comparison.pop("regressions"))
+                cleanup = base_comparison.get("base_cleanup") or {}
+                if cleanup and not cleanup.get("removed"):
+                    add_finding(
+                        "base_worktree_cleanup_failed",
+                        "UNVERIFIED_OBSERVATION",
+                        "info",
+                        "Temporary base worktree could not be removed: " + str(cleanup.get("detail") or ""),
+                        [],
+                    )
                 pre_existing = base_comparison.pop("pre_existing")
                 inconclusive_tests = base_comparison.pop("inconclusive")
             if regressions:
@@ -1786,36 +1803,82 @@ class UltraReviewService:
         }
 
     @staticmethod
-    def _ghost_pytest_cmd(root: Path, tests: Sequence[str]) -> list[str]:
+    def _ghost_pytest_cmd(root: Path, tests: Sequence[str], junit_path: Path) -> list[str]:
         # rootdir pins conftest discovery to the checkout under test (the sandbox may sit inside
         # the reviewed repo); no cache dir is written into it. -I: no PYTHONPATH, user site or
         # cwd at start-up, so a PR sitecustomize/.pth never loads; the checkout is put on
-        # sys.path by pytest's ``pythonpath`` ini override. -rfE lists failing test ids.
+        # sys.path by pytest's ``pythonpath`` ini override. Per-test outcomes are read from the
+        # junit XML (xunit1 records each test's file).
         return [
             sys.executable,
             "-I",
             "-m",
             "pytest",
             "-q",
-            "-rfE",
             "-p",
             "no:cacheprovider",
             "--rootdir",
             str(root),
             "-o",
             f"pythonpath={sbpl_path(root)}",
+            "-o",
+            "junit_family=xunit1",
+            f"--junitxml={sbpl_path(junit_path)}",
             *tests,
         ]
 
     @staticmethod
-    def _failed_test_ids(stdout: str) -> list[str]:
-        """Test ids from pytest's short summary (``FAILED id - msg`` / ``ERROR id``)."""
-        ids: list[str] = []
-        for line in stdout.splitlines():
-            match = PYTEST_FAILED_LINE.match(line.rstrip())
-            if match and match.group(1).strip() not in ids:
-                ids.append(match.group(1).strip())
-        return ids
+    def _junit_outcomes(junit_path: Path) -> dict[str, str] | None:
+        """``{test id: passed|failed|skipped|error_file}`` from a pytest junit XML, or None when
+        the report is missing, oversized, unparseable or names a test without a file.
+
+        The id is ``file::[Class::]name`` rebuilt from the xunit1 ``file``/``classname``/``name``
+        attributes, so parametrized names (``test_p[a - b]``) stay whole. A file-level
+        collection error (empty classname, dotted module as name) is keyed by the file path
+        with state ``error_file``."""
+        import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 - DTD/entities rejected below
+
+        try:
+            info = os.lstat(junit_path)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > JUNIT_MAX_BYTES:
+                return None
+            data = junit_path.read_bytes()
+            # Written by PR-controlled test code: refuse any DTD/entity declaration (entity
+            # expansion), the only XML feature that makes the stdlib parser unsafe here.
+            if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+                return None
+            root = ET.fromstring(data)  # noqa: S314  # nosec B314 - DTD/entities rejected above
+        except (OSError, ET.ParseError):
+            return None
+        outcomes: dict[str, str] = {}
+        for case in root.iter("testcase"):
+            classname = str(case.get("classname") or "")
+            name = str(case.get("name") or "")
+            file = str(case.get("file") or "").replace("\\", "/")
+            failed = case.find("failure") is not None or case.find("error") is not None
+            if not classname:
+                if not name or not failed:
+                    return None
+                test_id = file or name.replace(".", "/") + ".py"
+                state = "error_file"
+            else:
+                if not file or not name:
+                    return None
+                module = file[:-3].replace("/", ".") if file.endswith(".py") else file
+                if classname != module and not classname.startswith(module + "."):
+                    return None
+                parts = [file, *[p for p in classname[len(module) :].split(".") if p], name]
+                test_id = "::".join(parts)
+                if failed:
+                    state = "failed"
+                elif case.find("skipped") is not None:
+                    state = "skipped"
+                else:
+                    state = "passed"
+            if outcomes.get(test_id) in ("failed", "error_file"):
+                continue  # a teardown error after a pass still counts as a failure
+            outcomes[test_id] = state
+        return outcomes
 
     @staticmethod
     def _attribute_head_failures(
@@ -1845,9 +1908,10 @@ class UltraReviewService:
     ) -> dict[str, Any]:
         """Re-run the files of head-failing mapped tests on a detached worktree of ``base_ref``.
 
-        An id that also fails on base is pre-existing; one that passes on base, or whose test
-        file does not exist on base (a failing test the change added), is a regression; when
-        the base cannot be prepared or its result is unknown the id is inconclusive."""
+        Per id, from the base junit report: failed on base too -> pre-existing; passed on base,
+        or absent on base (a failing test the change added) -> regression; skipped on base, a
+        file-level collection error on base, an unknown base result (timeout, exit other than
+        0/1, unparseable report) or an unpreparable base -> inconclusive."""
         outcome: dict[str, Any] = {
             "base_ref": base_ref,
             "regressions": [],
@@ -1884,7 +1948,8 @@ class UltraReviewService:
             outcome["regressions"] = [test_id for test_id in failed_ids if file_of(test_id) not in present]
             if not remaining:
                 return outcome
-            cmd = self._ghost_pytest_cmd(base_root, present)
+            base_junit = sandbox_path / "ghost-base-junit.xml"
+            cmd = self._ghost_pytest_cmd(base_root, present, base_junit)
             outcome["repro_command"] = " ".join(cmd)
             try:
                 result = self._sandboxed_run(cmd, cwd=base_root, timeout=timeout_sec)
@@ -1893,22 +1958,35 @@ class UltraReviewService:
                 outcome["reason"] = f"base_run_timeout_{timeout_sec:g}s"
                 outcome["timeout"] = True
                 return outcome
-            base_failed = set(self._failed_test_ids(result.stdout or ""))
             outcome["base_returncode"] = result.returncode
-            if result.returncode == 0:
-                outcome["regressions"].extend(remaining)
-            elif result.returncode == 1 and base_failed:
-                for test_id in remaining:
-                    if test_id in base_failed or file_of(test_id) in base_failed:
-                        outcome["pre_existing"].append(test_id)
-                    else:
-                        outcome["regressions"].append(test_id)
-            else:
+            base_outcomes = self._junit_outcomes(base_junit) if result.returncode in (0, 1) else None
+            if base_outcomes is None:
                 outcome["inconclusive"] = remaining
-                outcome["reason"] = f"base_pytest_exit_{result.returncode}"
+                outcome["reason"] = f"base_result_unknown_exit_{result.returncode}"
+                return outcome
+            reasons: set[str] = set()
+            for test_id in remaining:
+                if base_outcomes.get(file_of(test_id)) == "error_file":
+                    # The file does not even collect on base: it cannot excuse head failures.
+                    outcome["inconclusive"].append(test_id)
+                    reasons.add("base_file_collection_error")
+                    continue
+                state = base_outcomes.get(test_id)
+                if state == "failed":
+                    outcome["pre_existing"].append(test_id)
+                elif state in (None, "passed"):
+                    outcome["regressions"].append(test_id)
+                else:
+                    outcome["inconclusive"].append(test_id)
+                    reasons.add(f"base_{state}")
+            outcome["reason"] = ",".join(sorted(reasons))
             return outcome
         finally:
-            self._git_run(["worktree", "remove", "--force", str(base_root)])
+            removed = self._git_run(["worktree", "remove", "--force", str(base_root)])
+            outcome["base_cleanup"] = {
+                "removed": removed.returncode == 0,
+                "detail": (removed.stderr or removed.stdout or "")[-300:].strip(),
+            }
 
     @staticmethod
     def _neutralize_base_links(base_root: Path) -> list[str]:
