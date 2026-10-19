@@ -305,7 +305,7 @@
 | nexus/evidence/claim_boundary.py | tests/architecture/test_planner_alias.py, tests/services/test_mainchain_false_green_gates.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/evidence/receipt_base.py | tests/architecture/test_planner_alias.py, tests/services/test_unified_runtime.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
-| nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
+| nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py, tests/engine/test_sandbox_runner_devnull_2685.py, tests/engine/test_sandbox_elastic_profile.py | active | high | sandbox_physical_runner_contract |
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py, tests/services/test_agy_dispatch_attestation_channel_2314.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py, tests/ops/test_start_codex_nexus_enforced.py | active | high | agy_write_admission_run_home_seatbelt_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
@@ -412,7 +412,7 @@
 | tests/ops/test_trusted_dependency_contract.py | tests/ops/test_trusted_dependency_contract.py | active | high | test_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
-| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | replay_runner_allowlist |
+| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
 | nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
@@ -575,8 +575,9 @@
 | tests/services/test_distill_swarm_honesty.py | tests/services/test_distill_swarm_honesty.py | active | medium | test_contract |
 | tests/engine/test_metrics_and_belief_score.py | tests/engine/test_metrics_and_belief_score.py | active | medium | test_contract |
 | nexus/orchestrator/metrics.py | tests/engine/test_metrics_and_belief_score.py, tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_metrics_contract |
-| scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
-| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_no_shell_model_text_2634.py | active | high | replay_runner_allowlist |
+| scripts/ops/replay_runner.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/ops/test_evidence_verifier_holes_2685.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
+| scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
+| nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_no_shell_model_text_2634.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | scripts/ops/autonomous_repair_loop.py | tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |
 | nexus/engine/cli_pregate.py | tests/engine/test_cli_pregate.py, tests/engine/test_cli_pregate_isolation.py, tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |
 | tests/ops/test_no_shell_model_text_2634.py | tests/ops/test_no_shell_model_text_2634.py | active | medium | test_contract |
@@ -584,6 +585,8 @@
 | nexus/schemas/evidence_bundle_v1.json | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | scripts/ops/governance_manifest.py | tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | tests/ops/test_evidence_verifier_replay_required.py | tests/ops/test_evidence_verifier_replay_required.py | active | medium | test_contract |
+| tests/ops/test_evidence_verifier_holes_2685.py | tests/ops/test_evidence_verifier_holes_2685.py | active | medium | test_contract |
+| tests/engine/test_sandbox_runner_devnull_2685.py | tests/engine/test_sandbox_runner_devnull_2685.py | active | medium | test_contract |
 | compliance/sla/metrics/stability_poc_v22.json | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/99_Schema/generated/ | tests/ops/test_build_wiki_agent_index.py, tests/ops/test_wiki_committed_reproducibility.py, tests/ops/test_classify_wiki_unresolved_links.py | active | medium | wiki_generated_artifacts |
