@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
+from nexus.core.argv_command import run_command_string
 
 _FILE_PATTERN = re.compile(
     r"(?P<path>(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.(?:py|json|yml|yaml|toml|md|txt|sh|ts|tsx|js|jsx))(?::(?P<line>\d+))?"
@@ -132,14 +133,8 @@ def evaluate_direct_mode_completion(
 
     for cmd in spec.verify_commands:
         try:
-            res = subprocess.run(
-                cmd,
-                cwd=project_root,
-                shell=True,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            # The command comes from the task text, so it never reaches a shell (#2635).
+            res = run_command_string(cmd, cwd=project_root)
             verify_results.append(
                 {
                     "command": cmd,

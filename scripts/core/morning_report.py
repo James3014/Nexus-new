@@ -77,8 +77,8 @@ class MorningReporter:
         """觸發語音播報 (修正路徑與調用模式)。"""
         try:
             # 💡 優先使用系統 say 指令，若失敗則回退到 notify.py
-            cmd = f"say '{message}'"
-            subprocess.run(cmd, shell=True, check=False)
+            # #2635: argv, so a quote in the message cannot break out into a shell.
+            subprocess.run(["say", message], check=False)
             
             # 同時嘗試執行 notify.py 以維持整合
             notify_script = "/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py"
