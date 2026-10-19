@@ -39,6 +39,14 @@ def _make_plan(task_id: str, **constraints: object) -> CapabilityExecutionPlan:
     )
 
 
+def _seed_healthy_phase_ledger(run_root: Path) -> None:
+    """A passing phase-SLO ledger in the run store (#2702: an empty store is NO_DATA, not a pass)."""
+    path = run_root / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = '{"phase": "R", "phase_status": "SUCCESS", "writeback_policy": {"required": true}, "writeback_done": true}'
+    path.write_text(row + "\n", encoding="utf-8")
+
+
 def _write_xray_target(project_root: Path) -> None:
     """Seed a scan target under project_root; the request names it via ``xray_targets``."""
     target = project_root / "nexus" / "services" / "capability_registry.py"
@@ -198,6 +206,7 @@ def test_executor_learn_phase_slo_sentinels_unchanged(tmp_path: Path) -> None:
         project_root=str(tmp_path),
         run_root=str(tmp_path / "runtime" / "t_slo_nc"),
     )
+    _seed_healthy_phase_ledger(tmp_path / "runtime" / "t_slo_nc")
     executor = get_executor("learn_phase_slo")
     assert executor is not None
     receipt = executor(plan, "test")
@@ -214,6 +223,7 @@ def test_executor_receipt_has_runtime_metadata(tmp_path: Path) -> None:
         run_root=str(tmp_path / "runtime" / "t_meta"),
         xray_targets=["nexus/services/capability_registry.py"],
     )
+    _seed_healthy_phase_ledger(tmp_path / "runtime" / "t_meta")
     for cap_name in ("xray", "learn_mode", "learn_phase_slo"):
         executor = get_executor(cap_name)
         assert executor is not None

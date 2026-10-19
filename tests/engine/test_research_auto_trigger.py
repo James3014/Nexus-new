@@ -46,8 +46,50 @@ def mock_tracer():
     tracer.phase_span.return_value.__enter__.return_value = MagicMock()
     return tracer
 
+
+def _write_slo_summary(root, *, phase_slo_pass, required_done_ratio):
+    import json
+    path = root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "SUCCESS",
+                "phase_slo_pass": phase_slo_pass,
+                "global": {"required_done_ratio": required_done_ratio},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @patch("nexus.engine.pipeline_stages.KnowledgeIndex")
-def test_p_stage_precomputes_research_route(mock_ki_cls, mock_ctx, mock_tracer):
+def test_p_stage_missing_slo_summary_closes_research_route_2702(
+    mock_ki_cls, mock_ctx, mock_tracer, tmp_path, monkeypatch
+):
+    """#2702: no phase_slo_summary.json is not ready (as in nightshift), so X is skipped."""
+    monkeypatch.delenv("NEXUS_STATE_ROOT", raising=False)
+    mock_ki_cls.return_value.search_similar.return_value = []
+    mock_ctx.prediction = {"candidate_count": 2, "root_cause_confidence": 0.5}
+    mock_ctx.planner.run.return_value = mock_ctx.prediction
+    mock_ctx.research_policy.route.return_value = ResearchDecision(
+        should_research=True, mode="external", reason="low_confidence", rounds=5, stable_wins=3
+    )
+    pipeline = MockPipeline()
+    pipeline.engine.project_root = str(tmp_path)
+
+    guard = pipeline._load_learn_phase_slo_guard(mock_ctx)
+    assert guard["ready"] is False and guard["active"] is True
+    assert guard["phase_slo_pass"] is False
+    assert guard["reason"] == "phase_slo_summary_missing"
+
+    pipeline._stage_plan(mock_ctx, mock_tracer)
+    route = mock_ctx.state.metadata["research_route"]
+    assert route["should_research"] is False
+    assert route["reason"] == "learn_phase_slo_not_ready"
+
+@patch("nexus.engine.pipeline_stages.KnowledgeIndex")
+def test_p_stage_precomputes_research_route(mock_ki_cls, mock_ctx, mock_tracer, tmp_path):
     """測試 P 階段結束時會預計算 research_route"""
     mock_ki = mock_ki_cls.return_value
     mock_ki.search_similar.return_value = []
@@ -60,6 +102,9 @@ def test_p_stage_precomputes_research_route(mock_ki_cls, mock_ctx, mock_tracer):
     mock_ctx.research_policy.route.return_value = res_decision
     
     pipeline = MockPipeline()
+    # #2702: a missing summary now closes X, so this test supplies a passing one.
+    pipeline.engine.project_root = str(tmp_path)
+    _write_slo_summary(tmp_path, phase_slo_pass=True, required_done_ratio=1.0)
     pipeline._stage_plan(mock_ctx, mock_tracer)
     
     # 驗證 metadata 中已存入 research_route

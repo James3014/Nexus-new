@@ -77,7 +77,12 @@ def test_counted_lane_learn_outcome_is_identical_across_runs(
     first = executor(_plan(tmp_path), "task")
     _seed_failing_phase_rows(tmp_path)  # an earlier run's rows in the project store
     second = executor(_plan(tmp_path), "task")
-    assert first.gate_passed and second.gate_passed
+    if name == "learn_phase_slo":
+        # #2702: the counted store is empty, so the SLO is NO_DATA and the receipt is not a pass
+        # (still the same on every run).
+        assert not first.gate_passed and not second.gate_passed
+    else:
+        assert first.gate_passed and second.gate_passed
     assert _outcome(first) == _outcome(second)
     assert _evidence_view(name, first) == _evidence_view(name, second)
     text = json.dumps(_outcome(second), default=str)
@@ -86,7 +91,9 @@ def test_counted_lane_learn_outcome_is_identical_across_runs(
     stamps = {m for m in re.findall(r'"timestamp": "([^"]*)"', text)}
     assert stamps <= {COUNTED_FIXED_TIMESTAMP}
     if name == "learn_phase_slo":
-        assert _outcome(second)["result"]["phase_slo_pass"] is True  # empty store, documented
+        assert _outcome(second)["result"]["phase_slo_pass"] is False  # empty store (#2702)
+        assert _outcome(second)["result"]["status"] == "NO_DATA"
+        assert _outcome(second)["semantic_status"] == "FAILED"
 
 
 def test_outside_counted_lanes_the_project_store_is_read_as_before(
