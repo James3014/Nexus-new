@@ -15,6 +15,9 @@ class ProjectMemoryManager:
     """🧠 Nexus Project Memory: Persistent knowledge across sessions."""
     
     def __init__(self, project_root: Path):
+        from nexus.core.state_root import persistent_state_root
+
+        project_root = persistent_state_root(project_root)  # #2688
         self.db_path = project_root / ".nexus" / "state" / "project_memory.sqlite"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.last_sqlite_retry_receipt: dict | None = None

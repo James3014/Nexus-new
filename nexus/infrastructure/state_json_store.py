@@ -80,6 +80,22 @@ class StateJsonStore:
         with self._locked(path, shared=False):
             self._atomic_write(path, payload)
 
+    def merge_dict(self, path: Path, updates: dict[str, Any]) -> dict[str, Any]:
+        """Merge top-level ``updates`` into the stored object under one exclusive lock.
+
+        Unlike ``read_dict`` + ``write_dict`` this keeps keys another writer stored
+        since our read.  An unreadable current file counts as empty, as in ``read_dict``.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._locked(path, shared=False):
+            try:
+                current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            except (OSError, ValueError, json.JSONDecodeError):
+                current = {}
+            merged = {**(current if isinstance(current, dict) else {}), **updates}
+            self._atomic_write(path, merged)
+        return merged
+
     @staticmethod
     def content_digest(payload: dict[str, Any]) -> str:
         """Return the stable SHA-256 digest used by compare-and-swap."""

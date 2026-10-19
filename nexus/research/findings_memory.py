@@ -83,6 +83,9 @@ class FindingsMemoryStore:
         file_store: FindingsFileStore | None = None,
         vector_sync: FindingsVectorSync | None = None,
     ):
+        from nexus.core.state_root import persistent_state_root
+
+        project_root = persistent_state_root(project_root)  # #2688: all writers/readers move
         self.project_root = project_root
         self.base_path = project_root / ".nexus" / "memory"
         self.file_store = file_store or FindingsFileStore(self.base_path)

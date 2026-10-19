@@ -514,7 +514,11 @@ class AutoResearchNightShift:
         return None
 
     def _read_learn_phase_slo_guard(self) -> dict[str, Any]:
-        summary_path = self.project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        from nexus.core.state_root import rebase_state_path
+
+        summary_path = rebase_state_path(  # #2688: same root as LearnModeService
+            self.project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        )
         if not summary_path.exists():
             return {
                 "ready": False,

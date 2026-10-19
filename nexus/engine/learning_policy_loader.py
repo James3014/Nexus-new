@@ -19,7 +19,7 @@ from nexus.core.lite_route_oracle import (
     GATE_ONLY_RECEIPT_LITE_LANES,
     ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
 )
-from nexus.core.state_root import persistent_state_root
+from nexus.core.state_root import rebase_state_path
 from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
@@ -200,7 +200,6 @@ def merge_runtime_learning_policy(
     runtime_identity: str = "",
     source_revision: str = "",
 ) -> dict[str, Any]:
-    project_root = persistent_state_root(project_root)  # #2688: policy files are state
     merged = dict(budget or {})
     caller_policy = merged.get("learning_policy")
     caller_policy = dict(caller_policy) if isinstance(caller_policy, dict) else {}
@@ -211,8 +210,14 @@ def merge_runtime_learning_policy(
         # governed adoption is a separate, validated overlay below.
         runtime_policy = caller_policy
     else:
-        runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH, store=store)
-        dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH, store=store)
+        # Learning-derived files follow NEXUS_STATE_ROOT with their writers (#2688);
+        # governed adoption/rollback and promoted route-cost/s2t files stay on project_root.
+        runtime_budget = load_learning_policy_budget(
+            rebase_state_path(project_root / DEFAULT_PROMOTED_POLICY_PATH), store=store
+        )
+        dynamic_budget = load_dynamic_learning_policy_budget(
+            rebase_state_path(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH), store=store
+        )
         if runtime_budget:
             runtime_policy = dict(runtime_budget["learning_policy"])
         if dynamic_budget:

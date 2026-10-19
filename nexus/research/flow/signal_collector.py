@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 from typing import Any, TypedDict
 
-from nexus.core.state_root import persistent_state_root
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.flow.history_signal_store import HistorySignalStore
@@ -118,9 +117,8 @@ def collect_route_signals(
     historical_hints = []
     adjusted_root_cause_confidence = root_cause_confidence
     effective_findings_query = findings_query or derive_findings_query(task_body, target_file=target_file)
-    state_root = persistent_state_root(repo_root)  # #2688: stores outlive the deploy dir
     if effective_findings_query:
-        store = findings_memory_store_cls(state_root)
+        store = findings_memory_store_cls(repo_root)
         hits = store.search(effective_findings_query)
         findings_hits = len(hits)
         # Hits are relevance-ranked (#2640); keep only the top few cards' hints so a long
@@ -130,7 +128,7 @@ def collect_route_signals(
 
         if findings_hits >= 1:
             adjusted_root_cause_confidence = max(0.0, root_cause_confidence - 0.15)
-    memory_signal = load_history_memory_signal(state_root, task_desc=task_desc, task_type=task_type)
+    memory_signal = load_history_memory_signal(repo_root, task_desc=task_desc, task_type=task_type)
     memory_hits = int(memory_signal.get("memory_hits", 0) or 0)
     historical_hints.extend(list(memory_signal.get("memory_hints", [])))
     if memory_hits > 0:

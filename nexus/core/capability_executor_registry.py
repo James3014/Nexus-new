@@ -428,7 +428,8 @@ def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str
     """Project-level learn store: the directory the ``learn:*`` CLI reads.
 
     ``LearnModeService(<project>)`` keeps claims and the phase ledger under
-    ``<project>/.nexus``.  The project is the runtime-supplied ``workspace_root`` (else
+    ``<state root>/.nexus``, where the state root is ``<project>`` unless
+    ``NEXUS_STATE_ROOT`` moves a per-deploy project (#2688).  The project is the runtime-supplied ``workspace_root`` (else
     ``project_root``, else the cwd).  An explicit ``run_root`` / ``runtime_root`` constraint
     still isolates the run (tests); without one the executor must not invent a fresh,
     empty per-task directory, because the report would then never see the project data.
@@ -438,10 +439,10 @@ def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str
         constraints.get("workspace_root") or constraints.get("project_root") or ""
     ).strip()
     project_root = Path(raw_root).expanduser().resolve() if raw_root else Path.cwd().resolve()
-    project_root = persistent_state_root(project_root)  # #2688
     run_id = str(constraints.get("run_id") or plan.task_id)
     raw_run = constraints.get("run_root") or constraints.get("runtime_root")
-    run_root = Path(str(raw_run)) if raw_run else project_root
+    # Same state root LearnModeService(project_root) picks without a run_root (#2688).
+    run_root = Path(str(raw_run)) if raw_run else persistent_state_root(project_root)
     return project_root, run_root, run_id
 
 
@@ -734,9 +735,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(
-            resolve_lancedb_root(KNOWLEDGE, persistent_state_root(root), honor_env=False)
-        )
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         frame = repository.search_fts(
             table,
             query,
@@ -2325,9 +2324,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(
-            resolve_lancedb_root(KNOWLEDGE, persistent_state_root(root), honor_env=False)
-        )
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         inst = cls(repository)
         hits = list(inst.search(query=query, table_name=table, limit=limit) or [])[:limit]
         elapsed = int((time.monotonic() - start) * 1000)

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-from nexus.core.state_root import persistent_state_root
 from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 
@@ -46,15 +44,33 @@ class CapabilitySignalSet:
         belief_confidence = 0.7
         if belief_engine and hasattr(belief_engine, "get_confidence"):
             try:
-                belief_confidence = float(belief_engine.get_confidence(task_id, assumption=task_desc))
+                target_files = context.get("target_files") or []
+                target_file = str(
+                    context.get("target_file")
+                    or (
+                        target_files[0]
+                        if isinstance(target_files, (list, tuple)) and target_files
+                        else ""
+                    )
+                    or ""
+                ).strip()
+                # Shared per-file repair key (#2688); old call shape when there is no target.
+                if target_file:
+                    belief_confidence = float(
+                        belief_engine.get_confidence(
+                            task_id, assumption=task_desc, target_file=target_file
+                        )
+                    )
+                else:
+                    belief_confidence = float(
+                        belief_engine.get_confidence(task_id, assumption=task_desc)
+                    )
             except Exception:
                 belief_confidence = 0.7
 
         # 1.1 [P12] 路由接 LanceDB & Memory 實體檢索 (FTS & 語意)
         # 如果檢索到歷史失敗案例，則進行信心度扣減
-        memory_index_path = resolve_lancedb_root(
-            MEMORY_INDEX, persistent_state_root(Path(project_root)), honor_env=False
-        )
+        memory_index_path = resolve_lancedb_root(MEMORY_INDEX, project_root, honor_env=False)
         if memory_index_path.exists():
             try:
                 from nexus.services.memory_repository import MemoryRepository
