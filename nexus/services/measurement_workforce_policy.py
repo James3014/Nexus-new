@@ -42,11 +42,15 @@ def measurement_policy_document(base: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(workers, dict) or not isinstance(workers.get(TEMPLATE_WORKER_ID), dict):
         raise ValueError(f"measurement policy template worker missing: {TEMPLATE_WORKER_ID}")
     if CLAUDE_MEASUREMENT_WORKER_ID in workers:
-        raise ValueError(f"measurement worker id already in the packaged policy: {CLAUDE_MEASUREMENT_WORKER_ID}")
+        raise ValueError(
+            f"measurement worker id already in the packaged policy: {CLAUDE_MEASUREMENT_WORKER_ID}"
+        )
     worker = {
         key: copy.deepcopy(value)
         for key, value in workers[TEMPLATE_WORKER_ID].items()
-        if key not in _IDENTITY_FIELDS and not key.endswith("_note") and key != "calibration_evidence"
+        if key not in _IDENTITY_FIELDS
+        and not key.endswith("_note")
+        and key != "calibration_evidence"
     }
     online = (data.get("routing") or {}).get("online")
     if not isinstance(online, dict):
@@ -74,7 +78,9 @@ def measurement_policy_document(base: dict[str, Any]) -> dict[str, Any]:
             if isinstance(entry, dict) and role in roles:
                 entry["current_default"] = CLAUDE_MEASUREMENT_WORKER_ID
                 if entry.get("fallback") == CLAUDE_MEASUREMENT_WORKER_ID:
-                    raise ValueError(f"measurement policy: {role} fallback equals the measurement worker")
+                    raise ValueError(
+                        f"measurement policy: {role} fallback equals the measurement worker"
+                    )
     # Exact campaign / consumer overrides would route around the measurement worker.
     online["campaign_routing"] = {}
     online["consumer_routing"] = {}

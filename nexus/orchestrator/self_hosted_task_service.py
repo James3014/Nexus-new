@@ -6,7 +6,7 @@ import base64
 import hashlib
 import inspect  # noqa: F401 - facade surface, late-bound by parts/worker_dispatch.py
 import json
-import logging  # noqa: F401 - facade surface (its only user moved to parts/checkpoint.py)
+import logging
 import os
 import re
 import shlex
@@ -1045,6 +1045,8 @@ class SelfHostedTaskService(
         self.ambient_core_port = ambient_core_port
         self._threads: dict[str, threading.Thread] = {}
         self._bound_attempt_claims: dict[tuple[str, str], dict[str, Any]] = {}
+        self._reconcile_failures: dict[str, dict[str, Any]] = {}
+        self._reconcile_failures_lock = threading.Lock()
         self._runtime_state_bridge = RuntimeStateBridge(
             self.state_dir,
             validator=lambda task_id, payload, path: self._validate_state_payload(
@@ -1336,11 +1338,49 @@ class SelfHostedTaskService(
         if not self.state_dir.exists():
             return []
         states = []
-        for path in sorted(self.state_dir.glob("*.json")):
-            state = self.reconcile_task(path.stem)
+        failures: dict[str, dict[str, Any]] = {}
+        first_error: Optional[Exception] = None
+        paths = sorted(self.state_dir.glob("*.json"))
+        for path in paths:
+            # One unrecoverable record (e.g. an ADOPTING state whose evidence
+            # artifact is gone) must not stop the whole service from starting
+            # (#2727).  The record is left untouched -- nothing is replayed or
+            # terminalised, so it still fails closed -- and is reported through
+            # lifecycle_status(), the reconcile tool and the log.
+            # reconcile_task(task_id) on that record keeps raising.
+            try:
+                state = self.reconcile_task(path.stem)
+            except Exception as exc:  # noqa: BLE001 - isolate per record, see above
+                first_error = first_error or exc
+                failures[path.stem] = {
+                    "task_id": path.stem,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                    "at": _utc_now(),
+                }
+                logging.getLogger(__name__).error(
+                    "reconcile of task %s failed and was left untouched: %s: %s",
+                    path.stem, failures[path.stem]["error_type"], failures[path.stem]["error"],
+                )
+                continue
             if state is not None:
                 states.append(state)
+        with self._reconcile_failures_lock:
+            self._reconcile_failures = failures
+        # Every record failing points at a systemic fault (code, schema,
+        # environment), not one bad record: keep failing fast then.
+        if first_error is not None and len(paths) > 1 and len(failures) == len(paths):
+            raise first_error
         return states
+
+    def reconcile_failures(self) -> list[dict[str, Any]]:
+        """Records the last full reconcile pass left untouched after an error (#2727)."""
+        lock = getattr(self, "_reconcile_failures_lock", None)
+        if lock is None:  # instances built without __init__ (test doubles)
+            return []
+        with lock:
+            failures = [dict(failure) for failure in self._reconcile_failures.values()]
+        return sorted(failures, key=lambda failure: failure["task_id"])
 
     def resume_task(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self._read_state(task_id)
@@ -4008,6 +4048,8 @@ class SelfHostedTaskService(
             "active_targets": sum(has_active_target(state) for state in valid_states),
             "invalid_states": len(invalid_states),
             "blockers": [state["blocker"] for state in invalid_states],
+            # Records the last reconcile pass left untouched after an error (#2727).
+            "reconcile_failures": self.reconcile_failures(),
         }
 
     def _cleanup_authority_blocker(

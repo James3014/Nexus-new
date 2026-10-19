@@ -597,6 +597,10 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:request: Mapping[str, Any]) -> dict[str, Any]"
    },
+   "reconcile_failures": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> list[dict[str, Any]]"
+   },
    "reconcile_task": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[dict[str, Any]]"

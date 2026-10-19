@@ -95,13 +95,25 @@ CLAUDE_MEASUREMENT_ENV: Mapping[str, str] = {
 CLAUDE_MEASUREMENT_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 ALLOWED_API_HOSTS: tuple[str, ...] = ("api.anthropic.com",)
 # User-data roots whose contents a run may not read unless re-allowed.
-_READ_DENIED_ROOTS: tuple[str, ...] = ("/Users", "/private/tmp", "/private/var/folders", "/Volumes", "/opt")
+_READ_DENIED_ROOTS: tuple[str, ...] = (
+    "/Users",
+    "/private/tmp",
+    "/private/var/folders",
+    "/Volumes",
+    "/opt",
+)
 _SAFE_TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _INFRA_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("rate_limited", re.compile(r"\b429\b|rate[ _-]?limit|usage limit|quota", re.I)),
     ("overloaded", re.compile(r"\b529\b|overloaded", re.I)),
-    ("auth", re.compile(r"\b401\b|\b403\b|authenticat|invalid api key|oauth|not logged in|login", re.I)),
-    ("api_error", re.compile(r"\b5\d\d\b|api[_ ]error|connection (?:error|refused|reset)|timed? ?out", re.I)),
+    (
+        "auth",
+        re.compile(r"\b401\b|\b403\b|authenticat|invalid api key|oauth|not logged in|login", re.I),
+    ),
+    (
+        "api_error",
+        re.compile(r"\b5\d\d\b|api[_ ]error|connection (?:error|refused|reset)|timed? ?out", re.I),
+    ),
 )
 
 
@@ -255,7 +267,9 @@ def build_claude_seatbelt_profile(
     return "\n".join(lines) + "\n"
 
 
-def normalize_seatbelt_profile(profile: str, *, target: str, run_root: str, venv: Optional[str]) -> str:
+def normalize_seatbelt_profile(
+    profile: str, *, target: str, run_root: str, venv: Optional[str]
+) -> str:
     """The profile with the per-run paths and proxy port replaced by placeholders."""
     text = profile.replace(run_root, "<RUN_ROOT>").replace(target, "<TARGET>")
     if venv:
@@ -401,8 +415,19 @@ class ClaudeStreamSummary:
 
 
 # Init-event fields that describe the agent's shell (compared across arms).
-INIT_SHELL_FIELDS = ("tools", "mcp_servers", "model", "permissionMode", "slash_commands", "skills",
-                     "plugins", "agents", "claude_code_version", "output_style", "apiKeySource")
+INIT_SHELL_FIELDS = (
+    "tools",
+    "mcp_servers",
+    "model",
+    "permissionMode",
+    "slash_commands",
+    "skills",
+    "plugins",
+    "agents",
+    "claude_code_version",
+    "output_style",
+    "apiKeySource",
+)
 
 
 def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
@@ -431,7 +456,8 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
             if isinstance(model, str) and model not in models:
                 models.append(model)
         elif kind == "assistant":
-            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            raw_message = event.get("message")
+            message: dict[str, Any] = raw_message if isinstance(raw_message, dict) else {}
             model = message.get("model")
             if isinstance(model, str) and model not in models:
                 models.append(model)
@@ -445,8 +471,10 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
                     })
         elif kind == "result":
             result = event
-    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
-    model_usage = result.get("modelUsage") if isinstance(result.get("modelUsage"), dict) else {}
+    raw_usage = result.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+    raw_model_usage = result.get("modelUsage")
+    model_usage: dict[str, Any] = raw_model_usage if isinstance(raw_model_usage, dict) else {}
     for name in model_usage:
         if name not in models:
             models.append(str(name))
@@ -457,8 +485,12 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
         result_seen=bool(result),
         is_error=result.get("is_error") if isinstance(result.get("is_error"), bool) else None,
         subtype=str(result.get("subtype") or ""),
-        num_turns=num_turns if isinstance(num_turns, int) and not isinstance(num_turns, bool) else None,
-        total_cost_usd=float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None,
+        num_turns=num_turns
+        if isinstance(num_turns, int) and not isinstance(num_turns, bool)
+        else None,
+        total_cost_usd=float(cost)
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
+        else None,
         usage=dict(usage),
         model_usage=dict(model_usage),
         models_seen=tuple(models),
@@ -479,9 +511,16 @@ def classify_claude_infra(summary: ClaudeStreamSummary, stderr: str | bytes) -> 
     if summary.result_seen and summary.is_error is False and summary.terminal_reason != "api_error":
         return None
     evidence = " ".join(
-        str(part) for part in (summary.api_error_status, summary.terminal_reason, summary.subtype,
-                                summary.result_text if summary.is_error or summary.terminal_reason == "api_error" else "",
-                                err[-4000:])
+        str(part)
+        for part in (
+            summary.api_error_status,
+            summary.terminal_reason,
+            summary.subtype,
+            summary.result_text
+            if summary.is_error or summary.terminal_reason == "api_error"
+            else "",
+            err[-4000:],
+        )
         if part
     )
     if summary.terminal_reason == "api_error" or summary.api_error_status not in (None, ""):
@@ -516,7 +555,9 @@ def write_measurement_trace(
     target = directory / f"{stdout_sha256}.stream.jsonl"
     target.write_bytes(stdout)
     side = directory / f"{stdout_sha256}.run.json"
-    side.write_text(json.dumps(dict(sidecar), sort_keys=True, indent=2, default=str), encoding="utf-8")
+    side.write_text(
+        json.dumps(dict(sidecar), sort_keys=True, indent=2, default=str), encoding="utf-8"
+    )
     for path in (target, side):
         os.chmod(path, 0o600)
     return str(target)
@@ -564,11 +605,18 @@ def run_claude_once(
                 readable.append(interpreter_home)
         with HostAllowlistProxy() as proxy:
             env = measurement_child_env(
-                run_root=run_root, target=target, proxy_url=proxy.url,
-                token=measurement_claude_token(environ), venv=venv, environ=environ,
+                run_root=run_root,
+                target=target,
+                proxy_url=proxy.url,
+                token=measurement_claude_token(environ),
+                venv=venv,
+                environ=environ,
             )
             profile = build_claude_seatbelt_profile(
-                target=target, run_root=run_root, readable=tuple(readable), proxy_port=proxy.port,
+                target=target,
+                run_root=run_root,
+                readable=tuple(readable),
+                proxy_port=proxy.port,
             )
             request = CliWorkerRequest(
                 executable=executable,
@@ -673,9 +721,13 @@ class ClaudeMeasurementWorkerAdapter:
                 raise WorkerProviderUnavailable(f"{self.provider}: {failure}")
         target = Path(os.path.realpath(lease.target_worktree))
         run = run_claude_once(
-            str(preflight.executable), target=target, prompt=prompt,
-            timeout_seconds=float(timeout_seconds or 900.0), venv=task_venv_for(contract),
-            environ=self._env(), on_process_group=on_process_group,
+            str(preflight.executable),
+            target=target,
+            prompt=prompt,
+            timeout_seconds=float(timeout_seconds or 900.0),
+            venv=task_venv_for(contract),
+            environ=self._env(),
+            on_process_group=on_process_group,
         )
         result, summary = run.result, run.summary
         if result.status is CliWorkerStatus.TIMED_OUT:
@@ -699,10 +751,14 @@ class ClaudeMeasurementWorkerAdapter:
         elif outcome is not WorkerOutcome.EXECUTION_COMPLETED:
             failure = f"{self.provider} execution did not complete successfully ({summary.subtype or result.status.value})"
         write_measurement_trace(
-            str(getattr(contract, "task_id", "")), result.stdout, result.stdout_sha256,
+            str(getattr(contract, "task_id", "")),
+            result.stdout,
+            result.stdout_sha256,
             {
                 "schema": "nexus.measurement_claude_run.v1",
-                "argv_sha256": hashlib.sha256(json.dumps(list(result.argv)).encode("utf-8")).hexdigest(),
+                "argv_sha256": hashlib.sha256(
+                    json.dumps(list(result.argv)).encode("utf-8")
+                ).hexdigest(),
                 "flags": list(CLAUDE_MEASUREMENT_FLAGS),
                 "env_keys": list(run.env_keys),
                 "seatbelt_sha256": run.seatbelt_sha256,
@@ -812,12 +868,20 @@ def measurement_claude_preflight(
     binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
     result.update(binary_found=True, binary_path=executable, binary_sha256=binary_sha256)
     with tempfile.TemporaryDirectory(prefix="nexus-claude-preflight-") as scratch:
-        version = run_version([executable, "--version"], cwd=scratch, capture_output=True, text=True,
-                              timeout=15, check=False, env={"PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH,
-                                                            **CLAUDE_MEASUREMENT_ENV})
+        version = run_version(
+            [executable, "--version"],
+            cwd=scratch,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env={"PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH, **CLAUDE_MEASUREMENT_ENV},
+        )
         cli_version = (version.stdout or version.stderr or "").strip()[:512]
-        result.update(cli_version=cli_version,
-                      cli_version_sha256=hashlib.sha256(cli_version.encode("utf-8")).hexdigest())
+        result.update(
+            cli_version=cli_version,
+            cli_version_sha256=hashlib.sha256(cli_version.encode("utf-8")).hexdigest(),
+        )
         if version.returncode != 0 or not cli_version:
             return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_FAILED")
         pinned = str(env.get(MEASUREMENT_CLAUDE_VERSION_ENV, "") or "").strip()
@@ -829,8 +893,14 @@ def measurement_claude_preflight(
         if cached is None or datetime.datetime.fromisoformat(cached["probe_expires_at"]) <= current:
             probe_target = Path(scratch) / "probe"
             probe_target.mkdir()
-            run = run_claude_once(executable, target=probe_target, prompt=PROBE_PROMPT,
-                                  timeout_seconds=120.0, venv=None, environ=env)
+            run = run_claude_once(
+                executable,
+                target=probe_target,
+                prompt=PROBE_PROMPT,
+                timeout_seconds=120.0,
+                venv=None,
+                environ=env,
+            )
             summary = run.summary
             served = set(summary.models_seen)
             if (
@@ -838,9 +908,13 @@ def measurement_claude_preflight(
                 or summary.is_error is not False
                 or served != {CLAUDE_MEASUREMENT_MODEL}
             ):
-                return _blocked(result, "MEASUREMENT_CLAUDE_PROBE_FAILED",
-                                probe_subtype=summary.subtype, probe_models=sorted(served),
-                                probe_infra=run.infra)
+                return _blocked(
+                    result,
+                    "MEASUREMENT_CLAUDE_PROBE_FAILED",
+                    probe_subtype=summary.subtype,
+                    probe_models=sorted(served),
+                    probe_infra=run.infra,
+                )
             evidence = {
                 "binary_sha256": binary_sha256,
                 "cli_version": cli_version,
@@ -853,7 +927,9 @@ def measurement_claude_preflight(
                 "probe_evidence_hash": hashlib.sha256(
                     json.dumps(evidence, sort_keys=True).encode("utf-8")
                 ).hexdigest(),
-                "probe_expires_at": (current + datetime.timedelta(seconds=PROBE_TTL_SECONDS)).isoformat(),
+                "probe_expires_at": (
+                    current + datetime.timedelta(seconds=PROBE_TTL_SECONDS)
+                ).isoformat(),
                 "probed_at": evidence["probed_at"],
                 "probe_usage": summary.usage,
             }

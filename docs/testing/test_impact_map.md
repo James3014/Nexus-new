@@ -298,6 +298,8 @@
 | nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
 | nexus/evaluation/eval_harness.py | tests/services/test_archived_legacy_engine_2026_10_13.py | active | medium | archived_legacy_engine_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
+| nexus/executors/claude_measurement_worker.py | tests/nexus/executors/test_claude_measurement_worker.py, tests/contracts/test_self_hosted_task_service_task_build.py | active | high | measurement_only_claude_worker_contract |
+| nexus/services/measurement_workforce_policy.py | tests/nexus/executors/test_claude_measurement_worker.py, tests/contracts/test_model_workforce_policy.py | active | high | measurement_only_workforce_policy_contract |
 | nexus/config/model_three_arm_matrix.yaml | tests/contracts/test_model_workforce_policy.py, tests/calibration/provider_adoption/test_three_arm_wiring.py | active | medium | three_arm_benchmark_matrix |
 | nexus/calibration/provider_adoption | tests/calibration/provider_adoption/test_*.py, tests/bench/test_model_calibration_plan.py | active | high | provider_adoption_calibration_evidence_contract |
 | nexus/config/model_capability_lineage.yaml | tests/services/test_model_capability_lineage.py, tests/bench/test_model_calibration_plan.py, tests/nexus/orchestrator/test_unified_mcp_gateway.py | active | medium | model_capability_lineage_calibration_contract |
