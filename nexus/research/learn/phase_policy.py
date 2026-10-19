@@ -18,33 +18,46 @@ class PhaseActions:
     reasoning: str
 
 def phase_slo_pass_rate(phase_slo_summary: Dict[str, Any]) -> float:
-    """Share of observed phases meeting the SLO, read from the real summary schema.
+    """Share of judged phases meeting the SLO, read from the real summary schema.
 
-    ``PhaseSLOService.build_phase_slo_report`` writes ``phases.<P>.{total,
-    required_done_ratio, success_ratio}`` and never ``overall_pass_rate``; reading only that
-    key made every real summary look like PassRate=0%.  An explicit ``overall_pass_rate`` is
-    still honoured.  A missing/unavailable summary or one with no observed phase rows is 0.0
-    (no evidence -> not ready).
+    ``PhaseSLOService.build_phase_slo_report`` writes ``phase_slo_pass`` and ``phases.<P>.{total,
+    writeback_required, required_done_ratio, success_ratio}`` and never ``overall_pass_rate``;
+    reading only that key made every real summary look like PassRate=0%.  An explicit
+    ``overall_pass_rate`` is still honoured unless the summary also says ``phase_slo_pass`` is
+    not true.
+
+    Fail closed (#2715, after #2702): a summary whose ``phase_slo_pass`` is missing or not
+    ``True`` is 0.0; a missing/unavailable summary is 0.0; a phase with no required write-back
+    rows is not judged (its ``required_done_ratio`` defaults to 1.0 and proves nothing), so it
+    never counts as passing, and a summary with no judged phase is 0.0 (no evidence -> not ready).
     """
     summary = phase_slo_summary if isinstance(phase_slo_summary, dict) else {}
+    if "phase_slo_pass" in summary and summary.get("phase_slo_pass") is not True:
+        return 0.0
     if "overall_pass_rate" in summary:
         return float(summary.get("overall_pass_rate") or 0.0)
     if str(summary.get("status") or "").upper() != "SUCCESS":
         return 0.0
+    if summary.get("phase_slo_pass") is not True:
+        return 0.0
     raw_phases = summary.get("phases")
     phases: Dict[str, Any] = raw_phases if isinstance(raw_phases, dict) else {}
-    observed = [
-        row for row in phases.values() if isinstance(row, dict) and int(row.get("total") or 0) > 0
+    judged = [
+        row
+        for row in phases.values()
+        if isinstance(row, dict)
+        and int(row.get("total") or 0) > 0
+        and int(row.get("writeback_required") or 0) > 0
     ]
-    if not observed:
+    if not judged:
         return 0.0
     passing = sum(
         1
-        for row in observed
+        for row in judged
         if float(row.get("required_done_ratio") or 0.0) >= 0.95
         and float(row.get("success_ratio") or 0.0) >= 0.5
     )
-    return round(passing / len(observed), 4)
+    return round(passing / len(judged), 4)
 
 
 def derive_phase_actions(phase_slo_summary: Dict[str, Any], task_type: str, risk_level: str) -> PhaseActions:
