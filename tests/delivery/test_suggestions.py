@@ -35,8 +35,10 @@ def test_suggest_verification_commands_for_go_subrepo(tmp_path: Path) -> None:
     go_dir.mkdir()
     (go_dir / "go.mod").write_text("module nexus-swarm\n", encoding="utf-8")
 
+    # The nexus-swarm sub-repo hint was retired (#2635): the argv runner has no `cd`
+    # builtin, so "cd nexus-swarm && ..." could only exit 127.
     assert suggest_verification_commands(tmp_path, "patch go scheduler in nexus-swarm") == [
-        "cd nexus-swarm && go test ./..."
+        "go test ./..."
     ]
 
 
