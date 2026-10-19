@@ -358,6 +358,21 @@ class _FinalizeRuntimeMixin:
                 "status": "PENDING",
                 "required": True,
             }
+        # #2721 measurement only: write the run back to memory/Belief (no-op unless
+        # NEXUS_LEARNING_WRITEBACK=1 and not NEXUS_STATE_READ_ONLY=1).
+        from nexus.orchestrator.self_hosted_task_service_parts.learning_writeback import (
+            run_learning_writeback,
+        )
+
+        writeback = run_learning_writeback(
+            contract=contract,
+            candidate=candidate,
+            verified=verified,
+            resolution_verdict=str(getattr(resolution, "verdict", "") or ""),
+        )
+        if writeback.get("enabled") or writeback.get("read_only"):
+            # Recorded only when a measurement switch is set: live state stays byte-identical.
+            verified_values["learning_writeback"] = writeback
         update("VERIFIED", verified_values)
 
         if resolution.verdict != _service_module().AttemptResolutionVerdict.PROVEN.value:

@@ -2714,3 +2714,21 @@ def test_subclass_overrides_are_dispatched_through_self(tmp_path, monkeypatch) -
     svc._finalize_runtime_failure("t", "a", RuntimeError("x"))
     assert calls == [("read", "t"), ("checkpoint", "FINAL_BLOCK", "a")]
     assert svc._pid_alive(3) is True
+
+
+def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, monkeypatch) -> None:
+    """#2721: with NEXUS_LEARNING_WRITEBACK=1 the VERIFIED update carries the write-back observation."""
+    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_writeback(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"schema": learning_writeback.SCHEMA, "enabled": True, "read_only": False, "card_written": True}
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", fake_writeback)
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    verified_update = dict(fin.updates)["VERIFIED"]
+    assert verified_update["learning_writeback"]["card_written"] is True
+    assert calls and calls[0]["verified"] is fin.verified

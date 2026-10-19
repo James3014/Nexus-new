@@ -125,3 +125,16 @@ def rebase_state_path(path: _T) -> Path | _T:
     if moved is root:
         return path
     return Path(moved, *parts[index:])
+
+
+STATE_READ_ONLY_ENV = "NEXUS_STATE_READ_ONLY"
+
+
+def state_read_only() -> bool:
+    """True while ``NEXUS_STATE_READ_ONLY=1`` (#2721 held-out phase L-B).
+
+    Learning stores (findings memory, Belief) skip every write while it is set, so a
+    frozen, read-only state can be replayed across tasks.  Measurement-only: the live
+    Gateway never sets it, so behaviour there is unchanged.
+    """
+    return os.environ.get(STATE_READ_ONLY_ENV, "").strip() == "1"

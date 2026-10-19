@@ -130,6 +130,10 @@ class FindingsMemoryStore:
 
     def write(self, card: FindingsCard) -> str:
         """寫入記憶卡 (v24.0 Atomic: Filesystem + Vector Sync)。"""
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: frozen state, no new cards
+            return ""
         card.updated_at = datetime.now().isoformat()
         path = self._get_card_path(card)
         payload = card.to_dict()

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from nexus.core.belief_contracts import AuditOutcome
-from nexus.core.state_root import rebase_state_path
+from nexus.core.state_root import rebase_state_path, state_read_only
 from nexus.infrastructure.state_json_store import StateJsonStore, StateMergeError
 from nexus.telemetry.tracer import NexusTracer
 
@@ -53,6 +53,8 @@ class BeliefEngine:
         self.beliefs = self.state_store.read_dict(self.state_file)
 
     def _persist(self, key: str | None = None) -> None:
+        if state_read_only():  # #2721 L-B: frozen state, in-memory only
+            return
         merge = getattr(self.state_store, "merge_dict", None)
         if key is None or merge is None:
             self.state_store.write_dict(self.state_file, self.beliefs)
