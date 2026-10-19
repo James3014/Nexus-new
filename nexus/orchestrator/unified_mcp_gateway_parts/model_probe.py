@@ -32,6 +32,11 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
+from nexus.executors.claude_measurement_worker import (
+    CLAUDE_MEASUREMENT_PROVIDER,
+    measurement_claude_enabled,
+    measurement_claude_preflight,
+)
 from nexus.services.agy_account_pool import AgyAccountPoolBusyError, AgyAccountPoolExhaustedError
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -106,6 +111,9 @@ class _ModelProbeMixin(_ModelProbeBase):
     def _provider_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         requested_model = str(arguments.get("model") or arguments.get("preferred_model") or "").strip()
+        if provider == CLAUDE_MEASUREMENT_PROVIDER and measurement_claude_enabled():
+            # #2721: measurement Gateway only; never reached on the live Gateway.
+            return measurement_claude_preflight(requested_model)
         if provider == "cline" and not requested_model:
             requested_model = "glm-5.2"
         metadata, executable = self._provider_executable(provider)
