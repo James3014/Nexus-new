@@ -11,14 +11,21 @@ class XRayService:
         self.project_root = Path(project_root)
         self.report_path = Path(report_path) if report_path else self.project_root / "xray_report_full.md"
 
-    def run(self, targets: List[str], recursive: bool = True, docker: bool = False) -> str:
+    def run(
+        self,
+        targets: List[str],
+        recursive: bool = True,
+        docker: bool = False,
+        *,
+        inject_findings: bool = True,
+    ) -> str:
         """執行掃描並產出報告"""
         from nexus.core.xray_observer import XRayObserver
         
         if not targets:
             targets = ["nexus/core", "benchmarks", "Autoresearch"]
             
-        observer = XRayObserver(targets)
+        observer = XRayObserver(targets, inject_findings=inject_findings)
         report = observer.scan(recursive=recursive)
         self.last_report = report
         

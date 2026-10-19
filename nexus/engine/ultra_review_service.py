@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import stat
 import subprocess
@@ -103,6 +104,21 @@ GHOST_TIMEOUT_RETRY_FACTOR = 2
 # Sandbox capability probes (#2650): run once per review, only when a head failure has no
 # base result. A failed probe means "this sandbox cannot run such a test", never a regression.
 ENV_PROBE_TIMEOUT_SEC = 30
+# git's own error text when the object store lacks history a test asks for (the sandbox mirror
+# git dir holds only the reviewed commit, by design since #2650). Matched only in the junit
+# failure text of a head-failing test that has NO base result (#2665, P7). Only git's CLI
+# message form counts: a ``fatal:``/``error:`` line, either at the start of a line or as the
+# start of a captured ``stderr = '...'`` value (how pytest shows a failed subprocess.run's
+# locals, the #535 shape); the same words in prose or an assertion message do not.
+GIT_HISTORY_UNAVAILABLE_RE = re.compile(
+    r"(?:^[ \t]*|\bstderr\s*=\s*b?['\"])(?:fatal|error): (?:git [a-z][a-z-]*: )?"
+    r"(?:bad object [0-9a-f]{7,64}\b"
+    r"|could not get object info"
+    r"|bad revision '[^'\n]*'"
+    r"|ambiguous argument '[^'\n]*': unknown revision or path not in the working tree"
+    r"|[^\n'\"]*\bshallow\b)",
+    re.MULTILINE,
+)
 ENV_PROBE_TMPDIR_WRITE = "import os, tempfile\nfd, path = tempfile.mkstemp()\nos.close(fd)\nos.unlink(path)\n"
 # ``ModuleNotFoundError`` text in a pytest collection-error report (#2650).
 MODULE_NOT_FOUND_RE = re.compile(r"ModuleNotFoundError: No module named '([A-Za-z_][A-Za-z0-9_.]*)'")
@@ -181,10 +197,19 @@ TEST_DIR_BY_SOURCE_DIR = {
     "services": "tests/services",
 }
 SECURITY_PATTERNS = (
-    ("secret_literal", re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*=\s*['\"][^'\"]{8,}['\"]")),
+    # One whole quoted literal (same quote both ends, >= 8 non-quote non-space chars) assigned
+    # to a credential-named identifier; never spans two literals (#2336, #2665).
+    (
+        "secret_literal",
+        re.compile(
+            r"(?i)\b\w*(api[_-]?key|secret|token|password)\w*\s*=\s*(['\"])(?P<v>[^'\"\s]{8,})\2"
+        ),
+    ),
     ("shell_true_subprocess", re.compile(r"subprocess\.(run|Popen|call|check_output)\([^#\n]*shell\s*=\s*True")),
     ("unsafe_delete", re.compile(r"shutil\.rmtree\([^#\n]*(ignore_errors\s*=\s*True|force|/tmp|\*)")),
 )
+# secret_literal values that are marker words, not credentials (e.g. SECRET_OUT_OF_SCOPE_MARKER).
+SECRET_MARKER_VALUE = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")
 SECURITY_REPRO_TIMEOUT_SEC = 10
 RUNTIME_ARTIFACT_PREFIXES = (
     ".nexus/reports/",
@@ -200,6 +225,12 @@ TOOL_CHECK_TIMEOUT_SEC = 60
 # argument-list subprocess calls, partial executable paths, non-crypto random).
 BANDIT_IGNORED_TESTS = frozenset({"B101", "B311", "B404", "B603", "B607"})
 RUFF_SECURITY_IGNORED_CODES = frozenset({"S101", "S311", "S404", "S603", "S607"})
+# Hardcoded-password heuristics: reported at low severity (as bandit rates B105-B107), so they
+# never block on their own (#2665).
+RUFF_LOW_SEVERITY_CODES = frozenset({"S105", "S106", "S107"})
+# yaml.load is flagged (B506/S506) unless the Loader is one of these safe loaders (#2665).
+YAML_LOAD_RULE_NUMBERS = frozenset({"B506", "S506"})
+YAML_SAFE_LOADERS = frozenset({"BaseLoader", "SafeLoader", "CSafeLoader"})
 # pyflakes/pycodestyle subset that means the changed code cannot run as written:
 # syntax errors, invalid comparisons/statements, undefined names.
 RUFF_LOGIC_SELECT = "E9,F63,F7,F82"
@@ -209,8 +240,167 @@ REVIEW_MODE = "review"
 # test run (a test that reviews "."), would review the sandbox again; refuse instead.
 ULTRA_REVIEW_NESTED_ENV = "NEXUS_ULTRA_REVIEW_IN_PROGRESS"
 # Files whose change alters how the ghost-regression test run itself behaves.
-TEST_HARNESS_FILES = ("conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "sitecustomize.py", "usercustomize.py")
+# .pytest.ini / pytest.toml / .pytest.toml are pytest 9 config files (#2665 review).
+TEST_HARNESS_FILES = (
+    "conftest.py",
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    "pyproject.toml",
+    "sitecustomize.py",
+    "usercustomize.py",
+    ".pytest.ini",
+    "pytest.toml",
+    ".pytest.toml",
+)
+# Shared config files: flagged only when their pytest/coverage configuration changes between
+# the base ref and the head (a parse error on either side is still flagged). The other
+# TEST_HARNESS_FILES are always flagged (#2665).
+TEST_HARNESS_SECTION_SCOPED_FILES = ("pyproject.toml", "setup.cfg", "tox.ini")
 DRY_RUN_MODE = "dry-run"
+
+
+def _security_pattern_matches(rule_id: str, pattern: re.Pattern[str], content: str) -> bool:
+    """True when ``pattern`` matches ``content``; a secret_literal whose value is an
+    UPPER_SNAKE marker word is not a credential and does not count (#2665)."""
+    if rule_id != "secret_literal":
+        return pattern.search(content) is not None
+    return any(
+        not SECRET_MARKER_VALUE.match(match.group("v")) for match in pattern.finditer(content)
+    )
+
+
+def _pytest_config_sections(name: str, text: str) -> dict[str, Any]:
+    """The pytest/coverage-relevant part of a shared config file (#2665).
+
+    pyproject.toml: every ``tool.pytest*`` table plus ``project.entry-points.pytest11``.
+    setup.cfg / tox.ini: the ``[tool:pytest]``, ``[pytest]`` and ``[coverage:*]`` sections.
+    Raises ``ValueError`` when the text does not parse, so the caller fails closed.
+    """
+    if name == "pyproject.toml":
+        import tomllib
+
+        try:
+            doc = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"toml_parse_error: {exc}") from exc
+        tool = doc.get("tool")
+        project = doc.get("project")
+        entry_points = project.get("entry-points") if isinstance(project, dict) else None
+        pytest_tables = (
+            {k: v for k, v in tool.items() if str(k).startswith("pytest")}
+            if isinstance(tool, dict)
+            else {}
+        )
+        return {
+            "tool": pytest_tables,
+            "pytest11": entry_points.get("pytest11") if isinstance(entry_points, dict) else None,
+        }
+    # pytest's own ini parser: keys are case-sensitive and [DEFAULT] is an ordinary section,
+    # exactly as pytest reads them (configparser would lowercase keys and merge DEFAULT).
+    import iniconfig
+
+    try:
+        parsed = iniconfig.IniConfig(name, data=text)
+    except iniconfig.ParseError as exc:
+        raise ValueError(f"ini_parse_error: {exc}") from exc
+    return {
+        section.name: dict(section.items())
+        for section in parsed
+        if section.name in ("tool:pytest", "pytest") or section.name.startswith("coverage:")
+    }
+
+
+def _diff_file_states(diff_text: str) -> dict[str, str]:
+    """``{path: "added" | "deleted"}`` for files the diff creates or deletes."""
+    states: dict[str, str] = {}
+    current = ""
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            parsed = re.match(r"^diff --git a/(.*) b/(.*)$", line)
+            current = parsed.group(2) if parsed else ""
+            continue
+        if current and line.startswith("new file mode "):
+            states[current] = "added"
+        elif current and line.startswith("deleted file mode "):
+            states[current] = "deleted"
+    return states
+
+
+def _yaml_load_uses_safe_loader(source: str, line: int) -> bool:
+    """True only when every ``load``/``load_all`` call spanning ``line`` passes ``Loader=`` one
+    of YAML_SAFE_LOADERS (bare or as ``yaml.<Name>``) and the file does not rebind that name;
+    anything unparsable or ambiguous stays flagged (#2665)."""
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return False
+    rebound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            from_yaml = isinstance(node, ast.ImportFrom) and node.module == "yaml"
+            for alias in node.names:
+                top = alias.name.split(".", 1)[0]
+                original = alias.name if isinstance(node, ast.ImportFrom) else top
+                bound = alias.asname or original
+                if bound != original or (isinstance(node, ast.ImportFrom) and not from_yaml):
+                    rebound.add(bound)
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+                if not from_yaml:
+                    return False  # a star import can bind any loader name
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            rebound.add(node.id)
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "yaml"
+        ):
+            return False  # yaml.<X>Loader = ... patches the module for every later import
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("setattr", "delattr", "globals", "vars", "locals", "__import__")
+        ):
+            return False  # dynamic rebinding the AST cannot follow
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebound.add(node.name)
+        elif isinstance(node, ast.arg):
+            rebound.add(node.arg)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and node.lineno <= line <= (node.end_lineno or node.lineno)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in ("load", "load_all"))
+            or (isinstance(node.func, ast.Name) and node.func.id in ("load", "load_all"))
+        )
+    ]
+    if not calls:
+        return False
+    for call in calls:
+        loader = next((kw.value for kw in call.keywords if kw.arg == "Loader"), None)
+        positional = call.args
+        starred = any(isinstance(arg, ast.Starred) for arg in positional)
+        if loader is None and len(positional) >= 2 and not starred:
+            loader = call.args[1]
+        if isinstance(loader, ast.Attribute):
+            safe = (
+                loader.attr in YAML_SAFE_LOADERS
+                and isinstance(loader.value, ast.Name)
+                and loader.value.id == "yaml"
+                and "yaml" not in rebound
+            )
+        elif isinstance(loader, ast.Name):
+            safe = loader.id in YAML_SAFE_LOADERS and loader.id not in rebound
+        else:
+            safe = False
+        if not safe:
+            return False
+    return True
 
 
 class UltraReviewError(SandboxError):
@@ -407,6 +597,7 @@ class UltraReviewService:
             execution_root=execution_root,
             sandbox_path=sandbox_path,
             mode=mode,
+            base_ref=base_ref,
         )
         for rule_id, tool, paths, summary in (
             (
@@ -877,6 +1068,14 @@ class UltraReviewService:
             tmp=ctx.get("tmp") or "",
             untrusted_roots=(self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")),
         )
+        # ``python3`` inside the sandbox resolves to the reviewer's interpreter first (#2665,
+        # P7), unless that interpreter itself lives in a reviewed tree.
+        untrusted = (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path"))
+        interpreter_bin = os.path.dirname(sys.executable)
+        if os.path.isabs(interpreter_bin) and not in_tree(interpreter_bin, untrusted):
+            parts = env.get("PATH", "").split(os.pathsep)
+            rest = [part for part in parts if part and part != interpreter_bin]
+            env["PATH"] = os.pathsep.join([interpreter_bin, *rest])
         env[ULTRA_REVIEW_NESTED_ENV] = "1"
         if ctx.get("tmp"):
             # xcrun caches into the per-user temp dir (outside the sandbox) unless told
@@ -1112,6 +1311,10 @@ class UltraReviewService:
             line = int(item.get("line_number") or 0)
             if line not in added.get(rel, set()):
                 continue
+            if test_id in YAML_LOAD_RULE_NUMBERS and self._safe_yaml_load_at(
+                execution_root, rel, line
+            ):
+                continue
             findings.append(
                 {
                     "lane": "security_sentry",
@@ -1174,13 +1377,21 @@ class UltraReviewService:
             line = int(((item.get("location") or {}).get("row")) or 0)
             if added_only and line not in added.get(rel, set()):
                 continue
+            if code in YAML_LOAD_RULE_NUMBERS and self._safe_yaml_load_at(
+                execution_root, rel, line
+            ):
+                continue
+            if lane == "security_sentry":
+                severity = "low" if code in RUFF_LOW_SEVERITY_CODES else "medium"
+            else:
+                severity = "high"
             findings.append(
                 {
                     "lane": lane,
                     "rule_id": f"ruff:{code}",
                     "tool": "ruff",
                     "state": "VERIFIED_FINDING",
-                    "severity": "medium" if lane == "security_sentry" else "high",
+                    "severity": severity,
                     "file": rel,
                     "line": line,
                     "repro_command": run["command"],
@@ -1189,6 +1400,84 @@ class UltraReviewService:
                 }
             )
         return run, findings
+
+    def _harness_changes(self, diff_text: str, *, execution_root: Path, base_ref: str) -> list[str]:
+        """Changed test-harness files. conftest.py, pytest.ini and the *customize.py files always
+        count; pyproject.toml / setup.cfg / tox.ini count only when their pytest/coverage
+        configuration differs between ``base_ref`` (read with ``git show``, never from the
+        candidate tree) and the applied head mirror. Anything unreadable or unparsable counts
+        (fail closed) (#2665)."""
+        states = _diff_file_states(diff_text)
+        harness: list[str] = []
+        for rel in self._changed_files(diff_text):
+            name = Path(rel).name
+            if name not in TEST_HARNESS_FILES:
+                continue
+            if name not in TEST_HARNESS_SECTION_SCOPED_FILES or self._harness_config_changed(
+                rel,
+                name,
+                execution_root=execution_root,
+                base_ref=base_ref,
+                state=states.get(rel, ""),
+            ):
+                harness.append(rel)
+        return harness
+
+    def _harness_config_changed(
+        self, rel: str, name: str, *, execution_root: Path, base_ref: str, state: str
+    ) -> bool:
+        if state == "added":
+            base_text = ""
+        else:
+            if not base_ref or base_ref.startswith("-"):
+                return True
+            shown = subprocess.run(  # noqa: S603 - argv list, no shell
+                ["git", "show", f"{base_ref}:{rel}"],
+                cwd=self.project_root,
+                env=self._git_env(),
+                capture_output=True,
+                check=False,
+            )
+            if shown.returncode != 0:
+                return True
+            try:
+                base_text = shown.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                return True
+        if state == "deleted":
+            head_text = ""
+        else:
+            target = self._contained_path(rel, execution_root)
+            if target is None:
+                return True
+            try:
+                if not stat.S_ISREG(os.lstat(target).st_mode):
+                    return True
+                head_text = target.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                return True
+            if state != "added" and head_text == base_text:
+                # The diff says this file changed, but the mirror still holds the base
+                # content: the patch did not land, so nothing can be compared.
+                return True
+        try:
+            base_sections = _pytest_config_sections(name, base_text)
+            return base_sections != _pytest_config_sections(name, head_text)
+        except ValueError:
+            return True
+
+    def _safe_yaml_load_at(self, execution_root: Path, rel: str, line: int) -> bool:
+        """True when the flagged yaml.load at ``rel:line`` uses a safe Loader (#2665)."""
+        target = self._contained_path(rel, execution_root)
+        if target is None:
+            return False
+        try:
+            if not stat.S_ISREG(os.lstat(target).st_mode):
+                return False
+            source = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False
+        return _yaml_load_uses_safe_loader(source, line)
 
     def _capture_diff(self, base_ref: str) -> str:
         return self._filter_diff(
@@ -1346,7 +1635,7 @@ class UltraReviewService:
                 new_line += 1
                 content = raw_line[1:]
                 for rule_id, pattern in SECURITY_PATTERNS:
-                    if pattern.search(content):
+                    if _security_pattern_matches(rule_id, pattern, content):
                         findings.append(
                             {
                                 "id": f"security-{len(findings) + 1}",
@@ -1577,7 +1866,13 @@ class UltraReviewService:
         }
 
     def _run_logic_breaker(
-        self, *, diff_path: Path, execution_root: Path, sandbox_path: Path, mode: str = DRY_RUN_MODE
+        self,
+        *,
+        diff_path: Path,
+        execution_root: Path,
+        sandbox_path: Path,
+        mode: str = DRY_RUN_MODE,
+        base_ref: str = "",
     ) -> dict[str, Any]:
         repro_script = sandbox_path / "ultra_logic_repro.py"
         mirror_diff_path = execution_root / ".nexus_ultra_changes.diff"
@@ -1696,7 +1991,7 @@ class UltraReviewService:
                         "execution_cwd": str(execution_root),
                     }
                 )
-        harness = [rel for rel in self._changed_files(diff_text) if Path(rel).name in TEST_HARNESS_FILES]
+        harness = self._harness_changes(diff_text, execution_root=execution_root, base_ref=base_ref)
         executed_checks.append("test-harness-guard")
         if harness:
             # A diff that edits the test harness can make the ghost re-run report green
@@ -1943,6 +2238,7 @@ class UltraReviewService:
                     sandbox_path=sandbox_path,
                     timeout_sec=timeout_sec,
                     head_collection_modules=self._junit_collection_error_modules(head_check["junit_bytes"]),
+                    head_failure_texts=self._junit_failure_texts(head_check["junit_bytes"]),
                     execution_root=execution_root,
                 )
                 regressions.extend(base_comparison.pop("regressions"))
@@ -2131,7 +2427,9 @@ class UltraReviewService:
             "--rootdir",
             str(root),
             "-o",
-            f"pythonpath={sbpl_path(root)}",
+            # pytest shlex-splits a ``paths`` ini value: quote it so a root with a space
+            # (``~/Library/Application Support``) stays one sys.path entry (#2665).
+            f"pythonpath={shlex.quote(sbpl_path(root))}",
             "-o",
             "junit_family=xunit1",
             # A file that fails to import is reported (error_file) and the other files still
@@ -2205,6 +2503,37 @@ class UltraReviewService:
         return outcomes
 
     @staticmethod
+    def _junit_failure_texts(data: bytes | None) -> dict[str, str]:
+        """``{test id: failure/error message + text}`` for failed test cases, ids built exactly
+        as ``_junit_outcomes_from_bytes`` builds them; ``{}`` for any report it would refuse."""
+        import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 - DTD/entities rejected below
+
+        if UltraReviewService._junit_outcomes_from_bytes(data) is None or data is None:
+            return {}
+        try:
+            # DTD/entities were rejected by the _junit_outcomes_from_bytes call above.
+            root = ET.fromstring(data)  # noqa: S314  # nosec B314
+        except ET.ParseError:
+            return {}
+        texts: dict[str, str] = {}
+        for case in root.iter("testcase"):
+            classname = str(case.get("classname") or "")
+            name = str(case.get("name") or "")
+            file = str(case.get("file") or "").replace("\\", "/")
+            if not classname:
+                continue
+            module = file[:-3].replace("/", ".") if file.endswith(".py") else file
+            nested = [p for p in classname[len(module) :].split(".") if p]
+            test_id = "::".join([file, *nested, name])
+            parts = [
+                f"{node.get('message') or ''}\n{node.text or ''}"
+                for node in (*case.findall("failure"), *case.findall("error"))
+            ]
+            if parts:
+                texts[test_id] = (texts.get(test_id, "") + "\n".join(parts))[-20000:]
+        return texts
+
+    @staticmethod
     def _attribute_head_failures(
         failed_ids: list[str], test_candidates: list[str], explicit_tests: Sequence[str]
     ) -> tuple[list[str], list[str]]:
@@ -2236,6 +2565,7 @@ class UltraReviewService:
         timeout_sec: float,
         head_collection_modules: dict[str, str] | None = None,
         execution_root: Path | None = None,
+        head_failure_texts: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Re-run the files of head-failing mapped tests on a detached worktree of ``base_ref``.
 
@@ -2256,12 +2586,19 @@ class UltraReviewService:
             "timeout": False,
         }
         modules = dict(head_collection_modules or {})
+        failure_texts = dict(head_failure_texts or {})
 
         def file_of(test_id: str) -> str:
             return test_id.split("::", 1)[0]
 
         def absent_on_base(test_id: str) -> None:
-            reason = self._environment_reason(test_id, modules, execution_root=execution_root, base_ref=base_ref)
+            reason = self._environment_reason(
+                test_id,
+                modules,
+                execution_root=execution_root,
+                base_ref=base_ref,
+                failure_text=failure_texts.get(test_id, ""),
+            )
             if reason:
                 outcome["inconclusive_env"].append({"test": test_id, "reason": reason})
             else:
@@ -2371,7 +2708,13 @@ class UltraReviewService:
             }
 
     def _environment_reason(
-        self, test_id: str, modules: dict[str, str], *, execution_root: Path | None, base_ref: str
+        self,
+        test_id: str,
+        modules: dict[str, str],
+        *,
+        execution_root: Path | None,
+        base_ref: str,
+        failure_text: str = "",
     ) -> str:
         """Why a head failure with no base result cannot be judged here, or ``""`` (#2650).
 
@@ -2380,12 +2723,17 @@ class UltraReviewService:
         dependency (pyproject / requirements), that neither the head nor the base tree provides
         and that the reviewer's interpreter cannot import. A forgotten or misspelled module is not
         declared, so it stays a regression. ``environment_probe_failed:<probes>`` when a sandbox
-        capability probe, run before any candidate code, failed."""
+        capability probe, run before any candidate code, failed. ``git_history_unavailable`` when
+        the test's own junit failure text carries git's missing-object error (the sandbox git
+        dir holds one commit, #2665). Only ever called for a test with no base result, so a
+        base pass -> head fail never reaches here and stays a regression."""
         module = modules.get(test_id) or ""
         if module and execution_root is not None and self._dependency_unavailable(
             module, execution_root, base_ref, test_file=test_id.split("::", 1)[0]
         ):
             return "dependency_unavailable:" + module.split(".", 1)[0]
+        if failure_text and GIT_HISTORY_UNAVAILABLE_RE.search(failure_text):
+            return "git_history_unavailable"
         failed = list(getattr(self, "_env_probe_failures", None) or [])
         if failed:
             return "environment_probe_failed:" + ",".join(failed)
@@ -2459,6 +2807,21 @@ class UltraReviewService:
         probes: list[tuple[str, list[str]]] = [("git_version", ["git", "--version"])]
         if mirror_git_ok:
             probes.append(("git_rev_parse_mirror", ["git", "-C", str(execution_root), "rev-parse", "HEAD"]))
+            # ``git status`` needs the iconv tables (#2665, P6); --no-optional-locks keeps the
+            # probe from writing the index.
+            probes.append(
+                (
+                    "git_status_mirror",
+                    [
+                        "git",
+                        "--no-optional-locks",
+                        "-C",
+                        str(execution_root),
+                        "status",
+                        "--porcelain",
+                    ],
+                )
+            )
         probes.append(("tmpdir_write", [sys.executable, "-I", "-c", ENV_PROBE_TMPDIR_WRITE]))
         failed: list[str] = []
         for name, cmd in probes:

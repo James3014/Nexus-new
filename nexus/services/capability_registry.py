@@ -3149,6 +3149,10 @@ PLANNER_SIGNAL_TRIGGERS: dict[str, tuple[frozenset[str] | None, tuple[str, ...]]
     "learn_mode": (frozenset({"claim_or_citation_learning_signal"}), ("learning_signal",)),
     "learn_phase_slo": (frozenset({"learn_phase_policy_needed"}), ("learning_signal",)),
     "multi_agent": (frozenset({"coordinated_ownership_required"}), ("multi_agent_signal", "swarm_signal")),
+    # #2688: the planner selects xray on a deep-scan request or a high-risk cross-module task;
+    # it reads the target worktree and returns prompt evidence (no model call; its report is
+    # written to a temporary run root outside the worktree, and it writes no findings card).
+    "xray": (frozenset({"deep_scan_or_dependency_signal"}), ("xray_signal", "cross_module")),
 }
 
 

@@ -124,10 +124,13 @@ def test_execute_calls_effect_authority_shadow(monkeypatch):
         def _bridge_validate_claim(self, *_a, **_k):
             return None
 
+        def _read_state(self, _task_id):
+            return {"attempt_id": "a1", "status": "SUBMITTED"}
+
     class _Stop(Exception):
         pass
 
-    def fake_shadow(task_id, attempt_id, request):
+    def fake_shadow(task_id, attempt_id, request, state=None):
         calls.append((task_id, attempt_id, request))
 
     def stop(self, *_a, **_k):
@@ -138,3 +141,343 @@ def test_execute_calls_effect_authority_shadow(monkeypatch):
     with pytest.raises(_Stop):
         bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
     assert calls == [("t1", "a1", {"k": 1})]
+
+
+# --- #2344 step 1: the shadow decision is persisted on the task state ---------
+
+
+def _owned_service(tmp_path, runner):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+    from tests.nexus.orchestrator.test_self_hosted_task_service import _request
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, ephemeral=True, auto_reconcile=False
+    )
+    request = _request(tmp_path)
+    task_id = request["task_id"]
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "request": request,
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-1",
+            "attempts": [{"attempt_id": "attempt-1"}],
+            "worker_pid": None,
+            "status_history": [],
+        },
+    )
+    return service, task_id
+
+
+def _ok_runner(contract, request, update):
+    return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+
+def _read(service, task_id) -> dict:
+    state = service._read_state(task_id)
+    assert state is not None
+    return state
+
+
+def _run(tmp_path, monkeypatch, runner=_ok_runner):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, runner)
+    service._run_owned_task(task_id, "attempt-1")
+    return _read(service, task_id), task_id
+
+
+def test_owned_attempt_persists_would_refuse_shadow_on_task_state(tmp_path, monkeypatch):
+    state, task_id = _run(tmp_path, monkeypatch)
+    shadow = state[ea.SHADOW_FIELD]
+    assert shadow["decision"] == ea.DECISION_WOULD_REFUSE
+    assert shadow["reason"] == "NO_EFFECT_AUTHORIZATION_ON_REQUEST"
+    assert shadow["task_id"] == task_id
+    assert shadow["attempt_id"] == "attempt-1"
+    assert shadow["mode"] == "SHADOW"
+    assert shadow["recorded_at"]
+    assert state["attempts"][0][ea.SHADOW_FIELD] == shadow
+    # Observation only: the run still reached its normal outcome.
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_persisted_shadow_is_visible_through_get_task(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    service._run_owned_task(task_id, "attempt-1")
+    task = service.get_task(task_id)
+    assert task is not None
+    assert task[ea.SHADOW_FIELD]["decision"] == ea.DECISION_WOULD_REFUSE
+
+
+def test_shadow_decision_failure_does_not_change_outcome(tmp_path, monkeypatch):
+    baseline, _ = _run(tmp_path / "a", monkeypatch)
+
+    def broken(_request, *_a, **_k):
+        raise RuntimeError("bug in shadow path")
+
+    monkeypatch.setattr(ea, "shadow_decision", broken)
+    state, _ = _run(tmp_path / "b", monkeypatch)
+    assert ea.SHADOW_FIELD not in state
+    assert state["status"] == baseline["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_shadow_persist_failure_does_not_change_outcome(tmp_path, monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    real_mutate = SelfHostedTaskService._mutate_state
+
+    def mutate(self, task_id, mutator):
+        if getattr(mutator, "__qualname__", "").startswith("_persist_effect_authority_shadow"):
+            raise OSError("state store unavailable")
+        return real_mutate(self, task_id, mutator)
+
+    monkeypatch.setattr(SelfHostedTaskService, "_mutate_state", mutate)
+    state, _ = _run(tmp_path, monkeypatch)
+    assert ea.SHADOW_FIELD not in state
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_shadow_failure_does_not_change_failing_outcome(tmp_path, monkeypatch):
+    def failing(contract, request, update):
+        raise RuntimeError("deliberate terminal failure")
+
+    baseline, _ = _run(tmp_path / "a", monkeypatch, failing)
+    monkeypatch.setattr(ea, "shadow_decision", lambda *_a, **_k: 1 / 0)
+    state, _ = _run(tmp_path / "b", monkeypatch, failing)
+    assert state["status"] == baseline["status"]
+    assert state.get("error") == baseline.get("error")
+
+
+def test_shadow_never_writes_into_another_attempts_state(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    decision = {"decision": ea.DECISION_WOULD_REFUSE, "attempt_id": "stale-attempt"}
+    bridge._persist_effect_authority_shadow(service, task_id, "stale-attempt", decision)
+    assert ea.SHADOW_FIELD not in _read(service, task_id)
+
+
+def test_strict_off_attaches_no_port_on_owned_attempt(tmp_path, monkeypatch):
+    # Strict-off behaviour unchanged: the coordinator gets no effect port and
+    # no require_effect_authority, so nothing new is refused.
+    seen = []
+    real = bridge.ExecutionCoordinator
+
+    def spy(*args, **kwargs):
+        seen.append({k: kwargs.get(k) for k in ("effect_authority", "require_effect_authority")})
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", spy)
+    state, _ = _run(tmp_path, monkeypatch)
+    assert seen == [{"effect_authority": None, "require_effect_authority": None}]
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+    assert state[ea.SHADOW_FIELD]["mode"] == "SHADOW"
+
+
+def test_execute_persists_shadow_with_service(monkeypatch):
+    persisted = []
+
+    class _Service:
+        def _bridge_validate_claim(self, *_a, **_k):
+            return None
+
+        def _read_state(self, _task_id):
+            return {"attempt_id": "a1", "status": "SUBMITTED"}
+
+    class _Stop(Exception):
+        pass
+
+    def stop(self, *_a, **_k):
+        raise _Stop
+
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "_persist_effect_authority_shadow",
+        lambda service, t, a, d: persisted.append((t, a, d["decision"])),
+    )
+    monkeypatch.setattr(bridge.RuntimeCoordinationBridge, "_coordinator", stop)
+    with pytest.raises(_Stop):
+        bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
+    assert persisted == [("t1", "a1", ea.DECISION_WOULD_REFUSE)]
+
+
+# --- Codex r1: the shadow mirrors strict's freshness and identity checks ------
+
+
+def _req(auth, **over):
+    request = {
+        "operation_id": "op-1",
+        "repository": "James3014/Nexus-new",
+        "effect_authorization": auth.to_dict(),
+    }
+    request.update(over)
+    return request
+
+
+def test_shadow_allows_fresh_matching_authorization_for_its_attempt():
+    decision = ea.shadow_decision(_req(_auth()), _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_ALLOW
+    assert decision["reason"] == "RECORD_MATCH"
+
+
+def test_shadow_refuses_expired_authorization_even_with_record_match():
+    expired = _auth(expires_at="2000-01-01T00:00:00Z")
+    decision = ea.shadow_decision(_req(expired), _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith("AUTHORIZATION_INVALID:")
+
+
+@pytest.mark.parametrize(
+    ("attempt", "over", "prefix"),
+    [
+        ("other-attempt", {}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"operation_id": "op-2"}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"repository": "James3014/other"}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"operation_id": None}, "REQUEST_IDENTITY_MISSING"),
+        ("att-1", {"repository": " "}, "REQUEST_IDENTITY_MISSING"),
+    ],
+)
+def test_shadow_refuses_identity_mismatch(attempt, over, prefix):
+    decision = ea.shadow_decision(_req(_auth(), **over), _lookup(_record()), attempt_id=attempt)
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith(prefix)
+
+
+def test_bridge_shadow_checks_identity_against_its_attempt(monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    # The identity check runs before any record lookup.
+    decision = bridge._record_effect_authority_shadow("t1", "other-attempt", _req(_auth()))
+    assert decision is not None
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith("IDENTITY_MISMATCH:")
+
+
+def test_shadow_record_bounds_caller_supplied_text(monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    huge = "x" * 1_000_000
+    monkeypatch.setattr(
+        ea,
+        "shadow_decision",
+        lambda *_a, **_k: {"decision": "WOULD_REFUSE", "reason": "R", "authority_ref": huge},
+    )
+    decision = bridge._record_effect_authority_shadow("t1", "a1", {"task": "x"})
+    assert decision is not None
+    assert len(decision["authority_ref"]) < 300
+    assert "len=1000000" in decision["authority_ref"]
+
+
+# --- Codex r2: resumed attempts also model the durable-copy checks -----------
+
+
+def _durable_state(auth=None, **over):
+    state = {"status": "RUNNING", "executions": [{"n": 1}]}
+    if auth is not None:
+        state["effect_authorization"] = auth.to_dict()
+        state["effect_authorization_hash"] = auth.authorization_hash
+    state.update(over)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("state", "decision", "reason"),
+    [
+        ({"status": "SUBMITTED"}, ea.DECISION_ALLOW, "RECORD_MATCH"),
+        (_durable_state(), ea.DECISION_WOULD_REFUSE, "DURABLE_AUTHORIZATION_MISSING"),
+        (_durable_state(_auth()), ea.DECISION_ALLOW, "RECORD_MATCH"),
+        (
+            _durable_state(_auth(), effect_authorization="bad"),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_MALFORMED",
+        ),
+        (
+            _durable_state(_auth(effects={"filesystem.write_paths": {"paths": ["b.py"]}})),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_SUBSTITUTED",
+        ),
+        (
+            _durable_state(_auth(), effect_authorization_hash="0" * 64),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_HASH_MISMATCH",
+        ),
+    ],
+)
+def test_shadow_models_durable_copy_checks(state, decision, reason):
+    got = ea.shadow_decision(_req(_auth()), _lookup(_record()), attempt_id="att-1", state=state)
+    assert (got["decision"], got["reason"]) == (decision, reason)
+
+
+def test_owned_attempt_shadow_uses_task_state_for_durable_check(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    seen = []
+    real = ea.shadow_decision
+
+    def spy(request, *args, **kwargs):
+        seen.append(kwargs.get("state"))
+        return real(request, *args, **kwargs)
+
+    monkeypatch.setattr(ea, "shadow_decision", spy)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    bridge._record_owned_attempt_shadow(service, task_id, "attempt-1")
+    assert seen and seen[0]["attempt_id"] == "attempt-1"
+
+
+@pytest.mark.parametrize("field", ["source_revision", "base_revision", "workspace_id", "target_id"])
+def test_shadow_checks_optional_identity_fields(field):
+    request = _req(_auth(**{field: "expected"}), **{field: "other"})
+    decision = ea.shadow_decision(request, _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert (
+        decision["reason"] == f"IDENTITY_MISMATCH:effect authorization identity mismatch: {field}"
+    )
+
+
+def test_owned_attempt_shadow_swallows_state_read_error():
+    class _Broken:
+        def _read_state(self, _task_id):
+            raise OSError("state unreadable")
+
+        def _mutate_state(self, *_a, **_k):
+            raise AssertionError("must not write after a failed read")
+
+    assert bridge._record_owned_attempt_shadow(_Broken(), "t1", "a1") is None
+
+
+def test_execute_records_nothing_when_state_unreadable(monkeypatch):
+    # Codex r3: without the state the durable check cannot be modelled.
+    calls = []
+
+    class _Service:
+        def _bridge_validate_claim(self, *_a, **_k):
+            return None
+
+        def _read_state(self, _task_id):
+            raise OSError("state unreadable")
+
+    class _Stop(Exception):
+        pass
+
+    def stop(self, *_a, **_k):
+        raise _Stop
+
+    monkeypatch.setattr(bridge, "_record_effect_authority_shadow", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(bridge, "_persist_effect_authority_shadow", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(bridge.RuntimeCoordinationBridge, "_coordinator", stop)
+    with pytest.raises(_Stop):
+        bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
+    assert calls == []
+
+
+def test_shadow_is_in_compact_task_status(tmp_path, monkeypatch):
+    # Shadow triage: the Gateway's nexus_task_status serves the compact
+    # get_task_snapshot projection, so the shadow must be projected there too.
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    compact_before = service.get_task_snapshot(task_id)
+    assert compact_before is not None
+    assert ea.SHADOW_FIELD not in compact_before
+    service._run_owned_task(task_id, "attempt-1")
+    compact = service.get_task_snapshot(task_id)
+    assert compact is not None
+    assert compact[ea.SHADOW_FIELD]["decision"] == ea.DECISION_WOULD_REFUSE
+    assert compact[ea.SHADOW_FIELD]["attempt_id"] == "attempt-1"
