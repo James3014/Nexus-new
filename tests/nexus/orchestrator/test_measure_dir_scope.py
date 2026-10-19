@@ -164,7 +164,7 @@ def _guard(
 
 
 @pytest.fixture
-def ext(layout, monkeypatch) -> dict[str, Any]:
+def ext(layout, monkeypatch) -> dict[str, Any]:  # noqa: F811 (fixture from test_measure_external_target)
     """A clean measurement external target with real directories and tracked symlinks."""
     monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(layout["measure_root"]))
     repo = layout["measure_root"] / "dirrepo"
@@ -396,7 +396,7 @@ def test_switch_on_dir_scope_is_resolved_in_the_external_repository(
 # --------------------------------------------------------------------------
 
 
-def test_switch_off_gateway_refuses_dir_scope_before_submit(gateway_env, monkeypatch):
+def test_switch_off_gateway_refuses_dir_scope_before_submit(gateway_env, monkeypatch):  # noqa: F811 (fixture from test_measure_external_target)
     result = _call(gateway_env, _arguments(gateway_env, "dir-off-1", allowed_files=["pkg/"]))
     assert result["isError"] is True
     # Today's refusal: the action envelope rejects the entry, before submit.
@@ -419,7 +419,7 @@ def test_switch_off_gateway_refuses_dir_scope_before_submit(gateway_env, monkeyp
     assert result["isError"] is False, result.get("structuredContent")
 
 
-def test_switch_on_gateway_dir_scope_without_external_target_is_refused(gateway_env, monkeypatch):
+def test_switch_on_gateway_dir_scope_without_external_target_is_refused(gateway_env, monkeypatch):  # noqa: F811 (fixture from test_measure_external_target)
     """#2786: never a dir scope on the Nexus-new checkout itself, even in measurement mode."""
     _switch_on(monkeypatch)
     monkeypatch.setattr(
@@ -434,7 +434,7 @@ def test_switch_on_gateway_dir_scope_without_external_target_is_refused(gateway_
     assert result["isError"] is False, result.get("structuredContent")
 
 
-def test_switch_on_gateway_external_target_dir_scope_reaches_submit(gateway_env, monkeypatch):
+def test_switch_on_gateway_external_target_dir_scope_reaches_submit(gateway_env, monkeypatch):  # noqa: F811 (fixture from test_measure_external_target)
     _switch_on(monkeypatch)
     monkeypatch.setattr(
         met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
@@ -452,7 +452,9 @@ def test_switch_on_gateway_external_target_dir_scope_reaches_submit(gateway_env,
 
 
 def test_switch_on_gateway_external_dir_scope_symlink_escape_is_refused(
-    gateway_env, monkeypatch, tmp_path
+    gateway_env,  # noqa: F811 (fixture from test_measure_external_target)
+    monkeypatch,
+    tmp_path,
 ):
     ext = gateway_env["measure_root"] / "linkrepo"
     ext.mkdir()
@@ -572,7 +574,7 @@ def _ephemeral_submit(ctx: dict[str, Any], monkeypatch, request: dict[str, Any])
     service.submit_task(request)
 
 
-def test_ephemeral_service_still_checks_dir_scopes(gateway_env, monkeypatch):
+def test_ephemeral_service_still_checks_dir_scopes(gateway_env, monkeypatch):  # noqa: F811 (fixture from test_measure_external_target)
     _switch_on(monkeypatch)
     monkeypatch.setattr(
         met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
