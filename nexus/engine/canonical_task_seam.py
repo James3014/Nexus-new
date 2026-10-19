@@ -457,6 +457,32 @@ def _resolve_policy_workforce_bindings(
     return bindings, providers
 
 
+def _canonical_route_facts(
+    *,
+    repo_root: Path,
+    task_text: str,
+    task_type: str,
+    allowed_files: tuple[str, ...],
+    target_file: str = "",
+) -> dict[str, Any]:
+    """Planner task facts (#2688); ``NEXUS_CANONICAL_ROUTE_FACTS=0`` restores the old inputs."""
+    if os.environ.get("NEXUS_CANONICAL_ROUTE_FACTS", "1").strip() == "0":
+        return {"route_features": {}, "codeintel": {}}
+    from nexus.engine.canonical_route_facts import derive_canonical_route_facts
+
+    facts = derive_canonical_route_facts(
+        repo_root=repo_root,
+        task_text=task_text,
+        task_type=task_type,
+        allowed_files=allowed_files,
+        target_file=target_file,
+    )
+    codeintel = dict(facts["codeintel"])
+    if facts["errors"]:
+        codeintel["fact_derivation_errors"] = list(facts["errors"])
+    return {"route_features": dict(facts["route_features"]), "codeintel": codeintel}
+
+
 def build_canonical_planner_admission(
     *,
     task_id: str,
@@ -508,9 +534,16 @@ def build_canonical_planner_admission(
         or verified_campaign_id == "github-issue-982-wave-b-20260919"
         or workforce_consumer == "external_intelligence"
     )
+    admission_task_type = "feature" if infer_task_kind(task_text) == "feature" else "repair"
+    facts = _canonical_route_facts(
+        repo_root=REPO_ROOT,
+        task_text=str(task_text),
+        task_type=admission_task_type,
+        allowed_files=allowed_files,
+    )
     context = CanonicalTaskContext(
         task_id=str(task_id),
-        task_type="feature" if infer_task_kind(task_text) == "feature" else "repair",
+        task_type=admission_task_type,
         task_desc=str(task_text),
         execution_world="product_runtime",
         transport_ingress="mcp",
@@ -529,10 +562,12 @@ def build_canonical_planner_admission(
         route_features={
             "bounded_allowed_file_count": len(allowed_files),
             "deterministic_verifier_available": bool(verifier_command),
+            **facts["route_features"],
         },
         codeintel={
             "allowed_files": list(allowed_files),
             "verify_commands": list(verifier_command),
+            **facts["codeintel"],
         },
     )
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
@@ -756,9 +791,18 @@ def execute_canonical_product_task(
         },
         "mempalace_query": task_evidence_id,
     }
+    facts = _canonical_route_facts(
+        repo_root=root,
+        task_text=str(task_text),
+        task_type=task_type,
+        allowed_files=allowed_files,
+        target_file=target_file,
+    )
+    codeintel.update(facts["codeintel"])
     route_features = {
         "bounded_allowed_file_count": len(allowed_files),
         "deterministic_verifier_available": bool(verifier_command),
+        **facts["route_features"],
     }
     execution_channels = ("online",)
     if local_enabled:

@@ -224,3 +224,87 @@ def test_forwarded_route_signals_pass_the_canonical_planning_seam() -> None:
 
     assert snapshot["doc_scout_hits"] == 2
     assert snapshot["risk_score_0_100"] == 72
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "signal"),
+    [
+        ({"xray_signal": True}, "xray_signal"),
+        ({"cross_module": True, "risk_score": 60}, "cross_module"),
+    ],
+)
+def test_xray_fires_on_the_planners_deep_scan_selection(snapshot, signal) -> None:
+    """#2688: xray was selected on high-risk cross-module tasks but always skipped."""
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
+
+    receipt = invoker(
+        _context("xray", reasons=["deep_scan_or_dependency_signal"], snapshot=snapshot)
+    )
+
+    assert calls == ["sprint-abc-s0-a1"]
+    assert receipt["trigger_source"] == f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:{signal}"
+
+
+def test_xray_needs_the_planners_deep_scan_reason() -> None:
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
+
+    receipt = invoker(
+        _context("xray", reasons=["available_but_not_selected"], snapshot={"cross_module": True})
+    )
+
+    assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
+
+
+def test_xray_executor_leaves_the_scanned_worktree_and_cwd_clean(tmp_path, monkeypatch) -> None:
+    """#2688 reviews: the report followed cwd, then landed in the candidate worktree."""
+    import subprocess
+
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _exec_xray
+
+    workspace = tmp_path / "ws"
+    (workspace / "pkg").mkdir(parents=True)
+    imports = "".join(f"import mod{i}\n" for i in range(20))  # > 15 crossings
+    (workspace / "pkg" / "hub.py").write_text(
+        imports + "def f():\n    return 1\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)  # no .nexus ignore
+    subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "c",
+        ],
+        check=True,
+    )
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        constraints={"workspace_root": str(workspace), "target_file": "pkg/hub.py"},
+    )
+
+    receipt = _exec_xray(plan, "deep scan pkg")
+
+    assert receipt.gate_passed is True
+    status = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == "", f"xray left files in the candidate worktree: {status}"
+    assert not any(elsewhere.rglob("*")), "xray wrote under cwd"

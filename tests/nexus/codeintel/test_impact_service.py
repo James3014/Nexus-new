@@ -56,3 +56,20 @@ def test_analyze_impact_ignores_nexus_sandbox_cache(tmp_path: Path) -> None:
     result = analyze_impact(tmp_path, ["pkg/core.py"])
 
     assert result.impacted_files == ["pkg/core.py"]
+
+
+def test_non_python_changes_skip_the_full_import_walk(tmp_path, monkeypatch) -> None:
+    """With no changed Python module no importer can match (#2688)."""
+    from nexus.services.codeintel import impact_service
+
+    (tmp_path / "doc.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "mod.py").write_text("import os\n", encoding="utf-8")
+    monkeypatch.setattr(
+        impact_service,
+        "_iter_python_files",
+        lambda root: (_ for _ in ()).throw(AssertionError("walked")),
+    )
+
+    result = impact_service.analyze_impact(tmp_path, ["doc.md"]).to_dict()
+
+    assert result["impacted_files"] == ["doc.md"]

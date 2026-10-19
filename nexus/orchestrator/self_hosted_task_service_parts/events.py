@@ -19,8 +19,8 @@ Not all of it is read-only: ``_record_event_append_failure`` and ``_record_direc
 write state through ``_mutate_state`` (under the state lock), and the emitters append to
 the canonical EventBus log (binding it for production first when the service is not
 ephemeral). The rehydration and ``read_canonical_*`` paths take no lock and write
-nothing. The state lock and state store stay in the facade class and are reached
-through ``self``.
+nothing. The state lock and state store live in ``_StateStoreMixin``
+(``parts/state_store.py``, split S6b) and are reached through ``self``.
 """
 
 from __future__ import annotations
