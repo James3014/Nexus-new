@@ -26,6 +26,20 @@ class ChallengeReport:
     phantom_triggers: int
     duration_sec: float
 
+def _guard_write_deny_rule(guard_dir: Path) -> str:
+    """Deny writes to the Python network guard, even under an allowed write path.
+
+    sandbox-exec applies the last matching rule, so this goes at the end of the profile.
+    It matters when the run record dir sits under /tmp or /private/tmp (both writable):
+    the sandboxed process must not be able to rewrite its own guard (#2698 review).
+    """
+    paths = [str(guard_dir)]
+    real = str(guard_dir.resolve())
+    if real not in paths:
+        paths.append(real)
+    return "\n".join(f'(deny file-write* (subpath "{path}"))' for path in paths)
+
+
 # Device files every process may write (mirrors nexus/engine/sandboxed_lane.py).
 SANDBOX_DEVICE_WRITE_RULE = (
     '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))'
@@ -259,7 +273,8 @@ socket.socket.connect = _guarded_socket_connect
         command_list = [str(part) for part in command]
         run_dir.mkdir(parents=True, exist_ok=True)
         # The working copy goes to a system temp dir, removed on exit when cleanup is
-        # set (#2698); only the run record stays in run_dir.
+        # set (#2698).  The run record and the network guard stay in run_dir, outside
+        # the sandbox's write paths, so the process cannot rewrite its own guard.
         scratch_dir = self._make_scratch_dir(f"nexus-sandbox-{run_id}-")
         workspace_path = scratch_dir / "workspace"
 
@@ -319,7 +334,7 @@ socket.socket.connect = _guarded_socket_connect
                     return self._write_result(run_dir, result_payload)
 
             env = os.environ.copy()
-            guard_dir = self._write_python_network_guard(scratch_dir)
+            guard_dir = self._write_python_network_guard(run_dir)
             env["NEXUS_SANDBOX_NO_NETWORK"] = "1"
             env["NEXUS_SANDBOX_WORKSPACE"] = str(workspace_path)
             env["PYTHONPATH"] = os.pathsep.join(
@@ -393,6 +408,7 @@ socket.socket.connect = _guarded_socket_connect
                         write_literals=write_paths
                     )
 
+                applied_profile = f"{applied_profile}\n{_guard_write_deny_rule(guard_dir)}"
                 active_command = [
                     "sandbox-exec",
                     "-p",
