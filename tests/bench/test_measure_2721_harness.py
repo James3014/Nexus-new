@@ -1,0 +1,316 @@
+"""Tests for the #2721 measurement harness (no network, no model, no Gateway)."""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from scripts.bench.measure_2721 import (
+    arms,
+    blind,
+    dryrun,
+    materialize,
+    nexus_driver,
+    scope,
+    task_text,
+)
+from scripts.bench.measure_2721.common import capture_diff, read_jsonl
+from scripts.bench.measure_2721.fakes import FakeGateway
+from scripts.bench.measure_2721.providers import FakeProvider
+
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@invalid", "GIT_CONFIG_NOSYSTEM": "1",
+}
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, env={**os.environ, **GIT_ENV}, check=True,
+                          capture_output=True, text=True).stdout
+
+
+@pytest.fixture()
+def bank(tmp_path: Path) -> dict:
+    """A mirror with a base commit, then a later 'fix' commit, a tag and a branch."""
+    mirror = tmp_path / "repos" / "sympy"
+    (mirror / "sympy" / "core").mkdir(parents=True)
+    (mirror / "sympy" / "core" / "tests").mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / "sympy" / "core" / "add.py").write_text("def add(a, b):\n    return a - b\n")
+    (mirror / "sympy" / "core" / "tests" / "test_old.py").write_text("def test_x():\n    pass\n")
+    (mirror / "README.md").write_text("readme\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "commit", "-qm", "base")
+    base = _git(mirror, "rev-parse", "HEAD").strip()
+    (mirror / "sympy" / "core" / "add.py").write_text("def add(a, b):\n    return a + b\n")
+    _git(mirror, "commit", "-qam", "GOLD FIX")
+    _git(mirror, "tag", "v-fixed")
+    _git(mirror, "branch", "fix-branch")
+    test_patch = (
+        "diff --git a/sympy/core/tests/test_add.py b/sympy/core/tests/test_add.py\n"
+        "new file mode 100644\n--- /dev/null\n+++ b/sympy/core/tests/test_add.py\n@@ -0,0 +1,2 @@\n"
+        "+def test_add():\n+    assert 1\n"
+    )
+    row = {"id": "sympy-1", "set": "M", "repo": "sympy/sympy", "base_commit": base,
+           "problem_statement": "add() subtracts\n\nadd(1, 2) returns -1.",
+           "gold_patch": "diff --git a/sympy/core/add.py b/sympy/core/add.py\n", "test_patch": test_patch}
+    tasks = tmp_path / "tasks.jsonl"
+    tasks.write_text(json.dumps(row) + "\n")
+    return {"root": tmp_path, "mirror": mirror, "base": base, "row": row, "tasks": tasks}
+
+
+@pytest.fixture()
+def manifest(bank: dict) -> Path:
+    out = bank["root"] / "mat"
+    assert materialize.main(["--tasks", str(bank["tasks"]), "--repos-root", str(bank["root"] / "repos"),
+                             "--out", str(out)]) == 0
+    return out / "manifest.jsonl"
+
+
+# -- task text ------------------------------------------------------------------
+
+def test_short_statement_goes_verbatim_into_what():
+    text = task_text.build_task_text("  Title\n\nBody  ", ["pkg/"])
+    assert text.what == "Title\n\nBody"
+    assert text.why == task_text.INSTRUCTION
+    assert not text.truncated
+
+
+def test_long_statement_is_split_over_what_and_why_without_loss():
+    statement = "x" * 3000 + "y" * 3000
+    text = task_text.build_task_text(statement, ["pkg/"])
+    assert len(text.what) <= 4000 and len(text.why) <= 4000
+    assert not text.truncated
+    body = text.what.replace(task_text.CONTINUED_MARKER.strip(), "") + text.why
+    assert body.count("x") + body.count("y") >= 6000
+
+
+def test_overlong_statement_is_truncated_and_flagged():
+    text = task_text.build_task_text("z" * 12000, ["pkg/"])
+    assert text.truncated
+    assert len(text.what) <= 4000 and len(text.why) <= 4000
+    assert text.why.endswith(task_text.INSTRUCTION)
+
+
+@pytest.mark.parametrize("allowed", [[], ["a", "b", "c", "d", "e"]])
+def test_p1_allowed_files_limit(allowed):
+    with pytest.raises(ValueError):
+        task_text.build_task_text("t", allowed)
+
+
+def test_harness_prompt_matches_gateway_worker_template():
+    real = dryrun.real_gateway_prompt_template()
+    if real is None:
+        pytest.skip("nexus not importable")
+    text = task_text.build_task_text("Issue\n\nbody with `code`", ["src/pkg/", "src/x.py"])
+    from types import SimpleNamespace
+
+    contract = SimpleNamespace(goal=SimpleNamespace(what=text.what, why=text.why),
+                               allowed_files=list(text.allowed_files),
+                               verifier_commands=list(text.verifier_commands))
+    assert task_text.render_worker_prompt(text) == real(contract)
+
+
+# -- scope ----------------------------------------------------------------------
+
+def test_every_repo_scope_is_valid_for_p1():
+    from nexus.orchestrator.task_card_scope import protected_path_reason
+    from nexus.orchestrator.task_contract import _normalize_repository_path
+
+    for repo, entries in scope.REPO_SCOPE.items():
+        assert 1 <= len(entries) <= scope.MAX_SCOPE_ENTRIES, repo
+        for entry in entries:
+            assert protected_path_reason(entry) is None, entry
+            assert _normalize_repository_path(entry) == entry
+            assert not scope.is_test_path(entry.rstrip("/") + "/x.py"), entry
+
+
+def test_scope_boundary_rule():
+    assert scope.in_scope("sympy/core/add.py", ["sympy/"])
+    assert not scope.in_scope("sympyx/a.py", ["sympy/"])
+    assert scope.in_scope("src/py.py", ["src/py.py"])
+    assert scope.out_of_scope(["doc/a.rst", "sympy/a.py"], ["sympy/"]) == ["doc/a.rst"]
+    assert scope.is_test_path("sympy/core/tests/test_add.py")
+    assert scope.is_test_path("testing/test_terminal.py")
+    assert not scope.is_test_path("sympy/core/add.py")
+
+
+# -- materializer ---------------------------------------------------------------
+
+def test_materialized_checkout_holds_only_the_base_commit(bank, manifest):
+    (task,) = list(read_jsonl(manifest))
+    checkout = Path(task["base_checkout"])
+    assert _git(checkout, "rev-parse", "HEAD").strip() == bank["base"]
+    assert _git(checkout, "rev-list", "--all").split() == [bank["base"]]
+    assert _git(checkout, "for-each-ref").strip() == ""
+    assert "GOLD FIX" not in _git(checkout, "log", "--all", "--format=%s")
+    assert "a - b" in (checkout / "sympy/core/add.py").read_text()
+    assert not (checkout / "sympy/core/tests/test_add.py").exists()
+    assert task["test_patch_withheld"] is True and task["scope"] == ["sympy/"]
+    saved = json.dumps(task)
+    assert "GOLD" not in saved and "test_add" not in saved and "gold_patch" not in saved
+    prompt = (checkout.parent / "TASK_PROMPT.txt").read_text()
+    assert task_text.render_worker_prompt(task["text"]) == prompt
+
+
+def test_materializer_leaves_the_mirror_untouched(bank, manifest):
+    assert _git(bank["mirror"], "status", "--porcelain").strip() == ""
+    assert _git(bank["mirror"], "worktree", "list").count("\n") == 1
+
+
+def test_materializer_rejects_unknown_repo(bank, tmp_path):
+    row = dict(bank["row"], repo="someone/unknown")
+    with pytest.raises(KeyError):
+        materialize.materialize_task(row, bank["root"] / "repos", tmp_path / "o")
+
+
+# -- arms -----------------------------------------------------------------------
+
+def _edit(workdir: Path, _prompt: str) -> None:
+    (workdir / "sympy/core/add.py").write_text("def add(a, b):\n    return a + b\n")
+    (workdir / "sympy/core/new_helper.py").write_text("X = 1\n")
+    (workdir / "README.md").write_text("changed\n")
+
+
+def test_bare_arm_captures_full_diff_and_scope_facts(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    provider = FakeProvider(edit=_edit)
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5)
+    diff = Path(row["diff_path"]).read_text()
+    assert "+    return a + b" in diff and "new_helper.py" in diff
+    assert row["out_of_scope_paths"] == ["README.md"]
+    assert row["model_calls"] == 0 and row["outcome"] == "OK"
+    assert provider.prompts[0]["prompt"] == task_text.render_worker_prompt(task["text"])
+    assert not (tmp_path / "run" / "work" / row["run_id"]).exists()
+
+
+def test_capture_diff_does_not_touch_the_worktree_index(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    work = tmp_path / "w"
+    materialize.checkout_base(Path(task["base_checkout"]), task["base_commit"], work)
+    (work / "untracked.py").write_text("u = 1\n")
+    assert "untracked.py" in capture_diff(work, task["base_commit"])
+    assert _git(work, "diff", "--cached", "--name-only").strip() == ""
+
+
+def test_noop_arm_is_empty(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    row = arms.run_noop(task, 1, tmp_path / "run")
+    assert row["empty"] and row["model_calls"] == 0 and Path(row["diff_path"]).read_text() == ""
+
+
+# -- NEXUS driver ---------------------------------------------------------------
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8766", "http://localhost:8766/", "https://m4.example:8766"])
+def test_live_gateway_is_refused(url):
+    with pytest.raises(nexus_driver.LiveGatewayRefused):
+        nexus_driver.GatewayClient(url, "t", transport=FakeGateway())
+
+
+def test_token_file_must_be_private(tmp_path):
+    path = tmp_path / "tok"
+    path.write_text("NEXUS_MCP_GATEWAY_TOKEN=secret-xyz\n")
+    os.chmod(path, 0o644)
+    with pytest.raises(PermissionError):
+        nexus_driver.read_token(path)
+    os.chmod(path, 0o600)
+    assert nexus_driver.read_token(path) == "secret-xyz"
+
+
+def _driver(gateway: FakeGateway, token: str = "tok-123") -> nexus_driver.NexusArmDriver:
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", token, transport=gateway)
+    return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None)
+
+
+def test_external_task_is_blocked_until_gateway_supports_it(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway(external_target=False)
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["outcome"] == nexus_driver.OUTCOME_BLOCKED_EXTERNAL
+    assert gateway.calls == []  # no card, no worker
+    assert row["empty"]
+
+
+def test_driver_runs_the_p1_sequence_and_always_cancels(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway(external_target=True)
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    tools = [call["tool"] for call in gateway.calls]
+    assert tools == ["nexus_task_card_create", "nexus_task_card_commit", "nexus_worker_candidate",
+                     "nexus_task_wait", "nexus_task_status", "nexus_task_cancel"]
+    worker = gateway.calls[2]["arguments"]
+    assert worker["what"] == task["text"]["what"] and worker["why"] == task["text"]["why"]
+    assert worker["external_target"] == {"repo_root": str(Path(task["base_checkout"]).resolve()),
+                                         "base_revision": task["base_commit"]}
+    assert row["outcome"] == "OK" and row["empty"]
+
+
+def test_driver_cancels_after_a_worker_error_and_redacts_the_token(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway(worker_error={"error": "agy_pool_busy for tok-123"})
+    row = _driver(gateway, token="tok-123").run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert gateway.calls[-1]["tool"] == "nexus_task_cancel"
+    assert row["infra"] is True and row["outcome"] == "INFRA"
+    for path in (tmp_path / "run").rglob("*"):
+        if path.is_file():
+            assert "tok-123" not in path.read_text(errors="ignore"), path
+
+
+# -- blinding -------------------------------------------------------------------
+
+def test_blinding_separates_the_arm_map(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    arms.run_bare(task, 1, run, FakeProvider(edit=_edit), timeout_seconds=5)
+    arms.run_noop(task, 1, run)
+    _driver(FakeGateway(worker_error={"error": "agy_pool_busy"})).run(task, 1, run, timeout_seconds=5)
+    out, arm_map = tmp_path / "blind", tmp_path / "b6" / "arm_map.json"
+    assert blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map)]) == 0
+    candidates = list(read_jsonl(out / "candidates.jsonl"))
+    assert len(candidates) == 2
+    for item in candidates:
+        assert set(item) == {"opaque_id", "task_id", "diff_sha256"}
+        assert (out / "candidates" / f"{item['opaque_id']}.diff").is_file()
+    text = (out / "candidates.jsonl").read_text()
+    assert "BARE" not in text and "NOOP" not in text and "m2721-" not in text
+    mapping = json.loads(arm_map.read_text())
+    assert stat.S_IMODE(arm_map.stat().st_mode) == 0o600
+    assert sorted(v["arm"] for v in mapping["map"].values()) == ["BARE", "NOOP"]
+    assert [e["arm"] for e in mapping["excluded"]] == ["NEXUS"]
+
+
+def test_blinding_refuses_arm_map_inside_scorer_dir(tmp_path):
+    with pytest.raises(SystemExit):
+        blind.main(["--run-roots", str(tmp_path), "--out", str(tmp_path / "o"),
+                    "--arm-map", str(tmp_path / "o" / "m.json")])
+
+
+# -- dry run --------------------------------------------------------------------
+
+def test_zero_model_dry_run_passes_and_detects_tampering(manifest, tmp_path):
+    report = dryrun.dry_run(manifest, tmp_path / "dry")
+    assert report["status"] == "PASS", report
+    assert report["model_calls"] == 0
+    inputs = [json.loads(p.read_text()) for p in (tmp_path / "dry" / "inputs").glob("*.json")]
+    rows = list(read_jsonl(tmp_path / "dry" / "rows.jsonl"))
+    tampered = [dict(item) for item in inputs]
+    for item in tampered:
+        if item["arm"] == "NEXUS":
+            item["gateway_worker_args"] = dict(item["gateway_worker_args"], why="extra Nexus hint")
+    assert dryrun.check_task(tampered, rows)["status"] == "FAIL"
+
+
+def test_agy_provider_fails_closed_without_the_pool(monkeypatch, tmp_path):
+    """No pool -> INFRA before any agy process starts (the call is never made)."""
+    from scripts.bench.measure_2721.providers import STATUS_INFRA, AgyPoolProvider
+
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", "0")
+    monkeypatch.setenv("NEXUS_AGY_WORKER_MODEL", "gemini-3.8-flash-medium")
+    result = AgyPoolProvider().run(prompt="p", workdir=tmp_path, timeout_seconds=1, run_id="r")
+    assert result.status == STATUS_INFRA and result.model_calls == 0
+    assert result.model == "gemini-3.8-flash-medium"
