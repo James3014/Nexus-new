@@ -2847,6 +2847,7 @@ def test_cancel_succeeds_once_worker_child_is_a_zombie(tmp_path):
     _wait_for_exit_eof(read_fd)
     # Let the child finish exiting so it is a zombie, not still running.
     # Not waitid(WNOWAIT): macOS ignores WNOWAIT and would reap the child.
+    stat = ""
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         stat = subprocess.run(
@@ -2866,7 +2867,8 @@ def test_cancel_succeeds_once_worker_child_is_a_zombie(tmp_path):
         "task_id": "zombie-worker", "status": "SUBMITTED", "attempt_id": "a" * 32,
         "worker_pid": process.pid,
     })
-    assert service._read_state("zombie-worker")["worker_pid"] == process.pid
+    seeded = service._read_state("zombie-worker")
+    assert seeded is not None and seeded["worker_pid"] == process.pid
 
     cancelled = service.cancel_task("zombie-worker")
 
