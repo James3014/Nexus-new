@@ -24,6 +24,8 @@ from typing import Any, Sequence
 SCHEMA = "nexus.canonical_route_facts.v1"
 # The planner's default when the fact is absent; findings/memory hits lower it.
 _ROOT_CAUSE_CONFIDENCE = 1.0
+# Facts the planner turns into a routing tier, and so into a Workforce demand.
+TIER_FACT_KEYS = ("risk_score", "is_cross_module_task", "impact_complexity")
 _CONTRACT_PREFIXES = ("nexus/orchestrator/", "nexus/delivery/", "nexus/contracts/")
 
 # One import graph per (root, HEAD, worktree status) for the life of the process: a full
@@ -176,6 +178,12 @@ def derive_canonical_route_facts(
         features["is_cross_module_task"] = True
     if "is_cross_module_task" in features:
         features["impact_complexity"] = 0.8 if features["is_cross_module_task"] else 0.1
+    # Tier inputs stay out of the planner (#2688 live witness): risk_score and
+    # cross_module move the routing tier, and the tier picks the Workforce demand
+    # (L3 -> main_engineering).  Capability selection still gets the evidence through
+    # codeintel.impact_report_present and the memory/findings hits.
+    for key in TIER_FACT_KEYS:
+        features.pop(key, None)
 
     if files:
         try:
@@ -187,10 +195,11 @@ def derive_canonical_route_facts(
             # analyze_impact's own formula without its scan_index_* reasons: those describe
             # the cache, not the change, so cached and live scans give the same score.
             change_reasons = [r for r in reasons if not r.startswith("scan_index_")]
-            features["risk_score"] = min(100, len(impacted) * 10 + len(change_reasons) * 15)
+            risk_score = min(100, len(impacted) * 10 + len(change_reasons) * 15)
             codeintel.update({
                 "impact_report_present": True,
-                "risk_score": features["risk_score"],
+                "risk_score": risk_score,
+                "cross_module": allowed_files_cross_module(files),
                 "risk_reason": reasons,
                 "impacted_files_count": len(impacted),
                 "governance_contract_impacted": any(

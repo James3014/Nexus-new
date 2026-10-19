@@ -3086,12 +3086,26 @@ _PLANNER_MAINCHAIN_GATE_REASONS = frozenset(
 _PLANNER_MAINCHAIN_GATE_CAPABILITIES = frozenset({"forecast_gate"})
 
 
+def _planner_plan(context: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """The planner's plan from ``context["planner"]``.
+
+    UnifiedRuntime passes the flat plan payload; the Gateway worker path
+    (materialize_selected_capability_evidence) passes the planning-bundle envelope,
+    whose plan is under ``plan_payload`` (#2688 live witness).
+    """
+    planner = context.get("planner")
+    if not isinstance(planner, Mapping):
+        return None
+    payload = planner.get("plan_payload")
+    return payload if isinstance(payload, Mapping) else planner
+
+
 def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> bool:
     """True when the planner's mainchain gate policy explicitly selected ``name``."""
     if name not in _PLANNER_MAINCHAIN_GATE_CAPABILITIES:
         return False
-    planner = context.get("planner")
-    if not isinstance(planner, Mapping):
+    planner = _planner_plan(context)
+    if planner is None:
         return False
     selected = planner.get("selected_capabilities") or []
     if not isinstance(selected, (list, tuple)) or name not in selected:
@@ -3166,8 +3180,8 @@ def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
     if spec is None:
         return ""
     reasons_required, signal_keys = spec
-    planner = context.get("planner")
-    if not isinstance(planner, Mapping):
+    planner = _planner_plan(context)
+    if planner is None:
         return ""
     selected = planner.get("selected_capabilities") or []
     if not isinstance(selected, (list, tuple)) or name not in selected:

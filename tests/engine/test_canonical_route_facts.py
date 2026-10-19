@@ -9,6 +9,7 @@ import pytest
 
 from nexus.engine import canonical_route_facts as facts_mod
 from nexus.engine.canonical_route_facts import (
+    TIER_FACT_KEYS,
     allowed_files_cross_module,
     derive_canonical_route_facts,
 )
@@ -65,11 +66,12 @@ def test_facts_report_impact_risk_and_reverse_importers(tmp_path: Path) -> None:
 
     assert facts["errors"] == []
     features, codeintel = facts["route_features"], facts["codeintel"]
-    assert features["risk_score"] == codeintel["risk_score"] > 0
+    assert codeintel["risk_score"] > 0 and "risk_score" not in features
     assert codeintel["impact_report_present"] is True
     assert codeintel["impacted_files_count"] == 4  # core.py + three importers
     assert features["memory_hits"] == 0 and features["findings_hits"] == 0
-    assert features["is_cross_module_task"] is False
+    assert codeintel["cross_module"] is False
+    assert not set(features) & set(TIER_FACT_KEYS)
     assert 0.0 <= features["adjusted_root_cause_confidence"] <= 1.0
 
 
@@ -86,7 +88,7 @@ def test_facts_never_carry_route_or_selection_keys(tmp_path: Path) -> None:
     )
     keys = [*facts["route_features"], *facts["codeintel"]]
     assert keys and not [key for key in keys if _forbidden_context_key(key)]
-    assert facts["route_features"]["is_cross_module_task"] is True
+    assert facts["codeintel"]["cross_module"] is True
     assert facts["route_features"]["has_hard_signal"] is True
 
 
@@ -104,7 +106,7 @@ def test_a_failing_source_drops_only_its_own_facts(
     )
 
     assert facts["errors"] == ["impact:OSError"]
-    assert "risk_score" not in facts["route_features"] and facts["codeintel"] == {}
+    assert facts["codeintel"] == {}
     assert "memory_hits" in facts["route_features"]
 
 
@@ -139,8 +141,8 @@ def test_seam_kill_switch_restores_the_old_inputs(monkeypatch: pytest.MonkeyPatc
     ) == {"route_features": {}, "codeintel": {}}
 
 
-def test_planner_tiers_a_cross_module_code_task_above_l1_with_the_facts() -> None:
-    """Before #2688 every Gateway task planned as L1_green_lane without codeintel."""
+def test_facts_select_codeintel_without_moving_the_tier_or_workforce_demand() -> None:
+    """#2688 live witness: facts must not move the routing tier (L3 -> main_engineering)."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.engine.canonical_task_seam import REPO_ROOT
@@ -178,13 +180,20 @@ def test_planner_tiers_a_cross_module_code_task_above_l1_with_the_facts() -> Non
         payload = plan_canonical_task_bundle(context, shared_playbook_root=REPO_ROOT).to_dict()[
             "plan_payload"
         ]
-        return payload["signal_snapshot"]["routing_tier"], set(payload["selected_capabilities"])
+        snapshot = payload["signal_snapshot"]
+        return (
+            snapshot["routing_tier"],
+            set(payload["selected_capabilities"]),
+            snapshot["workforce_demands"],
+        )
 
-    before_tier, before = plan({}, {})
-    after_tier, after = plan(facts["route_features"], facts["codeintel"])
+    before_tier, before, before_demands = plan({}, {})
+    after_tier, after, after_demands = plan(facts["route_features"], facts["codeintel"])
 
-    assert before_tier == "L1_green_lane" and "codeintel" not in before
-    assert after_tier != "L1_green_lane" and "codeintel" in after
+    assert facts["codeintel"]["cross_module"] is True and facts["codeintel"]["risk_score"] >= 60
+    assert after_tier == before_tier == "L1_green_lane"
+    assert after_demands == before_demands
+    assert "codeintel" not in before and "codeintel" in after
 
 
 def test_paths_outside_the_root_are_never_read(tmp_path: Path) -> None:
@@ -198,7 +207,7 @@ def test_paths_outside_the_root_are_never_read(tmp_path: Path) -> None:
         allowed_files=["../outside.py", str(tmp_path / "outside.py"), "pkg/../../outside.py"],
     )
 
-    assert facts["codeintel"] == {} and "risk_score" not in facts["route_features"]
+    assert facts["codeintel"] == {}
 
 
 def test_uncommitted_python_changes_invalidate_the_cached_graph(tmp_path: Path) -> None:
@@ -265,7 +274,7 @@ def test_path_aliases_collapse_to_one_file(tmp_path: Path) -> None:
         allowed_files=["pkg/core.py", "pkg/./core.py"],
     )
 
-    assert facts["route_features"]["is_cross_module_task"] is False
+    assert facts["codeintel"]["cross_module"] is False
 
 
 def test_moving_an_import_between_dirty_files_changes_the_graph_key(tmp_path: Path) -> None:
@@ -293,7 +302,7 @@ def test_cached_and_live_impact_give_the_same_risk(tmp_path: Path) -> None:
         repo_root=plain, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
     )
 
-    assert cached["route_features"]["risk_score"] == live["route_features"]["risk_score"]
+    assert cached["codeintel"]["risk_score"] == live["codeintel"]["risk_score"]
 
 
 def test_no_hits_keep_the_planners_default_confidence(tmp_path: Path) -> None:
@@ -323,4 +332,4 @@ def test_cached_and_live_impact_agree_at_the_cap(tmp_path: Path) -> None:
         repo_root=plain, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
     )
 
-    assert cached["route_features"]["risk_score"] == live["route_features"]["risk_score"] == 100
+    assert cached["codeintel"]["risk_score"] == live["codeintel"]["risk_score"] == 100

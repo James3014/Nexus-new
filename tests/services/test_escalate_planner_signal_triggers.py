@@ -308,3 +308,42 @@ def test_xray_executor_leaves_the_scanned_worktree_and_cwd_clean(tmp_path, monke
     ).stdout
     assert status == "", f"xray left files in the candidate worktree: {status}"
     assert not any(elsewhere.rglob("*")), "xray wrote under cwd"
+
+
+def test_triggers_read_the_plan_inside_the_worker_path_envelope() -> None:
+    """#2688 live witness: the Gateway worker path passes the planning-bundle envelope
+    (plan under ``plan_payload``); the trigger read the envelope top level and skipped."""
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
+    flat = _context(
+        "xray", reasons=["deep_scan_or_dependency_signal"], snapshot={"xray_signal": True}
+    )
+    envelope = dict(flat)
+    envelope["planner"] = {
+        "schema": "nexus.canonical_planning_bundle.v1",
+        "plan_hash": "0" * 64,
+        "context": {"task_desc": "x"},
+        "plan_payload": flat["planner"],
+    }
+
+    receipt = invoker(envelope)
+
+    assert calls == ["sprint-abc-s0-a1"]
+    assert receipt["trigger_source"] == f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:xray_signal"
+
+
+def test_envelope_shape_matches_a_real_worker_dispatch_state() -> None:
+    """The envelope keys come from a recorded live task (i2604 worker-dispatch canary)."""
+    from nexus.services.capability_registry import _planner_plan
+
+    envelope = {
+        "canonical_execution_projection": {},
+        "context": {},
+        "plan_hash": "0" * 64,
+        "plan_payload": {"selected_capabilities": ["xray"], "signal_snapshot": {}},
+        "schema": "nexus.canonical_planning_bundle.v1",
+    }
+
+    assert _planner_plan({"planner": envelope}) == envelope["plan_payload"]
+    assert _planner_plan({"planner": envelope["plan_payload"]}) == envelope["plan_payload"]
+    assert _planner_plan({}) is None
