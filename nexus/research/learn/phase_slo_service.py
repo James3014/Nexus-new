@@ -41,7 +41,14 @@ class PhaseSLOService:
             items = [r for r in rows if str(r.get("phase", "")).upper() == phase]
             total = len(items)
             required = sum(1 for r in items if bool((r.get("writeback_policy") or {}).get("required", False)))
-            done = sum(1 for r in items if bool(r.get("writeback_done", False)))
+            # #2702: only required rows count as done (a not-required row that happened to
+            # write back used to inflate the ratio past 1 required-but-missing row).
+            done = sum(
+                1
+                for r in items
+                if bool((r.get("writeback_policy") or {}).get("required", False))
+                and bool(r.get("writeback_done", False))
+            )
             success = sum(1 for r in items if str(r.get("phase_status", "")).upper() == "SUCCESS")
             required_done_ratio = 1.0 if required == 0 else done / required
             success_ratio = 1.0 if total == 0 else success / total
@@ -56,17 +63,31 @@ class PhaseSLOService:
         global_done = sum(v["writeback_done"] for v in per_phase.values())
         global_total = sum(v["total"] for v in per_phase.values())
         global_success = sum(int(round(v["success_ratio"] * v["total"])) for v in per_phase.values())
-        phase_slo_pass = all(v["required_done_ratio"] >= 0.95 and v["success_ratio"] >= 0.5 for v in per_phase.values())
+        # #2702: fail closed.  No rows is NO_DATA (not a pass), only phases that have rows are
+        # judged, and at least one required write-back must exist to call the SLO met
+        # (global_required > 0 implies global_total > 0).
+        observed = [v for v in per_phase.values() if v["total"] > 0]
+        phase_slo_pass = (
+            global_required > 0
+            and all(v["required_done_ratio"] >= 0.95 and v["success_ratio"] >= 0.5 for v in observed)
+        )
+        if global_total == 0:
+            status, reason = "NO_DATA", "no_phase_rows"
+        elif global_required == 0:
+            status, reason = "SUCCESS", "no_required_writeback_rows"
+        else:
+            status, reason = "SUCCESS", "" if phase_slo_pass else "phase_slo_below_threshold"
 
         summary = {
-            "status": "SUCCESS",
+            "status": status,
             "window": max(1, int(window)),
             "phase_slo_pass": bool(phase_slo_pass),
+            "reason": reason,
             "global": {
                 "writeback_required": global_required,
                 "writeback_done": global_done,
-                "required_done_ratio": round(1.0 if global_required == 0 else global_done / global_required, 4),
-                "success_ratio": round(1.0 if global_total == 0 else global_success / global_total, 4)},
+                "required_done_ratio": round(0.0 if global_required == 0 else global_done / global_required, 4),
+                "success_ratio": round(0.0 if global_total == 0 else global_success / global_total, 4)},
             "phases": per_phase,
             "timestamp": datetime.now(timezone.utc).isoformat()}
         self.ctx.phase_slo_summary_path.parent.mkdir(parents=True, exist_ok=True)

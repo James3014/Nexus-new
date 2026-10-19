@@ -51,12 +51,12 @@ class PipelineStagesMixin:
         slo_path = rebase_state_path(  # #2688: same root as LearnModeService
             project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
         )
-        if not slo_path.exists():
+        if not slo_path.exists():  # #2702: no summary is not ready (as in nightshift)
             return {
-                "active": False,
-                "ready": True,
-                "phase_slo_pass": True,
-                "required_done_ratio": 1.0,
+                "active": True,
+                "ready": False,
+                "phase_slo_pass": False,
+                "required_done_ratio": 0.0,
                 "reason": "phase_slo_summary_missing",
                 "path": str(slo_path),
             }
