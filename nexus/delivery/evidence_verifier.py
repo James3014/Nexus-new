@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .anti_drift import AntiDrift
-from .replay_runner import ReplayRunner, check_pytest_args, split_command
+from .replay_runner import (
+    ReplayRunner,
+    check_pytest_args,
+    pytest_arg_is_non_running,
+    split_command,
+)
 
 # Test commands in agent-written evidence are data, never shell text (#2634).
 # Only these test-runner prefixes are executed, argv-only and without a shell;
@@ -31,8 +36,6 @@ TEST_COMMAND_TIMEOUT_SECONDS = 30
 # Base-vs-candidate test-set comparison (#2685): bounded collection, argv only, no shell.
 TEST_SET_COLLECT_TIMEOUT_SECONDS = 60
 TEST_SET_MAX_REPORTED_IDS = 50
-# pytest options that do not run tests: a claim made only of these is not a test-pass claim.
-_NON_RUNNING_PYTEST_FLAGS = frozenset({"--version", "--co", "--collect-only"})
 # pytest options whose value is the next argv item (from the shared allowlist).
 _PYTEST_VALUE_OPTIONS = frozenset(
     {"-k", "-m", "-r", "-p", "--tb", "--maxfail", "--durations", "--capture", "--color", "--deselect"}
@@ -49,14 +52,15 @@ def _allowlisted_prefix(argv: List[str]) -> Optional[Tuple[str, ...]]:
 def _pytest_targets(args: List[str]) -> Optional[List[str]]:
     """Positional test targets of an (already allowlisted) pytest argv tail.
 
-    Returns None when the command does not run tests (``--version``, ``--collect-only``).
+    Returns None when the command does not run tests (``--version``, ``-V``, ``--collect-only``,
+    ``--help``, ``--fixtures``, ``--markers``, ``--setup-plan`` ...).
     """
     targets: List[str] = []
     index = 0
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg in _NON_RUNNING_PYTEST_FLAGS:
+        if pytest_arg_is_non_running(arg):  # --version, -V, -qV, --collect-only, --help ...
             return None
         if not arg.startswith("-"):
             targets.append(arg)

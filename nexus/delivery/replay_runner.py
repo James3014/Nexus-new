@@ -193,7 +193,28 @@ def check_pytest_args(args: List[str], project_root: Path) -> None:
 
 
 # pytest options that make the run execute no tests (#2685).
-_PYTEST_NON_RUNNING_FLAGS = frozenset({"--version", "--co", "--collect-only"})
+_PYTEST_NON_RUNNING_FLAGS = frozenset({
+    "--version", "--co", "--collect-only", "--help", "--fixtures", "--funcargs",
+    "--fixtures-per-test", "--markers", "--setup-plan",
+})
+# Short forms (-V version, -h help), also inside clusters such as -qV.  Scanning a cluster
+# stops at a flag whose value follows (-k/-m/-r/-p), e.g. "-kVh" is "-k Vh".
+_PYTEST_NON_RUNNING_SHORT = frozenset("Vh")
+_PYTEST_SHORT_VALUE_LETTERS = frozenset(_PYTEST_SHORT_VALUE_FLAGS)
+
+
+def pytest_arg_is_non_running(arg: str) -> bool:
+    """True when this single pytest option makes the run execute no tests."""
+    if arg.startswith("--"):
+        return arg.partition("=")[0] in _PYTEST_NON_RUNNING_FLAGS
+    if not arg.startswith("-") or arg == "-":
+        return False
+    for ch in arg[1:]:
+        if ch in _PYTEST_NON_RUNNING_SHORT:
+            return True
+        if ch in _PYTEST_SHORT_VALUE_LETTERS:
+            return False
+    return False
 
 
 def command_runs_tests(argv: List[str]) -> bool:
@@ -209,7 +230,7 @@ def command_runs_tests(argv: List[str]) -> bool:
         rest = rest[2:]
     elif head != "pytest":
         return False
-    return not any(arg in _PYTEST_NON_RUNNING_FLAGS for arg in rest)
+    return not any(pytest_arg_is_non_running(arg) for arg in rest)
 
 
 def split_command(cmd: Any) -> List[str]:

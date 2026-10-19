@@ -503,3 +503,53 @@ def test_l1_refusal_deleted_test_file_named(tmp_path):
         "test_artifacts": [{"command": OK_CMD, "exit_code": 0}]
     })
     assert report["status"] == "FAILED" and report["passed"] is False
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-V"],
+        ["-qV"],
+        ["-h"],
+        ["--help"],
+        ["--fixtures"],
+        ["--markers"],
+        ["--setup-plan", "tests"],
+        ["--version"],
+        ["--co"],
+        ["--collect-only=yes"],
+    ],
+)
+def test_non_running_pytest_options_are_detected(args):
+    # Review r2 (Gemini, Low): short and clustered forms run no tests either.
+    from nexus.delivery.evidence_verifier import _pytest_targets
+    from nexus.delivery.replay_runner import command_runs_tests
+
+    assert command_runs_tests(["python", "-m", "pytest", *args]) is False
+    assert command_runs_tests(["uv", "run", "pytest", *args]) is False
+    assert _pytest_targets(args) is None
+
+
+@pytest.mark.parametrize("args", [["-q", "tests"], ["-kV", "tests"], ["-x", "-rA", "tests"]])
+def test_running_pytest_options_are_not_misdetected(args):
+    # "-kV" is "-k V" (a keyword expression), not -V.
+    from nexus.delivery.replay_runner import command_runs_tests
+
+    assert command_runs_tests(["python", "-m", "pytest", *args]) is True
+
+
+@pytest.mark.parametrize("flag", ["-V", "-qV"])
+def test_delivery_gate_cli_short_version_claim_is_not_verified(tmp_path, flag):
+    code, data = _cli_verify(tmp_path, [{"command": f"python3 -m pytest {flag}", "exit_code": 0}])
+    assert data["status"] != "VERIFIED"
+    assert data["overall_trust"] != "HIGH"
+    assert code != 0
+
+
+def test_verifier_short_version_claim_is_never_high(tmp_path):
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    res = EvidenceVerifier(root).verify(
+        _bundle([{"command": "python -m pytest -V", "exit_code": 0}])
+    )
+    assert res["overall_trust"] not in {"HIGH"}
