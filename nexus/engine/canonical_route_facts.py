@@ -181,16 +181,17 @@ def derive_canonical_route_facts(
         try:
             from nexus.services.codeintel.impact_service import analyze_impact
 
-            impact = analyze_impact(root, files, index_path=_graph_index(root)).to_dict()
-            impacted = list(impact.get("impacted_files") or [])
+            impact = analyze_impact(root, files, index_path=_graph_index(root))
+            impacted = list(impact.impacted_files)
+            reasons = list(impact.risk_reason)
             # analyze_impact adds 15 for "scan_index_used"; that reflects the cache, not
             # the change, so the score is the same with or without the cached graph.
-            index_bonus = 15 if "scan_index_used" in (impact.get("risk_reason") or []) else 0
-            features["risk_score"] = max(0, int(impact.get("risk_score") or 0) - index_bonus)
+            index_bonus = 15 if "scan_index_used" in reasons else 0
+            features["risk_score"] = max(0, int(impact.risk_score) - index_bonus)
             codeintel.update({
                 "impact_report_present": True,
                 "risk_score": features["risk_score"],
-                "risk_reason": list(impact.get("risk_reason") or []),
+                "risk_reason": reasons,
                 "impacted_files_count": len(impacted),
                 "governance_contract_impacted": any(
                     str(path).startswith(_CONTRACT_PREFIXES) for path in impacted
