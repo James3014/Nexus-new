@@ -22,6 +22,7 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     validate_owner_inline_contract,
 )
+from nexus.contracts.measure_dir_scope import dir_scope_enabled, split_dir_scope
 from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 
 _TRUSTED_TOOL_MANIFEST_HASH: Optional[str] = None
@@ -424,6 +425,20 @@ def _repo_relative(path: str, *, root: Path) -> Path:
     return resolved
 
 
+def _bounded_path(path: str, *, root: Path) -> str:
+    """The envelope path as validated under ``root``.
+
+    On a measurement Gateway with ``NEXUS_MEASURE_DIR_SCOPE=1`` (#2721) a
+    ``dir/`` scope keeps its trailing ``/`` so it matches the request entry;
+    the same resolve/containment check as for a file still runs.  Otherwise
+    unchanged.
+    """
+    bounded = str(_repo_relative(path, root=root).relative_to(root.resolve()))
+    if dir_scope_enabled() and split_dir_scope(path) is not None and bounded != ".":
+        return bounded + "/"
+    return bounded
+
+
 def _head(root: Path) -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=3, check=False,
@@ -483,7 +498,7 @@ def pre_action_guard(
     if action.approval_scope == ApprovalScope.REJECT:
         raise LifecycleGuardError("APPROVAL_REJECTED", "approval scope explicitly rejects this action")
 
-    bounded_paths = {str(_repo_relative(path, root=canonical_root).relative_to(canonical_root.resolve())) for path in action.allowed_paths}
+    bounded_paths = {_bounded_path(path, root=canonical_root) for path in action.allowed_paths}
     if request is not None:
         requested_paths = {str(path).strip() for path in request.get("allowed_files", ()) if str(path).strip()}
         unknown = sorted(requested_paths - bounded_paths)

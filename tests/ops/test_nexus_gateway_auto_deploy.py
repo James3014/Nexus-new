@@ -7567,6 +7567,7 @@ def test_measurement_env_list_is_one_constant_of_valid_names() -> None:
         "NEXUS_LEARNING_WRITEBACK",
         "NEXUS_STATE_READ_ONLY",
         "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
+        "NEXUS_MEASURE_DIR_SCOPE",  # #2721 dir/ scope
     } <= set(names)
     guard = ad.measurement_env_guard()
     for name in names:
