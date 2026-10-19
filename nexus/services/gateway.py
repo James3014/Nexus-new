@@ -1368,9 +1368,11 @@ class BattlesuitGateway:
         if str(model_name).startswith("gemma4"):
             return "chat"
         try:
-            from nexus.engine.local_model_policy import LocalModelPolicy
+            # get_api_type lives on ModelProfile (the profile SSoT), not on
+            # LocalModelPolicy; calling it on the policy always fell back (#2662).
+            from nexus.engine.local_model_policy import ModelProfile
 
-            api_type = str(LocalModelPolicy.get_api_type(model_name) or "").strip().lower()
+            api_type = str(ModelProfile.get_api_type(model_name) or "").strip().lower()
             if api_type in {"generate", "chat"}:
                 return api_type
         except Exception as exc:
