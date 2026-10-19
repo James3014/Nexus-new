@@ -1059,7 +1059,7 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.2"
+    assert ros.SCORER_VERSION == "1.2.3"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
@@ -2029,6 +2029,16 @@ def _leak_tree(tmp_path: Path, nbytes: int) -> Path:
 
 def _runner(tmp_path: Path) -> ros.PytestRunner:
     return ros.PytestRunner(tmp_path / "scratch", timeout=300, log=lambda m: None)
+
+
+def test_node_ids_are_relative_to_the_tree_inside_an_outer_pytest_repo(tmp_path):
+    outer = tmp_path / "outer"
+    _write(outer, {"pytest.ini": "[pytest]\n"})
+    tree = outer / "work" / "tree"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = ros.PytestRunner(outer / "work" / "scratch", timeout=300, log=lambda m: None)
+    assert runner.run(env, tree, "t", "tests", (), 0).outcomes == {"tests.test_a::test_a": ros.PASS}
 
 
 def test_scratch_tmp_cap_run_is_not_cached(tmp_path, monkeypatch):

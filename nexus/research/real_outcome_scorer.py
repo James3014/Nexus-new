@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.2"
+SCORER_VERSION = "1.2.3"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -1193,6 +1193,9 @@ class PytestRunner:
             "-q",
             "-p",
             "no:cacheprovider",
+            # Node ids are relative to the tree even when --work sits inside another
+            # repository whose pytest.ini would otherwise become the rootdir.
+            f"--rootdir={tree}",
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
