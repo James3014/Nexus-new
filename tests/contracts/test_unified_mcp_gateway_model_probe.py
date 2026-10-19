@@ -22,6 +22,9 @@ import pytest
 from nexus.orchestrator import unified_mcp_gateway as gateway_module
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.unified_mcp_gateway import GatewayInputError, UnifiedMCPGateway
+from nexus.orchestrator.unified_mcp_gateway_parts.model_probe import (
+    MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS,
+)
 from nexus.services.agy_account_pool import AgyAccountPoolBusyError, AgyAccountPoolExhaustedError
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -319,7 +322,11 @@ def test_acquire_agy_probe_claim_uses_pool_manager_and_family(gateway, pool) -> 
     (coordinator,) = _Coordinator.instances
     assert coordinator.manager is pool
     assert coordinator.calls == [
-        {"consumer_id": "model-probe:t1", "wait_timeout": 0.0, "model_family": "gemini"}
+        {
+            "consumer_id": "model-probe:t1",
+            "wait_timeout": MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS,
+            "model_family": "gemini",
+        }
     ]
 
 

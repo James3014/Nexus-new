@@ -57,9 +57,35 @@ class _AssistResponseMixin(_ResponseBase):
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
+        # #2716: a model-probe submit may wait for an Agy account while its
+        # SUBMITTED record is on disk.  Its own thread owns that record until
+        # launch; check before reading so a finished submit is read in full.
+        with self._assist_lock:
+            inflight_ids = getattr(self, "_model_probe_inflight_ids", None)
+            submit_in_flight = bool(inflight_ids) and task_id in inflight_ids
         job = self._assist_read(task_id)
         if job is None:
             return None
+        if submit_in_flight and job.get("status") == "SUBMITTED":
+            return job
+        if (
+            job.get("status") == "SUBMITTED"
+            and job.get("account_pool_wait_started_at")
+            and not job.get("account_alias_hash")
+            and not job.get("pid")
+        ):
+            # The submit that owned this record ended (e.g. a Gateway restart)
+            # while it waited for an account: no account was leased and no
+            # provider was started, so the probe failed without any effect.
+            job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": "AGY_ACCOUNT_POOL_WAIT_INTERRUPTED",
+                "provider_error": "Agy account pool wait ended before a model probe launched",
+                "model_response_verified": False,
+                "process_cleanup": True,
+            })
+            return self._assist_write(job)
         if job.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
             return job
         with self._assist_lock:
@@ -412,6 +438,8 @@ class _AssistResponseMixin(_ResponseBase):
             "account_lease_id_hash": job.get("account_lease_id_hash"),
             "account_lease_released": job.get("account_lease_released"),
             "account_lease_cleanup_status": job.get("account_lease_cleanup_status"),
+            "account_pool_wait_budget_seconds": job.get("account_pool_wait_budget_seconds"),
+            "account_pool_wait_ms": job.get("account_pool_wait_ms"),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
             "stream_flush_status": job.get("stream_flush_status", "not_observed"),

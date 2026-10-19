@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import math
 import os
 import shutil
 import signal
@@ -41,6 +42,28 @@ if TYPE_CHECKING:
     )
 else:
     _ModelProbeBase = object
+
+
+# #2716: an Agy model probe waits a bounded time for a free account instead of
+# failing on the first busy pass.  The wait runs on the submitting request
+# thread (the Gateway uses ThreadingHTTPServer), so it is capped.
+MODEL_PROBE_POOL_WAIT_ENV = "NEXUS_MODEL_PROBE_POOL_WAIT_SECONDS"
+MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS = 90.0
+MODEL_PROBE_POOL_WAIT_MAX_SECONDS = 300.0
+
+
+def model_probe_pool_wait_seconds() -> float:
+    """Bounded account-pool wait for one Agy model probe (env override, clamped)."""
+    raw = os.getenv(MODEL_PROBE_POOL_WAIT_ENV, "").strip()
+    if not raw:
+        return MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS
+    if not math.isfinite(value):
+        return MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS
+    return min(max(value, 0.0), MODEL_PROBE_POOL_WAIT_MAX_SECONDS)
 
 
 def _gateway():
@@ -182,13 +205,22 @@ class _ModelProbeMixin(_ModelProbeBase):
             return "claude_gpt"
         raise _gateway().GatewayInputError("AGY_MODEL_FAMILY_UNSUPPORTED")
 
-    def _acquire_agy_probe_claim(self, *, task_id: str, model: str):
+    def _model_probe_inflight(self) -> set[str]:
+        """Task ids whose probe submit is still between job write and launch (#2716)."""
+        with self._assist_lock:
+            inflight = getattr(self, "_model_probe_inflight_ids", None)
+            if inflight is None:
+                inflight = set()
+                self._model_probe_inflight_ids = inflight
+            return inflight
+
+    def _acquire_agy_probe_claim(self, *, task_id: str, model: str, wait_timeout: Optional[float] = None):
         manager = _gateway().get_account_pool_manager()
         coordinator = _gateway().CrossProcessLeaseCoordinator(manager)
         try:
             return coordinator.acquire_claim(
                 consumer_id=f"model-probe:{task_id}",
-                wait_timeout=0.0,
+                wait_timeout=model_probe_pool_wait_seconds() if wait_timeout is None else wait_timeout,
                 model_family=self._agy_probe_model_family(model),
             )
         except AgyAccountPoolBusyError as exc:
@@ -225,6 +257,19 @@ class _ModelProbeMixin(_ModelProbeBase):
         job["reconciliation_required"] = True
 
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        registered: list[str] = []
+        try:
+            return self._model_probe_submit_guarded(arguments, registered)
+        finally:
+            # Leave the in-flight set only after the final job record is written,
+            # so a concurrent refresh never projects a stale pre-launch record.
+            if registered:
+                inflight = self._model_probe_inflight()
+                with self._assist_lock:
+                    for registered_task_id in registered:
+                        inflight.discard(registered_task_id)
+
+    def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[str]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         metadata, executable = self._provider_executable(provider)
         if not metadata:
@@ -283,6 +328,12 @@ class _ModelProbeMixin(_ModelProbeBase):
         root = self._assist_root()
         stdout_path = root / f"{job_id}.stdout"
         stderr_path = root / f"{job_id}.stderr"
+        inflight = self._model_probe_inflight()
+        with self._assist_lock:
+            if task_id in inflight:
+                raise _gateway().GatewayInputError("MODEL_PROBE_SUBMIT_IN_PROGRESS")
+            inflight.add(task_id)
+            registered.append(task_id)
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
         command = self._assist_command(
@@ -389,9 +440,15 @@ class _ModelProbeMixin(_ModelProbeBase):
         provider_env = None
         account_claim = None
         if provider == "agy":
+            pool_wait_budget = model_probe_pool_wait_seconds()
+            job["account_pool_wait_budget_seconds"] = pool_wait_budget
+            job["account_pool_wait_started_at"] = self._utc_now()
+            self._assist_write(job)
+            pool_wait_started = time.monotonic()
             try:
-                account_claim = self._acquire_agy_probe_claim(task_id=task_id, model=model)
+                account_claim = self._acquire_agy_probe_claim(task_id=task_id, model=model, wait_timeout=pool_wait_budget)
             except _gateway().GatewayInputError as exc:
+                job["account_pool_wait_ms"] = int((time.monotonic() - pool_wait_started) * 1000)
                 shutil.rmtree(workspace_root, ignore_errors=True)
                 job.update({
                     "status": "FAILED",
@@ -402,6 +459,7 @@ class _ModelProbeMixin(_ModelProbeBase):
                     "process_cleanup": True,
                 })
                 return self._assist_response(self._assist_write(job), operation="submit")
+            job["account_pool_wait_ms"] = int((time.monotonic() - pool_wait_started) * 1000)
             provider_env = dict(account_claim.lease.execution_env)
             job["account_alias_hash"] = account_claim.account_alias_hash
             job["account_lease_id_hash"] = account_claim.lease_id_hash
