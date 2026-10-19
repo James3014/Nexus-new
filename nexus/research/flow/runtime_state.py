@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nexus.core.state_root import persistent_state_root
+
 
 @dataclass(frozen=True)
 class ParsedTuningKnobs:
@@ -46,7 +48,7 @@ def parse_tuning_knobs(payload: dict[str, Any] | None) -> ParsedTuningKnobs:
 
 
 def read_belief_confidence_fast(repo_root: Path) -> float:
-    path = (repo_root / ".nexus" / "belief_state.json").resolve()
+    path = (persistent_state_root(repo_root) / ".nexus" / "belief_state.json").resolve()
     if not path.exists():
         return 1.0
     try:
@@ -77,7 +79,9 @@ def read_phase_slo_summary_fast(repo_root: Path) -> dict[str, Any]:
         "status": "UNAVAILABLE",
         "reason": "phase_slo_summary_missing",
     }
-    path = (repo_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").resolve()
+    path = (
+        persistent_state_root(repo_root) / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    ).resolve()
     if not path.exists():
         return missing
     try:

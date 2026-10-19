@@ -1016,7 +1016,9 @@ def persist_learning_episode(
             qualification=dict(qualification or {}),
         )
         if append is not None:
-            path = canonical_learning_episode_path(project_root)
+            from nexus.core.state_root import persistent_state_root
+
+            path = canonical_learning_episode_path(persistent_state_root(project_root))
             result = append(path, episode)
             # append_learning_episode intentionally returns True for an
             # existing episode: duplicate is an idempotent success.

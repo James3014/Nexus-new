@@ -2161,9 +2161,11 @@ def run_auto_flow(
         "model_training": apply_autodata_quality_gate(project_model_training(learning_experience), autodata_quality_row),
         "dual_learning_decision": asdict(learning_decision),
     }
+    from nexus.core.state_root import persistent_state_root, rebase_state_path
+
     if learning_decision.nexus_action == "PROMOTE_NEXUS":
         promoted_policy = save_promoted_learning_policy(
-            repo_root / DEFAULT_PROMOTED_POLICY_PATH,
+            rebase_state_path(repo_root / DEFAULT_PROMOTED_POLICY_PATH),  # #2688
             [learning_experience],
         )
         nexus_usage_trace["learning_projection"]["promoted_policy"] = promoted_policy
@@ -2191,7 +2193,7 @@ def run_auto_flow(
                 trust_mismatch=bool(nexus_usage_trace.get("trust_mismatch", False)),
                 receipts=nexus_usage_trace["capability_receipts"],
             ),
-            project_root=repo_root,
+            project_root=persistent_state_root(repo_root),
         )
     except (OSError, ValueError, TypeError) as exc:
         outcome_memory = {

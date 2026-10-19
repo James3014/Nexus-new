@@ -44,7 +44,27 @@ class CapabilitySignalSet:
         belief_confidence = 0.7
         if belief_engine and hasattr(belief_engine, "get_confidence"):
             try:
-                belief_confidence = float(belief_engine.get_confidence(task_id, assumption=task_desc))
+                target_files = context.get("target_files") or []
+                target_file = str(
+                    context.get("target_file")
+                    or (
+                        target_files[0]
+                        if isinstance(target_files, (list, tuple)) and target_files
+                        else ""
+                    )
+                    or ""
+                ).strip()
+                # Shared per-file repair key (#2688); old call shape when there is no target.
+                if target_file:
+                    belief_confidence = float(
+                        belief_engine.get_confidence(
+                            task_id, assumption=task_desc, target_file=target_file
+                        )
+                    )
+                else:
+                    belief_confidence = float(
+                        belief_engine.get_confidence(task_id, assumption=task_desc)
+                    )
             except Exception:
                 belief_confidence = 0.7
 

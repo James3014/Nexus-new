@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from nexus.core.state_root import persistent_state_root
+
 KeywordExtractor = Callable[[str], list[str]]
 AUTO_FLOW_HISTORY_RELATIVE_PATH = Path(".nexus") / "reports" / "research" / "auto-flow-history.json"
 
 
 def auto_flow_history_path(repo_root: Path) -> Path:
-    return (repo_root / AUTO_FLOW_HISTORY_RELATIVE_PATH).resolve()
+    return (persistent_state_root(repo_root) / AUTO_FLOW_HISTORY_RELATIVE_PATH).resolve()
 
 
 def auto_flow_key(target_file: str, test_file: str) -> str:

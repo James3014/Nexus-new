@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from nexus.core.state_root import persistent_state_root, rebase_state_path
 from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 from nexus.services.local_heal.lesson_embedding import embed_text
 
@@ -347,8 +348,12 @@ class LocalJsonlLessonStore:
     backend = "local_jsonl"
 
     def __init__(self, path: Path | None = None) -> None:
-        root = Path(__file__).resolve().parents[3]
-        self.path = path or root / ".nexus/reports/learn/learning_closure.jsonl"
+        root = persistent_state_root(Path(__file__).resolve().parents[3])  # #2688
+        self.path = (
+            rebase_state_path(path)
+            if path
+            else root / ".nexus/reports/learn/learning_closure.jsonl"
+        )
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -408,7 +413,10 @@ class FindingsMemoryLessonStore:
     """Read local-heal lessons from the existing structured FindingsMemoryStore."""
 
     def __init__(self, project_root: Path | None = None, findings_store: Any | None = None) -> None:
-        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        # Same root rule as the LearningClosureBridge writer (#2688).
+        self.project_root = persistent_state_root(
+            project_root or Path(__file__).resolve().parents[3]
+        )
         self.findings_store = findings_store
         self.last_error: str = ""
         self.backend = "findings_memory"
@@ -473,7 +481,9 @@ class MemoryRepositoryLessonStore:
     """
 
     def __init__(self, project_root: Path | None = None, repository: Any | None = None) -> None:
-        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.project_root = persistent_state_root(
+            project_root or Path(__file__).resolve().parents[3]
+        )
         self.repository = repository
         self.last_error: str = ""
         self.backend = "lancedb"
@@ -529,7 +539,9 @@ class CanonicalEpisodicMemoryLessonStore:
     backend = "canonical_episodic_memory"
 
     def __init__(self, project_root: Path | None = None) -> None:
-        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.project_root = persistent_state_root(
+            project_root or Path(__file__).resolve().parents[3]
+        )
         self.last_error: str = ""
         self.last_metadata: dict[str, Any] = {}
 
@@ -746,7 +758,9 @@ class CanonicalLessonStore:
 
     def __init__(self, *, project_root: Path | None = None, path: Path | None = None) -> None:
         self.project_root = (
-            Path(project_root) if project_root is not None else Path(__file__).resolve().parents[3]
+            persistent_state_root(Path(project_root))
+            if project_root is not None
+            else persistent_state_root(Path(__file__).resolve().parents[3])
         )
         self.path = Path(path) if path is not None else None
         self.last_error = ""

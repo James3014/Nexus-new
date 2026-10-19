@@ -19,6 +19,7 @@ from nexus.core.skill_outcomes import (
     append_skill_outcome_event,
     build_outcome_event,
 )
+from nexus.core.state_root import persistent_state_root
 from nexus.learning.learning_closure_effectiveness import (
     append_learning_episode,
     canonical_learning_episode_path,
@@ -79,7 +80,10 @@ class LearnClaim:
 class LearnModeService:
     def __init__(self, project_root: Path, run_root: Path | None = None):
         self.project_root = Path(project_root)
-        self._run_root = Path(run_root) if run_root is not None else self.project_root
+        # project_root still resolves source paths; state follows NEXUS_STATE_ROOT (#2688).
+        self._run_root = (
+            Path(run_root) if run_root is not None else persistent_state_root(self.project_root)
+        )
         self.knowledge_dir = self._run_root / ".nexus" / "knowledge"
         self.raw_dir = self.knowledge_dir / "raw_sources"
         self.claims_path = self.knowledge_dir / "learn_claims.jsonl"
@@ -560,7 +564,9 @@ class LearnModeService:
             "stages": episode["stages"],
             "learning_write_succeeded": write_ok,
         })
-        if not append_learning_episode(canonical_learning_episode_path(self.project_root), episode):
+        if not append_learning_episode(
+            canonical_learning_episode_path(persistent_state_root(self.project_root)), episode
+        ):
             closure["learning_episode_write_failed"] = True
         self.closure_log.parent.mkdir(parents=True, exist_ok=True)
         with self.closure_log.open("a", encoding="utf-8") as f:

@@ -8,6 +8,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from nexus.core.state_root import (
+    configured_state_root,
+    persistent_state_root,
+    rebase_state_path,
+)
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text, post_local_json
 from nexus.services.local_heal.memory_trace import MemoryTrace
@@ -351,8 +356,16 @@ class LearningClosureBridge:
         enable_findings: bool = True,
     ) -> None:
         root = Path(__file__).resolve().parents[3]
-        self.project_root = project_root or root
-        self.path = path or root / ".nexus/reports/learn/learning_closure.jsonl"
+        # #2688: one root for the JSONL, findings and episodes once NEXUS_STATE_ROOT is set;
+        # unset keeps the old split (JSONL beside the code, the rest under project_root).
+        self.project_root = persistent_state_root(project_root or root)
+        jsonl_root = self.project_root if configured_state_root() is not None else root
+        # Explicit paths use the same rule as LocalJsonlLessonStore, its reader.
+        self.path = (
+            rebase_state_path(path)
+            if path
+            else jsonl_root / ".nexus/reports/learn/learning_closure.jsonl"
+        )
         self.findings_store = findings_store
         self.enable_findings = enable_findings
 

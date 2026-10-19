@@ -27,6 +27,8 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
+from nexus.core.state_root import persistent_state_root
+
 MEMORY_DB_PATH_ENV = "NEXUS_MEMORY_DB_PATH"
 
 KNOWLEDGE = "knowledge"
@@ -63,7 +65,7 @@ def resolve_lancedb_root(
         override = os.environ.get(MEMORY_DB_PATH_ENV)
         if override:
             return Path(override)
-    root = Path(project_root)
+    root = Path(persistent_state_root(project_root))  # #2688
     if kind == TENANT_JSONL:
         if not tenant_id:
             raise ValueError("tenant_id is required for the TENANT_JSONL root")

@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, List
 
+from nexus.core.state_root import persistent_state_root
 from nexus.evidence.abort_receipt import write_abort_receipt
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.context_guard import ContextGuard
@@ -400,7 +401,7 @@ class HealOrchestrator:
     def _learning_closure_path() -> Path:
         """Learning-closure JSONL read by the C6AB repair-pattern retrieval."""
         return (
-            Path(__file__).resolve().parents[3]
+            persistent_state_root(Path(__file__).resolve().parents[3])  # #2688
             / ".nexus"
             / "reports"
             / "learn"
@@ -1054,11 +1055,18 @@ class HealOrchestrator:
         try:
             from nexus.core.belief_engine import BeliefEngine
             from nexus.services.local_heal.belief_budget_policy import resolve_retry_budget
+            from nexus.services.local_heal.reasoning_advisory_bridge import repair_target_file
 
             task_id = str(getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""))
             assumption = f"local_heal:{task_id}:repair_outcome"
             engine = BeliefEngine()
-            belief_before = float(engine.get_confidence(task_id, assumption))
+            target_file = repair_target_file(ctx.op)
+            if target_file:
+                belief_before = float(
+                    engine.get_confidence(task_id, assumption, target_file=target_file)
+                )
+            else:
+                belief_before = float(engine.get_confidence(task_id, assumption))
 
             # Compute uncertainty_delta from existing trace or fresh calculation
             existing_trace = getattr(ctx.op, "_belief_trace", None)

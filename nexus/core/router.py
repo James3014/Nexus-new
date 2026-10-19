@@ -1,16 +1,18 @@
+import hashlib
 import json
 import logging
-import hashlib
 import os
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 from pathlib import Path
-from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+from typing import Any, Dict, List, Optional
+
+from nexus.core.state_root import persistent_state_root
 from nexus.learning.learning_closure_effectiveness import (
-    normalize_learning_episode,
     append_learning_episode,
     canonical_learning_episode_path,
+    normalize_learning_episode,
 )
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +334,8 @@ class SkillsRouter:
             else "FAILED" if receipt_dicts
             else "UNVERIFIED"
         )
-        learning_log = canonical_learning_episode_path(Path(self.project_root))
+        state_root = persistent_state_root(Path(self.project_root))  # #2688
+        learning_log = canonical_learning_episode_path(state_root)
         episode = normalize_learning_episode(
             task_id=str(raw_task_id),
             attempt_id=str(context.get("attempt_id") or "router"),
@@ -355,7 +358,7 @@ class SkillsRouter:
         if not episode_written:
             logger.warning("[OutcomeMemory] canonical learning episode write failed; not a learning success")
         try:
-            projection_log = Path(self.project_root) / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+            projection_log = state_root / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
             projection_log.parent.mkdir(parents=True, exist_ok=True)
             with open(projection_log, "a", encoding="utf-8") as handle:
                 for cap_receipt in receipts:
@@ -387,7 +390,7 @@ class SkillsRouter:
                     plan=plan,
                     receipts=receipts,
                 )
-                OutcomeMemoryManager.save_episode_and_tune_sync(episode, project_root=Path(self.project_root))
+                OutcomeMemoryManager.save_episode_and_tune_sync(episode, project_root=state_root)
             except Exception as e:
                 logger.debug("[OutcomeMemory] Learning loop write failed: %s", e)
 

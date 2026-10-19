@@ -46,7 +46,11 @@ class PipelineStagesMixin:
 
     def _load_learn_phase_slo_guard(self, ctx: PipelineContextProtocol) -> Dict[str, Any]:
         project_root = Path(getattr(self.engine, "project_root", "."))
-        slo_path = project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        from nexus.core.state_root import rebase_state_path
+
+        slo_path = rebase_state_path(  # #2688: same root as LearnModeService
+            project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        )
         if not slo_path.exists():
             return {
                 "active": False,

@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping
 from nexus.contracts.fail_closed import Decision, decide
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
 from nexus.core.layer_ports import registered_ports, resolve_port
+from nexus.core.state_root import persistent_state_root
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +429,8 @@ def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str
     """Project-level learn store: the directory the ``learn:*`` CLI reads.
 
     ``LearnModeService(<project>)`` keeps claims and the phase ledger under
-    ``<project>/.nexus``.  The project is the runtime-supplied ``workspace_root`` (else
+    ``<state root>/.nexus``, where the state root is ``<project>`` unless
+    ``NEXUS_STATE_ROOT`` moves a per-deploy project (#2688).  The project is the runtime-supplied ``workspace_root`` (else
     ``project_root``, else the cwd).  An explicit ``run_root`` / ``runtime_root`` constraint
     still isolates the run (tests); without one the executor must not invent a fresh,
     empty per-task directory, because the report would then never see the project data.
@@ -440,7 +442,8 @@ def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str
     project_root = Path(raw_root).expanduser().resolve() if raw_root else Path.cwd().resolve()
     run_id = str(constraints.get("run_id") or plan.task_id)
     raw_run = constraints.get("run_root") or constraints.get("runtime_root")
-    run_root = Path(str(raw_run)) if raw_run else project_root
+    # Same state root LearnModeService(project_root) picks without a run_root (#2688).
+    run_root = Path(str(raw_run)) if raw_run else persistent_state_root(project_root)
     return project_root, run_root, run_id
 
 
@@ -1010,12 +1013,15 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             or ""
         )
         task_id = str(plan.task_id or "")
+        # Shared per-file key the repair path writes (#2688).
+        target_file = _first_task_file(plan.constraints or {})
+        target_kwargs = {"target_file": target_file} if target_file else {}
         # Prefer assess_confidence; fall back to get_confidence only if present.
         if hasattr(inst, "assess_confidence") and callable(getattr(inst, "assess_confidence")):
-            raw = inst.assess_confidence(task_id, assumption)
+            raw = inst.assess_confidence(task_id, assumption, **target_kwargs)
             _action = "assess_confidence"
         elif hasattr(inst, "get_confidence") and callable(getattr(inst, "get_confidence")):
-            raw = inst.get_confidence(task_id, assumption)
+            raw = inst.get_confidence(task_id, assumption, **target_kwargs)
             _action = "assess_confidence"  # report canonical action name
         else:
             elapsed = int((time.monotonic() - start) * 1000)
@@ -2179,6 +2185,7 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                     physical_callable="nexus.core.memory_manager.ProjectMemoryManager.search",
                 ),
             )
+        root = persistent_state_root(root)  # #2688: stores outlive the deploy dir
         inst = cls(root)
         hits = _memory_retrieve(inst, query, limit=5)
         findings_hits = _memory_findings_hits(root, query, limit=5)
@@ -4135,13 +4142,14 @@ def _exec_meta_opt(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             ],
             ab_lift_value=float(episode.get("ab_lift_value") or 0.0),
         )
+        state_root = persistent_state_root(workspace_root)  # #2688
         result = OutcomeMemoryManager.save_episode_and_tune_sync(
             record,
-            project_root=workspace_root,
+            project_root=state_root,
         )
         policy = result.get("policy") if isinstance(result.get("policy"), Mapping) else {}
-        policy_path = workspace_root / OutcomeMemoryManager.POLICY_PATH
-        storage_path = workspace_root / OutcomeMemoryManager.STORAGE_PATH
+        policy_path = state_root / OutcomeMemoryManager.POLICY_PATH
+        storage_path = state_root / OutcomeMemoryManager.STORAGE_PATH
         ok = bool(
             result.get("status") == "PASS"
             and policy.get("status") == "PASS"

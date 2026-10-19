@@ -1,9 +1,15 @@
+import logging
+import posixpath
+import re
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 from nexus.core.belief_contracts import AuditOutcome
-from nexus.infrastructure.state_json_store import StateJsonStore
+from nexus.core.state_root import rebase_state_path
+from nexus.infrastructure.state_json_store import StateJsonStore, StateMergeError
 from nexus.telemetry.tracer import NexusTracer
+
+logger = logging.getLogger(__name__)
 
 
 def blend_semantic_confidence(audit_confidence: float, semantic_confidence: float, *, semantic_weight: float = 0.3) -> float:
@@ -13,10 +19,32 @@ def blend_semantic_confidence(audit_confidence: float, semantic_confidence: floa
     weight = max(0.0, min(1.0, float(semantic_weight)))
     return round((audit * (1.0 - weight)) + (semantic * weight), 4)
 
+def repair_target_key(target_file: str) -> str:
+    """Shared belief key for repair outcomes on one target file (#2688).
+
+    Writers keyed outcomes by ``local_heal:<task>:repair_outcome``; readers ask with
+    free task text, so they never found them.  A key derived from the target file is
+    stable across tasks and known to both sides.  Only a normalized repo-relative path
+    gets a key; empty, absolute or ``..`` paths get "" (no cross-project influence).
+    """
+    text = str(target_file or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        return ""
+    text = posixpath.normpath(text)
+    if text in ("", ".") or text == ".." or text.startswith("../"):
+        return ""
+    return f"repair_outcome:file:{text}"
+
+
 class BeliefEngine:
     """維護當前的邏輯假設與信心度 (Subjective Trust)。"""
-    def __init__(self, state_file: Path = Path(".nexus/belief_state.json"), state_store: StateJsonStore | None = None):
-        self.state_file = state_file
+
+    def __init__(self, state_file: Path | None = None, state_store: StateJsonStore | None = None):
+        if state_file is None:
+            state_file = Path(".nexus/belief_state.json")
+        # <deploy root>/.nexus/belief_state.json follows NEXUS_STATE_ROOT; unset or any
+        # other root keeps the given path (#2688).
+        self.state_file = rebase_state_path(state_file)
         self.state_store = state_store or StateJsonStore()
         self.beliefs: Dict[str, Any] = {}
         self._load()
@@ -24,17 +52,33 @@ class BeliefEngine:
     def _load(self):
         self.beliefs = self.state_store.read_dict(self.state_file)
 
-    def _persist(self) -> None:
-        self.state_store.write_dict(self.state_file, self.beliefs)
+    def _persist(self, key: str | None = None) -> None:
+        merge = getattr(self.state_store, "merge_dict", None)
+        if key is None or merge is None:
+            self.state_store.write_dict(self.state_file, self.beliefs)
+            return
+        # Merge only the key we changed, under the file lock, so a concurrent engine's
+        # keys are not lost (#2688 review).  An unreadable file is left untouched.
+        try:
+            self.beliefs = merge(self.state_file, {key: self.beliefs[key]})
+        except StateMergeError as exc:
+            logger.warning("belief update not persisted: %s", exc)
 
-    def assess_confidence(self, task_id: str, assumption: str = "") -> float:
-        """根據歷史證據評估信心。"""
+    def assess_confidence(self, task_id: str, assumption: str = "", target_file: str = "") -> float:
+        """根據歷史證據評估信心。
+
+        Lookup order: the exact ``assumption or task_id`` key, then the shared
+        ``repair_target_key(target_file)`` written by the repair path; else 0.7.
+        """
         # 簡單模型：若有歷史相同假設則提高，否則基準為 0.7
         key = assumption or task_id
+        target_key = repair_target_key(target_file)
+        if target_key and key not in self.beliefs and target_key in self.beliefs:
+            key = target_key
         return self.beliefs.get(key, {}).get("confidence", 0.7)
 
-    def get_confidence(self, task_id: str, assumption: str = "") -> float:
-        return self.assess_confidence(task_id, assumption)
+    def get_confidence(self, task_id: str, assumption: str = "", target_file: str = "") -> float:
+        return self.assess_confidence(task_id, assumption, target_file)
 
     def update_belief(self, task_id: str, assumption: str, confidence: float, evidence_id: str):
         self.beliefs[assumption] = {
@@ -42,7 +86,7 @@ class BeliefEngine:
             "evidence": evidence_id,
             "task_id": task_id
         }
-        self._persist()
+        self._persist(assumption)
 
     def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
         """Process a structured audit outcome without leaking confidence policy."""
@@ -74,7 +118,7 @@ class BeliefEngine:
         if semantic_confidence is not None:
             self.beliefs[outcome.assumption]["semantic_searcher_confidence"] = semantic_confidence
             self.beliefs[outcome.assumption]["confidence_policy"] = "audit_semantic_weighted"
-        self._persist()
+        self._persist(outcome.assumption)
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)
         return {
             "task_id": outcome.task_id,
