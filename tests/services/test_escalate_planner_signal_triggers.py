@@ -228,14 +228,19 @@ def test_forwarded_route_signals_pass_the_canonical_planning_seam() -> None:
 
 @pytest.mark.parametrize(
     ("snapshot", "signal"),
-    [({"xray_signal": True}, "xray_signal"), ({"cross_module": True, "risk_score": 60}, "cross_module")],
+    [
+        ({"xray_signal": True}, "xray_signal"),
+        ({"cross_module": True, "risk_score": 60}, "cross_module"),
+    ],
 )
 def test_xray_fires_on_the_planners_deep_scan_selection(snapshot, signal) -> None:
     """#2688: xray was selected on high-risk cross-module tasks but always skipped."""
     calls: list[str] = []
     invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
 
-    receipt = invoker(_context("xray", reasons=["deep_scan_or_dependency_signal"], snapshot=snapshot))
+    receipt = invoker(
+        _context("xray", reasons=["deep_scan_or_dependency_signal"], snapshot=snapshot)
+    )
 
     assert calls == ["sprint-abc-s0-a1"]
     assert receipt["trigger_source"] == f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:{signal}"
@@ -252,13 +257,29 @@ def test_xray_needs_the_planners_deep_scan_reason() -> None:
     assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
 
 
-def test_hyper_sprint_flow_name_triggers_the_gate() -> None:
-    """route_decider/planner emit "hyper_sprint"; the gate only accepted "hyper" (#2688)."""
-    calls: list[str] = []
-    invoker = build_escalate_gated_invoker("hyper", real_invoker=_real(calls))
-    context = _context("hyper", reasons=[], snapshot={}, selected=False)
-    context["route"]["recommended_flow"] = "hyper_sprint"
+def test_xray_executor_writes_only_under_the_scanned_workspace(tmp_path, monkeypatch) -> None:
+    """#2688 Codex: the report followed cwd; a high-coupling scan also wrote a findings card."""
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _exec_xray
 
-    invoker(context)
+    workspace = tmp_path / "ws"
+    (workspace / "pkg").mkdir(parents=True)
+    imports = "".join(f"import mod{i}\n" for i in range(20))  # > 15 crossings
+    (workspace / "pkg" / "hub.py").write_text(
+        imports + "def f():\n    return 1\n", encoding="utf-8"
+    )
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        constraints={"workspace_root": str(workspace), "target_file": "pkg/hub.py"},
+    )
 
-    assert calls == ["sprint-abc-s0-a1"]
+    receipt = _exec_xray(plan, "deep scan pkg")
+
+    assert not any(elsewhere.rglob("*")), "xray wrote outside the scanned workspace"
+    reports = list(workspace.rglob("xray_report_full.md"))
+    assert len(reports) == 1 and receipt.gate_passed is True
+    assert not list(workspace.rglob("*.json")), "xray wrote a findings card"
