@@ -184,10 +184,10 @@ def derive_canonical_route_facts(
             impact = analyze_impact(root, files, index_path=_graph_index(root))
             impacted = list(impact.impacted_files)
             reasons = list(impact.risk_reason)
-            # analyze_impact adds 15 for "scan_index_used"; that reflects the cache, not
-            # the change, so the score is the same with or without the cached graph.
-            index_bonus = 15 if "scan_index_used" in reasons else 0
-            features["risk_score"] = max(0, int(impact.risk_score) - index_bonus)
+            # analyze_impact's own formula without its scan_index_* reasons: those describe
+            # the cache, not the change, so cached and live scans give the same score.
+            change_reasons = [r for r in reasons if not r.startswith("scan_index_")]
+            features["risk_score"] = min(100, len(impacted) * 10 + len(change_reasons) * 15)
             codeintel.update({
                 "impact_report_present": True,
                 "risk_score": features["risk_score"],

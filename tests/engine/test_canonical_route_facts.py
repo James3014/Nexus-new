@@ -304,3 +304,23 @@ def test_no_hits_keep_the_planners_default_confidence(tmp_path: Path) -> None:
     )
 
     assert facts["route_features"]["adjusted_root_cause_confidence"] == 1.0
+
+
+def test_cached_and_live_impact_agree_at_the_cap(tmp_path: Path) -> None:
+    """Many importers: the live score caps at 100 and so must the cached one."""
+    root = _repo(tmp_path)
+    for i in range(12):
+        (root / "pkg" / f"many_{i}.py").write_text("from pkg.core import f\n", encoding="utf-8")
+    _commit(root)
+    plain = tmp_path / "plain"
+    subprocess.run(["cp", "-R", str(root), str(plain)], check=True)
+    subprocess.run(["rm", "-rf", str(plain / ".git")], check=True)
+
+    cached = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+    live = derive_canonical_route_facts(
+        repo_root=plain, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert cached["route_features"]["risk_score"] == live["route_features"]["risk_score"] == 100
