@@ -434,7 +434,7 @@ def test_belief_reports_which_key_answered(tmp_path, monkeypatch) -> None:
     from nexus.services.unified_runtime import materialize_selected_capability_evidence
 
     monkeypatch.chdir(tmp_path)
-    BeliefEngine().update_belief("earlier", repair_target_key("pkg/a.py"), 0.7, "ev")
+    BeliefEngine().update_belief("earlier", repair_target_key("pkg/a.py"), 0.3, "ev")
     plan = {"selected_capabilities": ["belief"], "signal_snapshot": {}}
 
     def outcome(context: dict) -> dict:
@@ -458,7 +458,7 @@ def test_belief_reports_which_key_answered(tmp_path, monkeypatch) -> None:
 
     hit = outcome({"belief_target_files": ["pkg/a.py"]})
     assert (hit["confidence"], hit["belief_lookup"], hit["belief_target_file"]) == (
-        0.7,
+        0.3,
         "file",
         "pkg/a.py",
     )
@@ -466,6 +466,11 @@ def test_belief_reports_which_key_answered(tmp_path, monkeypatch) -> None:
     assert (miss["confidence"], miss["belief_lookup"]) == (0.7, "default")
     none = outcome({})
     assert (none["belief_lookup"], none["belief_target_file"]) == ("default", "")
+    # A host path is looked up as before but never reported.
+    host = outcome({"belief_target_files": [str(tmp_path / "pkg" / "a.py")]})
+    assert host["belief_target_file"] == ""
+    for bad in ("../a.py", "C:/x.py", "~/x.py", "a" * 201):
+        assert outcome({"belief_target_files": [bad]})["belief_target_file"] == ""
 
 
 def test_belief_reads_the_per_file_confidence_through_the_registry(tmp_path, monkeypatch) -> None:

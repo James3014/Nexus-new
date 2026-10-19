@@ -1099,7 +1099,7 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 state_file=str(getattr(inst, "state_file", "") or ""),
                 # Which key answered (#2721): a witness cannot tell a per-file 0.7 from
                 # the default 0.7 without it.
-                belief_target_file=target_file,
+                belief_target_file=_reportable_relative_path(target_file),
                 belief_lookup=_belief_lookup(inst, assumption or task_id, target_file),
                 physical_callable="nexus.core.belief_engine.BeliefEngine.assess_confidence",
             ),
@@ -1108,6 +1108,16 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("belief", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
                              outcome={"error": str(exc)[:300]})
+
+
+def _reportable_relative_path(value: str) -> str:
+    """``value`` when it is a short repo-relative path, else ``""`` (never a host path)."""
+    text = str(value or "")
+    if not text or len(text) > 200 or text.startswith(("/", "~")) or "\\" in text:
+        return ""
+    if re.match(r"^[A-Za-z]:", text) or ".." in text.split("/"):
+        return ""
+    return text
 
 
 def _belief_lookup(inst: Any, key: str, target_file: str) -> str:
