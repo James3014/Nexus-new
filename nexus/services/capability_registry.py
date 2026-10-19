@@ -2307,6 +2307,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "target_files",
         }
     )
+    # #2721: belief had no allowlist, so its executor never saw a target file on any path.
+    _BELIEF_CONSTRAINT_KEYS = frozenset({"workspace_root", "belief_target_files"})
     _XRAY_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "xray_targets", "target_file", "target_files"}
     )
@@ -2407,6 +2409,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _HYPER_CONSTRAINT_KEYS
         elif name == "xray":
             keys = _XRAY_CONSTRAINT_KEYS
+        elif name == "belief":
+            keys = _BELIEF_CONSTRAINT_KEYS
         elif name in {"swarm", "multi_agent"}:
             keys = _SWARM_CONSTRAINT_KEYS
         elif name == "pregate":

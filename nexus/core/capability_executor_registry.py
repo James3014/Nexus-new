@@ -1014,7 +1014,14 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         )
         task_id = str(plan.task_id or "")
         # Shared per-file key the repair path writes (#2688).
-        target_file = _first_task_file(plan.constraints or {})
+        constraints = plan.constraints or {}
+        # belief_target_files names the one target; several entries are ambiguous, so
+        # no file key is used rather than borrowing the first file's confidence (#2721).
+        if "belief_target_files" in constraints:
+            belief_files = _task_files(constraints, "belief_target_files")
+            target_file = belief_files[0] if len(belief_files) == 1 else ""
+        else:
+            target_file = _first_task_file(constraints)
         target_kwargs = {"target_file": target_file} if target_file else {}
         # Prefer assess_confidence; fall back to get_confidence only if present.
         if hasattr(inst, "assess_confidence") and callable(getattr(inst, "assess_confidence")):

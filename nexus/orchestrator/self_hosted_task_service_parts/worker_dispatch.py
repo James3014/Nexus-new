@@ -450,6 +450,7 @@ class _WorkerDispatchMixin:
                     # #2688: xray scans the task's own files (only xray reads this key);
                     # files the task will create do not exist yet and are left out.
                     **_xray_targets_context(request.get("allowed_files"), target_worktree),
+                    **_belief_target_context(request.get("allowed_files"), target_worktree),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,
@@ -653,3 +654,28 @@ def _codeintel_lookup_or_derived(
     return _service_module()._codeintel_lookup_context(
         {**derived, "search_paths": list(derived.get("search_paths") or ())}, target_worktree
     )
+
+
+def _belief_target_context(allowed_files: Any, target_worktree: Any) -> dict[str, Any]:
+    """``{"belief_target_files": [path]}`` when the task targets exactly one existing file (#2721).
+
+    Belief keys its per-file confidence by that file.  With several allowed files the
+    target is ambiguous (the task may be about a file it will create), so no file is
+    passed and belief keeps its task-level lookup instead of borrowing another file's
+    confidence.
+    """
+    if not isinstance(allowed_files, (list, tuple)) or len(allowed_files) != 1:
+        return {}
+    targets = _xray_targets_context(allowed_files, target_worktree).get("xray_targets") or []
+    try:
+        root = Path(str(target_worktree)).resolve(strict=True)
+        files = [
+            path
+            for path in targets
+            if not (root / path).is_symlink()
+            and (root / path).resolve(strict=True).is_relative_to(root)
+            and (root / path).is_file()
+        ]
+    except (OSError, RuntimeError, ValueError):
+        return {}
+    return {"belief_target_files": files} if files else {}
