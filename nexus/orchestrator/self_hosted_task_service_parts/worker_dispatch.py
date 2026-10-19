@@ -426,9 +426,7 @@ class _WorkerDispatchMixin:
                         )
                         if key in request
                     },
-                    **_service_module()._codeintel_lookup_context(
-                        request.get("codeintel_lookup"), target_worktree
-                    ),
+                    **_codeintel_lookup_or_derived(request, task_statement, target_worktree),
                     # #2688: xray scans the task's own files (only xray reads this key);
                     # files the task will create do not exist yet and are left out.
                     **_xray_targets_context(request.get("allowed_files"), target_worktree),
@@ -547,6 +545,9 @@ _OBSERVATION_OUTCOME_KEYS = (
     "findings_hit_count",
     "confidence",
     "state_file",
+    "lookup_symbol",
+    "found",
+    "match_count",
 )
 _OBSERVATION_MAX_TEXT = 512
 _OBSERVATION_MAX_ITEMS = 16
@@ -610,3 +611,24 @@ def _capability_observations(results: Any) -> dict[str, Any]:
         if len(observations) >= _OBSERVATION_MAX_CAPABILITIES:
             break
     return observations
+
+
+def _codeintel_lookup_or_derived(
+    request: Mapping[str, Any], task_statement: str, target_worktree: Any
+) -> dict[str, Any]:
+    """The caller's ``codeintel_lookup`` if valid, else one derived from the task (#2721).
+
+    Both go through ``_codeintel_lookup_context``, which re-validates the symbol and
+    every path against the leased worktree.
+    """
+    explicit = _service_module()._codeintel_lookup_context(
+        request.get("codeintel_lookup"), target_worktree
+    )
+    if explicit:
+        return explicit
+    from nexus.services.codeintel.lookup_target import derive_codeintel_lookup
+
+    derived = derive_codeintel_lookup(task_statement, request.get("allowed_files"), target_worktree)
+    return _service_module()._codeintel_lookup_context(
+        {**derived, "search_paths": list(derived.get("search_paths") or ())}, target_worktree
+    )
