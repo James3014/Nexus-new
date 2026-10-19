@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.3"
+SCORER_VERSION = "1.2.4"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -40,6 +40,12 @@ SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
+# Amendment A9 (opt-in, #ISSUE). "none" (the default) runs pytest exactly as v1 §8 says;
+# "os" runs the same command under the shared macOS sandbox (nexus.engine.sandboxed_lane):
+# no network, writes only to the tree and scratch HOME/TMPDIR. "os" never falls back to an
+# unconfined run.
+SANDBOX_NONE, SANDBOX_OS = "none", "os"
+RUNNER_SANDBOX_MODES = (SANDBOX_NONE, SANDBOX_OS)
 # Amendment A6 (operational, #2291). Every pytest run gets scratch/tmp as TMPDIR and
 # scratch/home as HOME; both are emptied after each task.
 # One run that leaves more than SCRATCH_TMP_CAP_BYTES there (its junit report excluded)
@@ -1073,6 +1079,14 @@ def parse_junit(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def _require_os_sandbox() -> None:
+    """A9: raise SandboxError unless the shared OS barrier is available (fail closed)."""
+    from nexus.engine import sandboxed_lane as lane
+
+    if not lane.os_sandbox_available():
+        raise lane.SandboxError("no_os_barrier")
+
+
 class PytestRunner:
     """Spec §8 test run.
 
@@ -1088,7 +1102,14 @@ class PytestRunner:
         scratch: Path,
         timeout: int = PYTEST_TIMEOUT_SECONDS,
         log: Callable[[str], None] = print,
+        sandbox: str = SANDBOX_NONE,
     ):
+        if sandbox not in RUNNER_SANDBOX_MODES:
+            raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
+        # A9: "os" refuses at once (fail closed) when no OS barrier exists.
+        self.sandbox = sandbox
+        if sandbox == SANDBOX_OS:
+            _require_os_sandbox()
         self.scratch = Path(scratch)
         self.cache = self.scratch / "pytest-cache"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -1163,6 +1184,55 @@ class PytestRunner:
             "TZ": "UTC",
         }
 
+    def result_key(
+        self,
+        env: TestEnv,
+        tree_id: str,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+        role: str = "",
+    ) -> str:
+        """Test-result cache key (also names the run's junit report)."""
+        key_parts: list[Any] = [env.cache_key, tree_id, target, sorted(set(ignores)), run_idx, role]
+        if self.sandbox != SANDBOX_NONE:
+            # A9: a confined run never shares a cache entry with an unconfined one.
+            key_parts.append(f"sandbox:{self.sandbox}")
+        return sha256_bytes(json.dumps(key_parts).encode())
+
+    def _confine(self, env: TestEnv, tree: Path) -> list[str]:
+        """A9: ``sandbox-exec -p <profile>`` for one run of ``env`` on ``tree``.
+
+        Writes: the tree and scratch HOME/TMPDIR (the junit report lives in TMPDIR). Reads:
+        those, the env dir, the resolved interpreter prefix it points to (uv pythons live
+        under ``$HOME``, which the profile otherwise denies), the env's extra import roots
+        and the fixed system/toolchain paths. No network; credential stores stay denied.
+        Signals only reach processes inside the same sandbox.
+        Raises SandboxError when no barrier exists or a path is unsafe for the policy.
+        """
+        from nexus.engine import sandboxed_lane as lane
+        from nexus.engine.confined_test_runner import TOOLCHAIN_READ_ROOTS
+
+        _require_os_sandbox()
+        writable = [lane.sbpl_path(p) for p in (Path(tree), self.home, self.tmp)]
+        interpreter = Path(os.path.realpath(env.python))
+        if lane.in_tree(interpreter, writable):
+            raise lane.SandboxError("interpreter_inside_sandbox")
+        read_roots = lane.checked_read_roots([
+            *writable,
+            str(Path(env.python).parent.parent),  # the env (venv) dir
+            str(interpreter.parent.parent),  # the base installation it resolves to
+            *env.extra_pythonpath,
+            *lane.tool_read_roots(),
+            *(p for p in TOOLCHAIN_READ_ROOTS if os.path.exists(p)),
+        ])
+        # Tests may signal the processes they start (e.g. a process-group kill); never one
+        # outside the sandbox.
+        profile = lane.build_sandbox_profile(
+            writable=writable, read_roots=read_roots, allow_signal_same_sandbox=True
+        )
+        return [lane.SANDBOX_EXEC, "-p", profile]
+
     def run(
         self,
         env: TestEnv,
@@ -1174,9 +1244,7 @@ class PytestRunner:
         role: str = "",
     ) -> RunResult:
         ignores = sorted(set(ignores))
-        key = sha256_bytes(
-            json.dumps([env.cache_key, tree_id, target, ignores, run_idx, role]).encode()
-        )
+        key = self.result_key(env, tree_id, target, ignores, run_idx, role)
         cached = self.cache / f"{key}.json"
         if cached.exists():
             data = json.loads(cached.read_text())
@@ -1200,6 +1268,9 @@ class PytestRunner:
             *[f"--ignore={p}" for p in ignores],
         ]
         run_env = self._env(env, tree)
+        # A9: the same command and env, only wrapped in sandbox-exec; built before the run
+        # starts, so a refusal (SandboxError) never runs anything unconfined.
+        launch = self._confine(env, tree) + cmd if self.sandbox == SANDBOX_OS else cmd
         self._live_junits.add(junit.name)
         before = self.scratch_bytes()
         start = time.monotonic()
@@ -1207,7 +1278,7 @@ class PytestRunner:
         # Own process group, so whatever the tests spawned is killed with the run and
         # cannot keep writing into scratch/tmp while the next tree is measured (A6).
         proc = subprocess.Popen(
-            cmd,
+            launch,
             cwd=str(tree),
             env=run_env,
             stdout=subprocess.DEVNULL,  # never read; a pipe would also let a leftover
@@ -1353,6 +1424,7 @@ def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
     return {
         "schema": RECEIPT_SCHEMA,
         "scorer_version": SCORER_VERSION,
+        "runner_sandbox": getattr(ctx.runner, "sandbox", SANDBOX_NONE),
         "spec_sha256": ctx.spec_sha256,
         "spec_version": SPEC_V1,
         "task_key": inputs.task_key,

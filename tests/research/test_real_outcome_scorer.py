@@ -1059,7 +1059,7 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.3"
+    assert ros.SCORER_VERSION == "1.2.4"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
@@ -2160,3 +2160,266 @@ def test_scratch_home_leak_counts_toward_per_run_cap(tmp_path, monkeypatch):
     with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
         runner.run(env, tree, "t", "tests", (), 0)
     assert exc.value.kind == ros.SCRATCH_TMP_CAP_EXCEEDED and exc.value.left_bytes >= 5000
+
+
+# Amendment A9: opt-in OS sandbox for pytest runs (default "none" = v1 §8 unchanged).
+
+from nexus.engine import sandboxed_lane  # noqa: E402
+
+_needs_os_sandbox = pytest.mark.skipif(
+    not sandboxed_lane.os_sandbox_available(), reason="no OS sandbox (non-macOS or disabled)"
+)
+
+SANDBOX_PROBE_TEST = (
+    "import os, socket\n"
+    "from pathlib import Path\n\n\n"
+    "def test_ok():\n    pass\n\n\n"
+    "def test_net():\n"
+    "    socket.create_connection(('1.1.1.1', 53), timeout=2).close()\n\n\n"
+    "def test_net_denied_by_barrier():\n"
+    "    try:\n"
+    "        socket.create_connection(('1.1.1.1', 53), timeout=2).close()\n"
+    "    except PermissionError:\n"
+    "        return\n"
+    "    raise AssertionError('connect was not refused by the sandbox')\n\n\n"
+    "def test_write_outside():\n"
+    "    (Path(__file__).resolve().parents[2] / 'escape.txt').write_text('x')\n\n\n"
+    "def test_kill_own_child():\n"
+    "    import signal, subprocess\n"
+    "    child = subprocess.Popen(['/bin/sleep', '30'])\n"
+    "    os.kill(child.pid, signal.SIGKILL)\n"
+    "    assert child.wait(timeout=10) == -signal.SIGKILL\n\n\n"
+    "def test_signal_outside_denied():\n"
+    "    try:\n"
+    "        os.kill(1, 0)\n"
+    "    except PermissionError:\n"
+    "        return\n"
+    "    raise AssertionError('signalled a process outside the run')\n\n\n"
+    "def test_write_allowed():\n"
+    "    (Path(os.environ['TMPDIR']) / 'ok.txt').write_text('x')\n"
+    "    (Path(os.environ['HOME']) / 'ok.txt').write_text('x')\n"
+    "    (Path(__file__).resolve().parent / 'ok.txt').write_text('x')\n"
+)
+
+
+def _sandbox_probe_tree(tmp_path: Path) -> Path:
+    tree = tmp_path / "trees" / "tree"
+    _write(tree, {"tests/test_probe.py": SANDBOX_PROBE_TEST})
+    return tree
+
+
+def test_default_sandbox_none_runs_the_v1_command_and_env(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _runner(tmp_path)
+    assert runner.sandbox == ros.SANDBOX_NONE
+    seen: list[tuple[list[str], dict[str, str]]] = []
+    real_popen = subprocess.Popen
+
+    def spy(cmd, **kwargs):
+        seen.append((list(cmd), dict(kwargs["env"])))
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr(ros.subprocess, "Popen", spy)
+    key = runner.result_key(env, "t", "tests", ["b", "a"], 0)
+    assert runner.run(env, tree, "t", "tests", ["b", "a"], 0).outcomes
+    junit = runner.tmp / f"junit-{key}.xml"
+    pythonpath = ":".join([str(tree), *env.extra_pythonpath])
+    # Exactly the 1.2.3 command and env (spec §8 + A8 --rootdir): no sandbox-exec wrapper.
+    assert seen == [
+        (
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                f"--rootdir={tree.resolve()}",
+                f"--junitxml={junit}",
+                "--ignore=a",
+                "--ignore=b",
+            ],
+            {
+                "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
+                "HOME": str(runner.scratch / "home"),
+                "TMPDIR": str(runner.scratch / "tmp"),
+                "PYTHONPATH": pythonpath,
+                "PYTHONHASHSEED": "0",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "LANG": "en_US.UTF-8",
+                "TZ": "UTC",
+            },
+        )
+    ]
+    # The "none" result key is the 1.2.3 formula (no sandbox component).
+    assert key == ros.sha256_bytes(
+        json.dumps([env.cache_key, "t", "tests", ["a", "b"], 0, ""]).encode()
+    )
+
+
+def test_sandbox_mode_separates_result_cache_keys(tmp_path):
+    env = LocalEnv().get("fixture-repo", tmp_path)
+    runner = _runner(tmp_path)
+    none_key = runner.result_key(env, "t", "tests", [], 0, "cand")
+    runner.sandbox = ros.SANDBOX_OS  # key only; no run (works without a barrier)
+    os_key = runner.result_key(env, "t", "tests", [], 0, "cand")
+    assert none_key != os_key
+    assert os_key == ros.sha256_bytes(
+        json.dumps([env.cache_key, "t", "tests", [], 0, "cand", "sandbox:os"]).encode()
+    )
+
+
+def test_shared_profile_signals_stay_self_only_unless_asked(tmp_path):
+    kwargs = {"writable": [str(tmp_path)], "read_roots": [str(tmp_path)]}
+    default = sandboxed_lane.build_sandbox_profile(**kwargs)
+    widened = sandboxed_lane.build_sandbox_profile(**kwargs, allow_signal_same_sandbox=True)
+    assert "same-sandbox" not in default and "(allow signal (target self))" in default
+    assert widened.splitlines() == [
+        *default.splitlines()[: default.splitlines().index("(allow signal (target self))") + 1],
+        "(allow signal (target same-sandbox))",
+        *default.splitlines()[default.splitlines().index("(allow signal (target self))") + 1 :],
+    ]
+
+
+def test_unknown_sandbox_mode_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        ros.PytestRunner(tmp_path / "scratch", sandbox="docker")
+
+
+@pytest.mark.parametrize("how", ["probe", "env_var"])
+def test_sandbox_os_refuses_without_a_barrier(tmp_path, monkeypatch, how):
+    if how == "probe":
+        monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: False)
+    else:
+        monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        ros.PytestRunner(tmp_path / "scratch", sandbox=ros.SANDBOX_OS)
+
+
+def test_sandbox_os_run_refuses_when_barrier_disappears(tmp_path, monkeypatch):
+    """A runner bound to "os" never falls back to an unconfined run."""
+    tree = tmp_path / "tree"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _runner(tmp_path)
+    runner.sandbox = ros.SANDBOX_OS
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: False)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran without the OS barrier")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.cache.iterdir()) == []
+
+
+def test_cli_sandbox_os_refuses_before_scoring(tmp_path, monkeypatch, capsys):
+    from nexus.research import score_real_outcome_cli as cli
+
+    monkeypatch.setattr(cli, "os_sandbox_available", lambda: False)
+
+    def no_scoring(*a, **k):
+        raise AssertionError("scored without the OS barrier")
+
+    monkeypatch.setattr(cli.ros, "score_task", no_scoring)
+    monkeypatch.setattr(cli.ros, "load_sealed_task", no_scoring)
+    store = tmp_path / "store"
+    (store / "tasks").mkdir(parents=True)
+    rc = cli.main([
+        "--store",
+        str(store),
+        "--out",
+        str(tmp_path / "out"),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+        "--sandbox",
+        "os",
+    ])
+    assert rc == 7
+    assert "refusing to score unconfined" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists() and not (tmp_path / "work").exists()
+
+
+def test_cli_sandbox_defaults_to_none():
+    from nexus.research import score_real_outcome_cli as cli
+
+    assert cli.parse_args(["--out", "o"]).sandbox == ros.SANDBOX_NONE
+    assert cli.parse_args(["--out", "o", "--sandbox", "os"]).sandbox == ros.SANDBOX_OS
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--out", "o", "--sandbox", "docker"])
+
+
+def test_receipt_records_runner_sandbox_none(tmp_path, fx):
+    receipt = ros.score_task(fx.task(b""), _ctx(tmp_path, fx), candidate_override="empty")[
+        "receipt"
+    ]
+    assert receipt["runner_sandbox"] == ros.SANDBOX_NONE
+
+
+@_needs_os_sandbox
+def test_sandbox_os_denies_network_and_outside_writes(tmp_path):
+    tree = _sandbox_probe_tree(tmp_path)
+    env = LocalEnv().get("fixture-repo", tree)
+    confined = ros.PytestRunner(
+        tmp_path / "scratch-os", timeout=300, log=lambda m: None, sandbox=ros.SANDBOX_OS
+    )
+    res = confined.run(env, tree, "t", "tests", (), 0)
+    node = "tests.test_probe::"
+    assert res.outcomes == {
+        node + "test_ok": ros.PASS,
+        node + "test_net": ros.FAIL,
+        node + "test_net_denied_by_barrier": ros.PASS,
+        node + "test_write_outside": ros.FAIL,
+        node + "test_kill_own_child": ros.PASS,
+        node + "test_signal_outside_denied": ros.PASS,
+        node + "test_write_allowed": ros.PASS,
+    }
+    assert not (tmp_path / "trees" / "escape.txt").exists()
+    # The unconfined run of the same tree gives the same node ids, and its outside write
+    # succeeds (network is not blocked there, so its test_net outcome is not asserted).
+    plain = ros.PytestRunner(tmp_path / "scratch-none", timeout=300, log=lambda m: None)
+    unconfined = plain.run(env, tree, "t", "tests", (), 0).outcomes
+    assert set(unconfined) == set(res.outcomes)
+    assert unconfined[node + "test_ok"] == ros.PASS
+    assert unconfined[node + "test_write_outside"] == ros.PASS
+    assert unconfined[node + "test_net_denied_by_barrier"] == ros.FAIL
+
+
+@_needs_os_sandbox
+def test_sandbox_os_keeps_timeout_and_group_kill(tmp_path):
+    tree = tmp_path / "tree"
+    _write(
+        tree,
+        {
+            "tests/test_spawn.py": (
+                "import subprocess, time\n\n\ndef test_spawn():\n"
+                "    subprocess.Popen(['/bin/sh', '-c', 'sleep 5; echo x > \"$TMPDIR/orphan\"'])\n"
+                "    time.sleep(60)\n"
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = ros.PytestRunner(
+        tmp_path / "scratch", timeout=2, log=lambda m: None, sandbox=ros.SANDBOX_OS
+    )
+    res = runner.run(env, tree, "t", "tests", (), 0)
+    assert (res.timed_out, res.exit_code, res.outcomes) == (True, -1, {})
+    time.sleep(5)  # the orphan would have written by now had it survived the group kill
+    assert not (runner.tmp / "orphan").exists()
+
+
+@_needs_os_sandbox
+def test_sandbox_os_gold_self_check_resolves_and_is_recorded(tmp_path, fx):
+    ctx = _ctx(tmp_path, fx)
+    ctx.runner = ros.PytestRunner(
+        ctx.work / "scratch", timeout=300, log=lambda m: None, sandbox=ros.SANDBOX_OS
+    )
+    receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
+    assert receipt["runner_sandbox"] == ros.SANDBOX_OS
+    assert receipt["label"] == ros.RESOLVED
