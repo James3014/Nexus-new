@@ -4562,7 +4562,7 @@ def _late_holder_scenario(tmp_path, monkeypatch, *, hold_space: bool):
     ready = cand / "late.ready"
     _late_holder_tree(cand, ready, hold_space=hold_space)
     base = work / "trees" / "a" / "baset"
-    _write(base, {"tests/test_b.py": "def test_b():\n    pass\n"})
+    _write(base, {"tests/test_b.py": "import time\n\n\ndef test_b():\n    time.sleep(3)\n"})
     pidfile = Path(str(ready) + ".pid")
     floor = runner.min_free_disk_bytes
 
@@ -4573,10 +4573,12 @@ def _late_holder_scenario(tmp_path, monkeypatch, *, hold_space: bool):
             return False
         return True
 
-    external = {"taken": False}
+    # external["gate"] False hides the held file from the disk until a test opens it
+    # (to place the shortfall at a post-run check instead of the next pre-run check).
+    external = {"taken": False, "gate": True}
 
     def disk(path):
-        if hold_space and ready.exists() and holder_alive():
+        if hold_space and external["gate"] and ready.exists() and holder_alive():
             return _usage(floor - 1)  # the held unlinked file filled the disk
         if external["taken"]:
             return _usage(floor - 10 * 1024**2)  # another process took 10 MiB
@@ -4594,14 +4596,20 @@ def _late_holder_scenario(tmp_path, monkeypatch, *, hold_space: bool):
 
 
 def test_r1b_late_holder_is_reaped_at_the_shortfall_and_charged(tmp_path, monkeypatch):
-    """layer1-rie R1b: the survivor holds nothing when the candidate run ends, then opens
-    a deleted file in the candidate tree and fills the disk. The next run's shortfall
-    reaps the candidate scope, free space recovers, and the candidate is charged."""
+    """layer1-rie R1b/H2: the survivor holds nothing when the candidate run ends, then
+    opens a deleted file in the candidate tree; the disk fills while the next (oracle)
+    run is running. Its post-run check reaps the candidate scope; the reaped space covers
+    the shortfall, so the candidate is charged (the run's result is not used)."""
+    import threading
+
     got = _late_holder_scenario(tmp_path, monkeypatch, hold_space=True)
     if got is None:
         return
-    runner, env, base, pidfile, holder_alive, _external = got
+    runner, env, base, pidfile, holder_alive, external = got
+    external["gate"] = False  # the pre-run check of the oracle run still sees a fine disk
+    timer = threading.Timer(1.0, lambda: external.update(gate=True))
     try:
+        timer.start()
         with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
             runner.run(env, base, "b", "tests", (), 0)
         assert (exc.value.kind, exc.value.role, exc.value.attributed_role) == (
@@ -4726,7 +4734,10 @@ def test_survivor_that_removed_its_run_dir_is_still_reaped_and_charged(tmp_path,
         },
     )
     base = work / "trees" / "a" / "baset"
-    _write(base, {"tests/test_b.py": "def test_b():\n    pass\n"})
+    # The oracle run lasts 3 s; the held file shows on the disk only from 1 s into it,
+    # so the shortfall is at its post-run check (a pre-run recovery just continues).
+    _write(base, {"tests/test_b.py": "import time\n\n\ndef test_b():\n    time.sleep(3)\n"})
+    gate = {"open": False}
     pidfile = Path(str(ready) + ".pid")
     floor = runner.min_free_disk_bytes
 
@@ -4740,7 +4751,9 @@ def test_survivor_that_removed_its_run_dir_is_still_reaped_and_charged(tmp_path,
     monkeypatch.setattr(
         ros,
         "_disk_usage",
-        lambda path: _usage(floor - 1 if ready.exists() and holder_alive() else 9 * 1024**4),
+        lambda path: _usage(
+            floor - 1 if gate["open"] and ready.exists() and holder_alive() else 9 * 1024**4
+        ),
     )
     env = LocalEnv().get("fixture-repo", cand)
     runner.begin_task("James3014/a#1")
@@ -4751,6 +4764,10 @@ def test_survivor_that_removed_its_run_dir_is_still_reaped_and_charged(tmp_path,
             time.sleep(0.1)
         assert ready.exists() and holder_alive()
         assert not any(p.name.startswith("candt-") for p in runner.runs.rglob("*"))
+        import threading
+
+        timer = threading.Timer(1.0, lambda: gate.update(open=True))
+        timer.start()
         with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
             runner.run(env, base, "b", "tests", (), 0)
         assert (exc.value.kind, exc.value.attributed_role) == (
@@ -4785,6 +4802,7 @@ def test_partial_recovery_by_the_reap_is_not_counted_twice(tmp_path, monkeypatch
 
     def reap():
         state["reaped"] = True  # the survivor's 1 MiB comes back
+        return [4242]
 
     def disk(path):
         if not state["cand_done"]:
@@ -4798,3 +4816,138 @@ def test_partial_recovery_by_the_reap_is_not_counted_twice(tmp_path, monkeypatch
     with pytest.raises(ros.ScratchInfraAbort, match="reclaimed=1048576B"):
         runner.run(env, base, "b", "tests", (), 0)
     assert runner.reclaimed_bytes == 1024**2  # kept as a diagnostic
+
+
+def test_h2_pre_run_reap_recovers_the_disk_and_scoring_continues(tmp_path, monkeypatch):
+    """layer1-rie H2, pre-run: the survivor's held deleted file has the disk below the
+    floor at the next run's pre-run check. The reap recovers it, so the run just goes
+    on: no charge, no abort. Real sandbox-exec on macOS; elsewhere the refusal."""
+    got = _late_holder_scenario(tmp_path, monkeypatch, hold_space=True)
+    if got is None:
+        return
+    runner, env, base, pidfile, holder_alive, _external = got
+    try:
+        res = runner.run(env, base, "b", "tests", (), 0)
+        assert res.outcomes == {"tests.test_b::test_b": ros.PASS}
+        assert runner.reaped_pids == [int(pidfile.read_text())] and not holder_alive()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            os.kill(int(pidfile.read_text()), 9)
+
+
+def _simulated_reap(monkeypatch, runner, state, pid: int = 4242):
+    def reap():
+        state["reaped"] = True
+        runner.reaped_pids.append(pid)
+        return [pid]
+
+    monkeypatch.setattr(runner, "_reap_candidate_scope", reap)
+
+
+def test_h2_pre_run_recovery_gives_a_normal_receipt(tmp_path, fx, monkeypatch):
+    """H2 at scoring level: after the first candidate run a survivor's held space puts
+    the disk below the floor; the next pre-run check reaps it, the disk recovers, and
+    scoring continues to the normal receipt."""
+    ctx = _ctx(tmp_path, fx)
+    runner = _unconfined_os_runner(ctx.work / "scratch", monkeypatch)
+    ctx.runner = runner
+    floor = runner.min_free_disk_bytes
+    state = {"cand_done": False, "reaped": False}
+    real_execute = runner._execute
+
+    def execute(env, tree, target, ignores, run_idx, role, *rest):
+        try:
+            return real_execute(env, tree, target, ignores, run_idx, role, *rest)
+        finally:
+            if role == ros.CAND_ROLE:
+                state["cand_done"] = True
+
+    def disk(path):
+        held = state["cand_done"] and not state["reaped"]
+        return _usage(floor - 1024**2 if held else 9 * 1024**4)
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    _simulated_reap(monkeypatch, runner, state)
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    result = ros.score_task(fx.task(b""), ctx, candidate_override="gold")
+    assert result["receipt"]["label"] == ros.RESOLVED
+    assert state["reaped"] and result["timing"]["reaped_pids"] == [4242]
+
+
+@pytest.mark.parametrize(("killed", "charged"), [(True, True), (False, False)])
+def test_h2_post_run_recovery_is_charged_only_if_the_reap_freed_it(
+    tmp_path, monkeypatch, killed, charged
+):
+    """H2, post-run: the disk is below the floor right after a candidate run. If the
+    reap killed a survivor and the space it gave back covers the shortfall: charged.
+    If the disk came back without a reaped survivor: infra abort."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    state = {"calls": 0, "reaped": False}
+    if killed:
+        _simulated_reap(monkeypatch, runner, state)
+    else:
+
+        def reap_nothing():
+            state["reaped"] = True  # the disk recovers anyway (someone else freed it)
+            return []
+
+        monkeypatch.setattr(runner, "_reap_candidate_scope", reap_nothing)
+
+    def disk(path):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return _usage(9 * 1024**4)  # pre-run check of the candidate run
+        return _usage(9 * 1024**4 if state["reaped"] else floor - 1024**2)
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    if charged:
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+        assert (exc.value.kind, exc.value.attributed_role) == (
+            ros.SCRATCH_HOST_DISK_LOW,
+            ros.CAND_ROLE,
+        )
+    else:
+        with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_without_reap"):
+            runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert list(runner.cache.iterdir()) == []  # that run's result is never used
+
+
+def test_reclaimed_counts_toward_the_majority_term_only(tmp_path, monkeypatch):
+    """Still below after the reap: free_start = floor + 1 MiB, the candidate has 300 kB
+    visible, its reaped survivor gave 1 MiB back, and the disk ends 200 kB short. The
+    visible bytes cover the shortfall; visible + reclaimed make the majority of the
+    drop: charged. (Visible bytes alone, 300 kB of a 1.2 MiB drop, would not.)"""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _tree_writer(tmp_path / "cand", 300_000)
+    base = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    state = {"cand_done": False, "reaped": False}
+    real_execute = runner._execute
+
+    def execute(env, tree, target, ignores, run_idx, role, *rest):
+        try:
+            return real_execute(env, tree, target, ignores, run_idx, role, *rest)
+        finally:
+            if role == ros.CAND_ROLE:
+                state["cand_done"] = True
+
+    def disk(path):
+        if not state["cand_done"]:
+            return _usage(floor + 1024**2)
+        return _usage(floor - 200_000 if state["reaped"] else floor - 200_000 - 1024**2)
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    _simulated_reap(monkeypatch, runner, state)
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
+    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+        runner.run(env, base, "b", "tests", (), 0)
+    assert (exc.value.kind, exc.value.attributed_role) == (
+        ros.SCRATCH_HOST_DISK_LOW,
+        ros.CAND_ROLE,
+    )

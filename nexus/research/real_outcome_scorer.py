@@ -1868,7 +1868,7 @@ class PytestRunner:
             self.log(f"  reaped sandbox survivors: {sorted(hits)}")
         return sorted(hits)
 
-    def _reap_candidate_scope(self) -> None:
+    def _reap_candidate_scope(self) -> list[int]:
         """A11: reap holders of a cwd or open file (deleted ones included) under this
         scoring's candidate run dirs and candidate trees, so blocks they hold in unlinked
         files are released (#2740). Called on a host-disk shortfall."""
@@ -1879,7 +1879,9 @@ class PytestRunner:
         if self.task_dir is not None:
             names.append(f"{Path(self.task_dir).resolve()}/{_role_slug(CAND_ROLE)}-")
         trees = [Path(t) for t in self._cand_tree_base]
-        self.reaped_pids += self.reap_survivors(trees, name_prefixes=names)
+        reaped = self.reap_survivors(trees, name_prefixes=names)
+        self.reaped_pids += reaped
+        return reaped
 
     def _candidate_bytes(self, current: Path | None) -> int:
         """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
@@ -1899,17 +1901,20 @@ class PytestRunner:
         *,
         pre: bool,
     ) -> None:
-        """A11: the host-disk check around an "os" run; one rule below the floor.
+        """A11: the host-disk check around an "os" run, below the floor.
 
-        No candidate run has run yet in this scoring: infra abort. Otherwise reap this
-        scoring's candidate scope (survivors holding cwd or files, deleted ones included,
-        under its candidate run dirs and trees), measure free space again, and charge the
-        candidate (HOST_DISK_LOW, NOT_RUNNABLE) only if free_start (at its first run) was
-        at or above the floor, the candidate's visible bytes >= the shortfall
-        (floor - free_after_reap), and they are >= half of the drop since free_start
-        (free_start - free_after_reap). Space the reap gave back (``reclaimed``) is
-        already outside the post-reap drop, so it is a diagnostic only, never counted. Otherwise infra abort (external disk use as
-        the majority, a harmless daemon that held no space, a disk already low)."""
+        No candidate run yet in this scoring: infra abort. Otherwise reap this scoring's
+        candidate scope (survivors holding cwd or files, deleted ones included, under its
+        candidate run dirs and trees) and measure free space again. ``reclaimed`` is the
+        space that came back, counted only if the reap killed something.
+
+        * Recovered (free >= floor), pre-run check: continue (no charge, no abort).
+        * Recovered, post-run check: the run may have run on an exhausted disk. Charged
+          (HOST_DISK_LOW) iff reclaimed >= the shortfall before the reap; else infra.
+        * Still below: charged iff free_start >= floor, the candidate's visible bytes
+          >= the shortfall, and visible bytes + reclaimed >= half of the drop since
+          free_start. Otherwise infra abort (external use as the majority, a harmless
+          daemon that held no space, a disk already low)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
         free = _disk_usage(probe).free
         if pre and role == CAND_ROLE and self.free_start is None:
@@ -1921,43 +1926,62 @@ class PytestRunner:
             raise ScratchInfraAbort(
                 f"host_disk_low:free={free}B floor={floor}B (no candidate run yet)"
             )
-        free_before_reap = free
-        self._reap_candidate_scope()
+        free_before = free
+        shortfall_before = floor - free_before
+        killed = self._reap_candidate_scope()
         free = _disk_usage(probe).free
         shortfall = floor - free
-        # Space the reap gave back: a diagnostic only. The shortfall and the drop below
-        # are measured after the reap, so counting it again would double-count.
-        reclaimed = max(0, free - free_before_reap)
+        # Space this reap gave back: only when it killed something; a recovery without
+        # a reaped survivor came back for some other reason.
+        reclaimed = max(0, free - free_before) if killed else 0
         self.reclaimed_bytes += reclaimed
         # A candidate run's own run dir is the candidate's: measure it as one (current
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
-        cand_total = cand
-        # Charged iff the scoring started above the floor, the candidate's bytes cover
-        # the shortfall, and they account for at least half of the drop since
+        if free >= floor:
+            if pre:
+                return  # H2: the reap recovered the disk before the run: just go on
+            # Post-run: the run may have run on an exhausted disk, so its result is not
+            # used. The candidate's survivor caused it iff its reaped space covers the
+            # shortfall that was there; otherwise the space came back for another reason.
+            if reclaimed >= shortfall_before:
+                self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
+            raise ScratchInfraAbort(
+                f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
+                f" reclaimed={reclaimed}B floor={floor}B"
+            )
+        # Still below the floor: charged iff the scoring started above the floor, the
+        # candidate's visible bytes cover the shortfall, and they (plus reclaimed, for
+        # this majority term only) account for at least half of the drop since
         # free_start (so a candidate that filled the disk to just above the floor is
         # still charged when an oracle run's small writes cross it).
         if (
             self.free_start is not None
             and self.free_start >= floor
-            and cand_total >= floor - free
-            and 2 * cand_total >= self.free_start - free
+            and cand >= floor - free
+            and 2 * (cand + reclaimed) >= self.free_start - free
         ):
-            res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
-            raise ScratchTmpCapExceeded(
-                tree.name,
-                target,
-                run_idx,
-                role,
-                res,
-                SCRATCH_HOST_DISK_LOW,
-                max(shortfall, 0),
-                attributed_role=CAND_ROLE,
-            )
+            self._charge_host_disk(tree, target, run_idx, role, shortfall)
         raise ScratchInfraAbort(
             f"host_disk_low:free_after_reap={free}B candidate_bytes={cand}B"
             f" reclaimed={reclaimed}B"
             f" free_start={self.free_start} floor={floor}B"
+        )
+
+    def _charge_host_disk(
+        self, tree: Path, target: str, run_idx: int, role: str, shortfall: int
+    ) -> None:
+        """A11: raise the HOST_DISK_LOW cap refusal charged to the candidate."""
+        res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
+        raise ScratchTmpCapExceeded(
+            tree.name,
+            target,
+            run_idx,
+            role,
+            res,
+            SCRATCH_HOST_DISK_LOW,
+            max(shortfall, 0),
+            attributed_role=CAND_ROLE,
         )
 
     def check_host_disk(self) -> None:

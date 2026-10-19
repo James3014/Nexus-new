@@ -373,33 +373,47 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
      the path itself or below it (`<tree>/…`), so similarly named siblings never match.
      The reap kills by PID, checks that each process is gone, and fails closed, as
      above. The reaped PIDs are recorded in `reaped_pids`.
-  3. The scorer measures free space again (`free_now`). `cand_total` is the
-     candidate's visible bytes: its leftover run directories, the current run's
-     directory if it is a candidate run, and its trees' growth since their first
-     candidate run.
-     - `reclaimed = max(0, free_now - free_before_reap)` is the space the reap gave
-       back. It is a diagnostic only: it appears in the infra-abort message and as
+  3. The scorer measures free space again (`free_now`; `free_before` is the value
+     before the reap, `shortfall_before = floor - free_before`).
+     - `reclaimed = max(0, free_now - free_before)` is the space the reap gave back.
+       It counts only if the reap killed at least one process. A recovery without a
+       reaped survivor came back for some other reason.
+     - It also appears in the infra-abort message and, summed per scoring, as
        `reap_reclaimed_bytes` in the receipt timing.
-     - It is never added to `cand_total`. The shortfall and the drop are measured after
-       the reap, so the space it gave back is already outside them, and counting it
-       again would count it twice.
-  4. The candidate is charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if all three
-     hold, where `free_now` is the free space measured after the reap:
+     - The candidate's visible bytes are its leftover run directories, the current
+       run's directory if it is a candidate run, and its trees' growth since their
+       first candidate run.
+  4. **The disk recovered (`free_now >= floor`).**
+     - At a pre-run check, the run just goes on: no charge, no abort (H2).
+     - At a post-run check, the run that just finished may have run on an exhausted
+       disk, so its result is never used. If `reclaimed >= shortfall_before`, the
+       candidate's survivor caused the shortfall: charged (`NOT_RUNNABLE` /
+       `HOST_DISK_LOW`). Otherwise it is an infra abort.
+  5. **The disk is still below the floor.** The candidate is charged only if all
+     three hold:
      - `free_start` was at or above the floor. `free_start` is the free space at the
        pre-run check of the scoring's first candidate run, before any candidate code
        ran, so disk taken during the oracle runs never counts against the candidate.
-     - `cand_total >= floor - free_now`: the candidate's bytes cover the shortfall.
-       Without them the disk would be above the floor.
-     - `cand_total >= 0.5 * (free_start - free_now)`: the candidate accounts for at
-       least half of the drop since `free_start`.
-  5. Otherwise the result is an infra abort.
+     - `visible >= floor - free_now`: the candidate's visible bytes cover the
+       shortfall. Without them the disk would be above the floor.
+     - `visible + reclaimed >= 0.5 * (free_start - free_now)`: the candidate accounts
+       for at least half of the drop since `free_start`. `reclaimed` counts toward this
+       majority term only, never toward the shortfall term, which is measured after
+       the reap.
+  6. Otherwise the result is an infra abort.
 
   Cases that show how the rule works:
-  - A survivor holding a large deleted file: the reap gives the space back, the
-    shortfall and the drop measured afterwards are about zero, and it is charged.
+  - H2, pre-run: a survivor's held deleted file has the disk below the floor at the
+    next run's pre-run check. The reap recovers the disk and scoring continues to its
+    normal receipt.
+  - H2 / R1b, post-run: the survivor holds nothing when its candidate run ends, then
+    opens a deleted file, and the disk fills while the next run is running. That run's
+    post-run check reaps the survivor; the space it gave back covers the shortfall, so
+    the candidate is charged. The candidate cannot time this to force an infra abort.
   - Partial recovery: the reap gives back a survivor's 1 MiB, but external use alone
     leaves the disk 50 kB short with no candidate bytes visible. That is infra.
-  - A harmless daemon reclaims about nothing, so it is infra.
+  - A harmless daemon holds no space: it reclaims about nothing, so it never causes a
+    charge.
   - An honest candidate whose small bytes tip a disk that external use brought close
     to the floor made far less than half of the drop, so it is infra.
   - H1 (layer1-rie): the candidate fills the disk to just above the floor and stops;
