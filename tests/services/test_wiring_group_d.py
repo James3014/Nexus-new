@@ -218,13 +218,17 @@ def _git_repo(root: Path) -> None:
 
 
 def _assert_no_barrier_fail_closed(receipt) -> bool:
-    """Without an OS barrier (Linux CI) the PR's tests never run and the review fails
-    closed; sandbox-dependent tests assert that instead of skipping."""
+    """Without an OS barrier (Linux CI) the PR's tests never run and the review cannot
+    finish; sandbox-dependent tests assert that instead of skipping. Since #2732 that is
+    recorded (review_status BLOCKED + review_error), never a blocking receipt."""
     if os_sandbox_available():
         return False
     assert receipt.invoked is True
-    assert receipt.gate_passed is False
-    assert receipt.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
+    assert receipt.gate_passed is True
+    assert receipt.outcome["advisory_only"] is True
+    assert receipt.outcome["review_status"] == "BLOCKED"
+    assert receipt.outcome["review_error"] == "ghost_regression_not_executed:no_os_barrier"
+    assert "error" not in receipt.outcome
     assert not any(c.startswith("tests/") for c in receipt.outcome["executed_checks"])
     return True
 
@@ -239,8 +243,12 @@ def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> 
     if _assert_no_barrier_fail_closed(receipt):
         return
     assert receipt.invoked is True
-    assert receipt.gate_passed is False
-    assert receipt.outcome["semantic_status"] == "FAILED"
+    # #2732: the findings are recorded, but the record-only receipt never fails the gate.
+    assert receipt.gate_passed is True
+    assert receipt.outcome["semantic_status"] == "SUCCEEDED"
+    assert receipt.outcome["advisory_only"] is True
+    assert receipt.outcome["review_status"] == "FAIL"
+    assert receipt.outcome["review_passed"] is False
     rules = {f["rule_id"] for f in receipt.outcome["findings"]}
     assert "bandit:B307" in rules and "regression_test_failed" in rules
     assert {"bandit", "ruff-security", "tests/test_app.py"} <= set(
@@ -269,8 +277,10 @@ def test_ultra_review_executor_passes_benign_diff(tmp_path) -> None:
 def test_ultra_review_executor_clean_tree_fails_closed(tmp_path) -> None:
     _git_repo(tmp_path)
     receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
-    assert receipt.gate_passed is False
-    assert receipt.outcome["error"] == "no_diff_to_review"
+    # #2732: nothing to review is recorded (review_status BLOCKED), never blocking.
+    assert receipt.gate_passed is True
+    assert receipt.outcome["review_status"] == "BLOCKED"
+    assert receipt.outcome["review_error"] == "no_diff_to_review"
 
 
 def test_ollama_judge_retries_once_on_unusable_output(monkeypatch) -> None:
@@ -299,6 +309,8 @@ def test_ultra_review_executor_without_os_sandbox_fails_closed(tmp_path, monkeyp
         encoding="utf-8",
     )
     receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
-    assert receipt.gate_passed is False
-    assert receipt.outcome["semantic_status"] == "BLOCKED"
-    assert receipt.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
+    # #2732: the review could not run its tests; recorded, never blocking.
+    assert receipt.gate_passed is True
+    assert receipt.outcome["semantic_status"] == "SUCCEEDED"
+    assert receipt.outcome["review_status"] == "BLOCKED"
+    assert receipt.outcome["review_error"] == "ghost_regression_not_executed:no_os_barrier"
