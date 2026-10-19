@@ -427,6 +427,58 @@ def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeyp
     assert "no_existing_task_files" in repr(receipt)
 
 
+def test_xray_keeps_its_report_but_prunes_stale_run_roots(tmp_path, monkeypatch) -> None:
+    """#2721: every worker-path xray call leaked a ``nexus-xray-*`` temp dir.  The report
+    must survive the call (``output_paths`` is recorded and read back), so run roots go
+    under one parent and only this executor's stale ones are pruned."""
+    import os
+    import time
+
+    from nexus.core import capability_executor_registry as registry
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+
+    parent = tmp_path / "runs"
+    parent.mkdir()
+    monkeypatch.setattr(registry, "_xray_runs_parent", lambda: parent)
+    old = time.time() - 2 * 24 * 3600
+    stale = parent / "nexus-xray-stale"
+    (stale / "sub").mkdir(parents=True)
+    fresh = parent / "nexus-xray-fresh"
+    fresh.mkdir()
+    foreign = parent / "other-stale"
+    foreign.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("x")
+    link = parent / "nexus-xray-link"
+    link.symlink_to(outside, target_is_directory=True)
+    stale_file = parent / "nexus-xray-file"
+    stale_file.write_text("x")
+    for path in (stale, foreign, outside, stale_file):
+        os.utime(path, (old, old))
+    os.utime(link, (old, old), follow_symlinks=False)
+
+    workspace = tmp_path / "ws"
+    (workspace / "pkg").mkdir(parents=True)
+    (workspace / "pkg" / "task.py").write_text("import os\n\ndef f():\n    return 1\n")
+    monkeypatch.chdir(tmp_path)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        constraints={"workspace_root": str(workspace), "xray_targets": ["pkg/task.py"]},
+    )
+
+    receipt = registry._exec_xray(plan, "deep scan")
+
+    outcome = receipt.outcome if isinstance(receipt.outcome, dict) else {}
+    run_root = Path(outcome["resolved_run_root"])
+    assert run_root.parent == parent and run_root.name.startswith("nexus-xray-")
+    assert [Path(p).exists() for p in outcome["output_paths"]] == [True]
+    assert not stale.exists()
+    assert fresh.is_dir() and foreign.is_dir() and stale_file.exists()
+    assert link.is_symlink() and (outside / "keep.txt").exists()
+
+
 def test_belief_reads_the_per_file_confidence_through_the_registry(tmp_path, monkeypatch) -> None:
     """#2721: belief had no constraint allowlist, so on every runtime path its executor
     saw no target file and returned the 0.7 default even with per-file evidence."""

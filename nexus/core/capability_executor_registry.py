@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import stat
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -4032,6 +4034,51 @@ def _xray_findings(scanned: Any) -> list[str]:
     return out
 
 
+XRAY_RUN_PREFIX = "nexus-xray-"
+XRAY_RUN_MAX_AGE_S = 24 * 3600
+
+
+def _xray_runs_parent() -> Path:
+    """One parent for the run roots this executor creates (patched in tests)."""
+    return Path(tempfile.gettempdir()) / "nexus-xray-runs"
+
+
+def _prune_xray_run_roots(parent: Path, now: float) -> None:
+    """Remove ``nexus-xray-*`` run roots older than a day under ``parent``.
+
+    Only real directories (never symlinks) with this executor's prefix, by mtime;
+    any error leaves the entry in place.
+    """
+    try:
+        entries = list(os.scandir(parent))
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.name.startswith(XRAY_RUN_PREFIX):
+            continue
+        try:
+            info = entry.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode) or now - info.st_mtime <= XRAY_RUN_MAX_AGE_S:
+                continue
+            shutil.rmtree(entry.path)
+        except OSError:
+            continue
+
+
+def _new_xray_run_root() -> str:
+    """A fresh run root under the shared parent, after pruning stale ones.
+
+    The report stays on disk after the call: its path is returned as ``output_paths``
+    and kept in the hash-bound capability observations, and the wiring audit reads the
+    report back.  Keeping every run forever leaked one temp dir per call, so old runs
+    are pruned at the start of each new one instead.
+    """
+    parent = _xray_runs_parent()
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _prune_xray_run_roots(parent, time.time())
+    return tempfile.mkdtemp(prefix=XRAY_RUN_PREFIX, dir=parent)
+
+
 def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
@@ -4043,7 +4090,7 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
             # file in a candidate worktree fails the candidate's allowed-scope check (#2688).
             updated = {**constraints, "project_root": constraints["workspace_root"]}
             if not (constraints.get("run_root") or constraints.get("runtime_root")):
-                updated["run_root"] = tempfile.mkdtemp(prefix="nexus-xray-")
+                updated["run_root"] = _new_xray_run_root()
             plan = dataclasses.replace(plan, constraints=updated)
         project_root, run_root, run_id = _resolve_run_root(plan)
         report_path = run_root / "xray_report_full.md"
