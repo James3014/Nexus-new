@@ -334,6 +334,14 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
        such a file there. A survivor that holds nothing under those paths cannot write
        anywhere that is counted.
      - Without lsof, `os` mode fails closed: `ScratchInfraAbort`, no receipt, exit 8.
+     - Every reaped PID must be gone (`kill(pid, 0)` gives ESRCH, or it is a zombie)
+       within 5 seconds. Otherwise: infra abort.
+     - **Also after every candidate run**, before that run's post-run disk check, the
+       same reaper runs on this scoring's candidate run directories and candidate
+       trees. So a survivor holding a deleted-but-open file there releases its blocks
+       before the disk is checked, and every rerun no longer stops on `host_disk_low`.
+       Its PIDs are recorded in `reaped_pids`, and the event makes any later shortfall
+       of this scoring the candidate's.
   3. The trash is deleted and `git worktree prune` drops the stale worktree entries.
      The A6 cleanup then empties scratch HOME/TMPDIR and `runs/`. `clean_tmp` also
      renames run parents to trash before it deletes them.
@@ -350,16 +358,28 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
     `candt-*` directories of the current scoring, that is, directories re-created by a
     session-escaping child of one of its candidate runs. Sub-reason
     `SCRATCH_TMP_CAP_EXCEEDED` or `SCRATCH_TMP_TASK_CAP_EXCEEDED`.
-  - Host disk below the floor before or right after a run, when this scoring's
-    candidate bytes cover the shortfall (floor minus free). Candidate bytes are its
-    leftover run directories, the current run's directory if it is a candidate run, and
-    its trees' growth since their first candidate run. Sub-reason `HOST_DISK_LOW`. This
-    is the case where the disk was fine when the scoring started and the candidate
-    filled it, for example by writing about 110 GiB into its own tree.
+  - Host disk below the floor before or right after a run, when the candidate explains
+    the drop. Sub-reason `HOST_DISK_LOW`.
+    - `free_start` is the host's free bytes at the pre-run check of the scoring's first
+      candidate run, before any candidate code ran. It is recorded then, not at
+      scoring start, so disk taken during the oracle runs is never charged to the
+      candidate.
+    - The candidate explains the drop when its bytes alone exceed the headroom it
+      started with (`free_start` minus the floor), so the floor would have been crossed
+      with nobody else writing. Candidate bytes are its leftover run directories, the
+      current run's directory if it is a candidate run, and its trees' growth since
+      their first candidate run.
+    - The candidate also explains the drop when a survivor of one of its runs had to be
+      reaped in this scoring (below): blocks held in an unlinked file are invisible to
+      the walk.
+    - Example of a charge: the disk was fine when the scoring started and the candidate
+      filled it, for example by writing about 110 GiB into its own tree.
 - **What is an infra abort (`ScratchInfraAbort`: no receipt, no cache entry, the run's
   outcome discarded, CLI exit 8; the driver or lab reruns the task):**
-  - Host disk below the floor when the candidate's bytes do not cover the shortfall,
-    for example the disk was already low before the scoring.
+  - Host disk below the floor when the candidate does not explain the drop. Examples:
+    the disk was already low before the first candidate run; or another process on the
+    shared host took most of the headroom and the candidate's honest small growth only
+    tipped it over.
   - A cap trip, on a run of any role, that would not happen without bytes under another
     scoring's run parent, alone or together with this scoring's candidate bytes. Such
     bytes should not exist after rename-and-reap.

@@ -173,6 +173,9 @@ _disk_usage = shutil.disk_usage  # indirection so tests can simulate a full disk
 SCRATCH_HOST_DISK_LOW = "HOST_DISK_LOW"
 # A11: fixed lsof locations for the survivor reaper (never looked up on PATH).
 LSOF_CANDIDATES = ("/usr/sbin/lsof", "/usr/bin/lsof")
+PS = "/bin/ps"
+# Seconds to wait for reaped PIDs to disappear after SIGKILL.
+REAP_WAIT_SECONDS = 5.0
 TRASH_PREFIX = ".trash-"
 
 
@@ -1499,6 +1502,12 @@ class PytestRunner:
         # A11 ("os"): candidate trees of this scoring -> their allocated size before their
         # first candidate run; growth beyond it is the candidate's.
         self._cand_tree_base: dict[str, int] = {}
+        # A11 ("os"): host free bytes at the pre-run check of this scoring's first
+        # candidate run (before any candidate code ran); None until then.
+        self.free_start: int | None = None
+        # A11 ("os"): survivors reaped after this scoring's candidate runs (diagnostic);
+        # any reaped one makes a later host-disk shortfall the candidate's.
+        self.reaped_pids: list[int] = []
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1583,6 +1592,8 @@ class PytestRunner:
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
         self.task_dir = None  # the next task scoring gets a fresh parent
         self._cand_tree_base.clear()
+        self.free_start = None
+        self.reaped_pids = []
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1778,6 +1789,8 @@ class PytestRunner:
         del task_key  # the parent is random; the task key is not needed
         self.task_dir = None
         self._cand_tree_base.clear()
+        self.free_start = None
+        self.reaped_pids = []
 
     def retire_runs(self) -> list[Path]:
         """A11: rename every run parent under runs/ to ``.trash-<uuid>`` (one atomic step
@@ -1832,9 +1845,29 @@ class PytestRunner:
         for victim in sorted(hits):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(victim, signal.SIGKILL)
+        deadline = time.monotonic() + REAP_WAIT_SECONDS
+        alive = [p for p in sorted(hits) if _pid_alive(p)]
+        while alive and time.monotonic() < deadline:
+            time.sleep(0.05)
+            alive = [p for p in alive if _pid_alive(p)]
+        if alive:
+            raise ScratchInfraAbort(f"reap_failed: still alive after SIGKILL: {alive}")
         if hits:
             self.log(f"  reaped sandbox survivors: {sorted(hits)}")
         return sorted(hits)
+
+    def _reap_candidate_scope(self, run_dir: Path) -> None:
+        """A11: after a candidate run, before its post-run disk check: reap holders of a
+        cwd or open file (deleted ones included) under this scoring's candidate run dirs
+        and candidate trees. A reaped one releases its unlinked files' blocks now, and
+        makes any later host-disk shortfall of this scoring the candidate's."""
+        prefixes: list[Path] = [run_dir, *(Path(t) for t in self._cand_tree_base)]
+        parent = run_dir.parent
+        if parent.is_dir() and not parent.is_symlink():
+            cand = _role_slug(CAND_ROLE) + "-"
+            prefixes += [d for d in parent.iterdir() if d.name.startswith(cand)]
+        reaped = self.reap_survivors(prefixes)
+        self.reaped_pids += reaped
 
     def _disk_shortfall(self) -> int:
         """Bytes missing to the host free-space floor (<= 0: enough)."""
@@ -1850,18 +1883,33 @@ class PytestRunner:
         return usage.own_candidate + growth
 
     def _check_disk_for_run(
-        self, tree: Path, target: str, run_idx: int, role: str, run_dir: Path
+        self,
+        tree: Path,
+        target: str,
+        run_idx: int,
+        role: str,
+        run_dir: Path,
+        *,
+        pre: bool,
     ) -> None:
-        """A11: the host-disk check around an "os" run. Below the floor: charged to the
-        candidate (SCRATCH_HOST_DISK_LOW, NOT_RUNNABLE) when its bytes cover the
-        shortfall, else an infra abort (no receipt)."""
-        shortfall = self._disk_shortfall()
+        """A11: the host-disk check around an "os" run. Below the floor it is charged to
+        the candidate (HOST_DISK_LOW, NOT_RUNNABLE) only when the candidate explains the
+        drop: a candidate survivor was reaped in this scoring, or the candidate's bytes
+        alone exceed the headroom it started with (free_start - floor), so the floor
+        would have been crossed without anyone else. Otherwise an infra abort."""
+        probe = self.scratch if self.scratch.exists() else self.scratch.parent
+        free = _disk_usage(probe).free
+        if pre and role == CAND_ROLE and self.free_start is None:
+            self.free_start = free  # before any candidate code of this scoring ran
+        floor = self.min_free_disk_bytes
+        shortfall = floor - free
         if shortfall <= 0:
             return
         # A candidate run's own run dir is the candidate's: measure it as one (current
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
-        if cand >= shortfall:
+        headroom = None if self.free_start is None else self.free_start - floor
+        if self.reaped_pids or (headroom is not None and headroom >= 0 and cand > headroom):
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
             raise ScratchTmpCapExceeded(
                 tree.name,
@@ -1875,7 +1923,7 @@ class PytestRunner:
             )
         raise ScratchInfraAbort(
             f"host_disk_low:shortfall={shortfall}B candidate_bytes={cand}B"
-            f" floor={self.min_free_disk_bytes}B"
+            f" free_start={self.free_start} floor={floor}B"
         )
 
     def check_host_disk(self) -> None:
@@ -1925,7 +1973,7 @@ class PytestRunner:
             junit.unlink(missing_ok=True)
         else:
             # A11: before every "os" run (charged to the candidate or infra if low).
-            self._check_disk_for_run(tree, target, run_idx, role, run_dir)
+            self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=True)
             if self.runs.is_symlink() or run_dir.parent.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use it")
             run_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -1992,8 +2040,11 @@ class PytestRunner:
             # A11: also right after the run, before its result is read or cached: a disk
             # that filled up during the run (e.g. an unlinked file a survivor holds open,
             # #2740) makes any failure of this run an infra abort, never a refusal (or the
-            # candidate's, when its own bytes cover the shortfall).
-            self._check_disk_for_run(tree, target, run_idx, role, run_dir)
+            # candidate's, when it explains the drop). A candidate run's survivors are
+            # reaped first, so blocks they hold in unlinked files are released (#2740).
+            if role == CAND_ROLE:
+                self._reap_candidate_scope(run_dir)
+            self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=False)
         # A6: what this run left in scratch (its own junit report excluded).
         junit_bytes = (
             allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0
@@ -2224,6 +2275,27 @@ def _charge_cap(role: str, level: int, cap: int, *, own: int, foreign: int) -> t
     if level - own - foreign <= cap:
         return role, True
     return role, False
+
+
+def _pid_alive(pid: int) -> bool:
+    """True while ``pid`` exists and is not a zombie (a zombie holds no files)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat_out = subprocess.run(  # noqa: S603 - fixed binary
+            [PS, "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return bool(stat_out) and not stat_out.startswith("Z")
 
 
 def _retire_dir(path: Path) -> Path | None:
@@ -2751,7 +2823,7 @@ def _retire_os_scoring(
     if trees_trash is not None:
         prefixes.append(trees_trash)
     prefixes += runner.retire_runs()
-    timing["reaped_pids"] = runner.reap_survivors(prefixes)
+    timing["reaped_pids"] = [*runner.reaped_pids, *runner.reap_survivors(prefixes)]
     if trees_trash is not None:
         shutil.rmtree(trees_trash, ignore_errors=True)
         if os.path.lexists(trees_trash):

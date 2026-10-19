@@ -3550,7 +3550,9 @@ def _survivor_script(nbytes: int, log: Path | None = None) -> str:
             f'; if [ -s "$TMPDIR/grow" ]; then echo ok >> "{log}"; else echo denied >> "{log}"; fi'
         )
     return (
-        'while :; do mkdir -p "$TMPDIR" 2>/dev/null; '
+        # cd /: the survivor holds nothing under the scoring's paths (not reapable), so
+        # these tests exercise the path confinement on its own.
+        'cd /; while :; do mkdir -p "$TMPDIR" 2>/dev/null; '
         f'[ -s "$TMPDIR/grow" ] || head -c {nbytes} /dev/urandom > "$TMPDIR/grow" 2>/dev/null'
         f"{record}; sleep 0.1; done"
     )
@@ -3825,6 +3827,8 @@ def test_sandbox_os_survivor_cannot_recreate_its_dir_after_the_task_parent_is_go
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
+    # Path confinement on its own: the post-run reaper (tested separately) is off here.
+    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda run_dir: None)
     cand = work / "trees" / "a" / "cand"
     log = cand / "attempts.log"
     _survivor_tree(cand, _survivor_script(5000, log))
@@ -4136,6 +4140,7 @@ def test_charge_cap_rule_table(role, level, own, foreign, expected):
 TIGHT_SURVIVOR_CODE = (
     "import os, sys, time, pathlib\n"
     "os.setsid()\n"
+    "os.chdir('/')  # holds nothing under the scoring's paths: the reaper cannot see it\n"
     "rd = pathlib.Path(sys.argv[1]); n = 0; end = time.time() + 40\n"
     "while time.time() < end:\n"
     "    try:\n"
@@ -4167,6 +4172,8 @@ def test_sandbox_os_survivor_in_a_tight_loop_cannot_outrace_clean_tmp(tmp_path, 
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
+    # Path confinement on its own: the post-run reaper (tested separately) is off here.
+    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda run_dir: None)
     cand = work / "trees" / "a" / "candt"
     _write(cand, {"tests/test_spawn.py": TIGHT_SURVIVOR_TEST})
     nxt = work / "trees" / "b" / "base"
@@ -4221,7 +4228,7 @@ def test_os_scoring_renames_its_trees_parent_before_deleting_and_reaps(tmp_path,
     ).stdout
     assert str(trees) not in worktrees  # pruned
     # The reaper saw the trees parent, its trash and the run parents.
-    (prefixes,) = runner.reaped_prefixes
+    prefixes = runner.reaped_prefixes[-1]  # the end-of-scoring reap
     assert Path(moved[0][1]) in prefixes and runner.runs in prefixes
     assert result["timing"]["reaped_pids"] == []
 
@@ -4293,50 +4300,6 @@ def test_an_oracle_runs_tree_is_not_counted(tmp_path, monkeypatch):
     assert runner.run(env, base, "b", "tests", (), 0).outcomes  # as before A11
 
 
-@pytest.mark.parametrize(("shortfall", "charged"), [(100_000, True), (10 * 1024**3, False)])
-def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, shortfall, charged):
-    """layer1-rie N1 / review C: the disk was fine when the scoring started; a candidate
-    run wrote into its tree. If the candidate's bytes cover the shortfall the next run is
-    HOST_DISK_LOW charged to the candidate (NOT_RUNNABLE), else an infra abort."""
-    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
-    cand = _tree_writer(tmp_path / "cand", 300_000)
-    base = _leak_tree(tmp_path, 0)
-    env = LocalEnv().get("fixture-repo", cand)
-    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
-    floor = runner.min_free_disk_bytes
-    monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(floor - shortfall))
-    if charged:
-        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
-            runner.run(env, base, "b", "tests", (), 0)
-        assert exc.value.kind == ros.SCRATCH_HOST_DISK_LOW == "HOST_DISK_LOW"
-        assert (exc.value.role, exc.value.attributed_role) == ("", ros.CAND_ROLE)
-    else:
-        with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
-            runner.run(env, base, "b", "tests", (), 0)
-    assert len(list(runner.cache.iterdir())) == 1  # only the candidate run was cached
-
-
-def test_host_disk_low_right_after_the_candidate_run_that_filled_it(tmp_path, monkeypatch):
-    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
-    cand = _tree_writer(tmp_path / "cand", 300_000)
-    env = LocalEnv().get("fixture-repo", cand)
-    floor = runner.min_free_disk_bytes
-    calls = {"n": 0}
-
-    def disk(path):
-        calls["n"] += 1
-        return _usage(floor - 100_000 if calls["n"] >= 2 else 9 * 1024**4)
-
-    monkeypatch.setattr(ros, "_disk_usage", disk)
-    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
-        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
-    assert (exc.value.kind, exc.value.attributed_role) == (
-        ros.SCRATCH_HOST_DISK_LOW,
-        ros.CAND_ROLE,
-    )
-    assert list(runner.cache.iterdir()) == []
-
-
 def test_disk_low_before_any_candidate_bytes_is_infra(tmp_path, monkeypatch):
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
     base = _leak_tree(tmp_path, 0)
@@ -4344,34 +4307,6 @@ def test_disk_low_before_any_candidate_bytes_is_infra(tmp_path, monkeypatch):
     monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(1))
     with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
         runner.run(env, base, "b", "tests", (), 0)
-
-
-def test_host_disk_low_charged_to_the_candidate_is_a_not_runnable_receipt(
-    tmp_path, fx, monkeypatch
-):
-    ctx = _ctx(tmp_path, fx)
-    runner = _unconfined_os_runner(ctx.work / "scratch", monkeypatch)
-    ctx.runner = runner
-    floor = runner.min_free_disk_bytes
-    state = {"cand_runs": 0}
-    real_execute = runner._execute
-
-    def execute(env, tree, target, ignores, run_idx, role, *rest):
-        if role == ros.CAND_ROLE:
-            state["cand_runs"] += 1
-        return real_execute(env, tree, target, ignores, run_idx, role, *rest)
-
-    def disk(path):  # the disk is full once a candidate run has happened
-        return _usage(floor - 1 if state["cand_runs"] else 9 * 1024**4)
-
-    monkeypatch.setattr(runner, "_execute", execute)
-    monkeypatch.setattr(ros, "_disk_usage", disk)
-    monkeypatch.setattr(runner, "_candidate_bytes", lambda current: 10**6)
-    receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
-    assert (receipt["label"], receipt["sub_reason"]) == (
-        ros.NOT_RUNNABLE,
-        ros.SCRATCH_HOST_DISK_LOW,
-    )
 
 
 def test_per_run_cap_trip_needing_foreign_growth_is_an_infra_abort(tmp_path, monkeypatch):
@@ -4395,3 +4330,181 @@ def test_per_run_cap_trip_needing_foreign_growth_is_an_infra_abort(tmp_path, mon
     with pytest.raises(ros.ScratchInfraAbort, match="foreign_run_dir_leftover:SCRATCH_TMP_CAP"):
         runner.run(env, tree, "t", "tests", (), 0)
     assert list(runner.cache.iterdir()) == []
+
+
+def _disk_by_phase(monkeypatch, runner: ros.PytestRunner, before: int, after: int) -> dict:
+    """Host free bytes: ``before`` until the first candidate run has finished, ``after``
+    from then on (another process may take disk in between)."""
+    state = {"cand_done": 0}
+    real_execute = runner._execute
+
+    def execute(env, tree, target, ignores, run_idx, role, *rest):
+        try:
+            return real_execute(env, tree, target, ignores, run_idx, role, *rest)
+        finally:
+            if role == ros.CAND_ROLE:
+                state["cand_done"] += 1
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    monkeypatch.setattr(
+        ros, "_disk_usage", lambda path: _usage(after if state["cand_done"] else before)
+    )
+    return state
+
+
+@pytest.mark.parametrize(
+    ("headroom", "charged"),
+    [(100_000, True), (1024**3, False)],  # the candidate alone used it up / it did not
+)
+def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, headroom, charged):
+    """layer1-rie N1/R2 / review C: free_start is taken at the first candidate run. The
+    candidate then writes 300 kB into its tree and the disk ends 200 kB below the floor.
+    Charged (HOST_DISK_LOW, NOT_RUNNABLE) only if the candidate's bytes alone exceed the
+    headroom it started with; else another process shared the drop: infra abort."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _tree_writer(tmp_path / "cand", 300_000)
+    base = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    _disk_by_phase(monkeypatch, runner, floor + headroom, floor - 200_000)
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
+    assert runner.free_start == floor + headroom
+    if charged:
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, base, "b", "tests", (), 0)
+        assert exc.value.kind == ros.SCRATCH_HOST_DISK_LOW == "HOST_DISK_LOW"
+        assert (exc.value.role, exc.value.attributed_role) == ("", ros.CAND_ROLE)
+    else:
+        with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
+            runner.run(env, base, "b", "tests", (), 0)
+
+
+def test_host_disk_low_right_after_the_candidate_run_that_filled_it(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _tree_writer(tmp_path / "cand", 300_000)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    calls = {"n": 0}
+
+    def disk(path):  # pre-run check: 100 kB headroom; post-run check: 200 kB short
+        calls["n"] += 1
+        return _usage(floor + 100_000 if calls["n"] == 1 else floor - 200_000)
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert (exc.value.kind, exc.value.attributed_role) == (
+        ros.SCRATCH_HOST_DISK_LOW,
+        ros.CAND_ROLE,
+    )
+    assert list(runner.cache.iterdir()) == []
+
+
+def test_another_process_taking_disk_between_candidate_runs_is_infra(tmp_path, monkeypatch):
+    """layer1-rie R2: 1 GiB headroom at free_start; another process takes nearly all of
+    it between candidate runs; the honest candidate grows 300 kB, which is more than the
+    final 200 kB shortfall but explains almost none of the drop: infra abort."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _tree_writer(tmp_path / "cand", 300_000)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    _disk_by_phase(monkeypatch, runner, floor + 1024**3, floor - 200_000)
+    assert runner.run(env, cand, "c1", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
+    with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
+        runner.run(env, cand, "c2", "tests", (), 0, ros.CAND_ROLE)
+    assert len(list(runner.cache.iterdir())) == 1
+
+
+def test_host_disk_low_charged_to_the_candidate_is_a_not_runnable_receipt(
+    tmp_path, fx, monkeypatch
+):
+    ctx = _ctx(tmp_path, fx)
+    runner = _unconfined_os_runner(ctx.work / "scratch", monkeypatch)
+    ctx.runner = runner
+    floor = runner.min_free_disk_bytes
+    _disk_by_phase(monkeypatch, runner, floor + 10, floor - 1)
+    monkeypatch.setattr(runner, "_candidate_bytes", lambda current: 10**6)
+    receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
+    assert (receipt["label"], receipt["sub_reason"]) == (
+        ros.NOT_RUNNABLE,
+        ros.SCRATCH_HOST_DISK_LOW,
+    )
+
+
+def test_candidate_runs_reap_their_survivors_before_the_post_run_disk_check(tmp_path, monkeypatch):
+    """layer1-rie R1: a candidate's setsid child holds an unlinked file in its run dir.
+    While it lives the disk reads below the floor. The post-run reap (before the disk
+    check) kills it, so the run completes; its PID is recorded, and any later shortfall
+    of this scoring is the candidate's. Real sandbox-exec on macOS; elsewhere the
+    fail-closed refusal."""
+    work = tmp_path / "work"
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    cand = work / "trees" / "a" / "candt"
+    holder = (
+        "import os, sys, time\n"
+        "os.setsid()\n"
+        "p = os.path.join(os.environ['TMPDIR'], 'held.bin')\n"
+        "f = open(p, 'wb'); f.write(b'x' * 100000); f.flush(); os.unlink(p)\n"
+        "time.sleep(60)\n"
+    )
+    pidfile = cand / "holder.pid"
+    _write(
+        cand,
+        {
+            "tests/test_hold.py": (
+                "import subprocess, sys, time\nfrom pathlib import Path\n\n\n"
+                "def test_hold():\n"
+                f"    child = subprocess.Popen([sys.executable, '-c', {holder!r}],"
+                " stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                f"    Path({str(pidfile)!r}).write_text(str(child.pid))\n"
+                "    time.sleep(1)\n"
+            )
+        },
+    )
+    floor = runner.min_free_disk_bytes
+
+    def holder_alive() -> bool:
+        if not pidfile.exists():
+            return False
+        try:
+            os.kill(int(pidfile.read_text()), 0)
+        except (ProcessLookupError, ValueError):
+            return False
+        return True
+
+    monkeypatch.setattr(
+        ros, "_disk_usage", lambda path: _usage(floor - 1 if holder_alive() else 9 * 1024**4)
+    )
+    env = LocalEnv().get("fixture-repo", cand)
+    runner.begin_task("James3014/a#1")
+    try:
+        res = runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+        assert res.outcomes == {"tests.test_hold::test_hold": ros.PASS}
+        pid = int(pidfile.read_text())
+        assert runner.reaped_pids == [pid] and not holder_alive()
+    finally:
+        if pidfile.exists():
+            with contextlib.suppress(OSError, ValueError):
+                os.kill(int(pidfile.read_text()), 9)
+
+
+def test_reaper_fails_closed_when_a_process_survives_sigkill(tmp_path, monkeypatch):
+    runner = ros.PytestRunner(tmp_path / "scratch", log=lambda m: None)
+    inside = tmp_path / "trash"
+    inside.mkdir()
+    holder = subprocess.Popen(["/bin/sleep", "60"], cwd=inside)
+    try:
+        if not any(os.path.isfile(p) for p in ros.LSOF_CANDIDATES):
+            with pytest.raises(ros.ScratchInfraAbort, match="lsof_unavailable"):
+                runner.reap_survivors([inside])
+            return
+        monkeypatch.setattr(ros, "_pid_alive", lambda pid: True)  # "survives" SIGKILL
+        monkeypatch.setattr(ros, "REAP_WAIT_SECONDS", 0.2)
+        with pytest.raises(ros.ScratchInfraAbort, match="reap_failed"):
+            runner.reap_survivors([inside])
+    finally:
+        with contextlib.suppress(OSError):
+            holder.kill()
+        holder.wait()
