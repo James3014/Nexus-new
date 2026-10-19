@@ -3937,17 +3937,22 @@ def _exec_integration_manager(plan: CapabilityExecutionPlan, task_desc: str) -> 
 
 
 _XRAY_FINDING_MAX = 8
-_XRAY_FINDING_CHARS = 160
+_XRAY_NAME_CHARS = 60
+_XRAY_FINDINGS_TOTAL_CHARS = 900
+# Repo-relative module/file/symbol names only: no whitespace or control characters
+# (prompt injection), no absolute or parent paths (host paths), no free text.
+_XRAY_NAME = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_][A-Za-z0-9_./-]*$")
 
 
-def _xray_text(value: Any) -> str:
-    """One scan fact as short repo-relative text; host paths are never kept."""
+def _xray_name(value: Any) -> str:
+    """One scanned name as safe repo-relative text, or "" when it is not a plain name."""
     text = str(value or "")
     if "::" in text:
-        text = text.split("::", 1)[1]
-    if "/Users/" in text or "/private/" in text or "/var/" in text or "/tmp/" in text:
+        text = text.split("::", 1)[1]  # drop the scan's repo id
+    parts = text.split("::")  # "file.py::symbol"
+    if len(text) > _XRAY_NAME_CHARS or not all(_XRAY_NAME.fullmatch(part) for part in parts):
         return ""
-    return text[:_XRAY_FINDING_CHARS]
+    return text
 
 
 def _xray_summary(scanned: Any) -> str:
@@ -3960,24 +3965,29 @@ def _xray_summary(scanned: Any) -> str:
 
 
 def _xray_findings(scanned: Any) -> list[str]:
-    """Risks first, then import crossings, then symbols (at most 8 short strings)."""
+    """Import crossings, then symbols, as plain names (at most 8 items, 900 chars).
+
+    Risk messages are free text (they can carry exception text and paths), so only
+    their count is reported, in ``result.risk_count``.
+    """
     if scanned is None:
         return []
-    candidates = [
-        *(f"risk: {_xray_text(r)}" for r in scanned.risks),
-        *(
-            f"import: {_xray_text(c.get('source'))} -> {_xray_text(c.get('target'))}"
-            for c in scanned.crossings
-            if isinstance(c, dict)
-        ),
-        *(f"symbol: {_xray_text(sym)}" for sym in scanned.symbols),
-    ]
+    candidates: list[str] = []
+    for crossing in scanned.crossings:
+        if isinstance(crossing, dict):
+            source, target = _xray_name(crossing.get("source")), _xray_name(crossing.get("target"))
+            if source and target:
+                candidates.append(f"import: {source} -> {target}")
+    candidates.extend(f"symbol: {name}" for name in map(_xray_name, scanned.symbols) if name)
     out: list[str] = []
+    total = 0
     for item in candidates:
-        if item.split(": ", 1)[-1].strip(" ->") and item not in out:
-            out.append(item)
-        if len(out) >= _XRAY_FINDING_MAX:
+        if item in out:
+            continue
+        if len(out) >= _XRAY_FINDING_MAX or total + len(item) > _XRAY_FINDINGS_TOTAL_CHARS:
             break
+        out.append(item)
+        total += len(item)
     return out
 
 
