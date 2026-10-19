@@ -17,18 +17,21 @@ One run:
 * executable: ``NEXUS_MEASUREMENT_CLAUDE_BIN``, an absolute path that is not a
   symlink (a pinned ``versions/<x.y.z>`` binary, so auto-update cannot move
   it); ``NEXUS_MEASUREMENT_CLAUDE_VERSION`` optionally pins the version string;
-* auth: a subscription OAuth token (``claude setup-token``) read from the
-  0600 file ``NEXUS_MEASUREMENT_CLAUDE_TOKEN_FILE`` (else the process's
-  ``CLAUDE_CODE_OAUTH_TOKEN``), passed as ``CLAUDE_CODE_OAUTH_TOKEN``;
-  ``--bare`` is not used because it never reads OAuth;
-* isolation: a fresh empty HOME and ``CLAUDE_CONFIG_DIR`` per run,
-  ``--safe-mode --setting-sources "" --strict-mcp-config`` with an empty MCP
-  config, no web tools, subagents or workflows (``--disallowedTools``), auto-update,
+* auth: a dedicated, spend-capped API key, read only by this module from the
+  0600 ``KEY=value`` file named by ``NEXUS_MEASUREMENT_ANTHROPIC_ENV_FILE`` and
+  passed to the CLI as ``ANTHROPIC_API_KEY``; it is redacted from everything
+  kept (trace, sidecar, receipt tails);
+* isolation: ``--bare`` (no CLAUDE.md, memory, hooks, plugins, keychain or
+  OAuth), ``--setting-sources "" --strict-mcp-config`` with an empty MCP
+  config, no web tools, subagents or workflows (``--disallowedTools``), a
+  fresh empty HOME / ``CLAUDE_CONFIG_DIR`` / TMPDIR per run, auto-update,
   telemetry and non-essential traffic off;
 * sandbox: a Seatbelt profile that allows writes only to the target (its
-  ``.git`` stays read-only) and the run root, allows reads of user data only
-  in the target, the run root, the task venv and the CLI install, and allows
-  outbound network only to a local proxy that tunnels ``api.anthropic.com``;
+  ``.git`` stays read-only) and the run root; allows reads of user data only
+  in the target, the run root, the task venv, the CLI install and the
+  operator's ``NEXUS_MEASUREMENT_READ_ROOTS``; starts no program from the
+  writable roots; and allows outbound network only to a local proxy that
+  tunnels ``api.anthropic.com:443`` when the TLS SNI matches;
 * task environment: when ``<controller_repo_root>/../venv`` exists it is put
   first on PATH (read-only) with ``VIRTUAL_ENV``; the target's ``src``
   directory (or the target itself) is on ``PYTHONPATH``;
@@ -56,9 +59,10 @@ from typing import Any, Mapping, Optional
 MEASUREMENT_CLAUDE_ENV = "NEXUS_MEASUREMENT_CLAUDE_WORKER"
 MEASUREMENT_CLAUDE_BIN_ENV = "NEXUS_MEASUREMENT_CLAUDE_BIN"
 MEASUREMENT_CLAUDE_VERSION_ENV = "NEXUS_MEASUREMENT_CLAUDE_VERSION"
-MEASUREMENT_CLAUDE_TOKEN_FILE_ENV = "NEXUS_MEASUREMENT_CLAUDE_TOKEN_FILE"
+MEASUREMENT_ANTHROPIC_ENV_FILE_ENV = "NEXUS_MEASUREMENT_ANTHROPIC_ENV_FILE"
+MEASUREMENT_READ_ROOTS_ENV = "NEXUS_MEASUREMENT_READ_ROOTS"
 MEASUREMENT_TRACE_DIR_ENV = "NEXUS_MEASUREMENT_TRACE_DIR"
-CLAUDE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 CLAUDE_MEASUREMENT_PROVIDER = "claude"
 CLAUDE_MEASUREMENT_MODEL = "claude-haiku-5-5"
@@ -67,7 +71,7 @@ CLAUDE_DISALLOWED_TOOLS = "WebSearch,WebFetch,Task,Agent,Workflow"
 EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
 CLAUDE_MEASUREMENT_FLAGS: tuple[str, ...] = (
     "-p",
-    "--safe-mode",
+    "--bare",
     "--setting-sources",
     "",
     "--strict-mcp-config",
@@ -146,21 +150,27 @@ def measurement_claude_executable(environ: Optional[Mapping[str, str]] = None) -
     return str(path)
 
 
-def measurement_claude_token(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
-    """The OAuth token from the 0600 token file, else from the process env."""
+def measurement_claude_api_key(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    """The measurement API key, read only from the 0600 ``KEY=value`` file named by
+    ``NEXUS_MEASUREMENT_ANTHROPIC_ENV_FILE`` (``ANTHROPIC_API_KEY=...``); never
+    from the process environment, never logged."""
     env = os.environ if environ is None else environ
-    token_file = str(env.get(MEASUREMENT_CLAUDE_TOKEN_FILE_ENV, "") or "").strip()
-    if token_file:
-        path = Path(token_file)
-        try:
-            if not path.is_absolute() or path.stat().st_mode & 0o077:
-                return None
-            text = path.read_text(encoding="utf-8").strip()
-        except OSError:
+    raw = str(env.get(MEASUREMENT_ANTHROPIC_ENV_FILE_ENV, "") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    try:
+        if not path.is_absolute() or path.is_symlink() or path.stat().st_mode & 0o077:
             return None
-        return text if text and "\n" not in text else None
-    token = str(env.get(CLAUDE_OAUTH_TOKEN_ENV, "") or "").strip()
-    return token or None
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        key, sep, value = line.strip().removeprefix("export ").partition("=")
+        if sep and key.strip() == ANTHROPIC_API_KEY_ENV:
+            value = value.strip().strip("'\"")
+            return value or None
+    return None
 
 
 def claude_measurement_argv(prompt: str) -> tuple[str, ...]:
@@ -182,7 +192,7 @@ def task_venv_for(contract: Any) -> Optional[Path]:
     venv = Path(os.path.realpath(Path(root).parent / "venv"))
     if not (venv / "bin" / "python").exists() or not (venv / "pyvenv.cfg").is_file():
         return None
-    return venv if is_safe_read_root(venv) else None
+    return venv if is_safe_read_root(venv, configured_read_roots()) else None
 
 
 def _venv_interpreter_home(venv: Path) -> Optional[Path]:
@@ -195,19 +205,58 @@ def _venv_interpreter_home(venv: Path) -> Optional[Path]:
     if not python.is_file() or python.parent.name != "bin":
         return None
     prefix = python.parent.parent
-    return prefix if is_safe_read_root(prefix) else None
+    return prefix if is_safe_read_root(prefix, configured_read_roots()) else None
 
 
-def is_safe_read_root(path: Path) -> bool:
-    """False for any path whose re-allowed reads would cover user data broadly:
-    the filesystem root, a denied root itself, the real HOME, or an ancestor of it."""
+def configured_read_roots(environ: Optional[Mapping[str, str]] = None) -> tuple[Path, ...]:
+    """Operator-listed extra read roots (``NEXUS_MEASUREMENT_READ_ROOTS``, ``:``-separated,
+    absolute), e.g. the task-venv directory and the uv interpreter store.  Each one
+    must itself be narrow: never ``/``, a denied root, HOME, or an ancestor of HOME."""
+    env = os.environ if environ is None else environ
+    roots = []
+    for raw in str(env.get(MEASUREMENT_READ_ROOTS_ENV, "") or "").split(":"):
+        raw = raw.strip()
+        if raw and os.path.isabs(raw) and _is_narrow(Path(raw)):
+            roots.append(Path(os.path.realpath(raw)))
+    return tuple(roots)
+
+
+def _is_narrow(path: Path) -> bool:
     resolved = Path(os.path.realpath(path))
     home = Path(os.path.realpath(os.path.expanduser("~")))
-    if len(resolved.parts) < 3:
+    denied = {Path(os.path.realpath(root)) for root in _READ_DENIED_ROOTS}
+    covers_denied = any(resolved in root.parents for root in denied)  # e.g. /private/var
+    return (
+        len(resolved.parts) >= 3
+        and resolved not in denied
+        and not covers_denied
+        and resolved != home
+        and resolved not in home.parents
+    )
+
+
+def _under_denied_root(path: Path) -> bool:
+    for root in _READ_DENIED_ROOTS:
+        real_root = Path(os.path.realpath(root))
+        if path == real_root or real_root in path.parents:
+            return True
+    return False
+
+
+def is_safe_read_root(path: Path, extra_roots: tuple[Path, ...] = ()) -> bool:
+    """Whether ``path`` may be re-allowed for reading (Codex r1 #4, r2 #3).
+
+    Allowed: a narrow path outside every denied user-data root (``/usr/...``),
+    or a path inside one of the operator-listed ``extra_roots``.  Anything else
+    under ``/Users``, ``/private/var``, ``/private/tmp`` ... is refused, so a
+    symlinked venv cannot open a whole directory of user data.
+    """
+    resolved = Path(os.path.realpath(path))
+    if not _is_narrow(resolved):
         return False
-    if str(resolved) in _READ_DENIED_ROOTS or resolved == home:
-        return False
-    return resolved not in home.parents
+    if any(resolved == root or root in resolved.parents for root in extra_roots):
+        return True
+    return not _under_denied_root(resolved)
 
 
 def measurement_child_env(
@@ -242,7 +291,7 @@ def measurement_child_env(
         child["PYTHONPATH"] = str(src if src.is_dir() else target)
     child.update(CLAUDE_MEASUREMENT_ENV)
     if token:
-        child[CLAUDE_OAUTH_TOKEN_ENV] = token
+        child[ANTHROPIC_API_KEY_ENV] = token
     return child
 
 
@@ -286,7 +335,11 @@ def build_claude_seatbelt_profile(
         ")",
         # Helpers that would act through unsandboxed system services (open a
         # URL via LaunchServices, AppleScript, the keychain) cannot be started.
+        # No program may be started from the writable roots (a copied helper
+        # binary), nor these helpers that act through unsandboxed services.
         "(deny process-exec",
+        f'  (subpath "{_sbpl(target)}")',
+        f'  (subpath "{_sbpl(run_root)}")',
         *[f'  (literal "{tool}")' for tool in _DENIED_HELPER_EXECUTABLES],
         ")",
         "(deny network-outbound)",
@@ -306,28 +359,55 @@ def normalize_seatbelt_profile(
     return re.sub(r'remote ip "localhost:\d+"', 'remote ip "localhost:<PORT>"', text)
 
 
+def tls_handshake_bytes(data: bytes) -> Optional[bytes]:
+    """The first handshake message reassembled from consecutive TLS records,
+    or None until it is complete (or when the bytes are not TLS handshake records)."""
+    payload = b""
+    pos = 0
+    while pos + 5 <= len(data):
+        if data[pos] != 0x16:
+            return None
+        length = int.from_bytes(data[pos + 3 : pos + 5], "big")
+        if pos + 5 + length > len(data):
+            return None
+        payload += data[pos + 5 : pos + 5 + length]
+        pos += 5 + length
+        if len(payload) >= 4 and len(payload) >= 4 + int.from_bytes(payload[1:4], "big"):
+            return payload[: 4 + int.from_bytes(payload[1:4], "big")]
+    return None
+
+
 def tls_client_hello_sni(data: bytes) -> Optional[str]:
-    """The SNI host name of a TLS ClientHello record, or None when absent/malformed."""
+    """The SNI host name of a TLS ClientHello (possibly split over several
+    records), or None when absent, incomplete or malformed."""
+    hello = tls_handshake_bytes(data)
+    if hello is None or hello[0] != 0x01:
+        return None
     try:
-        if len(data) < 5 or data[0] != 0x16:
+        end = len(hello)
+        pos = 4 + 2 + 32  # handshake header, client version, random
+        pos += 1 + hello[pos]  # session id
+        pos += 2 + int.from_bytes(hello[pos : pos + 2], "big")  # cipher suites
+        pos += 1 + hello[pos]  # compression methods
+        ext_end = pos + 2 + int.from_bytes(hello[pos : pos + 2], "big")
+        if ext_end > end:
             return None
-        end = min(len(data), 5 + int.from_bytes(data[3:5], "big"))
-        pos = 5
-        if data[pos] != 0x01:
-            return None
-        pos += 4 + 2 + 32  # handshake header, client version, random
-        pos += 1 + data[pos]  # session id
-        pos += 2 + int.from_bytes(data[pos : pos + 2], "big")  # cipher suites
-        pos += 1 + data[pos]  # compression methods
-        ext_end = min(end, pos + 2 + int.from_bytes(data[pos : pos + 2], "big"))
         pos += 2
         while pos + 4 <= ext_end:
-            ext_type = int.from_bytes(data[pos : pos + 2], "big")
-            ext_len = int.from_bytes(data[pos + 2 : pos + 4], "big")
+            ext_type = int.from_bytes(hello[pos : pos + 2], "big")
+            ext_len = int.from_bytes(hello[pos + 2 : pos + 4], "big")
             pos += 4
-            if ext_type == 0 and ext_len >= 5 and data[pos + 2] == 0:
-                name_len = int.from_bytes(data[pos + 3 : pos + 5], "big")
-                return data[pos + 5 : pos + 5 + name_len].decode("ascii").lower()
+            if pos + ext_len > ext_end:
+                return None
+            if ext_type == 0:
+                body = hello[pos : pos + ext_len]
+                list_len = int.from_bytes(body[0:2], "big")
+                if list_len + 2 != len(body) or body[2] != 0:
+                    return None
+                name_len = int.from_bytes(body[3:5], "big")
+                if 5 + name_len != len(body):
+                    return None
+                return body[5 : 5 + name_len].decode("ascii").lower()
             pos += ext_len
     except (IndexError, UnicodeDecodeError):
         return None
@@ -430,8 +510,8 @@ class HostAllowlistProxy:
                 return
             client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             hello = head.split(b"\r\n\r\n", 1)[1]
-            while len(hello) < 5 or len(hello) < 5 + int.from_bytes(hello[3:5], "big"):
-                if len(hello) >= 16384:
+            while tls_handshake_bytes(hello) is None:
+                if len(hello) >= 65536:
                     break
                 chunk = client.recv(4096)
                 if not chunk:
@@ -485,6 +565,9 @@ class ClaudeStreamSummary:
     api_error_status: Any = None
     terminal_reason: str = ""
     init: dict[str, Any] = field(default_factory=dict)
+    # Models that actually produced output (assistant messages, modelUsage);
+    # the init event's configured model is not evidence of service.
+    served_models: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -496,6 +579,7 @@ class ClaudeStreamSummary:
             "usage": self.usage,
             "model_usage": self.model_usage,
             "models_seen": list(self.models_seen),
+            "served_models": list(self.served_models),
             "tool_calls": [dict(call) for call in self.tool_calls],
             "permission_denials": list(self.permission_denials),
             "session_id": self.session_id,
@@ -526,6 +610,7 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
     text = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else str(stdout)
     tool_calls: list[dict[str, Any]] = []
     models: list[str] = []
+    served: list[str] = []
     result: dict[str, Any] = {}
     init: dict[str, Any] = {}
     session_id = ""
@@ -552,6 +637,8 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
             model = message.get("model")
             if isinstance(model, str) and model not in models:
                 models.append(model)
+            if isinstance(model, str) and model not in served:
+                served.append(model)
             for block in message.get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     tool_calls.append({
@@ -569,6 +656,8 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
     for name in model_usage:
         if name not in models:
             models.append(str(name))
+        if name not in served:
+            served.append(str(name))
     num_turns = result.get("num_turns")
     cost = result.get("total_cost_usd")
     denials = result.get("permission_denials")
@@ -585,6 +674,7 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
         usage=dict(usage),
         model_usage=dict(model_usage),
         models_seen=tuple(models),
+        served_models=tuple(served),
         tool_calls=tuple(tool_calls),
         permission_denials=tuple(denials) if isinstance(denials, list) else (),
         session_id=str(result.get("session_id") or session_id),
@@ -628,11 +718,24 @@ def classify_claude_infra(summary: ClaudeStreamSummary, stderr: str | bytes) -> 
     return None
 
 
+_API_KEY_SHAPE = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{8,}")
+_SECRET_FRAGMENT = 16
+
+
 def redact_secrets(data: bytes, secrets: tuple[str, ...]) -> bytes:
-    """``data`` with every occurrence of each secret replaced by ``<REDACTED>``."""
+    """``data`` without the secrets: every key-shaped string, every exact secret
+    and every ``_SECRET_FRAGMENT``-character piece of one (a secret printed in
+    pieces) becomes ``<REDACTED>``."""
+    data = _API_KEY_SHAPE.sub(b"<REDACTED>", bytes(data))
     for secret in secrets:
-        if secret and len(secret) >= 8:
-            data = data.replace(secret.encode("utf-8"), b"<REDACTED>")
+        raw = secret.encode("utf-8") if secret else b""
+        if len(raw) < 8:
+            continue
+        data = data.replace(raw, b"<REDACTED>")
+        for start in range(0, max(1, len(raw) - _SECRET_FRAGMENT + 1)):
+            piece = raw[start : start + _SECRET_FRAGMENT]
+            if len(piece) == _SECRET_FRAGMENT and piece in data:
+                data = data.replace(piece, b"<REDACTED>")
     return data
 
 
@@ -655,7 +758,7 @@ def write_measurement_trace(
 
     Only ``NEXUS_MEASUREMENT_TRACE_DIR`` (absolute) enables this.  Files are
     named by the receipt's ``stdout_sha256`` (the hash of the raw stream) and
-    created 0600; every ``secrets`` value (the OAuth token) is redacted from
+    created 0600; every ``secrets`` value (the API key) is redacted from
     the stored stream and sidecar, since a tool call may print the environment.
     """
     env = os.environ if environ is None else environ
@@ -715,7 +818,11 @@ def run_claude_once(
         (run_root / "home" / ".claude").mkdir(parents=True)
         (run_root / "tmp").mkdir()
         cli_dir = Path(os.path.realpath(executable)).parent
-        if not is_safe_read_root(cli_dir):
+        extra = configured_read_roots(environ)
+        # The CLI's own install directory (``.../claude/versions``) is its own root.
+        if not is_safe_read_root(
+            cli_dir, (*extra, cli_dir) if cli_dir.name == "versions" else extra
+        ):
             raise ValueError("claude executable directory is not a safe read root")
         readable: list[Path] = [cli_dir]
         if venv is not None:
@@ -728,7 +835,7 @@ def run_claude_once(
                 run_root=run_root,
                 target=target,
                 proxy_url=proxy.url,
-                token=measurement_claude_token(environ),
+                token=measurement_claude_api_key(environ),
                 venv=venv,
                 environ=environ,
             )
@@ -790,7 +897,7 @@ class ClaudeMeasurementWorkerAdapter:
         return os.environ if self._environ is None else self._environ
 
     def _secrets(self) -> tuple[str, ...]:
-        token = measurement_claude_token(self._env())
+        token = measurement_claude_api_key(self._env())
         return (token,) if token else ()
 
     def preflight(self) -> Any:
@@ -875,10 +982,9 @@ class ClaudeMeasurementWorkerAdapter:
         if foreign:
             outcome = WorkerOutcome.FAILED
             failure = f"{self.provider}: model substitution observed: {sorted(foreign)}"
-        elif (
-            outcome is WorkerOutcome.EXECUTION_COMPLETED
-            and CLAUDE_MEASUREMENT_MODEL not in summary.models_seen
-        ):
+        elif outcome is WorkerOutcome.EXECUTION_COMPLETED and set(summary.served_models) != {
+            CLAUDE_MEASUREMENT_MODEL
+        }:
             # A success must positively show the measurement model served it.
             outcome = WorkerOutcome.FAILED
             failure = f"{self.provider}: no evidence that {CLAUDE_MEASUREMENT_MODEL} served the run"
@@ -1029,7 +1135,7 @@ def measurement_claude_preflight(
         pinned = str(env.get(MEASUREMENT_CLAUDE_VERSION_ENV, "") or "").strip()
         if pinned and not cli_version.startswith(pinned):
             return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_MISMATCH")
-        token = measurement_claude_token(env) or ""
+        token = measurement_claude_api_key(env) or ""
         # A different account (token) needs its own proof (review finding #5).
         key = (binary_sha256, cli_version, hashlib.sha256(token.encode("utf-8")).hexdigest())
         cached = _PROBE_CACHE.get(key)
@@ -1046,7 +1152,7 @@ def measurement_claude_preflight(
                 environ=env,
             )
             summary = run.summary
-            served = set(summary.models_seen)
+            served = set(summary.served_models)
             if (
                 run.result.exit_code != 0
                 or summary.is_error is not False

@@ -93,7 +93,12 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         "params": {"name": "nexus_worker_candidate", "arguments": arguments},
     })
     assert response is not None
-    result: dict[str, Any] = {"gateway_is_error": bool(response["result"]["isError"])}
+    import nexus.executors.claude_measurement_worker as cmw_mod
+
+    result: dict[str, Any] = {
+        "gateway_is_error": bool(response["result"]["isError"]),
+        "use_seatbelt": cmw_mod._USE_SEATBELT,
+    }
     if result["gateway_is_error"]:
         result["gateway_error"] = response["result"]["structuredContent"]
         return result

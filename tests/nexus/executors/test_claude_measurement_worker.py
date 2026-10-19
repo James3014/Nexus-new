@@ -84,6 +84,15 @@ for name, tool in (("exec_security", "/usr/bin/security"), ("exec_open", "/usr/b
         probes[name] = "RAN"
     except Exception as exc:
         probes[name] = "DENIED:" + type(exc).__name__
+try:
+    import shutil, subprocess
+    shutil.copy("/bin/echo", "copied-echo")
+    subprocess.run(["./copied-echo", "hi"], capture_output=True, timeout=5)
+    probes["exec_from_target"] = "RAN"
+except Exception as exc:
+    probes["exec_from_target"] = "DENIED:" + type(exc).__name__
+finally:
+    Path("copied-echo").unlink(missing_ok=True)
 model = os.environ.get("FAKE_MODEL", "claude-haiku-5-5")
 mode = os.environ.get("FAKE_MODE", "ok")
 init = {"type": "system", "subtype": "init", "session_id": "s1",
@@ -131,25 +140,36 @@ def _fake_claude(
     return Path(os.path.realpath(path))
 
 
+FAKE_KEY = "sk-" "ant-api03-" "FAKEKEYFORTESTSONLY0123456789abcdef"  # split so secret scanners do not match a test literal
+FAKE_OTHER_KEY = "sk-" "ant-other-" "KEYSHAPED123456"
+
+
+def _key_file(tmp_path: Path) -> Path:
+    path = tmp_path / "anthropic.env"
+    path.write_text(f"# measurement key\nANTHROPIC_API_KEY={FAKE_KEY}\n")
+    path.chmod(0o600)
+    return path
+
+
 @pytest.fixture()
 def switch_off(monkeypatch):
     for key in (
         cmw.MEASUREMENT_CLAUDE_ENV,
         cmw.MEASUREMENT_CLAUDE_BIN_ENV,
-        cmw.MEASUREMENT_CLAUDE_TOKEN_FILE_ENV,
+        cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV,
     ):
         monkeypatch.delenv(key, raising=False)
 
 
 def _enable(monkeypatch, tmp_path, **fake) -> Path:
     exe = _fake_claude(tmp_path, **fake)
-    token = tmp_path / "token"
-    token.write_text("fake-oauth-token-123\n")
-    token.chmod(0o600)
+    token = _key_file(tmp_path)
     monkeypatch.setenv(cmw.MEASUREMENT_CLAUDE_ENV, "1")
     monkeypatch.setenv(cmw.MEASUREMENT_CLAUDE_BIN_ENV, str(exe))
-    monkeypatch.setenv(cmw.MEASUREMENT_CLAUDE_TOKEN_FILE_ENV, str(token))
+    monkeypatch.setenv(cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV, str(token))
     monkeypatch.setenv(cmw.MEASUREMENT_TRACE_DIR_ENV, str(tmp_path / "traces"))
+    # tmp_path lives under a denied user-data root; the operator lists it.
+    monkeypatch.setenv(cmw.MEASUREMENT_READ_ROOTS_ENV, str(tmp_path))
     cmw._PROBE_CACHE.clear()
     return exe
 
@@ -228,7 +248,7 @@ def test_gateway_preflight_for_claude_is_unregistered_while_switched_off(switch_
 def test_argv_is_fixed_and_the_prompt_is_last():
     argv = cmw.claude_measurement_argv("WHAT: x")
     assert argv[:-1] == cmw.CLAUDE_MEASUREMENT_FLAGS and argv[-1] == "WHAT: x"
-    assert "--bare" not in argv and "--dangerously-skip-permissions" not in argv
+    assert "--bare" in argv and "--dangerously-skip-permissions" not in argv
     assert "--fallback-model" not in argv
     assert argv[argv.index("--disallowedTools") + 1] == "WebSearch,WebFetch,Task,Agent,Workflow"
     assert argv[argv.index("--model") + 1] == "claude-haiku-5-5"
@@ -253,16 +273,20 @@ def test_executable_must_be_absolute_and_not_a_symlink(tmp_path):
         assert cmw.measurement_claude_executable({cmw.MEASUREMENT_CLAUDE_BIN_ENV: raw}) is None
 
 
-def test_token_file_must_be_private(tmp_path):
-    token = tmp_path / "tok"
-    token.write_text("abc\n")
-    token.chmod(0o644)
-    assert cmw.measurement_claude_token({cmw.MEASUREMENT_CLAUDE_TOKEN_FILE_ENV: str(token)}) is None
-    token.chmod(0o600)
+def test_api_key_comes_only_from_a_private_env_file(tmp_path):
+    key_file = _key_file(tmp_path)
+    env = {cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: str(key_file)}
+    assert cmw.measurement_claude_api_key(env) == FAKE_KEY
+    key_file.chmod(0o644)
+    assert cmw.measurement_claude_api_key(env) is None
+    key_file.chmod(0o600)
+    link = tmp_path / "link.env"
+    link.symlink_to(key_file)
     assert (
-        cmw.measurement_claude_token({cmw.MEASUREMENT_CLAUDE_TOKEN_FILE_ENV: str(token)}) == "abc"
+        cmw.measurement_claude_api_key({cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: str(link)}) is None
     )
-    assert cmw.measurement_claude_token({cmw.CLAUDE_OAUTH_TOKEN_ENV: "envtok"}) == "envtok"
+    # Never from the process environment.
+    assert cmw.measurement_claude_api_key({"ANTHROPIC_API_KEY": FAKE_KEY}) is None
 
 
 def test_stream_summary_collects_tools_usage_models_and_init():
@@ -387,12 +411,15 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
     assert Path(seen["cwd"]).resolve() == Path(lease.target_worktree).resolve()
     env = seen["env"]
     # The CLI received the token, and the kept trace never holds it (Codex r1 #1).
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "<REDACTED>"
+    assert env["ANTHROPIC_API_KEY"] == "<REDACTED>"
     trace_bytes = (
         tmp_path / "traces" / "t1" / f"{receipt.stdout_sha256}.stream.jsonl"
     ).read_bytes()
-    assert b"fake-oauth-token-123" not in trace_bytes
-    assert b"fake-oauth-token-123" not in (receipt.stdout_tail or "").encode()
+    assert FAKE_KEY.encode() not in trace_bytes
+    assert (
+        FAKE_KEY.encode()
+        not in (receipt.stdout_tail or "").encode()
+    )
     assert env["HOME"] != os.environ.get("HOME") and env["CLAUDE_CONFIG_DIR"].startswith(
         env["HOME"]
     )
@@ -402,7 +429,8 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
         env["PATH"] == f"{venv}/bin:" + cmw.CLAUDE_MEASUREMENT_SYSTEM_PATH
         and env["VIRTUAL_ENV"] == venv
     )
-    assert not any(key.startswith(("ANTHROPIC_", "GITHUB_", "GH_TOKEN")) for key in env)
+    assert [key for key in env if key.startswith("ANTHROPIC_")] == ["ANTHROPIC_API_KEY"]
+    assert not any(key.startswith(("GITHUB_", "GH_TOKEN", "CLAUDE_CODE_OAUTH")) for key in env)
     # Sandbox enforcement is proven by the physical witness below (macOS);
     # the proxy refusal holds everywhere.
     assert seen["probes"]["proxy_github"].startswith("HTTP/1.1 403"), seen["probes"]
@@ -414,7 +442,7 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
         sidecar["init"]["mcp_servers"] == []
         and sidecar["seatbelt_sha256"] == receipt.provider_permission_profile_sha256
     )
-    assert "fake-oauth-token-123" not in json.dumps(sidecar)
+    assert FAKE_KEY not in json.dumps(sidecar)
 
 
 def test_adapter_marks_provider_rate_limits_as_infra(monkeypatch, tmp_path):
@@ -531,13 +559,12 @@ def test_dispatch_assertion_is_inert_with_the_switch_off(switch_off):
 
 def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
     fake = _fake_claude(tmp_path)
-    token = tmp_path / "token"
-    token.write_text("fake-oauth-token-123\n")
-    token.chmod(0o600)
+    token = _key_file(tmp_path)
     spec = {
         "work": str(tmp_path / "work"),
         "out": str(tmp_path / "out.json"),
         "task_id": "m2721-claude-witness",
+        "use_seatbelt": SANDBOX,
     }
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(spec))
@@ -545,8 +572,9 @@ def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
     env.update({
         cmw.MEASUREMENT_CLAUDE_ENV: "1",
         cmw.MEASUREMENT_CLAUDE_BIN_ENV: str(fake),
-        cmw.MEASUREMENT_CLAUDE_TOKEN_FILE_ENV: str(token),
+        cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: str(token),
         cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "traces"),
+        cmw.MEASUREMENT_READ_ROOTS_ENV: str(tmp_path),
         "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), env.get("PYTHONPATH", "")]),
     })
     subprocess.run(
@@ -558,6 +586,8 @@ def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
     )
     result = json.loads((tmp_path / "out.json").read_text())
     assert "driver_error" not in result, result.get("trace")
+    # The subprocess honoured the host's sandbox mode (Linux CI has no Seatbelt).
+    assert result["use_seatbelt"] is SANDBOX
     assert result["gateway_is_error"] is False, result.get("gateway_error")
     assert (result["request_provider"], result["request_model"]) == ("claude", "claude-haiku-5-5")
     assert result["request_worker_id"] == cmw.CLAUDE_MEASUREMENT_WORKER_ID
@@ -600,14 +630,32 @@ def test_direct_calls_without_a_leased_contract_are_refused(monkeypatch, tmp_pat
 
 def test_read_roots_never_cover_home_or_user_data(tmp_path):
     home = Path(os.path.realpath(os.path.expanduser("~")))
-    for unsafe in (Path("/"), Path("/Users"), Path("/private/tmp"), home, home.parent):
-        assert not cmw.is_safe_read_root(unsafe), unsafe
-    assert cmw.is_safe_read_root(tmp_path)
+    for unsafe in (
+        Path("/"),
+        Path("/Users"),
+        Path("/private/tmp"),
+        Path("/var"),
+        home,
+        home.parent,
+    ):
+        assert not cmw.is_safe_read_root(unsafe, (tmp_path,)), unsafe
+    # Inside a denied tree only the operator-listed roots are allowed (Codex r2 #3).
+    assert not cmw.is_safe_read_root(home / "Downloads")
+    # A path outside every denied root (e.g. /private/var/log) is already readable,
+    # so re-allowing it widens nothing.
+    assert not cmw.is_safe_read_root(tmp_path)
+    assert cmw.is_safe_read_root(tmp_path / "venv", (Path(os.path.realpath(tmp_path)),))
+    assert cmw.is_safe_read_root(Path("/usr/lib"))
     venv = tmp_path / "ctl" / "venv"
     venv.parent.mkdir(parents=True)
     venv.symlink_to(home)  # a venv link pointing at HOME is ignored, never re-allowed
     contract = SimpleNamespace(controller_repo_root=str(tmp_path / "ctl" / "base"))
     assert cmw.task_venv_for(contract) is None
+    # An operator root that is itself broad is dropped.
+    roots = cmw.configured_read_roots({
+        cmw.MEASUREMENT_READ_ROOTS_ENV: f"/Users:{home}:/:{tmp_path}"
+    })
+    assert roots == (Path(os.path.realpath(tmp_path)),)
 
 
 def test_infra_needs_an_api_error_signal():
@@ -732,4 +780,39 @@ def test_seatbelt_denies_reads_writes_network_and_helper_tools(monkeypatch, tmp_
     assert probes["exec_security"].startswith("DENIED") and probes["exec_open"].startswith(
         "DENIED"
     ), probes
+    assert probes["exec_from_target"].startswith("DENIED"), probes
     assert not (tmp_path / "answers" / "planted.txt").exists()
+
+
+def test_init_only_model_is_not_evidence_of_service():
+    stream = "\n".join(
+        json.dumps(e)
+        for e in (
+            {"type": "system", "subtype": "init", "model": "claude-haiku-5-5"},
+            {"type": "result", "subtype": "success", "is_error": False},
+        )
+    )
+    summary = cmw.summarize_stream_json(stream)
+    assert summary.models_seen == ("claude-haiku-5-5",) and summary.served_models == ()
+
+
+def test_sni_is_read_across_fragmented_records():
+    hello = _client_hello("api.anthropic.com")
+    body = hello[5:]
+    cut = len(body) // 3
+    fragmented = b"".join(
+        b"\x16" + hello[1:3] + len(part).to_bytes(2, "big") + part
+        for part in (body[:cut], body[cut:])
+    )
+    assert cmw.tls_client_hello_sni(fragmented) == "api.anthropic.com"
+    assert cmw.tls_client_hello_sni(fragmented[: len(fragmented) - 3]) is None  # incomplete
+
+
+def test_key_redaction_covers_pieces_and_key_shapes():
+    data = (
+        f"a {FAKE_KEY} b {FAKE_KEY[:20]} c {FAKE_KEY[20:]} d {FAKE_OTHER_KEY}".encode()
+    )
+    out = cmw.redact_secrets(data, (FAKE_KEY,))
+    for piece in (FAKE_KEY, FAKE_KEY[:20], FAKE_KEY[20:40]):
+        assert piece.encode() not in out
+    assert b"sk-ant-" not in out

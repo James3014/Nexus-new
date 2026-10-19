@@ -34,6 +34,12 @@ import json
 from typing import Any, Mapping, Optional
 
 
+def _assert_measurement_dispatch(provider: str, model: str) -> None:
+    from nexus.services.measurement_workforce_policy import assert_measurement_dispatch
+
+    assert_measurement_dispatch(provider, model)
+
+
 def _measurement_policy_loader() -> Any:
     from nexus.services.measurement_workforce_policy import measurement_workforce_policy_loader
 
@@ -202,6 +208,8 @@ def validate_workforce_dispatch_binding(
             "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"
         )):
             raise ValueError("workforce admission resolved identity missing")
+        # #2721: on a measurement Gateway the readback must also be the measurement model.
+        _assert_measurement_dispatch(str(binding["provider"]), str(binding["model"]))
     except (TypeError, ValueError, KeyError) as exc:
         raise RuntimeError(f"WORKFORCE_ADMISSION_BINDING_INVALID:{exc}") from exc
     fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
