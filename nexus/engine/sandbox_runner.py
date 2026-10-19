@@ -7,6 +7,7 @@ import logging
 import time
 import os
 import json
+import stat
 import uuid
 import sys
 import tempfile
@@ -38,6 +39,79 @@ def _guard_write_deny_rule(guard_dir: Path) -> str:
     if real not in paths:
         paths.append(real)
     return "\n".join(f'(deny file-write* (subpath "{path}"))' for path in paths)
+
+
+def _run_dir_write_deny_rule(run_dir: Path) -> str:
+    """Deny writes to the run record dir and renames of any directory above it (#2785).
+
+    When ``run_dir`` sits under an allowed write path (/tmp, /private/tmp) the sandboxed
+    process could otherwise rename ``run_dir`` (or one of its parents) and put a
+    symlink in its place: a later Python child would load a ``sitecustomize.py`` the
+    process wrote, and the parent would write ``sandbox_result.json`` through it.
+
+    ``(subpath run_dir)`` refuses every write inside the record dir, including renaming
+    it.  ``(literal <ancestor>)`` refuses renaming or removing each parent directory
+    while still allowing new files next to it, because Seatbelt checks a rename
+    against the source path only.  Both the literal and the resolved spelling are
+    listed, since sandbox-exec matches real paths.  It goes at the end of the
+    profile, next to the guard deny: the last matching rule wins.  The parent's own
+    writes (guard, report, artifacts) happen outside the sandbox and are unaffected.
+    """
+    forms: list[Path] = [Path(os.path.abspath(run_dir))]
+    real = Path(os.path.realpath(run_dir))
+    if real not in forms:
+        forms.append(real)
+    subpaths = [str(form) for form in forms]
+    ancestors: list[str] = []
+    for form in forms:
+        for parent in form.parents:
+            text = str(parent)
+            if text not in ancestors:
+                ancestors.append(text)
+    lines = [f'(deny file-write* (subpath "{path}"))' for path in subpaths]
+    lines.extend(f'(deny file-write* (literal "{path}"))' for path in ancestors)
+    return "\n".join(lines)
+
+
+# Reason code when run_dir is no longer the directory the parent created (#2785).
+RUN_DIR_REPLACED = "run_dir_replaced_during_run"
+
+
+class RunDirUnsafe(RuntimeError):
+    """run_dir is a symlink, not a directory, or not the directory recorded before the run."""
+
+
+@dataclass(frozen=True)
+class RunDirIdentity:
+    st_dev: int
+    st_ino: int
+    real_path: str
+
+
+def _capture_run_dir_identity(run_dir: Path) -> RunDirIdentity:
+    info = os.lstat(run_dir)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise RunDirUnsafe(f"{run_dir} is not a real directory")
+    return RunDirIdentity(info.st_dev, info.st_ino, os.path.realpath(run_dir))
+
+
+def _run_dir_mismatch(run_dir: Path, identity: RunDirIdentity) -> str | None:
+    """Return why ``run_dir`` is not the recorded directory any more, or None if it is."""
+    try:
+        info = os.lstat(run_dir)
+    except OSError as exc:
+        return f"lstat failed: {exc}"
+    if stat.S_ISLNK(info.st_mode):
+        return "run_dir is a symlink"
+    if not stat.S_ISDIR(info.st_mode):
+        return "run_dir is not a directory"
+    if (info.st_dev, info.st_ino) != (identity.st_dev, identity.st_ino):
+        return "run_dir device/inode changed"
+    # A renamed parent replaced by a symlink to the renamed tree keeps the same
+    # device/inode at the end of the path; the resolved path tells them apart.
+    if os.path.realpath(run_dir) != identity.real_path:
+        return "run_dir resolves to a different path"
+    return None
 
 
 # Device files every process may write (mirrors nexus/engine/sandboxed_lane.py).
@@ -162,12 +236,65 @@ class SandboxRunner:
             },
         }
 
-    def _write_result(self, run_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
+    def _write_result(
+        self,
+        run_dir: Path,
+        result: dict[str, Any],
+        identity: RunDirIdentity | None = None,
+    ) -> dict[str, Any]:
+        """Write sandbox_result.json without following any symlink at run_dir (#2785).
+
+        ``run_dir`` must still be the directory recorded in ``identity`` (same device
+        and inode, same resolved path, not a symlink), and the report itself is opened
+        with ``O_NOFOLLOW`` relative to that directory.  Otherwise nothing is written:
+        the run is marked failed with ``RUN_DIR_REPLACED`` and ``report_path`` is None.
+        """
         report_path = run_dir / "sandbox_result.json"
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        result["report_path"] = str(report_path)
-        report_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        try:
+            if identity is None:
+                run_dir.mkdir(parents=True, exist_ok=True)
+                identity = _capture_run_dir_identity(run_dir)
+            mismatch = _run_dir_mismatch(run_dir, identity)
+            if mismatch:
+                raise RunDirUnsafe(mismatch)
+            result["report_path"] = str(report_path)
+            self._write_report_nofollow(
+                run_dir,
+                identity,
+                report_path.name,
+                json.dumps(result, indent=2, ensure_ascii=False),
+            )
+        except (RunDirUnsafe, OSError) as exc:
+            result["success"] = False
+            if result.get("error") not in (None, RUN_DIR_REPLACED):
+                result["original_error"] = result["error"]
+            result["error"] = RUN_DIR_REPLACED
+            result["report_path"] = None
+            result["report_write_refused"] = str(exc)
+            logger.error("sandbox run record not written: %s", exc)
         return result
+
+    @staticmethod
+    def _write_report_nofollow(
+        run_dir: Path, identity: RunDirIdentity, name: str, text: str
+    ) -> None:
+        dir_fd = os.open(run_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            info = os.fstat(dir_fd)
+            if (info.st_dev, info.st_ino) != (identity.st_dev, identity.st_ino):
+                raise RunDirUnsafe("run_dir device/inode changed before the report write")
+            fd = os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o644,
+                dir_fd=dir_fd,
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise RunDirUnsafe(f"{name} is not a regular file")
+                handle.write(text)
+        finally:
+            os.close(dir_fd)
 
     def _write_python_network_guard(self, run_dir: Path) -> Path:
         guard_dir = run_dir / "python_network_guard"
@@ -272,6 +399,15 @@ socket.socket.connect = _guarded_socket_connect
         run_dir = self.sandbox_base / "runs" / run_id
         command_list = [str(part) for part in command]
         run_dir.mkdir(parents=True, exist_ok=True)
+        # From here on run_dir is its real path: the guard on PYTHONPATH, the profile
+        # denies and the report all name a path with no symlink in it.  A symlink in
+        # the project or state root (e.g. /tmp/x/link -> /private/tmp/x/real) could
+        # otherwise be renamed and repointed by the child, because the ancestor denies
+        # cover the real parents but not the symlink's own entry (#2791 review).
+        run_dir = Path(os.path.realpath(run_dir))
+        # Recorded before the child starts; checked again before anything is written
+        # back into run_dir (#2785).
+        run_dir_identity = _capture_run_dir_identity(run_dir)
         # The working copy goes to a system temp dir, removed on exit when cleanup is
         # set (#2698).  The run record and the network guard stay in run_dir, outside
         # the sandbox's write paths, so the process cannot rewrite its own guard.
@@ -297,7 +433,7 @@ socket.socket.connect = _guarded_socket_connect
                     error="cwd_outside_sandbox_workspace",
                     duration_sec=time.time() - start_time,
                 )
-                return self._write_result(run_dir, result_payload)
+                return self._write_result(run_dir, result_payload, run_dir_identity)
             if not effective_cwd.exists() or not effective_cwd.is_dir():
                 result_payload = self._failure_result(
                     task=task,
@@ -311,7 +447,7 @@ socket.socket.connect = _guarded_socket_connect
                     error="cwd_missing",
                     duration_sec=time.time() - start_time,
                 )
-                return self._write_result(run_dir, result_payload)
+                return self._write_result(run_dir, result_payload, run_dir_identity)
 
             output_path: Path | None = None
             if output_file:
@@ -331,7 +467,7 @@ socket.socket.connect = _guarded_socket_connect
                         error="output_file_outside_sandbox_workspace",
                         duration_sec=time.time() - start_time,
                     )
-                    return self._write_result(run_dir, result_payload)
+                    return self._write_result(run_dir, result_payload, run_dir_identity)
 
             env = os.environ.copy()
             guard_dir = self._write_python_network_guard(run_dir)
@@ -408,7 +544,10 @@ socket.socket.connect = _guarded_socket_connect
                         write_literals=write_paths
                     )
 
-                applied_profile = f"{applied_profile}\n{_guard_write_deny_rule(guard_dir)}"
+                applied_profile = (
+                    f"{applied_profile}\n{_guard_write_deny_rule(guard_dir)}"
+                    f"\n{_run_dir_write_deny_rule(run_dir)}"
+                )
                 active_command = [
                     "sandbox-exec",
                     "-p",
@@ -427,6 +566,26 @@ socket.socket.connect = _guarded_socket_connect
                 check=False,
             )
             duration_sec = time.time() - start_time
+            mismatch = _run_dir_mismatch(run_dir, run_dir_identity)
+            if mismatch:
+                result_payload = self._failure_result(
+                    task=task,
+                    command=command_list,
+                    run_id=run_id,
+                    run_dir=run_dir,
+                    workspace_path=workspace_path,
+                    cwd=cwd,
+                    output_file=output_file,
+                    cleanup=cleanup,
+                    error=RUN_DIR_REPLACED,
+                    exit_code=126,
+                    stdout=proc.stdout,
+                    stderr=proc.stderr,
+                    duration_sec=duration_sec,
+                )
+                result_payload["run_dir_mismatch"] = mismatch
+                # _write_result sees the same mismatch and writes nothing.
+                return self._write_result(run_dir, result_payload, run_dir_identity)
             output_artifact_path = None
             output_artifact = None
             output_missing = False
@@ -480,7 +639,7 @@ socket.socket.connect = _guarded_socket_connect
                     "external_allowed": False,
                 },
             }
-            return self._write_result(run_dir, result_payload)
+            return self._write_result(run_dir, result_payload, run_dir_identity)
         except subprocess.TimeoutExpired as exc:
             result_payload = self._failure_result(
                 task=task,
@@ -498,7 +657,7 @@ socket.socket.connect = _guarded_socket_connect
                 timed_out=True,
                 duration_sec=time.time() - start_time,
             )
-            return self._write_result(run_dir, result_payload)
+            return self._write_result(run_dir, result_payload, run_dir_identity)
         finally:
             if cleanup:
                 shutil.rmtree(scratch_dir, ignore_errors=True)
