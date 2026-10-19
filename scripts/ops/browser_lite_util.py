@@ -5,9 +5,9 @@ import sys
 
 import requests
 
-MCP_URL = os.environ.get("NEXUS_BROWSER_MCP_URL", "http://127.0.0.1:12307/mcp")
-# Never hardcode the bearer: this repo is public (#2678).
-TOKEN = os.environ.get("NEXUS_BROWSER_MCP_TOKEN", "")
+MCP_URL = "http://127.0.0.1:12307/mcp"
+# Never hardcode the bearer: this repo is public (#2678). The URL stays loopback-only.
+TOKEN = os.environ.get("NEXUS_BROWSER_MCP_TOKEN", "").strip()
 
 def parse_sse(text):
     for line in text.split('\n'):
@@ -21,7 +21,7 @@ def run():
         sys.exit(1)
     
     if not TOKEN:
-        print("Set NEXUS_BROWSER_MCP_TOKEN to the browser MCP bearer token.")
+        print("Set NEXUS_BROWSER_MCP_TOKEN to the browser MCP bearer token.", file=sys.stderr)
         sys.exit(1)
 
     tool_name = sys.argv[1]
