@@ -85,8 +85,12 @@ class _AssistResponseMixin(_ResponseBase):
                     # restart) while it waited for an account: no account was
                     # leased and no provider was started, so the probe failed
                     # without any effect.
+                    # Only the probe's own workspace (created by the submit as
+                    # /tmp/nexus-probe-*) is removed; this compares a recorded
+                    # path, it creates nothing in /tmp.
+                    probe_parents = {"/tmp", "/private/tmp"}  # nosec B108
                     workspace_root = os.path.realpath(str(job.get("workspace_root") or ""))
-                    if os.path.dirname(workspace_root) in {"/tmp", "/private/tmp"} and os.path.basename(
+                    if os.path.dirname(workspace_root) in probe_parents and os.path.basename(
                         workspace_root
                     ).startswith("nexus-probe-"):
                         shutil.rmtree(workspace_root, ignore_errors=True)
