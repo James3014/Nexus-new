@@ -292,10 +292,155 @@ def agy_child_env(
     return env
 
 
+# #2721 measurement: opt-in deny of agy's URL tools.  Probed on the pool
+# (#2721 step 3): explicit ``read_url(*)``/``execute_url(*)`` deny rules make
+# agy refuse the call and continue the session, whereas the headless default
+# auto-denial ends the run with no output.  ``search_web`` cannot be denied
+# (a ``search_web(*)`` rule has no effect), so it is deliberately not listed.
+AGY_DENY_WEB_FETCH_ENV = "NEXUS_AGY_DENY_WEB_FETCH"
+AGY_WEB_FETCH_DENY_RULES = ("read_url(*)", "execute_url(*)")
+
+
 def agy_run_settings(*, read_only: bool) -> dict[str, Any]:
-    """Explicit per-run permission profile: never commands; no writes for plan."""
+    """Explicit per-run permission profile: never commands; no writes for plan.
+
+    With ``NEXUS_AGY_DENY_WEB_FETCH=1`` the URL tools are denied as well; any
+    other value leaves the profile exactly as before.
+    """
     deny = ["command(*)", "write_file(*)"] if read_only else ["command(*)"]
+    if os.environ.get(AGY_DENY_WEB_FETCH_ENV, "").strip() == "1":
+        deny.extend(AGY_WEB_FETCH_DENY_RULES)
     return {"permissions": {"allow": [], "deny": deny}}
+
+
+# ---------------------------------------------------------------------------
+# opt-in tool trace (#2721)
+# ---------------------------------------------------------------------------
+
+# agy's ``--output-format json`` result carries only the reply and the denied
+# actions; the tool calls live in the run HOME's conversation databases, which
+# the adapter deletes with the run root.  With ``NEXUS_AGY_KEEP_TOOL_TRACE=1``
+# they are copied out first (into ``NEXUS_AGY_TOOL_TRACE_DIR``, absolute, or
+# ``~/.local/state/nexus-agy-tool-trace``) so a measurement can audit which
+# tools ran.  Only ``conversations/*.db`` (and its ``-wal``) cross over: never
+# the OAuth token, installation id, keychain or settings.  Off by default: the
+# databases hold the prompt and file contents, and the gateway would
+# otherwise grow the directory without bound.
+AGY_KEEP_TOOL_TRACE_ENV = "NEXUS_AGY_KEEP_TOOL_TRACE"
+AGY_TOOL_TRACE_DIR_ENV = "NEXUS_AGY_TOOL_TRACE_DIR"
+AGY_TOOL_TRACE_SCHEMA = "nexus.agy_tool_trace.v1"
+AGY_RUN_HOME_CONVERSATIONS = Path(".gemini") / "antigravity-cli" / "conversations"
+AGY_TOOL_TRACE_FILE_MAX_BYTES = 64 * 1024 * 1024
+AGY_TOOL_TRACE_TOTAL_MAX_BYTES = 128 * 1024 * 1024
+_AGY_TOOL_TRACE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.db(?:-wal)?$")
+_TRACE_SEGMENT_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def agy_tool_trace_root() -> Optional[Path]:
+    """Where to keep tool traces, or ``None`` when the trace is off (default)."""
+    if os.environ.get(AGY_KEEP_TOOL_TRACE_ENV, "").strip() != "1":
+        return None
+    configured = os.environ.get(AGY_TOOL_TRACE_DIR_ENV, "").strip()
+    if configured:
+        root = Path(configured).expanduser()
+        return root if root.is_absolute() else None
+    return Path.home() / ".local" / "state" / "nexus-agy-tool-trace"
+
+
+def _trace_segment(value: str, fallback: str) -> str:
+    segment = _TRACE_SEGMENT_UNSAFE.sub("_", value)[:128].lstrip(".")
+    return segment or fallback
+
+
+def _copy_trace_file(source: Path, destination: Path, budget: int) -> dict[str, Any]:
+    """Copy one regular, single-link file without following symlinks."""
+    entry: dict[str, Any] = {"name": source.name}
+    try:
+        fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return {**entry, "skipped": "unreadable_or_symlink"}
+    with os.fdopen(fd, "rb") as handle:
+        stat = os.fstat(handle.fileno())
+        if not (stat.st_mode & 0o170000 == 0o100000) or stat.st_nlink != 1:
+            return {**entry, "skipped": "not_a_single_link_regular_file"}
+        entry["bytes"] = stat.st_size
+        if stat.st_size > min(AGY_TOOL_TRACE_FILE_MAX_BYTES, budget):
+            return {**entry, "skipped": "size_cap"}
+        digest = hashlib.sha256()
+        copied = 0
+        out_fd = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(out_fd, "wb") as out:
+            while copied <= stat.st_size:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                copied += len(chunk)
+                if copied > stat.st_size:
+                    break
+                digest.update(chunk)
+                out.write(chunk)
+        if copied != stat.st_size:
+            destination.unlink(missing_ok=True)
+            return {**entry, "skipped": "changed_during_copy"}
+        return {**entry, "sha256": digest.hexdigest()}
+
+
+def preserve_agy_tool_trace(
+    run_homes: Iterable[Path], *, task_id: str, run_id: str, root: Path
+) -> Optional[Path]:
+    """Copy each attempt's ``conversations/*.db`` out of the run HOME (#2721).
+
+    Writes ``<root>/<task>/<run>/attempt-<n>/<name>`` (0600) and a
+    ``manifest.json`` listing each file's size and sha256 or why it was
+    skipped.  Bounded per file and per run; symlinks, hard links and a
+    conversations directory that resolves outside the run HOME are never
+    followed.  Best effort: returns the manifest path, or ``None`` when the
+    trace directory cannot be written; never raises into the run.
+    """
+    try:
+        run_dir = root / _trace_segment(task_id, "task") / _trace_segment(run_id, "run")
+        run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        budget = AGY_TOOL_TRACE_TOTAL_MAX_BYTES
+        attempts: list[dict[str, Any]] = []
+        for index, home in enumerate(run_homes, start=1):
+            attempt: dict[str, Any] = {"attempt": index, "files": []}
+            attempts.append(attempt)
+            conversations = home / AGY_RUN_HOME_CONVERSATIONS
+            expected = Path(os.path.realpath(home)) / AGY_RUN_HOME_CONVERSATIONS
+            if not conversations.is_dir():
+                attempt["status"] = "conversations_missing"
+                continue
+            if Path(os.path.realpath(conversations)) != expected:
+                attempt["status"] = "conversations_path_escapes_run_home"
+                continue
+            attempt_dir = run_dir / f"attempt-{index}"
+            attempt_dir.mkdir(mode=0o700)
+            for source in sorted(conversations.iterdir()):
+                if not _AGY_TOOL_TRACE_NAME.fullmatch(source.name):
+                    continue
+                entry = _copy_trace_file(source, attempt_dir / source.name, budget)
+                if "sha256" in entry:
+                    budget -= int(entry["bytes"])
+                attempt["files"].append(entry)
+            attempt["status"] = "ok"
+        manifest = {
+            "schema": AGY_TOOL_TRACE_SCHEMA,
+            "task_id": task_id,
+            "run_id": run_id,
+            "attempts": attempts,
+        }
+        manifest_path = run_dir / "manifest.json"
+        fd = os.open(manifest_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, sort_keys=True, indent=2)
+            handle.write("\n")
+        return manifest_path
+    except (OSError, ValueError):
+        return None
 
 
 # Absolute path: the run's PATH is untrusted input to the boundary.

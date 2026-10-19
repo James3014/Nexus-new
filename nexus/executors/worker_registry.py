@@ -33,6 +33,7 @@ from nexus.executors.agy_write_admission import (
     agy_delivery_failure,
     agy_model_shape_ok,
     agy_permission_bypass_flags,
+    agy_tool_trace_root,
     build_seatbelt_profile,
     checkout_fingerprint,
     escaping_symlinks,
@@ -41,6 +42,7 @@ from nexus.executors.agy_write_admission import (
     materialize_cline_run_home,
     materialize_run_home,
     paths_overlap,
+    preserve_agy_tool_trace,
     protected_checkout_plan,
     run_home_keychain_state,
     run_home_settings_sha256,
@@ -1302,6 +1304,16 @@ class AgyWorkerAdapter:
                 run_home_settings_sha256(home) != digest for home, digest in run_homes
             )
         finally:
+            # #2721: opt-in (NEXUS_AGY_KEEP_TOOL_TRACE=1) copy of the
+            # conversation databases before the run HOME is deleted.
+            trace_root = agy_tool_trace_root()
+            if trace_root is not None:
+                preserve_agy_tool_trace(
+                    [home for home, _ in run_homes],
+                    task_id=str(getattr(contract, "task_id", "") or ""),
+                    run_id=run_tmp.name,
+                    root=trace_root,
+                )
             shutil.rmtree(run_tmp, ignore_errors=True)
         receipt = replace(
             receipt,
