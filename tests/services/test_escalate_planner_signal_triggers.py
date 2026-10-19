@@ -460,3 +460,5 @@ def test_belief_reads_the_per_file_confidence_through_the_registry(tmp_path, mon
 
     assert confidence({"belief_target_files": ["pkg/a.py"]}) == 0.2
     assert confidence({}) == 0.7
+    # several entries are ambiguous: no file key, so a.py's confidence is not borrowed
+    assert confidence({"belief_target_files": ["pkg/a.py", "pkg/new.py"]}) == 0.7

@@ -646,5 +646,15 @@ def _belief_target_context(allowed_files: Any, target_worktree: Any) -> dict[str
     if not isinstance(allowed_files, (list, tuple)) or len(allowed_files) != 1:
         return {}
     targets = _xray_targets_context(allowed_files, target_worktree).get("xray_targets") or []
-    files = [path for path in targets if (Path(str(target_worktree)) / path).is_file()]
+    try:
+        root = Path(str(target_worktree)).resolve(strict=True)
+        files = [
+            path
+            for path in targets
+            if not (root / path).is_symlink()
+            and (root / path).resolve(strict=True).is_relative_to(root)
+            and (root / path).is_file()
+        ]
+    except (OSError, RuntimeError, ValueError):
+        return {}
     return {"belief_target_files": files} if files else {}

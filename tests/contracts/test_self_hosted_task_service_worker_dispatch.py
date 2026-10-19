@@ -1833,6 +1833,18 @@ def test_materialization_withholds_belief_target_when_ambiguous(ctx, stubs, allo
     assert "belief_target_files" not in stubs.log[2][1]["capability_context"]
 
 
+def test_materialization_withholds_belief_target_through_escaping_symlink(
+    ctx, stubs, tmp_path
+) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("x = 1\n", encoding="utf-8")
+    (ctx.target / "nexus").mkdir()
+    (ctx.target / "nexus" / "link.py").symlink_to(outside)
+    ctx.request["allowed_files"] = ["nexus/link.py"]
+    ctx.run()
+    assert "belief_target_files" not in stubs.log[2][1]["capability_context"]
+
+
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:
     with pytest.raises(
         RuntimeError, match="^OUTCOME_UNKNOWN:worker_context_materialization_missing$"
