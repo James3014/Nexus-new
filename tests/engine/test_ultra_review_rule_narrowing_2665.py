@@ -350,3 +350,129 @@ def test_2665_yaml_load_with_unsafe_or_missing_loader_is_flagged(tmp_path, monke
 
     assert {"bandit:B506", "ruff:S506"} & _rules(payload)
     assert payload["security_sentry"]["passed"] is False
+
+
+# ---------------------------------------------------------------- review follow-ups (#2686)
+
+_STRICT_CFG = (
+    "[metadata]\nname = demo\n\n[tool:pytest]\nfilterwarnings = error\nxfail_strict = true\n"
+)
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        # pytest's ini keys are case-sensitive: "Filterwarnings" is ignored, strictness is off.
+        _STRICT_CFG.replace("filterwarnings", "Filterwarnings"),
+        # [DEFAULT] is an ordinary section for pytest: moving keys there drops them.
+        "[DEFAULT]\nfilterwarnings = error\nxfail_strict = true\n\n[metadata]\nname = demo\n\n"
+        "[tool:pytest]\n",
+    ],
+)
+def test_2665_ini_key_case_change_or_default_move_is_harness(tmp_path, monkeypatch, head):
+    _init_repo(tmp_path, {"setup.cfg": _STRICT_CFG})
+    (tmp_path / "setup.cfg").write_text(head, encoding="utf-8")
+
+    assert "test_harness_modified" in _rules(_review(tmp_path, monkeypatch))
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        # Case change outside the pytest sections.
+        _STRICT_CFG.replace("name = demo", "Name = demo"),
+        # A [DEFAULT] section pytest never reads; [tool:pytest] itself is unchanged.
+        "[DEFAULT]\nfilterwarnings = ignore\n\n" + _STRICT_CFG,
+    ],
+)
+def test_2665_ini_case_or_default_outside_pytest_is_not_harness(tmp_path, monkeypatch, head):
+    _init_repo(tmp_path, {"setup.cfg": _STRICT_CFG})
+    (tmp_path / "setup.cfg").write_text(head, encoding="utf-8")
+
+    assert "test_harness_modified" not in _rules(_review(tmp_path, monkeypatch))
+
+
+@pytest.mark.parametrize("rel", ["tests/pytest.toml", "tests/.pytest.ini", ".pytest.toml"])
+def test_2665_new_pytest9_config_file_is_harness(tmp_path, monkeypatch, rel):
+    _init_repo(tmp_path)
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    body = (
+        '[pytest]\naddopts = ["--deselect", "tests/test_app.py::test_x"]\n'
+        if rel.endswith(".toml")
+        else "[pytest]\naddopts = --deselect tests/test_app.py::test_x\n"
+    )
+    target.write_text(body, encoding="utf-8")
+    _git(tmp_path, "add", rel)
+
+    payload = _review(tmp_path, monkeypatch)
+
+    assert [f["file"] for f in payload["findings"] if f["rule_id"] == "test_harness_modified"] == [
+        rel
+    ]
+
+
+def test_2665_head_identical_to_base_while_diff_changed_fails_closed(tmp_path):
+    # The diff says pyproject.toml changed, but the mirror still holds the base bytes (the
+    # patch did not land): nothing can be compared, so it is flagged.
+    _init_repo(tmp_path, {"pyproject.toml": _PYPROJECT_BASE})
+    head = _PYPROJECT_BASE.replace("@aaaaaaaa", "@bbbbbbbb")
+    (tmp_path / "pyproject.toml").write_text(head, encoding="utf-8")
+    service = UltraReviewService(tmp_path)
+    diff_text = service._capture_diff("HEAD")
+
+    stale = tmp_path / "stale_mirror"
+    stale.mkdir()
+    (stale / "pyproject.toml").write_text(_PYPROJECT_BASE, encoding="utf-8")
+    applied = tmp_path / "applied_mirror"
+    applied.mkdir()
+    (applied / "pyproject.toml").write_text(head, encoding="utf-8")
+
+    assert service._harness_changes(diff_text, execution_root=stale, base_ref="HEAD") == [
+        "pyproject.toml"
+    ]
+    assert service._harness_changes(diff_text, execution_root=applied, base_ref="HEAD") == []
+
+
+_YAML_HEAD = "import yaml\n\n\ndef read(text):\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Two calls on one line, one unsafe.
+        _YAML_HEAD
+        + "    return yaml.load(text, Loader=yaml.BaseLoader), yaml.load(text, Loader=yaml.Loader)\n",
+        # The module's safe loader patched to the unsafe one.
+        "import yaml\n\nyaml.BaseLoader = yaml.UnsafeLoader\n\n\ndef read(text):\n"
+        "    return yaml.load(text, Loader=yaml.BaseLoader)\n",
+        "import yaml\n\nsetattr(yaml, 'BaseLoader', yaml.UnsafeLoader)\n\n\ndef read(text):\n"
+        "    return yaml.load(text, Loader=yaml.BaseLoader)\n",
+        "import yaml\nfrom evil import *\n\n\ndef read(text):\n"
+        "    return yaml.load(text, Loader=BaseLoader)\n",
+        "import yaml\n\nglobals()['BaseLoader'] = yaml.UnsafeLoader\n\n\ndef read(text):\n"
+        "    return yaml.load(text, Loader=BaseLoader)\n",
+    ],
+)
+def test_2665_yaml_load_rebinding_or_mixed_calls_stay_flagged(tmp_path, monkeypatch, source):
+    _init_repo(tmp_path)
+    (tmp_path / "app.py").write_text(source, encoding="utf-8")
+
+    payload = _review(tmp_path, monkeypatch)
+
+    assert {"bandit:B506", "ruff:S506"} & _rules(payload)
+    assert payload["security_sentry"]["passed"] is False
+
+
+def test_2665_yaml_load_two_safe_calls_on_one_line_not_flagged(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        _YAML_HEAD
+        + "    return yaml.load(text, Loader=yaml.BaseLoader), yaml.load(text, Loader=yaml.SafeLoader)\n",
+        encoding="utf-8",
+    )
+
+    payload = _review(tmp_path, monkeypatch)
+
+    assert payload["security_sentry"]["scanned_python_files"] == ["app.py"]
+    assert not {"bandit:B506", "ruff:S506"} & _rules(payload)

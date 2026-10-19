@@ -224,7 +224,19 @@ REVIEW_MODE = "review"
 # test run (a test that reviews "."), would review the sandbox again; refuse instead.
 ULTRA_REVIEW_NESTED_ENV = "NEXUS_ULTRA_REVIEW_IN_PROGRESS"
 # Files whose change alters how the ghost-regression test run itself behaves.
-TEST_HARNESS_FILES = ("conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "sitecustomize.py", "usercustomize.py")
+# .pytest.ini / pytest.toml / .pytest.toml are pytest 9 config files (#2665 review).
+TEST_HARNESS_FILES = (
+    "conftest.py",
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    "pyproject.toml",
+    "sitecustomize.py",
+    "usercustomize.py",
+    ".pytest.ini",
+    "pytest.toml",
+    ".pytest.toml",
+)
 # Shared config files: flagged only when their pytest/coverage configuration changes between
 # the base ref and the head (a parse error on either side is still flagged). The other
 # TEST_HARNESS_FILES are always flagged (#2665).
@@ -268,18 +280,19 @@ def _pytest_config_sections(name: str, text: str) -> dict[str, Any]:
             "tool": pytest_tables,
             "pytest11": entry_points.get("pytest11") if isinstance(entry_points, dict) else None,
         }
-    import configparser
+    # pytest's own ini parser: keys are case-sensitive and [DEFAULT] is an ordinary section,
+    # exactly as pytest reads them (configparser would lowercase keys and merge DEFAULT).
+    import iniconfig
 
-    parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read_string(text)
-        return {
-            section: dict(parser.items(section))
-            for section in parser.sections()
-            if section in ("tool:pytest", "pytest") or section.startswith("coverage:")
-        }
-    except configparser.Error as exc:
-        raise ValueError(f"ini_parse_error: {type(exc).__name__}") from exc
+        parsed = iniconfig.IniConfig(name, data=text)
+    except iniconfig.ParseError as exc:
+        raise ValueError(f"ini_parse_error: {exc}") from exc
+    return {
+        section.name: dict(section.items())
+        for section in parsed
+        if section.name in ("tool:pytest", "pytest") or section.name.startswith("coverage:")
+    }
 
 
 def _diff_file_states(diff_text: str) -> dict[str, str]:
@@ -318,8 +331,24 @@ def _yaml_load_uses_safe_loader(source: str, line: int) -> bool:
                 bound = alias.asname or original
                 if bound != original or (isinstance(node, ast.ImportFrom) and not from_yaml):
                     rebound.add(bound)
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+                if not from_yaml:
+                    return False  # a star import can bind any loader name
         elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             rebound.add(node.id)
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "yaml"
+        ):
+            return False  # yaml.<X>Loader = ... patches the module for every later import
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("setattr", "delattr", "globals", "vars", "locals", "__import__")
+        ):
+            return False  # dynamic rebinding the AST cannot follow
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             rebound.add(node.name)
         elif isinstance(node, ast.arg):
