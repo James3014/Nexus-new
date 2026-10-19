@@ -145,3 +145,53 @@ def test_complete_pass_review_still_contributes(tmp_path, monkeypatch) -> None:
     assert "advisory_contract_violations" not in out["response"]
     assert out["response"]["outcome"]["review_passed"] is True
     assert out["outcome_contributed"] is True
+
+
+@pytest.mark.parametrize("flag", ["missing", False])
+def test_ultra_review_without_advisory_flag_is_still_record_only(
+    tmp_path, monkeypatch, flag
+) -> None:
+    """A record-only capability's receipt that omits/clears advisory_only cannot contribute
+    a failed review (Gemini r1 on #2782)."""
+    base._bind(monkeypatch, base._fake_service(base._fail_payload()))
+    real = reg._exec_ultra_review(base._plan(tmp_path), "review")
+    outcome = dict(real.outcome)
+    assert outcome["review_status"] == "FAIL"
+    if flag == "missing":
+        outcome.pop("advisory_only")
+    else:
+        outcome["advisory_only"] = flag
+    out = _invoke_fake(monkeypatch, tmp_path, "ultra_review", True, outcome)
+    assert out["gate_passed"] is True
+    assert out["outcome_contributed"] is False
+
+
+@pytest.mark.parametrize(
+    ("capability", "registry_key"),
+    [
+        ("ultra_review", "ultra_review_impl"),  # the capability name is record-only
+        ("review_alias_2772", "ultra_review"),  # the registry key is record-only
+    ],
+)
+def test_record_only_name_or_registry_key_decides(
+    tmp_path, monkeypatch, capability, registry_key
+) -> None:
+    monkeypatch.setitem(capability_registry.EXECUTOR_REGISTRY_ALIASES, capability, registry_key)
+    # A real FAIL review receipt (it satisfies the execution contract) without the flag.
+    base._bind(monkeypatch, base._fake_service(base._fail_payload()))
+    outcome = dict(reg._exec_ultra_review(base._plan(tmp_path), "review").outcome)
+    outcome.pop("advisory_only")
+    receipt = SimpleNamespace(
+        invoked=True, gate_passed=True, evidence_id="ev", telemetries={}, outcome=outcome
+    )
+    real_get_executor = reg.get_executor
+    monkeypatch.setattr(
+        reg,
+        "get_executor",
+        lambda key: (lambda _p, _d: receipt) if key == registry_key else real_get_executor(key),
+    )
+    invoker = capability_registry.build_real_executor_invoker(capability)
+    assert invoker is not None
+    out = invoker(_context(tmp_path))
+    assert out["gate_passed"] is True
+    assert out["outcome_contributed"] is False

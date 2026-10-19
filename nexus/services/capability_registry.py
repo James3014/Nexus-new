@@ -3070,7 +3070,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             # completely: PASS status, the executor's review_passed, and no lane shortfall.
             "outcome_contributed": gate_passed
             and (
-                not _is_advisory_only_outcome(name, outcome_map)
+                not _is_record_only_capability(name, registry_key)
                 or _advisory_review_passed(outcome_map, advisory_contract_violations)
             ),
             "evidence_refs": evidence_refs,
@@ -3102,6 +3102,21 @@ def _is_advisory_only_outcome(name: str, outcome: Mapping[str, Any]) -> bool:
     from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
 
     return name in ADVISORY_ONLY_CAPABILITIES and outcome.get("advisory_only") is True
+
+
+def _is_record_only_capability(name: str, registry_key: str) -> bool:
+    """#2772: whether ``outcome_contributed`` must follow the review verdict.
+
+    True when the capability name or its registry key is record-only, even if the receipt
+    omits or clears ``advisory_only``. So a record-only review can never count a failed
+    review as a contribution. The ``advisory_only`` flag alone never decides: a
+    non-advisory capability whose receipt merely carries it keeps
+    ``outcome_contributed == gate_passed`` (#2772 item 1). The non-blocking contract split
+    still requires both name and flag, so this only makes contribution stricter.
+    """
+    from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
+
+    return name in ADVISORY_ONLY_CAPABILITIES or registry_key in ADVISORY_ONLY_CAPABILITIES
 
 
 def _advisory_review_passed(outcome: Mapping[str, Any], contract_violations: list[str]) -> bool:
