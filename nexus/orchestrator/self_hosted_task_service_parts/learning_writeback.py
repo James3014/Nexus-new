@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -56,7 +57,7 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 
 def _changed_files(candidate: Any) -> list[str]:
     files: list[str] = []
-    for key in ("changed_files", "untracked_files"):
+    for key in ("changed_files", "untracked_files", "deleted_files"):
         for path in _get(candidate, key, None) or ():
             text = str(path).strip()
             if text and text not in files:
@@ -64,17 +65,18 @@ def _changed_files(candidate: Any) -> list[str]:
     return sorted(files)[:_MAX_FILES]
 
 
-# Verifier commands that check the diff but run no test: they cannot make a run PASSED
-# (#2721 gap review: L-A must not store unverified "successes").
-_NON_TEST_VERIFIERS = frozenset({"git diff --check", "code_integrity_v1"})
+# A run counts as tested only if a Nexus verifier actually invoked a test runner; diff
+# checks, `true`, `echo` and the like cannot make a run PASSED (#2721 gap review: L-A
+# must not store unverified "successes").
+_TEST_RUNNER_PATTERN = re.compile(
+    r"(^|[\s/;&|(])(pytest|py\.test|unittest|nose2|tox|nox|"
+    r"(npm|pnpm|yarn|bun)\s+(run\s+)?test|jest|vitest|mocha|go\s+test|cargo\s+test|"
+    r"make\s+(check|test)|ctest|rspec|phpunit|gradle\w*\s+test|mvn\w*\s+test)\b"
+)
 
 
 def _has_real_test(verifiers: list[dict[str, Any]]) -> bool:
-    return any(
-        str(item.get("command") or "").strip() not in _NON_TEST_VERIFIERS
-        and str(item.get("command") or "").strip()
-        for item in verifiers
-    )
+    return any(_TEST_RUNNER_PATTERN.search(str(item.get("command") or "")) for item in verifiers)
 
 
 def _verifier_results(verified: Any) -> list[dict[str, Any]]:

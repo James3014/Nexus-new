@@ -104,6 +104,15 @@ class BeliefEngine:
         if semantic_raw is not None:
             semantic_confidence = max(0.0, min(1.0, float(semantic_raw)))
             confidence = blend_semantic_confidence(confidence, semantic_confidence)
+        result = {
+            "task_id": outcome.task_id,
+            "assumption": outcome.assumption,
+            "confidence": confidence,
+            "evidence_id": outcome.evidence_id,
+            "accepted": bool(outcome.passed),
+        }
+        if state_read_only():  # #2721 L-B: same result, no Belief change (memory or disk)
+            return result
         self.update_belief(
             task_id=outcome.task_id,
             assumption=outcome.assumption,
@@ -124,10 +133,4 @@ class BeliefEngine:
             self.beliefs[outcome.assumption]["confidence_policy"] = "audit_semantic_weighted"
         self._persist(outcome.assumption)
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)
-        return {
-            "task_id": outcome.task_id,
-            "assumption": outcome.assumption,
-            "confidence": confidence,
-            "evidence_id": outcome.evidence_id,
-            "accepted": bool(outcome.passed),
-        }
+        return result

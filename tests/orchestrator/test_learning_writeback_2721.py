@@ -318,3 +318,93 @@ def test_read_only_disables_local_heal_learning_closure(monkeypatch):
     assert bridge._learning_writeback_disabled() is False
     monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
     assert bridge._learning_writeback_disabled() is True
+
+
+@pytest.mark.parametrize(
+    "command", ["/usr/bin/true", "echo ok", "git diff --check", "code_integrity_v1", "test -f x"]
+)
+def test_non_test_verifier_commands_are_unverified(tmp_path, state_root, monkeypatch, command):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    verified = SimpleNamespace(
+        verifier_gate_passed=True,
+        candidate_state_hash="ef" * 32,
+        verifier_evidence=(SimpleNamespace(command=command, status="COMPLETED", exit_code=0),),
+    )
+    obs = lw.run_learning_writeback(
+        contract=_contract(_target(tmp_path)),
+        candidate=_candidate(),
+        verified=verified,
+        resolution_verdict="PROVEN",
+    )
+    assert obs["outcome"] == "UNVERIFIED" and obs["belief_keys"] == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -m pytest tests/test_mod.py",
+        "cd sub && pytest -q",
+        ".venv/bin/python -m unittest t",
+        "npm test",
+    ],
+)
+def test_test_runner_commands_count_as_tested(tmp_path, state_root, monkeypatch, command):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    verified = SimpleNamespace(
+        verifier_gate_passed=True,
+        candidate_state_hash="ef" * 32,
+        verifier_evidence=(SimpleNamespace(command=command, status="COMPLETED", exit_code=0),),
+    )
+    obs = lw.run_learning_writeback(
+        contract=_contract(_target(tmp_path)),
+        candidate=_candidate(),
+        verified=verified,
+        resolution_verdict="PROVEN",
+    )
+    assert obs["outcome"] == "PASSED"
+
+
+def test_deleted_files_are_recorded(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    candidate = SimpleNamespace(changed_files=[], untracked_files=[], deleted_files=["pkg/old.py"])
+    obs = lw.run_learning_writeback(
+        contract=_contract(_target(tmp_path)),
+        candidate=candidate,
+        verified=_verified(True),
+        resolution_verdict="PROVEN",
+    )
+    assert obs["belief_keys"] == ["repair_outcome:file:pkg/old.py"]
+
+
+def test_read_only_audit_outcome_returns_result_without_change(tmp_path, state_root, monkeypatch):
+    from nexus.core.belief_contracts import AuditOutcome
+
+    engine = BeliefEngine(tmp_path / "b3" / "belief_state.json")
+    monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
+    outcome = AuditOutcome(
+        task_id="t", assumption="new-assumption", passed=True, evidence_id="e", reason="r"
+    )
+    result = engine.process_audit_outcome(outcome)
+    assert result["assumption"] == "new-assumption" and result["accepted"] is True
+    assert "new-assumption" not in engine.beliefs
+    assert not (tmp_path / "b3" / "belief_state.json").exists()
+
+
+def test_read_only_learn_mode_closure_persists_nothing(tmp_path, state_root, monkeypatch):
+    from nexus.research.learn_mode import LearnModeService
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
+    service = LearnModeService(project, run_root=tmp_path / "run")
+    out = service._persist_learning_closure(
+        action="ask",
+        status="SUCCESS",
+        reason="r",
+        topic_or_source="t",
+        evidence_paths=[],
+        retrieval_hints=[],
+        metrics={},
+    )
+    assert out["skipped"] == lw.READ_ONLY_ENV
+    assert not list(tmp_path.rglob("*.jsonl")) and not (state_root / ".nexus").exists()
