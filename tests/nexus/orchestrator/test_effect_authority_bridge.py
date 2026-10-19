@@ -138,3 +138,159 @@ def test_execute_calls_effect_authority_shadow(monkeypatch):
     with pytest.raises(_Stop):
         bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
     assert calls == [("t1", "a1", {"k": 1})]
+
+
+# --- #2344 step 1: the shadow decision is persisted on the task state ---------
+
+
+def _owned_service(tmp_path, runner):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+    from tests.nexus.orchestrator.test_self_hosted_task_service import _request
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, ephemeral=True, auto_reconcile=False
+    )
+    request = _request(tmp_path)
+    task_id = request["task_id"]
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "request": request,
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-1",
+            "attempts": [{"attempt_id": "attempt-1"}],
+            "worker_pid": None,
+            "status_history": [],
+        },
+    )
+    return service, task_id
+
+
+def _ok_runner(contract, request, update):
+    return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+
+def _read(service, task_id) -> dict:
+    state = service._read_state(task_id)
+    assert state is not None
+    return state
+
+
+def _run(tmp_path, monkeypatch, runner=_ok_runner):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, runner)
+    service._run_owned_task(task_id, "attempt-1")
+    return _read(service, task_id), task_id
+
+
+def test_owned_attempt_persists_would_refuse_shadow_on_task_state(tmp_path, monkeypatch):
+    state, task_id = _run(tmp_path, monkeypatch)
+    shadow = state[ea.SHADOW_FIELD]
+    assert shadow["decision"] == ea.DECISION_WOULD_REFUSE
+    assert shadow["reason"] == "NO_EFFECT_AUTHORIZATION_ON_REQUEST"
+    assert shadow["task_id"] == task_id
+    assert shadow["attempt_id"] == "attempt-1"
+    assert shadow["mode"] == "SHADOW"
+    assert shadow["recorded_at"]
+    assert state["attempts"][0][ea.SHADOW_FIELD] == shadow
+    # Observation only: the run still reached its normal outcome.
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_persisted_shadow_is_visible_through_get_task(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    service._run_owned_task(task_id, "attempt-1")
+    task = service.get_task(task_id)
+    assert task is not None
+    assert task[ea.SHADOW_FIELD]["decision"] == ea.DECISION_WOULD_REFUSE
+
+
+def test_shadow_decision_failure_does_not_change_outcome(tmp_path, monkeypatch):
+    baseline, _ = _run(tmp_path / "a", monkeypatch)
+
+    def broken(_request, *_a, **_k):
+        raise RuntimeError("bug in shadow path")
+
+    monkeypatch.setattr(ea, "shadow_decision", broken)
+    state, _ = _run(tmp_path / "b", monkeypatch)
+    assert ea.SHADOW_FIELD not in state
+    assert state["status"] == baseline["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_shadow_persist_failure_does_not_change_outcome(tmp_path, monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    real_mutate = SelfHostedTaskService._mutate_state
+
+    def mutate(self, task_id, mutator):
+        if getattr(mutator, "__qualname__", "").startswith("_persist_effect_authority_shadow"):
+            raise OSError("state store unavailable")
+        return real_mutate(self, task_id, mutator)
+
+    monkeypatch.setattr(SelfHostedTaskService, "_mutate_state", mutate)
+    state, _ = _run(tmp_path, monkeypatch)
+    assert ea.SHADOW_FIELD not in state
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_shadow_failure_does_not_change_failing_outcome(tmp_path, monkeypatch):
+    def failing(contract, request, update):
+        raise RuntimeError("deliberate terminal failure")
+
+    baseline, _ = _run(tmp_path / "a", monkeypatch, failing)
+    monkeypatch.setattr(ea, "shadow_decision", lambda *_a, **_k: 1 / 0)
+    state, _ = _run(tmp_path / "b", monkeypatch, failing)
+    assert state["status"] == baseline["status"]
+    assert state.get("error") == baseline.get("error")
+
+
+def test_shadow_never_writes_into_another_attempts_state(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    decision = {"decision": ea.DECISION_WOULD_REFUSE, "attempt_id": "stale-attempt"}
+    bridge._persist_effect_authority_shadow(service, task_id, "stale-attempt", decision)
+    assert ea.SHADOW_FIELD not in _read(service, task_id)
+
+
+def test_strict_off_attaches_no_port_on_owned_attempt(tmp_path, monkeypatch):
+    # Strict-off behaviour unchanged: the coordinator gets no effect port and
+    # no require_effect_authority, so nothing new is refused.
+    seen = []
+    real = bridge.ExecutionCoordinator
+
+    def spy(*args, **kwargs):
+        seen.append({k: kwargs.get(k) for k in ("effect_authority", "require_effect_authority")})
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", spy)
+    state, _ = _run(tmp_path, monkeypatch)
+    assert seen == [{"effect_authority": None, "require_effect_authority": None}]
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+    assert state[ea.SHADOW_FIELD]["mode"] == "SHADOW"
+
+
+def test_execute_persists_shadow_with_service(monkeypatch):
+    persisted = []
+
+    class _Service:
+        def _bridge_validate_claim(self, *_a, **_k):
+            return None
+
+    class _Stop(Exception):
+        pass
+
+    def stop(self, *_a, **_k):
+        raise _Stop
+
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "_persist_effect_authority_shadow",
+        lambda service, t, a, d: persisted.append((t, a, d["decision"])),
+    )
+    monkeypatch.setattr(bridge.RuntimeCoordinationBridge, "_coordinator", stop)
+    with pytest.raises(_Stop):
+        bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
+    assert persisted == [("t1", "a1", ea.DECISION_WOULD_REFUSE)]
