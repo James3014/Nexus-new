@@ -476,3 +476,32 @@ def test_2665_yaml_load_two_safe_calls_on_one_line_not_flagged(tmp_path, monkeyp
 
     assert payload["security_sentry"]["scanned_python_files"] == ["app.py"]
     assert not {"bandit:B506", "ruff:S506"} & _rules(payload)
+
+
+# ------------------------------------------- secret_literal: keyword must end the identifier
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'token_capture_status = "measured"',
+        'client_token_status = "configured"',
+        'secret_manager_name = "production-vault"',
+    ],
+)
+def test_2665_secret_literal_ignores_identifier_with_keyword_prefix_only(tmp_path, line):
+    assert _scan_line(tmp_path, line) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "api_key = " + '"sk-' + 'live-AbC123xyz987"',
+        'self.password = "Hunter2' + 'Hunter2"',
+        'aws_secret_access_key = "AKIA' + 'ABCDEFGH1234"',
+        'GITHUB_TOKEN = "ghp' + '_abcdefgh12345678"',
+        'auth_token = "abcd1234' + 'efgh5678"',
+    ],
+)
+def test_2665_secret_literal_flags_identifiers_ending_with_keyword(tmp_path, line):
+    assert len(_scan_line(tmp_path, line)) == 1
