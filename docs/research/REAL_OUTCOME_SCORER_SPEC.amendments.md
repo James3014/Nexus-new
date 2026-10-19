@@ -158,7 +158,9 @@ expected F2P/P2P id matched, and a gold candidate was labelled `UNRESOLVED`
 (nexus-runtime#200 in the layer-1 verifier audit, knowledge
 `nexus/research/2026-10-19-layer1-remaining-verifiers/`).
 
-- Scoring rules are unchanged: v1 §6 always meant ids relative to the repository root.
+- This adds one flag to the literal §8 test-run command. Scoring rules are unchanged:
+  §8 already runs pytest with cwd = tree root, and v1 §6 always meant ids relative to
+  that root. The flag only stops an outer directory from overriding it.
 - Work directories outside any repository (all #2147 batches so far) gave the same ids
   before and after.
 - `--rootdir` does not stop pytest from loading an outer config file when the tree has
