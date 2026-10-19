@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/test_state_io_split_hardened.py",
-    "disposition": "quarantine",
-    "issue": "#1929",
-    "cause": "behavior removed: StateRepository.save is now an atomic overwrite (v26.2), no append history; owner decision",
-    "tests": ("test_state_repository_append_mode",),
-}
+# Tombstone (#1929): test_state_repository_append_mode deleted: StateRepository.save is an atomic overwrite since v26.2 (9f1e9afac); Owner decision on #1929 (2026-10-19, workspace-32).
+ENTRY = None

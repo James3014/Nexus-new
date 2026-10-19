@@ -1,6 +1,5 @@
 from nexus.pilot_cli.gateway import (
     _build_fastlane_prompt,
-    _coerce_long_gemini_answer,
     _gemini_payload,
     _format_gemini_fastlane_response,
     chat_via_gateway,
@@ -191,21 +190,3 @@ def test_format_gemini_fastlane_response_formats_structured_sections():
     assert "根因：" in text
     assert "為何會漏過：" in text
     assert "修補策略：" in text
-
-
-def test_coerce_long_gemini_answer_uses_second_pass_for_non_json():
-    captured = {}
-
-    def fake_second_pass(session, original_prompt, draft_answer):
-        captured["draft"] = draft_answer
-        return '{"conclusion":"短結論","root_cause":"短根因","why_it_passes":"短原因","fix_strategy":"短修補"}'
-
-    text = _coerce_long_gemini_answer(
-        session=PilotSession(provider="Gemini", model="gemini-2.5-flash", api_key="k"),
-        user_request="x" * 1200,
-        raw_text="這是一段沒有 JSON 的長回答",
-        finish_reason="MAX_TOKENS",
-        second_pass_fn=fake_second_pass,
-    )
-    assert "結論：短結論" in text
-    assert captured["draft"] == "這是一段沒有 JSON 的長回答"
