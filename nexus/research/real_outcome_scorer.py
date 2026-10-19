@@ -24,13 +24,14 @@ import signal
 import stat
 import subprocess
 import time
+import uuid
 import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
-SCORER_VERSION = "1.2.3"
+SCORER_VERSION = "1.2.4"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -40,6 +41,12 @@ SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
+# Amendment A9 (opt-in, #2723). "none" (the default) runs pytest exactly as v1 §8 says;
+# "os" runs the same command under the shared macOS sandbox (nexus.engine.sandboxed_lane):
+# no network, writes only to the tree and a fresh per-run HOME/TMPDIR under scratch/runs.
+# "os" never falls back to an unconfined run.
+SANDBOX_NONE, SANDBOX_OS = "none", "os"
+RUNNER_SANDBOX_MODES = (SANDBOX_NONE, SANDBOX_OS)
 # Amendment A6 (operational, #2291). Every pytest run gets scratch/tmp as TMPDIR and
 # scratch/home as HOME; both are emptied after each task.
 # One run that leaves more than SCRATCH_TMP_CAP_BYTES there (its junit report excluded)
@@ -1073,6 +1080,84 @@ def parse_junit(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def _require_os_sandbox() -> None:
+    """A9: raise SandboxError unless the shared OS barrier is available (fail closed)."""
+    from nexus.engine import sandboxed_lane as lane
+
+    if not lane.os_sandbox_available():
+        raise lane.SandboxError("no_os_barrier")
+
+
+def _scorer_profile(
+    *,
+    writable: Sequence[str],
+    reads: Sequence[str],
+    denied: Sequence[Path | str],
+    all_system_subpaths: bool = False,
+) -> str:
+    """A9: the scorer's SBPL profile from the shared sandboxed_lane primitives.
+
+    ``all_system_subpaths`` lists every shared system subpath whether or not it exists on
+    this machine (used only for the machine-independent profile hash).
+    """
+    from nexus.engine import sandboxed_lane as lane
+
+    read_roots = lane.checked_read_roots([*writable, *reads])
+    if all_system_subpaths:
+        read_roots = sorted(set(read_roots) | set(lane.SANDBOX_SYSTEM_READ_SUBPATHS))
+    # Tests may signal the processes they start (e.g. a process-group kill); never one
+    # outside the sandbox.
+    return lane.build_sandbox_profile(
+        writable=list(writable),
+        read_roots=read_roots,
+        deny_subtrees=list(denied),
+        allow_signal_same_sandbox=True,
+    )
+
+
+# A9: every root of the scorer's profile as (rule, kind): the single source for both the
+# real per-run profile (``PytestRunner._confine``) and its machine-independent hash
+# (``PytestRunner.sandbox_profile_sha256``). Each kind needs a real value in ``_confine``
+# (a missing one is a KeyError) and gets a placeholder (or its fixed paths) in the hash.
+_PROFILE_ROOT_SPEC: tuple[tuple[str, str], ...] = (
+    ("write", "tree"),
+    ("write", "run_dir"),
+    ("read", "env_dir"),
+    ("read", "interpreter_prefix"),
+    ("read", "extra_import_roots"),
+    ("read", "tool_files"),
+    ("read", "developer_dir"),
+    ("read", "toolchain"),
+    ("deny", "repos"),
+    ("deny", "store"),
+)
+
+
+def _fixed_profile_roots() -> dict[str, list[str]]:
+    """Kinds whose paths are fixed system locations (unresolved, unfiltered)."""
+    from nexus.engine import sandboxed_lane as lane
+    from nexus.engine.confined_test_runner import TOOLCHAIN_READ_ROOTS
+
+    return {
+        "tool_files": list(lane.SANDBOX_TOOL_READ_FILES),
+        "toolchain": list(TOOLCHAIN_READ_ROOTS),
+    }
+
+
+def _profile_from_roots(
+    values: Mapping[str, Sequence[Path | str]], *, all_system_subpaths: bool = False
+) -> str:
+    groups: dict[str, list[str]] = {"write": [], "read": [], "deny": []}
+    for rule, kind in _PROFILE_ROOT_SPEC:
+        groups[rule].extend(str(path) for path in values[kind])
+    return _scorer_profile(
+        writable=groups["write"],
+        reads=groups["read"],
+        denied=groups["deny"],
+        all_system_subpaths=all_system_subpaths,
+    )
+
+
 class PytestRunner:
     """Spec §8 test run.
 
@@ -1088,7 +1173,15 @@ class PytestRunner:
         scratch: Path,
         timeout: int = PYTEST_TIMEOUT_SECONDS,
         log: Callable[[str], None] = print,
+        sandbox: str = SANDBOX_NONE,
+        store: Path | None = None,
     ):
+        if sandbox not in RUNNER_SANDBOX_MODES:
+            raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
+        # A9: "os" refuses at once (fail closed) when no OS barrier exists.
+        self.sandbox = sandbox
+        if sandbox == SANDBOX_OS:
+            _require_os_sandbox()
         self.scratch = Path(scratch)
         self.cache = self.scratch / "pytest-cache"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -1096,6 +1189,11 @@ class PytestRunner:
         self.log = log
         self.total_seconds = 0.0
         self.tmp = self.scratch / "tmp"
+        # A9 ("os" only): one fresh HOME/TMPDIR/junit dir per run, removed after the run.
+        self.runs = self.scratch / "runs"
+        # A9 ("os" only): the experiment store; never readable by a confined run.
+        self.store = Path(store) if store is not None else None
+        self._profile_sha256: str | None = None
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1110,7 +1208,9 @@ class PytestRunner:
                 raise ScratchUnsafe(f"{path} is a symlink; refusing to use or clean it")
 
     def scratch_bytes(self) -> int:
-        return tree_bytes(self.tmp) + tree_bytes(self.home)
+        # A9 "os": everything under runs/ counts too (a session-escaping child may re-create
+        # its deleted run dir and keep writing). Absent in "none" mode, so 0 there.
+        return tree_bytes(self.tmp) + tree_bytes(self.home) + tree_bytes(self.runs)
 
     def clean_tmp(self) -> tuple[int, int, list[str]]:
         """A6: empty scratch/tmp and scratch/home after a task.
@@ -1127,6 +1227,10 @@ class PytestRunner:
                 sizes.append(-1)
         errors = clean_scratch_tmp(self.tmp, self._live_junits)
         errors += [f"home/{e}" for e in clean_scratch_tmp(self.home)]
+        if os.path.lexists(self.runs):  # A9 "os": dirs a crash or an escaped child left
+            if self.runs.is_symlink():
+                raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use or clean it")
+            errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1143,9 +1247,12 @@ class PytestRunner:
         except (ProcessLookupError, PermissionError):
             return
 
-    def _env(self, env: TestEnv, tree: Path) -> dict[str, str]:
-        home = self.scratch / "home"
-        tmp = self.scratch / "tmp"
+    def _env(
+        self, env: TestEnv, tree: Path, home: Path | None = None, tmp: Path | None = None
+    ) -> dict[str, str]:
+        # A9 "os" passes a per-run HOME/TMPDIR; "none" uses the shared ones (1.2.3).
+        home = home or self.scratch / "home"
+        tmp = tmp or self.scratch / "tmp"
         home.mkdir(parents=True, exist_ok=True)
         tmp.mkdir(parents=True, exist_ok=True)
         pythonpath = [str(tree)]
@@ -1163,6 +1270,115 @@ class PytestRunner:
             "TZ": "UTC",
         }
 
+    def result_key(
+        self,
+        env: TestEnv,
+        tree_id: str,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+        role: str = "",
+    ) -> str:
+        """Test-result cache key (also names the run's junit report)."""
+        key_parts: list[Any] = [env.cache_key, tree_id, target, sorted(set(ignores)), run_idx, role]
+        if self.sandbox != SANDBOX_NONE:
+            # A9: a confined run never shares a cache entry with an unconfined one, nor
+            # with a run under a different sandbox profile.
+            key_parts.append(f"sandbox:{self.sandbox}")
+            key_parts.append(f"profile:{self.sandbox_profile_sha256}")
+        return sha256_bytes(json.dumps(key_parts).encode())
+
+    def _confine(self, env: TestEnv, tree: Path, run_dir: Path) -> list[str]:
+        """A9: ``sandbox-exec -p <profile>`` for one run of ``env`` on ``tree``.
+
+        Writes: the tree and this run's own ``run_dir`` (its HOME, TMPDIR and junit report;
+        never the shared scratch HOME/TMPDIR, so no run sees what another left). Reads:
+        those, the env dir, the resolved interpreter prefix it points to (uv pythons live
+        under ``$HOME``, which the profile otherwise denies), the env's extra import roots
+        and the fixed system/toolchain paths. No network; credential stores, ``<work>/repos``
+        and the store stay denied. Signals only reach processes inside the same sandbox.
+        Raises SandboxError when no barrier exists, a read root other than the tree and the
+        run dir (env dir, interpreter prefix, extra import root) is or contains the work
+        dir or lies inside repos, trees or the store, or a path is unsafe for the policy.
+        """
+        from nexus.engine import sandboxed_lane as lane
+
+        _require_os_sandbox()
+        work = self.scratch.parent.resolve()
+        denied = [work / "repos", *([self.store.resolve()] if self.store else [])]
+        interpreter = Path(os.path.realpath(env.python))
+        env_dir = Path(env.python).parent.parent
+        # Every read root besides the tree and the run dir (env dir, interpreter prefix,
+        # extra import roots) must neither cover the work dir (sibling trees, e.g. GOLD)
+        # nor lie inside repos, trees or the store. The shared profile denies its
+        # deny_subtrees last, so denying <work>/trees there would also deny this tree.
+        for root in (env_dir, interpreter.parent.parent, *env.extra_pythonpath):
+            resolved = Path(root).resolve()
+            if lane.in_tree(work, [resolved]) or lane.in_tree(resolved, [*denied, work / "trees"]):
+                raise lane.SandboxError(f"read_root_overbroad:{root}")
+        writable = [lane.sbpl_path(p) for p in (Path(tree), run_dir)]
+        if lane.in_tree(interpreter, writable):
+            raise lane.SandboxError("interpreter_inside_sandbox")
+        fixed = _fixed_profile_roots()
+        profile = _profile_from_roots({
+            "tree": [tree],
+            "run_dir": [run_dir],
+            "env_dir": [env_dir],
+            "interpreter_prefix": [interpreter.parent.parent],
+            "extra_import_roots": list(env.extra_pythonpath),
+            "tool_files": [p for p in fixed["tool_files"] if os.path.isfile(p)],
+            "developer_dir": lane.developer_toolchain_read_roots(),
+            "toolchain": [p for p in fixed["toolchain"] if os.path.exists(p)],
+            "repos": [work / "repos"],
+            "store": [self.store.resolve()] if self.store else [],
+        })
+        return [lane.SANDBOX_EXEC, "-p", profile]
+
+    @property
+    def sandbox_profile_sha256(self) -> str | None:
+        """A9: sha256 of the SBPL profile shape this runner uses (None for "none").
+
+        Built from the same ``_PROFILE_ROOT_SPEC`` and builder as every run, with each run- or
+        machine-specific path replaced by a fixed placeholder (tree, per-run dir, env dir,
+        interpreter prefix, extra import roots, developer toolchain, work dir, store,
+        ``$HOME``) and every system/toolchain root listed, unresolved, whether or not it
+        exists here.
+        So the same scorer gives the same hash on any machine, and any change to the
+        shared profile or to the scorer's roots changes it. Part of the "os" result key.
+        """
+        if self.sandbox == SANDBOX_NONE:
+            return None
+        if self._profile_sha256 is None:
+            from nexus.engine import sandboxed_lane as lane
+
+            fixed = _fixed_profile_roots()
+            values: dict[str, list[str]] = {}
+            for _rule, kind in _PROFILE_ROOT_SPEC:
+                if kind in fixed:
+                    values[kind] = fixed[kind]
+                elif kind == "repos":
+                    values[kind] = ["/__WORK__/repos"]
+                elif kind == "store":
+                    values[kind] = ["/__STORE__"] if self.store else []
+                else:
+                    values[kind] = [f"/__{kind.upper()}__"]
+            profile = _profile_from_roots(values, all_system_subpaths=True)
+            # sbpl_path resolves symlinks (e.g. /usr/share/zoneinfo points to a tz-version
+            # dir): put each fixed root back in its unresolved, machine-independent form.
+            for path in (
+                *lane.SANDBOX_SYSTEM_READ_SUBPATHS,
+                *(p for paths in fixed.values() for p in paths),
+            ):
+                resolved = str(Path(path).resolve())
+                if resolved != path:
+                    profile = profile.replace(f'"{resolved}"', f'"{path}"')
+            home = lane.sbpl_path(Path(os.path.expanduser("~")).resolve())
+            profile = profile.replace(f'"{home}"', '"/__HOME__"').replace(
+                f'"{home}/', '"/__HOME__/'
+            )
+            self._profile_sha256 = sha256_bytes(profile.encode())
+        return self._profile_sha256
+
     def run(
         self,
         env: TestEnv,
@@ -1174,17 +1390,62 @@ class PytestRunner:
         role: str = "",
     ) -> RunResult:
         ignores = sorted(set(ignores))
-        key = sha256_bytes(
-            json.dumps([env.cache_key, tree_id, target, ignores, run_idx, role]).encode()
-        )
+        key = self.result_key(env, tree_id, target, ignores, run_idx, role)
         cached = self.cache / f"{key}.json"
         if cached.exists():
             data = json.loads(cached.read_text())
             return RunResult(data["outcomes"], data["exit_code"], data["timed_out"], 0.0)
+        if self.sandbox != SANDBOX_OS:
+            return self._execute(env, tree, target, ignores, run_idx, role, key, None)
+        # A9 "os": a fresh HOME/TMPDIR/junit dir for this run only, removed afterwards on
+        # every path (result, timeout, cap refusal, error).
+        run_dir = self.runs / f"{key[:16]}-{uuid.uuid4().hex[:12]}"
+        try:
+            return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
+        finally:
+            self._remove_run_dir(run_dir)
+
+    def _remove_run_dir(self, run_dir: Path) -> None:
+        """Delete one A9 per-run dir without following links; log what could not go."""
+        if run_dir.is_symlink():
+            run_dir.unlink(missing_ok=True)
+            return
+        errors = clean_scratch_tmp(run_dir)
+        try:
+            run_dir.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            errors.append(f"rmdir:{type(exc).__name__}")
+        for err in errors:
+            self.log(f"  run dir cleanup {run_dir.name}: {err}")
+
+    def _execute(
+        self,
+        env: TestEnv,
+        tree: Path,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+        role: str,
+        key: str,
+        run_dir: Path | None,
+    ) -> RunResult:
+        """One uncached pytest run. ``run_dir`` is None for "none" (1.2.3 behaviour)."""
+        cached = self.cache / f"{key}.json"
         self.check_scratch()
-        junit = self.tmp / f"junit-{key}.xml"
-        junit.parent.mkdir(parents=True, exist_ok=True)
-        junit.unlink(missing_ok=True)
+        if run_dir is None:
+            junit = self.tmp / f"junit-{key}.xml"
+            junit.parent.mkdir(parents=True, exist_ok=True)
+            junit.unlink(missing_ok=True)
+        else:
+            if self.runs.is_symlink():
+                raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use it")
+            self.runs.mkdir(parents=True, exist_ok=True)
+            run_dir.mkdir()
+            (run_dir / "home").mkdir()
+            (run_dir / "tmp").mkdir()
+            junit = run_dir / "junit.xml"
         cmd = [
             env.python,
             "-m",
@@ -1199,15 +1460,23 @@ class PytestRunner:
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
-        run_env = self._env(env, tree)
-        self._live_junits.add(junit.name)
+        if run_dir is None:
+            run_env = self._env(env, tree)
+            launch = cmd
+            self._live_junits.add(junit.name)
+        else:
+            # A9: the same command and env (but a per-run HOME/TMPDIR), wrapped in
+            # sandbox-exec; built before the run starts, so a refusal (SandboxError) never
+            # runs anything unconfined.
+            run_env = self._env(env, tree, run_dir / "home", run_dir / "tmp")
+            launch = self._confine(env, tree, run_dir) + cmd
         before = self.scratch_bytes()
         start = time.monotonic()
         timed_out = False
         # Own process group, so whatever the tests spawned is killed with the run and
         # cannot keep writing into scratch/tmp while the next tree is measured (A6).
         proc = subprocess.Popen(
-            cmd,
+            launch,
             cwd=str(tree),
             env=run_env,
             stdout=subprocess.DEVNULL,  # never read; a pipe would also let a leftover
@@ -1353,6 +1622,8 @@ def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
     return {
         "schema": RECEIPT_SCHEMA,
         "scorer_version": SCORER_VERSION,
+        "runner_sandbox": getattr(ctx.runner, "sandbox", SANDBOX_NONE),
+        "runner_sandbox_profile_sha256": getattr(ctx.runner, "sandbox_profile_sha256", None),
         "spec_sha256": ctx.spec_sha256,
         "spec_version": SPEC_V1,
         "task_key": inputs.task_key,
@@ -1519,6 +1790,11 @@ def _score_task(
         return _finish(receipt, timing, t0, ctx)
 
     trees_dir = ctx.work / "trees" / inputs.task_key
+    if getattr(ctx.runner, "sandbox", SANDBOX_NONE) == SANDBOX_OS:
+        # A9: fresh tree paths for every scoring. A session-escaping child keeps write
+        # access to its tree's path, so a fixed path would let it plant files (e.g. a
+        # conftest.py) for the next scoring of this task. Cache keys use tree ids only.
+        trees_dir = ctx.work / "trees" / f"{inputs.task_key}-{uuid.uuid4().hex[:12]}"
     wts: dict[str, Path] = {}
     try:
         wts["base"] = repo.worktree(trees_dir / "base", inputs.base_sha)
