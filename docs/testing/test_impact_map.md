@@ -104,6 +104,8 @@
 | nexus/core/argv_command.py | tests/security/test_low_severity_hardening_2635.py, tests/core, tests/delivery, tests/health | active | high | no_shell_legacy_command_runner_2635 |
 | nexus/core/notifier.py | tests/security/test_low_severity_hardening_2635.py, tests/core | active | medium | notifier_osascript_argv_2635 |
 | scripts/core/guard_executor.py | tests/security/test_low_severity_hardening_2635.py, tests/test_guard_allowlist.py | active | medium | guard_executor_no_shell_2635 |
+| scripts/guard_executor.py | tests/security/test_low_severity_hardening_2635.py | active | medium | legacy_guard_executor_no_shell_2635 |
+| scripts/core/morning_report.py | tests/security/test_low_severity_hardening_2635.py | active | low | morning_report_voice_notify_no_shell_2635 |
 | nexus/learning | tests/learning | active | high | learning_contract |
 | nexus/learning/skill_registry.py | tests/test_skill_sharing.py::test_skill_registry_upsert_retries_sqlite_busy_then_success, tests/test_skill_sharing.py::test_skill_registry_upsert_keeps_non_busy_errors_fail_fast, tests/test_skill_sharing.py, tests/infrastructure/test_sqlite_retry.py | active | high | skill_registry_sqlite_retry_contract |
 | nexus/learning/skill_fit_status.py | tests/learning/test_skill_fit_data_shape_pregate.py, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_finds_skill_but_blocks_benchmark_until_threshold_clean, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_uses_threshold_alternate_candidate_even_if_policy_needs_more_data | active | high | skill_fit_data_shape_pregate_contract |

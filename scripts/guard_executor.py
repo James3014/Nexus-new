@@ -2,6 +2,29 @@
 import sys
 import subprocess
 import random
+import os
+
+
+def preview_argv_for_rm(cmd):
+    """Map an ``rm`` argv to a read-only ``ls`` argv, or None if it is not one.
+
+    Same rule as scripts/core/guard_executor.py (#2635).
+    """
+    if not cmd or os.path.basename(cmd[0]) != "rm":
+        return None
+    recursive = False
+    operands = []
+    end_of_options = False
+    for arg in cmd[1:]:
+        if not end_of_options and arg == "--":
+            end_of_options = True
+        elif not end_of_options and arg.startswith("--"):
+            recursive = recursive or arg == "--recursive"
+        elif not end_of_options and arg.startswith("-") and arg != "-":
+            recursive = recursive or "r" in arg[1:].lower()
+        else:
+            operands.append(arg)
+    return ["ls", "-ld" if recursive else "-l", "--", *operands]
 
 
 def secure_execute():
@@ -21,13 +44,13 @@ def secure_execute():
 
         # 1. 強制顯示影響範圍
         print("\n🔍 影響範圍預覽 (Dry Run):")
-        preview_cmd = (
-            cmd_str.replace("rm -rf", "ls -ld")
-            .replace("rm -f", "ls -l")
-            .replace("rm -r", "ls -ld")
-        )
+        # #2635: the preview is an ls argv built from the operands, never a
+        # shell string (a file name such as "x; evil" would otherwise run).
+        preview_argv = preview_argv_for_rm(cmd)
         try:
-            subprocess.run(preview_cmd, shell=True, check=False)
+            if preview_argv is None:
+                raise ValueError("not an rm argv")
+            subprocess.run(preview_argv, check=False)
         except:
             print("  無法預覽影響範圍。")
 
@@ -52,7 +75,9 @@ def secure_execute():
 
     # 執行原始指令
     try:
-        subprocess.run(cmd_str, shell=True, check=True)
+        # #2635: run the original argv; joining it into a shell string re-parsed
+        # quoted operands.
+        subprocess.run(list(cmd), check=True)
     except subprocess.CalledProcessError as e:
         sys.exit(e.returncode)
 

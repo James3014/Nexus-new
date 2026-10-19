@@ -296,3 +296,52 @@ def test_secure_sync_serve_defaults_to_loopback():
     from nexus.security.secure_sync import SecureRegistrySync
 
     assert inspect.signature(SecureRegistrySync.serve).parameters["host"].default == "127.0.0.1"
+
+
+def test_legacy_guard_executor_runs_non_rm_command_without_shell(tmp_path):
+    # Second sweep (#2635): scripts/guard_executor.py is the older copy of the core guard.
+    marker = tmp_path / "pwned"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/guard_executor.py"),
+            "echo",
+            f"hi; touch {marker}",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert not marker.exists(), proc.stdout + proc.stderr
+    assert f"hi; touch {marker}" in proc.stdout
+
+
+def test_legacy_guard_executor_rm_preview_is_argv_only(tmp_path):
+    marker = tmp_path / "pwned"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/guard_executor.py"),
+            "rm",
+            "-rf",
+            f"x; touch {marker}",
+        ],
+        cwd=tmp_path,
+        input="0\n",  # wrong challenge: the rm itself never runs
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 1
+    assert not marker.exists(), proc.stdout + proc.stderr
+
+
+def test_morning_report_voice_notify_has_no_shell():
+    tree = ast.parse((REPO_ROOT / "scripts/core/morning_report.py").read_text(encoding="utf-8"))
+    notify = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_voice_notify"
+    )
+    for node in ast.walk(notify):
+        if isinstance(node, ast.Call):
+            assert not any(kw.arg == "shell" for kw in node.keywords), ast.unparse(node)
