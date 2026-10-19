@@ -425,3 +425,46 @@ def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeyp
 
     assert receipt.gate_passed is False
     assert "no_existing_task_files" in repr(receipt)
+
+
+def test_xray_consumer_payload_carries_scan_facts_not_host_paths(tmp_path) -> None:
+    """#2721: the payload held only report_type (the report path is scrubbed), so the
+    worker prompt got an empty shell. The scan facts now travel in the payload."""
+    import json
+
+    from nexus.services.mainchain_entry import build_mainchain_capability_invokers
+    from nexus.services.unified_runtime import materialize_selected_capability_evidence
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "core.py").write_text("def frobnicate_widget():\n    return 1\n")
+    (tmp_path / "pkg" / "user.py").write_text(
+        "from pkg.core import frobnicate_widget\n\ndef use_it():\n    return frobnicate_widget()\n"
+    )
+    plan = {"selected_capabilities": ["xray"], "signal_snapshot": {}}
+    _, bundle = materialize_selected_capability_evidence(
+        planner_output={"plan_payload": plan, "plan_hash": "0" * 64},
+        selected_capabilities=["xray"],
+        task_id="t-xray",
+        task_statement="deep scan",
+        workspace_revision="w" * 40,
+        plan_hash="0" * 64,
+        planner_decision_id="d" * 64,
+        capability_invokers={
+            "xray": build_mainchain_capability_invokers(
+                codeintel={}, include_postflight_gates=True
+            )["xray"]
+        },
+        capability_context={
+            "workspace_root": str(tmp_path),
+            "xray_targets": ["pkg/core.py", "pkg/user.py"],
+            "escalate_triggered": True,
+        },
+        codeintel={},
+    )
+    entry = next(e for e in bundle["entries"] if e["name"] == "xray")
+    fields = entry["consumer_payload"]["fields"]
+    text = json.dumps(fields)
+
+    assert fields["result"]["symbol_count"] == 2 and fields["result"]["crossing_count"] == 1
+    assert "frobnicate_widget" in text and "user.py -> pkg.core" in text
+    assert str(tmp_path) not in text and "/private/" not in text

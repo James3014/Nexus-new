@@ -3936,6 +3936,51 @@ def _exec_integration_manager(plan: CapabilityExecutionPlan, task_desc: str) -> 
     return _archived_receipt("integration_manager", plan, task_desc)
 
 
+_XRAY_FINDING_MAX = 8
+_XRAY_FINDING_CHARS = 160
+
+
+def _xray_text(value: Any) -> str:
+    """One scan fact as short repo-relative text; host paths are never kept."""
+    text = str(value or "")
+    if "::" in text:
+        text = text.split("::", 1)[1]
+    if "/Users/" in text or "/private/" in text or "/var/" in text or "/tmp/" in text:
+        return ""
+    return text[:_XRAY_FINDING_CHARS]
+
+
+def _xray_summary(scanned: Any) -> str:
+    if scanned is None:
+        return ""
+    return (
+        f"{len(scanned.symbols)} symbols, {len(scanned.crossings)} import crossings, "
+        f"{len(scanned.risks)} risks"
+    )
+
+
+def _xray_findings(scanned: Any) -> list[str]:
+    """Risks first, then import crossings, then symbols (at most 8 short strings)."""
+    if scanned is None:
+        return []
+    candidates = [
+        *(f"risk: {_xray_text(r)}" for r in scanned.risks),
+        *(
+            f"import: {_xray_text(c.get('source'))} -> {_xray_text(c.get('target'))}"
+            for c in scanned.crossings
+            if isinstance(c, dict)
+        ),
+        *(f"symbol: {_xray_text(sym)}" for sym in scanned.symbols),
+    ]
+    out: list[str] = []
+    for item in candidates:
+        if item.split(": ", 1)[-1].strip(" ->") and item not in out:
+            out.append(item)
+        if len(out) >= _XRAY_FINDING_MAX:
+            break
+    return out
+
+
 def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
@@ -3982,7 +4027,16 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
                 action="run",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_xray_{plan.task_id}"],
-                result={"report_type": type(result).__name__, "report_preview": str(result)[:200]},
+                # The scan itself is the evidence; the report path is host-only and the
+                # consumer payload scrub drops it, which left the worker an empty shell (#2721).
+                result={
+                    "report_type": type(result).__name__,
+                    "symbol_count": len(scanned.symbols) if scanned else 0,
+                    "crossing_count": len(scanned.crossings) if scanned else 0,
+                    "risk_count": len(scanned.risks) if scanned else 0,
+                },
+                summary=_xray_summary(scanned),
+                findings=_xray_findings(scanned),
                 scan_targets=[str(t) for t in targets][:8],
                 physical_callable="nexus.services.xray_service.XRayService.run",
                 run_id=run_id,
