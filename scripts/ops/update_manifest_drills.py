@@ -5,6 +5,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from scripts.ops.check_policy_lane_gate import _is_drilled
+except ImportError:
+    from check_policy_lane_gate import _is_drilled
+
 MANIFEST_PATH = Path("docs/reports/policy-manifest.v2.json")
 LANES = ("hard", "soft", "shadow")
 ENFORCEMENT_MODES = ("block", "record_only", "not_wired")
@@ -56,7 +61,11 @@ def _lane_distribution(policies: list[dict[str, Any]]) -> dict[str, dict[str, An
 
 
 def update_manifest(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the deterministic drill fixture projection for one manifest."""
+    """Return the deterministic drill fixture projection for one manifest.
+
+    Preserves existing real rollback drill status per check_policy_lane_gate._is_drilled;
+    otherwise sets 'drilled-2026-06-15'.
+    """
     updated = deepcopy(dict(data))
     raw_policies = updated.get("policies")
     if not isinstance(raw_policies, list):
@@ -76,7 +85,8 @@ def update_manifest(data: Mapping[str, Any]) -> dict[str, Any]:
         if policy_id in seen:
             raise ValueError(f"duplicate_policy_id:{policy_id}")
         seen.add(policy_id)
-        policy["rollback_drill_status"] = "drilled-2026-06-15"
+        if not _is_drilled(policy.get("rollback_drill_status")):
+            policy["rollback_drill_status"] = "drilled-2026-06-15"
         if policy.get("lane") == "hard" and not policy.get("test_entrypoints"):
             policy["test_entrypoints"] = ["tests/test_policy_manager.py"]
         policies.append(policy)
