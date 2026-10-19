@@ -466,3 +466,18 @@ def test_execute_records_nothing_when_state_unreadable(monkeypatch):
     with pytest.raises(_Stop):
         bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
     assert calls == []
+
+
+def test_shadow_is_in_compact_task_status(tmp_path, monkeypatch):
+    # Shadow triage: the Gateway's nexus_task_status serves the compact
+    # get_task_snapshot projection, so the shadow must be projected there too.
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    compact_before = service.get_task_snapshot(task_id)
+    assert compact_before is not None
+    assert ea.SHADOW_FIELD not in compact_before
+    service._run_owned_task(task_id, "attempt-1")
+    compact = service.get_task_snapshot(task_id)
+    assert compact is not None
+    assert compact[ea.SHADOW_FIELD]["decision"] == ea.DECISION_WOULD_REFUSE
+    assert compact[ea.SHADOW_FIELD]["attempt_id"] == "attempt-1"
