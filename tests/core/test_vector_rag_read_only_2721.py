@@ -38,3 +38,27 @@ def test_read_only_still_reads_an_existing_fallback_index(tmp_path, monkeypatch)
     rag.update_index([{"task": "u", "solution": "v"}])
     assert rag._load_fallback_rows() == [{"task": "t", "solution": "s"}]
     assert rag.fallback_file.read_bytes() == before
+
+
+def test_switch_set_after_construction_still_blocks_writes(tmp_path, monkeypatch):
+    monkeypatch.delenv("NEXUS_STATE_READ_ONLY", raising=False)
+    rag = _rag(tmp_path, monkeypatch)
+    before = rag.fallback_file.read_bytes()
+    monkeypatch.setenv("NEXUS_STATE_READ_ONLY", "1")
+    rag.update_index([{"task": "late", "solution": "x"}])
+    assert rag.fallback_file.read_bytes() == before
+
+
+def test_real_lancedb_with_missing_db_path_creates_nothing(tmp_path, monkeypatch):
+    import pytest
+
+    lancedb = pytest.importorskip("lancedb")
+    monkeypatch.setattr(vr, "lancedb", lancedb)
+    monkeypatch.setattr(
+        vr, "resolve_lancedb_root", lambda name, root: tmp_path / "state" / "vectors.lance"
+    )
+    monkeypatch.setenv("NEXUS_STATE_READ_ONLY", "1")
+    rag = vr.VectorRAG()
+    assert rag.enabled is False and rag.db is None
+    rag.update_index([{"task": "t", "solution": "s"}])
+    assert not (tmp_path / "state").exists()

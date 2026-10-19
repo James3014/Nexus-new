@@ -94,7 +94,7 @@ class VectorRAG:
             return []
 
     def _ensure_fallback_file(self) -> None:
-        if self.read_only:
+        if self.read_only or state_read_only():  # re-read: the switch may be set later
             return
         self.fallback_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.fallback_file.exists():
@@ -119,7 +119,7 @@ class VectorRAG:
         """
         if not knowledge_data:
             return
-        if self.read_only:
+        if self.read_only or state_read_only():  # re-read: the switch may be set later
             logger.info("[VectorRAG] index update skipped: NEXUS_STATE_READ_ONLY=1")
             return
 
