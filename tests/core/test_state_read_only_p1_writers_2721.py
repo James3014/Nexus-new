@@ -498,4 +498,25 @@ def test_policy_manager_record_episode_writes_nothing_under_switch(tmp_path, mon
     monkeypatch.setenv(RO, "1")
     manager.record_episode(state)
     assert state.metadata["metabolizer_status"] == "skipped_read_only"
+    assert state.metadata.get("learning_ingest_status") in (
+        None,
+        "skipped_read_only",
+        "skipped_frozen",
+        "discarded",
+        "export_model_queued",
+    )
+    assert state.metadata.get("learning_ingest_status") != "ingested"
+    assert names(tmp_path) == []
+
+
+def test_policy_manager_ingest_reports_skipped_under_switch(tmp_path, monkeypatch):
+    from nexus.core.policy_manager import PolicyManager
+    from nexus.core.state_contracts import NexusState
+
+    monkeypatch.setenv("NEXUS_MEMORY_AUTO_INIT", "0")
+    manager = PolicyManager(str(tmp_path))
+    state = NexusState(task_id="t1", task_description="t", project_root=str(tmp_path))
+    monkeypatch.setenv(RO, "1")
+    manager._ingest_episode(state, {"task_id": "t1"}, "ingested")
+    assert state.metadata["learning_ingest_status"] == "skipped_read_only"
     assert names(tmp_path) == []
