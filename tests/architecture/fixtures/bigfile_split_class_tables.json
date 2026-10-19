@@ -837,7 +837,7 @@
    },
    "_canonical_request": {
     "kind": "staticmethod",
-    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str], POSITIONAL_OR_KEYWORD:base: str, KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:contract_binding: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str], POSITIONAL_OR_KEYWORD:base: str, KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:contract_binding: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:bound_action_request: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_repo_root: Optional[Path] = None) -> dict[str, Any]"
    },
    "_cleanup_assist_workspace": {
     "kind": "function",
