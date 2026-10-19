@@ -1303,6 +1303,7 @@ def _complete(ctx: _Ctx, bundle: Any = BUNDLE) -> dict[str, Any]:
         "bundle_hash": service_module._sha256_json(bundle),
         "bundle": copy.deepcopy(bundle),
         "capability_observations": {},
+        "capability_observations_hash": service_module._sha256_json({}),
         "producer_revision": "c" * 40,
     }
 
@@ -1727,6 +1728,53 @@ def test_capability_observations_keep_trigger_store_and_outputs() -> None:
     assert observed["pregate"]["skip_reason"] == "SKIPPED_POLICY_NOT_TRIGGERED"
     assert "broken" not in observed
     assert worker_dispatch_module._capability_observations(None) == {}
+
+
+def test_capability_observations_are_bounded_json_safe_and_message_free() -> None:
+    """#2719 Codex: unbounded, nested or non-JSON values and raw error text."""
+    huge = "x" * 300_000
+    results = {
+        "xray": {
+            "status": "INVOKED",
+            "response": {
+                "trigger_source": huge,
+                "response": {
+                    "outcome": {
+                        "output_paths": [huge] * 100 + [{"nested": "dict"}, 3],
+                        "scan_targets": {"a", "b"},
+                        "confidence": float("nan"),
+                        "error": "ValueError: task text with SECRET_TOKEN=abc",
+                        "result": {"root": {"nested": True}},
+                    }
+                },
+            },
+        }
+    }
+
+    observed = worker_dispatch_module._capability_observations(results)
+    xray = observed["xray"]
+
+    assert len(xray["trigger_source"]) == 512
+    assert len(xray["output_paths"]) == 16 and all(len(p) == 512 for p in xray["output_paths"])
+    assert "scan_targets" not in xray and "confidence" not in xray and "store_root" not in xray
+    assert xray["error_kind"] == "ValueError" and "SECRET" not in json.dumps(observed)
+    assert len(json.dumps(observed)) < 20_000
+
+
+def test_resume_rejects_tampered_capability_observations(ctx, stubs) -> None:
+    record = _complete(ctx)
+    record["capability_observations"] = {"xray": {"status": "INVOKED"}}  # hash still of {}
+    ctx.state["worker_model_context_materialization"] = record
+    with pytest.raises(RuntimeError, match="worker_context_observations_hash_mismatch"):
+        ctx.run(fresh_submission=False)
+
+
+def test_resume_accepts_a_record_written_before_observations(ctx, stubs) -> None:
+    record = _complete(ctx)
+    record.pop("capability_observations")
+    record.pop("capability_observations_hash")
+    ctx.state["worker_model_context_materialization"] = record
+    ctx.run(fresh_submission=False)
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

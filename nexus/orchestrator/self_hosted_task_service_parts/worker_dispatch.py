@@ -359,6 +359,14 @@ class _WorkerDispatchMixin:
             bundle_hash = str(record.get("bundle_hash") or "")
             if not bundle_hash or _service_module()._sha256_json(bundle) != bundle_hash:
                 raise RuntimeError("worker_context_bundle_hash_mismatch")
+            # Records written before #2688 have no observations; when present they are bound.
+            if "capability_observations" in record or "capability_observations_hash" in record:
+                observations_hash = str(record.get("capability_observations_hash") or "")
+                observations = record.get("capability_observations")
+                if not observations_hash or _service_module()._sha256_json(
+                    observations
+                ) != observations_hash:
+                    raise RuntimeError("worker_context_observations_hash_mismatch")
         else:
             if not fresh_submission:
                 raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_missing")
@@ -431,6 +439,7 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
             )
             bundle = dict(bundle)
+            observations = _capability_observations(capability_results)
             record = {
                 "schema": "nexus.worker_model_context_materialization.v1",
                 "status": "COMPLETE",
@@ -448,7 +457,8 @@ class _WorkerDispatchMixin:
                 "bundle": bundle,
                 # #2688: what each executor actually did (trigger, store, outputs). The
                 # runtime's bundle entries drop these fields; witnesses need them.
-                "capability_observations": _capability_observations(capability_results),
+                "capability_observations": observations,
+                "capability_observations_hash": _service_module()._sha256_json(observations),
                 "producer_revision": revision,
             }
 
@@ -536,8 +546,31 @@ _OBSERVATION_OUTCOME_KEYS = (
     "findings_hit_count",
     "confidence",
     "state_file",
-    "error",
 )
+_OBSERVATION_MAX_TEXT = 512
+_OBSERVATION_MAX_ITEMS = 16
+_OBSERVATION_MAX_CAPABILITIES = 64
+
+
+def _observation_value(value: Any) -> Any:
+    """JSON-safe, bounded scalar or list of short strings; anything else is dropped."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value if value == value else None  # drop NaN
+    if isinstance(value, str):
+        return value[:_OBSERVATION_MAX_TEXT]
+    if isinstance(value, (list, tuple)):
+        items = [v[:_OBSERVATION_MAX_TEXT] for v in value if isinstance(v, str)]
+        return items[:_OBSERVATION_MAX_ITEMS]
+    return None
+
+
+def _error_kind(value: Any) -> str:
+    """Only the error's kind (text before the first ':'), never its message."""
+    text = str(value or "")
+    head = text.split(":", 1)[0].strip()
+    return head[:80] if head.replace("_", "").replace(".", "").isalnum() else "error"
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -547,8 +580,9 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 def _capability_observations(results: Any) -> dict[str, Any]:
     """Bounded per-capability facts from the raw executor receipts (#2688).
 
-    Keeps only identifiers, paths and counts (never prompt content or payloads), so a
-    witness can tell whether and how a capability ran and which store it used.
+    Keeps only identifiers, paths and counts, bounded and JSON-safe (never prompt
+    content, payloads or error messages), so a witness can tell whether and how a
+    capability ran and which store it used.  The record binds them with a hash.
     """
     if not isinstance(results, Mapping):
         return {}
@@ -561,14 +595,22 @@ def _capability_observations(results: Any) -> dict[str, Any]:
         outcome = _mapping(inner.get("outcome"))
         result = _mapping(outcome.get("result"))
         entry: dict[str, Any] = {
-            "status": stage.get("status"),
-            "skip_reason": stage.get("skip_reason") or "",
-            "trigger_source": receipt.get("trigger_source") or "",
+            "status": _observation_value(stage.get("status")),
+            "skip_reason": _observation_value(stage.get("skip_reason") or ""),
+            "trigger_source": _observation_value(receipt.get("trigger_source") or ""),
         }
         for key in _OBSERVATION_OUTCOME_KEYS:
             if key in outcome:
-                entry[key] = outcome[key]
+                value = _observation_value(outcome[key])
+                if value is not None:
+                    entry[key] = value
+        if outcome.get("error"):
+            entry["error_kind"] = _error_kind(outcome["error"])
         if "root" in result:
-            entry["store_root"] = result["root"]
-        observations[str(name)] = entry
+            root = _observation_value(result["root"])
+            if isinstance(root, str):
+                entry["store_root"] = root
+        observations[str(name)[:_OBSERVATION_MAX_TEXT]] = entry
+        if len(observations) >= _OBSERVATION_MAX_CAPABILITIES:
+            break
     return observations
