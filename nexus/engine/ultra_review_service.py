@@ -108,6 +108,67 @@ ENV_PROBE_TMPDIR_WRITE = "import os, tempfile\nfd, path = tempfile.mkstemp()\nos
 MODULE_NOT_FOUND_RE = re.compile(r"ModuleNotFoundError: No module named '([A-Za-z_][A-Za-z0-9_.]*)'")
 TOP_LEVEL_MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 FIND_SPEC_PROBE = "import importlib.util, sys\nsys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)\n"
+
+
+def _normalized_dist(name: str) -> str:
+    return re.sub(r"[-_.]+", "_", name.strip()).lower()
+
+
+def _requirement_name(spec: str) -> str:
+    match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", spec or "")
+    return _normalized_dist(match.group(1)) if match else ""
+
+
+def _declared_names_from_requirements(text: str) -> set[str]:
+    names: set[str] = set()
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        name = _requirement_name(line)
+        if name:
+            names.add(name)
+    return names
+
+
+def _declared_names_from_pyproject(text: str) -> set[str]:
+    """Normalized distribution names (and ``canonical-namespace`` values) a pyproject declares."""
+    import tomllib
+
+    try:
+        doc = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        return set()
+    names: set[str] = set()
+    specs: list[Any] = []
+    raw_project = doc.get("project")
+    project: dict[str, Any] = raw_project if isinstance(raw_project, dict) else {}
+    specs.extend(project.get("dependencies") or [])
+    optional = project.get("optional-dependencies")
+    if isinstance(optional, dict):
+        for group in optional.values():
+            specs.extend(group or [])
+    groups = doc.get("dependency-groups")
+    if isinstance(groups, dict):
+        for group in groups.values():
+            specs.extend(group or [])
+    for spec in specs:
+        if isinstance(spec, str):
+            name = _requirement_name(spec)
+            if name:
+                names.add(name)
+    raw_tool = doc.get("tool")
+    tool: dict[str, Any] = raw_tool if isinstance(raw_tool, dict) else {}
+    raw_poetry = tool.get("poetry")
+    poetry: dict[str, Any] = raw_poetry if isinstance(raw_poetry, dict) else {}
+    for key in ("dependencies", "dev-dependencies"):
+        declared = poetry.get(key)
+        if isinstance(declared, dict):
+            names.update(_normalized_dist(str(name)) for name in declared if str(name).lower() != "python")
+    for section in tool.values():
+        if isinstance(section, dict) and isinstance(section.get("canonical-namespace"), str):
+            names.add(_normalized_dist(section["canonical-namespace"]))
+    return names
 LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
@@ -219,15 +280,19 @@ class UltraReviewService:
         try:
             if os.getenv(ULTRA_REVIEW_NESTED_ENV, "").strip():
                 raise UltraReviewError("nested_ultra_review_refused")
-            return self._run(
-                dry_run=dry_run,
-                task=task,
-                base_ref=base_ref,
-                report_path=report_path,
-                sandbox_root=sandbox_root,
-                regression_tests=tuple(regression_tests),
-                excluded_tests=tuple(excluded_tests),
-            )
+            try:
+                return self._run(
+                    dry_run=dry_run,
+                    task=task,
+                    base_ref=base_ref,
+                    report_path=report_path,
+                    sandbox_root=sandbox_root,
+                    regression_tests=tuple(regression_tests),
+                    excluded_tests=tuple(excluded_tests),
+                )
+            finally:
+                # Safety net: a worktree's own .git file is always put back (#2650).
+                self._restore_pending_git_swaps()
         except (SandboxError, OSError, subprocess.SubprocessError) as exc:
             # Fail closed with a reason instead of an unhandled traceback.
             out_path = self._resolve(report_path)
@@ -305,6 +370,25 @@ class UltraReviewService:
             mirror_metadata["diff_applied"] = False
             mirror_metadata["post_apply_violations"] = mirror_violations[:20]
         self._bind_sandbox(sandbox_path=sandbox_path, execution_root=execution_root)
+        mirror_git: dict[str, Any] = {}
+        ghost_will_run = bool(
+            test_candidates
+            and os_sandbox_available()
+            and os.getenv(ULTRA_SKIP_GHOST_ENV, "").strip().lower() not in {"1", "true", "yes", "on"}
+        )
+        if (
+            ghost_will_run
+            and str(mirror_metadata.get("strategy") or "").startswith("git_worktree")
+            and mirror_metadata.get("diff_applied")
+        ):
+            mirror_git = self._give_checkout_sandbox_git_dir(execution_root, rev="HEAD", diff_path=diff_path)
+        # Capability probes run once, BEFORE any lane executes candidate-derived content, so
+        # code under review cannot poison them (#2650).
+        self._env_probe_failures = (
+            self._environment_probe(execution_root, mirror_git_ok=bool(mirror_git.get("ok")))
+            if ghost_will_run
+            else []
+        )
         security_sentry = self._run_security_sentry(
             diff_text=diff_text,
             execution_root=execution_root,
@@ -360,17 +444,6 @@ class UltraReviewService:
         explicit_tests = tuple(
             text for text in (str(rel).strip() for rel in regression_tests) if text and text in test_candidates
         )
-        mirror_git: dict[str, Any] = {}
-        if (
-            test_candidates
-            and os_sandbox_available()
-            and os.getenv(ULTRA_SKIP_GHOST_ENV, "").strip().lower() not in {"1", "true", "yes", "on"}
-            and str(mirror_metadata.get("strategy") or "").startswith("git_worktree")
-            and mirror_metadata.get("diff_applied")
-        ):
-            mirror_git = self._give_checkout_sandbox_git_dir(
-                execution_root, sandbox_path / "mirror-git-dir", rev="HEAD", diff_path=diff_path
-            )
         try:
             ghost_regression = self._run_ghost_regression(
                 test_candidates,
@@ -384,9 +457,10 @@ class UltraReviewService:
             mirror_git_restore = self._restore_checkout_git_file(execution_root, mirror_git)
         if mirror_git:
             ghost_regression["sandbox_git_dir"] = {
-                **{k: v for k, v in mirror_git.items() if k != "original"},
+                **{k: v for k, v in mirror_git.items() if k not in ("original", "restored_result")},
                 "restore": mirror_git_restore,
             }
+        ghost_regression["environment_probe_failures"] = list(self._env_probe_failures)
         unmapped_paths = [str(item.get("changed_file") or "") for item in regression_map if not item.get("existing")]
         ghost_regression["uncovered_paths"] = unmapped_paths
         if (
@@ -835,8 +909,10 @@ class UltraReviewService:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         # tool_read_roots: /usr/bin/shasum and the active developer dir, so the xcrun git shim
         # and Perl tools work inside the sandbox (#2650); validated like every other root.
+        # Read-only, reviewer-built git dirs for the mirror and base checkout (#2650).
+        git_roots = [str(path) for path in ctx.get("git_read_roots") or []]
         return checked_read_roots(
-            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots(), *tool_read_roots()],
+            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots(), *tool_read_roots(), *git_roots],
             extra_forbidden=[self.project_root],
         )
 
@@ -2219,7 +2295,7 @@ class UltraReviewService:
             if not remaining:
                 return outcome
             # Same git capability on base as on head, so a git-using test is judged alike (#2650).
-            base_git = self._give_checkout_sandbox_git_dir(base_root, sandbox_path / "base-git-dir", rev=base_ref)
+            base_git = self._give_checkout_sandbox_git_dir(base_root, rev=base_ref)
             base_report = self._new_ghost_report(sandbox_path, "base")
             cmd = self._ghost_pytest_cmd(base_root, present, base_report["junit"], base_report["witness"])
             try:
@@ -2285,7 +2361,7 @@ class UltraReviewService:
             restore = self._restore_checkout_git_file(base_root, base_git)
             if base_git:
                 outcome["base_git_dir"] = {
-                    **{k: v for k, v in base_git.items() if k != "original"},
+                    **{k: v for k, v in base_git.items() if k not in ("original", "restored_result")},
                     "restore": restore,
                 }
             removed = self._git_run(["worktree", "remove", "--force", str(base_root)])
@@ -2300,23 +2376,27 @@ class UltraReviewService:
         """Why a head failure with no base result cannot be judged here, or ``""`` (#2650).
 
         ``dependency_unavailable:<module>`` when the file failed to collect with a
-        ``ModuleNotFoundError`` for a top-level module that neither the head tree nor the base
-        tree provides and the reviewer's interpreter cannot import (a moved or deleted in-tree
-        module therefore stays a regression); ``environment_probe_failed:<probes>`` when a
-        sandbox capability probe fails."""
+        ``ModuleNotFoundError`` for a top-level module that the tree DECLARES as an external
+        dependency (pyproject / requirements), that neither the head nor the base tree provides
+        and that the reviewer's interpreter cannot import. A forgotten or misspelled module is not
+        declared, so it stays a regression. ``environment_probe_failed:<probes>`` when a sandbox
+        capability probe, run before any candidate code, failed."""
         module = modules.get(test_id) or ""
-        if module and execution_root is not None and self._dependency_unavailable(module, execution_root, base_ref):
+        if module and execution_root is not None and self._dependency_unavailable(
+            module, execution_root, base_ref, test_file=test_id.split("::", 1)[0]
+        ):
             return "dependency_unavailable:" + module.split(".", 1)[0]
-        if execution_root is not None:
-            failed = self._environment_probe(execution_root)
-            if failed:
-                return "environment_probe_failed:" + ",".join(failed)
+        failed = list(getattr(self, "_env_probe_failures", None) or [])
+        if failed:
+            return "environment_probe_failed:" + ",".join(failed)
         return ""
 
-    def _dependency_unavailable(self, module: str, execution_root: Path, base_ref: str) -> bool:
+    def _dependency_unavailable(self, module: str, execution_root: Path, base_ref: str, *, test_file: str = "") -> bool:
         top = module.split(".", 1)[0]
         if not TOP_LEVEL_MODULE_RE.fullmatch(top):
             return False
+        if not self._declared_external_dependency(top, execution_root, test_file):
+            return False  # not declared anywhere: a forgotten or misspelled module is the change's
         candidates = (top, f"{top}.py", f"src/{top}", f"src/{top}.py")
         for rel in candidates:
             if os.path.lexists(execution_root / rel):
@@ -2340,17 +2420,46 @@ class UltraReviewService:
         # Importable by the reviewer yet missing in the run: not a dependency gap, keep it.
         return probe.returncode == 1
 
-    def _environment_probe(self, execution_root: Path) -> list[str]:
-        """Names of the sandbox capability probes that fail (run once per mirror)."""
-        cache: dict[str, list[str]] = self.__dict__.setdefault("_env_probe_cache", {})
-        key = str(execution_root)
-        if key in cache:
-            return list(cache[key])
-        probes = (
-            ("git_version", ["git", "--version"]),
-            ("git_rev_parse_mirror", ["git", "-C", str(execution_root), "rev-parse", "HEAD"]),
-            ("tmpdir_write", [sys.executable, "-I", "-c", ENV_PROBE_TMPDIR_WRITE]),
-        )
+    def _declared_external_dependency(self, top: str, execution_root: Path, test_file: str) -> bool:
+        """True when a ``pyproject.toml`` or ``requirements*.txt`` at the tree root or in a
+        directory containing ``test_file`` declares a distribution whose normalized name is
+        ``top`` (``langchain-core`` -> ``langchain_core``), or a ``[tool.*] canonical-namespace``
+        equal to ``top`` (a vendored sibling package)."""
+        wanted = top.lower()
+        dirs: list[Path] = [execution_root]
+        rel_parent = Path(test_file).parent if test_file else Path()
+        current = execution_root
+        for part in rel_parent.parts:
+            if part in ("", ".", ".."):
+                break
+            current = current / part
+            dirs.append(current)
+        for directory in dirs:
+            if self._contained_path(str(directory.relative_to(execution_root)) or ".", execution_root) is None:
+                continue
+            files = [directory / "pyproject.toml", *sorted(directory.glob("requirements*.txt"))]
+            for path in files:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    if path.stat().st_size > 1_000_000:
+                        continue
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                names = _declared_names_from_pyproject(text) if path.name == "pyproject.toml" else _declared_names_from_requirements(text)
+                if wanted in names:
+                    return True
+        return False
+
+    def _environment_probe(self, execution_root: Path, *, mirror_git_ok: bool) -> list[str]:
+        """Names of the sandbox capability probes that fail. Run once per review, before any
+        candidate code. The mirror git probe only applies when the mirror was given a git dir;
+        a copytree mirror has no ``.git`` by design, so that probe is not applicable there."""
+        probes: list[tuple[str, list[str]]] = [("git_version", ["git", "--version"])]
+        if mirror_git_ok:
+            probes.append(("git_rev_parse_mirror", ["git", "-C", str(execution_root), "rev-parse", "HEAD"]))
+        probes.append(("tmpdir_write", [sys.executable, "-I", "-c", ENV_PROBE_TMPDIR_WRITE]))
         failed: list[str] = []
         for name, cmd in probes:
             try:
@@ -2359,8 +2468,7 @@ class UltraReviewService:
                 ok = False
             if not ok:
                 failed.append(name)
-        cache[key] = failed
-        return list(failed)
+        return failed
 
     @staticmethod
     def _junit_collection_error_modules(data: bytes | None) -> dict[str, str]:
@@ -2391,18 +2499,21 @@ class UltraReviewService:
         return found
 
     def _give_checkout_sandbox_git_dir(
-        self, checkout: Path, git_dir: Path, *, rev: str, diff_path: Path | None = None
+        self, checkout: Path, *, rev: str, diff_path: Path | None = None
     ) -> dict[str, Any]:
-        """Point a review worktree at a self-contained git dir inside the sandbox (#2650).
+        """Point a review worktree at a self-contained, read-only git dir (#2650).
 
         A ``git worktree``'s admin dir lives in the reviewed repository's ``.git``, which the
         sandbox cannot (and must not) read, so ``git rev-parse HEAD`` in the mirror fails under
-        test. Build ``git_dir`` with a depth-1 fetch of ``rev`` from the repository, an index of
-        that commit (plus ``diff_path`` staged, matching the mirror), and swap the checkout's
-        ``.git`` file to it. ``_restore_checkout_git_file`` puts the original back before the
-        reviewer touches the worktree with git again. Sandboxed code may write ``git_dir``; the
-        reviewer never runs git with it. Returns ``{}``-like ``{"ok": False, ...}`` on any
-        failure, leaving the checkout untouched."""
+        test. The reviewer builds a fresh git dir with ``tempfile.mkdtemp`` (exclusive, random
+        name, mode 0700) OUTSIDE every sandbox-writable tree: init without templates, a depth-1
+        fetch of the exact sha of ``rev`` from the repository, a detached ``HEAD`` and an index of
+        that commit (plus ``diff_path`` staged with ``apply --cached``, matching the mirror). No
+        step reads the worktree, so no clean filter, attribute or config planted by code under
+        review is ever consulted, and ``core.attributesFile`` is ``/dev/null`` throughout. The
+        sandbox gets the dir as a read root only (never writable). The checkout's ``.git`` file
+        is then swapped to it; ``_restore_checkout_git_file`` puts the original back and deletes
+        the dir. Returns ``{"ok": False, ...}`` on any failure, leaving the checkout untouched."""
         try:
             self._mirror_git_dir(checkout)
             original = (checkout / ".git").read_text(encoding="utf-8")
@@ -2412,17 +2523,24 @@ class UltraReviewService:
         sha = (sha_run.stdout or "").strip()
         if sha_run.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", sha):
             return {"ok": False, "detail": "rev_unresolved"}
-        gd, wt = str(git_dir), str(checkout)
+        git_dir = Path(tempfile.mkdtemp(prefix="nexus-ultra-gitdir-")).resolve()
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        if in_tree(git_dir, (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path"))):
+            shutil.rmtree(git_dir, ignore_errors=True)
+            return {"ok": False, "detail": "git_dir_inside_reviewed_tree"}
+        gd = str(git_dir)
+        safe = ["--git-dir", gd, "-c", "core.attributesFile=/dev/null"]
         steps = (
-            ("init", ["--git-dir", gd, "--work-tree", wt, "init", "-q"]),
+            ("init", [*safe, "init", "-q", "--template="]),
+            ("config", [*safe, "config", "core.bare", "false"]),
             (
                 "fetch",
                 # A fixed local path and an exact sha; the file transport is enabled for this
                 # one call only (GIT_SAFE_CONFIG sets protocol.allow=never).
-                ["--git-dir", gd, "-c", "protocol.file.allow=always", "fetch", "-q", "--no-tags", "--depth=1",
+                [*safe, "-c", "protocol.file.allow=always", "fetch", "-q", "--no-tags", "--depth=1",
                  str(self.project_root), sha],
             ),
-            ("read_tree", ["--git-dir", gd, "--work-tree", wt, "read-tree", sha]),
+            ("read_tree", [*safe, "read-tree", sha]),
         )
         for label, step in steps:
             done = self._git_run(step)
@@ -2430,8 +2548,7 @@ class UltraReviewService:
                 shutil.rmtree(git_dir, ignore_errors=True)
                 return {"ok": False, "detail": f"{label}:" + (done.stderr or done.stdout or "")[-200:].strip()}
             if label == "fetch":
-                # Detached HEAD at the fetched commit, written into the git dir we just created
-                # (not a ref update in any repository the reviewer owns).
+                # Detached HEAD at the fetched commit, in the git dir the reviewer just created.
                 try:
                     _write_no_follow(git_dir / "HEAD", f"{sha}\n".encode())
                 except (OSError, SandboxError) as exc:
@@ -2439,24 +2556,23 @@ class UltraReviewService:
                     return {"ok": False, "detail": f"head:{exc}"}
         staged = False
         if diff_path is not None and diff_path.is_file() and diff_path.read_text(encoding="utf-8").strip():
-            staged = (
-                self._git_run(["--git-dir", gd, "--work-tree", wt, "apply", "--cached", "--binary", str(diff_path)]).returncode
-                == 0
-            )
-        self._git_run(["--git-dir", gd, "--work-tree", wt, "update-index", "-q", "--refresh"])
+            staged = self._git_run([*safe, "apply", "--cached", "--binary", str(diff_path)]).returncode == 0
         try:
             _write_no_follow(checkout / ".git", f"gitdir: {gd}\n".encode())
         except (OSError, SandboxError) as exc:
             shutil.rmtree(git_dir, ignore_errors=True)
             return {"ok": False, "detail": f"swap_failed:{exc}"}
-        return {"ok": True, "git_dir": gd, "head": sha, "diff_staged": staged, "original": original}
+        if ctx:
+            ctx.setdefault("git_read_roots", []).append(git_dir)
+        swap = {"ok": True, "git_dir": gd, "head": sha, "diff_staged": staged, "original": original}
+        self.__dict__.setdefault("_pending_git_swaps", []).append((checkout, swap))
+        return swap
 
-    @staticmethod
-    def _restore_checkout_git_file(checkout: Path, swap: dict[str, Any]) -> dict[str, Any]:
+    def _restore_checkout_git_file(self, checkout: Path, swap: dict[str, Any]) -> dict[str, Any]:
         """Undo ``_give_checkout_sandbox_git_dir``: the original ``.git`` file back (whatever the
-        sandboxed run left there), the sandbox git dir removed."""
-        if not swap or not swap.get("ok"):
-            return {}
+        sandboxed run left there), the git dir removed and dropped from the read roots."""
+        if not swap or not swap.get("ok") or swap.get("restored_result") is not None:
+            return dict(swap.get("restored_result") or {}) if swap else {}
         dot_git = checkout / ".git"
         detail = ""
         try:
@@ -2466,8 +2582,20 @@ class UltraReviewService:
             restored = True
         except (OSError, SandboxError) as exc:
             restored, detail = False, str(exc)[:200]
-        shutil.rmtree(str(swap["git_dir"]), ignore_errors=True)
-        return {"restored": restored, "detail": detail}
+        git_dir = Path(str(swap["git_dir"]))
+        shutil.rmtree(git_dir, ignore_errors=True)
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        roots = ctx.get("git_read_roots") or []
+        if git_dir in roots:
+            roots.remove(git_dir)
+        pending = self.__dict__.get("_pending_git_swaps") or []
+        self._pending_git_swaps = [item for item in pending if item[1] is not swap]
+        swap["restored_result"] = {"restored": restored, "detail": detail}
+        return dict(swap["restored_result"])
+
+    def _restore_pending_git_swaps(self) -> None:
+        for checkout, swap in list(self.__dict__.get("_pending_git_swaps") or []):
+            self._restore_checkout_git_file(checkout, swap)
 
     @staticmethod
     def _neutralize_base_links(base_root: Path) -> list[str]:

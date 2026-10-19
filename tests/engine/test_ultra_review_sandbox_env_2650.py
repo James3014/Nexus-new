@@ -54,7 +54,7 @@ def _review(path):
 
 
 def _no_probe_failure(monkeypatch):
-    monkeypatch.setattr(UltraReviewService, "_environment_probe", lambda self, root: [])
+    monkeypatch.setattr(UltraReviewService, "_environment_probe", lambda self, root, **kw: [])
 
 
 def _ghost_findings(payload):
@@ -165,9 +165,12 @@ def test_restore_puts_back_the_worktree_git_file_whatever_the_run_left(tmp_path)
     _git(tmp_path, "worktree", "add", "--detach", str(checkout), "HEAD")
     original = (checkout / ".git").read_text(encoding="utf-8")
 
-    swap = svc._give_checkout_sandbox_git_dir(checkout, tmp_path / "gd", rev="HEAD")
+    swap = svc._give_checkout_sandbox_git_dir(checkout, rev="HEAD")
     assert swap["ok"] is True, swap
-    assert (checkout / ".git").read_text(encoding="utf-8").strip() == f"gitdir: {tmp_path / 'gd'}"
+    git_dir = Path(swap["git_dir"])
+    # built by the reviewer outside the reviewed tree, under a fresh random name
+    assert tmp_path.resolve() not in git_dir.parents
+    assert (checkout / ".git").read_text(encoding="utf-8").strip() == f"gitdir: {git_dir}"
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=checkout, capture_output=True, text=True
     ).stdout
@@ -181,7 +184,7 @@ def test_restore_puts_back_the_worktree_git_file_whatever_the_run_left(tmp_path)
 
     assert result["restored"] is True
     assert (checkout / ".git").read_text(encoding="utf-8") == original
-    assert not (tmp_path / "gd").exists()
+    assert not git_dir.exists()
     _git(tmp_path, "worktree", "remove", "--force", str(checkout))
 
 
@@ -194,7 +197,7 @@ def test_new_failing_test_when_a_sandbox_probe_fails_is_inconclusive_env(tmp_pat
         handle.write("\n\ndef test_needs_git():\n    assert False, 'git unavailable here'\n")
     _allow_ghost_run(monkeypatch)
     monkeypatch.setattr(
-        UltraReviewService, "_environment_probe", lambda self, root: ["git_version"]
+        UltraReviewService, "_environment_probe", lambda self, root, **kw: ["git_version"]
     )
 
     payload = _review(tmp_path)
@@ -218,7 +221,7 @@ def test_base_pass_head_fail_still_fails_when_a_sandbox_probe_fails(tmp_path, mo
     (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
     _allow_ghost_run(monkeypatch)
     monkeypatch.setattr(
-        UltraReviewService, "_environment_probe", lambda self, root: ["git_version"]
+        UltraReviewService, "_environment_probe", lambda self, root, **kw: ["git_version"]
     )
 
     payload = _review(tmp_path)
@@ -230,6 +233,15 @@ def test_base_pass_head_fail_still_fails_when_a_sandbox_probe_fails(tmp_path, mo
 
 def test_new_test_file_needing_an_uninstalled_dependency_is_inconclusive_env(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\ndependencies = ["nexus-missing-dependency-2650>=1"]\n'
+        # a pytest section, so pytest stops its ini search here (the project root above the
+        # sandbox is unreadable inside it)
+        "[tool.pytest.ini_options]\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "add", "pyproject.toml")
+    _git(tmp_path, "commit", "-qm", "declare dep")
     (tmp_path / "tests" / "test_extra.py").write_text(
         "import nexus_missing_dependency_2650\n\n\ndef test_extra():\n    assert True\n",
         encoding="utf-8",
@@ -304,6 +316,13 @@ def test_junit_collection_error_modules_reads_the_last_module_not_found():
 def test_dependency_check_refuses_modules_the_reviewer_can_import_or_either_tree_has(tmp_path):
     _init_app_repo(tmp_path)
     svc = UltraReviewService(tmp_path)
+    # not declared anywhere: a forgotten module, never a dependency gap
+    assert svc._dependency_unavailable("nexus_missing_dependency_2650", tmp_path, "HEAD") is False
+    (tmp_path / "requirements-dev.txt").write_text("app\nhelper\njson\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\ndependencies = ["Nexus.Missing-Dependency_2650 @ git+https://x"]\n',
+        encoding="utf-8",
+    )
     assert svc._dependency_unavailable("nexus_missing_dependency_2650", tmp_path, "HEAD") is True
     assert (
         svc._dependency_unavailable("json", tmp_path, "HEAD") is False
@@ -422,3 +441,128 @@ def test_run_confined_default_path_is_unchanged(tmp_path, monkeypatch):
         timeout=10,
     )
     assert done.returncode == 0 and calls == [None]
+
+
+# --- reviewer repros for PR #2655 (independent review, a9893d67b) ----------------------------
+
+
+def test_planted_git_dir_config_never_runs_a_filter_outside_the_sandbox(tmp_path, monkeypatch):
+    """B1: code under test plants a git dir with a clean filter where the reviewer used to build
+    the base git dir, and also writes a filter into the mirror's own git dir. The reviewer's git
+    must never execute it (the marker sits outside the sandbox)."""
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
+    marker = tmp_path.parent / (tmp_path.name + "-PWNED")
+    plant = (
+        "\nimport pathlib, subprocess\n"
+        "_wt = pathlib.Path(__file__).resolve().parents[1]\n"
+        f"_cfg = '[filter \"evil\"]\\n\\tclean = touch {marker}\\n\\tsmudge = touch {marker}\\n'\n"
+        "_targets = [_wt.parent / 'base-git-dir', _wt.parent / 'mirror-git-dir']\n"
+        "try:\n"
+        "    _gd = subprocess.run(['git', 'rev-parse', '--absolute-git-dir'], cwd=_wt, capture_output=True, text=True).stdout.strip()\n"
+        "    if _gd:\n"
+        "        _targets.append(pathlib.Path(_gd))\n"
+        "except Exception:\n"
+        "    pass\n"
+        "for _gd in _targets:\n"
+        "    try:\n"
+        "        (_gd / 'info').mkdir(parents=True, exist_ok=True)\n"
+        "        with open(_gd / 'config', 'a') as _fh:\n"
+        "            _fh.write(_cfg)\n"
+        "        (_gd / 'info' / 'attributes').write_text('* filter=evil\\n')\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    with (tmp_path / "tests" / "test_app.py").open("a", encoding="utf-8") as handle:
+        handle.write(plant)
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "FAIL", payload["findings"]  # base pass -> head fail still caught
+    assert not marker.exists(), "a filter planted by code under review ran outside the sandbox"
+    base_git = payload["ghost_regression"]["base_comparison"].get("base_git_dir") or {}
+    if base_git.get("ok"):
+        assert not Path(base_git["git_dir"]).exists()
+        assert Path(base_git["git_dir"]).name.startswith("nexus-ultra-gitdir-")
+
+
+def test_candidate_rewriting_the_mirror_git_file_cannot_poison_the_probe(tmp_path, monkeypatch):
+    """M1: the probes run before candidate code, so a test module that breaks the mirror's
+    .git file cannot turn its own new failing test into INCONCLUSIVE_ENV."""
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_new.py").write_text(
+        "import pathlib\n"
+        "_p = pathlib.Path(__file__).resolve().parents[1] / '.git'\n"
+        "try:\n    _p.write_text('gitdir: /nonexistent\\n')\nexcept Exception:\n    pass\n"
+        "\n\ndef test_new_behaviour():\n    assert 1 == 2\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "add", "tests/test_new.py")
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["failed_tests"] == ["tests/test_new.py::test_new_behaviour"]
+    assert payload["ghost_regression"]["inconclusive_env_tests"] == []
+    assert payload["ghost_regression"]["environment_probe_failures"] == []
+
+
+def test_copytree_mirror_new_failing_test_stays_a_regression(tmp_path, monkeypatch):
+    """M2: a copytree mirror has no .git by design; the mirror git probe is not applicable
+    there, so a new failing test is not excused as INCONCLUSIVE_ENV."""
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_new.py").write_text(
+        "def test_new_behaviour():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    _git(tmp_path, "add", "tests/test_new.py")
+    _allow_ghost_run(monkeypatch)
+    monkeypatch.setattr(
+        UltraReviewService,
+        "_prepare_git_worktree_mirror",
+        lambda self, execution_root, **kw: {"strategy": "copytree", "fallback_reason": "forced"},
+    )
+
+    payload = _review(tmp_path)
+
+    assert payload["sandbox_mirror"]["strategy"] == "copytree"
+    assert "git_rev_parse_mirror" not in payload["ghost_regression"]["environment_probe_failures"]
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["inconclusive_env_tests"] == []
+
+
+def test_forgotten_new_module_is_a_regression_not_a_dependency_gap(tmp_path, monkeypatch):
+    """M3: a module the author forgot to add (not declared anywhere) stays FAIL."""
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_new.py").write_text(
+        "from newpkg_forgot import f\n\n\ndef test_f():\n    assert f() == 1\n", encoding="utf-8"
+    )
+    _git(tmp_path, "add", "tests/test_new.py")
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["failed_tests"] == ["tests/test_new.py"]
+    assert payload["ghost_regression"]["inconclusive_env_tests"] == []
+
+
+def test_declared_names_cover_pep621_groups_poetry_requirements_and_namespaces():
+    from nexus.engine.ultra_review_service import (
+        _declared_names_from_pyproject,
+        _declared_names_from_requirements,
+    )
+
+    names = _declared_names_from_pyproject(
+        '[project]\ndependencies = ["langchain-core==1.5.2"]\n'
+        '[project.optional-dependencies]\nx = ["Foo.Bar>=1"]\n'
+        '[dependency-groups]\ndev = ["pytest>=9", {include-group = "x"}]\n'
+        '[tool.poetry.dependencies]\npython = "^3.11"\nbaz-qux = "*"\n'
+        '[tool.repository-intelligence]\ncanonical-namespace = "repository_intelligence"\n'
+    )
+    assert names == {"langchain_core", "foo_bar", "pytest", "baz_qux", "repository_intelligence"}
+    assert _declared_names_from_pyproject("not toml [") == set()
+    assert _declared_names_from_requirements(
+        "# c\n-r other.txt\nreq-a==1 ; python_version>'3'\n\n"
+    ) == {"req_a"}
