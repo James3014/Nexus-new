@@ -22,7 +22,12 @@ time (``CANONICAL_SOURCE_ROOT``, ``LifecycleActionType``,
 ``_EXTERNAL_ADOPTION_CLAIM_CEILING``, ``_jsonable``, ``_utc_now`` and the module
 ``subprocess``) is resolved at call time through ``_service_module()``, so patches on the
 facade keep taking effect; ``base64``, ``hashlib``, ``json``, ``os``, ``re``, ``stat``,
-``Path`` and the typing names are imported by the part itself.
+``Path`` and the typing names are imported by the part itself.  Issue #2727 later
+changed ``_reconcile_direct_failure`` (it is no longer verbatim): an allowed entry covers
+everything below it as a directory, untracked files and both sides of a rename are
+probed, names are read NUL-separated, and a malformed allowed entry or a failing listing
+probe keeps the task retained (helpers ``_within_allowed_boundary`` and
+``_invalid_allowed_boundary``).
 
 This is not read-only code: the Direct members write task state through
 ``_record_direct_failure`` / ``_checkpoint`` and the PRE_APPLY restore through
@@ -52,6 +57,30 @@ def _service_module():
     # Late binding: the service imports this module at its top level, so its own
     # (and its patched) names are only resolved once a method runs.
     return importlib.import_module("nexus.orchestrator.self_hosted_task_service")
+
+
+class _ListingProbeFailed(Exception):
+    """A Direct-failure listing probe exited non-zero (its output is not evidence)."""
+
+
+def _invalid_allowed_boundary(boundary: str) -> bool:
+    """True unless ``boundary`` (trailing "/" removed) is a normalized repo-relative path."""
+    return (
+        not boundary
+        or boundary.startswith("/")
+        or "\\" in boundary
+        or any(part in ("", ".", "..") for part in boundary.split("/"))
+    )
+
+
+def _within_allowed_boundary(path: str, boundary: str) -> bool:
+    """``path`` is the allowed entry itself or strictly below it as a directory.
+
+    The trailing "/" of a declared directory entry is removed before comparison, so both
+    ``docs/`` and ``docs`` cover ``docs`` and ``docs/x.md``, never ``docs2/x.md``.  Used
+    only to detect a mutation, so covering more is the fail-closed direction.
+    """
+    return path == boundary or path.startswith(boundary + "/")
 
 
 class _ReconcileRecoveryMixin:
@@ -140,6 +169,10 @@ class _ReconcileRecoveryMixin:
         ).expanduser().resolve()
         expected_head = str(request.get("controller_revision") or state.get("controller_revision") or "").strip()  # pyright: ignore[reportOptionalMemberAccess]
         allowed = {str(path).rstrip("/") for path in request.get("allowed_files") or () if str(path).strip()}  # pyright: ignore[reportOptionalMemberAccess]
+        invalid_allowed = sorted(
+            str(path) for path in request.get("allowed_files") or ()  # pyright: ignore[reportOptionalMemberAccess]
+            if str(path).strip() and _invalid_allowed_boundary(str(path).rstrip("/"))
+        )
         observed: dict[str, Any] = {
             "controller_repo_root": str(controller),
             "expected_head": expected_head,
@@ -148,10 +181,23 @@ class _ReconcileRecoveryMixin:
             "commits_since_base": [],
             "working_tree_changes": [],
             "staged_changes": [],
+            "untracked_changes": [],
             "allowed_paths": sorted(allowed),
+            "invalid_allowed_paths": invalid_allowed,
             "target_created": bool(state.get("target_worktree") or state.get("lease")),
             "candidate_created": bool(state.get("candidate_ref") or state.get("candidate_commit_sha") or state.get("promotion_packet")),
         }
+
+        def listing(*args: str) -> list[str]:
+            # -z: names are NUL-separated and never C-quoted; --no-renames: a rename lists
+            # both its source and its destination.  A failing probe is not evidence.
+            result = _service_module().subprocess.run(
+                ["git", *args], cwd=controller, capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                raise _ListingProbeFailed(f"git {' '.join(args)} exited {result.returncode}")
+            return [name for name in result.stdout.split("\0") if name]
+
         probe_error = ""
         try:
             observed["current_head"] = _service_module().subprocess.run(
@@ -164,17 +210,16 @@ class _ReconcileRecoveryMixin:
                 )
                 observed["expected_head_is_ancestor"] = ancestor.returncode == 0
                 if observed["expected_head_is_ancestor"]:
-                    observed["commits_since_base"] = _service_module().subprocess.run(
-                        ["git", "diff", "--name-only", f"{expected_head}..HEAD"],
-                        cwd=controller, capture_output=True, text=True, check=False,
-                    ).stdout.splitlines()
-            observed["working_tree_changes"] = _service_module().subprocess.run(
-                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.splitlines()
-            observed["staged_changes"] = _service_module().subprocess.run(
-                ["git", "diff", "--cached", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.splitlines()
-        except OSError as exc:
+                    observed["commits_since_base"] = listing(
+                        "diff", "--name-only", "--no-renames", "-z", f"{expected_head}..HEAD",
+                    )
+            observed["working_tree_changes"] = listing("diff", "--name-only", "--no-renames", "-z")
+            observed["staged_changes"] = listing("diff", "--cached", "--name-only", "--no-renames", "-z")
+            # untracked, not ignored, named from the repository root like git diff
+            observed["untracked_changes"] = sorted(listing(
+                "ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--", ":(top)",
+            ))
+        except (OSError, _ListingProbeFailed) as exc:
             probe_error = str(exc)
             observed["probe_error"] = probe_error
 
@@ -184,12 +229,13 @@ class _ReconcileRecoveryMixin:
                 list(observed.get("commits_since_base") or [])
                 + list(observed.get("working_tree_changes") or [])
                 + list(observed.get("staged_changes") or [])
+                + list(observed.get("untracked_changes") or [])
             )
         }
         allowed_touched = sorted(
             path
             for path in touched
-            if any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed)
+            if any(_within_allowed_boundary(path, boundary) for boundary in allowed)
         )
         observed["allowed_paths_touched"] = allowed_touched
         safe_no_mutation = bool(
@@ -200,6 +246,7 @@ class _ReconcileRecoveryMixin:
             and not observed.get("target_created")
             and not observed.get("candidate_created")
             and not allowed_touched
+            and not invalid_allowed
         )
         action = dict(state.get("canonical_action") or {})
         reconciliation = dict(action.get("reconciliation") or {})
