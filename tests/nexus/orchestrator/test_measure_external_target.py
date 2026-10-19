@@ -832,15 +832,13 @@ def test_unreadable_nexus_identity_refuses_the_target(layout, tmp_path):
         )
 
 
-def _case_insensitive(path: Path) -> bool:
-    swapped = path.parent / path.name.swapcase()
-    return swapped != path and swapped.exists()
+def test_forbidden_root_spelled_in_a_different_case_is_still_forbidden(layout, monkeypatch):
+    """1d (b): on a case-insensitive volume (darwin) a different spelling is the same directory.
 
-
-def test_forbidden_root_spelled_in_a_different_case_is_still_forbidden(layout):
-    """1d (b): on a case-insensitive volume a different spelling is the same directory."""
-    if not _case_insensitive(layout["measure_root"]):
-        pytest.skip("volume is case-sensitive")
+    The spelling is compared case-folded, so this holds even where the respelled path does
+    not exist (a case-sensitive CI volume); the platform switch is forced on here.
+    """
+    monkeypatch.setattr(met, "_CASE_INSENSITIVE_PATHS", True)
     respelled = layout["measure_root"].parent / layout["measure_root"].name.upper()
     with pytest.raises(ExternalTargetError, match="EXTERNAL_TARGET_ROOT_FORBIDDEN"):
         validate_external_target(
@@ -851,11 +849,13 @@ def test_forbidden_root_spelled_in_a_different_case_is_still_forbidden(layout):
         )
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="case folding applies on darwin")
-def test_overlap_is_case_insensitive_on_darwin_even_for_missing_paths(tmp_path):
+def test_overlap_is_case_insensitive_on_darwin_even_for_missing_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(met, "_CASE_INSENSITIVE_PATHS", True)
     assert met._overlaps(tmp_path / "A" / "b", tmp_path / "a")
     assert met._overlaps(tmp_path / "a", tmp_path / "A" / "B")
     assert not met._overlaps(tmp_path / "a", tmp_path / "ab")
+    monkeypatch.setattr(met, "_CASE_INSENSITIVE_PATHS", False)
+    assert not met._overlaps(tmp_path / "A" / "b", tmp_path / "a")
 
 
 def test_ephemeral_service_still_rechecks_the_external_controller(gateway_env, monkeypatch):

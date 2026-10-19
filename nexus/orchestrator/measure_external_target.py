@@ -136,10 +136,13 @@ def _same_directory(left: Path, right: Path) -> bool:
         return False
 
 
+# APFS/HFS+ are case-insensitive by default: compare case-folded on darwin (#2742).
+_CASE_INSENSITIVE_PATHS = sys.platform == "darwin"
+
+
 def _lexical_key(path: Path) -> tuple[str, ...]:
-    # APFS/HFS+ are case-insensitive by default: compare case-folded on darwin (#2742).
     parts = path.parts
-    return tuple(part.casefold() for part in parts) if sys.platform == "darwin" else parts
+    return tuple(part.casefold() for part in parts) if _CASE_INSENSITIVE_PATHS else parts
 
 
 def _same_or_ancestor(path: Path, other: Path) -> bool:
