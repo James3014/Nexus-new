@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -112,7 +113,9 @@ def test_issue_refs_and_intake_block() -> None:
     assert shadow.intake_from_issue("no block") is None
 
 
-def test_run_is_idempotent_and_report_joins(clone: Path, tmp_path: Path) -> None:
+def test_run_is_idempotent_and_report_joins(
+    clone: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     merged = shadow.main_commits(clone)
     calls: list[tuple[str, ...]] = []
 
@@ -147,29 +150,21 @@ def test_run_is_idempotent_and_report_joins(clone: Path, tmp_path: Path) -> None
     assert shadow.cmd_run(ns, gh_json=fake_gh) == 0
     assert len(shadow.read_log(log)) == 1  # same (repo, pr, head sha): not appended again
     assert len(calls) == n_calls + 1  # only the list call; the Issue text is cached
-    rep = shadow.build_parser().parse_args([
-        "report",
-        "--log",
-        str(log),
-        "--clone-root",
-        str(clone.parent),
-        "--no-fetch",
-        "--now",
-        "2026-10-30T00:00:00+00:00",
-    ])
-    assert shadow.cmd_report(rep) == 0
-    young = shadow.build_parser().parse_args([
-        "report",
-        "--log",
-        str(log),
-        "--clone-root",
-        str(clone.parent),
-        "--no-fetch",
-        "--now",
-        "2026-10-03T00:00:00+00:00",
-        "--json",
-    ])
-    assert shadow.cmd_report(young) == 0
+
+    def report(now: str, capsys: pytest.CaptureFixture[str]) -> dict:
+        argv = ["report", "--log", str(log), "--clone-root", str(clone.parent), "--no-fetch"]
+        ns = shadow.build_parser().parse_args([*argv, "--now", now, "--json"])
+        capsys.readouterr()
+        assert shadow.cmd_report(ns) == 0
+        return json.loads(capsys.readouterr().out)
+
+    old = report("2026-10-30T00:00:00+00:00", capsys)
+    assert old["scored"] == 1 and old["pending_under_7d"] == 0 and old["not_merged_or_unknown"] == 0
+    assert old["flagged"]["any"]["n"] == 1 and old["iv1_flagged"]["any"]["n"] == 1
+    assert old["flagged"]["ref"] == {"n": 1, "k": 1, "rate": 1.0}  # #12's subject: fix + #10
+    young = report("2026-10-03T00:00:00+00:00", capsys)
+    assert young["scored"] == 0 and young["pending_under_7d"] == 1
+    assert young["flagged"]["any"] == {"n": 0, "k": 0, "rate": None}
 
 
 def test_bad_pr_is_recorded_not_raised(clone: Path, tmp_path: Path) -> None:
@@ -190,3 +185,197 @@ def test_log_lines_are_json(clone: Path, tmp_path: Path) -> None:
     log = tmp_path / "l.jsonl"
     shadow.append_log(log, {"a": 1})
     assert json.loads(log.read_text()) == {"a": 1}
+
+
+def _run_args(log: Path, clone: Path) -> argparse.Namespace:
+    ns = shadow.build_parser().parse_args([
+        "run",
+        "--log",
+        str(log),
+        "--clone-root",
+        str(clone.parent),
+        "--no-fetch",
+    ])
+    ns.repo = ["James3014/Nexus-new"]
+    return ns
+
+
+def _pr_list(merged: dict) -> list[dict]:
+    return [
+        {
+            "number": 10,
+            "title": "feat: tweak",
+            "body": "Refs #99",
+            "mergedAt": merged[10]["date"],
+            "mergeCommit": {"oid": merged[10]["sha"]},
+            "headRefOid": "headsha10",
+        }
+    ]
+
+
+def test_errored_scan_is_retried_not_marked_seen(clone: Path, tmp_path: Path) -> None:
+    merged = shadow.main_commits(clone)
+    state = {"fail": True}
+
+    def gh(*args: str) -> object:
+        if args[:2] == ("pr", "list"):
+            return _pr_list(merged)
+        if state["fail"]:
+            raise shadow.GhError("ghc issue view failed (exit 75): temporary")
+        return {"title": "t", "body": "b"}
+
+    log = tmp_path / "state/flags.jsonl"
+    ns = _run_args(log, clone)
+    assert shadow.cmd_run(ns, gh_json=gh) == 0
+    assert shadow.read_log(log) == []  # nothing marked seen
+    assert [r["pr"] for r in shadow.read_log(log.parent / "errors.jsonl")] == [10]
+    state["fail"] = False
+    assert shadow.cmd_run(ns, gh_json=gh) == 0
+    assert [r["pr"] for r in shadow.read_log(log)] == [10]  # retried and recorded
+
+
+def test_issue_cache_only_remembers_confirmed_absence(tmp_path: Path) -> None:
+    answers: list[Exception | dict] = [
+        shadow.GhError("ghc issue view failed (exit 75): rate limited"),
+        shadow.GhError(
+            "ghc issue view failed (exit 1): GraphQL: Could not resolve to an Issue with the number of 5."
+        ),
+        {"title": "T", "body": "B"},
+    ]
+
+    def gh(*args: str) -> object:
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    issues = shadow.IssueText(gh, tmp_path / "c.json")
+    with pytest.raises(shadow.GhError):
+        issues.get("o/r", 5)
+    assert not (tmp_path / "c.json").exists()  # transient failure not cached
+    assert issues.get("o/r", 5) == ""  # confirmed absent: cached
+    assert json.loads((tmp_path / "c.json").read_text()) == {"o/r#5": ""}
+    assert issues.get("o/r", 5) == ""  # no further ghc call
+    assert issues.get("o/r", 6) == "T\n\nB"
+    assert answers == []
+
+
+def test_append_log_never_glues_onto_a_torn_line(tmp_path: Path) -> None:
+    log = tmp_path / "flags.jsonl"
+    log.write_bytes(b'{"pr": 1}\n{"pr": 2, "tor')
+    shadow.append_log(log, {"pr": 3})
+    shadow.append_log(log, {"pr": 4})
+    assert log.read_bytes().endswith(b'\n{"pr": 3}\n{"pr": 4}\n')
+    assert [r["pr"] for r in shadow.read_log(log)] == [1, 3, 4]
+    log.write_bytes(b'{"pr": 1}\n\xff\xfe not json\n{"pr": 5}\n')
+    assert [r["pr"] for r in shadow.read_log(log)] == [1, 5]
+
+
+def test_ref_signal_needs_subject_and_same_repo() -> None:
+    assert shadow.is_ref_subject("fix: bad thing from #10 (#12)", 10)
+    assert shadow.is_ref_subject('Revert "feat: tweak (#10)"', 10)
+    assert not shadow.is_ref_subject("feat: unrelated (#10)", 11)
+    assert not shadow.is_ref_subject("fix: other repo piece of other/repo#10 (#12)", 10)
+    assert not shadow.is_ref_subject("fix: itself (#10)", 10)
+    assert not shadow.is_ref_subject("feat: add thing (#12)", 10)  # no fix word
+
+
+def test_body_mention_is_not_a_ref_signal(tmp_path: Path) -> None:
+    origin = tmp_path / "o.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    work = tmp_path / "Nexus-new"
+    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
+    (work / "z.py").write_text("z = 0\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-qm", "base", date="2026-09-30T00:00:00+00:00")
+    (work / "a.py").write_text("x = 1\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-qm", "feat: a (#10)", date="2026-10-01T00:00:00+00:00")
+    (work / "b.py").write_text("y = 1\n")
+    _git(work, "add", "-A")
+    _git(
+        work,
+        "commit",
+        "-qm",
+        "feat: b (#11)\n\nfixes the thing, relates to #10",
+        date="2026-10-02T00:00:00+00:00",
+    )
+    _git(work, "push", "-q", "origin", "main")
+    merged = shadow.main_commits(work)
+    fu = shadow.followup(work, merged[10]["sha"], 10, merged[10]["date"])
+    assert not fu["ref"]
+
+
+@pytest.fixture()
+def merge_repo(tmp_path: Path) -> Path:
+    """True merge commit `Merge pull request #20 from x/feature` followed by a rewrite of its line."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    work = tmp_path / "Nexus-new"
+    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
+    (work / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-qm", "base", date="2026-10-01T00:00:00+00:00")
+    _git(work, "checkout", "-qb", "feature")
+    (work / "f.py").write_text("a = 1\nb = 22\nc = 3\n")
+    _git(work, "commit", "-qam", "feature work", date="2026-10-02T00:00:00+00:00")
+    _git(work, "checkout", "-q", "main")
+    (work / "other.py").write_text("z = 1\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-qm", "main moves on (#19)", date="2026-10-02T01:00:00+00:00")
+    _git(
+        work,
+        "merge",
+        "--no-ff",
+        "-q",
+        "feature",
+        "-m",
+        "Merge pull request #20 from x/feature",
+        date="2026-10-03T00:00:00+00:00",
+    )
+    (work / "f.py").write_text("a = 1\nb = 222\nc = 3\n")
+    _git(work, "commit", "-qam", "tune later (#21)", date="2026-10-04T00:00:00+00:00")
+    _git(work, "push", "-q", "origin", "main")
+    return work
+
+
+def test_true_merge_commits_use_first_parent(merge_repo: Path, tmp_path: Path) -> None:
+    merged = shadow.main_commits(merge_repo)
+    assert {19, 20, 21} <= set(merged)
+    assert len(merged[20]["parents"]) == 2
+    merge = merged[20]["sha"]
+    pr = {
+        "number": 20,
+        "title": "feature",
+        "body": "",
+        "mergedAt": merged[20]["date"],
+        "mergeCommit": {"oid": merge},
+        "headRefOid": "h20",
+    }
+    diff, base, _m = shadow.pr_diff(merge_repo, pr, "merged")
+    assert base == merged[20]["parents"][0]
+    assert "b = 22" in diff and "z = 1" not in diff  # main's own commit is not part of the PR
+    fu = shadow.followup(merge_repo, merge, 20, merged[20]["date"])
+    assert fu["touch"] and fu["touch_commits"] == [merged[21]["sha"][:12]]
+    assert not fu["ref"]
+
+
+def test_log_row_carries_both_tiers_and_errors_field(clone: Path, tmp_path: Path) -> None:
+    merged = shadow.main_commits(clone)
+    issues = shadow.IssueText(lambda *a: {"title": "t", "body": "b"}, tmp_path / "c.json")
+    pr = _pr_list(merged)[0]
+    row = shadow.scan_pr("James3014/Nexus-new", pr, "merged", clone, issues)
+    assert row["result"]["errors"] == []
+    assert isinstance(row["result"]["flags_refined"], list) and row["schema"] == shadow.SCHEMA
+
+
+def test_default_clone_root_is_dedicated_and_created_on_first_use(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert shadow.DEFAULT_CLONE_ROOT == Path.home() / ".local/state/nexus-l2-shadow/clone"
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", clone.parent)  # the shared main clone stand-in
+    root = tmp_path / "state/clone"
+    dest = shadow.ensure_clone("James3014/Nexus-new", root)
+    assert dest == root / "Nexus-new" and dest != clone
+    assert shadow.main_commits(dest).keys() == {10, 11, 12, 13}
+    assert shadow.ensure_clone("James3014/Nexus-new", root) == dest  # second call reuses it

@@ -4,24 +4,33 @@
 ``run``    for merged (and optionally open) PRs, compute the two static checks of
            ``nexus.review.l2_static_flags`` and append one JSON line per
            (repo, PR number, head sha) to the shadow log (default
-           ``~/.local/state/nexus-l2-shadow/flags.jsonl``).  Idempotent.
-``report`` join the log with a 7-day follow-up signal (see ``followup``) and print
-           flagged vs unflagged fix/revert rates.
+           ``~/.local/state/nexus-l2-shadow/flags.jsonl``).  Idempotent.  A scan that
+           errors (git failure, transient GitHub failure) is written to ``errors.jsonl``
+           next to the log, not to the log, so the next run retries it.
+``report`` join the log with a 7-day follow-up signal and print flagged vs unflagged
+           rates.  ``flagged`` is the refined tier; ``iv1_flagged`` is the exact offline
+           IV1 tier; both are shown.  ``--json`` prints scored / pending counts and rates.
 
 Zero model calls.  GitHub is read only through ``~/workspace/agent-coord/bin/ghc``
 (shared 60 s cache, separate quota) with a delay between calls; diffs come from a
-local clone with ``git`` (read-only: fetch + diff/show/blame/log).  Nothing here
-comments on, blocks, or labels a PR, and no gate or Gateway path reads the log.
+dedicated clone under ``~/.local/state/nexus-l2-shadow/clone/`` (created on first run;
+the shared ``~/workspace/<repo>`` main clone is only a read-only ``--reference`` object
+store and is never fetched into).  Nothing here comments on, blocks, or labels a PR, and
+no gate or Gateway path reads the log.
 
-Follow-up heuristic for a merged PR P (merge commit M), over commits on origin
-main after M within 7 days (a PR is only scored once M is >= 7 days old):
-  * ``ref``   a later commit message mentions ``#P`` (or M's sha) together with a
-              fix / revert / hotfix / regression word, or says ``This reverts commit M``;
-  * ``touch`` a later commit's diff removes or rewrites a line that ``git blame``
-              (at the commit's parent) attributes to M, in a file P touched;
+Merged PR diff: against the merge commit's first parent (squash commit or true merge).
+Merge commits are recognised by ``(#N)`` subjects and ``Merge pull request #N from ...``.
+
+Follow-up heuristic for a merged PR P (merge commit M), over first-parent commits on
+origin/main after M within 7 days (a PR is only scored once M is >= 7 days old):
+  * ``ref``   a later commit SUBJECT line contains ``#P`` (this repo only, not
+              ``owner/other#P``) together with a fix / revert / hotfix / regression word;
+  * ``touch`` a later commit's diff removes or rewrites a line that ``git blame`` (at its
+              first parent) attributes to P (M, or the branch commits of a true merge),
+              in a file P touched;
   * ``any``   ref or touch.
 ``touch`` is noisier than ``ref`` (feature work also rewrites fresh lines), so the
-report prints all three rates.
+report prints all three rates, plus per-check breakdowns.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -42,13 +52,18 @@ if str(REPO_ROOT) not in sys.path:
 
 from nexus.review import l2_static_flags as flags_lib  # noqa: E402
 
-SCHEMA = "nexus.l2_flag_shadow.v1"
+SCHEMA = "nexus.l2_flag_shadow.v2"
 DEFAULT_LOG = Path.home() / ".local/state/nexus-l2-shadow/flags.jsonl"
 DEFAULT_GHC = Path.home() / "workspace/agent-coord/bin/ghc"
-DEFAULT_CLONE_ROOT = Path.home() / "workspace"
+DEFAULT_CLONE_ROOT = Path.home() / ".local/state/nexus-l2-shadow/clone"
+SEED_CLONE_ROOT = (
+    Path.home() / "workspace"
+)  # read only: used as --reference object store, never fetched into
 MAX_DIFF_BYTES = 2_000_000
 FOLLOWUP_DAYS = 7
 FIX_WORD = re.compile(r"\b(revert\w*|fix\w*|hotfix\w*|regress\w*)\b", re.I)
+MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
+SQUASH_SUBJECT = re.compile(r"\(#(\d+)\)\s*$")
 REF_ISSUE = re.compile(r"(?:refs?|closes?|fix(?:es|ed)?|resolves?)\s+(?:[\w./-]+)?#(\d+)", re.I)
 ANY_ISSUE = re.compile(r"(?<![\w/])#(\d+)")
 
@@ -68,6 +83,18 @@ def git(clone: Path, *args: str, check: bool = True) -> str:
     return r.stdout
 
 
+class GhError(RuntimeError):
+    """A failed ghc call; ``confirmed_absent`` is True only for a definite 404 / not-an-issue answer."""
+
+    @property
+    def confirmed_absent(self) -> bool:
+        text = str(self).lower()
+        return any(
+            k in text
+            for k in ("could not resolve to an issue", "http 404", "not found", "is a pull request")
+        )
+
+
 def make_ghc_json(ghc: Path, delay: float) -> Callable[..., object]:
     last = [0.0]
 
@@ -80,29 +107,43 @@ def make_ghc_json(ghc: Path, delay: float) -> Callable[..., object]:
         )
         last[0] = time.monotonic()
         if r.returncode != 0:
-            raise RuntimeError(f"ghc {' '.join(args[:3])} failed: {r.stderr.strip()[:300]}")
+            raise GhError(
+                f"ghc {' '.join(args[:3])} failed (exit {r.returncode}): {r.stderr.strip()[:300]}"
+            )
         return json.loads(r.stdout or "null")
 
     return call
 
 
 def read_log(path: Path) -> list[dict]:
+    """Parsed records; torn / non-JSON lines are skipped."""
     if not path.is_file():
         return []
     rows = []
-    for line in path.read_text().splitlines():
+    for line in path.read_bytes().decode("utf-8", errors="replace").split("\n"):
         if line.strip():
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if isinstance(row, dict):
+                rows.append(row)
     return rows
 
 
 def append_log(path: Path, row: dict) -> None:
+    """Append one record with a single write; never glue it onto a torn last line."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as fh:
-        fh.write(json.dumps(row, sort_keys=True) + "\n")
+    data = (json.dumps(row, sort_keys=True) + "\n").encode()
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o644)
+    try:
+        size = os.fstat(fd).st_size
+        if size and os.pread(fd, 1, size - 1) != b"\n":
+            data = b"\n" + data
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def now_iso() -> str:
@@ -148,6 +189,10 @@ class IssueText:
                 self.cache = {}
 
     def get(self, repo: str, number: int) -> str:
+        """Issue text; "" is cached only for a confirmed absent Issue / PR number.
+
+        Any other failure (ghc exit 75, network, timeout) raises and is never cached.
+        """
         key = f"{repo}#{number}"
         if key not in self.cache:
             try:
@@ -155,11 +200,15 @@ class IssueText:
                     "issue", "view", str(number), "--repo", repo, "--json", "title,body"
                 )
                 text = f"{data['title']}\n\n{data.get('body') or ''}"  # type: ignore[index,union-attr]
-            except Exception:  # a PR number or a transient error: remember emptiness only for PRs
+            except GhError as exc:
+                if not exc.confirmed_absent:
+                    raise
                 text = ""
             self.cache[key] = text
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self.cache, sort_keys=True))
+            tmp = self.path.with_name(self.path.name + f".tmp{os.getpid()}")
+            tmp.write_text(json.dumps(self.cache, sort_keys=True))
+            os.replace(tmp, self.path)
         return self.cache[key]
 
 
@@ -168,7 +217,7 @@ def pr_diff(clone: Path, pr: dict, state: str) -> tuple[str, str, str | None]:
     """(diff text, base sha, merge sha) from the local clone."""
     if state == "merged":
         merge = pr["mergeCommit"]["oid"]
-        base = git(clone, "rev-parse", f"{merge}^").strip()
+        base = git(clone, "rev-parse", f"{merge}^1").strip()  # first parent: squash or true merge
         return (
             git(clone, "diff", "--no-color", "--no-ext-diff", "--no-renames", base, merge),
             base,
@@ -181,6 +230,7 @@ def pr_diff(clone: Path, pr: dict, state: str) -> tuple[str, str, str | None]:
 
 
 def scan_pr(repo: str, pr: dict, state: str, clone: Path, issues: IssueText) -> dict:
+    """One log record. ``row["error"]`` is set when the scan failed; such rows are retried, not logged."""
     row: dict = {
         "schema": SCHEMA,
         "repo": repo,
@@ -191,19 +241,19 @@ def scan_pr(repo: str, pr: dict, state: str, clone: Path, issues: IssueText) -> 
         "merged_at": pr.get("mergedAt"),
         "checked_at": now_iso(),
     }
-    refs = issue_refs(pr.get("title", ""), pr.get("body") or "", pr["number"])
-    texts = [(n, issues.get(repo, n)) for n in refs]
-    texts = [(n, t) for n, t in texts if t]
-    issue_text = (
-        "\n\n".join(t for _n, t in texts) or f"{pr.get('title', '')}\n\n{pr.get('body') or ''}"
-    )
-    intake = next((i for _n, t in texts if (i := intake_from_issue(t))), None)
-    row.update(
-        issue_refs=[n for n, _t in texts],
-        issue_source="issue" if texts else "pr_body",
-        intake_source="eia-task" if intake else "none",
-    )
     try:
+        refs = issue_refs(pr.get("title", ""), pr.get("body") or "", pr["number"])
+        texts = [(n, issues.get(repo, n)) for n in refs]  # transient failures raise: scan retried
+        texts = [(n, t) for n, t in texts if t]
+        issue_text = (
+            "\n\n".join(t for _n, t in texts) or f"{pr.get('title', '')}\n\n{pr.get('body') or ''}"
+        )
+        intake = next((i for _n, t in texts if (i := intake_from_issue(t))), None)
+        row.update(
+            issue_refs=[n for n, _t in texts],
+            issue_source="issue" if texts else "pr_body",
+            intake_source="eia-task" if intake else "none",
+        )
         diff, base, merge = pr_diff(clone, pr, state)
         row.update(base_sha=base, merge_sha=merge, diff_bytes=len(diff))
         if len(diff) > MAX_DIFF_BYTES:
@@ -213,81 +263,114 @@ def scan_pr(repo: str, pr: dict, state: str, clone: Path, issues: IssueText) -> 
             row["result"] = flags_lib.flag_candidate(
                 diff, issue_text, intake, head_tree=flags_lib.GitTree(clone, base)
             )
-    except Exception as exc:  # record, never raise: a bad PR must not stop the stream
+    except Exception as exc:  # never raise: a bad PR must not stop the stream
         row["result"] = None
         row["error"] = str(exc)[:300]
     return row
+
+
+def ensure_clone(repo: str, clone_root: Path) -> Path:
+    """Dedicated clone under the shadow state dir (created on first use).
+
+    The shared ``~/workspace/<repo>`` main clone is only used as a read-only ``--reference``
+    object store; nothing is fetched into it.
+    """
+    dest = clone_root / repo.split("/")[-1]
+    if (dest / ".git").exists() or (dest / "HEAD").exists():
+        return dest
+    seed = SEED_CLONE_ROOT / repo.split("/")[-1]
+    url = f"https://github.com/{repo}.git"
+    if (seed / ".git").exists():
+        r = subprocess.run(
+            ["git", "-C", str(seed), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        url = r.stdout.strip() or url
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["git", "clone", "-q", "--no-checkout"]
+    if (seed / ".git").exists():
+        cmd += ["--reference", str(seed)]
+    r = subprocess.run([*cmd, url, str(dest)], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(f"clone of {repo} failed: {r.stderr.strip()[:300]}")
+    return dest
 
 
 def cmd_run(args: argparse.Namespace, gh_json: Callable[..., object] | None = None) -> int:
     log = Path(args.log).expanduser()
     state_dir = log.parent
     gh_json = gh_json or make_ghc_json(Path(args.ghc).expanduser(), args.gh_delay)
-    seen = {(r.get("repo"), r.get("pr"), r.get("head_sha")) for r in read_log(log)}
-    counts = {"new": 0, "skipped_seen": 0, "flagged": 0, "errors": 0}
+    # errored scans are never logged, so they are never "seen" and get retried next run
+    seen = {
+        (r.get("repo"), r.get("pr"), r.get("head_sha")) for r in read_log(log) if not r.get("error")
+    }
+    counts = {"new": 0, "skipped_seen": 0, "flagged": 0, "flagged_refined": 0, "errors": 0}
     for repo in args.repo:
-        clone = Path(args.clone_root).expanduser() / repo.split("/")[-1]
+        clone = ensure_clone(repo, Path(args.clone_root).expanduser())
         if not args.no_fetch:
             git(clone, "fetch", "-q", "origin", "main")
         issues = IssueText(gh_json, state_dir / "issue_cache.json")
         fields = "number,title,body,mergedAt,mergeCommit,headRefOid"
-        batches = [
-            (
-                "merged",
-                gh_json(
-                    "pr",
-                    "list",
-                    "--repo",
-                    repo,
-                    "--state",
-                    "merged",
-                    "--limit",
-                    str(args.limit),
-                    "--json",
-                    fields,
-                ),
+        batches = []
+        for state in ("merged", *(("open",) if args.open else ())):
+            listing = gh_json(
+                "pr",
+                "list",
+                "--repo",
+                repo,
+                "--state",
+                state,
+                "--limit",
+                str(args.limit),
+                "--json",
+                fields,
             )
-        ]
-        if args.open:
-            batches.append((
-                "open",
-                gh_json(
-                    "pr",
-                    "list",
-                    "--repo",
-                    repo,
-                    "--state",
-                    "open",
-                    "--limit",
-                    str(args.limit),
-                    "--json",
-                    fields,
-                ),
-            ))
+            batches.append((state, listing))
         for state, prs in batches:
             for pr in prs:  # type: ignore[union-attr]
                 if (repo, pr["number"], pr["headRefOid"]) in seen:
                     counts["skipped_seen"] += 1
                     continue
                 row = scan_pr(repo, pr, state, clone, issues)
+                if row.get("error"):
+                    counts["errors"] += 1
+                    append_log(
+                        state_dir / "errors.jsonl",
+                        {
+                            k: row[k]
+                            for k in ("repo", "pr", "head_sha", "state", "error", "checked_at")
+                        },
+                    )
+                    continue
                 append_log(log, row)
                 seen.add((repo, pr["number"], pr["headRefOid"]))
                 counts["new"] += 1
-                counts["errors"] += int(bool(row.get("error")))
-                counts["flagged"] += int(bool((row.get("result") or {}).get("flags")))
+                res = row.get("result") or {}
+                counts["flagged"] += int(bool(res.get("flags")))
+                counts["flagged_refined"] += int(bool(res.get("flags_refined")))
     print(json.dumps({"log": str(log), **counts}, sort_keys=True))
     return 0
 
 
 # --------------------------------------------------------------------------- follow-up
 def main_commits(clone: Path) -> dict[int, dict]:
-    """PR number -> {sha, date, subject} for commits on origin/main whose subject ends with (#N)."""
+    """PR number -> {sha, date, subject, parents} for first-parent commits of origin/main that are PR merges.
+
+    Recognises squash subjects ending ``(#N)`` and ``Merge pull request #N from ...``.
+    """
     out: dict[int, dict] = {}
-    for line in git(clone, "log", "origin/main", "--format=%H%x1f%cI%x1f%s").splitlines():
-        sha, date, subject = (line.split("\x1f") + ["", ""])[:3]
-        m = re.search(r"\(#(\d+)\)\s*$", subject)
+    for line in git(
+        clone, "log", "--first-parent", "origin/main", "--format=%H%x1f%cI%x1f%P%x1f%s"
+    ).splitlines():
+        sha, date, parents, subject = (line.split("\x1f") + ["", "", ""])[:4]
+        m = MERGE_SUBJECT.match(subject) or SQUASH_SUBJECT.search(subject)
         if m:
-            out.setdefault(int(m.group(1)), {"sha": sha, "date": date, "subject": subject})
+            out.setdefault(
+                int(m.group(1)),
+                {"sha": sha, "date": date, "subject": subject, "parents": parents.split()},
+            )
     return out
 
 
@@ -301,7 +384,7 @@ def _changed_old_ranges(
         "--no-color",
         "--no-renames",
         "-U0",
-        f"{commit}^",
+        f"{commit}^1",
         commit,
         "--",
         *paths,
@@ -319,22 +402,43 @@ def _changed_old_ranges(
     return out
 
 
+def is_ref_subject(subject: str, pr_number: int) -> bool:
+    """Fix/revert word and ``#P`` (same repo, not ``owner/other#P``) both on the commit subject line."""
+    own = SQUASH_SUBJECT.search(subject) or MERGE_SUBJECT.match(subject)
+    if own and int(own.group(1)) == pr_number:
+        return False
+    return bool(
+        FIX_WORD.search(subject)
+        and re.search(rf"(?<![\w/]){re.escape(f'#{pr_number}')}\b", subject)
+    )
+
+
 def followup(
     clone: Path, merge_sha: str, pr_number: int, merged_iso: str, commits: list[dict] | None = None
 ) -> dict:
     """Follow-up signal for one merged PR; see the module docstring."""
     start = dt.datetime.fromisoformat(merged_iso)
     until = start + dt.timedelta(days=FOLLOWUP_DAYS)
+    # files and lines of the PR: diff against the first parent (squash commit or true merge)
     files = [
         f
         for f in git(
-            clone, "diff-tree", "--no-commit-id", "--name-only", "-r", merge_sha
+            clone, "diff", "--name-only", "--no-renames", f"{merge_sha}^1", merge_sha
         ).splitlines()
         if f
     ]
+    parents = git(clone, "rev-list", "--parents", "-n", "1", merge_sha).split()[1:]
+    owned = {merge_sha}
+    if len(parents) > 1:  # true merge: blame attributes the lines to the branch commits
+        owned.update(git(clone, "rev-list", f"{parents[0]}..{parents[1]}").split())
     later = []
     for line in git(
-        clone, "log", "--reverse", f"{merge_sha}..origin/main", "--format=%H%x1f%cI%x1f%B%x1e"
+        clone,
+        "log",
+        "--first-parent",
+        "--reverse",
+        f"{merge_sha}..origin/main",
+        "--format=%H%x1f%cI%x1f%B%x1e",
     ).split("\x1e"):
         line = line.strip("\n")
         if not line.strip():
@@ -344,17 +448,12 @@ def followup(
             later.append({"sha": sha.strip(), "msg": msg})
     ref: list[str] = []
     touch: list[str] = []
-    short = merge_sha[:9]
     for c in later:
-        msg = c["msg"]
-        mentions = re.search(rf"#{pr_number}\b", msg) or short in msg
-        own = re.search(r"\(#(\d+)\)\s*$", msg.split("\n", 1)[0])
-        if own and int(own.group(1)) == pr_number:
-            continue
-        if (mentions and FIX_WORD.search(msg)) or f"reverts commit {merge_sha[:7]}" in msg.lower():
+        subject = c["msg"].split("\n", 1)[0]
+        if is_ref_subject(subject, pr_number):
             ref.append(c["sha"][:12])
             continue
-        if not files or c["sha"] in touch:
+        if not files:
             continue
         ranges = _changed_old_ranges(clone, c["sha"], files)
         hit = False
@@ -366,12 +465,12 @@ def followup(
                     "--porcelain",
                     "-L",
                     f"{s},{e}",
-                    f"{c['sha']}^",
+                    f"{c['sha']}^1",
                     "--",
                     path,
                     check=False,
                 )
-                if any(re.match(rf"^{merge_sha}\b", ln) for ln in blame.splitlines()):
+                if any(ln.split(" ", 1)[0] in owned for ln in blame.splitlines() if len(ln) > 40):
                     hit = True
                     break
             if hit:
@@ -390,7 +489,7 @@ def followup(
 
 # --------------------------------------------------------------------------- report
 def summarize(rows: list[dict]) -> dict:
-    """Rates per group; rows carry ``flagged`` plus follow-up booleans."""
+    """Rates per group; rows carry ``flagged`` (refined tier), ``iv1_flagged`` and follow-up booleans."""
 
     def rate(sub: list[dict], key: str) -> dict:
         n = len(sub)
@@ -400,6 +499,8 @@ def summarize(rows: list[dict]) -> dict:
     groups = {
         "flagged": [r for r in rows if r["flagged"]],
         "unflagged": [r for r in rows if not r["flagged"]],
+        "iv1_flagged": [r for r in rows if r.get("iv1_flagged")],
+        "iv1_unflagged": [r for r in rows if not r.get("iv1_flagged")],
         "tamper": [r for r in rows if r["tamper"]],
         "api_delta": [r for r in rows if r["api_delta"]],
     }
@@ -425,7 +526,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     for r in latest.values():
         by_repo.setdefault(r["repo"], []).append(r)
     for repo, rs in by_repo.items():
-        clone = Path(args.clone_root).expanduser() / repo.split("/")[-1]
+        clone = ensure_clone(repo, Path(args.clone_root).expanduser())
         if not args.no_fetch:
             git(clone, "fetch", "-q", "origin", "main")
         merged = main_commits(clone)
@@ -439,13 +540,15 @@ def cmd_report(args: argparse.Namespace) -> int:
                 continue
             fu = followup(clone, info["sha"], r["pr"], info["date"])
             res = r["result"]
+            refined = res.get("flags_refined", res["flags"])  # v1 log lines had one tier
             scored.append({
                 "repo": repo,
                 "pr": r["pr"],
-                "flagged": bool(res["flags"]),
-                "checks": sorted({f["check"] for f in res["flags"]}),
-                "tamper": bool(res["tamper"]),
-                "api_delta": bool(res["api_delta"]),
+                "flagged": bool(refined),
+                "iv1_flagged": bool(res["flags"]),
+                "checks": sorted({f["check"] for f in refined}),
+                "tamper": bool(res.get("tamper_refined", res["tamper"])),
+                "api_delta": bool(res.get("api_delta_refined", res["api_delta"])),
                 "follow": fu,
             })
     out = {
@@ -464,7 +567,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             if name in ("scored", "pending_under_7d", "not_merged_or_unknown"):
                 continue
             cells = "  ".join(f"{k}: {v['k']}/{v['n']} ({v['rate']})" for k, v in out[name].items())
-            print(f"{name:10s} {cells}")
+            print(f"{name:14s} {cells}")
     return 0
 
 

@@ -2,18 +2,31 @@
 
 Two zero-model, deterministic checks over a candidate unified diff plus the
 Issue text, productised from the offline #1196 round-20 IV1 rules (C5 tamper
-guard and C2 unrequested public-signature change):
+guard and C2 unrequested public-signature change).  Every flag carries a tier:
 
-* ``C5.*`` test tampering: (a) a string literal that an existing test quotes is
-  hard-coded into non-test source as a comparison, (b) test / config / CI files
-  touched outside the intake list (or, when no intake list exists, outside the
-  files the Issue names; newly added test files are then not flagged),
-  (c) skip / xfail markers added.
-* ``C2.public_signature`` a public symbol (no leading underscore) of a touched
-  module was removed or its signature changed and the Issue does not name it.
+``iv1`` (``flags``): exact IV1 semantics, so the offline comparison still holds.
+  * ``C5.test_literal_hardcoded``: a >=6-char literal compared against in non-test source
+    that an existing test quotes, not in the Issue;
+  * ``C5.tamper_file_outside_intake``: test / config / CI file touched outside the intake
+    list (or the files the Issue names; a new test file is exempt when there is no intake list);
+  * ``C5.skip_xfail_added``: skip/xfail marker count rose in a .py file;
+  * ``C2.public_signature``: a public symbol of a touched module removed or re-signed and
+    neither it nor its class is named in the Issue.
 
-Pure functions: no network, no model, no subprocess except the optional
-``GitTree`` helper the shadow CLI uses to read the base tree.  The result is a
+``refined`` (``flags_refined``): what the shadow comparison uses.
+  * file rule: with no intake list an edit to an existing test file is only advisory
+    (``C5.test_edit_no_intake``); it is flagged as ``C5.test_weakened`` when it nets removed
+    asserts or removes test functions; config / CI edits stay flagged;
+  * literal rule: only literals appearing in tests this diff adds or edits that do not already
+    occur in the base tree's non-test source;
+  * skip rule: per function, a skip/xfail newly applied to a function (or class / module) that
+    was not skipped before (a moved marker is flagged, a new skipped test is not);
+  * C2: a change that only adds defaulted parameters is advisory ``C2.compat_extended``; the Issue
+    must name the changed symbol itself (plain word or ``Class.method``), not just its class.
+
+Pure functions: no network, no model, no subprocess except the optional ``GitTree`` helper
+the shadow CLI uses to read the base tree.  A hunk that does not apply to the base text is
+reported in ``errors`` as ``PATCH_NOT_APPLIED`` (never as removed symbols).  The result is a
 record; nothing here blocks anything.
 """
 
@@ -28,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol
 
-SCHEMA = "nexus.l2_static_flags.v1"
+SCHEMA = "nexus.l2_static_flags.v2"
 
 CONFIG_NAMES = {
     "pyproject.toml",
@@ -269,6 +282,8 @@ class HeadTree(Protocol):
 
     def test_texts_quoting(self, literals: list[str]) -> list[str]: ...
 
+    def non_test_source_contains(self, literals: list[str]) -> set[str]: ...
+
 
 class DirTree:
     """Base tree on disk (a checkout of the commit the diff applies to)."""
@@ -302,6 +317,24 @@ class DirTree:
             if any(lit in text for lit in literals):
                 hits.append(text)
         return hits
+
+    def non_test_source_contains(self, literals: list[str]) -> set[str]:
+        """Literals that already occur in some non-test .py file of the base tree."""
+        found: set[str] = set()
+        if not literals:
+            return found
+        for p in self.root.rglob("*.py"):
+            rel = p.relative_to(self.root)
+            if any(part in self._SKIP_DIRS for part in rel.parts) or file_category(rel.as_posix()):
+                continue
+            try:
+                text = p.read_text(errors="replace")
+            except OSError:
+                continue
+            found.update(lit for lit in literals if lit in text)
+            if len(found) == len(literals):
+                break
+        return found
 
 
 class GitTree:
@@ -345,6 +378,17 @@ class GitTree:
                 files.add(path)
         return [t for t in (self.read(p) for p in sorted(files)[:200]) if t is not None]
 
+    def non_test_source_contains(self, literals: list[str]) -> set[str]:
+        found: set[str] = set()
+        for lit in literals[:30]:
+            out = self._git("grep", "-l", "-F", "-e", lit, self.rev, "--", "*.py")
+            for line in (out or "").splitlines():
+                path = line.split(":", 1)[1] if ":" in line else line
+                if file_category(path) is None:
+                    found.add(lit)
+                    break
+        return found
+
 
 # --------------------------------------------------------------------------- AST helpers
 def _sig(node: ast.AST) -> str:
@@ -357,27 +401,120 @@ def _sig(node: ast.AST) -> str:
         return "?"
 
 
-def public_surface(text: str) -> dict[str, tuple[str, str]] | None:
-    """{qualname: (kind, signature)} of public top-level defs/classes and public methods; None if unparsable."""
+def _struct(node: ast.AST) -> tuple:
+    """(is_async, return annotation, [(kind, name, annotation, default)]) for compat comparison."""
+    a: ast.arguments = node.args  # type: ignore[attr-defined]
+
+    def ann(x: ast.arg) -> str:
+        return ast.unparse(x.annotation) if x.annotation is not None else ""
+
+    items: list[tuple] = []
+    pos = [*a.posonlyargs, *a.args]
+    first_default = len(pos) - len(a.defaults)
+    for i, x in enumerate(pos):
+        d = ast.unparse(a.defaults[i - first_default]) if i >= first_default else None
+        items.append(("pos", x.arg, ann(x), d))
+    if a.vararg:
+        items.append(("var", a.vararg.arg, ann(a.vararg), None))
+    for x, d in zip(a.kwonlyargs, a.kw_defaults, strict=False):
+        items.append(("kw", x.arg, ann(x), None if d is None else ast.unparse(d)))
+    if a.kwarg:
+        items.append(("kwarg", a.kwarg.arg, ann(a.kwarg), None))
+    ret = ast.unparse(node.returns) if getattr(node, "returns", None) is not None else ""  # type: ignore[attr-defined]
+    return (isinstance(node, ast.AsyncFunctionDef), ret, items)
+
+
+def compat_extended(old: tuple | None, new: tuple | None) -> bool:
+    """True when ``new`` only adds parameters that existing callers need not pass."""
+    if old is None or new is None or old[0] != new[0] or old[1] != new[1]:
+        return False
+    old_items, new_items = old[2], new[2]
+    j = 0
+    matched: list[int] = []
+    for i, item in enumerate(new_items):
+        if j < len(old_items) and item == old_items[j]:
+            matched.append(i)
+            j += 1
+    if j != len(old_items):
+        return False
+    last_old_pos = max((i for i in matched if new_items[i][0] == "pos"), default=-1)
+    for i, (kind, _n, _a, default) in enumerate(new_items):
+        if i in matched:
+            continue
+        if kind in ("var", "kwarg"):
+            continue
+        if default is None:
+            return False
+        if kind == "pos" and i < last_old_pos:
+            return False
+    return True
+
+
+def _surface_full(text: str) -> dict[str, tuple[str, str, tuple | None]] | None:
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
-    out: dict[str, tuple[str, str]] = {}
+    out: dict[str, tuple[str, str, tuple | None]] = {}
     for n in tree.body:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_"):
-            out[n.name] = ("def", _sig(n))
+            out[n.name] = ("def", _sig(n), _struct(n))
         elif isinstance(n, ast.ClassDef) and not n.name.startswith("_"):
             try:
                 bases = ",".join(ast.unparse(b) for b in n.bases)
             except Exception:
                 bases = "?"
-            out[n.name] = ("class", bases)
+            out[n.name] = ("class", bases, None)
             for m in n.body:
                 if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
                     not m.name.startswith("_") or m.name == "__init__"
                 ):
-                    out[f"{n.name}.{m.name}"] = ("def", _sig(m))
+                    out[f"{n.name}.{m.name}"] = ("def", _sig(m), _struct(m))
+    return out
+
+
+def public_surface(text: str) -> dict[str, tuple[str, str]] | None:
+    """{qualname: (kind, signature)} of public top-level defs/classes and public methods; None if unparsable."""
+    full = _surface_full(text)
+    return None if full is None else {q: (k, s) for q, (k, s, _st) in full.items()}
+
+
+def skip_state(text: str) -> dict[str, tuple[bool, int]] | None:
+    """{qualname: (skipped?, line)} per function/method plus ``<module>``; None if unparsable.
+
+    A function counts as skipped when it, its class or the module carries a skip/xfail marker
+    or its body calls pytest.skip / xfail / importorskip / skipTest.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+
+    def deco(node: ast.AST) -> bool:
+        return any(SKIP_RX.search(ast.unparse(d)) for d in getattr(node, "decorator_list", []))
+
+    def body_call(node: ast.AST) -> bool:
+        return any(
+            isinstance(c, ast.Call) and SKIP_RX.search(ast.unparse(c.func) + "(")
+            for c in ast.walk(node)
+        )
+
+    mod = any(
+        isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in n.targets)
+        and SKIP_RX.search(ast.unparse(n.value))
+        for n in tree.body
+    )
+    out: dict[str, tuple[bool, int]] = {"<module>": (mod, 1)}
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out[n.name] = (mod or deco(n) or body_call(n), n.lineno)
+        elif isinstance(n, ast.ClassDef):
+            cls_skip = mod or deco(n)
+            out[n.name] = (cls_skip, n.lineno)
+            for m in n.body:
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    out[f"{n.name}.{m.name}"] = (cls_skip or deco(m) or body_call(m), m.lineno)
     return out
 
 
@@ -440,6 +577,44 @@ def _hunk_only_api(fd: FileDiff) -> list[tuple[str, str, int | None]]:
     return res
 
 
+_ASSERT_RX = re.compile(r"^\s*assert\b|\bself\.assert\w*\(|\bpytest\.raises\b|\bpytest\.fail\(")
+_TEST_DEF_RX = re.compile(r"^\s*(?:async\s+)?def\s+(test\w*)")
+_STR_LIT_RX = re.compile(r"\"([^\"\\\n]{6,})\"|'([^'\\\n]{6,})'")
+
+
+def _weakening(fd: FileDiff) -> list[str]:
+    """Reasons an edit to an existing test file weakens it (hunk-local, no base tree needed)."""
+    reasons: list[str] = []
+    rem, add = fd.removed(), fd.added()
+    n_rem = sum(1 for _l, t in rem if _ASSERT_RX.search(t))
+    n_add = sum(1 for _l, t in add if _ASSERT_RX.search(t))
+    if n_rem > n_add:
+        reasons.append(f"net removed asserts {n_rem} -> {n_add}")
+    gone = {m.group(1) for _l, t in rem if (m := _TEST_DEF_RX.match(t))} - {
+        m.group(1) for _l, t in add if (m := _TEST_DEF_RX.match(t))
+    }
+    if gone:
+        reasons.append("removed test functions " + ", ".join(sorted(gone)[:5]))
+    return reasons
+
+
+def _word_in(name: str, text: str, symbols: set[str]) -> bool:
+    return name in symbols or bool(
+        re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", text or "")
+    )
+
+
+def _named_for_refined(qual: str, text: str, symbols: set[str]) -> bool:
+    """Refined C2 authorisation: the symbol itself (or Class.method), not merely its class."""
+    parts = qual.split(".")
+    if len(parts) == 1:
+        return _word_in(parts[0], text, symbols)
+    cls, meth = parts
+    if f"{cls}.{meth}" in (text or ""):
+        return True
+    return _word_in(cls if meth == "__init__" else meth, text, symbols)
+
+
 def flag_candidate(
     diff_text: str,
     issue_text: str,
@@ -452,7 +627,12 @@ def flag_candidate(
 
     ``repo_root`` is a checkout of the diff's base; ``head_tree`` may be given instead
     (e.g. :class:`GitTree`).  With neither, only hunk-local evidence is used (weaker C2/C5c).
-    Returns ``{schema, flags:[{check, path, line, detail}], tamper, api_delta, elapsed_ms, ...}``.
+
+    Two tiers are returned.  ``flags`` keeps the exact IV1 semantics of the offline round-20
+    study (every flag has ``tier: "iv1"``).  ``flags_refined`` (``tier: "refined"``) is the tier
+    the shadow comparison uses; see the module docstring of ``scripts/ops/l2_flag_shadow.py``.
+    Returns ``{schema, flags, flags_refined, tamper, api_delta, tamper_refined, api_delta_refined,
+    advisory, errors, files, elapsed_ms}``.
     """
     t0 = time.perf_counter()
     tree: HeadTree | None = (
@@ -469,41 +649,92 @@ def flag_candidate(
     intake_known = intake_paths is not None
     t_f = set(intake_paths or []) | named
     flags: list[dict] = []
+    refined: list[dict] = []
     advisory: list[dict] = []
+    errors: list[dict] = []
 
-    def add(bucket: list[dict], check: str, path: str, line: int | None, detail: str) -> None:
-        bucket.append({"check": check, "path": path, "line": line, "detail": detail})
+    def add(
+        bucket: list[dict], tier: str, check: str, path: str, line: int | None, detail: str
+    ) -> None:
+        bucket.append({"check": check, "path": path, "line": line, "detail": detail, "tier": tier})
+
+    def both(check: str, path: str, line: int | None, detail: str) -> None:
+        add(flags, "iv1", check, path, line, detail)
+        add(refined, "refined", check, path, line, detail)
 
     heads: dict[str, str | None] = {}
     patched: dict[str, str | None] = {}
+    not_applied: set[str] = set()
     for fd in files:
-        if fd.path.endswith(".py"):
-            heads[fd.path] = (
-                None if fd.status == "added" or tree is None else tree.read(fd.old_path or fd.path)
-            )
-            patched[fd.path] = (
-                apply_hunks(heads[fd.path], fd)
-                if (tree is not None or fd.status == "added")
-                else None
-            )
+        if not fd.path.endswith(".py"):
+            continue
+        old = None if fd.status == "added" or tree is None else tree.read(fd.old_path or fd.path)
+        heads[fd.path] = old
+        if fd.status == "deleted":
+            patched[fd.path] = None
+        elif fd.status == "added" or (tree is not None and old is not None):
+            patched[fd.path] = apply_hunks(old, fd)
+            if patched[fd.path] is None:
+                not_applied.add(fd.path)
+                errors.append({"kind": "PATCH_NOT_APPLIED", "path": fd.path})
+        else:
+            patched[fd.path] = None
 
-    quoting_cache: dict[str, list[str]] = {}
+    # literals that tests added or edited by this diff contain (refined literal rule)
+    test_added_literals: set[str] = set()
+    for fd in files:
+        if fd.path.endswith(".py") and file_category(fd.path) == "TEST":
+            for _ln, text in fd.added():
+                test_added_literals.update(
+                    m.group(1) or m.group(2) for m in _STR_LIT_RX.finditer(text)
+                )
+
+    skip_flagged: set[str] = set()
+    weak_paths: set[str] = set()
     for fd in files:
         path = fd.path
         cat = file_category(path)
         # C5(b): test / config / CI files outside the intake list
         if cat and path not in t_f:
-            if intake_known or fd.status != "added":
+            iv1_file = intake_known or fd.status != "added"
+            detail = f"{cat} file {fd.status} outside the intake list"
+            if iv1_file:
+                add(flags, "iv1", "C5.tamper_file_outside_intake", path, _first_line(fd), detail)
+            if cat != "TEST":
+                if iv1_file:
+                    add(
+                        refined,
+                        "refined",
+                        "C5.tamper_file_outside_intake",
+                        path,
+                        _first_line(fd),
+                        detail,
+                    )
+            elif intake_known:
                 add(
-                    flags,
+                    refined,
+                    "refined",
                     "C5.tamper_file_outside_intake",
                     path,
                     _first_line(fd),
-                    f"{cat} file {fd.status} outside the intake list",
+                    detail,
                 )
+            elif fd.status != "added":
+                reasons = _weakening(fd)
+                if reasons:
+                    weak_paths.add(path)
+                    add(
+                        refined,
+                        "refined",
+                        "C5.test_weakened",
+                        path,
+                        _first_line(fd),
+                        "; ".join(reasons),
+                    )
         elif cat:
             add(
                 advisory,
+                "iv1",
                 "C5.tamper_file_in_intake",
                 path,
                 _first_line(fd),
@@ -511,16 +742,47 @@ def flag_candidate(
             )
         if not path.endswith(".py"):
             continue
-        # C5(c): skip / xfail markers added
+        old_text, new_text = heads.get(path), patched.get(path)
         added = fd.added()
+        # C5(c): skip / xfail markers added (iv1: marker count; refined: per function)
         n_add = sum(len(SKIP_RX.findall(t)) for _l, t in added)
         n_del = sum(len(SKIP_RX.findall(t)) for _l, t in fd.removed())
+        count_line = next((ln for ln, t in added if SKIP_RX.search(t)), _first_line(fd))
         if n_add > n_del:
-            line = next((ln for ln, t in added if SKIP_RX.search(t)), _first_line(fd))
-            add(flags, "C5.skip_xfail_added", path, line, f"skip/xfail markers {n_del} -> {n_add}")
+            add(
+                flags,
+                "iv1",
+                "C5.skip_xfail_added",
+                path,
+                count_line,
+                f"skip/xfail markers {n_del} -> {n_add}",
+            )
+        so = skip_state(old_text) if old_text is not None and new_text is not None else None
+        sn = skip_state(new_text) if so is not None and new_text is not None else None
+        if so is not None and sn is not None:
+            for q, (skipped, line) in sn.items():
+                if skipped and q in so and not so[q][0]:
+                    skip_flagged.add(path)
+                    add(
+                        refined,
+                        "refined",
+                        "C5.skip_xfail_added",
+                        path,
+                        line,
+                        f"{q} newly skipped/xfail",
+                    )
+        elif fd.status != "added" and n_add > n_del:
+            skip_flagged.add(path)
+            add(
+                refined,
+                "refined",
+                "C5.skip_xfail_added",
+                path,
+                count_line,
+                f"skip/xfail markers {n_del} -> {n_add}",
+            )
         # C5(a): expected literal hard-coded into non-test source
-        if _is_source_py(path) and fd.status != "deleted":
-            new_text, old_text = patched.get(path), heads.get(path)
+        if _is_source_py(path) and fd.status != "deleted" and path not in not_applied:
             cands: dict[str, int] = {}
             if new_text is not None:
                 cb = _compare_literals(new_text) or {}
@@ -542,26 +804,37 @@ def flag_candidate(
                             cands.setdefault(m.group(2), ln)
             if cands and tree is not None:
                 quoting = tree.test_texts_quoting(sorted(cands))
-                quoting_cache.update({lit: quoting for lit in cands})
-                for lit, line in sorted(cands.items(), key=lambda kv: kv[1]):
-                    if any(f'"{lit}"' in t or f"'{lit}'" in t for t in quoting):
+                hit = {
+                    lit for lit in cands if any(f'"{lit}"' in t or f"'{lit}'" in t for t in quoting)
+                }
+                for lit in sorted(hit, key=lambda x: cands[x]):
+                    add(
+                        flags,
+                        "iv1",
+                        "C5.test_literal_hardcoded",
+                        path,
+                        cands[lit],
+                        f"literal {lit[:80]!r} is quoted by an existing test and hard-coded into source",
+                    )
+                in_pr_tests = [lit for lit in cands if lit in test_added_literals]
+                existing = tree.non_test_source_contains(in_pr_tests) if in_pr_tests else set()
+                for lit in sorted(in_pr_tests, key=lambda x: cands[x]):
+                    if lit not in existing:
                         add(
-                            flags,
+                            refined,
+                            "refined",
                             "C5.test_literal_hardcoded",
                             path,
-                            line,
-                            f"literal {lit[:80]!r} is quoted by an existing test and hard-coded into source",
+                            cands[lit],
+                            f"literal {lit[:80]!r} appears in a test this diff adds/edits and is hard-coded into source",
                         )
         # C2: public symbol removed / signature changed, not named in the Issue
-        if _is_source_py(path):
-            old_text, new_text = heads.get(path), patched.get(path)
-            if fd.status == "added":
-                continue
+        if _is_source_py(path) and fd.status != "added" and path not in not_applied:
             if old_text is not None:
-                a = public_surface(old_text)
+                a = _surface_full(old_text)
                 if a is None:
                     continue
-                b = public_surface(new_text) if new_text is not None else None
+                b = _surface_full(new_text) if new_text is not None else None
                 why_all = (
                     "MODULE_DELETED"
                     if fd.status == "deleted"
@@ -572,35 +845,65 @@ def flag_candidate(
                         kind = why_all
                     elif b is not None and q not in b:
                         kind = "REMOVED"
-                    elif b is not None and a[q] != b[q]:
+                    elif b is not None and a[q][:2] != b[q][:2]:
                         kind = "SIGNATURE_CHANGED"
                     else:
                         continue
-                    bucket = advisory if any(part in t_s for part in q.split(".")) else flags
-                    add(
-                        bucket,
-                        "C2.public_signature",
-                        path,
-                        _symbol_line(new_text or old_text, q),
-                        f"{kind} {q}",
-                    )
+                    line = _symbol_line(new_text or old_text, q)
+                    detail = f"{kind} {q}"
+                    if any(part in t_s for part in q.split(".")):
+                        add(advisory, "iv1", "C2.public_signature", path, line, detail)
+                    else:
+                        add(flags, "iv1", "C2.public_signature", path, line, detail)
+                    # refined tier
+                    if (
+                        kind == "SIGNATURE_CHANGED"
+                        and b is not None
+                        and compat_extended(a[q][2], b[q][2])
+                    ):
+                        add(advisory, "refined", "C2.compat_extended", path, line, detail)
+                    elif _named_for_refined(q, issue_text, t_s):
+                        add(advisory, "refined", "C2.named_in_issue", path, line, detail)
+                    else:
+                        add(refined, "refined", "C2.public_signature", path, line, detail)
             elif tree is None:
                 for name, kind, ln in _hunk_only_api(fd):
-                    bucket = advisory if name in t_s else flags
-                    add(
-                        bucket,
-                        "C2.public_signature",
-                        path,
-                        ln,
-                        f"{kind} {name} (hunk-only evidence)",
-                    )
+                    detail = f"{kind} {name} (hunk-only evidence)"
+                    if name in t_s:
+                        add(advisory, "iv1", "C2.public_signature", path, ln, detail)
+                    else:
+                        add(flags, "iv1", "C2.public_signature", path, ln, detail)
+                    if not _named_for_refined(name, issue_text, t_s):
+                        add(refined, "refined", "C2.public_signature", path, ln, detail)
+
+    for fd in files:
+        if (
+            file_category(fd.path) == "TEST"
+            and fd.path not in t_f
+            and not intake_known
+            and fd.status != "added"
+            and fd.path not in weak_paths
+            and fd.path not in skip_flagged
+        ):
+            add(
+                advisory,
+                "refined",
+                "C5.test_edit_no_intake",
+                fd.path,
+                _first_line(fd),
+                "existing test edited, no intake list, does not weaken",
+            )
 
     return {
         "schema": SCHEMA,
         "flags": flags,
+        "flags_refined": refined,
         "tamper": any(f["check"].startswith("C5.") for f in flags),
         "api_delta": any(f["check"].startswith("C2.") for f in flags),
+        "tamper_refined": any(f["check"].startswith("C5.") for f in refined),
+        "api_delta_refined": any(f["check"].startswith("C2.") for f in refined),
         "advisory": advisory,
+        "errors": errors,
         "files": len(files),
         "elapsed_ms": int((time.perf_counter() - t0) * 1000),
     }

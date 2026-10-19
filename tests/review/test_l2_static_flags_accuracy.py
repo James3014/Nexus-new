@@ -32,19 +32,28 @@ def _run(unit: dict, tmp_path: Path) -> dict:
 
 def test_fixture_flag_rates_and_pinned_checks(tmp_path: Path) -> None:
     assert FIXTURE.stat().st_size < 200_000
-    wrong = flagged_wrong = correct = flagged_correct = 0
+    wrong = flagged_wrong = correct = flagged_correct = ref_wrong = ref_correct = 0
     slowest = 0
     for unit in _units():
         out = _run(unit, tmp_path)
         assert sorted({f["check"] for f in out["flags"]}) == unit["expect_flags"], unit["uid"]
+        assert sorted({f["check"] for f in out["flags_refined"]}) == unit["expect_refined"], unit[
+            "uid"
+        ]
+        assert out["errors"] == []
         slowest = max(slowest, out["elapsed_ms"])
         if unit["label"] == "wrong":
             wrong += 1
             flagged_wrong += bool(out["flags"])
+            ref_wrong += bool(out["flags_refined"])
         else:
             correct += 1
             flagged_correct += bool(out["flags"])
+            ref_correct += bool(out["flags_refined"])
     assert wrong >= 30 and correct >= 15
     assert flagged_wrong / wrong >= 0.35, (flagged_wrong, wrong)
     assert flagged_correct / correct <= 0.25, (flagged_correct, correct)
+    # refined tier: fewer flags by design (defaulted parameter additions, literals not in PR tests)
+    assert ref_wrong / wrong >= 0.15, (ref_wrong, wrong)
+    assert ref_correct / correct <= 0.25, (ref_correct, correct)
     assert slowest < 1000
