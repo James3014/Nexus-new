@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -451,3 +452,39 @@ def test_git_tree_distinguishes_absent_file_from_git_failure(tmp_path: Path) -> 
     assert lib.GitTree(repo, "HEAD").non_test_source_contains(["hello-there", "nope-nope"]) == {
         "hello-there"
     }
+
+
+def test_compat_extended_rejects_kwargs_shadowing_and_old_keyword_changes(tmp_path: Path) -> None:
+    breaking = {"C2.public_signature"}
+    # f(**kw) -> f(x=1, **kw): f(x=2) no longer reaches **kw (Codex r3)
+    assert _c2_refined("**kw", "x=1, **kw", tmp_path)[0] == breaking
+    assert _c2_refined("a, **kw", "a, *, x=1, **kw", tmp_path)[0] == breaking
+    # an existing keyword-only parameter's default changes, or it is removed
+    assert _c2_refined("x, *, y=1", "x, *, y=2", tmp_path)[0] == breaking
+    assert _c2_refined("x, *, y=1", "x", tmp_path)[0] == breaking
+    # **kwargs renamed
+    assert _c2_refined("x, **kw", "x, **options", tmp_path)[0] == breaking
+
+
+def test_git_tree_exit_one_with_stderr_is_a_failure(tmp_path: Path, monkeypatch) -> None:
+    repo = _git_repo(tmp_path / "r2")
+    tree = lib.GitTree(repo, "HEAD")
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], 1, stdout="", stderr="fatal: bad object")
+
+    monkeypatch.setattr(lib.subprocess, "run", fake_run)
+    with pytest.raises(lib.GitReadError):
+        tree._git("grep", "-e", "x")
+
+
+def test_git_tree_timeout_is_a_failure(tmp_path: Path, monkeypatch) -> None:
+    repo = _git_repo(tmp_path / "r3")
+    tree = lib.GitTree(repo, "HEAD")
+
+    def slow(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 60)
+
+    monkeypatch.setattr(lib.subprocess, "run", slow)
+    with pytest.raises(lib.GitReadError):
+        tree._git("grep", "-e", "x")

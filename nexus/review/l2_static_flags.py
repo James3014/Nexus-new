@@ -356,14 +356,17 @@ class GitTree:
 
     def _git(self, *args: str) -> str:
         """stdout; exit 1 (``git grep`` no match) is empty, anything else raises GitReadError."""
-        r = subprocess.run(
-            ["git", "-C", self.repo, *args],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=60,
-            check=False,
-        )
+        try:
+            r = subprocess.run(
+                ["git", "-C", self.repo, *args],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitReadError(f"git {' '.join(args[:2])} timed out") from exc
         if r.returncode == 0:
             return r.stdout
         if r.returncode == 1 and not r.stderr.strip():
@@ -492,7 +495,11 @@ def compat_extended(old: tuple | None, new: tuple | None) -> bool:
     if any(by_name.get(i[1]) != i for i in o_kw):
         return False
     old_kw_names = {i[1] for i in o_kw}
-    return all(i[3] is not None for i in n_kw if i[1] not in old_kw_names)
+    added_kw = [i for i in n_kw if i[1] not in old_kw_names]
+    if o_kwarg and (added_kw or extra_pos):
+        # f(**kw) -> f(x=1, **kw): a caller passing x= no longer reaches **kw, so behaviour changes.
+        return False
+    return all(i[3] is not None for i in added_kw)
 
 
 def _surface_full(text: str) -> dict[str, tuple[str, str, tuple | None]] | None:

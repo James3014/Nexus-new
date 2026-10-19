@@ -70,14 +70,19 @@ ANY_ISSUE = re.compile(r"(?<![\w/])#(\d+)")
 
 # --------------------------------------------------------------------------- plumbing
 def git(clone: Path, *args: str, check: bool = True) -> str:
-    r = subprocess.run(
-        ["git", "-C", str(clone), *args],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        timeout=300,
-        check=False,
-    )
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(clone), *args],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=300,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # A timeout is a git failure like any other: callers turn it into an errored scan or an
+        # unknown follow-up, never into a clean result or an aborted report.
+        raise RuntimeError(f"git {' '.join(args[:3])} timed out after {exc.timeout}s") from exc
     if check and r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args[:3])} failed: {r.stderr.strip()[:300]}")
     return r.stdout
@@ -296,6 +301,25 @@ def _check_clone_root(root: Path, repo: str) -> Path:
     return resolved
 
 
+def _same_repo(remote_url: str, repo: str) -> bool:
+    """True when a remote URL (https or ssh form) points at exactly ``owner/repo``."""
+    text = remote_url.strip().removesuffix(".git").rstrip("/")
+    for prefix in (
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+    ):
+        if text.startswith(prefix):
+            return text[len(prefix) :].lower() == repo.lower()
+    return False
+
+
+def repo_url(repo: str) -> str:
+    """Clone URL for ``owner/repo`` (tests replace this seam with a local path)."""
+    return f"https://github.com/{repo}.git"
+
+
 def ensure_clone(repo: str, clone_root: Path) -> Path:
     """Dedicated clone ``<root>/<owner>__<repo>`` (created on first use, never a shared main clone).
 
@@ -307,7 +331,8 @@ def ensure_clone(repo: str, clone_root: Path) -> Path:
     if (dest / ".git").exists() or (dest / "HEAD").exists():
         return dest
     seed = SEED_CLONE_ROOT / repo.split("/")[-1]
-    url = f"https://github.com/{repo}.git"
+    url = repo_url(repo)
+    use_seed = False
     if (seed / ".git").exists():
         r = subprocess.run(
             ["git", "-C", str(seed), "remote", "get-url", "origin"],
@@ -315,10 +340,13 @@ def ensure_clone(repo: str, clone_root: Path) -> Path:
             text=True,
             check=False,
         )
-        url = r.stdout.strip() or url
+        # The seed is only an object source, and only when it is a clone of the SAME owner/repo;
+        # the clone URL is always the requested repository, never the seed's origin.
+        origin = r.stdout.strip()
+        use_seed = origin == url or _same_repo(origin, repo)
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone", "-q", "--no-checkout"]
-    if (seed / ".git").exists():
+    if use_seed:
         cmd += ["--reference", str(seed), "--dissociate"]
     r = subprocess.run([*cmd, url, str(dest)], capture_output=True, text=True, check=False)
     if r.returncode != 0:

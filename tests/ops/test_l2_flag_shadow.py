@@ -387,6 +387,7 @@ def test_default_clone_root_is_dedicated_and_created_on_first_use(
     )
     # the seed's origin is `clone` (a path), standing in for the GitHub URL
     monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", seed_root)
+    monkeypatch.setattr(shadow, "repo_url", lambda repo: str(clone))
     root = tmp_path / "state/clone"
     dest = shadow.ensure_clone("James3014/Nexus-new", root)
     assert dest == root.resolve() / "James3014__Nexus-new"  # keyed by owner__repo
@@ -498,3 +499,76 @@ def test_report_excludes_unknown_followups_and_uses_refined_for_flagged(
     assert out["iv1_flagged"]["any"]["n"] == 1  # iv1 tier flags PR 10
     assert out["unflagged"]["any"]["n"] == 2 and out["iv1_unflagged"]["any"]["n"] == 1
     assert out["flagged"] != out["iv1_flagged"]
+
+
+def test_git_timeout_in_followup_is_unknown_not_an_abort(clone: Path, monkeypatch) -> None:
+    merged = shadow.main_commits(clone)
+
+    def slow(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 300)
+
+    monkeypatch.setattr(shadow.subprocess, "run", slow)
+    with pytest.raises(shadow.FollowupError):
+        shadow.followup(clone, merged[10]["sha"], 10, merged[10]["date"])
+
+
+def test_blame_failure_in_followup_is_unknown(clone: Path, monkeypatch) -> None:
+    merged = shadow.main_commits(clone)
+    real_git = shadow.git
+
+    def failing_blame(c, *args, **kwargs):
+        if args and args[0] == "blame":
+            raise RuntimeError("git blame failed")
+        return real_git(c, *args, **kwargs)
+
+    monkeypatch.setattr(shadow, "git", failing_blame)
+    # PR 10's lines are touched by PR 11 (see test_followup_ref_and_touch_signals), so blame runs
+    with pytest.raises(shadow.FollowupError):
+        shadow.followup(clone, merged[10]["sha"], 10, merged[10]["date"])
+
+
+def test_same_repo_matches_only_exact_owner_and_name() -> None:
+    assert shadow._same_repo("https://github.com/James3014/Nexus-new.git", "James3014/Nexus-new")
+    assert shadow._same_repo("git@github.com:James3014/Nexus-new.git", "james3014/nexus-new")
+    assert not shadow._same_repo("https://github.com/Other/Nexus-new.git", "James3014/Nexus-new")
+    assert not shadow._same_repo(
+        "https://example.com/James3014/Nexus-new.git", "James3014/Nexus-new"
+    )
+    assert not shadow._same_repo("", "James3014/Nexus-new")
+
+
+def test_seed_of_another_owner_is_never_used(clone: Path, tmp_path: Path, monkeypatch) -> None:
+    """Codex r3: a same-named seed of a different owner must not redirect the clone URL."""
+    seed_root = tmp_path / "seed2"
+    seed_root.mkdir()
+    subprocess.run(
+        ["git", "clone", "-q", str(clone), str(seed_root / "Nexus-new")],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(seed_root / "Nexus-new"),
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/James3014/Nexus-new.git",
+        ],
+        check=True,
+    )
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", seed_root)
+    calls: list[list[str]] = []
+    real_run = shadow.subprocess.run
+
+    def record(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(shadow.subprocess, "run", record)
+    shadow.ensure_clone("Other/Nexus-new", tmp_path / "state3/clone")
+    assert calls and calls[0][-2] == "https://github.com/Other/Nexus-new.git"
+    assert "--reference" not in calls[0]
