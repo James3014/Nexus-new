@@ -13,6 +13,7 @@ import pandas as pd
 import logging
 import urllib.request
 from nexus.core.config import NexusGlobalConfig
+from nexus.core.state_root import state_read_only
 from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 
 logger = logging.getLogger("nexus.vector_rag")
@@ -52,12 +53,16 @@ class VectorRAG:
             self.db_path = resolve_lancedb_root(VECTOR_DB, self.project_root)
         else:
             self.db_path = self.project_root / db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # #2721 L-B: under NEXUS_STATE_READ_ONLY nothing under the state root is created or
+        # written; an existing index is still read, a missing one reads as empty.
+        self.read_only = state_read_only()
+        if not self.read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.table_name = "nexus_knowledge"
         self.fallback_file = self.db_path.parent / f"{self.table_name}.json"
         self.db = None
         self.model = None
-        self.enabled = lancedb is not None
+        self.enabled = lancedb is not None and (not self.read_only or self.db_path.exists())
 
         if self.enabled and lancedb is not None:
             self.db = lancedb.connect(str(self.db_path))
@@ -89,12 +94,16 @@ class VectorRAG:
             return []
 
     def _ensure_fallback_file(self) -> None:
+        if self.read_only:
+            return
         self.fallback_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.fallback_file.exists():
             self.fallback_file.write_text("[]", encoding="utf-8")
 
     def _load_fallback_rows(self) -> List[Dict[str, Any]]:
         self._ensure_fallback_file()
+        if not self.fallback_file.exists():
+            return []
         try:
             return json.loads(self.fallback_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -109,6 +118,9 @@ class VectorRAG:
         將知識庫數據（解密後）執行向量化並存入 LanceDB。
         """
         if not knowledge_data:
+            return
+        if self.read_only:
+            logger.info("[VectorRAG] index update skipped: NEXUS_STATE_READ_ONLY=1")
             return
 
         logger.info(f"🚀 [VectorRAG] Indexing {len(knowledge_data)} items...")
