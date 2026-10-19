@@ -351,6 +351,19 @@ TRUSTED_PR2424_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
     ),
 )
 
+# Exact one-use, four-way binding for Owner-authorized PR #2641 (Issue #2657:
+# SEC-005 urllib3<2.6 lift and aiohttp >=3.14.3, refs #2636; Owner approval in chat
+# 2026-10-19 「同意」, session switched out of auto mode for it 「切換了」).
+TRUSTED_PR2641_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    2641,
+    (
+        "bd6bc8c7cdf20d805009609499842789a2755eb4235c36c5c3a2695950f2e5e1",
+        "c4084a67832b23a1835388af4062ce52f94ba69d30326b082657d51bd445e3de",
+        "7a66c78b87a8b066738101c10b4b34d6ca14f6392c1f05b9901bcca002185fee",
+        "91893c1bd75c4676aeb5897e4b63193d6fdfb9bc77572d552f3ceb2991e428c3",
+    ),
+)
+
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -589,6 +602,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR2205_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2278_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2424_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR2641_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
