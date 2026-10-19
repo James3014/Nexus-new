@@ -1372,6 +1372,14 @@ def test_materialization_fresh_submission_exact_flow(ctx, stubs) -> None:
             "controller_revision": "c" * 40,
         },
         "codeintel": PLANNER["context"]["codeintel"],
+        # #2734: the pre-execution gates are recorded, never shown to the worker.
+        "receipt_only_capabilities": (
+            "pregate",
+            "plan_quality_gate",
+            "mempalace_gate",
+            "harness_preflight_sensor",
+            "mempalace",
+        ),
     }
     assert list(materialize["capability_context"]) == [
         "task_id",
@@ -1810,6 +1818,39 @@ def test_materialization_keeps_an_explicit_codeintel_lookup(ctx, stubs) -> None:
     ctx.request["codeintel_lookup"] = {"target_symbol": "mod.x", "search_paths": ["mod.py"]}
     ctx.run()
     assert stubs.log[2][1]["capability_context"]["target_symbol"] == "mod.x"
+
+
+def test_materialization_passes_existing_allowed_files_to_belief(ctx, stubs) -> None:
+    (ctx.target / "nexus").mkdir()
+    (ctx.target / "nexus" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    ctx.request["allowed_files"] = ["nexus/a.py"]
+    ctx.run()
+    assert stubs.log[2][1]["capability_context"]["belief_target_files"] == ["nexus/a.py"]
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [["nexus/new.py", "nexus/a.py"], ["nexus/a.py", "nexus/b.py"], ["nexus/new.py"], ["nexus"]],
+)
+def test_materialization_withholds_belief_target_when_ambiguous(ctx, stubs, allowed) -> None:
+    (ctx.target / "nexus").mkdir()
+    for name in ("a.py", "b.py"):
+        (ctx.target / "nexus" / name).write_text("x = 1\n", encoding="utf-8")
+    ctx.request["allowed_files"] = allowed
+    ctx.run()
+    assert "belief_target_files" not in stubs.log[2][1]["capability_context"]
+
+
+def test_materialization_withholds_belief_target_through_escaping_symlink(
+    ctx, stubs, tmp_path
+) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("x = 1\n", encoding="utf-8")
+    (ctx.target / "nexus").mkdir()
+    (ctx.target / "nexus" / "link.py").symlink_to(outside)
+    ctx.request["allowed_files"] = ["nexus/link.py"]
+    ctx.run()
+    assert "belief_target_files" not in stubs.log[2][1]["capability_context"]
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

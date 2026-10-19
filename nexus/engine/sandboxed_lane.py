@@ -313,13 +313,21 @@ def tool_read_roots() -> list[str]:
 
 
 def build_sandbox_profile(
-    *, writable: Iterable[str], read_roots: Iterable[str], deny_subtrees: Iterable[Path | str] = ()
+    *,
+    writable: Iterable[str],
+    read_roots: Iterable[str],
+    deny_subtrees: Iterable[Path | str] = (),
+    allow_signal_same_sandbox: bool = False,
 ) -> str:
     """SBPL policy for one confined command (last matching rule wins).
 
     Reads: default-deny; ``$HOME`` is denied before the ``read_roots`` allows, and credential
     stores are denied again last, so they stay unreadable even if an allowed root contains
     them. No network. Writes only inside ``writable``.
+
+    Signals: only to the process itself by default. ``allow_signal_same_sandbox`` also lets
+    it signal processes inside the same sandbox (its own children and process group), never
+    a process outside it; test suites that kill their own subprocesses need it.
     """
 
     writes = " ".join(f'(subpath "{sbpl_path(path)}")' for path in writable)
@@ -345,6 +353,7 @@ def build_sandbox_profile(
         "(allow mach-lookup)",
         "(allow ipc-posix-shm)",
         "(allow signal (target self))",
+        *(["(allow signal (target same-sandbox))"] if allow_signal_same_sandbox else []),
         "(deny network*)",
         f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
         f"(deny file-read* {denied})",

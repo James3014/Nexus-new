@@ -21,8 +21,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.1` | scratch TMPDIR cleanup and cap (#2291), A6 below | unchanged from 1.2.0 (v1, or v2 for the GOLD port fallback); A6 is operational behaviour only |
 | `1.2.2` | oracle-module run failure diagnostic (#2297), A7 below | unchanged from 1.2.1; A7 only adds a receipt field |
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
+| `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 
-Current scorer: `SCORER_VERSION = "1.2.3"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.4"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -171,3 +172,82 @@ expected F2P/P2P id matched, and a gold candidate was labelled `UNRESOLVED`
   none of its own. Keep `--work` outside other repositories.
 - The test-result cache key includes the scorer version (A4), so 1.2.3 does not reuse
   1.2.2 results.
+
+## 2026-10-19: A9, opt-in OS sandbox for pytest runs (no rule change when off)
+
+The CLI gains `--sandbox {none,os}` and `PytestRunner` a matching `sandbox` argument.
+The default is `none`.
+
+- **`none` (default).** The pytest command, its environment, its timeout and its
+  process-group kill are exactly those of 1.2.3 (§8 plus A8). Network is not blocked,
+  as §8 says. #2147 v1 numbers stay comparable. Nothing in v1 changes.
+- **`os`.** The same command runs under macOS `sandbox-exec`, with the shared profile
+  from `nexus.engine.sandboxed_lane`. The environment is the §8 one, except that HOME
+  and TMPDIR point to a fresh directory for this run only
+  (`<scratch>/runs/<key>-<random>/{home,tmp}`, with the junit report beside them). That
+  directory is deleted after the junit report is read, also after a timeout, an error
+  or a cap refusal. So no run can read what an earlier run left in HOME or TMPDIR (for
+  example a GOLD test's copy of the fix in a pytest basetemp), and no run can plant
+  files there for a later one. A run can still change its own tree, which later runs on
+  that same tree see, as under `none`.
+- **Fresh tree paths under `os`.** Every scoring of a task builds its trees under a new
+  `<work>/trees/<task_key>-<random>/` instead of `<work>/trees/<task_key>/`. They are
+  removed at the end as before, unless `--keep-trees` is set. Sandbox write access is
+  granted by path. A session-escaping child could otherwise plant files (for example a
+  `conftest.py`) at a tree path that the next scoring of the same task, with the same
+  `--work`, reuses. Cache keys use tree ids (content), never tree paths, so this changes
+  no cached result. Under `none` the tree paths are unchanged.
+  - Network is denied.
+  - Writes are allowed only in the tree under test and the run's own directory.
+  - Reads are allowed only in those places, the env directory, the interpreter it
+    resolves to, the env's extra import roots and fixed system and toolchain paths.
+    `$HOME` stays denied apart from those roots, and credential stores stay denied.
+    `<work>/repos` and the experiment store are denied, so a test cannot read the merged
+    fix from git objects. Other trees of the same task are not readable.
+  - Every read root other than the tree and the run's own directory (the env
+    directory, the interpreter prefix and each extra import root) is refused before the
+    run (`SandboxError`) when it is or contains the work directory, or lies inside
+    `<work>/repos`, `<work>/trees` or the store. Otherwise such a root would expose
+    sibling trees, such as GOLD. `<work>/trees` is not also denied in the profile: the
+    shared profile applies its deny rules last, so that would deny the run's own tree.
+  - File metadata (`stat`, existence checks) stays readable everywhere, and
+    `mach-lookup` is allowed. Both come from the shared profile. Signals reach only
+    processes inside the same sandbox, so a test may kill its own subprocesses.
+  - The timeout, the process-group kill, the junit parsing and the A6 caps are the same
+    as for `none`. The A6 size checks at the start and end of each run count everything
+    under `<scratch>/runs/` as well as the shared HOME and TMPDIR. So the run's own
+    directory counts as what the run left. A directory that a session-escaping child
+    re-creates after deletion, and keeps writing to, is measured and capped like the
+    shared TMPDIR under `none`.
+  - A child that leaves the process group (`setsid()`, `start_new_session=True`) is not
+    killed when the run ends, in either mode. Under `os` it stays confined: it can write
+    only to its own (deleted) run directory and its tree, never to a later run's HOME,
+    TMPDIR, junit report or the result cache. Under `none` it is unconfined, as in
+    1.2.3. Leftover run directories are removed by the A6 cleanup after each task.
+- **Fail closed.** `--sandbox os` exits 7 before scoring anything when no OS sandbox
+  exists (non-macOS, or `NEXUS_DISABLE_OS_SANDBOX` /
+  `NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX` set to `1`). A runner bound to `os` refuses a
+  run (`SandboxError`, no receipt) rather than run it unconfined.
+- **Scoring with `os`.** The labels and rules are those of v1. A test that needs
+  network, a git repository outside its tree or a path outside the allowed roots fails
+  on GOLD or BASE and drops out of the oracle, as §8 already describes for network and
+  secrets. So `os` and `none` results can differ, and they are reported separately.
+  Example: on nexus-runtime#200 with `--candidate-override gold`, both modes give
+  `RESOLVED`; under `os` one P2P test that runs `git` on the worktree
+  (`test_source_ownership::test_ownership_source_tree_matches_head`) fails on BASE and
+  drops out (953 P2P nodes instead of 954).
+- Every receipt records `runner_sandbox` (`"none"` or `"os"`) and
+  `runner_sandbox_profile_sha256`. That field is `null` for `none`. For `os` it is the
+  sha256 of the scorer's SBPL profile. It comes from the same root list
+  (`_PROFILE_ROOT_SPEC`) and builder as every run, with each
+  run- or machine-specific path replaced by a fixed placeholder: the tree, the per-run
+  directory, the env directory, the interpreter prefix, the extra import roots, the
+  developer toolchain, the work directory, the store and `$HOME`. System and toolchain
+  roots appear unresolved, whether or not they exist on the machine. The same scorer
+  therefore gives the same hash on any machine, and any change to the shared profile or
+  to the scorer's roots changes it.
+- The test-result cache key includes the mode and the profile hash when the mode is
+  `os`. So `os` and `none` results never share a cache entry, and a profile change never
+  reuses older `os` results. The env build is not sandboxed and is the same for both
+  modes, so the env cache key is unchanged. The test-result cache key includes the
+  scorer version (A4), so 1.2.4 does not reuse 1.2.3 results.

@@ -75,7 +75,6 @@ UNMIGRATED_BASELINE: frozenset[str] = frozenset({
     "nexus.core.capability_executor_registry:_exec_sandbox_confined",
     "nexus.core.capability_executor_registry:_exec_sandbox_runner",
     "nexus.core.capability_executor_registry:_exec_swarm_multi_agent",
-    "nexus.core.capability_executor_registry:_exec_ultra_review",
     "nexus.core.capability_executor_registry:_exec_xray",
     "nexus.core.capability_executor_registry:_make_receipt",
     "nexus.core.executor_controls:ExecutorControls.execute_plan.execute_single_cap",
