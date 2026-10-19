@@ -255,6 +255,14 @@ def build_claude_seatbelt_profile(
     return "\n".join(lines) + "\n"
 
 
+def normalize_seatbelt_profile(profile: str, *, target: str, run_root: str, venv: Optional[str]) -> str:
+    """The profile with the per-run paths and proxy port replaced by placeholders."""
+    text = profile.replace(run_root, "<RUN_ROOT>").replace(target, "<TARGET>")
+    if venv:
+        text = text.replace(venv, "<VENV>")
+    return re.sub(r'remote ip "localhost:\d+"', 'remote ip "localhost:<PORT>"', text)
+
+
 class HostAllowlistProxy:
     """A local HTTP CONNECT proxy that tunnels only ``ALLOWED_API_HOSTS:443``.
 
@@ -522,6 +530,9 @@ class ClaudeRun:
     summary: ClaudeStreamSummary
     infra: Optional[str]
     seatbelt_sha256: str
+    seatbelt_profile: str
+    target: str
+    run_root: str
     proxy_attempts: list[dict[str, Any]]
     venv: Optional[str]
     env_keys: tuple[str, ...]
@@ -578,6 +589,9 @@ def run_claude_once(
             summary=summary,
             infra=classify_claude_infra(summary, result.stderr),
             seatbelt_sha256=hashlib.sha256(profile.encode("utf-8")).hexdigest(),
+            seatbelt_profile=profile,
+            target=str(target),
+            run_root=str(run_root),
             proxy_attempts=attempts,
             venv=str(venv) if venv is not None else None,
             env_keys=tuple(sorted(env)),
@@ -692,6 +706,10 @@ class ClaudeMeasurementWorkerAdapter:
                 "flags": list(CLAUDE_MEASUREMENT_FLAGS),
                 "env_keys": list(run.env_keys),
                 "seatbelt_sha256": run.seatbelt_sha256,
+                # Normalized (paths/port replaced) so both arms' profiles compare byte for byte.
+                "seatbelt_profile_normalized": normalize_seatbelt_profile(
+                    run.seatbelt_profile, target=run.target, run_root=run.run_root, venv=run.venv
+                ),
                 "proxy_attempts": run.proxy_attempts,
                 "venv": run.venv,
                 "init": summary.init,
