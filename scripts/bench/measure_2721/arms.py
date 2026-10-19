@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import shutil
 import sys
@@ -110,35 +111,75 @@ def candidate_facts(diff: str, task: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+FLAG_SERVED_MODEL_MISMATCH = "SERVED_MODEL_MISMATCH"
+FLAG_GIT_TAMPERED = "GIT_METADATA_TAMPERED"
+FLAG_SECRET_IN_DIFF = "SECRET_REDACTED_FROM_DIFF"
+MEASUREMENT_MODEL = "claude-haiku-5-5"
+
+
+def redact_diff(diff: str, key_file: Optional[str] = None) -> tuple[str, bool]:
+    """Remove key-shaped strings and the measurement key from a candidate diff
+    (an agent could write ``env`` into a file); True when anything was removed."""
+    from nexus.executors.claude_measurement_worker import (
+        MEASUREMENT_ANTHROPIC_ENV_FILE_ENV,
+        measurement_claude_api_key,
+        redact_secrets,
+    )
+
+    raw = diff.encode("utf-8", errors="surrogateescape")
+    key = measurement_claude_api_key({MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: key_file} if key_file else None)
+    cleaned = redact_secrets(raw, (key,) if key else ())
+    return cleaned.decode("utf-8", errors="surrogateescape"), cleaned != raw
+
+
+def served_model_flag(served: Any) -> Optional[str]:
+    """Both arms must show exactly the measurement model serving the run (driver item 6)."""
+    if served is None:
+        return None
+    return None if list(served) == [MEASUREMENT_MODEL] else FLAG_SERVED_MODEL_MISMATCH
+
+
 def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
              timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, keep_workdir: bool = False) -> dict[str, Any]:
+    from scripts.bench.measure_2721 import watchdog
+    from scripts.bench.measure_2721.common import git_meta_fingerprint, write_diff
+
     run_id = new_run_id(ARM_BARE, task["task_id"], repeat)
     workdir = run_root / "work" / run_id / "repo"
     checkout_base(Path(task["base_checkout"]), task["base_commit"], workdir)
     link_venv(task, workdir)
+    git_meta = git_meta_fingerprint(workdir)
     tree_sha = git(workdir, "rev-parse", "HEAD^{tree}").strip()
     prompt = task_prompt(task)
     write_json(run_root / "inputs" / f"{run_id}.json",
                input_capture(ARM_BARE, task, repeat, run_id, prompt=prompt, tree_sha=tree_sha,
                              timeout_seconds=timeout_seconds))
+    watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=ARM_BARE, cap_s=timeout_seconds)
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     result: ProviderResult = provider.run(prompt=prompt, workdir=workdir, timeout_seconds=timeout_seconds,
                                           run_id=run_id)
     wall = time.monotonic() - started
-    diff = capture_diff(workdir, task["base_commit"])
+    tampered = git_meta_fingerprint(workdir) != git_meta
+    # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
+    diff = "" if tampered else capture_diff(workdir, task["base_commit"])
+    diff, redacted = redact_diff(diff, getattr(provider, "key_file", None))
+    watchdog.mark_snapshot(run_root)
     diff_path = run_root / "diffs" / f"{run_id}.diff"
-    diff_path.parent.mkdir(parents=True, exist_ok=True)
-    diff_path.write_text(diff, encoding="utf-8")
+    write_diff(diff_path, diff)
     extra = result.extra or {}
     lookup = lookup_signals(
         [extra.get("response_text") or "", extra.get("stderr_tail") or "", extra.get("tool_inputs_text") or ""],
         repo=task.get("repo", ""), denied_actions=extra.get("denied_actions") or ())
     network = [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")]
+    infra_event = watchdog.infra_event_for(run_root, run_id)
     flags = [flag for flag in (
         FLAG_TIMEOUT if result.status == STATUS_TIMEOUT else None,
         lookup["flag"],
         FLAG_NETWORK_ATTEMPT if network else None,
+        served_model_flag(extra.get("served_models")) if result.status == STATUS_OK else None,
+        FLAG_GIT_TAMPERED if tampered else None,
+        FLAG_SECRET_IN_DIFF if redacted else None,
     ) if flag]
     row = {
         "schema": ROW_SCHEMA,
@@ -151,8 +192,9 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         "repeat": repeat,
         "started_at": started_at,
         "wall_seconds": round(wall, 3),
-        "outcome": result.status,
-        "infra": result.status == STATUS_INFRA,
+        "outcome": "TAMPERED" if tampered else (STATUS_INFRA if infra_event else result.status),
+        "infra": result.status == STATUS_INFRA or infra_event is not None,
+        "watchdog_event": infra_event,
         "provider": result.as_dict(),
         "model_calls": result.model_calls,
         "total_tokens": result.total_tokens,
@@ -161,6 +203,7 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         **candidate_facts(diff, task),
     }
     append_jsonl(run_root / "rows.jsonl", row)
+    watchdog.end_row(run_root)
     if not keep_workdir:
         shutil.rmtree(workdir.parent, ignore_errors=True)
     return row
@@ -184,6 +227,10 @@ def claude_row_fields(extra: Mapping[str, Any]) -> dict[str, Any]:
         "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
         "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
         "models_seen": extra.get("models_seen"),
+        "served_models": extra.get("served_models"),
+        "cli_timeout_seconds": extra.get("cli_timeout_seconds"),
+        "key_label": extra.get("key_label"),
+        "api_key_sha256_12": extra.get("api_key_sha256_12"),
         "seatbelt_sha256": extra.get("seatbelt_sha256"),
         "proxy_denied": [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")],
     }
@@ -199,7 +246,7 @@ def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, 
     diff = ""
     diff_path = run_root / "diffs" / f"{run_id}.diff"
     diff_path.parent.mkdir(parents=True, exist_ok=True)
-    diff_path.write_text(diff, encoding="utf-8")
+    diff_path.write_bytes(b"")
     row = {
         "schema": ROW_SCHEMA,
         "arm": ARM_NOOP,
@@ -239,7 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--provider", choices=["claude", "agy", "fake"], default="fake",
                         help="'fake' makes no model call (default); 'claude' (prereg v0.4) and 'agy' are paid")
     parser.add_argument("--claude-bin", help="absolute, non-symlink claude CLI (same file as the Gateway's)")
-    parser.add_argument("--token-file", help="0600 file with the measurement OAuth token (claude setup-token)")
+    parser.add_argument("--key-file", default=os.path.expanduser("~/.config/nexus-measure-2721/anthropic.env"),
+                        help="0600 KEY=value file with ANTHROPIC_API_KEY (read only by the adapter)")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     args = parser.parse_args(argv)
@@ -247,7 +295,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     tasks = load_manifest(args.manifest, args.ids)
     provider = (
         build_provider(args.provider, claude_bin=args.claude_bin, trace_dir=run_root / "traces",
-                       token_file=args.token_file)
+                       key_file=args.key_file)
         if args.arm == "bare" else None
     )
     rows = []

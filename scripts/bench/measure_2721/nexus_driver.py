@@ -43,7 +43,7 @@ from scripts.bench.measure_2721.arms import (
     new_run_id,
     task_prompt,
 )
-from scripts.bench.measure_2721.common import append_jsonl, git, write_json
+from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
 
 LIVE_GATEWAY_PORT = 8766
@@ -320,7 +320,7 @@ class NexusArmDriver:
             write_json(run_root / "transcripts" / f"{run_id}.json", self.client.redact(transcript))
             diff_path = run_root / "diffs" / f"{run_id}.diff"
             diff_path.parent.mkdir(parents=True, exist_ok=True)
-            diff_path.write_text(diff, encoding="utf-8")
+            write_diff(diff_path, diff)
             row["diff_path"] = str(diff_path)
             row.update(candidate_facts(diff, task))
             append_jsonl(run_root / "rows.jsonl", row)

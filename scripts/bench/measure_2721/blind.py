@@ -26,7 +26,14 @@ from typing import Any, Iterable, Mapping, Sequence
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.bench.measure_2721.common import read_jsonl, sha256_text, write_json, write_jsonl
+from scripts.bench.measure_2721.common import (
+    read_diff,
+    read_jsonl,
+    sha256_text,
+    write_diff,
+    write_json,
+    write_jsonl,
+)
 from scripts.bench.measure_2721.leakage import FLAG_PATCH_DOES_NOT_APPLY, filter_candidate
 
 BLIND_SCHEMA = "nexus.measure_2721.blinded_candidates.v1"
@@ -46,7 +53,7 @@ def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
         tree = Path(tmp) / "tree"
         checkout_base(Path(task["base_checkout"]), task["base_commit"], tree)
         patch = Path(tmp) / "c.diff"
-        patch.write_text(diff, encoding="utf-8")
+        patch.write_bytes(diff.encode("utf-8", errors="surrogateescape"))
         return subprocess.run(["git", "apply", "--check", "--binary", str(patch)], cwd=tree,
                               capture_output=True).returncode == 0
 
@@ -61,7 +68,7 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
         if row.get("infra") or row.get("outcome") not in SCORABLE_OUTCOMES:
             excluded.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")})
             continue
-        diff = Path(row["diff_path"]).read_text(encoding="utf-8")
+        diff = read_diff(Path(row["diff_path"]))
         if sha256_text(diff) != row["diff_sha256"]:
             raise RuntimeError(f"{row['run_id']}: diff changed after the run")
         opaque = secrets.token_hex(8)
@@ -78,7 +85,7 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
             flags.append(FLAG_PATCH_DOES_NOT_APPLY)
         target = out / "candidates" / f"{opaque}.diff"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(scored, encoding="utf-8")
+        write_diff(target, scored)
         candidates.append({"opaque_id": opaque, "task_id": row["task_id"], "diff_sha256": sha256_text(scored)})
         mapping[opaque] = {
             "arm": row["arm"], "run_id": row["run_id"], "repeat": row["repeat"], "task_id": row["task_id"],

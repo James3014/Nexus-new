@@ -29,7 +29,7 @@ args = sys.argv[1:]
 if args == ["--version"]:
     print("__VERSION__")
     sys.exit(0)
-env = {k: ("<set>" if k == "CLAUDE_CODE_OAUTH_TOKEN" else v) for k, v in os.environ.items()}
+env = {k: ("<set>" if k in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN") else v) for k, v in os.environ.items()}
 print(json.dumps({"type": "system", "subtype": "init", "model": "claude-haiku-5-5", "session_id": "fake",
                   "tools": ["Bash", "Edit", "Read", "Write"], "mcp_servers": [], "permissionMode": "acceptEdits",
                   "claude_code_version": "0.0.0",

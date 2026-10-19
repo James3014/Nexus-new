@@ -28,7 +28,7 @@ from typing import Any, Sequence
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.bench.measure_2721.common import git, sha256_text
+from scripts.bench.measure_2721.common import git, read_diff, sha256_text
 from scripts.bench.measure_2721.leakage import strip_test_hunks
 from scripts.bench.measure_2721.materialize import checkout_base
 
@@ -104,7 +104,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     held_out = {json.loads(line)["id"] for line in Path(args.bank, "tasks.jsonl").read_text().splitlines() if line}
     if args.task_id in held_out:
         parser.error("held-out task: the pilot oracle never scores tasks.jsonl tasks")
-    result = score(Path(args.bank), args.task_id, args.repo, args.base, Path(args.diff).read_text(), Path(args.work))
+    result = score(Path(args.bank), args.task_id, args.repo, args.base, read_diff(Path(args.diff)), Path(args.work))
     Path(args.out).write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
     return 0

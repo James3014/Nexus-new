@@ -140,9 +140,12 @@ def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str,
     if file_scope:
         manifest = file_scope_manifest(manifest, out)
     fake = write_fake_claude(out / "bin" / "claude", "record")
-    token = out / "token"
-    token.write_text("dry-run-not-a-token\n", encoding="utf-8")
+    token = out / "anthropic.env"
+    # Built at runtime: no key-shaped literal in the source (secret audit).
+    fake_key = "-".join(("sk", "ant", "dryrun", "NOT", "A", "REAL", "KEY", "0000000000"))
+    token.write_text(f"ANTHROPIC_API_KEY={fake_key}\n", encoding="utf-8")
     os.chmod(token, 0o600)
+    os.environ.setdefault("NEXUS_MEASUREMENT_READ_ROOTS", str(out))
     trace_dir = out / "traces"
     provider = ClaudeProvider(str(fake), trace_dir, str(token), identity=claude_identity(str(fake), str(token)))
     per_task: dict[str, Any] = {}

@@ -478,15 +478,17 @@ def test_driver_stops_the_batch_when_a_task_does_not_terminate(manifest, tmp_pat
 
 
 @needs_sandbox
-def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path):
+def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path, monkeypatch):
     from scripts.bench.measure_2721.fake_claude import write_fake_claude
     from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
 
     (task,) = arms.load_manifest(manifest)
     fake = write_fake_claude(tmp_path / "bin" / "claude", "edit")
-    token = tmp_path / "token"
-    token.write_text("tok\n")
+    token = tmp_path / "anthropic.env"
+    fake_key = "-".join(("sk", "ant", "test", "NOT", "A", "REAL", "KEY", "000000000000"))
+    token.write_text(f"ANTHROPIC_API_KEY={fake_key}\n")
     token.chmod(0o600)
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", str(tmp_path))
     provider = ClaudeProvider(str(fake), tmp_path / "run" / "traces", str(token),
                               identity=claude_identity(str(fake), str(token)))
     (task_root := Path(task["base_checkout"])).joinpath("README.md").exists()
@@ -495,5 +497,8 @@ def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path):
     assert row["claude_version"].startswith("0.0.0") and row["models_seen"] == ["claude-haiku-5-5"]
     assert row["cache_read_input_tokens"] == 0 and row["cache_creation_input_tokens"] == 0
     assert row["seatbelt_sha256"] and row["proxy_denied"] == []
+    assert row["account"]["auth"] == "api_key" and len(row["account"]["api_key_sha256_12"]) == 12
+    trace = Path(row["diff_path"]).parent.parent / "traces"
+    assert all(b"NOT-A-REAL-KEY" not in f.read_bytes() for f in trace.rglob("*") if f.is_file())
     assert "README.md" in row["changed_paths"]
     del task_root

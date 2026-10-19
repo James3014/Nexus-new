@@ -191,51 +191,33 @@ def run_evidence(stdout: str, stderr: str, response: str) -> dict[str, Any]:
     return {"response_text": response[-20000:], "denied_actions": denied, "stderr_tail": stderr[-4000:]}
 
 
-def claude_identity(executable: str, token_file: Optional[str] = None) -> dict[str, Any]:
-    """CLI version and the account the run will use (no secret is kept).
+def claude_identity(executable: str, key_file: Optional[str] = None) -> dict[str, Any]:
+    """CLI version (run inside the measurement sandbox) and a non-reversible key id.
 
-    Runs ``auth status`` in the same isolated configuration as a measurement
-    run (fresh HOME/config dir, the token from ``token_file``), so it reports
-    the token's account, never the host user's own login.  The email is kept
-    only as a sha256.
+    The key itself is never read here beyond hashing: the row keeps only the
+    first 12 hex digits of its sha256, enough to tell which key a row used.
     """
     import hashlib
-    import json as _json
-    import subprocess
     import tempfile
 
     from nexus.executors.claude_measurement_worker import (
-        CLAUDE_MEASUREMENT_ENV,
-        CLAUDE_MEASUREMENT_SYSTEM_PATH,
-        CLAUDE_OAUTH_TOKEN_ENV,
-        MEASUREMENT_CLAUDE_TOKEN_FILE_ENV,
-        measurement_claude_token,
+        MEASUREMENT_ANTHROPIC_ENV_FILE_ENV,
+        measurement_claude_api_key,
+        run_claude_once,
     )
 
+    environ = {MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: key_file} if key_file else {}
+    key = measurement_claude_api_key(environ)
     with tempfile.TemporaryDirectory(prefix="m2721-claude-id-") as tmp:
-        env = {"HOME": tmp, "CLAUDE_CONFIG_DIR": f"{tmp}/.claude", "TMPDIR": tmp, "CLAUDE_CODE_TMPDIR": tmp,
-               "PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH, **CLAUDE_MEASUREMENT_ENV}
-        token = measurement_claude_token({MEASUREMENT_CLAUDE_TOKEN_FILE_ENV: token_file} if token_file else {})
-        if token:
-            env[CLAUDE_OAUTH_TOKEN_ENV] = token
-        version = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=30,
-                                 env=env, cwd=tmp, check=False)
-        status = subprocess.run([executable, "auth", "status"], capture_output=True, text=True, timeout=30,
-                                env=env, cwd=tmp, check=False)
-    try:
-        auth = _json.loads(status.stdout or "{}")
-    except ValueError:
-        auth = {}
-    email = str(auth.get("email") or "")
+        run = run_claude_once(executable, target=Path(tmp), prompt="", timeout_seconds=30.0, venv=None,
+                              environ={**os.environ, **environ}, argv=("--version",))
+    version = (run.result.stdout or run.result.stderr or b"").decode("utf-8", errors="replace").strip()
     return {
         "claude_executable": executable,
-        "claude_version": (version.stdout or version.stderr).strip(),
+        "claude_version": version,
         "account": {
-            "logged_in": bool(auth.get("loggedIn")),
-            "auth_method": auth.get("authMethod"),
-            "org_id": auth.get("orgId"),
-            "subscription_type": auth.get("subscriptionType"),
-            "email_sha256": hashlib.sha256(email.encode("utf-8")).hexdigest() if email else None,
+            "auth": "api_key" if key else "none",
+            "api_key_sha256_12": hashlib.sha256(key.encode("utf-8")).hexdigest()[:12] if key else None,
         },
     }
 
@@ -281,34 +263,37 @@ class ClaudeProvider:
 
     ``ClaudeMeasurementWorkerAdapter`` is exactly what the measurement Gateway's
     P1 worker runs, so the BARE arm gets the identical argv, isolated HOME and
-    config dir, OAuth token, Seatbelt profile, API-only proxy, task venv and
+    config dir, API key, Seatbelt profile, API-only proxy, task venv and
     time cap; only the prompt (no Nexus context) and the paths differ.
     """
 
     name = "claude"
 
-    def __init__(self, executable: str, trace_dir: Path, token_file: Optional[str] = None,
+    def __init__(self, executable: str, trace_dir: Path, key_file: Optional[str] = None,
                  identity: Optional[dict[str, Any]] = None):
         if not os.path.isabs(executable):
             raise ValueError("claude executable must be an absolute path")
         self.executable = executable
         self.trace_dir = Path(trace_dir).resolve()
-        self.token_file = token_file
-        self.identity = identity if identity is not None else claude_identity(executable, token_file)
+        self.key_file = key_file
+        self.identity = identity if identity is not None else claude_identity(executable, key_file)
 
     def environ(self) -> dict[str, str]:
         from nexus.executors.claude_measurement_worker import (
+            MEASUREMENT_ANTHROPIC_ENV_FILE_ENV,
             MEASUREMENT_CLAUDE_BIN_ENV,
             MEASUREMENT_CLAUDE_ENV,
-            MEASUREMENT_CLAUDE_TOKEN_FILE_ENV,
+            MEASUREMENT_READ_ROOTS_ENV,
             MEASUREMENT_TRACE_DIR_ENV,
         )
 
         env = {key: value for key, value in os.environ.items() if key in ("USER", "LOGNAME", "LANG")}
         env.update({MEASUREMENT_CLAUDE_ENV: "1", MEASUREMENT_CLAUDE_BIN_ENV: self.executable,
                     MEASUREMENT_TRACE_DIR_ENV: str(self.trace_dir)})
-        if self.token_file:
-            env[MEASUREMENT_CLAUDE_TOKEN_FILE_ENV] = self.token_file
+        if self.key_file:
+            env[MEASUREMENT_ANTHROPIC_ENV_FILE_ENV] = self.key_file
+        if os.environ.get(MEASUREMENT_READ_ROOTS_ENV):
+            env[MEASUREMENT_READ_ROOTS_ENV] = os.environ[MEASUREMENT_READ_ROOTS_ENV]
         return env
 
     def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
@@ -358,6 +343,10 @@ class ClaudeProvider:
             "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
             "env_keys": trace["sidecar"].get("env_keys"),
             "argv_sha256": trace["sidecar"].get("argv_sha256"),
+            "served_models": list(summary.served_models),
+            "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
+            "key_label": trace["sidecar"].get("key_label"),
+            "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
             "fake_observed": trace["fake_observed"],
             "receipt_failure_reason": receipt.failure_reason,
         }
@@ -377,7 +366,7 @@ class ClaudeProvider:
 
 def build_provider(name: str, **options: Any) -> Provider:
     if name == "claude":
-        return ClaudeProvider(options["claude_bin"], options["trace_dir"], options.get("token_file"))
+        return ClaudeProvider(options["claude_bin"], options["trace_dir"], options.get("key_file"))
     if name == "agy":
         return AgyPoolProvider()
     if name == "fake":
