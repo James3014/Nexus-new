@@ -2659,7 +2659,8 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
 # depended on earlier runs inside the 300-row phase-SLO window and carried wall-clock
 # timestamps and host paths, so back-to-back counted runs differed in prompt text through timing
 # alone.  In counted lanes they run on a fresh, empty, per-call store and carry no timestamp or
-# path, so the fields are identical across runs (empty store: phase_slo_pass=True, all counts 0).
+# path, so the fields are identical across runs (empty store: NO_DATA, phase_slo_pass=False, all
+# counts 0; #2702).
 # Fixed, documented value for wall-clock fields in counted lanes (valid ISO-8601, so the prompt
 # audit's iso8601 format still holds).
 COUNTED_FIXED_TIMESTAMP = "1970-01-01T00:00:00+00:00"
@@ -2794,8 +2795,16 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
                 isolated.cleanup()
         physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = result is not None
         report = result if isinstance(result, Mapping) else {"value": str(result)[:200]}
+        # #2702: the receipt carries the SLO verdict, not "a report was built".  A failing
+        # SLO or an empty ledger (NO_DATA) is not SUCCEEDED.
+        ok = isinstance(result, Mapping) and result.get("phase_slo_pass") is True
+        if ok:
+            slo_error = None
+        elif isinstance(result, Mapping) and str(result.get("status") or "").upper() == "NO_DATA":
+            slo_error = "phase_slo_no_data"
+        else:
+            slo_error = "phase_slo_failed"
         # Counted lanes: no host path in the outcome (it reaches the prompt; nexus-runtime #218).
         store_fields: dict[str, Any] = (
             {}
@@ -2813,6 +2822,7 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
             outcome=_structured_outcome(
                 action="build_phase_slo_report",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
+                error=slo_error,
                 evidence_refs=[f"ev_learn_phase_slo_{plan.task_id}"],
                 result=_without_wall_clock(report) if counted else report,
                 physical_callable=physical,
