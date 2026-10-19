@@ -4,7 +4,7 @@ version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = [{name = "Nexus Engineers", email = "eng@nexus-singularity.os"}]
 dependencies = [
-    "aiohttp>=3.13.5,<4.0.0",
+    "aiohttp>=3.14.3,<4.0.0",
     "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@2b38dd87856a74163de2063feabeb9dca8047eec",
     "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@a48bd876b758069f4dd15c24d0d32f1f2486d319",
 ]
@@ -17,7 +17,7 @@ legacy = [
     "lancedb>=0.4.0",
     "pandas>=2.0.0,<3.0.0",
     "requests>=2.31.0,<3.0.0",
-    "urllib3<2.6",
+    "urllib3>=2.6.3,<3.0.0",
     "charset-normalizer<3.5",
     "filelock>=3.0.0,<4.0.0",
     "grpcio>=1.50.0",
