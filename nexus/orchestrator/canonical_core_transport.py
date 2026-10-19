@@ -608,18 +608,28 @@ def _acceptance_contract_payload(
 # #2776: one row per Core verification, never one row per session. A crash
 # resume of the same attempt (``RESUME_CANDIDATE_VERIFICATION``) re-verifies
 # the persisted session, so a later verdict must not erase an earlier one.
-_VERIFICATION_COLUMNS = (
-    "session_id",
-    "binding_hash",
-    "candidate_state_hash",
-    "core_status",
-    "change_set_hash",
-    "verification_plan_hash",
-    "evidence_bundle_hash",
-    "change_manifest_hash",
-    "projection_hash",
-    "core_reason_codes_json",
-    "verified_at",
+_MIGRATE_PRE2776_ROWS_SQL = """
+    INSERT INTO core_mutation_verifications
+    (session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
+     verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
+     core_reason_codes_json, verified_at)
+    SELECT session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
+     verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
+     core_reason_codes_json, verified_at
+    FROM core_mutation_verifications_pre2776
+    ORDER BY verified_at, rowid
+"""
+_APPEND_ONLY_TRIGGERS_SQL = (
+    """
+    CREATE TRIGGER IF NOT EXISTS core_mutation_verifications_no_update
+    BEFORE UPDATE ON core_mutation_verifications BEGIN
+    SELECT RAISE(ABORT, 'CORE_MUTATION_VERIFICATION_APPEND_ONLY'); END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS core_mutation_verifications_no_delete
+    BEFORE DELETE ON core_mutation_verifications BEGIN
+    SELECT RAISE(ABORT, 'CORE_MUTATION_VERIFICATION_APPEND_ONLY'); END
+    """,
 )
 _VERIFICATIONS_DDL = """
     CREATE TABLE IF NOT EXISTS core_mutation_verifications (
@@ -657,24 +667,15 @@ def _ensure_append_only_verifications(conn: sqlite3.Connection) -> None:
                 "RENAME TO core_mutation_verifications_pre2776"
             )
             conn.execute(_VERIFICATIONS_DDL)
-            cols = ", ".join(_VERIFICATION_COLUMNS)
-            conn.execute(
-                f"INSERT INTO core_mutation_verifications ({cols}) "
-                f"SELECT {cols} FROM core_mutation_verifications_pre2776 "
-                "ORDER BY verified_at, rowid"
-            )
+            conn.execute(_MIGRATE_PRE2776_ROWS_SQL)
             conn.execute("DROP TABLE core_mutation_verifications_pre2776")
         conn.execute(_VERIFICATIONS_DDL)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_core_mutation_verifications_session "
             "ON core_mutation_verifications(session_id, id)"
         )
-        for event in ("UPDATE", "DELETE"):
-            conn.execute(
-                f"CREATE TRIGGER IF NOT EXISTS core_mutation_verifications_no_{event.lower()} "
-                f"BEFORE {event} ON core_mutation_verifications BEGIN "
-                "SELECT RAISE(ABORT, 'CORE_MUTATION_VERIFICATION_APPEND_ONLY'); END"
-            )
+        for trigger_sql in _APPEND_ONLY_TRIGGERS_SQL:
+            conn.execute(trigger_sql)
         conn.commit()
     except BaseException:
         conn.rollback()
