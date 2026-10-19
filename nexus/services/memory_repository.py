@@ -4,6 +4,8 @@ import time
 import hashlib
 import os
 from pathlib import Path
+
+from nexus.core.state_root import state_read_only
 from typing import Dict, Any, List, Optional, Protocol, runtime_checkable
 
 try:
@@ -147,10 +149,13 @@ class MemoryRepository:
         return f"aaak:{digest}:{compressed} [dialect_fallback]"
 
     def _get_db(self):
+        if state_read_only() and not Path(self.db_path).exists():
+            return None  # #2721: never create the store; callers treat None as "no tables"
         if self._db is None:
             try:
                 import lancedb
-                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                if not state_read_only():
+                    self.db_path.parent.mkdir(parents=True, exist_ok=True)
                 self._db = lancedb.connect(self.db_path)
             except Exception as e:
                 logger.error(f"Failed to connect to LanceDB: {e}")
@@ -204,6 +209,8 @@ class MemoryRepository:
         Vectors come from the record or the injected EmbeddingProvider. Without a vector the
         row is still written with embedding_status="missing" (no dedup, no blocking call).
         """
+        if state_read_only():  # #2721: skip the whole ingest (no embed, no write)
+            return "SKIPPED_READ_ONLY"
         # 🛡️ Dual-Mode Metadata Injection
         new_record["tenant_id"] = tenant_id
         content = new_record.get("content", "")
@@ -343,6 +350,8 @@ class MemoryRepository:
         fts_column: Optional[str] = None,
         vector_col: str = "vector",
     ):
+        if state_read_only():  # #2721
+            return
         db = self._get_db()
         if db is None:
             return
@@ -370,6 +379,8 @@ class MemoryRepository:
                 logger.debug(f"LanceDB FTS index init skipped for {table_name}: {e}")
 
     def add_rows(self, table_name: str, rows: List[Dict[str, Any]], vector_col: str = "vector"):
+        if state_read_only():  # #2721
+            return
         db = self._get_db()
         if db is None:
             return
@@ -384,6 +395,8 @@ class MemoryRepository:
 
     def update_table(self, table_name: str, data: Any) -> None:
         """Replace a table with dataframe/list records for learning-weight updates."""
+        if state_read_only():  # #2721
+            return
         rows = data.to_dict("records") if hasattr(data, "to_dict") else list(data or [])
         if not rows:
             return

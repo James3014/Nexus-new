@@ -11,6 +11,12 @@ from nexus.infrastructure.sqlite_retry import SQLiteRetryHandler, is_retryable_s
 SQLITE_BUSY_TIMEOUT_MS = 5000
 SQLITE_WRITE_RETRIES = 4
 
+def state_read_only() -> bool:
+    from nexus.core.state_root import state_read_only as _state_read_only
+
+    return _state_read_only()
+
+
 class ProjectMemoryManager:
     """🧠 Nexus Project Memory: Persistent knowledge across sessions."""
     
@@ -19,11 +25,15 @@ class ProjectMemoryManager:
 
         project_root = persistent_state_root(project_root)  # #2688
         self.db_path = project_root / ".nexus" / "state" / "project_memory.sqlite"
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.last_sqlite_retry_receipt: dict | None = None
+        if state_read_only():  # #2721: no mkdir, no CREATE TABLE (re-checked per call too)
+            return
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def init_db(self):
+        if state_read_only():
+            return
         with self._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS insights (
@@ -55,6 +65,8 @@ class ProjectMemoryManager:
         )
 
     def add_insight(self, topic: str, content: str, insight_type: str = "RCA"):
+        if state_read_only():  # #2721
+            return
         self._execute_with_retry(
             "INSERT INTO insights (topic, content, type) VALUES (?, ?, ?)",
             (topic, content, insight_type),
@@ -69,6 +81,19 @@ class ProjectMemoryManager:
         concurrent_writer_count: int = 1,
     ):
         """Write an insight only after the SQLite write guard passes."""
+
+        if state_read_only():  # #2721: no guard probe (opens the DB), no write
+            return {
+                "schema": "nexus.memory_write_result.v1",
+                "status": "RETURN",
+                "written": False,
+                "topic": topic,
+                "write_guard_receipt": None,
+                "blockers": ["state_read_only"],
+                "claim_boundary": [
+                    "NEXUS_STATE_READ_ONLY=1: memory writes are skipped.",
+                ],
+            }
 
         receipt = self.build_write_guard_receipt(concurrent_writer_count=concurrent_writer_count)
         if receipt.get("status") != "PASS":
@@ -100,6 +125,8 @@ class ProjectMemoryManager:
         }
 
     def search(self, query: str):
+        if state_read_only() and not self.db_path.exists():  # #2721: nothing to read, create nothing
+            return []
         with self._connect() as conn:
             cursor = conn.execute(
                 "SELECT topic, content, type, timestamp FROM insights WHERE content LIKE ?",
@@ -108,6 +135,18 @@ class ProjectMemoryManager:
             return cursor.fetchall()
 
     def _connect(self):
+        if state_read_only():  # #2721: read-only open, no WAL pragma
+            # A WAL-mode DB at rest has no -wal file; a plain mode=ro open would create
+            # (and, being read-only, never delete) -wal/-shm.  With no -wal there is no
+            # log to replay, so open it immutable (no locking, no side files).  With a
+            # live -wal present a normal read-only open is required to see its content.
+            wal = Path(str(self.db_path) + "-wal")
+            flags = "mode=ro" if wal.exists() else "mode=ro&immutable=1"
+            conn = sqlite3.connect(
+                f"file:{self.db_path}?{flags}", uri=True, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000
+            )
+            conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+            return conn
         conn = sqlite3.connect(self.db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
