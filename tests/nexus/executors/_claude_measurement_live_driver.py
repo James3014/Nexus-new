@@ -44,6 +44,11 @@ class _RecordingService(SelfHostedTaskService):
 
 
 def run(spec: dict[str, Any]) -> dict[str, Any]:
+    if not spec.get("use_seatbelt", True):
+        # Hosts without macOS Seatbelt (Linux CI) run the same chain unsandboxed.
+        import nexus.executors.claude_measurement_worker as cmw
+
+        cmw._USE_SEATBELT = False
     root = Path(spec["work"]).resolve()
     task_id = spec["task_id"]
     ctl = root / "ctl"
