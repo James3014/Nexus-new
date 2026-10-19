@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from nexus.core.memory_coordinator import MemoryCoordinator
+from nexus.core.state_root import state_read_only
 from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
 from nexus.services.memory_repository import MemoryRepository
 from nexus.services.semantic_searcher import SemanticSearcher
@@ -183,7 +184,11 @@ class MemoryService:
         }
         
         dest_path = (self.run_dir if self.run_dir else self.project_root) / 'reminders.json'
-        
+
+        if state_read_only():  # #2721: aggregate is returned, nothing is written
+            gc.collect()
+            return result
+
         try:
             with open(dest_path, 'w', encoding='utf-8') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
@@ -255,6 +260,8 @@ class MemoryService:
         """📓 紀錄修復教訓至長效記憶體。"""
         if not lesson.fault_hash:
             return
+        if state_read_only():  # #2721: nothing recorded; returns None like the no-hash path
+            return
         entry = {
             "timestamp": datetime.now().isoformat(),
             "fault_hash": lesson.fault_hash,
@@ -288,6 +295,8 @@ class MemoryService:
         fault_hash: str = "",
     ) -> None:
         if not isinstance(weights, dict) or not weights:
+            return
+        if state_read_only():  # #2721
             return
 
         normalized = self._normalize_phase_weights(weights)
@@ -355,6 +364,8 @@ class MemoryService:
         return rows
 
     def _write_policy_memory_rows(self, rows: List[Dict[str, Any]]) -> None:
+        if state_read_only():  # #2721
+            return
         try:
             with self.coordinator.lock(self.policy_memory_jsonl):
                 self.jsonl_store.write_rows(str(self.policy_memory_jsonl), rows)

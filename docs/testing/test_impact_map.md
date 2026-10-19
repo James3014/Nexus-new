@@ -100,7 +100,7 @@
 | nexus/core/context_hub.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_split_contract |
 | nexus/core/context_budget_sources.py | tests/core/test_context_budget_sources.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder | active | high | context_hub_split_contract |
 | nexus/core/context_text_store.py | tests/core/test_context_text_store.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_text_store | active | high | context_hub_split_contract |
-| nexus/core/memory_manager.py | tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
+| nexus/core/memory_manager.py | tests/core/test_state_read_only_p1_writers_2721.py, tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
 | nexus/core/argv_command.py | tests/security/test_low_severity_hardening_2635.py, tests/core, tests/delivery, tests/health | active | high | no_shell_legacy_command_runner_2635 |
 | nexus/core/notifier.py | tests/security/test_low_severity_hardening_2635.py, tests/core | active | medium | notifier_osascript_argv_2635 |
 | scripts/core/guard_executor.py | tests/security/test_low_severity_hardening_2635.py, tests/test_guard_allowlist.py | active | medium | guard_executor_no_shell_2635 |
@@ -554,6 +554,14 @@
 | tests/test_v18_legacy_delivery.py | No direct import of core/services/engine found |
 | tests/test_llm_token_regex.py | No direct import of core/services/engine found |
 | tests/services/test_findings_embedding.py | tests/services/test_findings_embedding.py | active | medium | test_contract |
+| nexus/core/episode_repository.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/core/policy_manager.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/core/policy_metabolizer.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/core/memory_coordinator.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/research/findings_vector_sync.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/services/memory.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/services/memory_repository.py | tests/core/test_state_read_only_p1_writers_2721.py, tests/services/test_memory_repository_schema.py | active | high | state_read_only_p1_writers |
+| tests/core/test_state_read_only_p1_writers_2721.py | tests/core/test_state_read_only_p1_writers_2721.py | active | medium | test_contract |
 | tests/services/test_memory_repository_schema.py | tests/services/test_memory_repository_schema.py | active | medium | test_contract |
 | tests/services/test_lancedb_roots.py | tests/services/test_lancedb_roots.py | active | medium | test_contract |
 | tests/services/test_lancedb_roots_guard.py | tests/services/test_lancedb_roots_guard.py | active | medium | test_contract |
