@@ -1110,12 +1110,17 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                              outcome={"error": str(exc)[:300]})
 
 
+_REPORTABLE_PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_][A-Za-z0-9_.-]*)*")
+
+
 def _reportable_relative_path(value: str) -> str:
-    """``value`` when it is a short repo-relative path, else ``""`` (never a host path)."""
+    """``value`` when it is a short plain repo-relative path, else ``""``.
+
+    An allowlist (letters, digits, ``_ . -`` and single ``/``; no leading dot or
+    slash, no ``..`` segment, no ``:``), so no host path or URI form is reported.
+    """
     text = str(value or "")
-    if not text or len(text) > 200 or text.startswith(("/", "~")) or "\\" in text:
-        return ""
-    if re.match(r"^[A-Za-z]:", text) or ".." in text.split("/"):
+    if len(text) > 200 or not _REPORTABLE_PATH.fullmatch(text) or ".." in text.split("/"):
         return ""
     return text
 

@@ -469,7 +469,16 @@ def test_belief_reports_which_key_answered(tmp_path, monkeypatch) -> None:
     # A host path is looked up as before but never reported.
     host = outcome({"belief_target_files": [str(tmp_path / "pkg" / "a.py")]})
     assert host["belief_target_file"] == ""
-    for bad in ("../a.py", "C:/x.py", "~/x.py", "a" * 201):
+    for bad in (
+        "../a.py",
+        "C:/x.py",
+        "~/x.py",
+        "a" * 201,
+        "file:///Users/example/a.py",
+        "pkg//a.py",
+        ".hidden/a.py",
+        "pkg/a b.py",
+    ):
         assert outcome({"belief_target_files": [bad]})["belief_target_file"] == ""
 
 
