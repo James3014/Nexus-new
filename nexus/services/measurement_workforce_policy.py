@@ -110,8 +110,10 @@ def _materialized_policy_path(base_path: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"model_workforce.measure-2721.{digest[:16]}.yaml"
     if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-        partial = target.with_suffix(f".{os.getpid()}.tmp")
-        partial.write_text(text, encoding="utf-8")
+        # Unpredictable temp name, then an atomic rename (review L1).
+        fd, partial = tempfile.mkstemp(prefix=".policy-", suffix=".tmp", dir=root)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
         os.replace(partial, target)
     return target
 

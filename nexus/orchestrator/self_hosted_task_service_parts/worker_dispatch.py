@@ -39,6 +39,15 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
+# #2721: imported here, at service import (= process start), so the measurement
+# switch is snapshotted then; the runtime coordination bridge loads lazily.
+import nexus.orchestrator.measurement_worktree_diff  # noqa: F401
+from nexus.orchestrator.self_hosted_task_service_parts.worker_gate_inputs import (
+    RECEIPT_ONLY_WORKER_GATES,
+    worker_gate_inputs,
+    wrap_worker_gate_invokers,
+)
+
 if TYPE_CHECKING:
     from nexus.executors.worker_contract import WorkerExecutionReceipt
     from nexus.executors.worker_registry import WorkerRegistry
@@ -282,6 +291,7 @@ class _WorkerDispatchMixin:
             build_worker_context_package,
         )
 
+        from nexus.core.state_root import configured_state_root
         from nexus.services.mainchain_entry import build_mainchain_capability_invokers
         from nexus.services.unified_runtime import materialize_selected_capability_evidence
 
@@ -403,6 +413,19 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
                 include_postflight_gates=True,
             )
+            # #2734: feed the pre-execution gates from the Task Card, record-only.
+            invokers = wrap_worker_gate_invokers(
+                invokers,
+                worker_gate_inputs(
+                    planner=planner,
+                    task_statement=task_statement,
+                    allowed_files=getattr(contract, "allowed_files", None)
+                    or request.get("allowed_files"),
+                    verifier_commands=getattr(contract, "verifier_commands", None)
+                    or request.get("verifier_commands"),
+                    state_root=configured_state_root(),
+                ),
+            )
             capability_results, bundle = materialize_selected_capability_evidence(
                 planner_output=planner,
                 selected_capabilities=selected,
@@ -430,12 +453,14 @@ class _WorkerDispatchMixin:
                     # #2688: xray scans the task's own files (only xray reads this key);
                     # files the task will create do not exist yet and are left out.
                     **_xray_targets_context(request.get("allowed_files"), target_worktree),
+                    **_belief_target_context(request.get("allowed_files"), target_worktree),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,
                     "controller_revision": controller_revision,
                 },
                 codeintel=codeintel,
+                receipt_only_capabilities=RECEIPT_ONLY_WORKER_GATES,
             )
             bundle = dict(bundle)
             observations = _capability_observations(capability_results)
@@ -545,10 +570,15 @@ _OBSERVATION_OUTCOME_KEYS = (
     "findings_hit_count",
     "confidence",
     "state_file",
+    "belief_target_file",
+    "belief_lookup",
     "lookup_symbol",
     "found",
     "match_count",
 )
+# #2732: ultra_review is record-only; its own verdict must survive into the record.
+# #2772: only for ADVISORY_ONLY_CAPABILITIES, so no other capability can spoof them.
+_ADVISORY_OBSERVATION_KEYS = ("advisory_only", "review_status", "review_passed")
 _OBSERVATION_MAX_TEXT = 512
 _OBSERVATION_MAX_ITEMS = 16
 _OBSERVATION_MAX_CAPABILITIES = 64
@@ -583,6 +613,8 @@ def _capability_observations(results: Any) -> dict[str, Any]:
     """
     if not isinstance(results, Mapping):
         return {}
+    from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
+
     observations: dict[str, Any] = {}
     for name, stage in results.items():
         if not isinstance(stage, Mapping):
@@ -603,6 +635,16 @@ def _capability_observations(results: Any) -> dict[str, Any]:
                     entry[key] = value
         if outcome.get("error"):
             entry["error_present"] = True  # never the message: it can carry task text
+        if str(name) in ADVISORY_ONLY_CAPABILITIES:
+            for key in _ADVISORY_OBSERVATION_KEYS:
+                if key in outcome:
+                    value = _observation_value(outcome[key])
+                    if value is not None:
+                        entry[key] = value
+            if outcome.get("review_error"):
+                entry["review_error_present"] = True  # #2732: same rule, presence only
+            if outcome.get("advisory_only") is True and isinstance(outcome.get("findings"), list):
+                entry["review_findings_count"] = len(outcome["findings"])
         if "root" in result:
             root = _observation_value(result["root"])
             if isinstance(root, str):
@@ -632,3 +674,28 @@ def _codeintel_lookup_or_derived(
     return _service_module()._codeintel_lookup_context(
         {**derived, "search_paths": list(derived.get("search_paths") or ())}, target_worktree
     )
+
+
+def _belief_target_context(allowed_files: Any, target_worktree: Any) -> dict[str, Any]:
+    """``{"belief_target_files": [path]}`` when the task targets exactly one existing file (#2721).
+
+    Belief keys its per-file confidence by that file.  With several allowed files the
+    target is ambiguous (the task may be about a file it will create), so no file is
+    passed and belief keeps its task-level lookup instead of borrowing another file's
+    confidence.
+    """
+    if not isinstance(allowed_files, (list, tuple)) or len(allowed_files) != 1:
+        return {}
+    targets = _xray_targets_context(allowed_files, target_worktree).get("xray_targets") or []
+    try:
+        root = Path(str(target_worktree)).resolve(strict=True)
+        files = [
+            path
+            for path in targets
+            if not (root / path).is_symlink()
+            and (root / path).resolve(strict=True).is_relative_to(root)
+            and (root / path).is_file()
+        ]
+    except (OSError, RuntimeError, ValueError):
+        return {}
+    return {"belief_target_files": files} if files else {}

@@ -474,7 +474,7 @@ def failure(service, monkeypatch, tmp_path, fixed_now) -> SimpleNamespace:
     )
 
 
-CLEAN = [(0, f"{CURRENT}\n"), (0, ""), (0, "src/other.py\n"), (0, "README\n"), (0, "")]
+CLEAN = [(0, f"{CURRENT}\n"), (0, ""), (0, "src/other.py\0"), (0, "README\0"), (0, ""), (0, "")]
 
 
 def _evidence(controller: Path, **extra: Any) -> dict[str, Any]:
@@ -486,7 +486,9 @@ def _evidence(controller: Path, **extra: Any) -> dict[str, Any]:
         "commits_since_base": ["src/other.py"],
         "working_tree_changes": ["README"],
         "staged_changes": [],
+        "untracked_changes": [],
         "allowed_paths": ["docs", "src/a.py"],
+        "invalid_allowed_paths": [],
         "target_created": False,
         "candidate_created": False,
         "allowed_paths_touched": [],
@@ -517,9 +519,28 @@ def test_direct_failure_no_mutation_closes_as_final_block(failure) -> None:
     assert failure.log == [
         (("git", "rev-parse", "HEAD"), _kwargs(c)),
         (("git", "merge-base", "--is-ancestor", HEAD, CURRENT), _kwargs(c)),
-        (("git", "diff", "--name-only", f"{HEAD}..HEAD"), _kwargs(c)),
-        (("git", "diff", "--name-only"), _kwargs(c)),
-        (("git", "diff", "--cached", "--name-only"), _kwargs(c)),
+        (
+            ("git", "diff", "--name-only", "--no-relative", "--no-renames", "-z", f"{HEAD}..HEAD"),
+            _kwargs(c),
+        ),
+        (("git", "diff", "--name-only", "--no-relative", "--no-renames", "-z"), _kwargs(c)),
+        (
+            ("git", "diff", "--cached", "--name-only", "--no-relative", "--no-renames", "-z"),
+            _kwargs(c),
+        ),
+        (
+            (
+                "git",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--full-name",
+                "-z",
+                "--",
+                ":(top)",
+            ),
+            _kwargs(c),
+        ),
     ]
     evidence = _evidence(c)
     assert failure.checkpoints == [
@@ -584,12 +605,28 @@ def _retained(failure: SimpleNamespace, evidence: dict[str, Any], *, action: Any
 @pytest.mark.parametrize(
     "touched, answers",
     [
-        (["src/a.py"], [(0, f"{CURRENT}\n"), (0, ""), (0, "src/a.py\n"), (0, ""), (0, "")]),
-        (["src/a.py"], [(0, f"{CURRENT}\n"), (0, ""), (0, ""), (0, "src/a.py\n"), (0, "")]),
-        (["src/a.py"], [(0, f"{CURRENT}\n"), (0, ""), (0, ""), (0, ""), (0, "src/a.py\n")]),
+        (
+            ["src/a.py"],
+            [(0, f"{CURRENT}\n"), (0, ""), (0, "src/a.py\0"), (0, ""), (0, ""), (0, "")],
+        ),
+        (
+            ["src/a.py"],
+            [(0, f"{CURRENT}\n"), (0, ""), (0, ""), (0, "src/a.py\0"), (0, ""), (0, "")],
+        ),
+        (
+            ["src/a.py"],
+            [(0, f"{CURRENT}\n"), (0, ""), (0, ""), (0, ""), (0, "src/a.py\0"), (0, "")],
+        ),
         (
             ["docs", "src/a.py"],
-            [(0, f"{CURRENT}\n"), (0, ""), (0, "docs\nsrc/a.py\n"), (0, "src/a.py\n"), (0, "x\n")],
+            [
+                (0, f"{CURRENT}\n"),
+                (0, ""),
+                (0, "docs\0src/a.py\0"),
+                (0, "src/a.py\0"),
+                (0, "x\0"),
+                (0, ""),
+            ],
         ),
     ],
 )
@@ -604,14 +641,21 @@ def test_direct_failure_touched_allowed_paths_are_retained(failure, touched, ans
 
 
 def test_direct_failure_directory_boundaries_only_match_exactly(failure) -> None:
-    # allowed_files are stored without a trailing "/", so a file below an allowed
-    # directory is not an allowed-path touch; only the exact path is.
+    # Issue #2727 item 1 (this test id predates the fix): a file strictly below an allowed
+    # directory is an allowed-path touch; a sibling that only shares a prefix is not.
     failure.state()
-    failure.use([(0, f"{CURRENT}\n"), (0, ""), (0, "docs/x.md\nsrc/a.py.bak\n"), (0, ""), (0, "")])
+    failure.use([
+        (0, f"{CURRENT}\n"),
+        (0, ""),
+        (0, "docs/x.md\0src/a.py.bak\0docs2/y\0"),
+        (0, ""),
+        (0, ""),
+        (0, ""),
+    ])
     failure.service._reconcile_direct_failure("t")
     ((_, status, values, _),) = failure.checkpoints
-    assert status == "FINAL_BLOCK"
-    assert values["reconciliation_evidence"]["allowed_paths_touched"] == []
+    assert status == "DIRECT_RECONCILE_REQUIRED"
+    assert values["reconciliation_evidence"]["allowed_paths_touched"] == ["docs/x.md"]
     assert values["reconciliation_evidence"]["allowed_paths"] == ["docs", "src/a.py"]
 
 
@@ -623,7 +667,7 @@ def test_direct_failure_allowed_files_normalisation(failure) -> None:
             "allowed_files": ["b//", "", "  ", "a", 7, "a/"],
         }
     )
-    failure.use([(0, f"{CURRENT}\n"), (0, ""), (0, "7\n"), (0, ""), (0, "")])
+    failure.use([(0, f"{CURRENT}\n"), (0, ""), (0, "7\0"), (0, ""), (0, ""), (0, "")])
     failure.service._reconcile_direct_failure("t")
     ((_, status, values, _),) = failure.checkpoints
     evidence = values["reconciliation_evidence"]
@@ -634,13 +678,14 @@ def test_direct_failure_allowed_files_normalisation(failure) -> None:
 
 def test_direct_failure_not_an_ancestor_is_retained_without_the_base_diff(failure) -> None:
     failure.state()
-    failure.use([(0, f"{CURRENT}\n"), (1, ""), (0, "w\n"), (0, "s\n")])
+    failure.use([(0, f"{CURRENT}\n"), (1, ""), (0, "w\0"), (0, "s\0"), (0, "")])
     failure.service._reconcile_direct_failure("t")
     assert [argv[1:3] for argv, _ in failure.log] == [
         ("rev-parse", "HEAD"),
         ("merge-base", "--is-ancestor"),
         ("diff", "--name-only"),
         ("diff", "--cached"),
+        ("ls-files", "--others"),
     ]
     _retained(
         failure,
@@ -659,12 +704,13 @@ def test_direct_failure_without_a_full_expected_head_is_retained(failure, revisi
     failure.state(
         request={"controller_repo_root": str(failure.controller), "controller_revision": revision}
     )
-    failure.use([(0, f"{CURRENT}\n"), (0, ""), (0, "")])
+    failure.use([(0, f"{CURRENT}\n"), (0, ""), (0, ""), (0, "")])
     failure.service._reconcile_direct_failure("t")
     assert [argv[1:3] for argv, _ in failure.log] == [
         ("rev-parse", "HEAD"),
         ("diff", "--name-only"),
         ("diff", "--cached"),
+        ("ls-files", "--others"),
     ]
     _retained(
         failure,
@@ -681,9 +727,9 @@ def test_direct_failure_without_a_full_expected_head_is_retained(failure, revisi
 
 def test_direct_failure_without_a_current_head_is_retained(failure) -> None:
     failure.state()
-    failure.use([(128, "  \n"), (0, ""), (0, "")])
+    failure.use([(128, "  \n"), (0, ""), (0, ""), (0, "")])
     failure.service._reconcile_direct_failure("t")
-    assert len(failure.log) == 3
+    assert len(failure.log) == 4
     _retained(
         failure,
         _evidence(
@@ -696,7 +742,7 @@ def test_direct_failure_without_a_current_head_is_retained(failure) -> None:
     )
 
 
-@pytest.mark.parametrize("at", [0, 1, 2, 3, 4])
+@pytest.mark.parametrize("at", [0, 1, 2, 3, 4, 5])
 def test_direct_failure_probe_os_error_is_retained(failure, at) -> None:
     failure.state()
     answers: list[Any] = list(CLEAN)
@@ -712,12 +758,14 @@ def test_direct_failure_probe_os_error_is_retained(failure, at) -> None:
     assert evidence["commits_since_base"] == (["src/other.py"] if at > 2 else [])
     assert evidence["working_tree_changes"] == (["README"] if at > 3 else [])
     assert evidence["staged_changes"] == []
+    assert evidence["untracked_changes"] == []
 
 
 def test_direct_failure_other_probe_errors_propagate(failure) -> None:
     failure.state()
-    failure.use([ValueError("not os")])
-    with pytest.raises(ValueError, match="not os"):
+    # ValueError (undecodable names) counts as a probe error since #2727; others still propagate
+    failure.use([RuntimeError("not os")])
+    with pytest.raises(RuntimeError, match="not os"):
         failure.service._reconcile_direct_failure("t")
     assert failure.checkpoints == [] and failure.now == []
 
@@ -831,7 +879,8 @@ def test_direct_failure_with_real_git_and_the_real_checkpoint(
 
 
 def test_direct_failure_does_not_see_untracked_files(service, tmp_path, fixed_now) -> None:
-    # the probes are git diff based: an untracked file at an allowed path is not observed
+    # Issue #2727 item 2 (this test id predates the fix): an untracked file at an allowed
+    # path is now observed, so the task is retained for review instead of closed.
     controller = (tmp_path / "repo").resolve()
     head = _repo(controller)
     (controller / "src" / "new.py").write_text("n\n", encoding="utf-8")
@@ -848,8 +897,10 @@ def test_direct_failure_does_not_see_untracked_files(service, tmp_path, fixed_no
             },
         },
     )
-    closed = service._reconcile_direct_failure("t")
-    assert closed is not None and closed["status"] == "FINAL_BLOCK"
+    retained = service._reconcile_direct_failure("t")
+    assert retained is not None and retained["status"] == "DIRECT_RECONCILE_REQUIRED"
+    assert retained["reconciliation_evidence"]["untracked_changes"] == ["src/new.py"]
+    assert retained["reconciliation_evidence"]["allowed_paths_touched"] == ["src/new.py"]
 
 
 # ---------------------------------------------------------------------------
@@ -2603,25 +2654,29 @@ def test_late_subprocess_root_and_clock_in_direct_failure(failure, monkeypatch, 
     monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", (tmp_path / "first").resolve())
     failure.use(list(CLEAN))
     failure.service._reconcile_direct_failure("t")
-    assert len(failure.log) == 5
+    assert len(failure.log) == 6
     late_root = (tmp_path / "late").resolve()
     late_log: list[Any] = []
     monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", late_root)
     monkeypatch.setattr(
         service_module,
         "subprocess",
-        _Proc([(0, f"{CURRENT}\n"), (0, ""), (0, "src/a.py\n"), (0, "w\n"), (0, "s\n")], late_log),
+        _Proc(
+            [(0, f"{CURRENT}\n"), (0, ""), (0, "src/a.py\0"), (0, "w\0"), (0, "s\0"), (0, "")],
+            late_log,
+        ),
     )
     monkeypatch.setattr(service_module, "_utc_now", lambda: "LATE-NOW")
     failure.checkpoints.clear()
     failure.service._reconcile_direct_failure("t")
-    assert len(failure.log) == 5
+    assert len(failure.log) == 6
     assert [argv[1:3] for argv, _ in late_log] == [
         ("rev-parse", "HEAD"),
         ("merge-base", "--is-ancestor"),
         ("diff", "--name-only"),
         ("diff", "--name-only"),
         ("diff", "--cached"),
+        ("ls-files", "--others"),
     ]
     assert {kwargs["cwd"] for _, kwargs in late_log} == {late_root}
     ((_, status, values, _),) = failure.checkpoints

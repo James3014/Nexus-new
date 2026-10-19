@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import copy
 import difflib  # noqa: F401 - kept on the facade after the G9a move
+import functools
 import hashlib
 import importlib
 import json
@@ -30,7 +31,7 @@ from datetime import (  # noqa: F401 - kept on the facade after the G9b move
     timezone,
 )
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import urlsplit  # noqa: F401 - kept on the facade after the G3 move
 from uuid import uuid4
 
@@ -118,6 +119,7 @@ from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     validate_approval_grant,
 )
+from nexus.orchestrator.measure_external_target import external_target_enabled
 from nexus.orchestrator.mutation_admission import (
     CANONICAL_REPOSITORIES,  # noqa: F401 - kept on the facade after the G3 move
     MutationAdmissionError,  # noqa: F401 - kept on the facade after the G8 move
@@ -457,18 +459,25 @@ def _text(value: Any, field: str, *, max_length: int = 4096) -> str:
     return result
 
 
-def _safe_relative_path(value: Any, field: str = "path") -> Path:
+def _safe_relative_path(value: Any, field: str = "path", *, root: Optional[Path] = None) -> Path:
+    """Bounded repository-relative path under the canonical root, or under ``root``.
+
+    ``root`` is only passed for a validated measurement external target
+    (#2721); every other caller keeps the canonical (Controller) root.
+    """
     raw = _text(value, field, max_length=1024)
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise GatewayInputError(f"{field} must be a bounded relative path")
     if ".git" in candidate.parts:
         raise GatewayInputError(f"{field} cannot access .git")
-    resolved = (CANONICAL_SOURCE_ROOT / candidate).resolve()
+    base = CANONICAL_SOURCE_ROOT if root is None else root
+    resolved = (base / candidate).resolve()
     try:
-        resolved.relative_to(CANONICAL_SOURCE_ROOT)
+        resolved.relative_to(base)
     except ValueError as exc:
-        raise GatewayInputError(f"{field} escapes canonical root") from exc
+        escaped = "canonical root" if root is None else "external target root"
+        raise GatewayInputError(f"{field} escapes {escaped}") from exc
     return resolved
 
 
@@ -502,6 +511,43 @@ def _safe_search_target(value: Any) -> tuple[Path, Path]:
     except ValueError as exc:
         raise GatewayInputError("path escapes canonical root") from exc
     return lexical, resolved
+
+
+_EXTERNAL_TARGET_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "Measurement Gateway only (#2721): cut the Target from an exact commit of a clean external "
+        "repository under NEXUS_MEASURE_EXTERNAL_TARGET_ROOT. Absent from the live Gateway."
+    ),
+    "required": ["repo_root", "base_revision"],
+    "additionalProperties": False,
+    "properties": {
+        "repo_root": {"type": "string", "maxLength": 1024},
+        "base_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    },
+}
+
+
+def _with_measurement_external_target_schema(
+    build: Callable[[], list[dict[str, Any]]],
+) -> Callable[[], list[dict[str, Any]]]:
+    """Declare ``external_target`` on ``nexus_worker_candidate`` in measurement mode only (#2721).
+
+    Without ``NEXUS_MEASURE_EXTERNAL_TARGET_ROOT`` the built specs are returned
+    unchanged, so the live tool schema (and its hash) stays byte-identical.
+    """
+
+    @functools.wraps(build)
+    def tool_specs() -> list[dict[str, Any]]:
+        specs = build()
+        if not external_target_enabled():
+            return specs
+        for spec in specs:
+            if spec.get("name") == "nexus_worker_candidate":
+                spec["inputSchema"]["properties"]["external_target"] = dict(_EXTERNAL_TARGET_SCHEMA)
+        return specs
+
+    return tool_specs
 
 
 def _require_bound_controller(expected_head: Optional[str] = None) -> None:
@@ -1135,6 +1181,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         return digest.hexdigest()
 
     @staticmethod
+    @_with_measurement_external_target_schema
     def tool_specs() -> list[dict[str, Any]]:
         recovery_request_schema = {
             "type": "object",
@@ -2997,15 +3044,22 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         }
 
     @staticmethod
-    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None, contract_binding: Optional[Mapping[str, Any]] = None, controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None, contract_binding: Optional[Mapping[str, Any]] = None, controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, bound_action_request: Optional[Mapping[str, Any]] = None, controller_repo_root: Optional[Path] = None) -> dict[str, Any]:  # fmt: skip
+        # ``controller_repo_root`` is only passed for a validated measurement
+        # external target (#2721); ``base`` is then that repository's exact HEAD.
+        controller = CANONICAL_SOURCE_ROOT if controller_repo_root is None else controller_repo_root
         target_worktree_root = CANONICAL_SOURCE_ROOT.parent / "nexus-runtime-targets"
         request = {
-            "task_id": task_id, "what": what, "why": why,
-            "controller_revision": base, "target_base_revision": base,
-            "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "controller_revision": base,
+            "target_base_revision": base,
+            "controller_repo_root": str(controller),
             "target_repo_root": str(target_worktree_root / task_id),
             "target_worktree_root": str(target_worktree_root),
-            "allowed_files": allowed, "verifier_commands": verifiers,
+            "allowed_files": allowed,
+            "verifier_commands": verifiers,
         }
         if contract_binding:
             request.update({

@@ -334,3 +334,27 @@ def test_cached_and_live_impact_agree_at_the_cap(tmp_path: Path) -> None:
     )
 
     assert cached["codeintel"]["risk_score"] == live["codeintel"]["risk_score"] == 100
+
+
+def test_route_fact_probes_never_run_repository_config_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#2742: an external measurement repo's fsmonitor (or one injected through GIT_CONFIG_*)
+    must not run while the planner reads route facts."""
+    root = _repo(tmp_path)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmonitor.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+    hook.chmod(0o755)
+    subprocess.run(["git", "-C", str(root), "config", "core.fsmonitor", str(hook)], check=True)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(hook))
+    (root / "pkg" / "user_d.py").write_text("from pkg.core import f\n", encoding="utf-8")
+
+    facts = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert facts["codeintel"]["impacted_files_count"] >= 1
+    assert not marker.exists()

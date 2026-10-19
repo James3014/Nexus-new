@@ -346,6 +346,12 @@ def _bounded_outcome(name: str, outcome: Mapping[str, Any]) -> dict[str, Any]:
             "regression_tests",
             "excluded_regression_tests",
             "error",
+            # #2732: record-only review; its own verdict and any infra error stay visible.
+            "advisory_only",
+            "retired_reason",
+            "review_status",
+            "review_passed",
+            "review_error",
         ),
         "file_lock": (
             "semantic_status",

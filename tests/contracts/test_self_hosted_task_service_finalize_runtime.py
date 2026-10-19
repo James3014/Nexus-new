@@ -2714,3 +2714,104 @@ def test_subclass_overrides_are_dispatched_through_self(tmp_path, monkeypatch) -
     svc._finalize_runtime_failure("t", "a", RuntimeError("x"))
     assert calls == [("read", "t"), ("checkpoint", "FINAL_BLOCK", "a")]
     assert svc._pid_alive(3) is True
+
+
+def test_finalize_records_learning_writeback_only_under_measurement_switch(
+    fin, monkeypatch
+) -> None:
+    """#2721: with NEXUS_LEARNING_WRITEBACK=1 the VERIFIED update carries the write-back observation."""
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_writeback(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {
+            "schema": learning_writeback.SCHEMA,
+            "enabled": True,
+            "read_only": False,
+            "card_written": True,
+        }
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", fake_writeback)
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    verified_update = dict(fin.updates)["VERIFIED"]
+    assert verified_update["learning_writeback"]["card_written"] is True
+    assert calls and calls[0]["verified"] is fin.verified
+
+
+def test_finalize_writeback_failure_never_fails_finalize(fin, monkeypatch) -> None:
+    """#2721: an exception inside the write-back is contained; finalize still completes."""
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
+
+    def boom(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", boom)
+    monkeypatch.setenv("NEXUS_LEARNING_WRITEBACK", "1")
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    verified_update = dict(fin.updates)["VERIFIED"]
+    assert verified_update["learning_writeback"]["error_type"] == "RuntimeError"
+
+
+def test_finalize_writeback_failure_without_switch_leaves_state_unchanged(fin, monkeypatch) -> None:
+    """#2721: with no measurement switch even a failing write-back adds nothing to VERIFIED."""
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
+
+    def boom(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", boom)
+    monkeypatch.delenv("NEXUS_LEARNING_WRITEBACK", raising=False)
+    monkeypatch.delenv("NEXUS_STATE_READ_ONLY", raising=False)
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    assert "learning_writeback" not in dict(fin.updates)["VERIFIED"]
+
+
+def _capture_writeback(monkeypatch) -> list[dict[str, Any]]:
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
+
+    calls: list[dict[str, Any]] = []
+
+    def fake(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"schema": learning_writeback.SCHEMA, "enabled": True, "read_only": False}
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", fake)
+    return calls
+
+
+def test_finalize_f2p_required_failed_attempt_still_writes_back(fin, monkeypatch) -> None:
+    """#2721: a non-PROVEN attempt on an F2P task writes FAILED back before it raises."""
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.resolution = SimpleNamespace(verdict="FAILED", failure_reasons=["verifier"])
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    with pytest.raises(RuntimeError):
+        fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == [None]
+    assert "learning_writeback" in dict(fin.updates)["VERIFIED"]
+
+
+def test_finalize_f2p_required_proven_writes_back_after_the_probe(fin, monkeypatch) -> None:
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.probe = {"status": "BASE_ALREADY_PASS", "base_exit_codes": [0]}
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    with pytest.raises(RuntimeError):
+        fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == ["BASE_ALREADY_PASS"]
+    assert fin.updates[-1][1]["learning_writeback"]["enabled"] is True
+
+
+def test_finalize_f2p_required_authority_return_writes_back_not_run(fin, monkeypatch) -> None:
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.authority = "PROMOTION_AUTHORITY_REQUIRED"
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == ["NOT_RUN"]
+    assert "learning_writeback" in fin.updates[-1][1]
