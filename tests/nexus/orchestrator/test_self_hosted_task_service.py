@@ -5527,6 +5527,36 @@ def test_direct_lane_rejects_lockfile_and_active_mutation_task():
     assert "another_mutation_task_is_active" in lane["blockers"]
 
 
+@pytest.mark.parametrize(
+    "entry",
+    ["generated/", "generated", "dist/", "build", ".next/", "generated/x.json", "src/a.generated.json"],
+)
+def test_direct_lane_rejects_generated_directory_entries(entry):
+    lane = resolve_execution_lane({
+        "controller_repo_root": "/Users/jameschen/Workspace/nexus",
+        "allowed_files": [entry],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }, active_mutation_tasks=0)
+
+    assert lane["execution_lane"] == "ISOLATED_TARGET"
+    assert "generated_or_large_change_forbidden" in lane["blockers"]
+
+
+@pytest.mark.parametrize("entry", ["generatedx/a.py", "src/dist", "builder/x.py", "next/x.js"])
+def test_direct_lane_generated_check_keeps_directory_boundaries(entry):
+    lane = resolve_execution_lane({
+        "controller_repo_root": "/Users/jameschen/Workspace/nexus",
+        "allowed_files": [entry],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }, active_mutation_tasks=0)
+
+    assert "generated_or_large_change_forbidden" not in lane["blockers"]
+
+
 def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     calls: list[tuple[str, str]] = []
