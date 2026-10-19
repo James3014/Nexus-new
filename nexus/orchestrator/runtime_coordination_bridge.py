@@ -14,6 +14,7 @@ from typing import Mapping
 
 from nexus_runtime.execution_coordination import ExecutionCoordinator
 
+from . import measurement_worktree_diff
 from . import self_hosted_task_service as _service_module
 from .self_hosted_task_service import (
     _task_deadline,
@@ -269,6 +270,7 @@ class _Worker:
             kwargs["worker_role"] = "implementation"
             receipt = self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
         except Exception as exc:
+            self._measurement_snapshot(task_id, attempt_id, lease, state)
             if trajectory_root is not None and trajectory_ref is not None:
                 try:
                     bind_trajectory_step_result(
@@ -284,6 +286,7 @@ class _Worker:
                     pass
             raise
 
+        self._measurement_snapshot(task_id, attempt_id, lease, state)
         if trajectory_root is not None and trajectory_ref is not None:
             try:
                 bind_trajectory_step_result(
@@ -307,6 +310,21 @@ class _Worker:
             except Exception:
                 pass
         return receipt
+
+    def _measurement_snapshot(self, task_id, attempt_id, lease, state):
+        # #2721 measurement only (off unless enabled at process start): the
+        # worker's raw Target diff, before the runtime records the receipt and
+        # before escalation, verification, capture or cleanup.  Never raises.
+        if not measurement_worktree_diff.enabled() or not task_id:
+            return
+        measurement_worktree_diff.record_after_worker(
+            read_state=self.service._read_state,
+            mutate_state=self.service._mutate_state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            lease=lease,
+            invocation=len(state.get("executions") or ()),
+        )
 
 
 class _Target:
@@ -373,7 +391,7 @@ class _Processes:
         process = subprocess.Popen(
             command,
             cwd=cwd,
-            env=dict(env),
+            env=measurement_worktree_diff.align_child_env(dict(env)),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

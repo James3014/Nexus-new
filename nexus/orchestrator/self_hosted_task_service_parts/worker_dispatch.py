@@ -39,6 +39,9 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
+# #2721: imported here, at service import (= process start), so the measurement
+# switch is snapshotted then; the runtime coordination bridge loads lazily.
+import nexus.orchestrator.measurement_worktree_diff  # noqa: F401
 from nexus.orchestrator.self_hosted_task_service_parts.worker_gate_inputs import (
     RECEIPT_ONLY_WORKER_GATES,
     worker_gate_inputs,
