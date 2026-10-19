@@ -131,6 +131,63 @@ def test_held_lock_with_dead_owner_is_not_reclaimed(tmp_path: Path) -> None:
         holder.close()
 
 
+def test_inherited_lock_in_surviving_child_blocks_reclaim_until_it_exits(tmp_path: Path) -> None:
+    """Real fd inheritance: a provider holding the passed lease fd outlives its dispatcher."""
+    coordinator, alias_hash = _coordinator(tmp_path)
+    claim = coordinator.acquire_claim("desktop-dying", wait_timeout=0)
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        pass_fds=(claim.lock_file_obj.fileno(),),
+        start_new_session=True,
+    )
+    try:
+        # The dispatcher "dies": its own descriptor closes without LOCK_UN and
+        # the receipt survives with a dead owner PID.
+        claim.lock_file_obj.close()
+        claim.released = True
+        receipt = claim.receipt_path
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+        data["pid"] = _dead_pid()
+        receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim("desktop-new", wait_timeout=0)
+        assert receipt.exists()
+    finally:
+        child.kill()
+        child.wait()
+    reclaimed = coordinator.acquire_claim("desktop-new", wait_timeout=0)
+    try:
+        assert reclaimed.account_alias_hash == alias_hash
+    finally:
+        reclaimed.release()
+
+
+def test_run_agy_never_passes_stdio_fds(monkeypatch, tmp_path: Path) -> None:
+    captured: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_popen(*args, **kwargs):
+        captured.update(kwargs)
+        raise _Stop()
+
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: "/bin/true")
+    monkeypatch.setattr(dispatch.subprocess, "Popen", fake_popen)
+    with pytest.raises(_Stop):
+        dispatch.run_agy(
+            env=dict(os.environ),
+            prompt="p",
+            cwd=str(tmp_path),
+            mode="plan",
+            model=GEMINI,
+            effort=None,
+            timeout=5,
+            lease_fd=2,
+        )
+    assert captured["pass_fds"] == ()
+
+
 # --- dispatcher -----------------------------------------------------------
 
 

@@ -1946,7 +1946,7 @@ def run_agy(
             start_new_session=True,
             # #2717: the provider inherits the per-account lease lock, so the
             # account stays locked while any provider outlives this dispatcher.
-            pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd >= 0 else (),
+            pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd > 2 else (),
         )
     except BaseException:
         if log_relay is not None:
