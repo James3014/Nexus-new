@@ -5529,7 +5529,10 @@ def test_direct_lane_rejects_lockfile_and_active_mutation_task():
 
 @pytest.mark.parametrize(
     "entry",
-    ["generated/", "generated", "dist/", "build", ".next/", "generated/x.json", "src/a.generated.json"],
+    [
+        "generated/", "generated", "dist/", "build", ".next/", "generated/x.json", "src/a.generated.json",
+        "Generated", "GENERATED/x.py", "Dist/", "src/A.Generated.JSON",
+    ],
 )
 def test_direct_lane_rejects_generated_directory_entries(entry):
     lane = resolve_execution_lane({
