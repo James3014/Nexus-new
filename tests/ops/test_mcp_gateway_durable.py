@@ -9005,3 +9005,52 @@ def test_r1_recovery_state_root_symlink_is_refused(tmp_path, monkeypatch):
     link.symlink_to(target)
     with pytest.raises(g.GatewayContractError, match="R1 recovery state root rejected"):
         g._ensure_recovery_state_root()
+
+
+def test_r1_measurement_guard_mirrors_deployer_exactly():
+    """#2745: R1 keeps its own copy (bound by the manager hash); it must not drift."""
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    assert g.R1_MEASUREMENT_ONLY_ENV_VARS == ad.MEASUREMENT_ONLY_ENV_VARS
+    assert g.R1_MEASUREMENT_ENV_REFUSED == ad.MEASUREMENT_ENV_REFUSED
+    assert g.R1_MEASUREMENT_ENV_REFUSED_EXIT == ad.MEASUREMENT_ENV_REFUSED_EXIT
+    assert g._r1_measurement_env_guard() == ad.measurement_env_guard()
+
+
+def test_r1_recovery_module_does_not_import_the_deployer():
+    # The R1 receipt binds sha256(mcp_gateway_durable.py) only, so the R1
+    # wrapper must not take bytes from another module (#2746 review).
+    source = Path(g.__file__).read_text(encoding="utf-8")
+    assert "import nexus_gateway_auto_deploy" not in source
+    assert "from scripts.ops.nexus_gateway_auto_deploy" not in source
+
+
+@pytest.mark.parametrize("kind", ["missing", "existing_0755", "symlink", "file"])
+def test_r1_state_root_validation_matches_deployer(tmp_path, monkeypatch, kind):
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    outcomes = []
+    for side in ("r1", "deployer"):
+        home = tmp_path / side / "home"
+        path = home / "Library/Application Support/Nexus/gateway-direct/state"
+        path.parent.mkdir(parents=True)
+        if kind == "existing_0755":
+            path.mkdir(mode=0o755)
+            (path / "keep").write_text("x")
+        elif kind == "symlink":
+            (tmp_path / side / "elsewhere").mkdir()
+            path.symlink_to(tmp_path / side / "elsewhere")
+        elif kind == "file":
+            path.write_text("")
+        monkeypatch.setattr(Path, "home", lambda home=home: home)
+        try:
+            if side == "r1":
+                result = g._ensure_recovery_state_root()
+            else:
+                result = ad.ensure_state_root_path(ad.live_state_root())
+            assert result == path
+            outcomes.append(("ok", stat.S_IMODE(path.stat().st_mode), sorted(os.listdir(path))))
+        except (g.GatewayContractError, ad.DeployError):
+            outcomes.append(("refused",))
+    assert outcomes[0] == outcomes[1], outcomes
+    assert outcomes[0][0] == ("ok" if kind in ("missing", "existing_0755") else "refused")

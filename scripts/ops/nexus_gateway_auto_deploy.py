@@ -1825,7 +1825,9 @@ AGY_RUNTIME_AUTHORIZATION_EXPORT = "export NEXUS_AGY_RUNTIME_AUTHORIZED=1 ; "
 # in production.  Every wrapper this deployer renders (live and spare probe)
 # and the R1 emergency-restore wrapper (``mcp_gateway_durable``) refuse to
 # start, after the env file is sourced, when any of these is non-empty.  A new
-# measurement-only switch must be added here in the same PR that adds it.
+# measurement-only switch must be added here in the same PR that adds it, and
+# to the R1 mirror ``R1_MEASUREMENT_ONLY_ENV_VARS`` in mcp_gateway_durable.py
+# (kept there so R1's manager hash binds it; tests assert they are equal).
 MEASUREMENT_ONLY_ENV_VARS: Tuple[str, ...] = (
     "NEXUS_MEASUREMENT_CLAUDE_WORKER",  # #2744
     "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT",  # #2742
