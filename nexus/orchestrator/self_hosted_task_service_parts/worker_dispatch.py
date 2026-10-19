@@ -628,9 +628,7 @@ def _codeintel_lookup_or_derived(
         return explicit
     from nexus.services.codeintel.lookup_target import derive_codeintel_lookup
 
-    derived = derive_codeintel_lookup(
-        task_statement, list(request.get("allowed_files") or ()), target_worktree
-    )
+    derived = derive_codeintel_lookup(task_statement, request.get("allowed_files"), target_worktree)
     return _service_module()._codeintel_lookup_context(
         {**derived, "search_paths": list(derived.get("search_paths") or ())}, target_worktree
     )

@@ -103,3 +103,34 @@ def test_files_outside_the_worktree_are_never_read(tmp_path: Path) -> None:
         "pkg/../../outside.py",
     ):
         assert derive_codeintel_lookup("secret parser alpha", [rel], root) == {}
+
+
+def test_malformed_inputs_and_bounds(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/a.py", "def alpha():\n    return 1\n")
+    assert derive_codeintel_lookup("alpha", 5, tmp_path) == {}
+    assert derive_codeintel_lookup("alpha", "pkg/a.py", tmp_path) == {}
+    assert derive_codeintel_lookup(None, ["pkg/a.py"], tmp_path) == {}
+    _write(
+        tmp_path, "pkg/big.py", "def big_alpha():\n    return 1\n" + "#" * (1024 * 1024 + 10) + "\n"
+    )
+    assert derive_codeintel_lookup("big alpha", ["pkg/big.py"], tmp_path) == {}
+    found = derive_codeintel_lookup("alpha", ["pkg/a.py"] * 10, tmp_path)
+    assert found["search_paths"] == ["pkg/a.py"]
+
+
+def test_symlinked_parent_directory_is_not_followed(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    _write(tmp_path, "outside/secret.py", "def secret_parser():\n    return 1\n")
+    root.mkdir()
+    (root / "pkg").symlink_to(tmp_path / "outside")
+
+    assert derive_codeintel_lookup("secret parser", ["pkg/secret.py"], root) == {}
+
+
+def test_non_identifier_module_names_do_not_block_a_valid_symbol(tmp_path: Path) -> None:
+    _write(tmp_path, "my-mod.py", "def parse_widget():\n    return 1\n")
+    _write(tmp_path, "pkg/widgets.py", "def parse_widget():\n    return 2\n")
+
+    found = derive_codeintel_lookup("parse widget", ["my-mod.py", "pkg/widgets.py"], tmp_path)
+
+    assert found["target_symbol"] == "pkg.widgets.parse_widget"
