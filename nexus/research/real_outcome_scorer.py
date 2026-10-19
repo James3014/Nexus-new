@@ -1456,7 +1456,7 @@ class PytestRunner:
         log: Callable[[str], None] = print,
         sandbox: str = SANDBOX_NONE,
         store: Path | None = None,
-        min_free_percent: int = 20,
+        min_free_disk_bytes: int = SCRATCH_MIN_FREE_BYTES,
     ):
         if sandbox not in RUNNER_SANDBOX_MODES:
             raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
@@ -1485,9 +1485,8 @@ class PytestRunner:
         # at the first run and removed by clean_tmp. A confined process may write only its
         # own run dir, so once this parent is gone it can re-create nothing under runs/.
         self.task_dir: Path | None = None
-        # A11 ("os"): host free-space floor checked before every run (<= 0 disables the
-        # percentage part; SCRATCH_MIN_FREE_BYTES always applies).
-        self.min_free_percent = min_free_percent
+        # A11 ("os"): free bytes the scratch filesystem must keep before every run.
+        self.min_free_disk_bytes = min_free_disk_bytes
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1759,18 +1758,12 @@ class PytestRunner:
         self.task_dir = None
 
     def check_host_disk(self) -> None:
-        """A11: raise ScratchInfraAbort when the scratch filesystem has less free space
-        than ``min_free_percent`` % or SCRATCH_MIN_FREE_BYTES."""
+        """A11: raise ScratchInfraAbort when the scratch filesystem has fewer than
+        ``min_free_disk_bytes`` free bytes (default SCRATCH_MIN_FREE_BYTES)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
-        usage = _disk_usage(probe)
-        percent = 100.0 * usage.free / usage.total if usage.total else 0.0
-        if usage.free < SCRATCH_MIN_FREE_BYTES or (
-            self.min_free_percent > 0 and percent < self.min_free_percent
-        ):
-            raise ScratchInfraAbort(
-                f"host_disk_low:free={usage.free}B ({percent:.1f}%) < "
-                f"{SCRATCH_MIN_FREE_BYTES}B or {self.min_free_percent}%"
-            )
+        free = _disk_usage(probe).free
+        if free < self.min_free_disk_bytes:
+            raise ScratchInfraAbort(f"host_disk_low:free={free}B < {self.min_free_disk_bytes}B")
 
     def _remove_run_dir(self, run_dir: Path) -> None:
         """Delete one A9 per-run dir without following links; log what could not go."""

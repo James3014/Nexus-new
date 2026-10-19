@@ -3926,19 +3926,21 @@ def _fake_disk(monkeypatch, *, total: int, free: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("total", "free", "min_percent", "aborts"),
+    ("total", "free", "floor", "aborts"),
     [
-        (1000 * 1024**3, 100 * 1024**3, 20, True),  # 10 % < 20 %
-        (1000 * 1024**3, 100 * 1024**3, 0, False),  # percentage check disabled
-        (1000 * 1024**3, 30 * 1024**3, 0, True),  # under the 40 GiB floor regardless
-        (1000 * 1024**3, 500 * 1024**3, 20, False),
+        (1000 * 1024**3, 30 * 1024**3, None, True),  # under the default 40 GiB floor
+        (1000 * 1024**3, 41 * 1024**3, None, False),  # 4.1 % free is fine: no percentage
+        (1000 * 1024**3, 30 * 1024**3, 20 * 1024**3, False),  # a lower floor (CLI flag)
+        (1000 * 1024**3, 100 * 1024**3, 200 * 1024**3, True),  # a higher floor
     ],
 )
 def test_sandbox_os_host_disk_check_before_every_run(
-    tmp_path, monkeypatch, total, free, min_percent, aborts
+    tmp_path, monkeypatch, total, free, floor, aborts
 ):
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
-    runner.min_free_percent = min_percent
+    assert runner.min_free_disk_bytes == ros.SCRATCH_MIN_FREE_BYTES == 40 * 1024**3
+    if floor is not None:
+        runner.min_free_disk_bytes = floor
     tree = _leak_tree(tmp_path, 0)
     env = LocalEnv().get("fixture-repo", tree)
     _fake_disk(monkeypatch, total=total, free=free)
@@ -3986,3 +3988,34 @@ def test_cli_infra_abort_exits_8_without_a_receipt(tmp_path, monkeypatch):
     ])
     assert rc == ros.INFRA_ABORT_EXIT_CODE == 8
     assert not list(out.rglob("real_outcome.json"))
+
+
+def test_cli_min_free_disk_gib_flag_sets_the_runner_floor(tmp_path, monkeypatch):
+    from nexus.research import score_real_outcome_cli as cli
+
+    assert cli.parse_args(["--out", "o"]).min_free_disk_gib == 40
+    assert cli.parse_args(["--out", "o"]).min_free_percent == 20  # memory only, unchanged
+    seen: dict[str, int] = {}
+
+    def capture(task_dir, ctx, candidate_override=None):
+        seen["floor"] = ctx.runner.min_free_disk_bytes
+        raise ros.ScratchInfraAbort("stop")
+
+    monkeypatch.setattr(cli.ros, "score_task", capture)
+    monkeypatch.setattr(cli, "wait_for_memory", lambda *a, **k: 0.0)
+    store = tmp_path / "store"
+    (store / "tasks" / "James3014__nexus-runtime--1").mkdir(parents=True)
+    rc = cli.main([
+        "--store",
+        str(store),
+        "--out",
+        str(tmp_path / "out"),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+        "--min-free-disk-gib",
+        "12.5",
+    ])
+    assert rc == ros.INFRA_ABORT_EXIT_CODE
+    assert seen["floor"] == int(12.5 * 1024**3)

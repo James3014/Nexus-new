@@ -348,11 +348,11 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
     them. The precedence rule is a safeguard for a case that cannot happen.
   - `--sandbox none` has no run directories, so nothing changes there.
 - **Host-disk check (`--sandbox os`).** Before every pytest run the scorer checks free
-  space on the scratch filesystem (`shutil.disk_usage`). It needs at least
-  `--min-free-percent` % free (the same threshold as the memory check, default 20; 0
-  turns this part off) and at least 40 GiB free (two per-run caps, so one run that
-  fills its cap still leaves room for the next).
-  - Below either, scoring stops with `ScratchInfraAbort` and writes no receipt and no
+  space on the scratch filesystem (`shutil.disk_usage(scratch).free`). It needs at
+  least `--min-free-disk-gib` GiB free. The default is 40, two per-run caps, so one run
+  that fills its cap still leaves room for the next. There is no percentage check.
+  `--min-free-percent` stays the memory check only, unchanged.
+  - Below the floor, scoring stops with `ScratchInfraAbort` and writes no receipt and no
     cache entry. The CLI exits **8**, a new code; codes 2-7 are taken. The driver or
     lab should treat exit 8 as infra and rerun.
   - The caps cannot see blocks that a test holds in an unlinked but still open file (a
