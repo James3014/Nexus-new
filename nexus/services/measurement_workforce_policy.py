@@ -36,7 +36,14 @@ _IDENTITY_FIELDS = ("provider", "model")
 
 
 def measurement_policy_document(base: dict[str, Any]) -> dict[str, Any]:
-    """The packaged policy with every online route sent to the measurement worker."""
+    """The packaged policy with the template worker's routes sent to the measurement worker.
+
+    Only routes (direct, campaign, consumer, route defaults) that point at
+    ``TEMPLATE_WORKER_ID`` move; every other route, worker and authority
+    (review, main engineering, ...) is left exactly as packaged (Codex r1 #7).
+    A dispatch that still resolves elsewhere is refused by
+    ``assert_measurement_dispatch`` instead of silently using another model.
+    """
     data = copy.deepcopy(base)
     workers = data.get("workers")
     if not isinstance(workers, dict) or not isinstance(workers.get(TEMPLATE_WORKER_ID), dict):
@@ -45,46 +52,53 @@ def measurement_policy_document(base: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"measurement worker id already in the packaged policy: {CLAUDE_MEASUREMENT_WORKER_ID}"
         )
+    template = workers[TEMPLATE_WORKER_ID]
     worker = {
         key: copy.deepcopy(value)
-        for key, value in workers[TEMPLATE_WORKER_ID].items()
+        for key, value in template.items()
         if key not in _IDENTITY_FIELDS
         and not key.endswith("_note")
         and key != "calibration_evidence"
     }
-    online = (data.get("routing") or {}).get("online")
-    if not isinstance(online, dict):
-        raise ValueError("measurement policy: routing.online missing")
-    roles = sorted(role for role, target in online.items() if isinstance(target, str))
     worker.update(
         provider=CLAUDE_MEASUREMENT_PROVIDER,
         model=CLAUDE_MEASUREMENT_MODEL,
-        roles=roles,
-        default_route=True,
         measurement_only_note=(
             "Nexus-new #2721 measurement worker; exists only when NEXUS_MEASUREMENT_CLAUDE_WORKER=1."
         ),
     )
-    # The policy requires exactly one advertised default per defaulted role.
-    for other in workers.values():
-        if isinstance(other, dict) and other.get("default_route") is True:
-            other["default_route"] = False
+    # The template's default-route role passes to the measurement worker.
+    template["default_route"] = False
     workers[CLAUDE_MEASUREMENT_WORKER_ID] = worker
-    for role in roles:
-        online[role] = CLAUDE_MEASUREMENT_WORKER_ID
+    online = (data.get("routing") or {}).get("online")
+    if not isinstance(online, dict):
+        raise ValueError("measurement policy: routing.online missing")
+    for role, target in list(online.items()):
+        if target == TEMPLATE_WORKER_ID:
+            online[role] = CLAUDE_MEASUREMENT_WORKER_ID
+    for scope_key in ("campaign_routing", "consumer_routing"):
+        scoped = online.get(scope_key)
+        if isinstance(scoped, dict):
+            for overrides in scoped.values():
+                if isinstance(overrides, dict):
+                    for role, target in list(overrides.items()):
+                        if target == TEMPLATE_WORKER_ID:
+                            overrides[role] = CLAUDE_MEASUREMENT_WORKER_ID
     defaults = online.get("route_defaults")
     if isinstance(defaults, dict):
-        for role, entry in defaults.items():
-            if isinstance(entry, dict) and role in roles:
+        for entry in defaults.values():
+            if isinstance(entry, dict) and entry.get("current_default") == TEMPLATE_WORKER_ID:
                 entry["current_default"] = CLAUDE_MEASUREMENT_WORKER_ID
-                if entry.get("fallback") == CLAUDE_MEASUREMENT_WORKER_ID:
-                    raise ValueError(
-                        f"measurement policy: {role} fallback equals the measurement worker"
-                    )
-    # Exact campaign / consumer overrides would route around the measurement worker.
-    online["campaign_routing"] = {}
-    online["consumer_routing"] = {}
     return data
+
+
+def assert_measurement_dispatch(provider: str, model: str) -> None:
+    """On a measurement Gateway every P1 dispatch must be the measurement model."""
+    if measurement_claude_enabled() and (provider, model) != (
+        CLAUDE_MEASUREMENT_PROVIDER,
+        CLAUDE_MEASUREMENT_MODEL,
+    ):
+        raise ValueError(f"measurement_dispatch_not_claude:{provider}/{model}")
 
 
 def _materialized_policy_path(base_path: Path) -> Path:

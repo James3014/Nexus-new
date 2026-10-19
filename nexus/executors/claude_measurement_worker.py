@@ -102,6 +102,15 @@ _READ_DENIED_ROOTS: tuple[str, ...] = (
     "/Volumes",
     "/opt",
 )
+_DENIED_HELPER_EXECUTABLES: tuple[str, ...] = (
+    "/usr/bin/open",
+    "/usr/bin/osascript",
+    "/usr/bin/security",
+    "/usr/bin/pbcopy",
+    "/usr/bin/pbpaste",
+)
+# Test-only switch for hosts without macOS Seatbelt (Linux CI); never set in production.
+_USE_SEATBELT = True
 _SAFE_TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _INFRA_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("rate_limited", re.compile(r"\b429\b|rate[ _-]?limit|usage limit|quota", re.I)),
@@ -165,25 +174,40 @@ def claude_measurement_argv(prompt: str) -> tuple[str, ...]:
 
 
 def task_venv_for(contract: Any) -> Optional[Path]:
-    """The task venv: ``<controller_repo_root>/../venv`` when it holds a python."""
+    """The task venv: ``<controller_repo_root>/../venv`` when it is a real venv
+    whose resolved location is a safe read root."""
     root = str(getattr(contract, "controller_repo_root", "") or "").strip()
     if not root:
         return None
     venv = Path(os.path.realpath(Path(root).parent / "venv"))
-    return venv if (venv / "bin" / "python").exists() else None
+    if not (venv / "bin" / "python").exists() or not (venv / "pyvenv.cfg").is_file():
+        return None
+    return venv if is_safe_read_root(venv) else None
 
 
 def _venv_interpreter_home(venv: Path) -> Optional[Path]:
-    """The base interpreter install a venv's python links to (must stay readable)."""
-    cfg = venv / "pyvenv.cfg"
-    try:
-        for line in cfg.read_text(encoding="utf-8").splitlines():
-            key, _, value = line.partition("=")
-            if key.strip() == "home" and value.strip():
-                return Path(os.path.realpath(Path(value.strip()).parent))
-    except OSError:
+    """The install prefix of the interpreter the venv's python resolves to.
+
+    Taken from the resolved ``bin/python`` symlink (never from ``pyvenv.cfg``),
+    and only when it is a safe read root (gap review / Codex r1 #4).
+    """
+    python = Path(os.path.realpath(venv / "bin" / "python"))
+    if not python.is_file() or python.parent.name != "bin":
         return None
-    return None
+    prefix = python.parent.parent
+    return prefix if is_safe_read_root(prefix) else None
+
+
+def is_safe_read_root(path: Path) -> bool:
+    """False for any path whose re-allowed reads would cover user data broadly:
+    the filesystem root, a denied root itself, the real HOME, or an ancestor of it."""
+    resolved = Path(os.path.realpath(path))
+    home = Path(os.path.realpath(os.path.expanduser("~")))
+    if len(resolved.parts) < 3:
+        return False
+    if str(resolved) in _READ_DENIED_ROOTS or resolved == home:
+        return False
+    return resolved not in home.parents
 
 
 def measurement_child_env(
@@ -260,6 +284,11 @@ def build_claude_seatbelt_profile(
         "(allow file-read-data",
         *[f'  (subpath "{_sbpl(path)}")' for path in reads],
         ")",
+        # Helpers that would act through unsandboxed system services (open a
+        # URL via LaunchServices, AppleScript, the keychain) cannot be started.
+        "(deny process-exec",
+        *[f'  (literal "{tool}")' for tool in _DENIED_HELPER_EXECUTABLES],
+        ")",
         "(deny network-outbound)",
         f'(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))',
         '(allow network-outbound (literal "/private/var/run/syslog"))',
@@ -277,14 +306,48 @@ def normalize_seatbelt_profile(
     return re.sub(r'remote ip "localhost:\d+"', 'remote ip "localhost:<PORT>"', text)
 
 
+def tls_client_hello_sni(data: bytes) -> Optional[str]:
+    """The SNI host name of a TLS ClientHello record, or None when absent/malformed."""
+    try:
+        if len(data) < 5 or data[0] != 0x16:
+            return None
+        end = min(len(data), 5 + int.from_bytes(data[3:5], "big"))
+        pos = 5
+        if data[pos] != 0x01:
+            return None
+        pos += 4 + 2 + 32  # handshake header, client version, random
+        pos += 1 + data[pos]  # session id
+        pos += 2 + int.from_bytes(data[pos : pos + 2], "big")  # cipher suites
+        pos += 1 + data[pos]  # compression methods
+        ext_end = min(end, pos + 2 + int.from_bytes(data[pos : pos + 2], "big"))
+        pos += 2
+        while pos + 4 <= ext_end:
+            ext_type = int.from_bytes(data[pos : pos + 2], "big")
+            ext_len = int.from_bytes(data[pos + 2 : pos + 4], "big")
+            pos += 4
+            if ext_type == 0 and ext_len >= 5 and data[pos + 2] == 0:
+                name_len = int.from_bytes(data[pos + 3 : pos + 5], "big")
+                return data[pos + 5 : pos + 5 + name_len].decode("ascii").lower()
+            pos += ext_len
+    except (IndexError, UnicodeDecodeError):
+        return None
+    return None
+
+
 class HostAllowlistProxy:
     """A local HTTP CONNECT proxy that tunnels only ``ALLOWED_API_HOSTS:443``.
 
     Every attempt is logged (host, port, allowed), so a run that tried to
     reach anything else (a package index, GitHub) is visible in the trace.
+    The tunnel opens only when the client's TLS ClientHello names the same
+    host (SNI), so the CONNECT authority cannot front for another site.  At
+    most ``max_connections`` connections are served at once; a client gets
+    10 s to send its CONNECT header and its ClientHello.
     """
 
-    def __init__(self, allowed_hosts: tuple[str, ...] = ALLOWED_API_HOSTS):
+    def __init__(
+        self, allowed_hosts: tuple[str, ...] = ALLOWED_API_HOSTS, max_connections: int = 32
+    ):
         self.allowed_hosts = tuple(host.lower() for host in allowed_hosts)
         self.attempts: list[dict[str, Any]] = []
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -294,6 +357,7 @@ class HostAllowlistProxy:
         self.port = int(self._server.getsockname()[1])
         self._closed = threading.Event()
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(max_connections)
         self._thread = threading.Thread(target=self._serve, daemon=True)
 
     @property
@@ -320,16 +384,30 @@ class HostAllowlistProxy:
                 client, _ = self._server.accept()
             except OSError:
                 return
-            threading.Thread(target=self._handle, args=(client,), daemon=True).start()
+            if not self._slots.acquire(blocking=False):
+                self._record("<over-connection-limit>", 0, False)
+                try:
+                    client.close()
+                except OSError:
+                    pass
+                continue
+            threading.Thread(target=self._handle_slot, args=(client,), daemon=True).start()
 
-    def _record(self, host: str, port: int, allowed: bool) -> None:
+    def _handle_slot(self, client: socket.socket) -> None:
+        try:
+            self._handle(client)
+        finally:
+            self._slots.release()
+
+    def _record(self, host: str, port: int, allowed: bool, **extra: Any) -> None:
         with self._lock:
-            self.attempts.append({"host": host, "port": port, "allowed": allowed})
+            if len(self.attempts) < 1000:
+                self.attempts.append({"host": host, "port": port, "allowed": allowed, **extra})
 
     def _handle(self, client: socket.socket) -> None:
         upstream: Optional[socket.socket] = None
         try:
-            client.settimeout(30)
+            client.settimeout(10)
             head = b""
             while b"\r\n\r\n" not in head and len(head) < 16384:
                 chunk = client.recv(4096)
@@ -346,12 +424,25 @@ class HostAllowlistProxy:
             host, _, port_text = parts[1].rpartition(":")
             port = int(port_text) if port_text.isdigit() else 0
             allowed = host.lower() in self.allowed_hosts and port == 443
-            self._record(host[:200], port, allowed)
             if not allowed:
+                self._record(host[:200], port, False)
                 client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                 return
-            upstream = socket.create_connection((host, port), timeout=30)
             client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            hello = head.split(b"\r\n\r\n", 1)[1]
+            while len(hello) < 5 or len(hello) < 5 + int.from_bytes(hello[3:5], "big"):
+                if len(hello) >= 16384:
+                    break
+                chunk = client.recv(4096)
+                if not chunk:
+                    return
+                hello += chunk
+            sni = tls_client_hello_sni(hello)
+            self._record(host[:200], port, sni == host.lower(), sni=sni)
+            if sni != host.lower():
+                return
+            upstream = socket.create_connection((host, port), timeout=30)
+            upstream.sendall(hello)
             client.settimeout(None)
             upstream.settimeout(None)
             sockets = [client, upstream]
@@ -505,33 +596,51 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
 
 
 def classify_claude_infra(summary: ClaudeStreamSummary, stderr: str | bytes) -> Optional[str]:
-    """``rate_limited`` / ``overloaded`` / ``auth`` / ``api_error`` when the
-    run failed for a provider reason (both arms re-run it), else None."""
+    """``rate_limited`` / ``overloaded`` / ``auth`` / ``api_error`` when the run
+    failed for a provider reason (both arms re-run it), else None.
+
+    The run's own reply text is consulted only when the CLI itself reports an
+    API error, so a task that merely talks about logins or quotas is never
+    re-labelled infra; without that signal only stderr is read.
+    """
     err = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else str(stderr)
-    if summary.result_seen and summary.is_error is False and summary.terminal_reason != "api_error":
+    api_error = summary.terminal_reason == "api_error" or summary.api_error_status not in (None, "")
+    if summary.result_seen and summary.is_error is False and not api_error:
         return None
-    evidence = " ".join(
-        str(part)
-        for part in (
-            summary.api_error_status,
-            summary.terminal_reason,
-            summary.subtype,
-            summary.result_text
-            if summary.is_error or summary.terminal_reason == "api_error"
-            else "",
-            err[-4000:],
+    if api_error:
+        evidence = " ".join(
+            str(part)
+            for part in (
+                summary.api_error_status,
+                summary.subtype,
+                summary.result_text,
+                err[-4000:],
+            )
+            if part
         )
-        if part
-    )
-    if summary.terminal_reason == "api_error" or summary.api_error_status not in (None, ""):
         for kind, pattern in _INFRA_PATTERNS:
             if pattern.search(evidence):
                 return kind
         return "api_error"
     for kind, pattern in _INFRA_PATTERNS[:3]:
-        if pattern.search(evidence):
+        if pattern.search(err[-4000:]):
             return kind
     return None
+
+
+def redact_secrets(data: bytes, secrets: tuple[str, ...]) -> bytes:
+    """``data`` with every occurrence of each secret replaced by ``<REDACTED>``."""
+    for secret in secrets:
+        if secret and len(secret) >= 8:
+            data = data.replace(secret.encode("utf-8"), b"<REDACTED>")
+    return data
+
+
+def _write_private(path: Path, data: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    os.chmod(path, 0o600)
 
 
 def write_measurement_trace(
@@ -540,11 +649,14 @@ def write_measurement_trace(
     stdout_sha256: str,
     sidecar: Mapping[str, Any],
     environ: Optional[Mapping[str, str]] = None,
+    secrets: tuple[str, ...] = (),
 ) -> Optional[str]:
-    """Keep the raw stream-json trace (and its sidecar) on a measurement host.
+    """Keep the stream-json trace (and its sidecar) on a measurement host.
 
     Only ``NEXUS_MEASUREMENT_TRACE_DIR`` (absolute) enables this.  Files are
-    content-addressed by the receipt's ``stdout_sha256``.
+    named by the receipt's ``stdout_sha256`` (the hash of the raw stream) and
+    created 0600; every ``secrets`` value (the OAuth token) is redacted from
+    the stored stream and sidecar, since a tool call may print the environment.
     """
     env = os.environ if environ is None else environ
     root = str(env.get(MEASUREMENT_TRACE_DIR_ENV, "") or "").strip()
@@ -553,13 +665,13 @@ def write_measurement_trace(
     directory = Path(root) / str(task_id)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{stdout_sha256}.stream.jsonl"
-    target.write_bytes(stdout)
-    side = directory / f"{stdout_sha256}.run.json"
-    side.write_text(
-        json.dumps(dict(sidecar), sort_keys=True, indent=2, default=str), encoding="utf-8"
+    _write_private(target, redact_secrets(bytes(stdout), secrets))
+    side_text = json.dumps(
+        {**dict(sidecar), "secrets_redacted": bool(secrets)}, sort_keys=True, indent=2, default=str
     )
-    for path in (target, side):
-        os.chmod(path, 0o600)
+    _write_private(
+        directory / f"{stdout_sha256}.run.json", redact_secrets(side_text.encode("utf-8"), secrets)
+    )
     return str(target)
 
 
@@ -588,8 +700,13 @@ def run_claude_once(
     venv: Optional[Path],
     environ: Optional[Mapping[str, str]] = None,
     on_process_group: Any = None,
+    argv: Optional[tuple[str, ...]] = None,
 ) -> ClaudeRun:
-    """Run the CLI once in ``target`` under the measurement sandbox."""
+    """Run the CLI once in ``target`` under the measurement sandbox.
+
+    ``argv`` replaces the measurement flags + prompt (used only for
+    ``--version``, which then also runs inside the sandbox).
+    """
     from nexus.executors.cli_worker import CliWorkerRequest, run_cli_worker
 
     target = Path(os.path.realpath(target))
@@ -597,7 +714,10 @@ def run_claude_once(
     try:
         (run_root / "home" / ".claude").mkdir(parents=True)
         (run_root / "tmp").mkdir()
-        readable: list[Path] = [Path(os.path.realpath(executable)).parent]
+        cli_dir = Path(os.path.realpath(executable)).parent
+        if not is_safe_read_root(cli_dir):
+            raise ValueError("claude executable directory is not a safe read root")
+        readable: list[Path] = [cli_dir]
         if venv is not None:
             readable.append(venv)
             interpreter_home = _venv_interpreter_home(venv)
@@ -620,12 +740,15 @@ def run_claude_once(
             )
             request = CliWorkerRequest(
                 executable=executable,
-                argv=claude_measurement_argv(prompt),
+                argv=argv if argv is not None else claude_measurement_argv(prompt),
                 cwd=str(target),
                 timeout_seconds=float(timeout_seconds),
                 env=env,
                 exact_env=True,
-                seatbelt_profile=profile,
+                # The sandbox is mandatory: without sandbox-exec, run_cli_worker
+                # refuses to start.  Only tests on hosts without Seatbelt turn
+                # ``_USE_SEATBELT`` off (the profile is still built and hashed).
+                seatbelt_profile=profile if _USE_SEATBELT else None,
                 sweep_descendants_on_exit=True,
                 sweep_roots=(str(target), str(run_root)),
             )
@@ -665,6 +788,10 @@ class ClaudeMeasurementWorkerAdapter:
 
     def _env(self) -> Mapping[str, str]:
         return os.environ if self._environ is None else self._environ
+
+    def _secrets(self) -> tuple[str, ...]:
+        token = measurement_claude_token(self._env())
+        return (token,) if token else ()
 
     def preflight(self) -> Any:
         from nexus.executors.worker_contract import WorkerPreflight
@@ -715,10 +842,12 @@ class ClaudeMeasurementWorkerAdapter:
             raise WorkerProviderUnavailable(
                 f"{self.provider}: model {model!r} is not the measurement model {CLAUDE_MEASUREMENT_MODEL}"
             )
-        if require_leased_target or hasattr(contract, "target_worktree_root"):
-            failure = leased_target_failure(contract, lease)
-            if failure is not None:
-                raise WorkerProviderUnavailable(f"{self.provider}: {failure}")
+        # Always: the BARE arm calls invoke directly, so the lease check may not
+        # depend on the registry's require_leased_target flag (Codex r1 #5).
+        lease_failure = leased_target_failure(contract, lease)
+        if lease_failure is not None:
+            raise WorkerProviderUnavailable(f"{self.provider}: {lease_failure}")
+        del require_leased_target
         target = Path(os.path.realpath(lease.target_worktree))
         run = run_claude_once(
             str(preflight.executable),
@@ -746,6 +875,13 @@ class ClaudeMeasurementWorkerAdapter:
         if foreign:
             outcome = WorkerOutcome.FAILED
             failure = f"{self.provider}: model substitution observed: {sorted(foreign)}"
+        elif (
+            outcome is WorkerOutcome.EXECUTION_COMPLETED
+            and CLAUDE_MEASUREMENT_MODEL not in summary.models_seen
+        ):
+            # A success must positively show the measurement model served it.
+            outcome = WorkerOutcome.FAILED
+            failure = f"{self.provider}: no evidence that {CLAUDE_MEASUREMENT_MODEL} served the run"
         elif run.infra is not None and outcome is not WorkerOutcome.EXECUTION_COMPLETED:
             failure = f"claude_infra:{run.infra}"
         elif outcome is not WorkerOutcome.EXECUTION_COMPLETED:
@@ -774,6 +910,7 @@ class ClaudeMeasurementWorkerAdapter:
                 "timed_out": result.timed_out,
             },
             self._env(),
+            secrets=self._secrets(),
         )
         return WorkerExecutionReceipt(
             provider=self.provider,
@@ -801,8 +938,8 @@ class ClaudeMeasurementWorkerAdapter:
             provider_permission_profile_sha256=run.seatbelt_sha256,
             provider_write_sandbox=f"seatbelt:{run.seatbelt_sha256}",
             provider_env_keys_sha256=result.env_keys_sha256 or None,
-            stdout_tail=redacted_output_tail(result.stdout),
-            stderr_tail=redacted_output_tail(result.stderr),
+            stdout_tail=redacted_output_tail(redact_secrets(result.stdout, self._secrets())),
+            stderr_tail=redacted_output_tail(redact_secrets(result.stderr, self._secrets())),
         )
 
 
@@ -810,7 +947,7 @@ class ClaudeMeasurementWorkerAdapter:
 
 PROBE_PROMPT = "Reply with exactly the word ok and nothing else."
 PROBE_TTL_SECONDS = 3600
-_PROBE_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_PROBE_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}  # (binary sha, version, token sha)
 
 
 def _blocked(provider_result: dict[str, Any], blocker: str, **extra: Any) -> dict[str, Any]:
@@ -822,7 +959,6 @@ def measurement_claude_preflight(
     requested_model: str,
     *,
     environ: Optional[Mapping[str, str]] = None,
-    runner: Any = None,
     now: Any = None,
 ) -> dict[str, Any]:
     """``nexus.provider_preflight.v1`` for provider ``claude`` on a measurement Gateway.
@@ -833,10 +969,8 @@ def measurement_claude_preflight(
     (binary sha256, CLI version, model) for one hour.
     """
     import datetime
-    import subprocess
 
     env = os.environ if environ is None else environ
-    run_version = runner or subprocess.run
     clock = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
     result: dict[str, Any] = {
         "schema": "nexus.provider_preflight.v1",
@@ -868,26 +1002,36 @@ def measurement_claude_preflight(
     binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
     result.update(binary_found=True, binary_path=executable, binary_sha256=binary_sha256)
     with tempfile.TemporaryDirectory(prefix="nexus-claude-preflight-") as scratch:
-        version = run_version(
-            [executable, "--version"],
-            cwd=scratch,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-            env={"PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH, **CLAUDE_MEASUREMENT_ENV},
+        # ``--version`` runs inside the same sandbox as every other call (Codex r1 #2).
+        version_target = Path(scratch) / "version"
+        version_target.mkdir()
+        version_run = run_claude_once(
+            executable,
+            target=version_target,
+            prompt="",
+            timeout_seconds=30.0,
+            venv=None,
+            environ=env,
+            argv=("--version",),
         )
-        cli_version = (version.stdout or version.stderr or "").strip()[:512]
+        version = version_run.result
+        cli_version = (
+            (version.stdout or version.stderr or b"")
+            .decode("utf-8", errors="replace")
+            .strip()[:512]
+        )
         result.update(
             cli_version=cli_version,
             cli_version_sha256=hashlib.sha256(cli_version.encode("utf-8")).hexdigest(),
         )
-        if version.returncode != 0 or not cli_version:
+        if version.exit_code != 0 or not cli_version:
             return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_FAILED")
         pinned = str(env.get(MEASUREMENT_CLAUDE_VERSION_ENV, "") or "").strip()
         if pinned and not cli_version.startswith(pinned):
             return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_MISMATCH")
-        key = (binary_sha256, cli_version, CLAUDE_MEASUREMENT_MODEL)
+        token = measurement_claude_token(env) or ""
+        # A different account (token) needs its own proof (review finding #5).
+        key = (binary_sha256, cli_version, hashlib.sha256(token.encode("utf-8")).hexdigest())
         cached = _PROBE_CACHE.get(key)
         current = clock()
         if cached is None or datetime.datetime.fromisoformat(cached["probe_expires_at"]) <= current:

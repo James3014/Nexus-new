@@ -622,6 +622,12 @@ def build_canonical_planner_admission(
     if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
         raise ValueError("canonical_workforce_admission_not_single_allow")
     demand = demands["demands"][0]
+    from nexus.services.measurement_workforce_policy import assert_measurement_dispatch
+
+    # #2721: on a measurement Gateway a dispatch to any other model fails closed.
+    assert_measurement_dispatch(
+        str(decision.get("resolved_provider") or ""), str(decision.get("resolved_model") or "")
+    )
     policy_identity = admission.get("policy_identity")
     if not isinstance(policy_identity, Mapping):
         policy_identity = {}

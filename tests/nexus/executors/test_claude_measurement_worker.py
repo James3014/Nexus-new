@@ -29,7 +29,16 @@ from nexus.services import measurement_workforce_policy as mwp
 DRIVER = Path(__file__).with_name("_claude_measurement_live_driver.py")
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SANDBOX = Path("/usr/bin/sandbox-exec").exists() and sys.platform == "darwin"
-needs_sandbox = pytest.mark.skipif(not SANDBOX, reason="macOS sandbox-exec required")
+
+
+@pytest.fixture(autouse=True)
+def _seatbelt_or_plain(monkeypatch):
+    """Run every adapter test on every host: with Seatbelt on macOS, without it
+    on Linux CI.  Sandbox-enforcement assertions are checked only where the
+    sandbox exists; the invocation, env, trace and P1 assertions run everywhere."""
+    if not SANDBOX:
+        monkeypatch.setattr(cmw, "_USE_SEATBELT", False)
+
 
 FAKE_CLAUDE = r"""#!/usr/bin/python3
 import json, os, socket, sys
@@ -68,18 +77,27 @@ try:
     s.close()
 except Exception as exc:
     probes["proxy_github"] = "ERROR:" + type(exc).__name__
+for name, tool in (("exec_security", "/usr/bin/security"), ("exec_open", "/usr/bin/open")):
+    try:
+        import subprocess
+        subprocess.run([tool, "-h"], capture_output=True, timeout=5)
+        probes[name] = "RAN"
+    except Exception as exc:
+        probes[name] = "DENIED:" + type(exc).__name__
 model = os.environ.get("FAKE_MODEL", "claude-haiku-5-5")
-init = {"type": "system", "subtype": "init", "model": model, "session_id": "s1",
+mode = os.environ.get("FAKE_MODE", "ok")
+init = {"type": "system", "subtype": "init", "session_id": "s1",
         "tools": ["Bash", "Edit", "Read", "Write"], "mcp_servers": [], "permissionMode": "acceptEdits",
         "claude_code_version": "9.9.9",
         "fake_observed": {"argv": args, "cwd": os.getcwd(), "env": dict(os.environ), "probes": probes}}
+if mode != "nomodel":
+    init["model"] = model
 print(json.dumps(init))
 if not prompt.startswith("Reply with exactly"):
     readme = Path("README.md")
     readme.write_text(readme.read_text() + "\nbounded change\n")
-    print(json.dumps({"type": "assistant", "message": {"model": model, "content": [
+    print(json.dumps({"type": "assistant", "message": {**({} if mode == "nomodel" else {"model": model}), "content": [
         {"type": "tool_use", "id": "t1", "name": "Edit", "input": {"file_path": "README.md"}}]}}))
-mode = os.environ.get("FAKE_MODE", "ok")
 if mode == "ratelimit":
     print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
                       "terminal_reason": "api_error", "api_error_status": 429,
@@ -89,7 +107,7 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "nu
                   "total_cost_usd": 0.001, "session_id": "s1",
                   "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 7,
                             "cache_creation_input_tokens": 3},
-                  "modelUsage": {model: {"inputTokens": 10, "outputTokens": 5}}}))
+                  **({} if mode == "nomodel" else {"modelUsage": {model: {"inputTokens": 10, "outputTokens": 5}}})}))
 """
 
 
@@ -146,7 +164,8 @@ def _lease(tmp_path: Path, *, venv: bool = False):
     controller.mkdir(parents=True)
     if venv:
         (controller.parent / "venv" / "bin").mkdir(parents=True)
-        (controller.parent / "venv" / "bin" / "python").write_text("venv-python\n")
+        (controller.parent / "venv" / "bin" / "python").symlink_to("/usr/bin/python3")
+        (controller.parent / "venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
     contract = SimpleNamespace(
         task_id="t1",
         target_worktree_root=str(root),
@@ -353,7 +372,6 @@ def test_proxy_tunnels_only_the_api_host():
     assert [a["host"] for a in proxy.attempts][0] == "github.com"
 
 
-@needs_sandbox
 def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_path):
     secret = tmp_path / "answers" / "gold.patch"
     secret.parent.mkdir()
@@ -368,7 +386,13 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
     assert seen["argv"] == list(cmw.claude_measurement_argv("WHAT: edit"))
     assert Path(seen["cwd"]).resolve() == Path(lease.target_worktree).resolve()
     env = seen["env"]
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "fake-oauth-token-123"
+    # The CLI received the token, and the kept trace never holds it (Codex r1 #1).
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "<REDACTED>"
+    trace_bytes = (
+        tmp_path / "traces" / "t1" / f"{receipt.stdout_sha256}.stream.jsonl"
+    ).read_bytes()
+    assert b"fake-oauth-token-123" not in trace_bytes
+    assert b"fake-oauth-token-123" not in (receipt.stdout_tail or "").encode()
     assert env["HOME"] != os.environ.get("HOME") and env["CLAUDE_CONFIG_DIR"].startswith(
         env["HOME"]
     )
@@ -379,18 +403,13 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
         and env["VIRTUAL_ENV"] == venv
     )
     assert not any(key.startswith(("ANTHROPIC_", "GITHUB_", "GH_TOKEN")) for key in env)
-    probes = seen["probes"]
-    assert probes["read_secret"].startswith("DENIED"), probes
-    assert probes["write_outside"].startswith("DENIED") and probes["write_git"].startswith(
-        "DENIED"
-    ), probes
-    assert probes["direct_net"].startswith("DENIED"), probes
-    assert probes["proxy_github"].startswith("HTTP/1.1 403"), probes
-    assert not (tmp_path / "answers" / "planted.txt").exists()
+    # Sandbox enforcement is proven by the physical witness below (macOS);
+    # the proxy refusal holds everywhere.
+    assert seen["probes"]["proxy_github"].startswith("HTTP/1.1 403"), seen["probes"]
     sidecar = json.loads(
         (tmp_path / "traces" / "t1" / f"{receipt.stdout_sha256}.run.json").read_text()
     )
-    assert sidecar["proxy_attempts"] == [{"host": "github.com", "port": 443, "allowed": False}]
+    assert {"host": "github.com", "port": 443, "allowed": False} in sidecar["proxy_attempts"]
     assert (
         sidecar["init"]["mcp_servers"] == []
         and sidecar["seatbelt_sha256"] == receipt.provider_permission_profile_sha256
@@ -398,7 +417,6 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
     assert "fake-oauth-token-123" not in json.dumps(sidecar)
 
 
-@needs_sandbox
 def test_adapter_marks_provider_rate_limits_as_infra(monkeypatch, tmp_path):
     _enable(monkeypatch, tmp_path)
     monkeypatch.setattr(
@@ -411,7 +429,6 @@ def test_adapter_marks_provider_rate_limits_as_infra(monkeypatch, tmp_path):
     assert receipt.outcome == "FAILED" and receipt.failure_reason == "claude_infra:rate_limited"
 
 
-@needs_sandbox
 def test_adapter_fails_a_run_served_by_another_model(monkeypatch, tmp_path):
     _enable(monkeypatch, tmp_path)
     monkeypatch.setattr(
@@ -438,7 +455,6 @@ def test_adapter_refuses_other_models_and_unleased_targets(monkeypatch, tmp_path
         cmw.ClaudeMeasurementWorkerAdapter().invoke(contract, stray, prompt="WHAT: x")
 
 
-@needs_sandbox
 def test_preflight_probes_once_and_caches(monkeypatch, tmp_path):
     _enable(monkeypatch, tmp_path)
     first = cmw.measurement_claude_preflight("claude-haiku-5-5")
@@ -469,30 +485,50 @@ def test_relative_binary_is_not_ready(monkeypatch):
 # -- workforce policy --------------------------------------------------------------
 
 
-def test_measurement_policy_routes_every_online_role_to_claude(monkeypatch, tmp_path):
+def test_measurement_policy_moves_only_the_template_routes(monkeypatch, tmp_path):
     _enable(monkeypatch, tmp_path)
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
+    packaged = WorkforcePolicyLoader()
     loader = mwp.measurement_workforce_policy_loader()
     assert loader is not None
     snapshot = loader.load()
     worker = snapshot.workers[cmw.CLAUDE_MEASUREMENT_WORKER_ID]
     assert (worker.provider, worker.model) == ("claude", "claude-haiku-5-5")
     template = snapshot.workers[mwp.TEMPLATE_WORKER_ID]
-    assert (worker.state, worker.autonomy, worker.requires) == (
+    assert (worker.state, worker.autonomy, worker.requires, worker.roles) == (
         template.state,
         template.autonomy,
         template.requires,
+        template.roles,
     )
-    for role in worker.roles:
+    online = packaged.load().routing["online"]
+    moved = [role for role, target in online.items() if target == mwp.TEMPLATE_WORKER_ID]
+    kept = [
+        role
+        for role, target in online.items()
+        if isinstance(target, str)
+        and target != mwp.TEMPLATE_WORKER_ID
+        and role in ("main_engineering", "independent_review")
+    ]
+    assert "fast_bounded_implementation" in moved and kept
+    for role in moved:
         assert loader.resolve_route(role) == cmw.CLAUDE_MEASUREMENT_WORKER_ID
-    assert cmw.CLAUDE_MEASUREMENT_WORKER_ID not in WorkforcePolicyLoader().load().workers
+    for role in kept:  # authority routes are untouched (Codex r1 #7)
+        assert loader.resolve_route(role) == packaged.resolve_route(role)
+    assert cmw.CLAUDE_MEASUREMENT_WORKER_ID not in packaged.load().workers
+    mwp.assert_measurement_dispatch("claude", "claude-haiku-5-5")
+    with pytest.raises(ValueError, match="measurement_dispatch_not_claude"):
+        mwp.assert_measurement_dispatch("codex", "gpt-5.6-luna")
+
+
+def test_dispatch_assertion_is_inert_with_the_switch_off(switch_off):
+    mwp.assert_measurement_dispatch("codex", "gpt-5.6-luna")
 
 
 # -- the real P1 chain -------------------------------------------------------------
 
 
-@needs_sandbox
 def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
     fake = _fake_claude(tmp_path)
     token = tmp_path / "token"
@@ -537,3 +573,163 @@ def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
     assert seen["argv"][:-1] == list(cmw.CLAUDE_MEASUREMENT_FLAGS)
     # The Nexus prompt is the Gateway's base worker prompt plus Nexus's own context.
     assert seen["argv"][-1].startswith(result["base_prompt"])
+
+
+# -- Codex r1 / review fixes --------------------------------------------------------
+
+
+def test_a_success_without_model_evidence_fails(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cmw, "CLAUDE_MEASUREMENT_ENV", {**cmw.CLAUDE_MEASUREMENT_ENV, "FAKE_MODE": "nomodel"}
+    )
+    contract, lease = _lease(tmp_path)
+    receipt = cmw.ClaudeMeasurementWorkerAdapter().invoke(
+        contract, lease, prompt="WHAT: x", timeout_seconds=60
+    )
+    assert receipt.outcome == "FAILED" and "no evidence" in receipt.failure_reason
+
+
+def test_direct_calls_without_a_leased_contract_are_refused(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    _contract, lease = _lease(tmp_path)
+    bare_contract = SimpleNamespace(task_id="t1")  # no target_worktree_root / target_repo_root
+    with pytest.raises(WorkerProviderUnavailable, match="not_leased"):
+        cmw.ClaudeMeasurementWorkerAdapter().invoke(bare_contract, lease, prompt="WHAT: x")
+
+
+def test_read_roots_never_cover_home_or_user_data(tmp_path):
+    home = Path(os.path.realpath(os.path.expanduser("~")))
+    for unsafe in (Path("/"), Path("/Users"), Path("/private/tmp"), home, home.parent):
+        assert not cmw.is_safe_read_root(unsafe), unsafe
+    assert cmw.is_safe_read_root(tmp_path)
+    venv = tmp_path / "ctl" / "venv"
+    venv.parent.mkdir(parents=True)
+    venv.symlink_to(home)  # a venv link pointing at HOME is ignored, never re-allowed
+    contract = SimpleNamespace(controller_repo_root=str(tmp_path / "ctl" / "base"))
+    assert cmw.task_venv_for(contract) is None
+
+
+def test_infra_needs_an_api_error_signal():
+    reply = cmw.summarize_stream_json(
+        json.dumps({
+            "type": "result",
+            "is_error": True,
+            "subtype": "error_max_turns",
+            "result": "Fixed the login quota bug; please run /login after deploying.",
+        })
+    )
+    assert cmw.classify_claude_infra(reply, "") is None
+    assert cmw.classify_claude_infra(reply, "Error: 401 authentication failed") == "auth"
+
+
+def _client_hello(host: str) -> bytes:
+    import ssl
+
+    context = ssl.create_default_context()
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = context.wrap_bio(incoming, outgoing, server_hostname=host)
+    with pytest.raises(ssl.SSLWantReadError):
+        tls.do_handshake()
+    return outgoing.read()
+
+
+def test_sni_parser_reads_real_client_hellos():
+    assert cmw.tls_client_hello_sni(_client_hello("api.anthropic.com")) == "api.anthropic.com"
+    assert cmw.tls_client_hello_sni(b"GET / HTTP/1.1\r\n\r\n") is None
+    assert cmw.tls_client_hello_sni(b"\x16\x03\x01\x00") is None
+
+
+def test_proxy_refuses_a_tunnel_whose_sni_names_another_host():
+    with cmw.HostAllowlistProxy(allowed_hosts=("api.anthropic.com",)) as proxy:
+        sock = socket.create_connection(("127.0.0.1", proxy.port), timeout=5)
+        sock.sendall(b"CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n")
+        assert sock.recv(64).startswith(b"HTTP/1.1 200")
+        sock.sendall(_client_hello("evil.example.com"))
+        sock.settimeout(5)
+        assert sock.recv(64) == b""  # closed without dialing upstream
+        sock.close()
+    assert proxy.attempts == [
+        {"host": "api.anthropic.com", "port": 443, "allowed": False, "sni": "evil.example.com"}
+    ]
+
+
+def test_proxy_caps_concurrent_connections():
+    import time
+
+    with cmw.HostAllowlistProxy(max_connections=1) as proxy:
+        first = socket.create_connection(("127.0.0.1", proxy.port), timeout=5)
+        time.sleep(0.3)
+        second = socket.create_connection(("127.0.0.1", proxy.port), timeout=5)
+        second.settimeout(5)
+        assert second.recv(64) == b""
+        first.close()
+        second.close()
+    assert {"host": "<over-connection-limit>", "port": 0, "allowed": False} in proxy.attempts
+
+
+def test_preflight_runs_version_inside_the_sandbox(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    calls = []
+    original = cmw.run_claude_once
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs.get("argv"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cmw, "run_claude_once", spy)
+    assert cmw.measurement_claude_preflight("claude-haiku-5-5")["execution_ready"] is True
+    assert calls[0] == ("--version",) and calls[1] is None
+
+
+# -- physical Seatbelt witnesses (macOS only; not collected elsewhere, never skipped) --
+
+PHYSICAL_WITNESSES = ("test_seatbelt_denies_reads_writes_network_and_helper_tools",)
+
+
+def physical_seatbelt_witness(func, *, available: bool = SANDBOX):
+    """Expose a physical witness as a test node only where Seatbelt can run (#1607 pattern)."""
+    return func if available else None
+
+
+def test_witness_nodes_are_declared_and_darwin_ci_must_collect_them():
+    import ast
+
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    declared = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(d, ast.Name) and d.id == "physical_seatbelt_witness"
+            for d in node.decorator_list
+        )
+    }
+    assert declared == set(PHYSICAL_WITNESSES)
+    for name in PHYSICAL_WITNESSES:
+        assert (globals().get(name) is not None) is SANDBOX
+    if os.environ.get("CI") and sys.platform == "darwin":
+        assert SANDBOX, "macOS CI host has no sandbox-exec"
+
+
+@physical_seatbelt_witness
+def test_seatbelt_denies_reads_writes_network_and_helper_tools(monkeypatch, tmp_path):
+    secret = tmp_path / "answers" / "gold.patch"
+    secret.parent.mkdir()
+    secret.write_text("the gold fix")
+    _enable(monkeypatch, tmp_path, secret=secret, outside=tmp_path / "answers" / "planted.txt")
+    contract, lease = _lease(tmp_path, venv=True)
+    receipt = cmw.ClaudeMeasurementWorkerAdapter().invoke(
+        contract, lease, prompt="WHAT: edit", timeout_seconds=60
+    )
+    probes = _observed(tmp_path, receipt)["probes"]
+    assert probes["read_secret"].startswith("DENIED"), probes
+    assert probes["write_outside"].startswith("DENIED") and probes["write_git"].startswith(
+        "DENIED"
+    ), probes
+    assert probes["direct_net"].startswith("DENIED"), probes
+    assert probes["proxy_github"].startswith("HTTP/1.1 403"), probes
+    assert probes["exec_security"].startswith("DENIED") and probes["exec_open"].startswith(
+        "DENIED"
+    ), probes
+    assert not (tmp_path / "answers" / "planted.txt").exists()
