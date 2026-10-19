@@ -86,9 +86,6 @@ def honest_telemetries_from_payload(
     return out
 
 
-GATE_WITHOUT_INVOCATION_OR_EVIDENCE = "gate_without_invocation_or_evidence"
-
-
 def merge_capability_receipt(
     *,
     name: str,
@@ -109,20 +106,21 @@ def merge_capability_receipt(
         for text in (str(item).strip(),)
         if text and text != "None"
     )
-    # RC-3: never synthesize measured telemetry when missing
+    # Semantic invariant: outcome_contributed → gate_passed → evidence_present → invoked
+    evidence_present = bool(refs)
+    # RULE-217: enforce the lower rungs too. A gate cannot pass for a capability that
+    # was never invoked or left no evidence (false-green in receipts/telemetry).
+    # Reuse the selected_failure_reason taxonomy; keep a caller-supplied reason.
+    if gate_passed and not (invoked and evidence_present):
+        gate_passed = False
+        if not failure_reason:
+            failure_reason = "selected_without_invocation" if not invoked else "invoked_without_evidence"
+    # RC-3: never synthesize measured telemetry when missing (only for a gate that still passes)
     if invoked and gate_passed and not telemetries:
         telemetries = honest_unavailable_telemetries(
             missing_reason="telemetry_unavailable",
             model_calls=0,
         )
-    # Semantic invariant: outcome_contributed → gate_passed → evidence_present → invoked
-    evidence_present = bool(refs)
-    # RULE-217: enforce the lower rungs too. A gate cannot pass for a capability that
-    # was never invoked or left no evidence (false-green in receipts/telemetry).
-    if gate_passed and not (invoked and evidence_present):
-        gate_passed = False
-        if not failure_reason:
-            failure_reason = GATE_WITHOUT_INVOCATION_OR_EVIDENCE
     if not gate_passed:
         outcome_contributed = False
     if outcome_contributed and not evidence_present:

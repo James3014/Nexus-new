@@ -19,7 +19,7 @@ def test_merge_receipt_gate_passed_requires_invoked_and_evidence():
     )
     assert not_invoked.gate_passed is False
     assert not_invoked.outcome_contributed is False
-    assert not_invoked.failure_reason == "gate_without_invocation_or_evidence"
+    assert not_invoked.failure_reason == "selected_without_invocation"
 
     # 2. invoked but no evidence -> no pass
     no_evidence = merge_capability_receipt(
@@ -31,6 +31,7 @@ def test_merge_receipt_gate_passed_requires_invoked_and_evidence():
     )
     assert no_evidence.gate_passed is False
     assert no_evidence.outcome_contributed is False
+    assert no_evidence.failure_reason == "invoked_without_evidence"
 
     # 3. swarm adapter repro: swarm_used=False but evidence_count>0 and claim verified
     swarm = RECEIPT_ADAPTERS["swarm"].build(
@@ -80,3 +81,16 @@ def test_ddtree_receipt_gate_requires_invocation():
     assert r.invoked is False
     assert r.gate_passed is False
     assert r.failure_reason == "feature_flag_disabled"
+
+
+def test_merge_receipt_clamped_gate_gets_no_synthesized_telemetry():
+    r = merge_capability_receipt(
+        name="codeintel",
+        selected=True,
+        invoked=True,
+        evidence_refs=[],
+        gate_passed=True,
+    )
+    assert r.gate_passed is False
+    assert r.failure_reason == "invoked_without_evidence"
+    assert r.telemetries == {}
