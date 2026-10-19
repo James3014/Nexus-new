@@ -185,7 +185,14 @@ def test_local_heal_local_only_route_with_binding_keeps_gate_passed() -> None:
     assert receipt.outcome_contributed is False
 
 
-_HEAL_FLAT = {"solve_eligible": True, "verification_passed": True, "invoked": True}
+# RULE-217 (#2659): a passing flat local_heal gate needs evidence, so the fixture carries the
+# verification report the adapter reads as its evidence ref.
+_HEAL_FLAT = {
+    "solve_eligible": True,
+    "verification_passed": True,
+    "invoked": True,
+    "verification_report_path": "reports/local_heal/verify.json",
+}
 _EXEC_FLAT = {
     "local_model_called": True,
     "evidence_refs": ["ref:1"],
