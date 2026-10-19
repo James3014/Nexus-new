@@ -203,6 +203,12 @@ class _ReadProjectionMixin:
             "task_action": action,
             "autonomy": _service_module().project_autonomy_submission(state),
             "approval_requirements": approval_requirements,
+            # #2344: observation-only effect authority shadow, when recorded.
+            **(
+                {"effect_authority_shadow": state["effect_authority_shadow"]}
+                if isinstance(state.get("effect_authority_shadow"), Mapping)
+                else {}
+            ),
         }
 
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
