@@ -430,6 +430,7 @@ class _WorkerDispatchMixin:
                     # #2688: xray scans the task's own files (only xray reads this key);
                     # files the task will create do not exist yet and are left out.
                     **_xray_targets_context(request.get("allowed_files"), target_worktree),
+                    **_belief_target_context(request.get("allowed_files"), target_worktree),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,
@@ -632,3 +633,14 @@ def _codeintel_lookup_or_derived(
     return _service_module()._codeintel_lookup_context(
         {**derived, "search_paths": list(derived.get("search_paths") or ())}, target_worktree
     )
+
+
+def _belief_target_context(allowed_files: Any, target_worktree: Any) -> dict[str, Any]:
+    """``{"belief_target_files": [...]}``: existing allowed files, read only by belief (#2721).
+
+    Belief keys its per-file confidence by the first one; files the task will create
+    do not exist yet and are left out.
+    """
+    targets = _xray_targets_context(allowed_files, target_worktree).get("xray_targets") or []
+    files = [path for path in targets if (Path(str(target_worktree)) / path).is_file()]
+    return {"belief_target_files": files} if files else {}

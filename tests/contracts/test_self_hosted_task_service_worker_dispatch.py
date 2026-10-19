@@ -1812,6 +1812,14 @@ def test_materialization_keeps_an_explicit_codeintel_lookup(ctx, stubs) -> None:
     assert stubs.log[2][1]["capability_context"]["target_symbol"] == "mod.x"
 
 
+def test_materialization_passes_existing_allowed_files_to_belief(ctx, stubs) -> None:
+    (ctx.target / "nexus").mkdir()
+    (ctx.target / "nexus" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    ctx.request["allowed_files"] = ["nexus/new.py", "nexus/a.py"]
+    ctx.run()
+    assert stubs.log[2][1]["capability_context"]["belief_target_files"] == ["nexus/a.py"]
+
+
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:
     with pytest.raises(
         RuntimeError, match="^OUTCOME_UNKNOWN:worker_context_materialization_missing$"
