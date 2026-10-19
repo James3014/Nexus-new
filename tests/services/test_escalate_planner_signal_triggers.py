@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -370,3 +371,57 @@ def test_unscoped_writers_stay_skipped_on_the_worker_envelope(name, reasons, sna
     receipt = invoker(envelope)
 
     assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
+
+
+def test_xray_scans_the_worker_supplied_targets(tmp_path, monkeypatch) -> None:
+    """#2688: with xray_targets from the worker context, xray scans those files, not the
+    legacy default."""
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _exec_xray
+
+    workspace = tmp_path / "ws"
+    (workspace / "nexus" / "services").mkdir(parents=True)
+    (workspace / "nexus" / "services" / "capability_registry.py").write_text("x = 1\n")
+    (workspace / "pkg").mkdir()
+    (workspace / "pkg" / "task.py").write_text("import os\n\ndef f():\n    return 1\n")
+    monkeypatch.chdir(tmp_path)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        constraints={
+            "workspace_root": str(workspace),
+            "xray_targets": ["pkg/task.py"],
+            "target_files": ["nexus/services/capability_registry.py"],
+        },
+    )
+
+    receipt = _exec_xray(plan, "deep scan")
+
+    targets = receipt.outcome["scan_targets"] if isinstance(receipt.outcome, dict) else []
+    assert [Path(t).name for t in targets] == ["task.py"]
+
+
+def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeypatch) -> None:
+    """#2700 Codex: an empty xray_targets fell back to an unrelated default target."""
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _exec_xray
+
+    workspace = tmp_path / "ws"
+    (workspace / "nexus" / "services").mkdir(parents=True)
+    (workspace / "nexus" / "services" / "capability_registry.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        # target_file can arrive from codeintel; an explicit xray_targets must win.
+        constraints={
+            "workspace_root": str(workspace),
+            "xray_targets": [],
+            "target_file": "nexus/services/capability_registry.py",
+        },
+    )
+
+    receipt = _exec_xray(plan, "deep scan")
+
+    assert receipt.gate_passed is False
+    assert "no_existing_task_files" in repr(receipt)
