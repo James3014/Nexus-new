@@ -49,6 +49,10 @@ from nexus.executors.agy_write_admission import (
     worker_home,
     write_cline_run_config,
 )
+from nexus.executors.claude_measurement_worker import (
+    ClaudeMeasurementWorkerAdapter,
+    measurement_claude_enabled,
+)
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerResult,
@@ -63,6 +67,7 @@ from nexus.executors.worker_contract import (
     WorkerOutcome,
     WorkerPreflight,
     WorkerProviderUnavailable,
+    admitted_worker_providers,
     redacted_output_tail,
 )
 from nexus.services.agy_failure_signals import (
@@ -2261,6 +2266,8 @@ class WorkerRegistry:
             adapters.setdefault("cline", _cline_adapter())
             missing = set()
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
+        # #2721: measurement providers are optional extras, only while enabled.
+        unknown -= set(admitted_worker_providers()) - set(SUPPORTED_WORKER_PROVIDERS)
         if unknown:
             raise ValueError(f"unknown worker providers: {sorted(unknown)}")
         if missing:
@@ -2269,18 +2276,20 @@ class WorkerRegistry:
 
     @classmethod
     def default(cls) -> "WorkerRegistry":
-        return cls(
-            {
-                "codex": CodexWorkerAdapter(),
-                "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
-                "agy": AgyWorkerAdapter(use_installed_account_pool=True),
-                "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
-                "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
-                "ollama": OllamaPatchWorkerAdapter(),
-                "cline": _cline_adapter(),
-                "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
-            }
-        )
+        adapters: dict[str, Any] = {
+            "codex": CodexWorkerAdapter(),
+            "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
+            "agy": AgyWorkerAdapter(use_installed_account_pool=True),
+            "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
+            "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
+            "ollama": OllamaPatchWorkerAdapter(),
+            "cline": _cline_adapter(),
+            "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
+        }
+        if measurement_claude_enabled():
+            # #2721: measurement Gateway only; absent everywhere else.
+            adapters["claude"] = ClaudeMeasurementWorkerAdapter()
+        return cls(adapters)
 
     @property
     def providers(self) -> tuple[str, ...]:

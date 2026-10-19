@@ -390,6 +390,13 @@ def _derive_campaign_id_from_task_card(task_card_identity: 'VerifiedTaskCardIden
     return ""
 
 
+def _workforce_policy_loader(default_loader: Any) -> Any:
+    """The packaged policy, or the #2721 measurement policy when its switch is on."""
+    from nexus.services.measurement_workforce_policy import measurement_workforce_policy_loader
+
+    return measurement_workforce_policy_loader() or default_loader()
+
+
 def _resolve_policy_workforce_bindings(
     plan_payload: Mapping[str, Any],
     *,
@@ -410,7 +417,7 @@ def _resolve_policy_workforce_bindings(
     """
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
-    policy = WorkforcePolicyLoader()
+    policy = _workforce_policy_loader(WorkforcePolicyLoader)
     snapshot = policy.load()
     signal_snapshot = plan_payload.get("signal_snapshot")
     demands_payload = (
@@ -580,7 +587,7 @@ def build_canonical_planner_admission(
     demands = (plan_payload.get("signal_snapshot") or {}).get("workforce_demands")
     if not isinstance(demands, Mapping):
         raise ValueError("canonical_workforce_demands_missing")
-    policy = WorkforcePolicyLoader()
+    policy = _workforce_policy_loader(WorkforcePolicyLoader)
     snapshot = policy.load()
     policy_bindings, _ = _resolve_policy_workforce_bindings(
         plan_payload,

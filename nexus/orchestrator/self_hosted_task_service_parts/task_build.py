@@ -81,10 +81,12 @@ class _TaskBuildMixin:
             })
         worker = str(request.get("worker", "codex")).strip().lower()
         requested_worker = worker
-        if worker not in _service_module().SUPPORTED_WORKER_PROVIDERS:
+        # #2721: measurement-only providers count only while their switch is on.
+        admitted_providers = _service_module().admitted_worker_providers()
+        if worker not in admitted_providers:
             if worker != "auto":
                 raise ValueError(
-                    "worker must be one of: auto, " + ", ".join(_service_module().SUPPORTED_WORKER_PROVIDERS)
+                    "worker must be one of: auto, " + ", ".join(admitted_providers)
                 )
         provider_order = request.get("worker_order")
         if provider_order is None:
@@ -96,7 +98,7 @@ class _TaskBuildMixin:
         provider_order = [str(provider).strip().lower() for provider in provider_order]
         if worker == "auto" and not provider_order:
             raise ValueError("worker_order must be non-empty for auto selection")
-        if worker == "auto" and (set(provider_order) - set(_service_module().SUPPORTED_WORKER_PROVIDERS) or len(set(provider_order)) != len(provider_order)):
+        if worker == "auto" and (set(provider_order) - set(admitted_providers) or len(set(provider_order)) != len(provider_order)):
             raise ValueError("worker_order contains an unknown or duplicate provider")
         if worker == "auto":
             worker = provider_order[0]
