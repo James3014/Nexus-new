@@ -41,7 +41,9 @@ def _seed_writebacks(root: Path) -> None:
 def _write_summary(root: Path, phases: dict[str, dict[str, float]]) -> None:
     path = root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"status": "SUCCESS", "phases": phases}), encoding="utf-8")
+    # #2715: a real summary says phase_slo_pass; without it the phase policy fails closed.
+    payload = {"status": "SUCCESS", "phase_slo_pass": True, "phases": phases}
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ── learn_mode / learn_phase_slo ─────────────────────────────────
@@ -80,20 +82,44 @@ def test_learn_phase_slo_reads_project_ledger(tmp_path: Path) -> None:
 
 
 def test_phase_slo_pass_rate_reads_real_summary_schema() -> None:
-    ok = {"total": 4, "required_done_ratio": 1.0, "success_ratio": 1.0}
-    bad = {"total": 2, "required_done_ratio": 0.0, "success_ratio": 0.0}
-    unseen = {"total": 0, "required_done_ratio": 1.0, "success_ratio": 1.0}
-    assert phase_slo_pass_rate({"status": "SUCCESS", "phases": {"X": ok, "R": ok}}) == 1.0
+    # #2715: real-schema rows (writeback_required, phase_slo_pass); see test_phase_policy_fail_closed_2715
+    ok = {"total": 4, "writeback_required": 4, "required_done_ratio": 1.0, "success_ratio": 1.0}
+    bad = {"total": 2, "writeback_required": 2, "required_done_ratio": 0.0, "success_ratio": 0.0}
+    unseen = {"total": 0, "writeback_required": 0, "required_done_ratio": 1.0, "success_ratio": 1.0}
     assert (
-        phase_slo_pass_rate({"status": "SUCCESS", "phases": {"X": ok, "R": bad, "D": unseen}})
+        phase_slo_pass_rate({
+            "status": "SUCCESS",
+            "phase_slo_pass": True,
+            "phases": {"X": ok, "R": ok},
+        })
+        == 1.0
+    )
+    assert (
+        phase_slo_pass_rate({
+            "status": "SUCCESS",
+            "phase_slo_pass": True,
+            "phases": {"X": ok, "R": bad, "D": unseen},
+        })
         == 0.5
     )
-    assert phase_slo_pass_rate({"status": "SUCCESS", "phases": {"D": unseen}}) == 0.0
+    assert (
+        phase_slo_pass_rate({"status": "SUCCESS", "phase_slo_pass": True, "phases": {"D": unseen}})
+        == 0.0
+    )
     assert (
         phase_slo_pass_rate({"status": "UNAVAILABLE", "reason": "phase_slo_summary_missing"}) == 0.0
     )
-    assert phase_slo_pass_rate({"overall_pass_rate": 0.85}) == 0.85
-    actions = derive_phase_actions({"status": "SUCCESS", "phases": {"X": ok}}, "bug", "standard")
+    assert (
+        phase_slo_pass_rate({
+            "overall_pass_rate": 0.85,
+            "phase_slo_pass": True,
+            "status": "SUCCESS",
+        })
+        == 0.85
+    )
+    actions = derive_phase_actions(
+        {"status": "SUCCESS", "phase_slo_pass": True, "phases": {"X": ok}}, "bug", "standard"
+    )
     assert actions.allow_research is True
     missing = derive_phase_actions(
         {"status": "UNAVAILABLE", "reason": "phase_slo_summary_missing"}, "bug", "standard"
@@ -105,7 +131,17 @@ def test_phase_slo_pass_rate_reads_real_summary_schema() -> None:
 def test_learn_scheduler_evaluates_request_workspace(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)  # keep any stray write out of the checkout
     ready = tmp_path / "ready"
-    _write_summary(ready, {"X": {"total": 3, "required_done_ratio": 1.0, "success_ratio": 1.0}})
+    _write_summary(
+        ready,
+        {
+            "X": {
+                "total": 3,
+                "writeback_required": 3,
+                "required_done_ratio": 1.0,
+                "success_ratio": 1.0,
+            }
+        },
+    )
     not_ready = tmp_path / "not_ready"
     not_ready.mkdir()
     ok = EXECUTOR_REGISTRY["learn_scheduler_service"](

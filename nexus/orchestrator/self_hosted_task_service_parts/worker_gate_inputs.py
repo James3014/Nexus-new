@@ -43,6 +43,8 @@ _MISSING_INPUT_CODES: dict[str, tuple[str, ...]] = {
     "VERIFY_COMMAND_WIRING_REQUIRED": ("verify_commands",),
     "PLAN_QUALITY_CONTEXT_REQUIRED": (),
     "MEMPALACE_ARTIFACT_CONTEXT_REQUIRED": (),
+    # #2721 L-B: NEXUS_STATE_READ_ONLY froze the ledger; nothing to ingest or round-trip.
+    "MEMPALACE_STATE_READ_ONLY": (),
 }
 # Inputs whose absence a gate does not list itself, as named in a NOT_APPLICABLE record.
 _REQUIRED_INPUTS: dict[str, tuple[tuple[str, str], ...]] = {

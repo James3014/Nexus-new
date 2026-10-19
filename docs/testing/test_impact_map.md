@@ -134,7 +134,7 @@
 | nexus/orchestrator/ambient_core.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/nexus/orchestrator/test_managed_local_agent.py | active | high | evidence_coverage_core_verdict_contract |
 | nexus/orchestrator/effect_authority.py | tests/nexus/orchestrator/test_effect_authority_bridge.py, tests/nexus/orchestrator/test_runtime_coordination_real_path.py | active | high | runtime_effect_authority_port_contract |
 | nexus/orchestrator/runtime_coordination_bridge.py | tests/nexus/orchestrator/test_runtime_coordination_real_path.py, tests/nexus/orchestrator/test_effect_authority_bridge.py, tests/nexus/executors/test_agy_write_admission.py | active | high | runtime_effect_authority_port_contract |
-| nexus/orchestrator/canonical_core_transport.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_canonical_core_transport.py, tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py, tests/nexus/orchestrator/test_evidence_coverage_reuse_v1.py, tests/nexus/orchestrator/test_wave_d_canaries.py | active | high | canonical_core_transport_contract |
+| nexus/orchestrator/canonical_core_transport.py | tests/nexus/orchestrator/test_canonical_core_verification_history.py, tests/nexus/orchestrator/test_evidence_coverage_live_path.py, tests/nexus/orchestrator/test_canonical_core_transport.py, tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py, tests/nexus/orchestrator/test_evidence_coverage_reuse_v1.py, tests/nexus/orchestrator/test_wave_d_canaries.py | active | high | canonical_core_transport_contract |
 | tests/nexus/orchestrator/_evidence_coverage_live_driver.py | tests/nexus/orchestrator/test_evidence_coverage_live_path.py | active | medium | evidence_coverage_live_driver |
 | nexus/orchestrator/bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py, tests/nexus/orchestrator/test_task_card_create_scope.py, tests/nexus/orchestrator/test_gateway_controller_root.py, tests/nexus/orchestrator/test_owner_confirmation_elicitation.py, tests/nexus/orchestrator/test_task_card_create_expected_evidence.py | active | high | bootstrap_agent_task_card_authority_contract |
 | tests/nexus/orchestrator/test_bootstrap_agent_authority.py | tests/nexus/orchestrator/test_bootstrap_agent_authority.py | active | high | test_contract |
@@ -307,7 +307,7 @@
 | nexus/evidence/receipt_base.py | tests/architecture/test_planner_alias.py, tests/services/test_unified_runtime.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/run_receipt_store.py | tests/engine/test_run_receipt_store_2689.py, tests/engine/test_canonical_task_seam.py, tests/core/test_state_root_2688.py | active | high | canonical_run_receipt_state_root_contract |
-| nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py, tests/engine/test_sandbox_runner_devnull_2685.py, tests/engine/test_sandbox_elastic_profile.py | active | high | sandbox_physical_runner_contract |
+| nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py, tests/engine/test_sandbox_runner_devnull_2685.py, tests/engine/test_sandbox_runner_tempdir_2698.py, tests/engine/test_sandbox_elastic_profile.py | active | high | sandbox_physical_runner_contract |
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py, tests/services/test_agy_dispatch_attestation_channel_2314.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py, tests/ops/test_start_codex_nexus_enforced.py | active | high | agy_write_admission_run_home_seatbelt_contract |
 | nexus/engine/confined_test_runner.py | tests/services/test_post_candidate_seam.py, tests/research/test_post_candidate_seam_wiring.py | active | high | post_candidate_confined_sandbox_hidden_test_forbidden_contract |
@@ -416,7 +416,7 @@
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
-| nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
+| nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py, tests/infrastructure/test_storage_implementations.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
 | tests/engine/test_ultra_review_service.py | tests/engine/test_ultra_review_service.py | active | medium | test_contract |
 | tests/ops/test_ultra_gate.py | tests/ops/test_ultra_gate.py | active | medium | test_contract |
@@ -589,6 +589,7 @@
 | tests/ops/test_evidence_verifier_replay_required.py | tests/ops/test_evidence_verifier_replay_required.py | active | medium | test_contract |
 | tests/ops/test_evidence_verifier_holes_2685.py | tests/ops/test_evidence_verifier_holes_2685.py | active | medium | test_contract |
 | tests/engine/test_sandbox_runner_devnull_2685.py | tests/engine/test_sandbox_runner_devnull_2685.py | active | medium | test_contract |
+| tests/engine/test_sandbox_runner_tempdir_2698.py | tests/engine/test_sandbox_runner_tempdir_2698.py | active | medium | test_contract |
 | compliance/sla/metrics/stability_poc_v22.json | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/99_Schema/generated/ | tests/ops/test_build_wiki_agent_index.py, tests/ops/test_wiki_committed_reproducibility.py, tests/ops/test_classify_wiki_unresolved_links.py | active | medium | wiki_generated_artifacts |

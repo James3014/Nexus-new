@@ -30,14 +30,18 @@ class LanceDBStorage(MemoryStorage):
         return LanceDBStorage(self.project_root, tenant_id=str(tenant_id), audit_events=self.audit_events)
 
     def store(self, tenant_id: str, artifact_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        tenant_dir = self.project_root / ".nexus" / "tenants" / tenant_id
-        db_dir = tenant_dir / "lancedb"
-        db_dir.mkdir(parents=True, exist_ok=True)
         compressed = {
             "aaak_id": f"{artifact_type}-{int(datetime.now(timezone.utc).timestamp())}",
             "core": {k: v for k, v in data.items() if k not in ["timestamp", "metadata"]},
             "status": "COMPRESSED"
         }
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: frozen state, the tenant ledger is not appended
+            return {**compressed, "status": "SKIPPED_READ_ONLY"}
+        tenant_dir = self.project_root / ".nexus" / "tenants" / tenant_id
+        db_dir = tenant_dir / "lancedb"
+        db_dir.mkdir(parents=True, exist_ok=True)
         target_path = db_dir / f"{artifact_type}_stable.jsonl"
         with open(target_path, "a") as f:
             f.write(json.dumps(compressed, ensure_ascii=False) + "\n")

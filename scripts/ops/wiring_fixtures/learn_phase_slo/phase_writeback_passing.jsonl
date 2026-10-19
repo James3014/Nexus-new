@@ -1,0 +1,3 @@
+{"task_id": "wiring-pass-1", "phase": "X", "phase_status": "SUCCESS", "writeback_policy": {"required": true}, "writeback_done": true}
+{"task_id": "wiring-pass-2", "phase": "X", "phase_status": "SUCCESS", "writeback_policy": {"required": true}, "writeback_done": true}
+{"task_id": "wiring-pass-3", "phase": "R", "phase_status": "SUCCESS", "writeback_policy": {"required": true}, "writeback_done": true}
