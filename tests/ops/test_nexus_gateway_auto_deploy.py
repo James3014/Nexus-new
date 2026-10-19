@@ -16,6 +16,7 @@ import json
 import os
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -641,6 +642,11 @@ def test_green_candidate_is_built_probed_switched_and_receipted(cfg: ad.Config) 
     assert f'exec "{venv_python}" "{root}/scripts/ops/nexus_mcp_gateway_http.py"' in command
     assert "NEXUS_MCP_GATEWAY_PORT" not in command
     assert f'NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{cfg.canonical_state_dir}"' in command
+    # #2688: the fixed state root, exported after the env file so it cannot override it.
+    assert f'export NEXUS_STATE_ROOT="{cfg.state_root}" ; ' in command
+    assert command.index("NEXUS_STATE_ROOT=") > command.index("source ")
+    assert 'NEXUS_CANONICAL_SOURCE_ROOT="' in command and command.startswith('cd "')
+    assert cfg.state_root.is_dir() and stat.S_IMODE(cfg.state_root.stat().st_mode) == 0o700
     assert len(host.reloads) == 1
     assert host.lock_events == ["acquire", "release"]
     receipt = ad.last_receipt(cfg.state_dir)
@@ -1129,6 +1135,8 @@ def test_spare_probe_never_sees_live_state(cfg: ad.Config) -> None:
     spare = host.started[0]
     assert str(cfg.canonical_state_dir) not in spare
     assert f'NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{cfg.probe_state_root}/' in spare
+    assert f'NEXUS_STATE_ROOT="{cfg.probe_state_root}/' in spare
+    assert str(cfg.state_root) not in spare
     assert seen == [True]
     assert not any(cfg.probe_state_root.iterdir())  # throwaway dir cleaned up
     receipt = ad.last_receipt(cfg.state_dir)
@@ -7433,3 +7441,68 @@ def test_cycle_retention_prunes_unreferenced_rie_checkouts(cfg: ad.Config) -> No
     assert cycle(cfg, host, prober)["status"] == "IN_SYNC"
     assert not stale.exists()
     assert (cfg.rie_checkouts / RIE.pin).is_dir()
+
+
+def test_state_root_is_fixed_under_gateway_root(tmp_path: Path) -> None:
+    """#2688: one absolute NEXUS_STATE_ROOT for every deployment."""
+    home = tmp_path / "home"
+    c = ad.Config.default(home)
+    assert c.state_root == home / "Library/Application Support/Nexus/gateway-direct/state"
+    first = ad.wrapper_command(c, c.deployments / f"a1-{OLD}", Path("/p/python"))
+    second = ad.wrapper_command(
+        c,
+        c.deployments / f"a1-{NEW}",
+        Path("/q/python"),
+        controller_root=c.controllers / f"a1-{NEW}",
+    )
+    for command in (first, second):
+        assert f'export NEXUS_STATE_ROOT="{c.state_root}" ; ' in command
+    assert f'NEXUS_CANONICAL_SOURCE_ROOT="{c.controllers / f"a1-{NEW}"}"' in second
+    assert second.startswith(f'cd "{c.controllers / f"a1-{NEW}"}" ; ')
+
+
+def test_state_root_unsafe_path_is_refused(tmp_path: Path) -> None:
+    c = ad.Config.default(tmp_path / "home", state_root=tmp_path / "bad$dir")
+    with pytest.raises(ad.DeployError, match="WRAPPER_PATH_UNSAFE"):
+        ad.wrapper_command(c, c.deployments / f"a1-{OLD}", Path("/p/python"))
+
+
+def test_ensure_state_root_creates_0700_and_keeps_existing(tmp_path: Path) -> None:
+    c = ad.Config.default(tmp_path / "home")
+    assert not c.state_root.exists()
+    assert ad.ensure_state_root(c) == c.state_root
+    assert stat.S_IMODE(c.state_root.stat().st_mode) == 0o700
+    marker = c.state_root / ".nexus" / "belief_state.json"
+    marker.parent.mkdir()
+    marker.write_text("{}")
+    os.chmod(c.state_root, 0o750)
+    ad.ensure_state_root(c)  # existing memory is never touched
+    assert marker.read_text() == "{}"
+    assert stat.S_IMODE(c.state_root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("kind", ["symlink", "file", "relative"])
+def test_ensure_state_root_refuses_non_directories(tmp_path: Path, kind: str) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    state_root = tmp_path / "home" / "state"
+    state_root.parent.mkdir(parents=True)
+    if kind == "symlink":
+        state_root.symlink_to(target)
+    elif kind == "file":
+        state_root.write_text("x")
+    else:
+        state_root = Path("relative/state")
+    c = ad.Config.default(tmp_path / "home", state_root=state_root)
+    with pytest.raises(ad.DeployError, match="STATE_ROOT_"):
+        ad.ensure_state_root(c)
+
+
+def test_bad_state_root_fails_before_live_switch(cfg: ad.Config) -> None:
+    bad = ad.Config.default(cfg.state_dir.parents[2], state_root=Path("relative/state"))
+    before = bad.plist.read_bytes()
+    host = FakeHost()
+    result = cycle(bad, host, FakeProber())
+    assert result["status"] == "BUILD_FAILED"
+    assert "STATE_ROOT_NOT_ABSOLUTE" in result["receipt"]["reason"]
+    assert bad.plist.read_bytes() == before and host.reloads == []

@@ -485,6 +485,10 @@ class Config:
     plist: Path
     env_file: Path
     canonical_state_dir: Path
+    # Fixed NEXUS_STATE_ROOT for the live Gateway (#2688): belief, memory and
+    # learning stores live under ``<state_root>/.nexus`` and survive every
+    # deployment instead of following the per-deployment Controller.
+    state_root: Path
     repository: str = REPOSITORY
     track_branch: str = "main"
     python_version: str = "3.12"
@@ -514,6 +518,7 @@ class Config:
             else home / "Library/LaunchAgents" / f"{GATEWAY_LABEL}.plist",
             "env_file": support / "mcp-gateway.env",
             "canonical_state_dir": home / ".local/state/Nexus-new-self-hosted-state",
+            "state_root": support / "gateway-direct" / "state",
         }
         raw_park = os.environ.get(PIN_BUMP_PARK_ENV)
         if raw_park is not None and raw_park.strip():
@@ -1838,6 +1843,10 @@ def wrapper_command(
     ``pycache/<deployment>`` dir: the source digest excludes bytecode, so an
     in-tree ``__pycache__`` must never be read (#2246).
 
+    ``NEXUS_STATE_ROOT`` (#2688) is exported after the env file: the fixed
+    ``cfg.state_root`` for the live Gateway, or ``state_dir`` itself for the
+    spare-port probe, so the probe never reads or writes live memory.
+
     The wrapper always exports ``NEXUS_AGY_RUNTIME_AUTHORIZED=1`` after the env
     file (Owner approval in #2318), so ``nexus_worker_candidate`` can dispatch
     its default Agy route.  It never exports the broader
@@ -1848,8 +1857,16 @@ def wrapper_command(
     stale env-file value can never point the Gateway at another engine.
     """
     state = cfg.canonical_state_dir if state_dir is None else state_dir
+    state_root = cfg.state_root if state_dir is None else state_dir
     controller = root if controller_root is None else controller_root
-    values = [str(root), str(python), str(cfg.env_file), str(state), str(controller)]
+    values = [
+        str(root),
+        str(python),
+        str(cfg.env_file),
+        str(state),
+        str(state_root),
+        str(controller),
+    ]
     if core_root is not None:
         values.append(str(core_root))
     if rie is not None:
@@ -1891,6 +1908,7 @@ def wrapper_command(
         f"{AGY_RUNTIME_AUTHORIZATION_EXPORT}"
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
+        f'export NEXUS_STATE_ROOT="{state_root}" ; '
         f'{rie_export}{core_export}{port_export}exec "{python}" "{root / ENTRYPOINT}"'
     )
 
@@ -1956,6 +1974,28 @@ def live_python(plist_bytes: bytes) -> Optional[Path]:
 def commit_of(root: Optional[Path]) -> Optional[str]:
     match = _DEPLOYMENT_NAME.search(str(root)) if root else None
     return match.group(1) if match else None
+
+
+def ensure_state_root(cfg: Config) -> Path:
+    """Create the fixed ``NEXUS_STATE_ROOT`` (mode 0700) before the live switch (#2688).
+
+    An existing directory is kept as is (its contents are the Gateway's memory);
+    a symlink or a non-directory is refused so the live state never lands
+    somewhere the deployer did not choose.
+    """
+    path = cfg.state_root
+    if not path.is_absolute():
+        raise DeployError(f"STATE_ROOT_NOT_ABSOLUTE:{path}")
+    if path.is_symlink():
+        raise DeployError(f"STATE_ROOT_SYMLINK:{path}")
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(FileExistsError):
+            path.mkdir(mode=0o700)
+        os.chmod(path, 0o700)
+    if path.is_symlink() or not path.is_dir():
+        raise DeployError(f"STATE_ROOT_NOT_A_DIRECTORY:{path}")
+    return path
 
 
 def render_plist(previous: bytes, command: str, root: Path) -> bytes:
@@ -3889,6 +3929,11 @@ class _Cycle:
         receipt["rollback_readiness"] = readiness
         if not readiness["ok"]:
             return {"outcome": "BLOCKED_NO_ROLLBACK", "reason": readiness["reason"]}
+
+        # The live wrapper exports this fixed NEXUS_STATE_ROOT (#2688); it must
+        # exist before the new Gateway starts.  A bad path fails the cycle here,
+        # before anything live is touched.
+        receipt["state_root"] = str(ensure_state_root(cfg))
 
         with host.manager_lock(cfg):
             # Last gates before the only live effect.
