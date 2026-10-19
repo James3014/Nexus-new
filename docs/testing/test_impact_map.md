@@ -305,6 +305,7 @@
 | nexus/evidence/claim_boundary.py | tests/architecture/test_planner_alias.py, tests/services/test_mainchain_false_green_gates.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/evidence/receipt_base.py | tests/architecture/test_planner_alias.py, tests/services/test_unified_runtime.py | active | high | runtime_owned_planner_alias_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
+| nexus/engine/run_receipt_store.py | tests/engine/test_run_receipt_store_2689.py, tests/engine/test_canonical_task_seam.py, tests/core/test_state_root_2688.py | active | high | canonical_run_receipt_state_root_contract |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py, tests/engine/test_sandbox_runner_devnull_2685.py, tests/engine/test_sandbox_elastic_profile.py | active | high | sandbox_physical_runner_contract |
 | nexus/executors/agy_dispatch_boundary.py | tests/services/test_agy_dispatch_write_boundary.py, tests/services/test_agy_dispatch.py, tests/services/test_agy_dispatch_attestation_channel_2314.py | active | high | agy_dispatch_write_boundary_contract |
 | nexus/executors/agy_write_admission.py | tests/nexus/executors/test_agy_write_admission.py, tests/services/test_agy_dispatch_write_boundary.py, tests/ops/test_start_codex_nexus_enforced.py | active | high | agy_write_admission_run_home_seatbelt_contract |
