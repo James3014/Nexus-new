@@ -23,6 +23,12 @@ class ChallengeReport:
     phantom_triggers: int
     duration_sec: float
 
+# Device files every process may write (mirrors nexus/engine/sandboxed_lane.py).
+SANDBOX_DEVICE_WRITE_RULE = (
+    '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))'
+)
+
+
 class SandboxRunner:
     """🧬 Nexus v4.0: 陌生工程生存挑戰器
     職責：在隔離環境中對陌生專案執行 Nexus Pipeline，驗證治理鏈魯棒性。
@@ -205,6 +211,9 @@ socket.socket.connect = _guarded_socket_connect
         if write_literals:
             for path in write_literals:
                 profile.append(f'(allow file-write* (subpath "{path}"))')
+        # pytest and most tools write /dev/null; without this every pytest run inside the
+        # sandbox stops with INTERNALERROR exit 3 (#2685).  Same rule as sandboxed_lane.
+        profile.append(SANDBOX_DEVICE_WRITE_RULE)
         return "\n".join(profile)
 
     def run_task(
@@ -309,6 +318,11 @@ socket.socket.connect = _guarded_socket_connect
                         "/Library",
                         str(workspace_path),
                     ]
+                    # sandbox-exec matches real paths: a symlinked project root such as
+                    # /var/... (-> /private/var/...) never matches unless resolved (#2685).
+                    workspace_real = str(workspace_path.resolve())
+                    if workspace_real not in read_paths:
+                        read_paths.append(workspace_real)
                     if Path("/opt/homebrew").exists():
                         read_paths.append("/opt/homebrew")
                     # 收集所有 Python 運行相關的路徑
@@ -344,6 +358,8 @@ socket.socket.connect = _guarded_socket_connect
                         "/tmp",
                         "/private/tmp",
                     ]
+                    if workspace_real not in write_paths:
+                        write_paths.append(workspace_real)
                     if output_path:
                         write_paths.append(str(output_path.parent))
 
