@@ -32,7 +32,9 @@ _ORIGINAL_GUARD = gateway_module.pre_action_guard
 
 
 def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 class _RecordingService(SelfHostedTaskService):
@@ -63,7 +65,9 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     service_module.CANONICAL_SOURCE_ROOT = ctl
     gateway_module.CANONICAL_SOURCE_ROOT = ctl
     gateway_module._git = lambda *args, **kwargs: head
-    gateway_module.pre_action_guard = lambda action, **kwargs: _ORIGINAL_GUARD(action, canonical_root=ctl, **kwargs)
+    gateway_module.pre_action_guard = lambda action, **kwargs: _ORIGINAL_GUARD(
+        action, canonical_root=ctl, **kwargs
+    )
     arguments = {
         "task_id": task_id,
         "what": "Append the line 'bounded change' to README.md.",
@@ -74,21 +78,34 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         "task_card_path": card_rel,
         "task_card_hash": hashlib.sha256((ctl / card_rel).read_bytes()).hexdigest(),
     }
-    recorder = _RecordingService(state_dir=root / "gateway-state", auto_reconcile=False, ephemeral=True)
+    recorder = _RecordingService(
+        state_dir=root / "gateway-state", auto_reconcile=False, ephemeral=True
+    )
     response = UnifiedMCPGateway(service=recorder).handle({
-        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
         "params": {"name": "nexus_worker_candidate", "arguments": arguments},
     })
+    assert response is not None
     result: dict[str, Any] = {"gateway_is_error": bool(response["result"]["isError"])}
     if result["gateway_is_error"]:
         result["gateway_error"] = response["result"]["structuredContent"]
         return result
     request = recorder.submitted[0]
-    result.update(request_provider=request.get("provider"), request_model=request.get("model"),
-                  request_worker_id=request.get("worker_id"), request_worker_order=request.get("worker_order"))
+    result.update(
+        request_provider=request.get("provider"),
+        request_model=request.get("model"),
+        request_worker_id=request.get("worker_id"),
+        request_worker_order=request.get("worker_order"),
+    )
     state_dir = root / "state"
-    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True,
-                                    ambient_core_port=LazyCanonicalCoreControlPort(state_dir))
+    service = SelfHostedTaskService(
+        state_dir=state_dir,
+        auto_reconcile=False,
+        ephemeral=True,
+        ambient_core_port=LazyCanonicalCoreControlPort(state_dir),
+    )
 
     def launch_inline(task_id_arg, attempt_id):
         service._run_owned_task(task_id_arg, attempt_id)
@@ -112,7 +129,9 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         receipt_verified=receipt.get("verified"),
         receipt_failure_reasons=receipt.get("failure_reasons"),
         execution_providers=[item.get("provider") for item in executions if isinstance(item, dict)],
-        base_prompt=SelfHostedTaskService._prompt(service._contract_from_state(state)) if state.get("contract") else None,
+        base_prompt=SelfHostedTaskService._prompt(service._contract_from_state(state))
+        if state.get("contract")
+        else None,
     )
     target = Path(str(state.get("target_worktree") or ""))
     if result["target_initial_revision"] and target.is_dir():
