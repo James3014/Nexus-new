@@ -519,7 +519,7 @@ class Config:
             else home / "Library/LaunchAgents" / f"{GATEWAY_LABEL}.plist",
             "env_file": support / "mcp-gateway.env",
             "canonical_state_dir": home / ".local/state/Nexus-new-self-hosted-state",
-            "state_root": support / "gateway-direct" / "state",
+            "state_root": live_state_root(home),
         }
         raw_park = os.environ.get(PIN_BUMP_PARK_ENV)
         if raw_park is not None and raw_park.strip():
@@ -1818,6 +1818,48 @@ class Prober:
 # NEXUS_EXTERNAL_RUNTIME_AUTHORIZED is deliberately not exported.
 AGY_RUNTIME_AUTHORIZATION_EXPORT = "export NEXUS_AGY_RUNTIME_AUTHORIZED=1 ; "
 
+# Measurement-only switches (#2745).  They are inert unless set in the process
+# environment and exist only for the frozen measurement Gateway (M4 :18766,
+# launched by ``lab``, never by this deployer).  The live Gateway sources the
+# env file at start, so one stray line there would silently turn a switch on
+# in production.  Every wrapper this deployer renders (live and spare probe)
+# and the R1 emergency-restore wrapper (``mcp_gateway_durable``) refuse to
+# start, after the env file is sourced, when any of these is non-empty.  A new
+# measurement-only switch must be added here in the same PR that adds it, and
+# to the R1 mirror ``R1_MEASUREMENT_ONLY_ENV_VARS`` in mcp_gateway_durable.py
+# (kept there so R1's manager hash binds it; tests assert they are equal).
+MEASUREMENT_ONLY_ENV_VARS: Tuple[str, ...] = (
+    "NEXUS_MEASUREMENT_CLAUDE_WORKER",  # #2744
+    "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT",  # #2742
+    "NEXUS_LEARNING_WRITEBACK",  # #2736
+    "NEXUS_STATE_READ_ONLY",  # #2736
+    "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
+)
+# sysexits EX_CONFIG: the launch configuration is wrong, not the code.
+MEASUREMENT_ENV_REFUSED_EXIT = 78
+MEASUREMENT_ENV_REFUSED = "NEXUS_LIVE_LAUNCH_REFUSED_MEASUREMENT_ENV"
+_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def measurement_env_guard() -> str:
+    """Shell fragment refusing a live launch with a measurement-only switch set (#2745).
+
+    Placed right after ``source <env file>`` so it sees the env file, the
+    launchd environment and anything inherited.  It names the variable (never
+    its value) on stderr, i.e. in the Gateway error log or the spare-probe log,
+    and exits ``MEASUREMENT_ENV_REFUSED_EXIT`` before Python starts.
+    """
+    parts = []
+    for name in MEASUREMENT_ONLY_ENV_VARS:
+        if not _ENV_NAME.match(name):
+            raise DeployError(f"MEASUREMENT_ENV_NAME_INVALID:{name}")
+        parts.append(
+            f'if [ -n "${{{name}:-}}" ] ; then '
+            f'echo "{MEASUREMENT_ENV_REFUSED}:{name}" >&2 ; '
+            f"exit {MEASUREMENT_ENV_REFUSED_EXIT} ; fi ; "
+        )
+    return "".join(parts)
+
 
 def wrapper_command(
     cfg: Config,
@@ -1847,6 +1889,10 @@ def wrapper_command(
     ``NEXUS_STATE_ROOT`` (#2688) is exported after the env file: the fixed
     ``cfg.state_root`` for the live Gateway, or ``state_dir`` itself for the
     spare-port probe, so the probe never reads or writes live memory.
+
+    Right after the env file is sourced, ``measurement_env_guard()`` refuses
+    to start when a measurement-only switch is set (#2745): the spare probe
+    then fails (``REJECTED_PROBE``, live untouched) and a live restart exits.
 
     The wrapper always exports ``NEXUS_AGY_RUNTIME_AUTHORIZED=1`` after the env
     file (Owner approval in #2318), so ``nexus_worker_candidate`` can dispatch
@@ -1905,7 +1951,8 @@ def wrapper_command(
             f'export {RIE_ENV_ENGINE_ROOT}="{rie[0]}" ; export {RIE_ENV_PYTHON_BIN}="{rie[1]}" ; '
         )
     return (
-        f'cd "{controller}" ; source "{cfg.env_file}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f'cd "{controller}" ; source "{cfg.env_file}" ; {measurement_env_guard()}'
+        f"export PYTHONDONTWRITEBYTECODE=1 ; "
         f"{AGY_RUNTIME_AUTHORIZATION_EXPORT}"
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state}" ; '
@@ -1977,6 +2024,12 @@ def commit_of(root: Optional[Path]) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def live_state_root(home: Optional[Path] = None) -> Path:
+    """The fixed live ``NEXUS_STATE_ROOT`` (#2688), shared with the R1 path (#2713)."""
+    home = Path.home() if home is None else home
+    return home / "Library/Application Support/Nexus/gateway-direct/state"
+
+
 def ensure_state_root(cfg: Config) -> Path:
     """Create the fixed ``NEXUS_STATE_ROOT`` (mode 0700) before the live switch (#2688).
 
@@ -1993,7 +2046,15 @@ def ensure_state_root(cfg: Config) -> Path:
     to ``$NEXUS_STATE_ROOT/.nexus/reports/run`` (#2689), so the deployer must
     never place those markers here.
     """
-    path = cfg.state_root
+    return ensure_state_root_path(cfg.state_root)
+
+
+def ensure_state_root_path(path: Path) -> Path:
+    """``ensure_state_root`` for an explicit path.
+
+    R1 (``mcp_gateway_durable._ensure_recovery_state_root``, #2713) keeps an
+    identical copy inside its hashed manager; tests assert equal outcomes.
+    """
     if not path.is_absolute():
         raise DeployError(f"STATE_ROOT_NOT_ABSOLUTE:{path}")
     if path.is_symlink():

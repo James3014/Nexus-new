@@ -7525,3 +7525,96 @@ def test_ensure_state_root_creates_no_runtime_writer_markers(tmp_path: Path) -> 
     ):
         assert not (c.state_root / marker).exists()
         assert not (c.gateway_root / marker).exists()
+
+
+# --- #2745: measurement-only switches never reach the live Gateway ---------
+
+
+def _launch_shell() -> str:
+    """The wrapper is written for /bin/zsh; bash runs the same POSIX fragment."""
+    for shell in ("/bin/zsh", shutil.which("zsh"), shutil.which("bash")):
+        if shell and Path(shell).exists():
+            return shell
+    pytest.skip("no zsh/bash to run the launch wrapper")
+
+
+def _run_wrapper(
+    tmp_path: Path, env_lines: str = "", inherited: dict | None = None, spare: bool = False
+) -> subprocess.CompletedProcess:
+    c = ad.Config.default(tmp_path / "home")
+    c.env_file.parent.mkdir(parents=True, exist_ok=True)
+    c.env_file.write_text('export NEXUS_MCP_GATEWAY_TOKEN="tok"\n' + env_lines)
+    root = c.deployments / f"a1-{NEW}"
+    root.mkdir(parents=True)
+    python = tmp_path / "fake-python"
+    python.write_text('#!/bin/sh\necho STARTED "$NEXUS_STATE_ROOT"\n')
+    python.chmod(0o755)
+    kwargs: dict = {"port": 50123, "state_dir": tmp_path / "probe"} if spare else {}
+    command = ad.wrapper_command(c, root, python, **kwargs)
+    env = {k: v for k, v in os.environ.items() if k not in ad.MEASUREMENT_ONLY_ENV_VARS}
+    env.update(inherited or {})
+    return subprocess.run(
+        [_launch_shell(), "-c", command], env=env, capture_output=True, text=True, timeout=30
+    )
+
+
+def test_measurement_env_list_is_one_constant_of_valid_names() -> None:
+    names = ad.MEASUREMENT_ONLY_ENV_VARS
+    assert len(set(names)) == len(names) >= 5
+    assert {
+        "NEXUS_MEASUREMENT_CLAUDE_WORKER",
+        "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT",
+        "NEXUS_LEARNING_WRITEBACK",
+        "NEXUS_STATE_READ_ONLY",
+        "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
+    } <= set(names)
+    guard = ad.measurement_env_guard()
+    for name in names:
+        assert f'"${{{name}:-}}"' in guard and f"{ad.MEASUREMENT_ENV_REFUSED}:{name}" in guard
+
+
+@pytest.mark.parametrize("spare", [False, True], ids=["live", "spare_probe"])
+def test_wrapper_guard_runs_after_env_file_and_before_exec(tmp_path: Path, spare: bool) -> None:
+    c = ad.Config.default(tmp_path / "home")
+    kwargs: dict = {"port": 50123, "state_dir": tmp_path / "probe"} if spare else {}
+    command = ad.wrapper_command(c, c.deployments / f"a1-{NEW}", Path("/p/python"), **kwargs)
+    guard = ad.measurement_env_guard()
+    assert command.count(guard) == 1
+    assert command.index("source ") < command.index(guard) < command.index("exec ")
+
+
+def test_wrapper_starts_without_measurement_env(tmp_path: Path) -> None:
+    # Positive control: the guard does not block a clean launch, and an empty
+    # value is not "set".
+    proc = _run_wrapper(tmp_path, env_lines="export NEXUS_STATE_READ_ONLY=\n")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("STARTED ")
+    assert ad.MEASUREMENT_ENV_REFUSED not in proc.stderr
+
+
+@pytest.mark.parametrize("name", ad.MEASUREMENT_ONLY_ENV_VARS)
+@pytest.mark.parametrize("via", ["env_file", "inherited", "spare_probe"])
+def test_wrapper_refuses_live_launch_with_measurement_env(
+    tmp_path: Path, name: str, via: str
+) -> None:
+    if via == "inherited":
+        proc = _run_wrapper(tmp_path, inherited={name: "1"})
+    else:
+        proc = _run_wrapper(tmp_path, env_lines=f"export {name}=1\n", spare=via == "spare_probe")
+    assert proc.returncode == ad.MEASUREMENT_ENV_REFUSED_EXIT
+    assert "STARTED" not in proc.stdout
+    assert f"{ad.MEASUREMENT_ENV_REFUSED}:{name}" in proc.stderr
+    assert "=1" not in proc.stderr  # names the variable, never its value
+
+
+def test_measurement_instance_launch_is_not_guarded() -> None:
+    # The frozen measurement Gateway (:18766) is started by lab directly with
+    # the entrypoint, not through a deployer wrapper: the guard is a property
+    # of the live launch wrappers only, never a global ban in the Gateway.
+    for path in (ad.ENTRYPOINT, "nexus/orchestrator/unified_mcp_gateway.py"):
+        assert ad.MEASUREMENT_ENV_REFUSED not in (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def test_live_state_root_is_the_config_default(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    assert ad.live_state_root(home) == ad.Config.default(home).state_root
