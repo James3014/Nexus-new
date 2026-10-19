@@ -12,6 +12,7 @@ from nexus.core.state_root import (
     configured_state_root,
     persistent_state_root,
     rebase_state_path,
+    state_read_only,
 )
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text, post_local_json
@@ -542,6 +543,8 @@ class LearningClosureBridge:
         lesson["stages"] = dict(episode.get("stages") or {})
         if reflection is not None:
             lesson["reflection"] = reflection
+        if state_read_only():  # #2721 L-B: frozen learning state, nothing persisted
+            return lesson
         lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:

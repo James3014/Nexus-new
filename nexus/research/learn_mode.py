@@ -19,7 +19,7 @@ from nexus.core.skill_outcomes import (
     append_skill_outcome_event,
     build_outcome_event,
 )
-from nexus.core.state_root import persistent_state_root
+from nexus.core.state_root import persistent_state_root, state_read_only
 from nexus.learning.learning_closure_effectiveness import (
     append_learning_episode,
     canonical_learning_episode_path,
@@ -564,6 +564,8 @@ class LearnModeService:
             "stages": episode["stages"],
             "learning_write_succeeded": write_ok,
         })
+        if state_read_only():  # #2721 L-B: frozen learning state
+            return
         if not append_learning_episode(
             canonical_learning_episode_path(persistent_state_root(self.project_root)), episode
         ):

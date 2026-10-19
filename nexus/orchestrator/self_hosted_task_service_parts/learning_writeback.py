@@ -87,6 +87,7 @@ def run_learning_writeback(
     candidate: Any,
     verified: Any,
     resolution_verdict: str,
+    fail_to_pass_status: str | None = None,
     memory_store_factory: Any = None,
     belief_engine_factory: Any = None,
 ) -> dict[str, Any]:
@@ -107,6 +108,13 @@ def run_learning_writeback(
         return observation
     observation["enabled"] = True
     try:
+        from nexus.core.state_root import configured_state_root
+
+        if configured_state_root() is None:
+            # Without NEXUS_STATE_ROOT the task root is the candidate worktree itself:
+            # writing .nexus/ there would leak into the candidate. Measurement only.
+            observation["skip_reason"] = "NO_STATE_ROOT"
+            return observation
         from nexus.core.belief_engine import BeliefEngine, repair_target_key
         from nexus.core.state_root import persistent_state_root
         from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
@@ -116,11 +124,25 @@ def run_learning_writeback(
         files = _changed_files(candidate)
         verifiers = _verifier_results(verified)
         verifier_passed = bool(_get(verified, "verifier_gate_passed", False))
-        proven = str(resolution_verdict) == "PROVEN"
+        # A task whose acceptance requires fail-to-pass counts as PASSED only once the
+        # probe recorded VERIFIED (finalize calls this after the probe for such tasks).
+        # The probe status decides the outcome only; it is not written to the card.
+        f2p_ok = fail_to_pass_status is None or str(fail_to_pass_status) == "VERIFIED"
+        proven = str(resolution_verdict) == "PROVEN" and f2p_ok
         outcome = "PASSED" if (proven and verifier_passed) else "FAILED"
-        # Same root the P1 memory reader uses (workspace_root = target worktree), so
-        # NEXUS_STATE_ROOT moves writer and reader together (#2688).
-        root = persistent_state_root(Path(str(_get(contract, "target_worktree_root", "") or ".")))
+        # Same root the P1 memory reader uses: workspace_root = the task's own worktree,
+        # contract.target_repo_root.  (target_worktree_root is the shared targets
+        # directory, its parent, which persistent_state_root does not rebase.)
+        task_root = _get(contract, "target_repo_root", "") or ""
+        if not str(task_root).strip():
+            observation["skip_reason"] = "NO_TASK_ROOT"
+            return observation
+        root = persistent_state_root(Path(str(task_root)))
+        if root == Path(str(task_root)) or not root.is_absolute():
+            # Not rebased to NEXUS_STATE_ROOT (not a Gateway task worktree): never
+            # write into the candidate's own tree.
+            observation["skip_reason"] = "ROOT_NOT_REBASED"
+            return observation
         observation["store_root"] = str(root)
 
         body = "\n".join([

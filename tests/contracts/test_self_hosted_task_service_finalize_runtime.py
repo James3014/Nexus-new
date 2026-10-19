@@ -2732,3 +2732,33 @@ def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, 
     verified_update = dict(fin.updates)["VERIFIED"]
     assert verified_update["learning_writeback"]["card_written"] is True
     assert calls and calls[0]["verified"] is fin.verified
+
+
+def test_finalize_writeback_failure_never_fails_finalize(fin, monkeypatch) -> None:
+    """#2721: an exception inside the write-back is contained; finalize still completes."""
+    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+
+    def boom(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", boom)
+    monkeypatch.setenv("NEXUS_LEARNING_WRITEBACK", "1")
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    verified_update = dict(fin.updates)["VERIFIED"]
+    assert verified_update["learning_writeback"]["error_type"] == "RuntimeError"
+
+
+def test_finalize_writeback_failure_without_switch_leaves_state_unchanged(fin, monkeypatch) -> None:
+    """#2721: with no measurement switch even a failing write-back adds nothing to VERIFIED."""
+    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+
+    def boom(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", boom)
+    monkeypatch.delenv("NEXUS_LEARNING_WRITEBACK", raising=False)
+    monkeypatch.delenv("NEXUS_STATE_READ_ONLY", raising=False)
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    assert "learning_writeback" not in dict(fin.updates)["VERIFIED"]

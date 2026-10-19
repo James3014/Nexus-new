@@ -14,10 +14,13 @@ from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 
 
 def _contract(target: Path) -> SimpleNamespace:
+    # Real shape (task_build): target_repo_root = the task's worktree,
+    # target_worktree_root = its parent (the Gateway-managed targets directory).
     return SimpleNamespace(
         task_id="t-2721",
         objective="Fix the retry counter in pkg/mod.py",
-        target_worktree_root=str(target),
+        target_repo_root=str(target),
+        target_worktree_root=str(target.parent),
     )
 
 
@@ -46,19 +49,25 @@ def state_root(tmp_path, monkeypatch):
     monkeypatch.setenv("NEXUS_STATE_ROOT", str(root))
     monkeypatch.delenv(lw.WRITEBACK_ENV, raising=False)
     monkeypatch.delenv(lw.READ_ONLY_ENV, raising=False)
+    # Treat tmp_path/nexus-runtime-targets as the Gateway-managed targets directory.
+    monkeypatch.setattr(
+        "nexus.core.state_root._target_worktree_bases",
+        lambda roots: {tmp_path / "nexus-runtime-targets"},
+    )
     return root
 
 
 def _target(tmp_path: Path) -> Path:
     # A Gateway-managed target worktree (…/nexus-runtime-targets/<task>) moves to NEXUS_STATE_ROOT.
     target = tmp_path / "nexus-runtime-targets" / "t-2721"
-    target.mkdir(parents=True)
+    target.mkdir(parents=True, exist_ok=True)
     return target
 
 
 def _run(tmp_path, passed=True, verdict="PROVEN", **kw):
+    kw.setdefault("fail_to_pass_status", None)
     return lw.run_learning_writeback(
-        contract=_contract(kw.pop("target", tmp_path / "plain-target")),
+        contract=_contract(kw.pop("target", None) or _target(tmp_path)),
         candidate=_candidate(),
         verified=_verified(passed),
         resolution_verdict=verdict,
@@ -154,3 +163,61 @@ def test_finalize_calls_writeback_before_verified_update():
     src = Path(lw.__file__).with_name("finalize_runtime.py").read_text()
     call = src.index("writeback = run_learning_writeback(")
     assert call < src.index('update("VERIFIED", verified_values)')
+
+
+def test_reader_and_writer_resolve_the_same_root(tmp_path, state_root, monkeypatch):
+    """Writer root == the P1 memory reader's root (persistent_state_root(workspace_root=task worktree))."""
+    from nexus.core.state_root import persistent_state_root
+
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    monkeypatch.setattr(
+        "nexus.core.state_root._target_worktree_bases",
+        lambda roots: {tmp_path / "nexus-runtime-targets"},
+    )
+    target = _target(tmp_path)
+    obs = _run(tmp_path, target=target)
+    assert Path(obs["store_root"]) == persistent_state_root(target) == state_root.resolve()
+    # The parent (contract.target_worktree_root) would not have been rebased.
+    assert persistent_state_root(target.parent) != state_root.resolve()
+
+
+def test_fail_to_pass_not_verified_records_failed(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    obs = _run(tmp_path, fail_to_pass_status="BASE_ALREADY_PASS")
+    assert obs["outcome"] == "FAILED" and obs["belief_confidence"] == pytest.approx(0.1)
+    obs = _run(tmp_path, fail_to_pass_status="VERIFIED")
+    assert obs["outcome"] == "PASSED"
+
+
+def test_read_only_store_neither_creates_dirs_nor_promotes(tmp_path, state_root, monkeypatch):
+    mem_root = tmp_path / "m2"
+    mem_root.mkdir()
+    store = FindingsMemoryStore(mem_root)
+    store.write(FindingsCard(id="c1", kind="episodes", body="x", task_id="t"))
+    monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
+    assert store.promote_to_global("c1", "episodes") is False
+    assert store.read("c1", scope="task", kind="episodes", task_id="t") is not None
+    fresh = tmp_path / "m3"
+    fresh.mkdir()
+    FindingsMemoryStore(fresh)
+    assert not (fresh / ".nexus").exists()
+
+
+def test_without_state_root_nothing_is_written_into_the_candidate(
+    tmp_path, state_root, monkeypatch
+):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    monkeypatch.delenv("NEXUS_STATE_ROOT")
+    target = _target(tmp_path)
+    obs = _run(tmp_path, target=target)
+    assert obs["skip_reason"] == "NO_STATE_ROOT" and not obs["card_written"]
+    assert not (target / ".nexus").exists()
+
+
+def test_task_root_outside_gateway_targets_is_not_written(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    other = tmp_path / "elsewhere" / "repo"
+    other.mkdir(parents=True)
+    obs = _run(tmp_path, target=other)
+    assert obs["skip_reason"] == "ROOT_NOT_REBASED"
+    assert not (other / ".nexus").exists() and not (state_root / ".nexus").exists()

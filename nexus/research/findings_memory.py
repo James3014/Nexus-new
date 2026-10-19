@@ -93,6 +93,10 @@ class FindingsMemoryStore:
         self._ensure_dirs()
 
     def _ensure_dirs(self):
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: do not create store directories
+            return
         self.file_store.ensure_dirs()
 
     def _get_card_path(self, card: FindingsCard) -> Path:
@@ -195,6 +199,10 @@ class FindingsMemoryStore:
 
     def promote_to_global(self, card_id: str, kind: str) -> bool:
         """將任務級記憶提升到全域。"""
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: never delete or move a card
+            return False
         card = self.read(card_id, scope="task", kind=kind)
         if not card:
             return False
