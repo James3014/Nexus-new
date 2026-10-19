@@ -1661,6 +1661,15 @@ def test_materialization_codeintel_lookup_context(ctx, stubs) -> None:
     assert context["workspace_root"] == str(ctx.target.resolve())
 
 
+def test_materialization_passes_allowed_files_as_xray_targets(ctx, stubs) -> None:
+    """#2688: xray scanned a default file on the worker path; it now gets the task's files."""
+    ctx.request["allowed_files"] = ["nexus/a.py", "nexus/b.py"]
+    ctx.run()
+    context = stubs.log[2][1]["capability_context"]
+    assert context["xray_targets"] == ["nexus/a.py", "nexus/b.py"]
+    assert "target_files" not in context  # other executors keep their inputs
+
+
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:
     with pytest.raises(
         RuntimeError, match="^OUTCOME_UNKNOWN:worker_context_materialization_missing$"

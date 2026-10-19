@@ -419,6 +419,13 @@ class _WorkerDispatchMixin:
                     **_service_module()._codeintel_lookup_context(
                         request.get("codeintel_lookup"), target_worktree
                     ),
+                    # #2688: xray scans the task's own files (only xray reads this key).
+                    **(
+                        {"xray_targets": [str(path) for path in request["allowed_files"]]}
+                        if isinstance(request.get("allowed_files"), (list, tuple))
+                        and request.get("allowed_files")
+                        else {}
+                    ),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,
