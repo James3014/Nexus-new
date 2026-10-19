@@ -225,3 +225,42 @@ def test_ignored_files_are_not_a_mutation(service, repo) -> None:
     # allowed directory is not a Direct mutation.
     (repo.path / "docs" / "build.log").write_text("l\n", encoding="utf-8")
     _assert_closed(_reconcile(service, repo, ["docs/"]))
+
+
+# --- review follow-ups (#2741): case, diff.relative, a reported parent, undecodable names ---
+
+
+@pytest.mark.parametrize("entry", ["DOCS/", "Docs/X.md", "SRC/A.PY"])
+def test_an_allowed_entry_matches_regardless_of_case(service, repo, entry) -> None:
+    (repo.path / "docs" / "x.md").write_text("changed\n", encoding="utf-8")
+    (repo.path / "src" / "a.py").write_text("a = 2\n", encoding="utf-8")
+    result = _reconcile(service, repo, [entry])
+    _assert_retained(result)
+    assert result["reconciliation_evidence"]["allowed_paths_touched"]
+
+
+def test_diff_relative_config_does_not_hide_changes(service, repo) -> None:
+    _git(repo.path, "config", "diff.relative", "true")
+    (repo.path / "docs" / "x.md").write_text("changed\n", encoding="utf-8")
+    _assert_retained(_reconcile(service, repo, ["docs/x.md"]), ["docs/x.md"])
+
+
+def test_a_reported_parent_of_an_allowed_entry_is_retained(service, repo) -> None:
+    # git reports only the gitlink ``lib`` for a change inside a submodule ``lib``
+    (repo.path / "lib").write_text("gitlink stand-in\n", encoding="utf-8")
+    _git(repo.path, "add", "lib")
+    _assert_retained(_reconcile(service, repo, ["lib/f.py"]), ["lib"])
+
+
+def test_an_undecodable_probe_output_is_retained(service, repo, monkeypatch) -> None:
+    real_run = subprocess.run
+
+    def run(argv: Any, **kwargs: Any) -> Any:
+        if "ls-files" in argv:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(service_module, "subprocess", SimpleNamespace(run=run))
+    result = _reconcile(service, repo, ["src/a.py"])
+    _assert_retained(result)
+    assert "invalid start byte" in result["reconciliation_evidence"]["probe_error"]

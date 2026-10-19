@@ -74,13 +74,17 @@ def _invalid_allowed_boundary(boundary: str) -> bool:
 
 
 def _within_allowed_boundary(path: str, boundary: str) -> bool:
-    """``path`` is the allowed entry itself or strictly below it as a directory.
+    """``path`` touches the allowed entry: it is the entry, below it, or above it.
 
     The trailing "/" of a declared directory entry is removed before comparison, so both
-    ``docs/`` and ``docs`` cover ``docs`` and ``docs/x.md``, never ``docs2/x.md``.  Used
-    only to detect a mutation, so covering more is the fail-closed direction.
+    ``docs/`` and ``docs`` cover ``docs`` and ``docs/x.md``, never ``docs2/x.md``.  A
+    reported path *above* the entry also counts (a submodule gitlink ``lib`` for an
+    allowed ``lib/f.py``), and the comparison ignores case (the Controller may sit on a
+    case-insensitive file system).  Used only to detect a mutation, so covering more is
+    the fail-closed direction.
     """
-    return path == boundary or path.startswith(boundary + "/")
+    path, boundary = path.casefold(), boundary.casefold()
+    return path == boundary or path.startswith(boundary + "/") or boundary.startswith(path + "/")
 
 
 class _ReconcileRecoveryMixin:
@@ -190,7 +194,8 @@ class _ReconcileRecoveryMixin:
 
         def listing(*args: str) -> list[str]:
             # -z: names are NUL-separated and never C-quoted; --no-renames: a rename lists
-            # both its source and its destination.  A failing probe is not evidence.
+            # both its source and its destination; --no-relative: names stay repository-
+            # rooted even under diff.relative.  A failing probe is not evidence.
             result = _service_module().subprocess.run(
                 ["git", *args], cwd=controller, capture_output=True, text=True, check=False,
             )
@@ -211,15 +216,15 @@ class _ReconcileRecoveryMixin:
                 observed["expected_head_is_ancestor"] = ancestor.returncode == 0
                 if observed["expected_head_is_ancestor"]:
                     observed["commits_since_base"] = listing(
-                        "diff", "--name-only", "--no-renames", "-z", f"{expected_head}..HEAD",
+                        "diff", "--name-only", "--no-relative", "--no-renames", "-z", f"{expected_head}..HEAD",
                     )
-            observed["working_tree_changes"] = listing("diff", "--name-only", "--no-renames", "-z")
-            observed["staged_changes"] = listing("diff", "--cached", "--name-only", "--no-renames", "-z")
+            observed["working_tree_changes"] = listing("diff", "--name-only", "--no-relative", "--no-renames", "-z")
+            observed["staged_changes"] = listing("diff", "--cached", "--name-only", "--no-relative", "--no-renames", "-z")
             # untracked, not ignored, named from the repository root like git diff
             observed["untracked_changes"] = sorted(listing(
                 "ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--", ":(top)",
             ))
-        except (OSError, _ListingProbeFailed) as exc:
+        except (OSError, ValueError, _ListingProbeFailed) as exc:  # ValueError: undecodable names
             probe_error = str(exc)
             observed["probe_error"] = probe_error
 

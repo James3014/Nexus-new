@@ -519,9 +519,15 @@ def test_direct_failure_no_mutation_closes_as_final_block(failure) -> None:
     assert failure.log == [
         (("git", "rev-parse", "HEAD"), _kwargs(c)),
         (("git", "merge-base", "--is-ancestor", HEAD, CURRENT), _kwargs(c)),
-        (("git", "diff", "--name-only", "--no-renames", "-z", f"{HEAD}..HEAD"), _kwargs(c)),
-        (("git", "diff", "--name-only", "--no-renames", "-z"), _kwargs(c)),
-        (("git", "diff", "--cached", "--name-only", "--no-renames", "-z"), _kwargs(c)),
+        (
+            ("git", "diff", "--name-only", "--no-relative", "--no-renames", "-z", f"{HEAD}..HEAD"),
+            _kwargs(c),
+        ),
+        (("git", "diff", "--name-only", "--no-relative", "--no-renames", "-z"), _kwargs(c)),
+        (
+            ("git", "diff", "--cached", "--name-only", "--no-relative", "--no-renames", "-z"),
+            _kwargs(c),
+        ),
         (
             (
                 "git",
@@ -638,16 +644,14 @@ def test_direct_failure_directory_boundaries_only_match_exactly(failure) -> None
     # Issue #2727 item 1 (this test id predates the fix): a file strictly below an allowed
     # directory is an allowed-path touch; a sibling that only shares a prefix is not.
     failure.state()
-    failure.use(
-        [
-            (0, f"{CURRENT}\n"),
-            (0, ""),
-            (0, "docs/x.md\0src/a.py.bak\0docs2/y\0"),
-            (0, ""),
-            (0, ""),
-            (0, ""),
-        ]
-    )
+    failure.use([
+        (0, f"{CURRENT}\n"),
+        (0, ""),
+        (0, "docs/x.md\0src/a.py.bak\0docs2/y\0"),
+        (0, ""),
+        (0, ""),
+        (0, ""),
+    ])
     failure.service._reconcile_direct_failure("t")
     ((_, status, values, _),) = failure.checkpoints
     assert status == "DIRECT_RECONCILE_REQUIRED"
@@ -759,8 +763,9 @@ def test_direct_failure_probe_os_error_is_retained(failure, at) -> None:
 
 def test_direct_failure_other_probe_errors_propagate(failure) -> None:
     failure.state()
-    failure.use([ValueError("not os")])
-    with pytest.raises(ValueError, match="not os"):
+    # ValueError (undecodable names) counts as a probe error since #2727; others still propagate
+    failure.use([RuntimeError("not os")])
+    with pytest.raises(RuntimeError, match="not os"):
         failure.service._reconcile_direct_failure("t")
     assert failure.checkpoints == [] and failure.now == []
 
