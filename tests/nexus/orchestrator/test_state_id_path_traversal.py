@@ -195,3 +195,142 @@ def test_gateway_tools_return_invalid_code_for_traversal_ids(tmp_path):
         assert response is not None
         assert response["result"]["isError"] is True
         assert response["result"]["structuredContent"] == {"error": code}
+
+
+# --- Round-1 review follow-ups (#2663) ---------------------------------------------
+
+
+class _SubmittingService(_Service):
+    def submit_task(self, request):
+        return {"task_id": request["task_id"], "status": "SUBMITTED"}
+
+
+_WAVE = RefactorWave("wave-1", "refactor one", ("nexus/a.py",))
+
+
+def _base_request(tmp_path: Path) -> dict:
+    return {
+        "controller_repo_root": str(tmp_path / "repo"),
+        "target_worktree_root": str(tmp_path / "targets"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("_foo", "foo"), (".foo", "foo"), ("a..b", "a-b"), ("..a...b..", "a-b")]
+)
+def test_sanitize_state_id_produces_valid_ids(raw, expected):
+    from nexus.orchestrator.worker_competition import sanitize_state_id
+
+    assert sanitize_state_id(raw, code="CODE") == expected
+    assert validate_state_id(sanitize_state_id(raw, code="CODE"), code="CODE")
+
+
+@pytest.mark.parametrize("raw", ["", "...", "__", "-.-", "a" * 129])
+def test_sanitize_state_id_fails_clearly(raw):
+    from nexus.orchestrator.worker_competition import sanitize_state_id
+
+    with pytest.raises(ValueError, match="^CODE$"):
+        sanitize_state_id(raw, code="CODE")
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("_foo", "foo"), (".foo", "foo"), ("a..b", "a-b")])
+def test_campaign_create_sanitizes_edge_ids_and_round_trips(tmp_path, raw, expected):
+    coordinator = _campaign(tmp_path)
+    created = coordinator.create(raw, _base_request(tmp_path), [_WAVE], ["codex", "opencode"])
+    assert created["campaign_id"] == expected
+    state = coordinator.get(expected)
+    assert state is not None
+    assert state["campaign_id"] == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("_foo", "foo"), (".foo", "foo"), ("a..b", "a-b")])
+def test_competition_submit_sanitizes_edge_ids_and_round_trips(tmp_path, raw, expected):
+    coordinator = WorkerCompetitionCoordinator(_SubmittingService(tmp_path / "service-state"))
+    submitted = coordinator.submit(
+        {
+            "competition_id": raw,
+            "authority_goal_id": "goal",
+            "authority_coordination_scope_id": "scope",
+            "target_repo_root": str(tmp_path / "targets"),
+        },
+        ["codex", "opencode"],
+    )
+    assert submitted["competition_id"] == expected
+    state = coordinator.get(expected)
+    assert state is not None
+    assert state["competition_id"] == expected
+
+
+def test_campaign_create_rejects_id_too_long_for_wave_task_ids(tmp_path):
+    coordinator = _campaign(tmp_path)
+    wave = RefactorWave("wave-1", "refactor one", ("nexus/a.py",))
+    with pytest.raises(ValueError, match="^CAMPAIGN_ID_TOO_LONG$"):
+        coordinator.create("c" * 122, _base_request(tmp_path), [wave], ["codex", "opencode"])
+    assert not coordinator.state_dir.exists() or not any(coordinator.state_dir.iterdir())
+    # Exactly at the limit (len + 1 + len("wave-1") == 128) is accepted.
+    created = coordinator.create("c" * 121, _base_request(tmp_path), [wave], ["codex", "opencode"])
+    assert len(f"{created['campaign_id']}-wave-1") == 128
+
+
+def test_campaign_create_rejects_traversal_wave_id(tmp_path):
+    coordinator = _campaign(tmp_path)
+    with pytest.raises(ValueError, match="^WAVE_ID_INVALID$"):
+        coordinator.create(
+            "camp",
+            _base_request(tmp_path),
+            [RefactorWave("../x", "refactor one", ("nexus/a.py",))],
+            ["codex", "opencode"],
+        )
+
+
+def test_campaign_rollback_rejects_traversal_wave_id(tmp_path):
+    coordinator = _campaign(tmp_path)
+    coordinator.create("camp", _base_request(tmp_path), [_WAVE], ["codex", "opencode"])
+    state = coordinator.get("camp")
+    assert state is not None
+    state["checkpoints"] = {"../x": "a" * 40, "../../escape": "a" * 40}
+    coordinator._write(state)
+    targets = tmp_path / "targets"
+    for bad_wave in ("../x", "../../escape"):
+        with pytest.raises(ValueError, match="^WAVE_ID_INVALID$"):
+            coordinator.rollback("camp", wave_id=bad_wave)
+    assert not targets.exists() or sorted(p.name for p in targets.rglob("*")) == [
+        "campaign-rollbacks"
+    ]
+    assert not (targets / "x").exists()
+
+
+def test_gateway_rollback_integrate_push_tools_reject_traversal_ids(tmp_path):
+    server = NexusSelfHostedMCPServer(service=_Service(tmp_path / "service-state"))  # type: ignore[arg-type]
+    calls = [
+        (
+            "nexus_self_hosted_rollback_refactor_campaign",
+            {"campaign_id": "../x", "wave_id": "wave-1"},
+            "CAMPAIGN_ID_INVALID",
+        ),
+        (
+            "nexus_self_hosted_integrate_competition",
+            {"competition_id": "../x"},
+            "COMPETITION_ID_INVALID",
+        ),
+        (
+            "nexus_self_hosted_push_competition",
+            {
+                "competition_id": "../x",
+                "remote": "origin",
+                "authority_goal_id": "goal",
+                "authority_coordination_scope_id": "scope",
+            },
+            "COMPETITION_ID_INVALID",
+        ),
+    ]
+    for name, arguments, code in calls:
+        response = server.handle({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })
+        assert response is not None
+        assert response["result"]["isError"] is True
+        assert response["result"]["structuredContent"] == {"error": code}

@@ -20,6 +20,8 @@ from nexus.orchestrator.standing_grant_store import StandingGrantKey
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 _VALID_STATE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_DOT_RUN = re.compile(r"\.{2,}")
+_LEADING_NON_ALNUM = re.compile(r"^[^A-Za-z0-9]+")
 
 
 def validate_state_id(value: object, *, code: str) -> str:
@@ -33,13 +35,32 @@ def validate_state_id(value: object, *, code: str) -> str:
     return value
 
 
+def sanitize_state_id(value: object, *, code: str) -> str:
+    """Turn a caller-supplied id into a valid state id, or raise ``ValueError(code)``.
+
+    Unsafe characters and runs of two or more dots become ``-``; leading characters
+    other than ``[A-Za-z0-9]`` and trailing ``-`` are stripped. The result must pass
+    :func:`validate_state_id` (so an over-long id fails clearly instead of being stored).
+    """
+    text = _DOT_RUN.sub("-", _SAFE_ID.sub("-", str(value)))
+    text = _LEADING_NON_ALNUM.sub("", text).rstrip("-")
+    if not text:
+        raise ValueError(code)
+    return validate_state_id(text, code=code)
+
+
+def contained_child_path(parent: Path, name: str, *, code: str) -> Path:
+    """Return ``parent/name`` after proving it resolves directly inside ``parent``."""
+    path = parent / name
+    if path.resolve().parent != parent.resolve():
+        raise ValueError(code)
+    return path
+
+
 def contained_state_path(state_dir: Path, state_id: object, *, code: str) -> Path:
     """Return ``state_dir/<state_id>.json`` after proving it stays directly in ``state_dir``."""
     safe_id = validate_state_id(state_id, code=code)
-    path = state_dir / f"{safe_id}.json"
-    if path.resolve().parent != state_dir.resolve():
-        raise ValueError(code)
-    return path
+    return contained_child_path(state_dir, f"{safe_id}.json", code=code)
 
 
 @dataclass(frozen=True)
@@ -185,9 +206,7 @@ class WorkerCompetitionCoordinator:
         if unknown:
             raise ValueError(f"unknown competition workers: {sorted(unknown)}")
         base_id = str(request.get("competition_id") or request.get("task_id") or f"competition-{uuid4().hex[:10]}")
-        competition_id = _SAFE_ID.sub("-", base_id).strip("-")
-        if not competition_id:
-            raise ValueError("competition_id must contain a safe identifier")
+        competition_id = sanitize_state_id(base_id, code="COMPETITION_ID_INVALID")
         existing = self._read(competition_id)
         if existing is not None:
             if (
