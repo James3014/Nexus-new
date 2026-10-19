@@ -1,3 +1,4 @@
+import logging
 import posixpath
 import re
 from pathlib import Path
@@ -5,8 +6,10 @@ from typing import Any, Dict
 
 from nexus.core.belief_contracts import AuditOutcome
 from nexus.core.state_root import rebase_state_path
-from nexus.infrastructure.state_json_store import StateJsonStore
+from nexus.infrastructure.state_json_store import StateJsonStore, StateMergeError
 from nexus.telemetry.tracer import NexusTracer
+
+logger = logging.getLogger(__name__)
 
 
 def blend_semantic_confidence(audit_confidence: float, semantic_confidence: float, *, semantic_weight: float = 0.3) -> float:
@@ -55,8 +58,11 @@ class BeliefEngine:
             self.state_store.write_dict(self.state_file, self.beliefs)
             return
         # Merge only the key we changed, under the file lock, so a concurrent engine's
-        # keys are not lost (#2688 review).
-        self.beliefs = merge(self.state_file, {key: self.beliefs[key]})
+        # keys are not lost (#2688 review).  An unreadable file is left untouched.
+        try:
+            self.beliefs = merge(self.state_file, {key: self.beliefs[key]})
+        except StateMergeError as exc:
+            logger.warning("belief update not persisted: %s", exc)
 
     def assess_confidence(self, task_id: str, assumption: str = "", target_file: str = "") -> float:
         """根據歷史證據評估信心。

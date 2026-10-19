@@ -10,7 +10,7 @@ deploy, so the stores always start empty there.
 state root is the directory that *contains* ``.nexus``; callers keep appending
 ``.nexus/...`` exactly as before.
 
-Only the per-deploy roots move: this checkout (``REPO_ROOT``), the process cwd,
+Only the per-deploy roots move: this checkout (``REPO_ROOT``),
 ``NEXUS_CANONICAL_SOURCE_ROOT``, and any per-task target worktree under the
 Gateway-managed targets directory.  That directory is derived the way
 ``self_hosted_task_service.resolve_canonical_target_roots`` derives it:
@@ -18,7 +18,11 @@ Gateway-managed targets directory.  That directory is derived the way
 (live: ``controllers/nexus-runtime-targets/<task>``; older tasks
 ``deployments/nexus-runtime-targets/<task>``).  Any other root a caller passes (a
 canary or test directory, another project) stays where it is, so isolated runs
-never write into the shared state.  The store classes apply the resolver themselves
+never write into the shared state.  The cwd is not a root of its own: the Gateway
+runs with cwd = ``NEXUS_CANONICAL_SOURCE_ROOT``, so cwd-relative defaults such as
+``Path(".nexus/belief_state.json")`` move only when the cwd resolves to one of the
+roots above; a canary process whose cwd is its canary dir stays isolated.  The
+store classes apply the resolver themselves
 (``FindingsMemoryStore``, ``resolve_lancedb_root``, ``LearnModeService``,
 ``BeliefEngine``, ...), so every reader and writer of one store moves together, and
 applying it twice is harmless.
@@ -61,10 +65,6 @@ def configured_state_root() -> Path | None:
 
 def _deploy_roots() -> set[Path]:
     roots = {_CODE_ROOT}
-    try:
-        roots.add(Path.cwd().resolve())
-    except OSError:
-        pass
     source = os.environ.get(CANONICAL_SOURCE_ROOT_ENV, "").strip()
     if source:
         roots.add(Path(source).expanduser().resolve())
@@ -107,14 +107,15 @@ def persistent_state_root(default: _T) -> Path | _T:
 def rebase_state_path(path: _T) -> Path | _T:
     """Move ``<root>/.nexus/<rest>`` to ``<state root>/.nexus/<rest>`` when ``root`` moves.
 
-    Paths without a ``.nexus`` component, or whose root does not move, come back
-    unchanged (the same object).
+    The path is resolved first (``..`` and symlinks), so the root is classified by
+    where the file really is.  Paths without a ``.nexus`` component, or whose root
+    does not move, come back unchanged (the same object).
     """
     if configured_state_root() is None:
         return path
     try:
-        parts = Path(path).parts  # type: ignore[arg-type]
-    except TypeError:
+        parts = Path(path).expanduser().resolve(strict=False).parts  # type: ignore[arg-type]
+    except (TypeError, ValueError, OSError):
         return path
     if ".nexus" not in parts:
         return path

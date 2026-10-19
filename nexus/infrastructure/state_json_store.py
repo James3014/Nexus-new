@@ -59,6 +59,10 @@ def _strict_snapshot(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     return snapshot, canonical
 
 
+class StateMergeError(RuntimeError):
+    """``merge_dict`` refused to overwrite a state file it could not read."""
+
+
 @dataclass(frozen=True)
 class StateJsonStore:
     """Atomic JSON object storage for small Nexus state files."""
@@ -84,15 +88,20 @@ class StateJsonStore:
         """Merge top-level ``updates`` into the stored object under one exclusive lock.
 
         Unlike ``read_dict`` + ``write_dict`` this keeps keys another writer stored
-        since our read.  An unreadable current file counts as empty, as in ``read_dict``.
+        since our read.  If the file exists but cannot be read as a JSON object, nothing
+        is written and ``StateMergeError`` is raised, so its prior content survives.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._locked(path, shared=False):
-            try:
-                current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            except (OSError, ValueError, json.JSONDecodeError):
-                current = {}
-            merged = {**(current if isinstance(current, dict) else {}), **updates}
+            current: Any = {}
+            if path.exists():
+                try:
+                    current = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    raise StateMergeError(f"unreadable state file {path}: {exc}") from exc
+                if not isinstance(current, dict):
+                    raise StateMergeError(f"state file {path} is not a JSON object")
+            merged = {**current, **updates}
             self._atomic_write(path, merged)
         return merged
 

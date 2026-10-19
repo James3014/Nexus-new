@@ -39,7 +39,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def deploy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """Env set, cwd = a per-deploy dir; ``next()`` switches to a fresh deploy dir."""
+    """Env set; like the live Gateway, cwd = NEXUS_CANONICAL_SOURCE_ROOT = a per-deploy
+    dir.  ``next()`` switches to a fresh deploy dir."""
     state = tmp_path / "state"
     monkeypatch.setenv(STATE_ROOT_ENV, str(state))
     counter = {"n": 0}
@@ -48,6 +49,7 @@ def deploy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         counter["n"] += 1
         ws = tmp_path / f"a1-deploy{counter['n']}"
         ws.mkdir()
+        monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(ws))
         monkeypatch.chdir(ws)
         return ws
 
@@ -86,6 +88,38 @@ def test_helper_moves_only_deploy_roots(deploy: SimpleNamespace, monkeypatch) ->
     assert persistent_state_root(controller) is controller
     monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(controller))
     assert persistent_state_root(controller) == deploy.state
+    # The cwd alone is not a deploy root.
+    assert persistent_state_root(deploy.ws) == deploy.ws
+
+
+def test_canary_cwd_stays_isolated(deploy: SimpleNamespace, monkeypatch) -> None:
+    """A canary process whose cwd is its canary dir must not map into shared state."""
+    from nexus.core.belief_engine import BeliefEngine
+    from nexus.research.findings_memory import FindingsMemoryStore
+
+    canary = deploy.tmp / "nexus_family_canary" / "pos-memory"
+    canary.mkdir(parents=True)
+    monkeypatch.chdir(canary)
+    for root in (canary, Path("."), "."):
+        assert persistent_state_root(root) is root
+    rel = Path(".nexus/belief_state.json")
+    assert rebase_state_path(rel) is rel
+    BeliefEngine().update_belief("t", "k", 0.4, "e")
+    assert (canary / ".nexus" / "belief_state.json").is_file()
+    assert not (deploy.state / ".nexus" / "belief_state.json").exists()
+    assert FindingsMemoryStore(Path(".")).base_path == Path(".") / ".nexus" / "memory"
+
+
+def test_rebase_resolves_dotdot_before_classifying(deploy: SimpleNamespace) -> None:
+    canary = deploy.tmp / "canary"
+    sneaky = deploy.ws / ".nexus" / ".." / ".." / "canary" / ".nexus" / "belief_state.json"
+    assert rebase_state_path(sneaky) is sneaky
+    inside = deploy.ws / "sub" / ".." / ".nexus" / "belief_state.json"
+    assert rebase_state_path(inside) == deploy.state / ".nexus" / "belief_state.json"
+    assert persistent_state_root(deploy.ws / "x" / "..") == deploy.state
+    outside = deploy.ws / ".." / "canary"
+    assert persistent_state_root(outside) is outside
+    assert canary.name == "canary"
 
 
 def test_helper_moves_task_target_worktrees(
@@ -185,6 +219,23 @@ def test_belief_explicit_and_default_paths_share_the_state_file(deploy: SimpleNa
     assert (deploy.state / ".nexus" / "belief_state.json").is_file()
     isolated = deploy.tmp / "iso" / ".nexus" / "belief_state.json"
     assert BeliefEngine(isolated).state_file == isolated
+
+
+def test_merge_dict_never_overwrites_unreadable_file(tmp_path: Path) -> None:
+    from nexus.core.belief_engine import BeliefEngine
+    from nexus.infrastructure.state_json_store import StateJsonStore, StateMergeError
+
+    path = tmp_path / "belief.json"
+    engine = BeliefEngine(path)
+    for corrupt in ('{"a": {"confidence": 0.1}', "[1, 2]"):
+        path.write_text(corrupt, encoding="utf-8")
+        with pytest.raises(StateMergeError):
+            StateJsonStore().merge_dict(path, {"b": 1})
+        assert path.read_text(encoding="utf-8") == corrupt
+        engine.update_belief("t", "b", 0.2, "e")  # logs, does not raise or overwrite
+        assert path.read_text(encoding="utf-8") == corrupt
+    path.unlink()
+    assert StateJsonStore().merge_dict(path, {"b": 1}) == {"b": 1}
 
 
 def test_belief_concurrent_engines_keep_each_others_keys(tmp_path: Path) -> None:
@@ -321,6 +372,40 @@ def test_learning_closure_bridge_one_root(deploy: SimpleNamespace) -> None:
     explicit = deploy.tmp / "iso"
     bridge = LearningClosureBridge(project_root=explicit, enable_findings=False)
     assert (bridge.project_root, bridge.path) == (explicit, explicit / jsonl)
+
+
+def test_learning_closure_explicit_path_writer_and_reader_agree(deploy: SimpleNamespace) -> None:
+    from nexus.services.local_heal.learning_closure_bridge import LearningClosureBridge
+    from nexus.services.local_heal.memory_retrieval_adapter import LocalJsonlLessonStore
+
+    explicit = deploy.ws / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+    bridge = LearningClosureBridge(path=explicit, project_root=deploy.ws, enable_findings=False)
+    op = SimpleNamespace(
+        instance_id="task-closure",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        idempotency_key="idem-closure",
+        terminal_outcome="FAILED",
+        failure_reason="verifier failed",
+        receipt_path="receipt://verifier",
+        capability_receipts=[{"name": "repair_loop", "selected": True}],
+    )
+    assert LocalJsonlLessonStore(path=explicit).path == bridge.path
+    lesson = bridge.write_lesson(SimpleNamespace(op=op))
+    ws2 = deploy.next()
+    # The next deploy's reader builds the same explicit path from its own root.
+    reader = LocalJsonlLessonStore(
+        path=ws2 / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+    )
+    assert (
+        reader.path == bridge.path == deploy.state / ".nexus/reports/learn/learning_closure.jsonl"
+    )
+    rows = [json.loads(line) for line in reader.path.read_text(encoding="utf-8").splitlines()]
+    assert [row["task_id"] for row in rows] == [lesson["task_id"]]
+    assert not explicit.exists()
+    isolated = deploy.tmp / "iso" / "closure.jsonl"
+    assert LearningClosureBridge(path=isolated, enable_findings=False).path == isolated
+    assert LocalJsonlLessonStore(path=isolated).path == isolated
 
 
 def test_learning_closure_bridge_unset_unchanged(tmp_path: Path) -> None:
