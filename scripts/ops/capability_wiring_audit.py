@@ -2149,7 +2149,8 @@ def build_ultra_review(ws: Path, variant: str) -> Scenario:
     """Positive: a benign diff the review must pass with every lane executed.
 
     Negative: the planted diff (``eval(input())`` plus a behaviour change that breaks
-    ``tests/test_app.py``) that the same path must fail with both findings.
+    ``tests/test_app.py``): the review must FAIL with both findings recorded; since #2732 the
+    receipt is record-only (advisory_only), so it no longer fails the gate.
     """
     _git(ws, "init", "-q")
     _git(ws, "add", "app.py", "tests/test_app.py")
@@ -2196,17 +2197,22 @@ def neg_ultra_review(pos: Obs, neg: Obs) -> Check:
         r in rules for r in ("security_sentry:bandit:B307", "security_sentry:ruff:S307")
     )
     test_flagged = "ghost_regression:regression_test_failed" in rules
+    # #2732: ultra_review is record-only. The planted diff must still FAIL the review and its
+    # findings must be recorded, but the receipt no longer fails the gate (advisory_only).
     ok = (
         pos.gate_passed is True
-        and neg.gate_passed is False
+        and neg.gate_passed is True
+        and neg.outcome.get("advisory_only") is True
         and _result(neg).get("review_status") == "FAIL"
+        and neg.outcome.get("review_passed") is False
         and eval_flagged
         and test_flagged
     )
     return Check(
-        "negative_control:planted_eval_and_failing_test_fail_the_gate",
+        "negative_control:planted_eval_and_failing_test_recorded_as_advisory_findings",
         ok,
-        f"gate pos={pos.gate_passed} neg={neg.gate_passed}; neg status={_result(neg).get('review_status')} rules={rules}",
+        f"gate pos={pos.gate_passed} neg={neg.gate_passed}; neg status={_result(neg).get('review_status')} "
+        f"advisory_only={neg.outcome.get('advisory_only')} rules={rules}",
     )
 
 

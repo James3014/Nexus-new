@@ -1906,27 +1906,69 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
         )
 
 
+# #2732: ultra_review is retired as a completion gate (the #2701 pilot showed it cannot judge
+# completion: NO_SIGNAL in both the static and the rebuilt form). The review still runs and its
+# findings / status / report stay in the receipt, but the receipt never fails completion.
+ADVISORY_ONLY_CAPABILITIES: frozenset[str] = frozenset({"ultra_review"})
+ULTRA_REVIEW_RETIRED_REASON = "ultra_review_retired_as_completion_gate_2701"
+
+
+def _ultra_review_advisory_receipt(
+    plan: CapabilityExecutionPlan,
+    *,
+    wall_time_ms: int | None,
+    review_status: str,
+    evidence_refs: list[str],
+    review_error: str = "",
+    **extra: Any,
+) -> CapabilityReceipt:
+    """Record-only ultra_review receipt (#2732).
+
+    ``gate_passed`` is always True and ``semantic_status`` is SUCCEEDED ("the advisory review
+    step ran and its record is attached"), whatever the review found. The review's own verdict
+    is ``review_status`` (PASS / FAIL / BLOCKED / ERROR / UNAVAILABLE); an infrastructure
+    problem (the review could not run) is ``review_error``, never ``error``, so the semantic
+    success guard does not turn it into a blocking receipt.
+    """
+    return _make_receipt(
+        "ultra_review",
+        plan,
+        invoked=True,
+        gate_passed=True,
+        wall_time_ms=wall_time_ms,
+        outcome=_structured_outcome(
+            action="review",
+            semantic_status="SUCCEEDED",
+            evidence_refs=evidence_refs,
+            advisory_only=True,
+            retired_reason=ULTRA_REVIEW_RETIRED_REASON,
+            review_status=review_status,
+            review_error=str(review_error or "")[:300],
+            **extra,
+        ),
+    )
+
+
 def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     """Run the three ultra-review lanes on the workspace diff in a sandbox worktree.
 
     Review mode (not dry-run): security_sentry (diff pattern scan + bandit + ruff S rules on
     added lines), logic_breaker (mirror integrity + py_compile + ruff correctness rules) and
-    ghost_regression (pytest re-run of mapped tests).  gate_passed is the service's gate; an
-    empty diff or a missing check tool fails closed with the service's blocked_reason.
+    ghost_regression (pytest re-run of mapped tests).
+
+    Record-only since #2732: findings, lanes, status and report are kept, but the receipt
+    never blocks completion (``advisory_only``). An empty diff, a missing check tool, an
+    unavailable service or a crash is recorded as ``review_status`` + ``review_error``.
     """
     start = time.monotonic()
     cls = _try_port("ultra_review.UltraReviewService")
     if cls is None:
-        return _make_receipt(
-            "ultra_review",
+        return _ultra_review_advisory_receipt(
             plan,
-            invoked=False,
-            gate_passed=False,
-            outcome=_structured_outcome(
-                action="review",
-                semantic_status="FAILED",
-                error=_port_error("ultra_review.UltraReviewService"),
-            ),
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            review_status="UNAVAILABLE",
+            review_error=_port_error("ultra_review.UltraReviewService"),
+            evidence_refs=[f"ev_ultra_review_err_{plan.task_id}"],
         )
     constraints = dict(plan.constraints or {})
     project_root = Path(str(constraints.get("workspace_root") or ".")).expanduser()
@@ -1949,24 +1991,17 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             sandbox_root=".nexus/reports/ultra_review/capability_sandboxes",
             **review_kwargs,
         )
-    except Exception as exc:  # noqa: BLE001 - executor boundary must fail closed
-        return _make_receipt(
-            "ultra_review",
+    except Exception as exc:  # noqa: BLE001 - executor boundary: record, never block (#2732)
+        return _ultra_review_advisory_receipt(
             plan,
-            invoked=True,
-            gate_passed=False,
             wall_time_ms=int((time.monotonic() - start) * 1000),
-            outcome=_structured_outcome(
-                action="review",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-                evidence_refs=[f"ev_ultra_review_err_{plan.task_id}"],
-            ),
+            review_status="ERROR",
+            review_error=str(exc)[:300],
+            evidence_refs=[f"ev_ultra_review_err_{plan.task_id}"],
         )
     elapsed = int((time.monotonic() - start) * 1000)
     status = str(payload.get("status") or "")
-    gate_passed = bool(payload.get("gate_passed")) and status == "PASS"
-    semantic = {"PASS": "SUCCEEDED", "FAIL": "FAILED", "BLOCKED": "BLOCKED"}.get(status, "FAILED")
+    review_passed = bool(payload.get("gate_passed")) and status == "PASS"
     fleet = [item for item in payload.get("fleet") or [] if isinstance(item, Mapping)]
     lanes = {
         str(item.get("lane")): {
@@ -1997,38 +2032,34 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
     for ref in (payload.get("report_path"), artifacts.get("diff")):
         if ref:
             evidence.append(str(ref))
-    return _make_receipt(
-        "ultra_review",
+    return _ultra_review_advisory_receipt(
         plan,
-        invoked=True,
-        gate_passed=gate_passed,
         wall_time_ms=elapsed,
-        outcome=_structured_outcome(
-            action="review",
-            semantic_status=semantic,
-            evidence_refs=evidence,
-            error=(str(payload.get("blocked_reason") or "") or None) if status == "BLOCKED" else None,
-            result={
-                "run_id": str(payload.get("run_id") or ""),
-                "review_status": status,
-                "mode": payload.get("mode"),
-                "diff_bytes": int(diff.get("bytes") or 0),
-                "changed_files_count": len(diff.get("changed_files") or []),
-                "verified_findings": sum(1 for f in findings if f.get("state") == "VERIFIED_FINDING"),
-            },
-            regression_tests=list(
-                (payload.get("ghost_regression") or {}).get("executed_tests") or []
-                if isinstance(payload.get("ghost_regression"), Mapping)
-                else []
-            )[:12],
-            excluded_regression_tests=list(payload.get("excluded_regression_tests") or [])[:12],
-            lanes=lanes,
-            executed_checks=sorted({c for lane in lanes.values() for c in lane["executed_checks"]}),
-            findings=findings,
-            blocked_reason=str(payload.get("blocked_reason") or ""),
-            report_path=str(payload.get("report_path") or ""),
-            physical_callable="nexus.engine.ultra_review_service.UltraReviewService.run",
-        ),
+        review_status=status or "ERROR",
+        review_error=(str(payload.get("blocked_reason") or "") if status == "BLOCKED" else "")
+        or ("" if status else "missing_review_status"),
+        evidence_refs=evidence,
+        review_passed=review_passed,
+        result={
+            "run_id": str(payload.get("run_id") or ""),
+            "review_status": status,
+            "mode": payload.get("mode"),
+            "diff_bytes": int(diff.get("bytes") or 0),
+            "changed_files_count": len(diff.get("changed_files") or []),
+            "verified_findings": sum(1 for f in findings if f.get("state") == "VERIFIED_FINDING"),
+        },
+        regression_tests=list(
+            (payload.get("ghost_regression") or {}).get("executed_tests") or []
+            if isinstance(payload.get("ghost_regression"), Mapping)
+            else []
+        )[:12],
+        excluded_regression_tests=list(payload.get("excluded_regression_tests") or [])[:12],
+        lanes=lanes,
+        executed_checks=sorted({c for lane in lanes.values() for c in lane["executed_checks"]}),
+        findings=findings,
+        blocked_reason=str(payload.get("blocked_reason") or ""),
+        report_path=str(payload.get("report_path") or ""),
+        physical_callable="nexus.engine.ultra_review_service.UltraReviewService.run",
     )
 
 
