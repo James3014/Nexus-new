@@ -78,3 +78,29 @@ def test_regression_pack_has_no_host_specific_paths() -> None:
     for item in pack.REGRESSION_PACK:
         for field in ("workspace_path", "python_executable"):
             assert "/Users/" not in str(item[field]), (item["task_id"], field)
+
+
+def test_receipt_stdout_tail_accepts_dict_and_namespace_receipts() -> None:
+    """HealOrchestrator stores a dict receipt without stdout_tail (Refs #1926)."""
+    from types import SimpleNamespace
+
+    assert pack._receipt_stdout_tail(SimpleNamespace()) == ""
+    assert pack._receipt_stdout_tail(SimpleNamespace(verifier_receipt=None)) == ""
+    assert (
+        pack._receipt_stdout_tail(
+            SimpleNamespace(verifier_receipt={"verifier_status": "fail", "receipt_id": "r"})
+        )
+        == ""
+    )
+    assert (
+        pack._receipt_stdout_tail(
+            SimpleNamespace(verifier_receipt={"stdout_tail": "Environment ImportError"})
+        )
+        == "Environment ImportError"
+    )
+    assert (
+        pack._receipt_stdout_tail(
+            SimpleNamespace(verifier_receipt=SimpleNamespace(stdout_tail="BUG PRESENT"))
+        )
+        == "BUG PRESENT"
+    )
