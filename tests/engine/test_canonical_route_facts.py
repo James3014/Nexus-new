@@ -23,7 +23,28 @@ def _repo(tmp_path: Path) -> Path:
         (root / "pkg" / f"user_{name}.py").write_text("from pkg.core import f\n", encoding="utf-8")
     (root / "README.md").write_text("# demo\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    _commit(root)
     return root
+
+
+def _commit(root: Path) -> None:
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "c",
+        ],
+        check=True,
+    )
 
 
 def test_cross_module_rule_matches_the_old_mcp_ingress() -> None:
@@ -31,6 +52,7 @@ def test_cross_module_rule_matches_the_old_mcp_ingress() -> None:
     assert allowed_files_cross_module(["docs/a.md", "scripts/b.py"])
     assert not allowed_files_cross_module(["docs/a.md", "docs/b.md"])
     assert not allowed_files_cross_module(["nexus/a.py"])
+    assert not allowed_files_cross_module(["nexus/a.py", "nexus/a.py"])
 
 
 def test_facts_report_impact_risk_and_reverse_importers(tmp_path: Path) -> None:
@@ -162,3 +184,52 @@ def test_planner_tiers_a_cross_module_code_task_above_l1_with_the_facts() -> Non
 
     assert before_tier == "L1_green_lane" and "codeintel" not in before
     assert after_tier != "L1_green_lane" and "codeintel" in after
+
+
+def test_paths_outside_the_root_are_never_read(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (tmp_path / "outside.py").write_text("x = 1\n", encoding="utf-8")
+
+    facts = derive_canonical_route_facts(
+        repo_root=root,
+        task_text="fix",
+        task_type="repair",
+        allowed_files=["../outside.py", str(tmp_path / "outside.py"), "pkg/../../outside.py"],
+    )
+
+    assert facts["codeintel"] == {} and "risk_score" not in facts["route_features"]
+
+
+def test_uncommitted_python_changes_invalidate_the_cached_graph(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    first = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+    (root / "pkg" / "user_d.py").write_text("from pkg.core import f\n", encoding="utf-8")
+
+    second = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert (
+        second["codeintel"]["impacted_files_count"]
+        == first["codeintel"]["impacted_files_count"] + 1
+    )
+
+
+def test_a_root_without_a_revision_is_not_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "plain"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "core.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "nexus.services.codeintel.graph_builder.scan_codebase",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("cached a revisionless root")),
+    )
+
+    facts = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert facts["errors"] == [] and facts["codeintel"]["impact_report_present"] is True
