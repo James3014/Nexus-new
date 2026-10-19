@@ -81,7 +81,7 @@ def analyze_impact(root: str | Path, changed_files: list[str], *, index_path: st
         graph_impacted, graph_symbols = _impact_from_graph(project_root, graph, changed_modules)
         impacted.update(graph_impacted)
         impacted_symbols.update(graph_symbols)
-    else:
+    elif changed_modules:  # with no changed module no importer can match: skip the full walk
         for py_file in _iter_python_files(project_root):
             rel = str(py_file.relative_to(project_root))
             if rel in existing:
