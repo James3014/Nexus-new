@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import gzip
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1062,12 +1065,16 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.4"
+    assert ros.SCORER_VERSION == "1.3.0"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
     # The pre-registered spec itself is frozen (spec header); amendments live beside it.
     assert hashlib.sha256(spec).hexdigest().startswith("315d95de21ea7ec8")
+    # A10: the 1.3.0 row and note point to the v3 file, the Issue and the owner decision.
+    assert "| `1.3.0` |" in amendments and "A10" in amendments
+    assert "REAL_OUTCOME_SCORER_SPEC.v3.md" in amendments and "#2709" in amendments
+    assert "「同意」" in amendments
 
 
 # Amendment A5: GOLD port fallback when main moved between BASE and the merge.
@@ -1830,21 +1837,23 @@ def test_summary_v1_block_maps_v2_receipts_to_gold_port_failed():
 
 
 def test_summary_excludes_unknown_spec_versions():
-    # Review round 5, Codex 4: only v1 and v2 receipts are counted.
+    # Review round 5, Codex 4: only v1 and v2 receipts are counted in the headline; v3
+    # (1.3.0) has its own block, and any other version is in none.
     rows = [_summary_row(0, ros.RESOLVED), _summary_row(1, ros.UNRESOLVED, "v1")]
     before = ros.summarize(rows)
     after = ros.summarize([
         *rows,
-        _summary_row(2, ros.RESOLVED, "v3"),
-        _summary_row(3, ros.RESOLVED, "v3"),
+        _summary_row(2, ros.RESOLVED, "v4"),
+        _summary_row(3, ros.RESOLVED, "v4"),
         _summary_row(4, ros.RESOLVED, ""),
     ])
     for key in ("counts", "resolved", "valid_oracle_n", "ci95"):
         assert after[key] == before[key]
         assert after["v1_plus_v2"][key] == before["v1_plus_v2"][key]
-    assert after["unknown_spec_versions"] == {"": 1, "v3": 2}
+    assert after["unknown_spec_versions"] == {"": 1, "v4": 2}
     assert before["unknown_spec_versions"] == {}
-    assert after["spec_version_counts"] == {"": 1, "v1": 2, "v3": 2}
+    assert after["spec_version_counts"] == {"": 1, "v1": 2, "v4": 2}
+    assert "v3" not in after
 
 
 @pytest.mark.parametrize("field", ["spec_sha256", "spec_v2_sha256"])
@@ -2837,3 +2846,530 @@ def test_sandbox_os_rescoring_uses_fresh_tree_paths(tmp_path, fx, monkeypatch):
         planter.join()
     assert second["label"] == ros.RESOLVED
     assert seen and not set(seen) & set(first_paths)
+
+
+# Spec v3 (A10, #2709): metadata-only stub for the BASE project, opt-in.
+
+V3_PYPROJECT = '[project]\nname = "Nexus.Certify_Demo"\nversion = "0.3.0"\n'
+
+
+def _venv(tmp: Path) -> tuple[Path, Path]:
+    """A fresh venv (no pip) and its single site-packages directory."""
+    env_dir = tmp / "env"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(env_dir)],
+        check=True,
+        capture_output=True,
+    )
+    site = ros._site_packages(env_dir)
+    assert site is not None
+    return env_dir, site
+
+
+def _env_python(env_dir: Path, code: str, pythonpath: Path | None, cwd: Path):
+    env = {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"}
+    if pythonpath is not None:
+        env["PYTHONPATH"] = str(pythonpath)
+    return subprocess.run(
+        [str(env_dir / "bin" / "python"), "-c", code],
+        env=env,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_v3_stub_has_normalized_name_and_metadata_version_works(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT, "product/__init__.py": "VALUE = 'base'\n"})
+    env_dir, site = _venv(tmp_path)
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert reason is None and stub is not None
+    assert stub == {
+        "name": "Nexus.Certify_Demo",
+        "version": "0.3.0",
+        "dist_info": "nexus_certify_demo-0.3.0.dist-info",
+    }
+    dist = site / stub["dist_info"]
+    assert sorted(p.name for p in dist.iterdir()) == ["INSTALLER", "METADATA", "RECORD"]
+    assert (dist / "METADATA").read_text() == (
+        "Metadata-Version: 2.1\nName: Nexus.Certify_Demo\nVersion: 0.3.0\n"
+    )
+    for line in (dist / "RECORD").read_text().splitlines():
+        path, digest, size = line.split(",")
+        if path.endswith("/RECORD"):
+            assert (digest, size) == ("", "")
+            continue
+        body = (site / path).read_bytes()
+        want = base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
+        assert (digest, int(size)) == (f"sha256={want}", len(body))
+    tree = tmp_path / "tree"
+    shutil.copytree(base, tree)
+    code = (
+        "import importlib.metadata as m\n"
+        "print(m.version('nexus-certify-demo'), m.version('Nexus_Certify.Demo'))"
+    )
+    out = _env_python(env_dir, code, tree, tmp_path)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["0.3.0", "0.3.0"]
+
+
+def test_v3_stub_never_shadows_the_tree(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT, "product/__init__.py": "VALUE = 'base'\n"})
+    env_dir, site = _venv(tmp_path)
+    before = {p.relative_to(env_dir) for p in env_dir.rglob("*")}
+    stub, _ = ros.write_project_metadata_stub(base, site)
+    assert stub is not None
+    added = {p.relative_to(env_dir) for p in env_dir.rglob("*")} - before
+    dist_rel = site.relative_to(env_dir) / stub["dist_info"]
+    assert added == {dist_rel, *(dist_rel / f for f in ("INSTALLER", "METADATA", "RECORD"))}
+    assert not [p for p in added if p.suffix in {".pth", ".py", ".pyc", ".so", ".json"}]
+    tree = tmp_path / "tree"
+    shutil.copytree(base, tree)
+    (tree / "product" / "__init__.py").write_text("VALUE = 'tree'\n")
+    code = "import product, importlib.metadata as m; print(product.VALUE, product.__file__)"
+    out = _env_python(env_dir, code, tree, tmp_path)
+    assert out.returncode == 0, out.stderr
+    value, file = out.stdout.split()
+    assert value == "tree" and Path(file).resolve().is_relative_to(tree.resolve())
+    # Without the tree on PYTHONPATH the project code is not importable at all.
+    out = _env_python(env_dir, "import product", None, tmp_path)
+    assert out.returncode != 0 and "ModuleNotFoundError" in out.stderr
+
+
+@pytest.mark.parametrize(
+    ("pyproject", "reason"),
+    [
+        ('[project]\nname = "x"\ndynamic = ["version"]\n', "dynamic_version"),
+        ('[project]\nname = "x"\n', "version_missing"),
+        ("[tool.x]\na = 1\n", "no_project_table"),
+        ('[project]\nversion = "1"\n', "project_name_missing_or_invalid"),
+        ("[project\n", "pyproject_unreadable:TOMLDecodeError"),
+        (None, "no_pyproject_toml"),
+    ],
+)
+def test_v3_no_static_version_means_no_stub_and_a_reason(tmp_path, pyproject, reason):
+    base = tmp_path / "base"
+    base.mkdir()
+    if pyproject is not None:
+        (base / "pyproject.toml").write_text(pyproject)
+    site = tmp_path / "site"
+    site.mkdir()
+    assert ros.write_project_metadata_stub(base, site) == (None, reason)
+    assert list(site.iterdir()) == []
+
+
+def test_v3_stub_refuses_when_project_already_installed(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT})
+    site = tmp_path / "site"
+    (site / "nexus_certify_demo-0.2.0.dist-info").mkdir(parents=True)
+    assert ros.write_project_metadata_stub(base, site) == (
+        None,
+        "project_already_installed:nexus_certify_demo-0.2.0.dist-info",
+    )
+
+
+class _FakeUv:
+    """Stands in for ``subprocess`` inside UvEnvProvider: records argv and env, and lays
+    out an env directory the way ``uv sync`` / ``uv venv`` would."""
+
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def run(self, cmd, **kw):
+        self.calls.append((list(cmd), kw.get("env")))
+        out = ""
+        if cmd[:3] == ["uv", "python", "find"]:
+            out = "/uv/python3.12\n"
+        elif cmd[:1] == ["uv"] and cmd[1:2] == ["--version"]:
+            out = "uv 0.0.test\n"
+        elif len(cmd) > 1 and cmd[1] == "-c":
+            out = "3.12.7\n"
+        elif cmd[:2] == ["uv", "sync"]:
+            env_dir = Path(kw["env"]["UV_PROJECT_ENVIRONMENT"])
+            (env_dir / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+        elif cmd[:2] == ["uv", "venv"]:
+            (Path(cmd[-1]) / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+
+LEARNING_PIN = "a" * 40
+
+
+def _recipe_bases(tmp: Path) -> dict[str, tuple[str, Path]]:
+    nexus = tmp / "nexus-new"
+    _write(
+        nexus,
+        {
+            "pyproject.toml": V3_PYPROJECT,
+            "uv.lock": "lock\n",
+            "requirements/canonical-learning.txt": "x==1\n",
+            "requirements/canonical-runtime.txt": "y==1\n",
+        },
+    )
+    groups = tmp / "core"
+    _write(groups, {"pyproject.toml": V3_PYPROJECT, "uv.lock": "lock\n"})
+    pins = tmp / "runtime"
+    _write(
+        pins,
+        {
+            "pyproject.toml": V3_PYPROJECT,
+            ".github/workflows/tests.yml": (
+                f"  repository: James3014/nexus-learning\n  ref: {LEARNING_PIN}\n"
+            ),
+        },
+    )
+    return {
+        "uv-sync-all-extras+canonical": ("Nexus-new", nexus),
+        "uv-sync-all-groups": ("nexus-core", groups),
+        "uv-venv-runtime-pins": ("nexus-runtime", pins),
+    }
+
+
+def _build(tmp: Path, monkeypatch, spec_version: str | None, repo: str, base: Path):
+    fake = _FakeUv()
+    monkeypatch.setattr(ros, "subprocess", fake)
+    kw = {} if spec_version is None else {"spec_version": spec_version}
+    provider = ros.UvEnvProvider(tmp / f"envs-{spec_version}-{repo}", log=lambda m: None, **kw)
+    env = provider.get(repo, base)
+    return env, fake.calls, provider
+
+
+def _v124_key(repo: str, recipe: str, base: Path) -> str:
+    """The 1.2.4 env-key formula, copied verbatim (only SCORER_VERSION moved on)."""
+    files = [
+        "pyproject.toml",
+        "uv.lock",
+        "requirements/canonical-learning.txt",
+        "requirements/canonical-runtime.txt",
+    ]
+    digests = {f: ros.sha256_bytes((base / f).read_bytes()) for f in files if (base / f).exists()}
+    if recipe == "uv-venv-runtime-pins":
+        digests["learning_pin"] = LEARNING_PIN
+    interp = {"path": "/uv/python3.12", "version": "3.12.7"}
+    parts = [repo, recipe, "3.12", digests, interp, [], ros.SCORER_VERSION]
+    return ros.sha256_bytes(json.dumps(parts, sort_keys=True).encode())
+
+
+def _v124_argv(recipe: str, base: Path, env_dir: Path) -> list[list[str]]:
+    py = str(env_dir / "bin" / "python")
+    if recipe == "uv-venv-runtime-pins":
+        return [
+            ["uv", "venv", "-q", "--python", "3.12", str(env_dir)],
+            [
+                "uv", "pip", "install", "--python", py, *ros.UvEnvProvider.RUNTIME_PINS,
+                "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@"
+                + LEARNING_PIN,
+            ],
+        ]  # fmt: skip
+    sync = [
+        "uv", "sync", "--directory", str(base), "--frozen", "--all-groups",
+        "--no-install-project", "--python", "3.12",
+    ]  # fmt: skip
+    if recipe == "uv-sync-all-groups":
+        return [sync]
+    return [
+        [*sync, "--all-extras"],
+        ["uv", "pip", "install", "--python", py, "-r", str(base / "requirements/canonical-learning.txt")],
+        ["uv", "pip", "install", "--python", py, "-r", str(base / "requirements/canonical-runtime.txt")],
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("recipe", list(ros.NO_INSTALL_PROJECT_RECIPES) + ["uv-venv-runtime-pins"])
+def test_v1_default_env_build_is_unchanged(tmp_path, monkeypatch, recipe):
+    repo, base = _recipe_bases(tmp_path)[recipe]
+    env, calls, provider = _build(tmp_path, monkeypatch, None, repo, base)
+    assert provider.spec_version == ros.SPEC_V1
+    assert env.recipe == recipe
+    assert env.key == _v124_key(repo, recipe, base)
+    env_dir = provider.envs_dir / env.key[:16]
+    build = [(c, e) for c, e in calls if c[:2] in (["uv", "sync"], ["uv", "venv"], ["uv", "pip"])]
+    assert [c for c, _ in build] == _v124_argv(recipe, base, env_dir)
+    want_env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "PYTHONPATH"}}
+    want_env["UV_PROJECT_ENVIRONMENT"] = str(env_dir)
+    assert all(e == want_env for _, e in build)
+    assert set(env.description) == {
+        "python",
+        "python_path",
+        "scorer_version",
+        "uv",
+        "recipe",
+        "inputs",
+    }
+    assert not list(env_dir.rglob("*.dist-info"))
+    assert env.cache_key == ros.sha256_bytes(
+        json.dumps([env.key, env.python, "3.12.7", [], ros.SCORER_VERSION], sort_keys=True).encode()
+    )
+
+
+@pytest.mark.parametrize("recipe", list(ros.NO_INSTALL_PROJECT_RECIPES) + ["uv-venv-runtime-pins"])
+def test_v3_env_build_adds_only_the_stub_and_a_separate_key(tmp_path, monkeypatch, recipe):
+    repo, base = _recipe_bases(tmp_path)[recipe]
+    v1, v1_calls, _ = _build(tmp_path, monkeypatch, "v1", repo, base)
+    v3, v3_calls, provider = _build(tmp_path, monkeypatch, "v3", repo, base)
+    assert v1.key != v3.key and v1.cache_key != v3.cache_key
+    env_dir = provider.envs_dir / v3.key[:16]
+    v1_dir = tmp_path / f"envs-v1-{repo}" / v1.key[:16]
+    # Same commands and environment apart from the env directory itself.
+    assert [c for c, _ in v3_calls] == [
+        [a.replace(str(v1_dir), str(env_dir)) for a in c] for c, _ in v1_calls
+    ]
+    assert v3.description["spec_version"] == "v3"
+    stub = json.loads(v3.description["project_metadata_stub"])
+    reason = json.loads(v3.description["project_metadata_stub_reason"])
+    dists = sorted(p.name for p in env_dir.rglob("*.dist-info"))
+    if recipe == "uv-venv-runtime-pins":
+        assert (stub, reason) == (None, "recipe_without_project_install:uv-venv-runtime-pins")
+        assert dists == []
+    else:
+        assert reason is None
+        assert stub["dist_info"] == "nexus_certify_demo-0.3.0.dist-info"
+        assert dists == [stub["dist_info"]]
+    # A cached v3 env keeps its stub record.
+    again = provider.get(repo, base)
+    assert again.description == v3.description
+
+
+def test_v3_dynamic_version_env_records_reason(tmp_path, monkeypatch):
+    base = tmp_path / "core"
+    _write(
+        base, {"pyproject.toml": '[project]\nname = "x"\ndynamic = ["version"]\n', "uv.lock": "l\n"}
+    )
+    env, _, provider = _build(tmp_path, monkeypatch, "v3", "nexus-core", base)
+    assert json.loads(env.description["project_metadata_stub"]) is None
+    assert json.loads(env.description["project_metadata_stub_reason"]) == "dynamic_version"
+    assert not list((provider.envs_dir / env.key[:16]).rglob("*.dist-info"))
+
+
+def test_spec_version_is_validated():
+    with pytest.raises(ValueError):
+        ros.UvEnvProvider(Path("e"), spec_version="v2")
+    ctx: dict[str, Any] = {
+        "work": Path("w"),
+        "env_provider": None,
+        "runner": None,
+        "repo_sources": {},
+        "spec_sha256": "0" * 64,
+        "spec_v2_sha256": "2" * 64,
+    }
+    with pytest.raises(ValueError, match="spec_v3_sha256"):
+        ros.ScoreContext(**ctx, spec_version="v3")
+    with pytest.raises(ValueError):
+        ros.ScoreContext(**ctx, spec_version="v2")
+    ros.ScoreContext(**ctx)  # v1 needs no v3 hash
+
+
+class _StubLocalEnv(LocalEnv):
+    """LocalEnv plus the v3 stub, written to an extra import root (a dist-info directory
+    is found on any sys.path entry, as in site-packages)."""
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def get(self, repo: str, base_wt: Path) -> ros.TestEnv:
+        env = super().get(repo, base_wt)
+        site = self.root / "site"
+        shutil.rmtree(site, ignore_errors=True)
+        site.mkdir(parents=True)
+        stub, reason = ros.write_project_metadata_stub(base_wt, site)
+        desc = {
+            "spec_version": "v3",
+            "project_metadata_stub": json.dumps(stub, sort_keys=True),
+            "project_metadata_stub_reason": json.dumps(reason),
+        }
+        return ros.TestEnv(
+            "fixture-env-v3", env.python, "fixture", desc, (*env.extra_pythonpath, str(site))
+        )
+
+
+METADATA_TEST = (
+    "import importlib.metadata\n\nVERSION = importlib.metadata.version('fixture-proj')\n\n\n"
+    "def test_version():\n    assert VERSION == '1.0'\n"
+)
+
+
+def _v3_ctx(tmp: Path, fx: Fixture, work: str = "work-v3", env=None) -> ros.ScoreContext:
+    ctx = _ctx(tmp, fx, work=work)
+    return dataclasses.replace(
+        ctx,
+        env_provider=env or ctx.env_provider,
+        spec_version="v3",
+        spec_v3_sha256="3" * 64,
+    )
+
+
+def test_v3_stub_restores_p2p_and_catches_a_regression(tmp_path):
+    # The #2709 shape: a BASE test reads the project's own metadata at import time.
+    fx = Fixture(
+        tmp_path,
+        extra_base={
+            "pyproject.toml": '[project]\nname = "fixture-proj"\nversion = "1.0"\n',
+            "tests/test_version.py": METADATA_TEST,
+        },
+    )
+    broken = fx.diff_from_base({"pkg/calc.py": FIXED.replace("return a + b", "return a - b")})
+    task = fx.task(broken)
+    v1 = ros.score_task(task, _ctx(tmp_path, fx))["receipt"]
+    v3 = ros.score_task(task, _v3_ctx(tmp_path, fx, env=_StubLocalEnv(tmp_path / "stub")))[
+        "receipt"
+    ]
+    # v1: `pytest tests` stops at PackageNotFoundError, so the regression is invisible.
+    assert v1["label"] == ros.RESOLVED and v1["p2p_total"] == 0
+    assert v3["label"] == ros.BROKE_EXISTING
+    assert "tests.test_add::test_add" in v3["p2p_new_failures"]
+    assert v3["p2p_total"] >= 2
+    assert (v3["spec_version"], v3["spec_sha256"], v3["spec_v3_base_rules"]) == (
+        "v3",
+        "3" * 64,
+        "v1",
+    )
+    assert v3["project_metadata_stub"] == {
+        "name": "fixture-proj",
+        "version": "1.0",
+        "dist_info": "fixture_proj-1.0.dist-info",
+    }
+    assert v3["project_metadata_stub_reason"] is None
+    gold_ctx = _v3_ctx(tmp_path, fx, work="w-gold", env=_StubLocalEnv(tmp_path / "s2"))
+    gold = ros.score_task(task, gold_ctx, candidate_override="gold")["receipt"]
+    assert gold["label"] == ros.RESOLVED
+
+
+def test_v1_receipt_shape_is_unchanged(tmp_path, fx):
+    r = ros.score_task(fx.task(fx.gold_diff), _ctx(tmp_path, fx))["receipt"]
+    assert (r["spec_version"], r["spec_sha256"]) == ("v1", "0" * 64)
+    assert not {
+        "spec_v3_base_rules",
+        "project_metadata_stub",
+        "project_metadata_stub_reason",
+    } & set(r)
+    pending = ros.score_task(fx.task(terminal=None), _ctx(tmp_path, fx, work="w2"))["receipt"]
+    assert set(pending) == V124_BASE_RECEIPT_KEYS | {"flaky_dropped"}
+
+
+# The keys of a 1.2.4 receipt before any scoring step (``_base_receipt``).
+V124_BASE_RECEIPT_KEYS = {
+    "schema",
+    "scorer_version",
+    "runner_sandbox",
+    "runner_sandbox_profile_sha256",
+    "spec_sha256",
+    "spec_version",
+    "task_key",
+    "repo",
+    "issue",
+    "route",
+    "base_sha",
+    "candidate_digest",
+    "candidate_empty",
+    "candidate_override",
+    "candidate_raw_status",
+    "failure_kind",
+    "scope_valid",
+    "capped",
+    "leakage_flags",
+    "label",
+    "sub_reason",
+    "shadow_label",
+}
+
+
+def test_v3_receipt_with_a_provider_without_stub_and_with_the_a5_fallback(tmp_path, fx):
+    r = ros.score_task(fx.task(fx.gold_diff), _v3_ctx(tmp_path, fx))["receipt"]
+    assert r["label"] == ros.RESOLVED
+    assert (r["project_metadata_stub"], r["project_metadata_stub_reason"]) == (
+        None,
+        "env_provider_without_v3_stub",
+    )
+    (tmp_path / "b").mkdir()
+    fx2, merge = _docs_drop_fixture(tmp_path / "b")
+    task = fx2.task(fx2.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
+    r = ros.score_task(task, _v3_ctx(tmp_path / "b", fx2))["receipt"]
+    assert r["gold_port_method"] != "3way"
+    assert (r["spec_version"], r["spec_sha256"], r["spec_v3_base_rules"]) == ("v3", "3" * 64, "v2")
+
+
+def _golden_rows() -> list[dict]:
+    def row(i, label, version=None, **extra):
+        r = {
+            "label": label,
+            "route": "B" if i % 2 else "C",
+            "candidate_raw_status": "VALID" if i % 3 else "TIMEOUT",
+            "capped": i % 4 == 0,
+            "candidate_empty": i == 5,
+            "failure_kind": None,
+            "task_key": f"t{i}",
+            "leakage_flags": ["x"] if i == 2 else [],
+            **extra,
+        }
+        if version is not None:
+            r["spec_version"] = version
+        return r
+
+    return [
+        row(0, ros.RESOLVED),
+        row(1, ros.UNRESOLVED, "v1"),
+        row(2, ros.RESOLVED, "v2"),
+        row(3, ros.BROKE_EXISTING, "v1"),
+        row(4, ros.NOT_SCORABLE_ORACLE_INVALID, "v1", sub_reason="GOLD_PORT_FAILED"),
+        row(5, ros.NO_CANDIDATE, "v1"),
+        row(6, ros.PARTIAL, "v2"),
+        row(7, ros.RESOLVED, "v1"),
+    ]
+
+
+# sha256 of json.dumps(summarize(_golden_rows()), sort_keys=True) under scorer 1.2.4.
+V124_SUMMARY_SHA256 = "0f2bd6522b7adfb49b66b4c4e252ddf05c8de740ee28cccd335a86563f03251a"
+
+
+def test_v1_v2_receipts_summarize_exactly_as_1_2_4():
+    s = ros.summarize(_golden_rows())
+    assert "v3" not in s
+    assert hashlib.sha256(json.dumps(s, sort_keys=True).encode()).hexdigest() == (
+        V124_SUMMARY_SHA256
+    )
+
+
+def test_summary_v3_block_is_apart_from_v1_headline():
+    rows = _golden_rows()
+    before = ros.summarize(rows)
+    v3_rows = [
+        _summary_row(10, ros.BROKE_EXISTING, "v3"),
+        _summary_row(11, ros.RESOLVED, "v3"),
+        _summary_row(12, ros.NOT_SCORABLE_ORACLE_INVALID, "v3", sub_reason="GOLD_PORT_FAILED"),
+    ]
+    after = ros.summarize([*rows, *v3_rows])
+    for key in set(before) - {"spec_version_counts"}:
+        assert after[key] == before[key], key
+    assert after["spec_version_counts"] == {"v1": 6, "v2": 2, "v3": 3}
+    assert after["unknown_spec_versions"] == {}
+    assert after["v3"] == ros._summary(v3_rows)
+    assert after["v3"]["counts"] == {
+        ros.BROKE_EXISTING: 1,
+        ros.NOT_SCORABLE_ORACLE_INVALID: 1,
+        ros.RESOLVED: 1,
+    }
+    assert (after["v3"]["resolved"], after["v3"]["valid_oracle_n"]) == (1, 2)
+
+
+def test_cli_spec_version_defaults_to_v1():
+    from nexus.research import score_real_outcome_cli as cli
+
+    assert cli.parse_args(["--out", "o"]).spec_version == ros.SPEC_V1
+    assert cli.parse_args(["--out", "o", "--spec-version", "v3"]).spec_version == ros.SPEC_V3
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--out", "o", "--spec-version", "v2"])
+
+
+def test_spec_v3_file_names_base_specs_and_is_post_hoc():
+    root = Path(__file__).resolve().parents[2]
+    v3 = (root / ros.SPEC_V3_RELATIVE_PATH).read_text()
+    v2_sha = hashlib.sha256((root / ros.SPEC_V2_RELATIVE_PATH).read_bytes()).hexdigest()
+    assert "315d95de21ea7ec82c97bf80165feaa052cb8a36fe99f3a1072d45ff74bb2bda" in v3
+    assert v2_sha in v3
+    assert "not pre-registered" in v3 and "#2709" in v3
+    assert "uv-venv-runtime-pins" in v3

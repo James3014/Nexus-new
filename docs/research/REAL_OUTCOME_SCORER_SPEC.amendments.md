@@ -22,8 +22,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.2` | oracle-module run failure diagnostic (#2297), A7 below | unchanged from 1.2.1; A7 only adds a receipt field |
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
+| `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
 
-Current scorer: `SCORER_VERSION = "1.2.4"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.3.0"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -251,3 +252,24 @@ The default is `none`.
   reuses older `os` results. The env build is not sandboxed and is the same for both
   modes, so the env cache key is unchanged. The test-result cache key includes the
   scorer version (A4), so 1.2.4 does not reuse 1.2.3 results.
+
+## 2026-10-19: A10, spec v3, metadata-only project stub (opt-in rule set, #2709)
+
+`REAL_OUTCOME_SCORER_SPEC.v3.md` holds the rule. In short: after
+`uv sync --no-install-project`, the env gets a `<name>-<version>.dist-info` with only
+`METADATA`, `INSTALLER` and `RECORD`, taken from BASE `pyproject.toml` `[project]`, so
+`importlib.metadata.version(<project>)` works while imports still resolve only through
+`PYTHONPATH=<tree>`. Without it, nexus-core's `pytest tests` stops at a
+`PackageNotFoundError` for `nexus-certify` and collects about 2 nodes, which hides
+regressions (Issue #2709).
+
+- This is a rule change, so it is a new spec file and it is opt-in: the CLI gains
+  `--spec-version {v1,v3}`, default `v1`. With `v1` nothing changes (env build, pytest
+  command and environment, cache-key formulas, receipt fields). Scorer 1.3.0 does not
+  reuse 1.2.4 envs or results, only because every key covers the scorer version (A4).
+- v3 receipts are post hoc, not pre-registered, and are reported apart. The v1 headline
+  and `v1_plus_v2` never include them.
+- Owner decision (James, in session, 2026-10-19): 「同意」, approving Issue #2709 option 1,
+  "Install only the project's metadata without letting it shadow the tree", as spec v3,
+  opt-in, with the affected V12 tasks rescored and reported next to the unchanged v1
+  headline.
