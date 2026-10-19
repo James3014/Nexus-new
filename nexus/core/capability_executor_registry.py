@@ -1097,6 +1097,10 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 task_id=task_id,
                 assumption=assumption[:200],
                 state_file=str(getattr(inst, "state_file", "") or ""),
+                # Which key answered (#2721): a witness cannot tell a per-file 0.7 from
+                # the default 0.7 without it.
+                belief_target_file=target_file,
+                belief_lookup=_belief_lookup(inst, assumption or task_id, target_file),
                 physical_callable="nexus.core.belief_engine.BeliefEngine.assess_confidence",
             ),
         )
@@ -1104,6 +1108,19 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("belief", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
                              outcome={"error": str(exc)[:300]})
+
+
+def _belief_lookup(inst: Any, key: str, target_file: str) -> str:
+    """``assumption`` / ``file`` / ``default``: the entry ``assess_confidence`` used."""
+    beliefs = getattr(inst, "beliefs", None)
+    if not isinstance(beliefs, Mapping):
+        return "unknown"
+    if key in beliefs:
+        return "assumption"
+    from nexus.core.belief_engine import repair_target_key
+
+    target_key = repair_target_key(target_file) if target_file else ""
+    return "file" if target_key and target_key in beliefs else "default"
 
 
 def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:

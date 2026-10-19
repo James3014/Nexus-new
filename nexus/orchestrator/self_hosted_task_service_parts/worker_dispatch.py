@@ -570,6 +570,8 @@ _OBSERVATION_OUTCOME_KEYS = (
     "findings_hit_count",
     "confidence",
     "state_file",
+    "belief_target_file",
+    "belief_lookup",
     "lookup_symbol",
     "found",
     "match_count",

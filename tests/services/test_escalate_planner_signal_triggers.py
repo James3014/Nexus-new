@@ -427,6 +427,47 @@ def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeyp
     assert "no_existing_task_files" in repr(receipt)
 
 
+def test_belief_reports_which_key_answered(tmp_path, monkeypatch) -> None:
+    """#2721 witness: a per-file 0.7 and the default 0.7 must be distinguishable."""
+    from nexus.core.belief_engine import BeliefEngine, repair_target_key
+    from nexus.services.mainchain_entry import build_mainchain_capability_invokers
+    from nexus.services.unified_runtime import materialize_selected_capability_evidence
+
+    monkeypatch.chdir(tmp_path)
+    BeliefEngine().update_belief("earlier", repair_target_key("pkg/a.py"), 0.7, "ev")
+    plan = {"selected_capabilities": ["belief"], "signal_snapshot": {}}
+
+    def outcome(context: dict) -> dict:
+        results, _ = materialize_selected_capability_evidence(
+            planner_output={"plan_payload": plan, "plan_hash": "0" * 64},
+            selected_capabilities=["belief"],
+            task_id="later",
+            task_statement="fix a",
+            workspace_revision="w" * 40,
+            plan_hash="0" * 64,
+            planner_decision_id="d" * 64,
+            capability_invokers={
+                "belief": build_mainchain_capability_invokers(
+                    codeintel={}, include_postflight_gates=True
+                )["belief"]
+            },
+            capability_context={"workspace_root": str(tmp_path), **context},
+            codeintel={},
+        )
+        return results["belief"]["response"]["response"]["outcome"]
+
+    hit = outcome({"belief_target_files": ["pkg/a.py"]})
+    assert (hit["confidence"], hit["belief_lookup"], hit["belief_target_file"]) == (
+        0.7,
+        "file",
+        "pkg/a.py",
+    )
+    miss = outcome({"belief_target_files": ["pkg/b.py"]})
+    assert (miss["confidence"], miss["belief_lookup"]) == (0.7, "default")
+    none = outcome({})
+    assert (none["belief_lookup"], none["belief_target_file"]) == ("default", "")
+
+
 def test_belief_reads_the_per_file_confidence_through_the_registry(tmp_path, monkeypatch) -> None:
     """#2721: belief had no constraint allowlist, so on every runtime path its executor
     saw no target file and returned the 0.7 default even with per-file evidence."""
