@@ -53,7 +53,8 @@ def test_only_not_required_rows_do_not_allow_research(tmp_path: Path) -> None:
 
 
 def test_phase_without_required_rows_is_not_counted_as_passing(tmp_path: Path) -> None:
-    # R is judged and passes; X has rows but none required, so it is not a passing phase.
+    # X has rows but none required: it is judged on success_ratio only (its required_done_ratio
+    # default proves nothing), and a ledger whose only phases are not-required is 0.0.
     summary = {
         "status": "SUCCESS",
         "phase_slo_pass": True,
@@ -79,6 +80,9 @@ def test_phase_without_required_rows_is_not_counted_as_passing(tmp_path: Path) -
         "phases": {"X": summary["phases"]["X"]},
     }
     assert phase_slo_pass_rate(only_unrequired) == 0.0
+    failing_unrequired = {**summary["phases"]["X"], "success_ratio": 0.0}
+    mixed = {**summary, "phases": {"R": summary["phases"]["R"], "X": failing_unrequired}}
+    assert phase_slo_pass_rate(mixed) == 0.5
 
 
 def test_failing_phase_slo_pass_overrides_row_ratios_and_overall_rate() -> None:
@@ -139,3 +143,52 @@ def test_wiring_audit_learn_phase_slo_positive_fixture_passes(tmp_path: Path) ->
     probe = row["component_probe"]
     assert probe["project_root_phase_slo_pass"] is True
     assert probe["per_task_run_root_phase_slo_pass"] is False
+
+
+def test_overall_pass_rate_needs_phase_slo_pass_and_success_status() -> None:
+    assert phase_slo_pass_rate({"overall_pass_rate": 1.0}) == 0.0
+    assert phase_slo_pass_rate({"overall_pass_rate": 1.0, "status": "FAILED"}) == 0.0
+    assert (
+        phase_slo_pass_rate({"overall_pass_rate": 1.0, "status": "FAILED", "phase_slo_pass": True})
+        == 0.0
+    )
+    ok = {"phase_slo_pass": True, "status": "SUCCESS"}
+    assert phase_slo_pass_rate({**ok, "overall_pass_rate": 0.85}) == 0.85
+    assert phase_slo_pass_rate({**ok, "overall_pass_rate": 7.0}) == 1.0
+    assert phase_slo_pass_rate({**ok, "overall_pass_rate": -3.0}) == 0.0
+    assert phase_slo_pass_rate({**ok, "overall_pass_rate": "nan"}) == 0.0
+    assert (
+        derive_phase_actions({"overall_pass_rate": 1.0}, "bug", "standard").allow_research is False
+    )
+
+
+def test_failing_phase_cannot_hide_by_being_not_required() -> None:
+    bad_unrequired = {
+        "total": 3,
+        "writeback_required": 0,
+        "required_done_ratio": 1.0,
+        "success_ratio": 0.0,
+    }
+    summary = {
+        "status": "SUCCESS",
+        "phase_slo_pass": True,
+        "phases": {
+            "R": {
+                "total": 2,
+                "writeback_required": 2,
+                "required_done_ratio": 1.0,
+                "success_ratio": 1.0,
+            },
+            "X": dict(bad_unrequired),
+            "D": dict(bad_unrequired),
+            "A": dict(bad_unrequired),
+            "C": {
+                "total": 0,
+                "writeback_required": 0,
+                "required_done_ratio": 1.0,
+                "success_ratio": 1.0,
+            },
+        },
+    }
+    assert phase_slo_pass_rate(summary) == 0.25
+    assert derive_phase_actions(summary, "bug", "standard").allow_research is False

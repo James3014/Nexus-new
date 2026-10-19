@@ -2,7 +2,8 @@ import pytest
 from nexus.research.learn.phase_policy import derive_phase_actions, AuditStrictness
 
 def test_policy_allow_research_when_ready():
-    summary = {"overall_pass_rate": 0.85}
+    # #2715: overall_pass_rate is honoured only for a passing SUCCESS summary.
+    summary = {"overall_pass_rate": 0.85, "phase_slo_pass": True, "status": "SUCCESS"}
     actions = derive_phase_actions(summary, "bug", "standard")
     assert actions.allow_research is True
     assert actions.force_baseline is False

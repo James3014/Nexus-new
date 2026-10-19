@@ -20,43 +20,52 @@ class PhaseActions:
 def phase_slo_pass_rate(phase_slo_summary: Dict[str, Any]) -> float:
     """Share of judged phases meeting the SLO, read from the real summary schema.
 
-    ``PhaseSLOService.build_phase_slo_report`` writes ``phase_slo_pass`` and ``phases.<P>.{total,
-    writeback_required, required_done_ratio, success_ratio}`` and never ``overall_pass_rate``;
-    reading only that key made every real summary look like PassRate=0%.  An explicit
-    ``overall_pass_rate`` is still honoured unless the summary also says ``phase_slo_pass`` is
-    not true.
+    ``PhaseSLOService.build_phase_slo_report`` writes ``status``, ``phase_slo_pass`` and
+    ``phases.<P>.{total, writeback_required, required_done_ratio, success_ratio}`` and never
+    ``overall_pass_rate``; reading only that key made every real summary look like PassRate=0%.
 
-    Fail closed (#2715, after #2702): a summary whose ``phase_slo_pass`` is missing or not
-    ``True`` is 0.0; a missing/unavailable summary is 0.0; a phase with no required write-back
-    rows is not judged (its ``required_done_ratio`` defaults to 1.0 and proves nothing), so it
-    never counts as passing, and a summary with no judged phase is 0.0 (no evidence -> not ready).
+    Fail closed (#2715, after #2702):
+
+    * 0.0 unless ``phase_slo_pass is True`` and ``status`` is ``SUCCESS`` (a missing or
+      unavailable summary is 0.0).  This is checked first, so an explicit
+      ``overall_pass_rate`` cannot bypass it; when honoured it is clamped to [0, 1].
+    * Every phase with rows (``total > 0``) is judged.  A phase with required write-back rows
+      must reach ``required_done_ratio >= 0.95`` and ``success_ratio >= 0.5``; a phase with no
+      required rows is judged on ``success_ratio >= 0.5`` only (its ``required_done_ratio``
+      defaults to 1.0 and proves nothing), so a failing phase cannot hide by being marked
+      not-required.
+    * No judged phase, or no phase with a required write-back row, is 0.0 (no evidence ->
+      not ready), matching the service's own ``phase_slo_pass``.
     """
     summary = phase_slo_summary if isinstance(phase_slo_summary, dict) else {}
-    if "phase_slo_pass" in summary and summary.get("phase_slo_pass") is not True:
-        return 0.0
-    if "overall_pass_rate" in summary:
-        return float(summary.get("overall_pass_rate") or 0.0)
-    if str(summary.get("status") or "").upper() != "SUCCESS":
-        return 0.0
     if summary.get("phase_slo_pass") is not True:
         return 0.0
+    if str(summary.get("status") or "").upper() != "SUCCESS":
+        return 0.0
+    if "overall_pass_rate" in summary:
+        try:
+            rate = float(summary.get("overall_pass_rate") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        if rate != rate:  # NaN
+            return 0.0
+        return min(1.0, max(0.0, rate))
     raw_phases = summary.get("phases")
     phases: Dict[str, Any] = raw_phases if isinstance(raw_phases, dict) else {}
     judged = [
-        row
-        for row in phases.values()
-        if isinstance(row, dict)
-        and int(row.get("total") or 0) > 0
-        and int(row.get("writeback_required") or 0) > 0
+        row for row in phases.values() if isinstance(row, dict) and int(row.get("total") or 0) > 0
     ]
-    if not judged:
+    if not judged or not any(int(row.get("writeback_required") or 0) > 0 for row in judged):
         return 0.0
-    passing = sum(
-        1
-        for row in judged
-        if float(row.get("required_done_ratio") or 0.0) >= 0.95
-        and float(row.get("success_ratio") or 0.0) >= 0.5
-    )
+
+    def _passes(row: Dict[str, Any]) -> bool:
+        if float(row.get("success_ratio") or 0.0) < 0.5:
+            return False
+        if int(row.get("writeback_required") or 0) > 0:
+            return float(row.get("required_done_ratio") or 0.0) >= 0.95
+        return True
+
+    passing = sum(1 for row in judged if _passes(row))
     return round(passing / len(judged), 4)
 
 

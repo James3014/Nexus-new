@@ -109,7 +109,14 @@ def test_phase_slo_pass_rate_reads_real_summary_schema() -> None:
     assert (
         phase_slo_pass_rate({"status": "UNAVAILABLE", "reason": "phase_slo_summary_missing"}) == 0.0
     )
-    assert phase_slo_pass_rate({"overall_pass_rate": 0.85}) == 0.85
+    assert (
+        phase_slo_pass_rate({
+            "overall_pass_rate": 0.85,
+            "phase_slo_pass": True,
+            "status": "SUCCESS",
+        })
+        == 0.85
+    )
     actions = derive_phase_actions(
         {"status": "SUCCESS", "phase_slo_pass": True, "phases": {"X": ok}}, "bug", "standard"
     )

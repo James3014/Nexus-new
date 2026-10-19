@@ -55,7 +55,8 @@ class FakeLearnService:
         self.repo_root = repo_root
 
     def read_phase_slo_summary(self) -> dict:
-        return {"overall_pass_rate": 0.8}
+        # #2715: overall_pass_rate is honoured only for a passing SUCCESS summary.
+        return {"overall_pass_rate": 0.8, "phase_slo_pass": True, "status": "SUCCESS"}
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,11 @@ def test_get_learn_phase_policy_builds_payload_without_click(tmp_path: Path):
         return FakeLearnService(root)
 
     def derive_actions(slo_summary: dict, task_type: str, risk: str) -> FakeActions:
-        assert slo_summary == {"overall_pass_rate": 0.8}
+        assert slo_summary == {
+            "overall_pass_rate": 0.8,
+            "phase_slo_pass": True,
+            "status": "SUCCESS",
+        }
         assert task_type == "feature"
         assert risk == "high"
         return FakeActions(True, False, True, FakeStrictness("strict"), "ready")

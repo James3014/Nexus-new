@@ -26,7 +26,9 @@ class MockCtx:
 
 def test_planner_stage_injects_policy(tmp_path: Path, monkeypatch):
     from nexus.research.learn_mode import LearnModeService
-    monkeypatch.setattr(LearnModeService, "read_phase_slo_summary", lambda self: {"overall_pass_rate": 0.9})
+    # #2715: overall_pass_rate is honoured only for a passing SUCCESS summary.
+    summary = {"overall_pass_rate": 0.9, "phase_slo_pass": True, "status": "SUCCESS"}
+    monkeypatch.setattr(LearnModeService, "read_phase_slo_summary", lambda self: summary)
     
     stage = PipelineStagesMixin()
     stage.engine = MockEngine(tmp_path)
