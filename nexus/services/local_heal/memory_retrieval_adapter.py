@@ -730,6 +730,10 @@ def _canonical_relevance(hit: dict[str, Any], source_lesson: dict[str, Any]) -> 
     return score
 
 
+class CanonicalLedgerUnreadable(ValueError):
+    """The canonical ledger has content but not one valid lesson row."""
+
+
 class CanonicalLessonStore:
     """Read-only adapter over the canonical nexus.learning_lesson.v1 ledger.
 
@@ -799,6 +803,10 @@ class CanonicalLessonStore:
                 self.last_metadata["query_succeeded"] = True
                 return []
             lessons = load_lessons(path)
+            if not lessons and any(raw.strip() for raw in path.read_bytes().splitlines()):
+                # load_lessons skips malformed rows silently; a non-empty ledger with
+                # no valid lesson is corrupt, not "no lessons" (#2661).
+                raise CanonicalLedgerUnreadable(f"no valid lesson in {path.name}")
             by_id = {str(lesson.get("lesson_id")): lesson for lesson in lessons}
             kwargs: dict[str, Any] = {
                 "query_text": query_text,

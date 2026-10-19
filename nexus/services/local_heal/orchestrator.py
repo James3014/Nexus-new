@@ -396,6 +396,17 @@ class HealOrchestrator:
             return "LOGIC_REGRESSION"
         return "VERIFICATION_FAILED"
 
+    @staticmethod
+    def _learning_closure_path() -> Path:
+        """Learning-closure JSONL read by the C6AB repair-pattern retrieval."""
+        return (
+            Path(__file__).resolve().parents[3]
+            / ".nexus"
+            / "reports"
+            / "learn"
+            / "learning_closure.jsonl"
+        )
+
     def _render_memory_lessons(self, ctx: HealContext, target_file: str) -> tuple[str, list[str]]:
         """Render up to 3 advisory memory lessons for a retry prompt.
 
@@ -435,9 +446,20 @@ class HealOrchestrator:
                         failure_excerpt = str(getattr(ctx.op, "verifier_stderr_excerpt", "") or "")[
                             :200
                         ]
-                        canonical_rows = CanonicalLessonStore().query(
+                        canonical_store = CanonicalLessonStore()
+                        canonical_rows = canonical_store.query(
                             query_text=f"{problem_text} {failure_excerpt}".strip(), limit=3
                         )
+                        # The store fails open (returns [] and sets last_error); a
+                        # broken ledger must still not read as "no lessons" (#2661).
+                        canonical_error = str(getattr(canonical_store, "last_error", "") or "")
+                        if canonical_error:
+                            logger.warning(
+                                "canonical lesson store query failed for %s: %s",
+                                getattr(ctx.op, "instance_id", ""),
+                                canonical_error,
+                            )
+                            setattr(ctx.op, "_memory_canonical_store_error", canonical_error[:300])
                     except Exception as exc:
                         # Canonical store failure must not read as "no lessons" (#2638).
                         logger.warning(
@@ -636,14 +658,14 @@ class HealOrchestrator:
                 retrieve_successful_repair_patterns,
             )
 
-            _jsonl_path = (
-                Path(__file__).resolve().parents[3]
-                / ".nexus"
-                / "reports"
-                / "learn"
-                / "learning_closure.jsonl"
+            _read_errors: list[str] = []
+            _patterns = retrieve_successful_repair_patterns(
+                str(self._learning_closure_path()), limit=5, error_sink=_read_errors
             )
-            _patterns = retrieve_successful_repair_patterns(str(_jsonl_path), limit=5)
+            if _read_errors:
+                # An unreadable closure file is a retrieval failure, not "no patterns" (#2661).
+                research_error = _read_errors[0]
+                logger.warning("repair pattern retrieval failed: %s", research_error)
             research_pattern_count = len(_patterns)
             research_patterns_text = format_research_patterns_for_prompt(_patterns)
             research_hash = (
