@@ -638,3 +638,7 @@
 | nexus/services/claude_account_pool.py | tests/services/test_claude_account_pool.py, tests/services/test_external_worker_dispatch.py, tests/services/test_external_worker_runtime.py, tests/services/test_grok_account_pool.py | active | high | claude_account_pool_identity_lease_contract |
 | docs/arch/OPENCLI_CHATGPT_ADAPTER_CONTRACT.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | low | opencli_adapter_contract_doc |
 | tests/fixtures/host_evidence_1926/ | tests/benchmark/test_p12_replay.py, tests/unit/local_heal/test_c6bb_target_grounding.py, tests/unit/local_heal/test_c6bd_anchor_shaping.py, tests/unit/local_heal/test_memory_eval_9_real_model_influence_ab.py, tests/unit/local_heal/test_memory_eval_10_outcome_candidate_selection.py, tests/unit/local_heal/test_memory_eval_11_c13453_real_model_ab.py, tests/unit/local_heal/test_memory_eval_identity_and_path.py, tests/unit/local_heal/test_rrl3c_evidence_harness_proof.py | active | low | test_fixture |
+| nexus/review | tests/review | active | low | l2_static_flags_shadow_record_only_contract |
+| nexus/review/l2_static_flags.py | tests/review | active | low | l2_static_flags_shadow_record_only_contract |
+| scripts/ops/l2_flag_shadow.py | tests/ops/test_l2_flag_shadow.py | active | low | l2_flag_shadow_cli_record_only_contract |
+| tests/fixtures/l2_static_flags | tests/review/test_l2_static_flags_accuracy.py | active | low | l2_static_flags_fixture_contract |
