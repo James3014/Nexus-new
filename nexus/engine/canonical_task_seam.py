@@ -494,11 +494,15 @@ def build_canonical_planner_admission(
     task_card_identity: VerifiedTaskCardIdentity,
     campaign_identity: VerifiedCampaignIdentity | None = None,
     workforce_consumer: str = "",
+    route_facts_repo_root: Path | None = None,
 ) -> dict[str, Any]:
     """Run the sole planner and current Workforce Admission for one gateway task.
 
     ``workforce_consumer`` is exact-match only: ``""`` (global route) or one of
     ``KNOWN_WORKFORCE_CONSUMERS``; anything else is rejected before planning.
+    ``route_facts_repo_root`` is passed only for a validated measurement
+    external target (#2721): route facts and codeintel are then derived from
+    that repository.  Shared playbooks always come from ``REPO_ROOT``.
     """
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
@@ -538,7 +542,7 @@ def build_canonical_planner_admission(
     )
     admission_task_type = "feature" if infer_task_kind(task_text) == "feature" else "repair"
     facts = _canonical_route_facts(
-        repo_root=REPO_ROOT,
+        repo_root=REPO_ROOT if route_facts_repo_root is None else Path(route_facts_repo_root),
         task_text=str(task_text),
         task_type=admission_task_type,
         allowed_files=allowed_files,

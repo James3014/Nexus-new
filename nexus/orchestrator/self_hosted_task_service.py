@@ -147,7 +147,7 @@ from nexus.orchestrator.autonomy_policy import (
 )
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.governed_integration import (
     ControlledIntegrationManager,
@@ -160,6 +160,7 @@ from nexus.orchestrator.lifecycle_guards import (
     validate_approval_grant,
     validate_architecture_approval,
 )
+from nexus.orchestrator.measure_external_target import accepted_external_controller
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.runtime_retry_bridge import (
     project_candidate_acceptance_for_runtime_repair,  # noqa: F401 - facade surface, used by parts/read_projection.py
@@ -1849,11 +1850,31 @@ class SelfHostedTaskService(
             trusted_manifest = trusted_runtime_manifest_hash()
             if trusted_manifest is None:
                 raise RuntimeError("TOOL_MANIFEST_UNAVAILABLE: service cannot accept an unbound runtime manifest")
+            # #2721: on a measurement Gateway only, a worker-candidate Target may
+            # be cut from a re-validated external repository; its HEAD (not the
+            # Nexus-new HEAD) is then the one the envelope binds.  The Task Card
+            # is still checked under CANONICAL_SOURCE_ROOT.  With the measurement
+            # variable unset this is None and the guard is unchanged.
+            external_controller = (
+                accepted_external_controller(
+                    request.get("controller_repo_root"),
+                    action.get("expected_head"),
+                    nexus_root=Path(CANONICAL_SOURCE_ROOT),
+                    forbidden_roots=(LOADED_SOURCE_ROOT,),
+                )
+                if request.get("worker_candidate_ingress") is True
+                else None
+            )
             pre_action_guard(
                 action,
                 request=request,
                 canonical_root=CANONICAL_SOURCE_ROOT,
                 tool_manifest_hash=trusted_manifest,
+                **(
+                    {"current_head": external_controller.base_revision}
+                    if external_controller is not None
+                    else {}
+                ),
             )
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
