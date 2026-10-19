@@ -179,8 +179,8 @@ def test_p1_gates_missing_inputs_are_not_applicable_naming_them(tmp_path, monkey
     pq = obs["plan_quality_gate"]["skip_reason"].split(":missing=")[1].split(",")
     assert {"target_files", "acceptance_criteria", "impact_map"} <= set(pq)
     assert obs["plan_quality_gate"]["semantic_status"] == "NOT_APPLICABLE"
-    assert obs["mempalace_gate"]["skip_reason"].split(":missing=")[1].startswith(
-        "NEXUS_STATE_ROOT,"
+    assert (
+        obs["mempalace_gate"]["skip_reason"].split(":missing=")[1].startswith("NEXUS_STATE_ROOT,")
     )
     assert _status(lease.target_worktree) == ""
     assert package["status"] == "PASS"
