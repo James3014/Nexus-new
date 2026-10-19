@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import stat
 import subprocess
@@ -103,6 +104,21 @@ GHOST_TIMEOUT_RETRY_FACTOR = 2
 # Sandbox capability probes (#2650): run once per review, only when a head failure has no
 # base result. A failed probe means "this sandbox cannot run such a test", never a regression.
 ENV_PROBE_TIMEOUT_SEC = 30
+# git's own error text when the object store lacks history a test asks for (the sandbox mirror
+# git dir holds only the reviewed commit, by design since #2650). Matched only in the junit
+# failure text of a head-failing test that has NO base result (#2665, P7). Only git's CLI
+# message form counts: a ``fatal:``/``error:`` line, either at the start of a line or as the
+# start of a captured ``stderr = '...'`` value (how pytest shows a failed subprocess.run's
+# locals, the #535 shape); the same words in prose or an assertion message do not.
+GIT_HISTORY_UNAVAILABLE_RE = re.compile(
+    r"(?:^[ \t]*|\bstderr\s*=\s*b?['\"])(?:fatal|error): (?:git [a-z][a-z-]*: )?"
+    r"(?:bad object [0-9a-f]{7,64}\b"
+    r"|could not get object info"
+    r"|bad revision '[^'\n]*'"
+    r"|ambiguous argument '[^'\n]*': unknown revision or path not in the working tree"
+    r"|[^\n'\"]*\bshallow\b)",
+    re.MULTILINE,
+)
 ENV_PROBE_TMPDIR_WRITE = "import os, tempfile\nfd, path = tempfile.mkstemp()\nos.close(fd)\nos.unlink(path)\n"
 # ``ModuleNotFoundError`` text in a pytest collection-error report (#2650).
 MODULE_NOT_FOUND_RE = re.compile(r"ModuleNotFoundError: No module named '([A-Za-z_][A-Za-z0-9_.]*)'")
@@ -1052,6 +1068,14 @@ class UltraReviewService:
             tmp=ctx.get("tmp") or "",
             untrusted_roots=(self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path")),
         )
+        # ``python3`` inside the sandbox resolves to the reviewer's interpreter first (#2665,
+        # P7), unless that interpreter itself lives in a reviewed tree.
+        untrusted = (self.project_root, ctx.get("execution_root"), ctx.get("sandbox_path"))
+        interpreter_bin = os.path.dirname(sys.executable)
+        if os.path.isabs(interpreter_bin) and not in_tree(interpreter_bin, untrusted):
+            parts = env.get("PATH", "").split(os.pathsep)
+            rest = [part for part in parts if part and part != interpreter_bin]
+            env["PATH"] = os.pathsep.join([interpreter_bin, *rest])
         env[ULTRA_REVIEW_NESTED_ENV] = "1"
         if ctx.get("tmp"):
             # xcrun caches into the per-user temp dir (outside the sandbox) unless told
@@ -2214,6 +2238,7 @@ class UltraReviewService:
                     sandbox_path=sandbox_path,
                     timeout_sec=timeout_sec,
                     head_collection_modules=self._junit_collection_error_modules(head_check["junit_bytes"]),
+                    head_failure_texts=self._junit_failure_texts(head_check["junit_bytes"]),
                     execution_root=execution_root,
                 )
                 regressions.extend(base_comparison.pop("regressions"))
@@ -2402,7 +2427,9 @@ class UltraReviewService:
             "--rootdir",
             str(root),
             "-o",
-            f"pythonpath={sbpl_path(root)}",
+            # pytest shlex-splits a ``paths`` ini value: quote it so a root with a space
+            # (``~/Library/Application Support``) stays one sys.path entry (#2665).
+            f"pythonpath={shlex.quote(sbpl_path(root))}",
             "-o",
             "junit_family=xunit1",
             # A file that fails to import is reported (error_file) and the other files still
@@ -2476,6 +2503,37 @@ class UltraReviewService:
         return outcomes
 
     @staticmethod
+    def _junit_failure_texts(data: bytes | None) -> dict[str, str]:
+        """``{test id: failure/error message + text}`` for failed test cases, ids built exactly
+        as ``_junit_outcomes_from_bytes`` builds them; ``{}`` for any report it would refuse."""
+        import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 - DTD/entities rejected below
+
+        if UltraReviewService._junit_outcomes_from_bytes(data) is None or data is None:
+            return {}
+        try:
+            # DTD/entities were rejected by the _junit_outcomes_from_bytes call above.
+            root = ET.fromstring(data)  # noqa: S314  # nosec B314
+        except ET.ParseError:
+            return {}
+        texts: dict[str, str] = {}
+        for case in root.iter("testcase"):
+            classname = str(case.get("classname") or "")
+            name = str(case.get("name") or "")
+            file = str(case.get("file") or "").replace("\\", "/")
+            if not classname:
+                continue
+            module = file[:-3].replace("/", ".") if file.endswith(".py") else file
+            nested = [p for p in classname[len(module) :].split(".") if p]
+            test_id = "::".join([file, *nested, name])
+            parts = [
+                f"{node.get('message') or ''}\n{node.text or ''}"
+                for node in (*case.findall("failure"), *case.findall("error"))
+            ]
+            if parts:
+                texts[test_id] = (texts.get(test_id, "") + "\n".join(parts))[-20000:]
+        return texts
+
+    @staticmethod
     def _attribute_head_failures(
         failed_ids: list[str], test_candidates: list[str], explicit_tests: Sequence[str]
     ) -> tuple[list[str], list[str]]:
@@ -2507,6 +2565,7 @@ class UltraReviewService:
         timeout_sec: float,
         head_collection_modules: dict[str, str] | None = None,
         execution_root: Path | None = None,
+        head_failure_texts: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Re-run the files of head-failing mapped tests on a detached worktree of ``base_ref``.
 
@@ -2527,12 +2586,19 @@ class UltraReviewService:
             "timeout": False,
         }
         modules = dict(head_collection_modules or {})
+        failure_texts = dict(head_failure_texts or {})
 
         def file_of(test_id: str) -> str:
             return test_id.split("::", 1)[0]
 
         def absent_on_base(test_id: str) -> None:
-            reason = self._environment_reason(test_id, modules, execution_root=execution_root, base_ref=base_ref)
+            reason = self._environment_reason(
+                test_id,
+                modules,
+                execution_root=execution_root,
+                base_ref=base_ref,
+                failure_text=failure_texts.get(test_id, ""),
+            )
             if reason:
                 outcome["inconclusive_env"].append({"test": test_id, "reason": reason})
             else:
@@ -2642,7 +2708,13 @@ class UltraReviewService:
             }
 
     def _environment_reason(
-        self, test_id: str, modules: dict[str, str], *, execution_root: Path | None, base_ref: str
+        self,
+        test_id: str,
+        modules: dict[str, str],
+        *,
+        execution_root: Path | None,
+        base_ref: str,
+        failure_text: str = "",
     ) -> str:
         """Why a head failure with no base result cannot be judged here, or ``""`` (#2650).
 
@@ -2651,12 +2723,17 @@ class UltraReviewService:
         dependency (pyproject / requirements), that neither the head nor the base tree provides
         and that the reviewer's interpreter cannot import. A forgotten or misspelled module is not
         declared, so it stays a regression. ``environment_probe_failed:<probes>`` when a sandbox
-        capability probe, run before any candidate code, failed."""
+        capability probe, run before any candidate code, failed. ``git_history_unavailable`` when
+        the test's own junit failure text carries git's missing-object error (the sandbox git
+        dir holds one commit, #2665). Only ever called for a test with no base result, so a
+        base pass -> head fail never reaches here and stays a regression."""
         module = modules.get(test_id) or ""
         if module and execution_root is not None and self._dependency_unavailable(
             module, execution_root, base_ref, test_file=test_id.split("::", 1)[0]
         ):
             return "dependency_unavailable:" + module.split(".", 1)[0]
+        if failure_text and GIT_HISTORY_UNAVAILABLE_RE.search(failure_text):
+            return "git_history_unavailable"
         failed = list(getattr(self, "_env_probe_failures", None) or [])
         if failed:
             return "environment_probe_failed:" + ",".join(failed)
@@ -2730,6 +2807,21 @@ class UltraReviewService:
         probes: list[tuple[str, list[str]]] = [("git_version", ["git", "--version"])]
         if mirror_git_ok:
             probes.append(("git_rev_parse_mirror", ["git", "-C", str(execution_root), "rev-parse", "HEAD"]))
+            # ``git status`` needs the iconv tables (#2665, P6); --no-optional-locks keeps the
+            # probe from writing the index.
+            probes.append(
+                (
+                    "git_status_mirror",
+                    [
+                        "git",
+                        "--no-optional-locks",
+                        "-C",
+                        str(execution_root),
+                        "status",
+                        "--porcelain",
+                    ],
+                )
+            )
         probes.append(("tmpdir_write", [sys.executable, "-I", "-c", ENV_PROBE_TMPDIR_WRITE]))
         failed: list[str] = []
         for name, cmd in probes:

@@ -62,12 +62,22 @@ SCRIPT_BOOTSTRAP = (
     "sys.path.insert(0, os.path.dirname(s)); runpy.run_path(s, run_name='__main__')"
 )
 # Every path interpolated into the sandbox-exec (SBPL) profile must match this: no quote,
-# backslash, paren, whitespace or control character can reach an SBPL string literal, so
-# no PR-, branch- or user-derived text can close a literal and rewrite the policy.
-SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+-]*$")
+# backslash, paren, tab, newline, other control or non-ASCII character can reach an SBPL
+# string literal, so no PR-, branch- or user-derived text can close a literal and rewrite the
+# policy. The plain ASCII space is allowed: inside a double-quoted literal it is inert, and
+# macOS keeps per-user data under ``~/Library/Application Support`` (the Gateway deployment
+# root lives there; rejecting it blocked every live ultra_review run, #2665).
+SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+ -]*$")
 # System locations the confined interpreter needs to start: subtrees, then single files.
 # Nothing under a user's home directory, no temp tree, no repository root.
-SANDBOX_SYSTEM_READ_SUBPATHS = ("/usr/lib", "/usr/share/zoneinfo", "/System/Library")
+# ``/usr/share/i18n`` holds only the system charset tables (``csmapper``/``esdb``) that libiconv
+# loads: without it ``git status`` fails with ``iconv_open(UTF-8,UTF-8-MAC)`` (#2665, P6).
+SANDBOX_SYSTEM_READ_SUBPATHS = (
+    "/usr/lib",
+    "/usr/share/zoneinfo",
+    "/usr/share/i18n",
+    "/System/Library",
+)
 SANDBOX_SYSTEM_READ_LITERALS = (
     "/",
     "/private/etc/passwd",

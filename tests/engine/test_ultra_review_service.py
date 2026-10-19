@@ -993,12 +993,15 @@ def test_sandboxed_run_pins_cwd_interpreter_and_isolation(tmp_path, monkeypatch)
 
 
 def test_sandbox_env_path_never_points_into_reviewed_tree(tmp_path, monkeypatch):
+    import sys
+
     service, sandbox, execution_root = _bound_service(tmp_path)
     monkeypatch.setenv("PATH", f"{execution_root}/bin:{service.project_root}/bin:relative/bin:/usr/bin:/bin")
     monkeypatch.setenv("PYTHONPATH", str(execution_root))
     env = service._sandbox_env()
 
-    assert env["PATH"].split(":") == ["/usr/bin", "/bin"]
+    # #2665 P7: the reviewer's own interpreter dir comes first (it is outside the reviewed tree).
+    assert env["PATH"].split(":") == [os.path.dirname(sys.executable), "/usr/bin", "/bin"]
     assert "PYTHONPATH" not in env
 
 
@@ -1173,6 +1176,7 @@ def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monke
         str(Path(sys.base_prefix).resolve()),
         "/usr/lib",
         "/usr/share/zoneinfo",
+        "/usr/share/i18n",  # #2665: system iconv tables, read-only
         "/System/Library",
         # #2650: one Perl tool file and the system developer toolchain (xcrun git shim)
         "/usr/bin/shasum",
