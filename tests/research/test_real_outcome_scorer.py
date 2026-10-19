@@ -2634,7 +2634,7 @@ def test_sandbox_os_refuses_extra_import_roots_covering_work(tmp_path, monkeypat
 
     monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
     env = ros.TestEnv("e", sys.executable, "fixture", extra_pythonpath=(str(root),))
-    with pytest.raises(sandboxed_lane.SandboxError, match="extra_import_root_overbroad"):
+    with pytest.raises(sandboxed_lane.SandboxError, match="read_root_overbroad"):
         runner.run(env, tree, "t", "tests", (), 0)
     assert list(runner.runs.iterdir()) == [] and list(runner.cache.iterdir()) == []
 
@@ -2671,3 +2671,169 @@ def test_sandbox_os_cannot_read_repos_sibling_trees_or_home(tmp_path):
         assert plain.run(env, cand, "c", "tests", (), 0).outcomes == {node: ros.FAIL}
     finally:
         shutil.rmtree(home_dir, ignore_errors=True)
+
+
+@pytest.mark.parametrize("where", ["work_bin", "work_itself", "trees", "repos", "store"])
+def test_sandbox_os_refuses_an_interpreter_or_env_dir_covering_work(tmp_path, monkeypatch, where):
+    """Env dir / interpreter prefix are read roots too: one covering <work> would expose
+    sibling trees (GOLD), so it is refused before anything runs."""
+    work = tmp_path / "w" / "work"
+    store = tmp_path / "store"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    python = {
+        "work_bin": work / "bin" / "python",  # env dir == <work>
+        "work_itself": work / "python",  # env dir == <work>'s parent
+        "trees": work / "trees" / "task" / "gold" / "venv" / "bin" / "python",
+        "repos": work / "repos" / "r" / "venv" / "bin" / "python",
+        "store": store / "venv" / "bin" / "python",
+    }[where]
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.symlink_to(sys.executable)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None, store=store)
+    runner.sandbox = ros.SANDBOX_OS  # the check runs before any barrier-specific step
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran with an overbroad read root")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    env = ros.TestEnv("e", str(python), "fixture")
+    with pytest.raises(sandboxed_lane.SandboxError, match="read_root_overbroad"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.runs.iterdir()) == [] and list(runner.cache.iterdir()) == []
+
+
+def test_sandbox_os_uv_env_layout_is_accepted(tmp_path, monkeypatch):
+    """The scorer's own layout (<work>/envs/<key>/bin/python) is not overbroad."""
+    work = tmp_path / "work"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    python = work / "envs" / "abc" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None)
+    runner.sandbox = ros.SANDBOX_OS
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+    launch = runner._confine(ros.TestEnv("e", str(python), "fixture"), tree, work / "scratch" / "r")
+    assert launch[:2] == [sandboxed_lane.SANDBOX_EXEC, "-p"]
+    assert str((work / "envs" / "abc").resolve()) in launch[2]
+
+
+def test_sandbox_os_survivor_growth_in_a_recreated_run_dir_is_counted(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    first = work / "trees" / "task" / "first"
+    second = work / "trees" / "task" / "second"
+    grow = 'sleep 1; mkdir -p "$TMPDIR"; head -c 5000 /dev/urandom > "$TMPDIR/grow"; sleep 30'
+    _write(
+        first,
+        {
+            "tests/test_survivor.py": (
+                "import subprocess\nfrom pathlib import Path\n\n\n"
+                "def test_survivor():\n"
+                f"    child = subprocess.Popen(['/bin/sh', '-c', {grow!r}],"
+                " start_new_session=True)\n"
+                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    _write(second, {"tests/test_next.py": "def test_next():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", first)
+    assert runner.run(env, first, "a", "tests", (), 0).outcomes
+    pid = int((first / "tests" / "child.pid").read_text())
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not list(runner.runs.rglob("grow")):
+            time.sleep(0.1)
+        grown = list(runner.runs.rglob("grow"))
+        assert grown and grown[0].stat().st_size == 5000  # the survivor re-created its dir
+        assert runner.scratch_bytes() >= 5000
+        monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 1000)
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, second, "b", "tests", (), 0)
+        assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+    runner.clean_tmp()
+    assert list(runner.runs.iterdir()) == []
+
+
+def test_sandbox_profile_hash_and_confine_share_one_root_source(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    tree = work / "trees" / "task" / "cand"
+    tree.mkdir(parents=True)
+    before = _hash_runner(work / "scratch").sandbox_profile_sha256
+    monkeypatch.setattr(ros, "_PROFILE_ROOT_SPEC", (*ros._PROFILE_ROOT_SPEC, ("read", "new_kind")))
+    runner = _hash_runner(work / "scratch")
+    assert runner.sandbox_profile_sha256 != before
+    # _confine must supply a real value for every kind of the same source.
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+    env = ros.TestEnv("e", sys.executable, "fixture")
+    with pytest.raises(KeyError, match="new_kind"):
+        runner._confine(env, tree, work / "scratch" / "runs" / "r")
+
+
+def _record_tree_paths(monkeypatch) -> list[Path]:
+    seen: list[Path] = []
+    real = ros.GitRepo.worktree
+
+    def spy(self, dest, sha):
+        seen.append(Path(dest))
+        return real(self, dest, sha)
+
+    monkeypatch.setattr(ros.GitRepo, "worktree", spy)
+    return seen
+
+
+def test_tree_paths_stay_fixed_in_none_mode(tmp_path, fx, monkeypatch):
+    seen = _record_tree_paths(monkeypatch)
+    task = fx.task(b"")
+    receipt = ros.score_task(task, _ctx(tmp_path, fx), candidate_override="gold")["receipt"]
+    assert receipt["label"] == ros.RESOLVED
+    assert seen and {p.parent for p in seen} == {tmp_path / "work" / "trees" / task.name}
+
+
+def test_sandbox_os_rescoring_uses_fresh_tree_paths(tmp_path, fx, monkeypatch):
+    """A survivor that keeps planting a conftest.py at the previous scoring's tree paths
+    never reaches the next scoring of the same task."""
+    import shutil
+    import threading
+
+    ctx = _ctx(tmp_path, fx)
+    runner = _os_runner(ctx.work / "scratch-os")
+    if runner is None:
+        return
+    ctx.runner = runner
+    seen = _record_tree_paths(monkeypatch)
+    task = fx.task(b"")
+    first = ros.score_task(task, ctx, candidate_override="gold")["receipt"]
+    assert first["label"] == ros.RESOLVED
+    first_paths = list(seen)
+    seen.clear()
+    assert {p.parent.parent for p in first_paths} == {ctx.work / "trees"}
+    assert all(p.parent.name.startswith(task.name + "-") for p in first_paths)
+    stop = threading.Event()
+
+    def plant() -> None:
+        while not stop.is_set():
+            for path in first_paths:
+                with contextlib.suppress(OSError):
+                    path.mkdir(parents=True, exist_ok=True)
+                    (path / "conftest.py").write_text("raise RuntimeError('planted')\n")
+            time.sleep(0.02)
+
+    planter = threading.Thread(target=plant, daemon=True)
+    shutil.rmtree(runner.cache)
+    runner.cache.mkdir()  # the second scoring really runs the tests again
+    planter.start()
+    try:
+        second = ros.score_task(task, ctx, candidate_override="gold")["receipt"]
+    finally:
+        stop.set()
+        planter.join()
+    assert second["label"] == ros.RESOLVED
+    assert seen and not set(seen) & set(first_paths)

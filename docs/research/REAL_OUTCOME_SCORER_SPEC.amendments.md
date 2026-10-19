@@ -190,6 +190,13 @@ The default is `none`.
   example a GOLD test's copy of the fix in a pytest basetemp), and no run can plant
   files there for a later one. A run can still change its own tree, which later runs on
   that same tree see, as under `none`.
+- **Fresh tree paths under `os`.** Every scoring of a task builds its trees under a new
+  `<work>/trees/<task_key>-<random>/` instead of `<work>/trees/<task_key>/`. They are
+  removed at the end as before, unless `--keep-trees` is set. Sandbox write access is
+  granted by path. A session-escaping child could otherwise plant files (for example a
+  `conftest.py`) at a tree path that the next scoring of the same task, with the same
+  `--work`, reuses. Cache keys use tree ids (content), never tree paths, so this changes
+  no cached result. Under `none` the tree paths are unchanged.
   - Network is denied.
   - Writes are allowed only in the tree under test and the run's own directory.
   - Reads are allowed only in those places, the env directory, the interpreter it
@@ -197,14 +204,21 @@ The default is `none`.
     `$HOME` stays denied apart from those roots, and credential stores stay denied.
     `<work>/repos` and the experiment store are denied, so a test cannot read the merged
     fix from git objects. Other trees of the same task are not readable.
-  - An extra import root that is or contains the work directory, or lies inside
-    `<work>/repos`, `<work>/trees` or the store, is refused before the run
-    (`SandboxError`).
+  - Every read root other than the tree and the run's own directory (the env
+    directory, the interpreter prefix and each extra import root) is refused before the
+    run (`SandboxError`) when it is or contains the work directory, or lies inside
+    `<work>/repos`, `<work>/trees` or the store. Otherwise such a root would expose
+    sibling trees, such as GOLD. `<work>/trees` is not also denied in the profile: the
+    shared profile applies its deny rules last, so that would deny the run's own tree.
   - File metadata (`stat`, existence checks) stays readable everywhere, and
     `mach-lookup` is allowed. Both come from the shared profile. Signals reach only
     processes inside the same sandbox, so a test may kill its own subprocesses.
   - The timeout, the process-group kill, the junit parsing and the A6 caps are the same
-    as for `none`. The A6 caps count the run's own directory as what the run left.
+    as for `none`. The A6 size checks at the start and end of each run count everything
+    under `<scratch>/runs/` as well as the shared HOME and TMPDIR. So the run's own
+    directory counts as what the run left. A directory that a session-escaping child
+    re-creates after deletion, and keeps writing to, is measured and capped like the
+    shared TMPDIR under `none`.
   - A child that leaves the process group (`setsid()`, `start_new_session=True`) is not
     killed when the run ends, in either mode. Under `os` it stays confined: it can write
     only to its own (deleted) run directory and its tree, never to a later run's HOME,
@@ -224,7 +238,8 @@ The default is `none`.
   drops out (953 P2P nodes instead of 954).
 - Every receipt records `runner_sandbox` (`"none"` or `"os"`) and
   `runner_sandbox_profile_sha256`. That field is `null` for `none`. For `os` it is the
-  sha256 of the scorer's SBPL profile, built by the same code as every run but with each
+  sha256 of the scorer's SBPL profile. It comes from the same root list
+  (`_PROFILE_ROOT_SPEC`) and builder as every run, with each
   run- or machine-specific path replaced by a fixed placeholder: the tree, the per-run
   directory, the env directory, the interpreter prefix, the extra import roots, the
   developer toolchain, the work directory, the store and `$HOME`. System and toolchain
