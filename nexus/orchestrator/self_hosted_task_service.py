@@ -1843,6 +1843,22 @@ class SelfHostedTaskService(
             if autonomy_grant.expires_at <= now:
                 raise ValueError("AUTONOMY_GOAL_GRANT_EXPIRED")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
+        # #2721: on a measurement Gateway only, a worker-candidate Target may
+        # be cut from a re-validated external repository; its HEAD (not the
+        # Nexus-new HEAD) is then the one the envelope binds.  The Task Card
+        # is still checked under CANONICAL_SOURCE_ROOT.  With the measurement
+        # variable unset at start this is None and the guard is unchanged.
+        # The re-check runs in ephemeral mode too (#2742).
+        external_controller = (
+            accepted_external_controller(
+                request.get("controller_repo_root"),
+                action.get("expected_head"),
+                nexus_root=Path(CANONICAL_SOURCE_ROOT),
+                forbidden_roots=(LOADED_SOURCE_ROOT,),
+            )
+            if action and request.get("worker_candidate_ingress") is True
+            else None
+        )
         if action and not self.ephemeral:
             # The service remains lifecycle authority; this synchronous guard
             # only validates the caller's already-built envelope before any
@@ -1850,21 +1866,6 @@ class SelfHostedTaskService(
             trusted_manifest = trusted_runtime_manifest_hash()
             if trusted_manifest is None:
                 raise RuntimeError("TOOL_MANIFEST_UNAVAILABLE: service cannot accept an unbound runtime manifest")
-            # #2721: on a measurement Gateway only, a worker-candidate Target may
-            # be cut from a re-validated external repository; its HEAD (not the
-            # Nexus-new HEAD) is then the one the envelope binds.  The Task Card
-            # is still checked under CANONICAL_SOURCE_ROOT.  With the measurement
-            # variable unset this is None and the guard is unchanged.
-            external_controller = (
-                accepted_external_controller(
-                    request.get("controller_repo_root"),
-                    action.get("expected_head"),
-                    nexus_root=Path(CANONICAL_SOURCE_ROOT),
-                    forbidden_roots=(LOADED_SOURCE_ROOT,),
-                )
-                if request.get("worker_candidate_ingress") is True
-                else None
-            )
             pre_action_guard(
                 action,
                 request=request,

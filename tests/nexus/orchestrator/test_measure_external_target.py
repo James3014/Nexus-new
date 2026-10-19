@@ -381,6 +381,7 @@ def gateway_env(layout, tmp_path, monkeypatch):
 
     card_root = tmp_path / "canonical-test-repo"
     card_root.mkdir()
+    _run("init", "-q", cwd=card_root)  # the Nexus identity (common dir) must be readable
     monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", card_root)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", card_root)
     monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
@@ -392,7 +393,7 @@ def gateway_env(layout, tmp_path, monkeypatch):
         return original_guard(action, canonical_root=card_root, **kwargs)
 
     monkeypatch.setattr(gateway_module, "pre_action_guard", test_repo_guard)
-    monkeypatch.delenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, raising=False)
+    monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", "")
     service = _CaptureService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
@@ -472,7 +473,9 @@ def test_env_unset_tool_schema_and_request_are_unchanged(gateway_env, monkeypatc
     assert request["action"]["expected_head"] == "a" * 40
     assert gateway_env["guard_calls"][-1]["current_head"] == "a" * 40
     # Measurement mode only adds the one optional property; nothing else moves.
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     set_specs = UnifiedMCPGateway.tool_specs()
     set_spec = next(s for s in set_specs if s["name"] == "nexus_worker_candidate")
     assert (
@@ -485,7 +488,9 @@ def test_env_unset_tool_schema_and_request_are_unchanged(gateway_env, monkeypatc
 def test_env_set_external_target_binds_external_controller(gateway_env, monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     admission_kwargs: list[dict[str, Any]] = []
     real_admission = gateway_module.build_canonical_planner_admission
 
@@ -535,7 +540,9 @@ def test_env_set_allowed_files_are_checked_against_the_external_root(
     ext.mkdir()
     (ext / "escape").symlink_to(tmp_path, target_is_directory=True)
     sha = _repo(ext, {"pkg/mod.py": "VALUE = 1\n"})
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     target = {"repo_root": str(ext), "base_revision": sha}
     result = _call(
         gateway_env,
@@ -575,7 +582,9 @@ def test_env_set_allowed_files_are_checked_against_the_external_root(
 def test_env_set_invalid_external_target_fails_closed_before_submit(
     gateway_env, monkeypatch, mutate, code
 ):
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     target = mutate(gateway_env, _ext_arg(gateway_env))
     result = _call(gateway_env, _arguments(gateway_env, "ext-bad", external_target=target))
     assert result["isError"] is True
@@ -584,7 +593,9 @@ def test_env_set_invalid_external_target_fails_closed_before_submit(
 
 
 def test_env_set_external_target_still_requires_the_tracked_task_card(gateway_env, monkeypatch):
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     arguments = _arguments(gateway_env, "ext-card", external_target=_ext_arg(gateway_env))
     for field in ("task_card_path", "task_card_hash"):
         missing = {k: v for k, v in arguments.items() if k != field}
@@ -603,7 +614,9 @@ def test_env_set_external_target_still_requires_the_tracked_task_card(gateway_en
 
 
 def test_env_set_external_target_refuses_rie_identity(gateway_env, monkeypatch):
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     arguments = _arguments(
         gateway_env,
         "ext-rie",
@@ -617,7 +630,9 @@ def test_env_set_external_target_refuses_rie_identity(gateway_env, monkeypatch):
 def test_env_set_external_head_drift_before_submit_is_refused(gateway_env, monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway_parts.worker_candidate as wc
 
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     monkeypatch.setattr(wc, "external_target_head", lambda repo_root: "d" * 40)
     result = _call(
         gateway_env, _arguments(gateway_env, "ext-drift", external_target=_ext_arg(gateway_env))
@@ -660,7 +675,9 @@ def _submit_until_guard(
 
 
 def test_service_guard_uses_external_head_only_in_measurement_mode(gateway_env, monkeypatch):
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     assert (
         _call(
             gateway_env, _arguments(gateway_env, "ext-svc", external_target=_ext_arg(gateway_env))
@@ -673,13 +690,15 @@ def test_service_guard_uses_external_head_only_in_measurement_mode(gateway_env, 
     assert seen["canonical_root"] == gateway_env["card_root"]
     # Same request on a Gateway without the variable: no external HEAD is supplied,
     # so the guard reads the canonical HEAD exactly as before.
-    monkeypatch.delenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV)
+    monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", "")
     seen = _submit_until_guard(gateway_env, monkeypatch, request)
     assert "current_head" not in seen
 
 
 def test_service_guard_refuses_external_controller_that_moved(gateway_env, monkeypatch):
-    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
     assert (
         _call(
             gateway_env, _arguments(gateway_env, "ext-svc-2", external_target=_ext_arg(gateway_env))
@@ -697,3 +716,164 @@ def test_module_has_no_nexus_imports():
     source = Path(met.__file__).read_text(encoding="utf-8")
     assert "import nexus" not in source and "from nexus" not in source
     assert sys.modules[met.__name__] is met
+
+
+# --------------------------------------------------------------------------
+# PR #2742 review round 1
+# --------------------------------------------------------------------------
+
+
+def test_linked_worktree_of_an_outside_repository_is_refused(layout, tmp_path):
+    """Fix 1: the git dir / common dir must also live under the measurement root."""
+    outside = tmp_path / "outside-main"
+    _repo(outside)
+    linked = layout["measure_root"] / "linked"
+    _run("worktree", "add", "-q", "--detach", str(linked), "HEAD", cwd=outside)
+    head = _run("rev-parse", "HEAD", cwd=linked)
+    assert (
+        _code({"repo_root": str(linked), "base_revision": head}, layout)
+        == "EXTERNAL_TARGET_GIT_METADATA_OUTSIDE_ROOT"
+    )
+
+
+def test_linked_worktree_whose_repository_is_inside_the_root_is_accepted(layout):
+    linked = layout["measure_root"] / "linked-inside"
+    _run("worktree", "add", "-q", "--detach", str(linked), "HEAD", cwd=layout["ext"])
+    target = validate_external_target(
+        {"repo_root": str(linked), "base_revision": layout["sha"]},
+        nexus_root=layout["nexus_root"],
+        env=layout["env"],
+    )
+    assert target.repo_root == linked.resolve()
+
+
+def test_env_set_after_start_changes_nothing(gateway_env, monkeypatch):
+    """Fix 2: only the import-time snapshot counts; a later variable enables nothing."""
+    monkeypatch.setenv(MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(gateway_env["measure_root"]))
+    assert met.MEASURE_EXTERNAL_TARGET_ROOT_AT_START == ""
+    assert met.external_target_enabled() is False
+    spec = next(s for s in UnifiedMCPGateway.tool_specs() if s["name"] == "nexus_worker_candidate")
+    assert "external_target" not in spec["inputSchema"]["properties"]
+    result = _call(
+        gateway_env, _arguments(gateway_env, "ext-late", external_target=_ext_arg(gateway_env))
+    )
+    assert result["structuredContent"]["error"] == "WORKER_CANDIDATE_UNKNOWN_FIELDS:external_target"
+    assert (
+        accepted_external_controller(
+            str(gateway_env["ext"]), "f" * 40, nexus_root=gateway_env["nexus_root"]
+        )
+        is None
+    )
+    assert gateway_env["service"].submitted == []
+
+
+def test_git_probe_environment_is_isolated(monkeypatch):
+    """Fix 3: every inherited GIT_* variable is dropped; no system/global config, no prompt."""
+    for key, value in {
+        "GIT_DIR": "/elsewhere/.git",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "/bin/sh",
+        "GIT_EXEC_PATH": "/elsewhere",
+    }.items():
+        monkeypatch.setenv(key, value)
+    environment = met._git_environment()
+    git_keys = {key for key in environment if key.startswith("GIT_")}
+    assert git_keys == {"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"}
+    assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert environment["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def _fsmonitor_hook(tmp_path: Path) -> tuple[Path, Path]:
+    marker = tmp_path / "FSMONITOR_RAN"
+    hook = tmp_path / "fsmonitor-hook.sh"
+    hook.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 1\n', encoding="utf-8")
+    hook.chmod(0o755)
+    return hook, marker
+
+
+def test_inherited_git_config_env_cannot_run_a_command(layout, tmp_path, monkeypatch):
+    """Fix 3: an fsmonitor injected through GIT_CONFIG_* in the Gateway env never runs."""
+    hook, marker = _fsmonitor_hook(tmp_path)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(hook))
+    validate_external_target(
+        {"repo_root": str(layout["ext"]), "base_revision": layout["sha"]},
+        nexus_root=layout["nexus_root"],
+        env=layout["env"],
+    )
+    assert not marker.exists()
+
+
+def test_repository_fsmonitor_config_is_not_executed(layout, tmp_path):
+    """1d (a): core.fsmonitor in the external repository's own config never runs."""
+    hook, marker = _fsmonitor_hook(tmp_path)
+    _run("config", "core.fsmonitor", str(hook), cwd=layout["ext"])
+    target = validate_external_target(
+        {"repo_root": str(layout["ext"]), "base_revision": layout["sha"]},
+        nexus_root=layout["nexus_root"],
+        env=layout["env"],
+    )
+    assert target.base_revision == layout["sha"]
+    assert not marker.exists()
+
+
+def test_unreadable_nexus_identity_refuses_the_target(layout, tmp_path):
+    """Fix 3: the Nexus common dir must be readable; the identity check never fails open."""
+    not_a_repo = tmp_path / "nexus-not-a-repo"
+    not_a_repo.mkdir()
+    with pytest.raises(ExternalTargetError, match="EXTERNAL_TARGET_NEXUS_IDENTITY_UNREADABLE"):
+        validate_external_target(
+            {"repo_root": str(layout["ext"]), "base_revision": layout["sha"]},
+            nexus_root=not_a_repo,
+            env=layout["env"],
+        )
+
+
+def _case_insensitive(path: Path) -> bool:
+    swapped = path.parent / path.name.swapcase()
+    return swapped != path and swapped.exists()
+
+
+def test_forbidden_root_spelled_in_a_different_case_is_still_forbidden(layout):
+    """1d (b): on a case-insensitive volume a different spelling is the same directory."""
+    if not _case_insensitive(layout["measure_root"]):
+        pytest.skip("volume is case-sensitive")
+    respelled = layout["measure_root"].parent / layout["measure_root"].name.upper()
+    with pytest.raises(ExternalTargetError, match="EXTERNAL_TARGET_ROOT_FORBIDDEN"):
+        validate_external_target(
+            {"repo_root": str(layout["ext"]), "base_revision": layout["sha"]},
+            nexus_root=layout["nexus_root"],
+            env=layout["env"],
+            forbidden_roots=(respelled,),
+        )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="case folding applies on darwin")
+def test_overlap_is_case_insensitive_on_darwin_even_for_missing_paths(tmp_path):
+    assert met._overlaps(tmp_path / "A" / "b", tmp_path / "a")
+    assert met._overlaps(tmp_path / "a", tmp_path / "A" / "B")
+    assert not met._overlaps(tmp_path / "a", tmp_path / "ab")
+
+
+def test_ephemeral_service_still_rechecks_the_external_controller(gateway_env, monkeypatch):
+    """Unverified note: an ephemeral service must not skip the external re-check."""
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
+    assert (
+        _call(
+            gateway_env, _arguments(gateway_env, "ext-eph", external_target=_ext_arg(gateway_env))
+        )["isError"]
+        is False
+    )
+    request = gateway_env["service"].submitted[0]
+    _run("commit", "-q", "--allow-empty", "-m", "moved", cwd=gateway_env["ext"])
+    service = SelfHostedTaskService(
+        state_dir=gateway_env["card_root"].parent / "eph-state", auto_reconcile=False
+    )
+    assert service.ephemeral is True
+    with pytest.raises(ExternalTargetError, match="EXTERNAL_TARGET_HEAD_MISMATCH"):
+        service.submit_task(request)
