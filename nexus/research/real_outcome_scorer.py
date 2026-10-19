@@ -1813,16 +1813,21 @@ class PytestRunner:
         self.task_dir = None
         return trash
 
-    def reap_survivors(self, prefixes: Iterable[Path]) -> list[int]:
+    def reap_survivors(
+        self, prefixes: Iterable[Path], name_prefixes: Iterable[str] = ()
+    ) -> list[int]:
         """A11 ("os"): SIGKILL, by PID, every process of this user that still has its cwd
         or an open file (deleted ones included) under ``prefixes`` (this scoring's trees,
-        run dirs and their trash). Returns the reaped PIDs. Fails closed
-        (ScratchInfraAbort) when no lsof exists at a fixed location."""
+        run dirs and their trash: the path itself or below it) or whose lsof name starts
+        with one of ``name_prefixes`` (plain string match, for paths whose directory may
+        no longer exist). Returns the reaped PIDs. Fails closed (ScratchInfraAbort) when
+        no lsof exists at a fixed location."""
         lsof = next((p for p in LSOF_CANDIDATES if os.path.isfile(p)), None)
         if lsof is None:
             raise ScratchInfraAbort("lsof_unavailable: cannot reap sandbox survivors")
         roots = sorted({str(Path(p).resolve()) for p in prefixes if str(p)})
-        if not roots:
+        raw = sorted({p for p in name_prefixes if p})
+        if not roots and not raw:
             return []
         try:
             out = subprocess.run(  # noqa: S603 - fixed binary, argv list
@@ -1842,7 +1847,9 @@ class PytestRunner:
                 pid = int(line[1:]) if line[1:].isdigit() else 0
             elif line.startswith("n") and pid and pid not in own:
                 name = line[1:].removesuffix(" (deleted)")
-                if any(name == r or name.startswith(r + "/") for r in roots):
+                if any(name == r or name.startswith(r + "/") for r in roots) or any(
+                    name.startswith(r) for r in raw
+                ):
                     hits.add(pid)
         for victim in sorted(hits):
             with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -1862,12 +1869,14 @@ class PytestRunner:
         """A11: reap holders of a cwd or open file (deleted ones included) under this
         scoring's candidate run dirs and candidate trees, so blocks they hold in unlinked
         files are released (#2740). Called on a host-disk shortfall."""
-        prefixes: list[Path] = [Path(t) for t in self._cand_tree_base]
-        parent = self.task_dir
-        if parent is not None and parent.is_dir() and not parent.is_symlink():
-            cand = _role_slug(CAND_ROLE) + "-"
-            prefixes += [d for d in parent.iterdir() if d.name.startswith(cand)]
-        self.reaped_pids += self.reap_survivors(prefixes)
+        # Candidate run dirs by name prefix (<task_dir>/candt-), not by listing the dirs
+        # that exist now: a survivor may have removed its own run dir after unlinking a
+        # file it keeps open, and the scorer removes finished run dirs itself.
+        names = []
+        if self.task_dir is not None:
+            names.append(f"{Path(self.task_dir).resolve()}/{_role_slug(CAND_ROLE)}-")
+        trees = [Path(t) for t in self._cand_tree_base]
+        self.reaped_pids += self.reap_survivors(trees, name_prefixes=names)
 
     def _candidate_bytes(self, current: Path | None) -> int:
         """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
@@ -1893,10 +1902,10 @@ class PytestRunner:
         scoring's candidate scope (survivors holding cwd or files, deleted ones included,
         under its candidate run dirs and trees), measure free space again, and charge the
         candidate (HOST_DISK_LOW, NOT_RUNNABLE) only if free_start (at its first run) was
-        at or above the floor and cand_total = candidate_visible_bytes + reclaimed (space
-        the reap gave back) >= free_start - floor: the candidate's own bytes account for
-        the whole headroom it started with. Otherwise infra abort (external disk use, a
-        harmless daemon that held no space, a disk already low)."""
+        at or above the floor, cand_total = candidate_visible_bytes + reclaimed (space
+        the reap gave back) >= the shortfall (floor - free_after_reap), and cand_total >=
+        half of the drop since free_start. Otherwise infra abort (external disk use as
+        the majority, a harmless daemon that held no space, a disk already low)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
         free = _disk_usage(probe).free
         if pre and role == CAND_ROLE and self.free_start is None:
@@ -1918,10 +1927,15 @@ class PytestRunner:
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
         cand_total = cand + reclaimed
+        # Charged iff the scoring started above the floor, the candidate's bytes cover
+        # the shortfall, and they account for at least half of the drop since
+        # free_start (so a candidate that filled the disk to just above the floor is
+        # still charged when an oracle run's small writes cross it).
         if (
             self.free_start is not None
             and self.free_start >= floor
-            and cand_total >= self.free_start - floor
+            and cand_total >= floor - free
+            and 2 * cand_total >= self.free_start - free
         ):
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
             raise ScratchTmpCapExceeded(

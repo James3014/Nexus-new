@@ -366,26 +366,40 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
   2. Otherwise the scorer reaps this scoring's whole candidate scope right then. That
      means every process of the user holding a cwd or an open file, deleted files
      included, under this scoring's candidate run directories and candidate trees. The
-     reap kills by PID, checks that each process is gone, and fails closed, as above.
-     The reaped PIDs are recorded in `reaped_pids`.
+     run directories are matched by the name prefix `<task parent>/candt-` in lsof's
+     output, not by listing the directories that still exist. So a survivor that
+     unlinked a file it keeps open and then removed its own run directory is still
+     found; the scorer also removes finished run directories itself. Trees match as
+     the path itself or below it (`<tree>/…`), so similarly named siblings never match.
+     The reap kills by PID, checks that each process is gone, and fails closed, as
+     above. The reaped PIDs are recorded in `reaped_pids`.
   3. The scorer measures free space again. `reclaimed = max(0, free_after_reap -
      free_before_reap)` is the space the reap gave back: bytes the candidate's
      survivors held. `cand_total = candidate_visible_bytes + reclaimed`. Visible bytes
      are its leftover run directories, the current run's directory if it is a
      candidate run, and its trees' growth since their first candidate run.
-  4. The candidate is charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if both hold:
+  4. The candidate is charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if all three
+     hold, where `free_now` is the free space measured after the reap:
      - `free_start` was at or above the floor. `free_start` is the free space at the
        pre-run check of the scoring's first candidate run, before any candidate code
        ran, so disk taken during the oracle runs never counts against the candidate.
-     - `cand_total >= free_start - floor`: the candidate's own bytes, visible plus
-       what its survivors held, account for the whole headroom it started with.
+     - `cand_total >= floor - free_now`: the candidate's bytes cover the shortfall.
+       Without them the disk would be above the floor.
+     - `cand_total >= 0.5 * (free_start - free_now)`: the candidate accounts for at
+       least half of the drop since `free_start`.
   5. Otherwise the result is an infra abort.
 
-  Three cases show how the rule works:
+  Cases that show how the rule works:
   - A survivor holding a large deleted file is reclaimed by the reap and charged.
   - A harmless daemon reclaims about nothing, so it is infra.
   - An honest candidate whose small bytes tip a disk that external use brought close
-    to the floor does not account for the headroom, so it is infra.
+    to the floor made far less than half of the drop, so it is infra.
+  - H1 (layer1-rie): the candidate fills the disk to just above the floor and stops;
+    an oracle run's own small writes then cross it. The candidate covers the shortfall
+    and most of the drop, so it is charged, and the rerun does not repeat an infra
+    abort.
+  - External use alone crosses the floor, even if the candidate wrote more than it:
+    the candidate does not cover the shortfall, so it is infra.
 
   A reap only frees space; the arithmetic decides. A reap alone never charges the
   candidate.
