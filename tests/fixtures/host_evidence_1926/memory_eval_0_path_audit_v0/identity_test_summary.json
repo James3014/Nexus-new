@@ -1,0 +1,16 @@
+{
+  "report_id": "MEMORY_EVAL_0_IDENTITY_TEST_SUMMARY_v0",
+  "tests_added": 10,
+  "tests_passed": 10,
+  "source_changed": false,
+  "source_file_changed": null,
+  "identity_before": "unknown (in RRL3C runtime artifact)",
+  "identity_after": "instance_id used correctly in EvidenceHarness",
+  "unknown_identity_blocked": true,
+  "memory_trace_identity_checked": true,
+  "receipt_identity_checked": true,
+  "prompt_or_evidence_identity_checked": true,
+  "ready_for_executable_eval": true,
+  "blocker_if_not_ready": null,
+  "note": "Identity propagation works at module level. Runtime artifact showed 'unknown' because hook was tested in isolation. With real OperationalContext, instance_id propagates correctly."
+}

@@ -1,0 +1,63 @@
+{
+  "eval_id": "MEMORY_EVAL_10_REJECTED_CANDIDATES_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "rejected_candidate_count": 10,
+  "rejected_candidates": [
+    {
+      "task_id": "C_12481",
+      "reason_rejected": "Already tested in MEMORY-EVAL-9 with real model A/B. Both memory_on and memory_off arms FAIL. No solved delta observed. Repeating without a new retrieval strategy would not yield new information.",
+      "score": 30
+    },
+    {
+      "task_id": "C_15020",
+      "reason_rejected": "Structurally identical to C_15080 (same eval pool, all-arms-FAIL, no memory). C_15080 selected as representative from this pool to avoid redundant A/B runs.",
+      "score": 50,
+      "note": "Score meets threshold but excluded as redundant with C_15080"
+    },
+    {
+      "task_id": "C_15320",
+      "reason_rejected": "Same as C_15020 — structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15170",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15140",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15200",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15050",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15230",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15260",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15290",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    },
+    {
+      "task_id": "C_15110",
+      "reason_rejected": "Structurally redundant with C_15080.",
+      "score": 50
+    }
+  ]
+}

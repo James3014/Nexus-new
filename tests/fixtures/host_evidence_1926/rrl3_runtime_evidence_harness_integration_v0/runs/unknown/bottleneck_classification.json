@@ -1,0 +1,8 @@
+{
+  "task_id": "unknown",
+  "final_status": "MODEL_WRONG",
+  "primary_bottleneck": "model_generation",
+  "secondary_bottlenecks": [],
+  "confidence": "MEDIUM",
+  "human_readable_reason": "Auto-classified: MODEL_WRONG due to model_generation"
+}

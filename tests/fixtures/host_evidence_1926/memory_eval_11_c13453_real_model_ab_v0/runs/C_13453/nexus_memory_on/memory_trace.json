@@ -1,0 +1,59 @@
+{
+  "available": true,
+  "trace_status": "TRACE_AVAILABLE",
+  "retrieval_source": "NexusCompositeLessonStore",
+  "retrieval_sources": [
+    "FindingsMemoryLessonStore"
+  ],
+  "query_text_hash": "452695f3b7fb3789",
+  "retrieved_count": 9,
+  "selected_ids": [
+    "lh-13453",
+    "lh-e25a61cb4aa5"
+  ],
+  "memory_evidence_ids": [
+    "lh-13453",
+    "lh-e25a61cb4aa5"
+  ],
+  "provenance_count": 9,
+  "rerank_mode": true,
+  "anchor_symbol": "_set_col_formats",
+  "anchor_file": "astropy/io/ascii/core.py",
+  "no_memory_match": false,
+  "rejected_without_provenance": 0,
+  "evidence_packet_included": null,
+  "prompt_included": null,
+  "verifier_status": "NOT_MEASURED",
+  "learning_closure_id": "",
+  "findings_card_id": "",
+  "influence_status": "NOT_MEASURED",
+  "source_contract": "MEMORY_RETRIEVAL_ADAPTER",
+  "internal_only": true,
+  "shadow_ranking": {
+    "enabled": true,
+    "status": "COMPLETED",
+    "scored_count": 9,
+    "rank_changes": 0,
+    "top_current_ids": [
+      "lh-05fa0b972844",
+      "lh-00752de16cd4",
+      "lh-c2d0dfa2eaeb"
+    ],
+    "top_proposed_ids": [
+      "lh-05fa0b972844",
+      "lh-00752de16cd4",
+      "lh-c2d0dfa2eaeb"
+    ],
+    "feature_coverage": 1.0,
+    "runtime_order_changed": false,
+    "prompt_changed": false,
+    "verifier_changed": false,
+    "shadow_only": true
+  },
+  "primary_selected_id": "lh-13453",
+  "repair_attempt_id": "C_13453",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "orchestrator._attach_memory_influence_trace",
+  "source_timestamp": "2026-06-22T12:55:03"
+}

@@ -1,0 +1,32 @@
+{
+  "eval_id": "MEMORY_EVAL_11_C13453_REAL_MODEL_AB_v0",
+  "task_id": "C_13453",
+  "model": "qwen2.5-coder:7b",
+  "endpoint": "http://localhost:11434",
+  "temperature": 0.0,
+  "seed": 42,
+  "deterministic_settings": true,
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "arms": [
+    "nexus_memory_on",
+    "nexus_memory_off"
+  ],
+  "memory_on_lessons_retrieved": 2,
+  "prompt_len_on": 2066,
+  "prompt_len_off": 1801,
+  "prompt_delta_chars": 265,
+  "prompt_sha256_on": "b4ea67ed827a7573315687470cd9c1c28a1c88953913dc36843d506648b42ebb",
+  "prompt_sha256_off": "a2983698e158ed2871fa0854adec59745fdeff06b67ed697c4b63755afc2f28d",
+  "raw_model_output_sha256_on": "d6c37399316d731e5f619b101ec867f1f6b0f5f4136c908dd4d25b0730b08508",
+  "raw_model_output_sha256_off": "d6c37399316d731e5f619b101ec867f1f6b0f5f4136c908dd4d25b0730b08508",
+  "patch_sha256_on": "d6c37399316d731e5f619b101ec867f1f6b0f5f4136c908dd4d25b0730b08508",
+  "patch_sha256_off": "d6c37399316d731e5f619b101ec867f1f6b0f5f4136c908dd4d25b0730b08508",
+  "output_len_on": 210,
+  "output_len_off": 210,
+  "verifier_status_on": "FAIL",
+  "verifier_status_off": "FAIL",
+  "solved_on": false,
+  "solved_off": false,
+  "outcome_uplift_observed": false
+}

@@ -1,0 +1,8 @@
+{
+  "status": "FAIL",
+  "repair_attempt_id": "C_12481",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "verification_phase",
+  "source_timestamp": "2026-06-22T12:33:36"
+}

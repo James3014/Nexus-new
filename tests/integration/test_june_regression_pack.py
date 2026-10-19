@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import pytest
 from pathlib import Path
-from scripts.local_heal.run_june_regression_pack import run_pack, repo_root
+from scripts.local_heal.run_june_regression_pack import run_pack
 
-def test_june_regression_pack_governance_integrity() -> None:
+
+def _empty_git_workspace(path: Path) -> None:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+def test_june_regression_pack_governance_integrity(tmp_path: Path) -> None:
     """
     Phase 56F.1 — Regression Gate Integrity Test
     
@@ -14,7 +21,17 @@ def test_june_regression_pack_governance_integrity() -> None:
     
     真正的解題率要等到 real_model mode 下，由本地 Qwen + Nexus pipeline 執行。
     """
-    res = run_pack(replay_mode="mock_oracle")
+    # #1926: the pack used to replay the real astropy / sympy workspaces under the
+    # repo root (.nexus/workspaces/astropy with a python3.11 C-extension venv,
+    # artifacts/external_sources/sympy_13852), which only one host had. The test
+    # checks governance labelling, not solve rate, so it now runs against empty git
+    # workspaces in tmp_path: every task must still finish with the full governance
+    # fields and none may over-claim. Real-workspace replay is out of scope here.
+    workspace_root = tmp_path / "workspace_root"
+    _empty_git_workspace(workspace_root / ".nexus" / "workspaces" / "astropy")
+    _empty_git_workspace(workspace_root / "artifacts" / "external_sources" / "sympy_13852")
+    results_dir = tmp_path / "results"
+    res = run_pack(replay_mode="mock_oracle", workspace_root=workspace_root, results_dir=results_dir)
 
     assert res["status"] == "completed"
     results = res["results"]
@@ -120,7 +137,7 @@ def test_june_regression_pack_governance_integrity() -> None:
     # ======================================================
     # Gate 9: results.jsonl 完整輸出
     # ======================================================
-    jsonl_path = Path(repo_root) / "artifacts" / "runtime" / "june_regression_pack_v0" / "results.jsonl"
+    jsonl_path = results_dir / "results.jsonl"
     assert jsonl_path.exists(), "results.jsonl not found"
     lines = jsonl_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 6, f"Expected 6 result lines in JSONL, got {len(lines)}"

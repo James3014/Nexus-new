@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/unit/local_heal/test_memory_eval_9_real_model_influence_ab.py",
-    "disposition": "delete-candidate",
-    "issue": "#1926",
-    "cause": "host-only probe: audits cwd-relative, gitignored artifacts/runtime/memory_eval_9_real_model_influence_ab_v0/ (validation.json, model_call_receipt.json, raw_model_output_memory_{on,off}.txt, runs/C_12481/*/prompt_manifest.json) produced by a real local-model A/B run; a clean runner lacks them and faking them would defeat the audit",
-    "tests": ("test_memory_eval_9_real_model_influence_ab_verification",),
-}
+# Tombstone (#1926): the real MEMORY-EVAL-9 evidence, recovered from the 2026-08-09 legacy archive on M4, is committed under tests/fixtures/host_evidence_1926/.
+ENTRY = None

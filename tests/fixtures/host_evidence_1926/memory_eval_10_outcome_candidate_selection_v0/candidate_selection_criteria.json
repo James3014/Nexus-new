@@ -1,0 +1,41 @@
+{
+  "criteria_id": "MEMORY_EVAL_10_SELECTION_CRITERIA_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "primary_goal": "Select tasks where memory injection has plausible verifier outcome impact (solved=false -> solved=true) based on objective evidence.",
+  "scoring_rules": [
+    {
+      "rule_id": "R1",
+      "name": "task_specific_memory_available",
+      "weight": 40,
+      "description": "Task has >= 1 memory card with task_id matching the candidate, or retrieval_hints including task_id."
+    },
+    {
+      "rule_id": "R2",
+      "name": "prior_verifier_fail",
+      "weight": 30,
+      "description": "Candidate has at least one verifier_result with status FAIL or VERIFIER_EXECUTED_FAIL in prior evals."
+    },
+    {
+      "rule_id": "R3",
+      "name": "no_prior_real_model_ab_tested",
+      "weight": 20,
+      "description": "Candidate has NOT been tested with a real model A/B (memory_on vs memory_off) in eval-9 or prior evals."
+    },
+    {
+      "rule_id": "R4",
+      "name": "has_memory_off_arm_missing",
+      "weight": 10,
+      "description": "memory_off arm was never run (adds urgency — comparison delta not yet known)."
+    }
+  ],
+  "minimum_score_to_select": 50,
+  "target_selected_count": "3-5",
+  "hard_exclusions": [
+    "eval_stub_finding_id in memory_card_ids",
+    "MockEvaluationStore as retrieval source",
+    "synthetic or hand-filled model outputs",
+    "C_12481 unless objective score >50 AND not previously tested in eval-9"
+  ],
+  "c_12481_exclusion_rationale": "C_12481 was already run in eval-9 with real model A/B. memory_on and memory_off both FAIL. No solved delta. Including it again would not yield new information unless a fundamentally different retrieval strategy is used.",
+  "note": "Selection is for MEMORY-EVAL-11 real model A/B execution only. No uplift claim is made at this stage."
+}

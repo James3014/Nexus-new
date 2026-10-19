@@ -1,0 +1,7 @@
+```python
+def Cycle(*args):
+    cycles = [set(arg) for arg in args]
+    if any(len(cycle) != len(cycles[i]) for i, cycle in enumerate(cycles)):
+        raise ValueError("Cycles must be disjoint")
+    return tuple(tuple(sorted(cycle)) for cycle in cycles)
+```

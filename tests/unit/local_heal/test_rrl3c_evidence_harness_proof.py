@@ -4,7 +4,12 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
+
 from nexus.services.local_heal.evidence_harness import EvidenceHarness, EvidenceBundle
+
+# Real evidence recovered from the 2026-08-09 legacy-repo archive on M4 (#1926);
+# see tests/fixtures/host_evidence_1926/README.md for provenance and hashes.
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_1926"
 
 
 class TestOrchestratorHookBehavior:
@@ -66,14 +71,14 @@ class TestOrchestratorHookBehavior:
 
     def test_runtime_artifact_exists_at_committed_path(self):
         """Runtime artifacts exist under committed artifact root."""
-        committed_path = Path("artifacts/runtime/rrl3_runtime_evidence_harness_integration_v0/runs/unknown")
+        committed_path = _FIXTURES / "rrl3_runtime_evidence_harness_integration_v0/runs/unknown"
         assert committed_path.exists()
         assert (committed_path / "evidence_bundle.json").exists()
         assert (committed_path / "bottleneck_classification.json").exists()
 
     def test_committed_bundle_has_task_id(self):
         """Committed bundle has task_id field (may be 'unknown')."""
-        bundle_path = Path("artifacts/runtime/rrl3_runtime_evidence_harness_integration_v0/runs/unknown/evidence_bundle.json")
+        bundle_path = _FIXTURES / "rrl3_runtime_evidence_harness_integration_v0/runs/unknown/evidence_bundle.json"
         with open(bundle_path) as f:
             data = json.load(f)
         assert "task_id" in data

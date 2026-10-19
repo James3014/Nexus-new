@@ -1,0 +1,28 @@
+{
+  "task_id": "C_12481",
+  "route_id": "local_heal",
+  "issue_intent": "C_12481: Permutation raises ValueError on non-disjoint cycles.",
+  "base_commit": "dummy_base_commit",
+  "source_hash": "75f28023d3709be6",
+  "selected_anchor": {
+    "symbol": "Cycle",
+    "file": "sympy/combinatorics/permutations.py",
+    "start_line": 3,
+    "end_line": 6,
+    "source_text_preview": "    def Cycle(*args):\n        # Dummy content to replace\n        pass"
+  },
+  "codeintel_evidence": [],
+  "memory_evidence": [],
+  "prior_failure_evidence": [],
+  "missing_context_risks": [
+    "no_data_flow_trace_discovered",
+    "no_memory_evidence_available"
+  ],
+  "context_budget": "bounded_evidence_packet",
+  "prompt_inclusion_plan": "include_all_bounded_sections",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "repair_attempt_id": "C_12481",
+  "source_component": "native_evidence_packet.build",
+  "source_timestamp": "2026-06-22T12:33:41"
+}

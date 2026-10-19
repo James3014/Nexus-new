@@ -1,0 +1,11 @@
+{
+  "task_id": "C_13453",
+  "repo": "/tmp/fake_repo_eval_11_c13453",
+  "issue_summary": "",
+  "task_class": "",
+  "repair_attempt_id": "C_13453",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "orchestrator.start_task",
+  "source_timestamp": "2026-06-22T12:55:03"
+}

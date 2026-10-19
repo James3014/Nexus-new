@@ -1,0 +1,44 @@
+{
+  "eval_id": "MEMORY_EVAL_9_REAL_MODEL_INFLUENCE_AB_v0",
+  "comparison": {
+    "C_12481": {
+      "memory_on": {
+        "retrieved_count": 1,
+        "selected_ids": [
+          "lh-12481"
+        ],
+        "primary_selected_id": "lh-12481",
+        "prompt_length_chars": 1048,
+        "output_length_chars": 179,
+        "patch_len": 179,
+        "solved": false,
+        "output_hash": "37fee6a76a0c07b83ce663142573d03a620e2dd5beefcb8ea806e062a1b9aae7"
+      },
+      "memory_off": {
+        "retrieved_count": 0,
+        "selected_ids": [],
+        "primary_selected_id": "",
+        "prompt_length_chars": 932,
+        "output_length_chars": 258,
+        "patch_len": 258,
+        "solved": false,
+        "output_hash": "cdfbbf8fced155de501efffcedaaedb1452fa71dab6bca243e4e9c9d3f5cc97a"
+      }
+    }
+  },
+  "deltas": {
+    "prompt_delta_chars": 116,
+    "output_delta_chars": -79,
+    "patch_delta_chars": -79,
+    "decision_influence_proven": true,
+    "patch_influence_proven": true,
+    "solved_delta": false
+  },
+  "real_model_call_executed": true,
+  "synthetic_delta_measured": false,
+  "outcome_uplift_observed": false,
+  "claim_boundary": {
+    "influence_proof": "True local Ollama call execution and A/B decision diff measured.",
+    "outcome_uplift": "No outcome uplift is observed or claimed (both arms remained solved=false)."
+  }
+}

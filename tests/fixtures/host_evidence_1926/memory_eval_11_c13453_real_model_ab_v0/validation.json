@@ -1,0 +1,18 @@
+{
+  "eval_id": "MEMORY_EVAL_11_C13453_REAL_MODEL_AB_v0",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "real_model_call_executed": true,
+  "synthetic_delta_measured": false,
+  "real_model_decision_influence_proven": false,
+  "real_patch_synthesis_influence_proven": false,
+  "prompt_delta_observed": true,
+  "model_output_delta_measured_from_artifacts": false,
+  "patch_delta_measured_from_artifacts": false,
+  "outcome_uplift_observed": false,
+  "public_claim_allowed": false,
+  "production_ready": false,
+  "training_export_allowed": false,
+  "internal_only": true,
+  "validation_status": "MEMORY_EVAL_11_REAL_MODEL_AB_MEASURED_NO_UPLIFT"
+}

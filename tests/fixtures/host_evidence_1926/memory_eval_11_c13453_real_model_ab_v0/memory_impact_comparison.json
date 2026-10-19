@@ -1,0 +1,31 @@
+{
+  "eval_id": "MEMORY_EVAL_11_C13453_REAL_MODEL_AB_v0",
+  "task_id": "C_13453",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "nexus_memory_on": {
+    "prompt_length_chars": 2066,
+    "output_length_chars": 210,
+    "patch_len": 210,
+    "solved": false,
+    "verifier_status": "FAIL",
+    "lessons_retrieved": 2,
+    "top_retrieved_ids": [
+      "lh-13453",
+      "lh-e25a61cb4aa5"
+    ]
+  },
+  "nexus_memory_off": {
+    "prompt_length_chars": 1801,
+    "output_length_chars": 210,
+    "patch_len": 210,
+    "solved": false,
+    "verifier_status": "FAIL",
+    "lessons_retrieved": 0,
+    "top_retrieved_ids": []
+  },
+  "prompt_delta_chars": 265,
+  "output_delta_chars": 0,
+  "outcome_uplift_observed": false,
+  "data_aligned_to_live_artifacts": true
+}

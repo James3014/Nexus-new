@@ -1,0 +1,85 @@
+{
+  "eval_id": "MEMORY_EVAL_10_SELECTED_CANDIDATES_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "selected_candidate_count": 3,
+  "selected_candidates": [
+    {
+      "task_id": "C_13453",
+      "score": 90,
+      "score_breakdown": {
+        "R1_task_specific_memory_available": 40,
+        "R2_prior_verifier_fail": 0,
+        "R3_no_prior_real_model_ab_tested": 20,
+        "R4_memory_off_arm_missing": 10,
+        "bonus_high_memory_count": 20
+      },
+      "prior_status": "memory_on_PASS_in_eval_substrate_but_no_real_model_ab_eval",
+      "available_memory_count": 13,
+      "task_specific_memory_available": true,
+      "primary_selected_id": "lh-13453",
+      "evidence_paths": [
+        ".nexus/memory/task/episodes/C_13453_lh-13453.json",
+        ".nexus/memory/task/episodes/C_13453_lh-1dda6.json",
+        ".nexus/memory/task/episodes/C_13453_lh-e25a6.json",
+        "artifacts/runtime/memory_eval_7_task_specific_retrieval_precision_v0/"
+      ],
+      "reason_selected": "C_13453 has the largest task-specific memory pool (13 episodes). Real model A/B has never been run for this task. Memory top-order precision was confirmed correct in eval-7 (top selected_id = lh-13453). This is the highest-value new candidate.",
+      "risk_flags": [
+        "verifier may not run cleanly if task input not available",
+        "local_heal pipeline must be instrumented for C_13453 with memory injection"
+      ],
+      "expected_memory_impact_type": "task_specific_repair_context"
+    },
+    {
+      "task_id": "C_1",
+      "score": 70,
+      "score_breakdown": {
+        "R1_task_specific_memory_available": 0,
+        "R2_prior_verifier_fail": 30,
+        "R3_no_prior_real_model_ab_tested": 20,
+        "R4_memory_off_arm_missing": 10,
+        "bonus_memory_retrieved_in_live_run": 10
+      },
+      "prior_status": "FAIL",
+      "available_memory_count": 1,
+      "task_specific_memory_available": false,
+      "primary_selected_id": "lh-finalize",
+      "evidence_paths": [
+        "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/C_1/nexus_memory_on/verifier_result.json",
+        "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/C_1/nexus_memory_on/memory_trace.json"
+      ],
+      "reason_selected": "C_1 has a confirmed FAIL with memory_on arm. The memory_off arm was never run — this makes it an ideal candidate to complete the A/B pair and measure delta. lh-finalize was retrieved during live run.",
+      "risk_flags": [
+        "lh-finalize is not task-specific to C_1 — may be generic lesson",
+        "memory delta may be noise rather than signal",
+        "task definition for C_1 needs to be confirmed available"
+      ],
+      "expected_memory_impact_type": "generic_lesson_injection"
+    },
+    {
+      "task_id": "C_15080",
+      "score": 50,
+      "score_breakdown": {
+        "R1_task_specific_memory_available": 0,
+        "R2_prior_verifier_fail": 30,
+        "R3_no_prior_real_model_ab_tested": 20,
+        "R4_memory_off_arm_missing": 0
+      },
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "primary_selected_id": null,
+      "evidence_paths": [
+        "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15080/"
+      ],
+      "reason_selected": "C_15080 is from the be_targeted eval where all 4 arms (baseline, expanded_protocol, 14b_fallback, combined) all FAIL. It represents a task genuinely unsolved by any arm. Including it tests whether memory injection (seeded from failure patterns) can change outcome even without pre-existing task-specific memory.",
+      "risk_flags": [
+        "no task-specific memory exists — must seed from failure_memory.py patterns",
+        "memory_on arm must be constructed from scratch",
+        "higher setup cost for eval-11",
+        "may not produce outcome delta without real task-specific memory"
+      ],
+      "expected_memory_impact_type": "seeded_failure_pattern_injection"
+    }
+  ]
+}

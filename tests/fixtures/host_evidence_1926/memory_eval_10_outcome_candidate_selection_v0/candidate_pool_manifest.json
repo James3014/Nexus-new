@@ -1,0 +1,137 @@
+{
+  "manifest_id": "MEMORY_EVAL_10_CANDIDATE_POOL_MANIFEST_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "total_pool_size": 13,
+  "candidate_pool": [
+    {
+      "task_id": "C_13453",
+      "source_artifact": "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/C_12481/nexus_memory_off/verifier_result.json",
+      "prior_status": "memory_off_PASS_memory_on_PASS",
+      "note": "Both arms passed in eval_substrate_1b. Memory existed (13 episodes). No A/B with memory_off for C_13453 arm in eval-9.",
+      "memory_card_ids": ["lh-13453","lh-00752","lh-05fa0","lh-1dda6","lh-be215","lh-3d372","lh-4c08e","lh-6ea2e","lh-c02bc","lh-c2d0d","lh-d3f99","lh-e1585","lh-e25a6"],
+      "available_memory_count": 13,
+      "task_specific_memory_available": true,
+      "evidence_paths": [".nexus/memory/task/episodes/C_13453_lh-*.json"]
+    },
+    {
+      "task_id": "C_1",
+      "source_artifact": "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/C_1/nexus_memory_on/verifier_result.json",
+      "prior_status": "FAIL",
+      "note": "C_1 memory_on ran, verifier FAIL. Retrieved lh-finalize (1 memory). No memory_off arm run. Task still unsolved.",
+      "memory_card_ids": ["lh-finalize"],
+      "available_memory_count": 1,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/C_1/nexus_memory_on/"]
+    },
+    {
+      "task_id": "C_15080",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15080/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All 4 arms FAIL. No memory cards present in .nexus/memory. Fresh candidate for memory seeding.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15080/"]
+    },
+    {
+      "task_id": "C_15020",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15020/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards. Similar structure to C_15080.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15020/"]
+    },
+    {
+      "task_id": "C_15320",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15320/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15320/"]
+    },
+    {
+      "task_id": "C_15170",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15170/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15170/"]
+    },
+    {
+      "task_id": "C_15140",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15140/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15140/"]
+    },
+    {
+      "task_id": "C_15200",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15200/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15200/"]
+    },
+    {
+      "task_id": "C_15050",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15050/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15050/"]
+    },
+    {
+      "task_id": "C_15230",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15230/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15230/"]
+    },
+    {
+      "task_id": "C_15260",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15260/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15260/"]
+    },
+    {
+      "task_id": "C_15290",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15290/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15290/"]
+    },
+    {
+      "task_id": "C_15110",
+      "source_artifact": "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15110/arm_A_baseline/verifier_result.json",
+      "prior_status": "VERIFIER_EXECUTED_FAIL",
+      "note": "14b action protocol task. All arms FAIL. No memory cards.",
+      "memory_card_ids": [],
+      "available_memory_count": 0,
+      "task_specific_memory_available": false,
+      "evidence_paths": ["artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/C_15110/"]
+    }
+  ]
+}

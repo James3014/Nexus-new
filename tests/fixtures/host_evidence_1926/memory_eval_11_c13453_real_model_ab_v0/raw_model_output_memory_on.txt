@@ -1,0 +1,7 @@
+```python
+    def _set_col_formats(self, table, formats):
+        if formats:
+            for col in table.columns:
+                if col.name in formats:
+                    col.format = formats[col.name]
+```

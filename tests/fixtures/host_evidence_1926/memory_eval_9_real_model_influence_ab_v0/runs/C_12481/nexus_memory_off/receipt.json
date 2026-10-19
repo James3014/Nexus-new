@@ -1,0 +1,10 @@
+{
+  "receipt_path": "/tmp/receipt_eval_9_off.json",
+  "claim_eligible": false,
+  "gate_passed": false,
+  "repair_attempt_id": "C_12481",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "receipt_writer",
+  "source_timestamp": "2026-06-22T12:33:41"
+}

@@ -1,0 +1,72 @@
+{
+  "eval_id": "MEMORY_EVAL_10_MEMORY_AVAILABILITY_MATRIX_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "memory_store_path": ".nexus/memory/",
+  "lancedb_path": ".nexus/memory/memory_index.lancedb",
+  "total_memory_cards": 14,
+  "matrix": [
+    {
+      "task_id": "C_13453",
+      "memory_store": ".nexus/memory/task/episodes/",
+      "cards_found": 13,
+      "card_ids": [
+        "lh-13453","lh-00752","lh-05fa0","lh-1dda6","lh-be215",
+        "lh-3d372","lh-4c08e","lh-6ea2e","lh-c02bc","lh-c2d0d",
+        "lh-d3f99","lh-e1585","lh-e25a6"
+      ],
+      "task_specific": true,
+      "top_retrieval_precision_verified": true,
+      "top_id_in_eval7": "lh-13453",
+      "lancedb_synced": true,
+      "memory_on_retrievable": true,
+      "memory_off_verified": true,
+      "selected": true
+    },
+    {
+      "task_id": "C_12481",
+      "memory_store": ".nexus/memory/task/episodes/",
+      "cards_found": 1,
+      "card_ids": ["lh-12481"],
+      "task_specific": true,
+      "top_retrieval_precision_verified": true,
+      "top_id_in_eval7": "lh-12481",
+      "lancedb_synced": true,
+      "memory_on_retrievable": true,
+      "memory_off_verified": true,
+      "selected": false,
+      "exclusion_reason": "Already tested in eval-9 — no new information without different retrieval strategy"
+    },
+    {
+      "task_id": "C_1",
+      "memory_store": "live_runtime_retrieval_only",
+      "cards_found": 1,
+      "card_ids": ["lh-finalize"],
+      "task_specific": false,
+      "top_retrieval_precision_verified": false,
+      "top_id_in_eval7": null,
+      "lancedb_synced": "unknown",
+      "memory_on_retrievable": true,
+      "memory_off_verified": false,
+      "selected": true,
+      "note": "lh-finalize retrieved during live run in eval_substrate_1b. Not a task-specific card."
+    },
+    {
+      "task_id": "C_15080",
+      "memory_store": "none",
+      "cards_found": 0,
+      "card_ids": [],
+      "task_specific": false,
+      "top_retrieval_precision_verified": false,
+      "top_id_in_eval7": null,
+      "lancedb_synced": false,
+      "memory_on_retrievable": false,
+      "memory_off_verified": false,
+      "selected": true,
+      "note": "No memory available. Must seed from failure_memory.py patterns (.nexus/metrics/skill_outcome_events.jsonl) for memory_on arm in eval-11."
+    }
+  ],
+  "tasks_with_no_memory": [
+    "C_15020","C_15050","C_15080","C_15110","C_15140",
+    "C_15170","C_15200","C_15230","C_15260","C_15290","C_15320"
+  ]
+}

@@ -576,6 +576,19 @@ def _resolve_item_path(value: str, root: Path) -> str:
     return value.replace("{workspace_root}", str(root))
 
 
+def _receipt_stdout_tail(op: Any) -> str:
+    """stdout tail of op.verifier_receipt, whichever shape it has (Refs #1926).
+
+    The pack's own verifier phase stores a SimpleNamespace with stdout_tail, but
+    HealOrchestrator synthesises a dict receipt (no stdout_tail) when that phase
+    did not record one, which used to crash run_pack with AttributeError.
+    """
+    receipt = getattr(op, "verifier_receipt", None)
+    if isinstance(receipt, dict):
+        return str(receipt.get("stdout_tail", "") or "")
+    return str(getattr(receipt, "stdout_tail", "") or "")
+
+
 @contextlib.contextmanager
 def _scoped_pack_env(replay_mode: str) -> Iterator[None]:
     """Set the pack's env switches only for the run, then restore the caller's values.
@@ -864,7 +877,7 @@ def _run_pack(replay_mode: str, *, workspace_root: Path, results_dir: Path) -> d
 
         print(f"  DEBUG OP Failure Reason: {repr(ctx.op.failure_reason)}")
         if hasattr(ctx.op, "verifier_receipt"):
-            print(f"  DEBUG Verifier stdout: {repr(ctx.op.verifier_receipt.stdout_tail[:300])}")
+            print(f"  DEBUG Verifier stdout: {repr(_receipt_stdout_tail(ctx.op)[:300])}")
 
         # 動態計算 phase_trace 狀態 (任務 B)
         trace = getattr(ctx.op, "phase_trace", {})
@@ -902,7 +915,7 @@ def _run_pack(replay_mode: str, *, workspace_root: Path, results_dir: Path) -> d
             or "ImportError" in ctx.op.failure_reason
             or (
                 hasattr(ctx.op, "verifier_receipt")
-                and "ImportError" in ctx.op.verifier_receipt.stdout_tail
+                and "ImportError" in _receipt_stdout_tail(ctx.op)
             )
         ):
             final_verdict = "INFRA_BLOCKED"
