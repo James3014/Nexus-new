@@ -9,6 +9,8 @@ import time
 from contextlib import contextmanager
 import logging
 
+from nexus.core.state_root import state_read_only
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +46,9 @@ class MemoryCoordinator:
         🚀 [v24.0] Atomic Fast-Path Swarm Lock (Backpressure Aware)
         """
         lock_path = self._lock_path(target_path)
+        if state_read_only():  # #2721: no-op lock, never create a lock file
+            yield lock_path
+            return
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 🧪 [Round 20] Backpressure Scaling

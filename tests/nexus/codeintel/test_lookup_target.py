@@ -159,3 +159,28 @@ def test_symbol_cap_applies_while_parsing(tmp_path: Path, monkeypatch) -> None:
     lookup_target.derive_codeintel_lookup("fn 3", ["many.py"], tmp_path)
 
     assert seen and max(seen) <= 5
+
+
+def test_a_file_with_a_syntax_error_is_skipped_not_fatal(tmp_path: Path) -> None:
+    """One unparsable allowed file dropped the whole derivation (#2721)."""
+    _write(tmp_path, "pkg/broken.py", "def parse_config(:\n    return\n")
+    _write(tmp_path, "pkg/config.py", "def parse_config(text):\n    return {}\n")
+
+    found = derive_codeintel_lookup(
+        "parse_config drops keys", ["pkg/broken.py", "pkg/config.py"], tmp_path
+    )
+
+    assert found == {"target_symbol": "pkg.config.parse_config", "search_paths": ["pkg/config.py"]}
+
+
+def test_a_file_with_a_null_byte_is_skipped_not_fatal(tmp_path: Path) -> None:
+    """``ast.parse`` raises ValueError on a NUL byte."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "nul.py").write_bytes(b"def a():\n    return 1\x00\n")
+    _write(tmp_path, "pkg/config.py", "def parse_config(text):\n    return {}\n")
+
+    found = derive_codeintel_lookup(
+        "parse_config drops keys", ["pkg/nul.py", "pkg/config.py"], tmp_path
+    )
+
+    assert found["search_paths"] == ["pkg/config.py"]

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from nexus.core.state_root import state_read_only
+
 
 def _reject_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant: {value}")
@@ -80,6 +82,8 @@ class StateJsonStore:
         return payload if isinstance(payload, dict) else {}
 
     def write_dict(self, path: Path, payload: dict[str, Any]) -> None:
+        if state_read_only():  # #2721: frozen state, skip the write
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._locked(path, shared=False):
             self._atomic_write(path, payload)
@@ -91,6 +95,8 @@ class StateJsonStore:
         since our read.  If the file exists but cannot be read as a JSON object, nothing
         is written and ``StateMergeError`` is raised, so its prior content survives.
         """
+        if state_read_only():  # #2721: report the stored object, write nothing
+            return self.read_dict(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._locked(path, shared=False):
             current: Any = {}
@@ -124,6 +130,8 @@ class StateJsonStore:
         """
         if not isinstance(payload, dict):
             raise ValueError("payload must be a JSON object")
+        if state_read_only():  # #2721: no swap happens
+            return False
         snapshot, canonical = _strict_snapshot(payload)
         expected_output_digest = hashlib.sha256(canonical).hexdigest()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,8 +208,18 @@ class _FileLock:
         self._handle: Any | None = None
 
     def __enter__(self) -> "_FileLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._handle = open(self.path, "a+", encoding="utf-8")
+        if state_read_only():
+            # #2721: never create a lock file; lock only one that already exists.
+            if not self.path.exists():
+                return self
+            try:
+                self._handle = open(self.path, "r", encoding="utf-8")
+            except OSError:
+                self._handle = None
+                return self
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._handle = open(self.path, "a+", encoding="utf-8")
         flag = fcntl.LOCK_SH if self.shared else fcntl.LOCK_EX
         fcntl.flock(self._handle.fileno(), flag)
         return self

@@ -50,6 +50,10 @@ class PolicyMetabolizer:
         self.archive_threshold = float(archive_threshold)
 
     def metabolize(self, force: bool = False) -> MetabolizeResult:
+        from .state_root import state_read_only
+
+        if state_read_only():  # #2721: no snapshot, no rewrite, no archive
+            return self._get_empty_result()
         if not self.policy_file.exists():
             return self._get_empty_result()
 
