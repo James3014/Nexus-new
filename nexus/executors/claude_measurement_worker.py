@@ -349,10 +349,18 @@ def cli_install_dir_ok(cli_dir: Path) -> bool:
     )
 
 
-def worktree_git_dirs(target: Path) -> list[Path]:
+def worktree_git_dirs(target: Path, controller_root: Optional[Path | str] = None) -> list[Path]:
     """For a linked worktree (``.git`` is a ``gitdir:`` file), its gitdir and the
     common gitdir; ``[]`` for a standalone repository.  Read from the files,
-    never by running git on the worktree."""
+    never by running git on the worktree.
+
+    Both must resolve inside ``<controller_root>/.git`` (the contract's
+    Controller); anything else, e.g. a ``.git`` file repointed at ``~/.ssh``,
+    is never admitted as a read root (Codex r3).
+    """
+    if controller_root is None:
+        return []
+    controller_git = Path(os.path.realpath(Path(controller_root) / ".git"))
     dot_git = Path(target) / ".git"
     if not dot_git.is_file() or dot_git.is_symlink():
         return []
@@ -373,7 +381,13 @@ def worktree_git_dirs(target: Path) -> list[Path]:
         roots.append(Path(os.path.realpath(common_dir)))
     except OSError:
         pass
-    return [root for root in roots if root.is_dir() and _is_narrow(root)]
+    return [
+        root
+        for root in roots
+        if root.is_dir()
+        and _is_narrow(root)
+        and (root == controller_git or controller_git in root.parents)
+    ]
 
 
 def _sbpl(path: Path | str) -> str:
@@ -435,10 +449,13 @@ def build_claude_seatbelt_profile(
 
 
 def normalize_seatbelt_profile(
-    profile: str, *, target: str, run_root: str, venv: Optional[str]
+    profile: str, *, target: str, run_root: str, venv: Optional[str], git_dirs: tuple[str, ...] = ()
 ) -> str:
     """The profile with the per-run paths and proxy port replaced by placeholders."""
-    text = profile.replace(run_root, "<RUN_ROOT>").replace(target, "<TARGET>")
+    text = profile
+    for index, path in enumerate(sorted(git_dirs, key=len, reverse=True)):
+        text = text.replace(path, f"<GITDIR{index}>")
+    text = text.replace(run_root, "<RUN_ROOT>").replace(target, "<TARGET>")
     if venv:
         text = text.replace(venv, "<VENV>")
     return re.sub(r'remote ip "localhost:\d+"', 'remote ip "localhost:<PORT>"', text)
@@ -851,11 +868,15 @@ def write_measurement_trace(
     root = str(env.get(MEASUREMENT_TRACE_DIR_ENV, "") or "").strip()
     if not root or not os.path.isabs(root) or not _SAFE_TASK_ID.fullmatch(str(task_id)):
         return None
-    if target is not None:
-        real_root, real_target = Path(os.path.realpath(root)), Path(os.path.realpath(target))
-        if real_root == real_target or real_target in real_root.parents:
-            return None  # never write the trace into the worktree (review L2)
     directory = Path(root) / str(task_id)
+    if target is not None:
+        real_dir, real_target = Path(os.path.realpath(directory)), Path(os.path.realpath(target))
+        if (
+            real_dir == real_target
+            or real_target in real_dir.parents
+            or real_dir in real_target.parents
+        ):
+            return None  # never write the trace into (or around) the worktree (review L2, Codex r3)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{stdout_sha256}.stream.jsonl"
     _write_private(target, redact_secrets(bytes(stdout), secrets))
@@ -882,6 +903,7 @@ class ClaudeRun:
     proxy_attempts: list[dict[str, Any]]
     venv: Optional[str]
     env_keys: tuple[str, ...]
+    git_dirs: tuple[str, ...] = ()
 
 
 def run_claude_once(
@@ -894,6 +916,7 @@ def run_claude_once(
     environ: Optional[Mapping[str, str]] = None,
     on_process_group: Any = None,
     argv: Optional[tuple[str, ...]] = None,
+    controller_root: Optional[Path | str] = None,
 ) -> ClaudeRun:
     """Run the CLI once in ``target`` under the measurement sandbox.
 
@@ -914,7 +937,8 @@ def run_claude_once(
         # A P1 lease is a ``git worktree``: its ``.git`` file points into the
         # Controller's gitdir, which must be readable (never writable) so git
         # works in the NEXUS arm as it does in BARE (review H2).
-        readable.extend(worktree_git_dirs(target))
+        git_dirs = worktree_git_dirs(target, controller_root)
+        readable.extend(git_dirs)
         if venv is not None:
             readable.append(venv)
             interpreter_home = _venv_interpreter_home(venv)
@@ -963,6 +987,7 @@ def run_claude_once(
             proxy_attempts=attempts,
             venv=str(venv) if venv is not None else None,
             env_keys=tuple(sorted(env)),
+            git_dirs=tuple(str(path) for path in git_dirs),
         )
     finally:
         shutil.rmtree(run_root, ignore_errors=True)
@@ -1054,6 +1079,7 @@ class ClaudeMeasurementWorkerAdapter:
             venv=task_venv_for(contract),
             environ=self._env(),
             on_process_group=on_process_group,
+            controller_root=getattr(contract, "controller_repo_root", None),
         )
         result, summary = run.result, run.summary
         if result.status is CliWorkerStatus.TIMED_OUT:
@@ -1096,7 +1122,11 @@ class ClaudeMeasurementWorkerAdapter:
                 "seatbelt_sha256": run.seatbelt_sha256,
                 # Normalized (paths/port replaced) so both arms' profiles compare byte for byte.
                 "seatbelt_profile_normalized": normalize_seatbelt_profile(
-                    run.seatbelt_profile, target=run.target, run_root=run.run_root, venv=run.venv
+                    run.seatbelt_profile,
+                    target=run.target,
+                    run_root=run.run_root,
+                    venv=run.venv,
+                    git_dirs=run.git_dirs,
                 ),
                 "proxy_attempts": run.proxy_attempts,
                 "venv": run.venv,
@@ -1107,7 +1137,7 @@ class ClaudeMeasurementWorkerAdapter:
                 "cli_timeout_seconds": measurement_cli_timeout(timeout_seconds, self._env()),
                 "key_label": str(self._env().get(MEASUREMENT_KEY_LABEL_ENV, "") or "") or None,
                 "api_key_sha256_12": api_key_id(measurement_claude_api_key(self._env())),
-                "worktree_git_dirs": [str(path) for path in worktree_git_dirs(target)],
+                "worktree_git_dirs": list(run.git_dirs),
             },
             self._env(),
             secrets=self._secrets(),
