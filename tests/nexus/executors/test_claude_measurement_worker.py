@@ -919,11 +919,22 @@ def test_git_status_works_alike_in_a_standalone_repo_and_a_p1_worktree(monkeypat
 
 def test_worktree_git_dirs_follow_the_gitdir_file(tmp_path):
     contract, lease = _linked_worktree_lease(tmp_path)
-    dirs = cmw.worktree_git_dirs(Path(lease.target_worktree))
+    target = Path(lease.target_worktree)
+    dirs = cmw.worktree_git_dirs(target, contract.controller_repo_root)
     common = Path(os.path.realpath(Path(contract.controller_repo_root) / ".git"))
     assert common in dirs and any(common in d.parents for d in dirs)
-    standalone, lease2 = _lease(tmp_path / "s")
-    assert cmw.worktree_git_dirs(Path(lease2.target_worktree)) == []
+    assert cmw.worktree_git_dirs(target) == []  # no Controller named: nothing admitted
+    _standalone, lease2 = _lease(tmp_path / "s")
+    assert cmw.worktree_git_dirs(Path(lease2.target_worktree), contract.controller_repo_root) == []
+
+
+def test_a_repointed_gitdir_is_never_admitted(tmp_path):
+    contract, lease = _linked_worktree_lease(tmp_path)
+    private = tmp_path / "private-dir"
+    private.mkdir()
+    (private / "commondir").write_text(str(tmp_path))
+    (Path(lease.target_worktree) / ".git").write_text(f"gitdir: {private}\n")
+    assert cmw.worktree_git_dirs(Path(lease.target_worktree), contract.controller_repo_root) == []
 
 
 def test_cli_timeout_is_the_cap_minus_the_snapshot_reserve():
@@ -940,18 +951,16 @@ def test_cli_dir_must_hold_only_executables(tmp_path):
 
 
 def test_trace_is_never_written_into_the_worktree(tmp_path):
-    target = tmp_path / "wt"
-    target.mkdir()
-    env = {cmw.MEASUREMENT_TRACE_DIR_ENV: str(target / "traces")}
-    assert cmw.write_measurement_trace("t1", b"x", "a" * 64, {}, env, target=target) is None
-    assert cmw.write_measurement_trace(
-        "t1",
-        b"x",
-        "a" * 64,
-        {},
-        {cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "tr")},
-        target=target,
-    )
+    target = tmp_path / "targets" / "t1"
+    target.mkdir(parents=True)
+    inside = {cmw.MEASUREMENT_TRACE_DIR_ENV: str(target / "traces")}
+    assert cmw.write_measurement_trace("t1", b"x", "a" * 64, {}, inside, target=target) is None
+    # A trace root whose <root>/<task_id> IS the worktree (Codex r3).
+    ancestor = {cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "targets")}
+    assert cmw.write_measurement_trace("t1", b"x", "a" * 64, {}, ancestor, target=target) is None
+    assert not list(target.iterdir())
+    elsewhere = {cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "tr")}
+    assert cmw.write_measurement_trace("t1", b"x", "a" * 64, {}, elsewhere, target=target)
 
 
 @pytest.mark.parametrize("bad", ['a"b', "a\\b", "a\nb"])
