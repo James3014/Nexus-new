@@ -175,7 +175,11 @@ def _validate_scope(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         if not base or base.startswith("/") or "\\" in base or any(ch in base for ch in "*?[]"):
             raise MutationAdmissionError("ALLOWED_PATH_INVALID")
         path = PurePosixPath(base)
-        if ".." in path.parts or ".git" in path.parts or path.as_posix() != base:
+        if (
+            ".." in path.parts
+            or any(part.casefold() == ".git" for part in path.parts)
+            or path.as_posix() != base
+        ):
             raise MutationAdmissionError("ALLOWED_PATH_INVALID")
         normalized = base + "/**" if directory else base
         if normalized not in result:
@@ -188,7 +192,11 @@ def path_is_allowed(path: str, allowed_paths: tuple[str, ...] | list[str]) -> bo
     if not candidate or candidate.startswith("/") or "\\" in candidate:
         return False
     pure = PurePosixPath(candidate)
-    if ".." in pure.parts or ".git" in pure.parts or pure.as_posix() != candidate:
+    if (
+        ".." in pure.parts
+        or any(part.casefold() == ".git" for part in pure.parts)
+        or pure.as_posix() != candidate
+    ):
         return False
     for pattern in allowed_paths:
         if pattern.endswith("/**"):

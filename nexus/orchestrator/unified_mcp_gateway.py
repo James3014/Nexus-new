@@ -469,7 +469,7 @@ def _safe_relative_path(value: Any, field: str = "path", *, root: Optional[Path]
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise GatewayInputError(f"{field} must be a bounded relative path")
-    if ".git" in candidate.parts:
+    if any(part.casefold() == ".git" for part in candidate.parts):
         raise GatewayInputError(f"{field} cannot access .git")
     base = CANONICAL_SOURCE_ROOT if root is None else root
     resolved = (base / candidate).resolve()
@@ -494,7 +494,7 @@ def _safe_search_target(value: Any) -> tuple[Path, Path]:
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise GatewayInputError("path must be a bounded relative path")
-    if ".git" in candidate.parts:
+    if any(part.casefold() == ".git" for part in candidate.parts):
         raise GatewayInputError("path cannot access .git")
     lexical = CANONICAL_SOURCE_ROOT / candidate
     current = CANONICAL_SOURCE_ROOT
