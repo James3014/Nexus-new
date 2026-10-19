@@ -394,7 +394,7 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
                 include_postflight_gates=True,
             )
-            _, bundle = materialize_selected_capability_evidence(
+            capability_results, bundle = materialize_selected_capability_evidence(
                 planner_output=planner,
                 selected_capabilities=selected,
                 task_id=task_id,
@@ -446,6 +446,9 @@ class _WorkerDispatchMixin:
                 "selected_capabilities": selected,
                 "bundle_hash": _service_module()._sha256_json(bundle),
                 "bundle": bundle,
+                # #2688: what each executor actually did (trigger, store, outputs). The
+                # runtime's bundle entries drop these fields; witnesses need them.
+                "capability_observations": _capability_observations(capability_results),
                 "producer_revision": revision,
             }
 
@@ -522,3 +525,50 @@ def _xray_targets_context(allowed_files: Any, target_worktree: Any) -> dict[str,
         return {}
     root = Path(str(target_worktree))
     return {"xray_targets": [str(path) for path in allowed_files if (root / str(path)).exists()]}
+
+
+_OBSERVATION_OUTCOME_KEYS = (
+    "semantic_status",
+    "output_paths",
+    "resolved_run_root",
+    "scan_targets",
+    "hit_count",
+    "findings_hit_count",
+    "confidence",
+    "state_file",
+    "error",
+)
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _capability_observations(results: Any) -> dict[str, Any]:
+    """Bounded per-capability facts from the raw executor receipts (#2688).
+
+    Keeps only identifiers, paths and counts (never prompt content or payloads), so a
+    witness can tell whether and how a capability ran and which store it used.
+    """
+    if not isinstance(results, Mapping):
+        return {}
+    observations: dict[str, Any] = {}
+    for name, stage in results.items():
+        if not isinstance(stage, Mapping):
+            continue
+        receipt = _mapping(stage.get("response"))
+        inner = _mapping(receipt.get("response"))
+        outcome = _mapping(inner.get("outcome"))
+        result = _mapping(outcome.get("result"))
+        entry: dict[str, Any] = {
+            "status": stage.get("status"),
+            "skip_reason": stage.get("skip_reason") or "",
+            "trigger_source": receipt.get("trigger_source") or "",
+        }
+        for key in _OBSERVATION_OUTCOME_KEYS:
+            if key in outcome:
+                entry[key] = outcome[key]
+        if "root" in result:
+            entry["store_root"] = result["root"]
+        observations[str(name)] = entry
+    return observations

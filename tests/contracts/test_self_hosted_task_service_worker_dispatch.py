@@ -54,6 +54,7 @@ import nexus_runtime.task_context as task_context_module
 import pytest
 
 import nexus.orchestrator.self_hosted_task_service as service_module
+import nexus.orchestrator.self_hosted_task_service_parts.worker_dispatch as worker_dispatch_module
 import nexus.services.mainchain_entry as mainchain_module
 import nexus.services.unified_runtime as unified_runtime_module
 from nexus.contracts.lifecycle_action import ContractKind
@@ -1301,6 +1302,7 @@ def _complete(ctx: _Ctx, bundle: Any = BUNDLE) -> dict[str, Any]:
         "status": "COMPLETE",
         "bundle_hash": service_module._sha256_json(bundle),
         "bundle": copy.deepcopy(bundle),
+        "capability_observations": {},
         "producer_revision": "c" * 40,
     }
 
@@ -1678,6 +1680,53 @@ def test_materialization_passes_empty_xray_targets_when_no_allowed_file_exists(c
     ctx.request["allowed_files"] = ["nexus/new.py"]
     ctx.run()
     assert stubs.log[2][1]["capability_context"]["xray_targets"] == []
+
+
+def test_capability_observations_keep_trigger_store_and_outputs() -> None:
+    """#2688 witnesses could not see trigger_source or store paths: the runtime bundle
+    entries drop them. The raw stage results keep them under response."""
+    results = {
+        "xray": {
+            "status": "INVOKED",
+            "response": {
+                "trigger_source": "planner_task_signal:xray_signal",
+                "response": {
+                    "outcome": {
+                        "semantic_status": "SUCCEEDED",
+                        "output_paths": ["/tmp/nexus-xray-x/xray_report_full.md"],
+                        "scan_targets": ["/wt/pkg/a.py"],
+                        "result": {"report_preview": "secret prompt text not kept"},
+                    }
+                },
+            },
+        },
+        "memory": {
+            "status": "INVOKED",
+            "response": {"response": {"outcome": {"hit_count": 0, "result": {"root": "/state"}}}},
+        },
+        "belief": {
+            "status": "INVOKED",
+            "response": {"response": {"outcome": {"confidence": 0.7, "state_file": "/state/.nexus/b.json"}}},
+        },
+        "pregate": {"status": "SKIPPED", "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED"},
+        "broken": "not-a-mapping",
+    }
+
+    observed = worker_dispatch_module._capability_observations(results)
+
+    assert observed["xray"] == {
+        "status": "INVOKED",
+        "skip_reason": "",
+        "trigger_source": "planner_task_signal:xray_signal",
+        "semantic_status": "SUCCEEDED",
+        "output_paths": ["/tmp/nexus-xray-x/xray_report_full.md"],
+        "scan_targets": ["/wt/pkg/a.py"],
+    }
+    assert observed["memory"]["store_root"] == "/state" and observed["memory"]["hit_count"] == 0
+    assert observed["belief"]["state_file"] == "/state/.nexus/b.json"
+    assert observed["pregate"]["skip_reason"] == "SKIPPED_POLICY_NOT_TRIGGERED"
+    assert "broken" not in observed
+    assert worker_dispatch_module._capability_observations(None) == {}
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

@@ -1086,6 +1086,7 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 confidence=confidence,
                 task_id=task_id,
                 assumption=assumption[:200],
+                state_file=str(getattr(inst, "state_file", "") or ""),
                 physical_callable="nexus.core.belief_engine.BeliefEngine.assess_confidence",
             ),
         )
