@@ -18,7 +18,9 @@ class XRayObserver:
     限制：當前版本僅限於單一目錄靜態分析。
     """
     
-    def __init__(self, target_dirs: List[str] | str):
+    def __init__(self, target_dirs: List[str] | str, *, inject_findings: bool = True):
+        # inject_findings=False keeps the scan read-only (no FindingsCard written under cwd).
+        self.inject_findings = inject_findings
         # Backward compatibility: older callers pass a single string path.
         self.target_dirs = [target_dirs] if isinstance(target_dirs, str) else target_dirs
         self._legacy_source_format = isinstance(target_dirs, str)
@@ -49,7 +51,8 @@ class XRayObserver:
             if count > 15:
                 # 🚀 Autonomic FindingsCard Generation for Technical Debt
                 self.results.risks.append(f"{src}: ⚠️ EXTREME COUPLING DETECTED ({count} imports). Refactoring mandatory.")
-                self._inject_refactoring_card(src, count)
+                if self.inject_findings:
+                    self._inject_refactoring_card(src, count)
 
         self.results.summary = f"v24.0 X-Ray Scan complete. Symbols: {len(self.results.symbols)} | Crossings: {len(self.results.crossings)} | Risks: {len(self.results.risks)}"
         return self.results

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib
 import json
@@ -3922,6 +3923,14 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
     try:
         from nexus.services.xray_service import XRayService
 
+        constraints = plan.constraints or {}
+        if not constraints.get("project_root") and constraints.get("workspace_root"):
+            # Scope the scan to workspace_root, but keep the report out of it: an untracked
+            # file in a candidate worktree fails the candidate's allowed-scope check (#2688).
+            updated = {**constraints, "project_root": constraints["workspace_root"]}
+            if not (constraints.get("run_root") or constraints.get("runtime_root")):
+                updated["run_root"] = tempfile.mkdtemp(prefix="nexus-xray-")
+            plan = dataclasses.replace(plan, constraints=updated)
         project_root, run_root, run_id = _resolve_run_root(plan)
         report_path = run_root / "xray_report_full.md"
         output_paths = [report_path]
@@ -3934,7 +3943,9 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
             targets = _xray_targets(plan, Path(project_root))
         except _ScopeError as scope:
             return _scope_blocked_receipt("xray", plan, str(scope), start)
-        result = inst.run(targets=[str(t) for t in targets], recursive=False, docker=False)
+        result = inst.run(
+            targets=[str(t) for t in targets], recursive=False, docker=False, inject_findings=False
+        )
         elapsed = int((time.monotonic() - start) * 1000)
         # run() always returns the report path, so success must come from the scan itself.
         scanned = getattr(inst, "last_report", None)
