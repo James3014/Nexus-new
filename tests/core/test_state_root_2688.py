@@ -28,7 +28,12 @@ CODE_ROOT = Path(__import__("nexus").__file__).resolve().parents[1]
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in (STATE_ROOT_ENV, CANONICAL_SOURCE_ROOT_ENV, "NEXUS_MEMORY_DB_PATH"):
+    for name in (
+        STATE_ROOT_ENV,
+        CANONICAL_SOURCE_ROOT_ENV,
+        "NEXUS_MEMORY_DB_PATH",
+        "NEXUS_TARGET_ROOT_OVERRIDE",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -81,6 +86,36 @@ def test_helper_moves_only_deploy_roots(deploy: SimpleNamespace, monkeypatch) ->
     assert persistent_state_root(controller) is controller
     monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(controller))
     assert persistent_state_root(controller) == deploy.state
+
+
+def test_helper_moves_task_target_worktrees(
+    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gateway worker tasks run in <controllers>/nexus-runtime-targets/<task>."""
+    controllers = deploy.tmp / "gateway-direct" / "controllers"
+    controller = controllers / "a1-abc"
+    monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(controller))
+    targets = controllers / "nexus-runtime-targets"
+    for task_root in (targets / "task-1", targets / "campaign-x" / "task-2"):
+        assert persistent_state_root(task_root) == deploy.state, task_root
+        assert rebase_state_path(task_root / ".nexus" / "belief_state.json") == (
+            deploy.state / ".nexus" / "belief_state.json"
+        )
+    # Older layout: <deployments>/nexus-runtime-targets beside the code checkout.
+    legacy = CODE_ROOT.parent / "nexus-runtime-targets" / "task-3"
+    assert persistent_state_root(legacy) == deploy.state
+    # The targets dir itself, siblings and tmp/canary roots stay put.
+    for keep in (targets, controllers / "other" / "task", deploy.tmp / "canary" / "task"):
+        assert persistent_state_root(keep) is keep, keep
+    override = deploy.tmp / "override-targets"
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(override))
+    assert persistent_state_root(override / "task-4") == deploy.state
+
+
+def test_task_target_worktree_unset_unchanged(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(tmp_path / "controllers" / "a1"))
+    task_root = tmp_path / "controllers" / "nexus-runtime-targets" / "t"
+    assert persistent_state_root(task_root) is task_root
 
 
 def test_helper_expands_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

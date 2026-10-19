@@ -10,10 +10,15 @@ deploy, so the stores always start empty there.
 state root is the directory that *contains* ``.nexus``; callers keep appending
 ``.nexus/...`` exactly as before.
 
-Only the per-deploy roots move: this checkout (``REPO_ROOT``), the process cwd and
-``NEXUS_CANONICAL_SOURCE_ROOT``.  Any other root a caller passes (a canary or test
-directory, another project) stays where it is, so isolated runs never write into
-the shared state.  The store classes apply the resolver themselves
+Only the per-deploy roots move: this checkout (``REPO_ROOT``), the process cwd,
+``NEXUS_CANONICAL_SOURCE_ROOT``, and any per-task target worktree under the
+Gateway-managed targets directory.  That directory is derived the way
+``self_hosted_task_service.resolve_canonical_target_roots`` derives it:
+``NEXUS_TARGET_ROOT_OVERRIDE``, else ``<deploy root>.parent / "nexus-runtime-targets"``
+(live: ``controllers/nexus-runtime-targets/<task>``; older tasks
+``deployments/nexus-runtime-targets/<task>``).  Any other root a caller passes (a
+canary or test directory, another project) stays where it is, so isolated runs
+never write into the shared state.  The store classes apply the resolver themselves
 (``FindingsMemoryStore``, ``resolve_lancedb_root``, ``LearnModeService``,
 ``BeliefEngine``, ...), so every reader and writer of one store moves together, and
 applying it twice is harmless.
@@ -35,6 +40,9 @@ logger = logging.getLogger(__name__)
 
 STATE_ROOT_ENV = "NEXUS_STATE_ROOT"
 CANONICAL_SOURCE_ROOT_ENV = "NEXUS_CANONICAL_SOURCE_ROOT"
+TARGET_ROOT_OVERRIDE_ENV = "NEXUS_TARGET_ROOT_OVERRIDE"
+# Same directory name self_hosted_task_service / worktree_manager use for task worktrees.
+TARGET_WORKTREE_DIRNAME = "nexus-runtime-targets"
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _T = TypeVar("_T")
 
@@ -63,6 +71,21 @@ def _deploy_roots() -> set[Path]:
     return roots
 
 
+def _target_worktree_bases(deploy_roots: set[Path]) -> set[Path]:
+    bases = {root.parent / TARGET_WORKTREE_DIRNAME for root in deploy_roots}
+    override = os.environ.get(TARGET_ROOT_OVERRIDE_ENV, "").strip()
+    if override:
+        bases.add(Path(override).expanduser().resolve())
+    return bases
+
+
+def _is_per_deploy(candidate: Path) -> bool:
+    deploy_roots = _deploy_roots()
+    if candidate in deploy_roots:
+        return True
+    return any(base in candidate.parents for base in _target_worktree_bases(deploy_roots))
+
+
 def persistent_state_root(default: _T) -> Path | _T:
     """Return the root that holds ``.nexus`` state for ``default``.
 
@@ -76,7 +99,7 @@ def persistent_state_root(default: _T) -> Path | _T:
         candidate = Path(default).expanduser().resolve()  # type: ignore[arg-type]
     except (TypeError, ValueError, OSError):
         return default
-    if candidate == state_root or candidate in _deploy_roots():
+    if candidate == state_root or _is_per_deploy(candidate):
         return state_root
     return default
 
