@@ -28,7 +28,9 @@ def _run_anti_drift_gate(project_root: Path, policy: dict, report_path: Path) ->
     results = []
     for test in historical_tests:
         command = str(test.get("command", "")).strip()
-        result = subprocess.run(command, cwd=project_root, shell=True, capture_output=True, text=True)
+        from nexus.core.argv_command import run_command_string
+
+        result = run_command_string(command, cwd=project_root)
         ok = result.returncode == 0
         passed += int(ok)
         results.append({"name": test.get("name", command), "passed": ok})

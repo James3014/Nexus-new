@@ -172,8 +172,10 @@ class BattlesuitGateway:
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status == 200:
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            # Unreachable Ollama is a normal "not available" answer; log the
+            # cause so a misconfigured endpoint is distinguishable (#2638).
+            logger.debug("Ollama availability probe failed for %s: %r", endpoint, exc)
         return False
 
     def get_anti_token_estimate(self) -> int:
@@ -300,8 +302,13 @@ class BattlesuitGateway:
                         relevant_lines = lines[:50]  # Usually imports are in first 50 lines
                         truncated = '\n'.join(relevant_lines)
                         surgical_context.append(f"### [Target File (first 50 lines): {tf}]\n```\n{truncated}\n```")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # The R-phase prompt silently lost its target file; make it visible (#2638).
+                        logger.warning(
+                            "Surgical context: could not read target file %s for R phase: %r",
+                            file_path,
+                            exc,
+                        )
             
         combined_payload = "\n\n".join(surgical_context)
 
@@ -494,8 +501,14 @@ class BattlesuitGateway:
         except Exception:
             try:
                 request.route = route  # type: ignore[misc]
-            except Exception:
-                pass
+            except Exception as exc:
+                # The request keeps its old route, so downstream readers will not
+                # see this online_execution_decision (#2638).
+                logger.warning(
+                    "Could not attach online route decision to request %s: %r",
+                    type(request).__name__,
+                    exc,
+                )
 
         def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             task_id = str(context.get("task_id", ""))
@@ -1101,9 +1114,12 @@ class BattlesuitGateway:
             try:
                 dynamic_timeout = max(5, int(timeout_override))
             except ValueError:
-                pass
-            except Exception:
-                pass
+                # Invalid override is ignored; say so instead of silently using the default (#2638).
+                logger.warning(
+                    "Ignoring invalid NEXUS_GATEWAY_TIMEOUT_SEC=%r; using %ss",
+                    timeout_override,
+                    dynamic_timeout,
+                )
 
         gateway_telemetry = {
             "gateway_prompt_chars": len(sys_msg),
@@ -1357,8 +1373,14 @@ class BattlesuitGateway:
             api_type = str(LocalModelPolicy.get_api_type(model_name) or "").strip().lower()
             if api_type in {"generate", "chat"}:
                 return api_type
-        except Exception:
-            pass
+        except Exception as exc:
+            # Policy lookup failure falls back to "generate"; log so a broken
+            # policy is not mistaken for a model that uses /api/generate (#2638).
+            logger.warning(
+                "Ollama API type lookup failed for model %s; defaulting to generate: %r",
+                model_name,
+                exc,
+            )
         return "generate"
 
     def _ollama_options(self, model_name: str) -> Dict[str, Any]:
@@ -1366,7 +1388,12 @@ class BattlesuitGateway:
             from nexus.engine.local_model_policy import ModelProfile
 
             options = dict(ModelProfile.get_options(model_name) or {})
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Ollama options lookup failed for model %s; using no profile options: %r",
+                model_name,
+                exc,
+            )
             options = {}
         for env_key, option_key, caster in (
             ("NEXUS_OLLAMA_NUM_CTX", "num_ctx", int),

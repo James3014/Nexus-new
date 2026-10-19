@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, List
@@ -14,6 +15,8 @@ from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
 from nexus.services.local_heal.latency_ledger import LatencyLedger
 from nexus.services.local_heal.phase_runner import PhaseRunner
 from nexus.services.local_heal.role_contract import build_role_receipt
+
+logger = logging.getLogger(__name__)
 
 
 class HealOrchestrator:
@@ -407,8 +410,8 @@ class HealOrchestrator:
             if getattr(ctx.op, "_memory_influence_trace", None) is None:
                 try:
                     self._attach_memory_influence_trace(ctx)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("memory influence trace attach failed: %r", exc)
             if not getattr(ctx.op, "memory_enabled", False):
                 return "", []
 
@@ -435,7 +438,18 @@ class HealOrchestrator:
                         canonical_rows = CanonicalLessonStore().query(
                             query_text=f"{problem_text} {failure_excerpt}".strip(), limit=3
                         )
-                    except Exception:
+                    except Exception as exc:
+                        # Canonical store failure must not read as "no lessons" (#2638).
+                        logger.warning(
+                            "canonical lesson store query failed for %s: %r",
+                            getattr(ctx.op, "instance_id", ""),
+                            exc,
+                        )
+                        setattr(
+                            ctx.op,
+                            "_memory_canonical_store_error",
+                            f"{type(exc).__name__}: {exc}"[:300],
+                        )
                         canonical_rows = []
                     store = NexusCompositeLessonStore()
                     # Selected ids first (legacy behaviour), plus the problem text so
@@ -490,17 +504,36 @@ class HealOrchestrator:
                                 ctx.op._memory_prompt_injected_ids = list(rendered_ids)
                                 try:
                                     memory_trace.prompt_included = True
-                                except Exception:
-                                    pass
-                except Exception:
+                                except Exception as exc:
+                                    logger.debug(
+                                        "memory trace prompt_included not settable: %r", exc
+                                    )
+                except Exception as exc:
                     # Fallback: use IDs if content read fails. These are not rendered
                     # lessons, so no ids are reported for attribution.
+                    logger.warning(
+                        "memory lesson content read failed for %s; using id fallback: %r",
+                        getattr(ctx.op, "instance_id", ""),
+                        exc,
+                    )
+                    setattr(ctx.op, "_memory_render_error", f"{type(exc).__name__}: {exc}"[:300])
                     memory_lessons_text = (
                         f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
                     )
                     rendered_ids = []
             return memory_lessons_text, rendered_ids
-        except Exception:
+        except Exception as exc:
+            # Same return as "memory disabled"; record the error so the two are
+            # distinguishable in telemetry (#2638).
+            logger.warning(
+                "memory lesson rendering failed for %s: %r",
+                getattr(ctx.op, "instance_id", ""),
+                exc,
+            )
+            try:
+                setattr(ctx.op, "_memory_render_error", f"{type(exc).__name__}: {exc}"[:300])
+            except Exception:  # noqa: BLE001 - ctx.op itself may be the problem
+                pass
             return "", []
 
     def _attempt_semantic_retry(
@@ -596,6 +629,7 @@ class HealOrchestrator:
         research_patterns_text = ""
         research_pattern_count = 0
         research_hash = ""
+        research_error = ""
         try:
             from nexus.services.local_heal.repair_pattern_retrieval import (
                 format_research_patterns_for_prompt,
@@ -617,8 +651,11 @@ class HealOrchestrator:
                 if research_patterns_text
                 else ""
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Zero patterns because retrieval failed is not the same as zero
+            # patterns found; surface it in the retry telemetry (#2638).
+            research_error = f"{type(exc).__name__}: {exc}"[:300]
+            logger.warning("repair pattern retrieval failed: %s", research_error)
 
         semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
             original_user_prompt=original_prompt,
@@ -726,6 +763,7 @@ class HealOrchestrator:
                 "semantic_retry_research_patterns_injected": bool(research_patterns_text),
                 "semantic_retry_research_pattern_count": research_pattern_count,
                 "semantic_retry_research_context_hash": research_hash,
+                "semantic_retry_research_error": research_error,
                 "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
                 "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
                 "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get(
@@ -812,8 +850,12 @@ class HealOrchestrator:
             if target_path.exists():
                 try:
                     source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "could not read diff target %s; falling back to localized content: %r",
+                        target_path,
+                        exc,
+                    )
             if not source_text and ctx.op.localized_files:
                 source_text = ctx.op.localized_files[0].content
 
@@ -942,6 +984,7 @@ class HealOrchestrator:
             "semantic_retry_research_patterns_injected": bool(research_patterns_text),
             "semantic_retry_research_pattern_count": research_pattern_count,
             "semantic_retry_research_context_hash": research_hash,
+            "semantic_retry_research_error": research_error,
             "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
             "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
             "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after")
@@ -1008,8 +1051,10 @@ class HealOrchestrator:
             )
             max_rounds = budget["max_rounds"]
             budget_policy = budget["policy"]
-        except Exception:
-            pass
+        except Exception as exc:
+            # Falls back to the default budget; record why (#2638).
+            logger.warning("belief retry budget resolution failed; using default: %r", exc)
+            setattr(ctx.op, "_belief_budget_error", f"{type(exc).__name__}: {exc}"[:300])
 
         # Store budget info on ctx.op for telemetry in _attempt_semantic_retry
         ctx.op._belief_budget_used = belief_before is not None
@@ -1107,8 +1152,8 @@ class HealOrchestrator:
                     ]
                     scored.sort(key=lambda x: (-x[0], x[1]))
                     return [a for _, _, a in scored]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("autoreason assertion ranking failed; using heuristic order: %r", exc)
 
         return sorted(assertions, key=_assertion_priority, reverse=True)
 
@@ -1156,7 +1201,8 @@ class HealOrchestrator:
             context = "\n".join(lines)
             return context[:1500]
 
-        except Exception:
+        except Exception as exc:
+            logger.debug("codeintel retry context extraction failed: %r", exc)
             return ""
 
     def _extract_target_symbol(self, ctx: HealContext) -> str:
@@ -1265,8 +1311,9 @@ class HealOrchestrator:
                 trace["verifier_status"] = status
             else:
                 trace.verifier_status = status
-        except Exception:
-            pass
+        except Exception as exc:
+            # A stale verifier_status would misreport the outcome (#2638).
+            logger.warning("could not refresh memory trace verifier_status: %r", exc)
 
     def _attach_memory_influence_trace(self, ctx: HealContext) -> None:
         if getattr(ctx.op, "_memory_influence_trace", None):
@@ -1420,7 +1467,8 @@ class HealOrchestrator:
                 "exit_code": getattr(op, "verifier_exit_code", ""),
                 "gate_exit": gate_exit,
             }
-        except Exception:
+        except Exception as exc:
+            logger.warning("verifier receipt derivation failed; no receipt attached: %r", exc)
             return  # fail closed: missing inputs leave applied empty
 
     @staticmethod
@@ -1556,8 +1604,9 @@ class HealOrchestrator:
             bundle.gate_passed = bool(getattr(op, "solve_eligible", False))
             # Finalize (writes artifacts)
             harness.finalize(bundle)
-        except Exception:
-            pass  # Write-only observability: never fail the repair loop
+        except Exception as exc:
+            # Write-only observability: never fail the repair loop.
+            logger.debug("observability artifact write failed: %r", exc)
 
     def _attach_live_full_loop_artifacts(self, ctx: HealContext) -> None:
         """EVAL-SUBSTRATE-1B: Live full-loop artifact capture (runtime wiring)."""
@@ -1693,8 +1742,9 @@ class HealOrchestrator:
             # Store collector reference on ctx for test verification
             ctx.op._live_artifact_collector = collector
 
-        except Exception:
-            pass  # Write-only observability: never fail the repair loop
+        except Exception as exc:
+            # Write-only observability: never fail the repair loop.
+            logger.debug("observability artifact write failed: %r", exc)
 
     def _record_role_receipt(self, ctx: HealContext, phase_name: str) -> None:
         model_name = self._get_model_for_phase(ctx, phase_name)
@@ -1903,8 +1953,14 @@ class HealOrchestrator:
                 model_calls=len(ctx.op.model_decisions),
                 stop_layer=phase_name,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # The phase failure would otherwise leave no abort receipt and no trace (#2638).
+            logger.warning(
+                "abort receipt write failed for %s (phase %s): %r",
+                getattr(ctx.op, "instance_id", ""),
+                phase_name,
+                exc,
+            )
 
 
 def _safe_id(instance_id: str) -> str:

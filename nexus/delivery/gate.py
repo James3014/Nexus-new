@@ -1,8 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 
-import subprocess
-
+from nexus.core.argv_command import run_command_string
 from nexus.delivery.contract import contract_for_level
 from nexus.delivery.models import CompletionRequest
 from nexus.delivery.models import CompletionResult
@@ -13,13 +12,7 @@ from nexus.delivery.models import VerificationRecord
 
 
 def _run_verification_command(command: str, cwd: Path) -> VerificationRecord:
-    completed = subprocess.run(
-        command,
-        shell=True,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-    )
+    completed = run_command_string(command, cwd=cwd)
     return VerificationRecord(
         command=command,
         exit_code=completed.returncode,

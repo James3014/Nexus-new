@@ -1043,3 +1043,33 @@ def test_health_worker_route_preflight_one_adapter_raises_other_still_reported(m
     assert len(block["routes"]) >= 2
     assert all(r["reason"] == "preflight error: RuntimeError" for r in block["routes"])
     assert "/secret/path" not in json.dumps(block)
+
+
+def test_handler_exception_text_is_not_returned_to_client(capsys):
+    """#2635 SEC-009: a failing request gets a generic error id; the detail is only logged."""
+    secret_detail = "/Users/someone/secret-path token=abc123"
+
+    class ExplodingGateway:
+        def handle(self, request):
+            raise RuntimeError(secret_detail)
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), build_handler(ExplodingGateway(), token="secret")
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            _request(server, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, token="secret")
+        assert caught.value.code == 400
+        payload = json.loads(caught.value.read())
+        assert payload["error"] == "bad request"
+        assert len(payload["error_id"]) == 12
+        assert secret_detail not in json.dumps(payload)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+    logged = capsys.readouterr().err
+    assert secret_detail in logged
+    assert payload["error_id"] in logged

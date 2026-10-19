@@ -82,7 +82,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
         assert ghost["executed_checks"] == []
         assert ghost["status"] == "FAIL"
         assert payload["ghost_regression"]["blocked_reason"] == "no_os_barrier"
-    assert payload["ghost_regression"]["timeout_sec"] == 30
+    assert payload["ghost_regression"]["timeout_sec"] == 300
     assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
     assert payload["ghost_regression"]["sanitized_env"] == ["NEXUS_LLM_CANDIDATE_CAP"]
     assert payload["ghost_regression"]["execution_cwd"].startswith(payload["sandbox_path"])
@@ -313,11 +313,13 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
         sandbox_root="reports/sandboxes",
     )
 
+    # Name kept for test-id stability: since #2623 a timeout is inconclusive, not a finding.
     assert payload["gate_passed"] is False
     assert payload["ghost_regression"]["timeout"] is True
     finding = payload["findings"][0]
     assert finding["rule_id"] == "regression_test_timeout"
-    assert finding["state"] == "VERIFIED_FINDING"
+    assert finding["state"] == "INCONCLUSIVE_TIMEOUT"
+    assert finding["severity"] == "info"
 
 
 def test_ultra_review_logic_breaker_failure_becomes_verified_finding(tmp_path, monkeypatch):
@@ -700,10 +702,12 @@ def test_ultra_review_ghost_lane_timeout_fails_the_gate_closed(tmp_path, monkeyp
     if not OS_SANDBOX:
         _assert_no_barrier_fail_closed(payload)
         return
+    # The gate still does not pass, but a timeout is INCONCLUSIVE, not FAIL (#2623).
     assert payload["ghost_regression"]["timeout"] is True
     assert payload["gate_passed"] is False
-    assert payload["status"] == "FAIL"
-    assert any(f["rule_id"] == "regression_test_timeout" for f in payload["findings"])
+    assert payload["status"] == "INCONCLUSIVE"
+    timeout_finding = next(f for f in payload["findings"] if f["rule_id"] == "regression_test_timeout")
+    assert timeout_finding["state"] == "INCONCLUSIVE_TIMEOUT"
 
 
 def test_ultra_review_tool_timeout_fails_the_gate_closed(tmp_path, monkeypatch):
@@ -751,8 +755,13 @@ def test_ultra_review_review_mode_without_mapped_tests_cannot_pass(tmp_path):
         dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
     )
 
-    assert payload["gate_passed"] is False
-    assert payload["blocked_reason"] == "ghost_regression_not_executed:no_mapped_tests"
+    # Name kept for test-id stability: since #2623 no mapped tests is an advisory UNCOVERED
+    # result, never a block on its own.
+    assert payload["blocked_reason"] == ""
+    assert payload["status"] == "PASS"
+    uncovered = next(f for f in payload["findings"] if f["rule_id"] == "no_mapped_tests")
+    assert uncovered["state"] == "UNCOVERED"
+    assert uncovered["unmapped_paths"] == ["other.py"]
 
 
 def test_ultra_review_flags_test_harness_changes(tmp_path):
@@ -1308,3 +1317,524 @@ def test_post_apply_walk_unlinks_head_tracked_symlinks_that_point_outside(tmp_pa
     assert not any(f["rule_id"] == "mirror_link_or_escape" for f in payload["findings"])
     assert outside.read_text(encoding="utf-8") == "head-link-secret"
     assert "head-link-secret" not in json.dumps(payload)
+
+
+# --- #2623: content-independent blocks --------------------------------------------------
+# The ghost lane refuses to run PR tests without an OS barrier (Linux CI). These tests run
+# trusted fixture tests only, so they lift that refusal; on macOS the real barrier still applies.
+_ALWAYS_RED = "\n\ndef test_always_red():\n    assert False\n"
+
+
+def _allow_ghost_run(monkeypatch):
+    monkeypatch.setattr("nexus.engine.ultra_review_service.os_sandbox_available", lambda: True)
+
+
+def _init_app_repo_with_red_test(path):
+    _init_app_repo(path)
+    with (path / "tests" / "test_app.py").open("a", encoding="utf-8") as handle:
+        handle.write(_ALWAYS_RED)
+    subprocess.run(["git", "commit", "-qam", "red test"], cwd=path, check=True, capture_output=True)
+
+
+def _review(path, *, dry_run=False, service_kwargs=None, **kwargs):
+    return UltraReviewService(path, **(service_kwargs or {})).run(
+        dry_run=dry_run, report_path="reports/ultra.json", sandbox_root="reports/sandboxes", **kwargs
+    )
+
+
+def test_ultra_review_no_mapped_tests_is_advisory_uncovered(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "README.md").write_text("docs\n", encoding="utf-8")
+    (tmp_path / "data.json").write_text("{}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "docs"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("docs v2\n", encoding="utf-8")
+    (tmp_path / "data.json").write_text('{"a": 1}\n', encoding="utf-8")
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "PASS"
+    assert payload["gate_passed"] is True
+    assert payload["blocked_reason"] == ""
+    assert payload["ghost_regression"]["coverage"] == "UNCOVERED"
+    assert payload["ghost_regression"]["uncovered_paths"] == ["README.md", "data.json"]
+    (uncovered,) = [f for f in payload["findings"] if f["lane"] == "ghost_regression"]
+    assert (uncovered["state"], uncovered["severity"]) == ("UNCOVERED", "info")
+    assert uncovered["unmapped_paths"] == ["README.md", "data.json"]
+    assert payload["summary"]["verified_findings"] == 0
+    assert _review(tmp_path, dry_run=True)["status"] == "DRY_RUN_NOT_VERIFIED"
+
+
+def test_ultra_review_ghost_timeout_is_inconclusive_info_not_fail(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    original_run = subprocess.run
+    seen_timeouts = []
+
+    def fake_run(cmd, **kwargs):
+        if "pytest" in cmd and "-q" in cmd:
+            seen_timeouts.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 0, output="running")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    _allow_ghost_run(monkeypatch)
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC", "45")
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["gate_passed"] is False
+    assert payload["blocked_reason"] == ""
+    assert seen_timeouts == [45.0]
+    assert payload["ghost_regression"]["timeout_sec"] == 45.0
+    assert payload["ghost_regression"]["inconclusive"] is True
+    assert payload["summary"]["verified_findings"] == 0
+    (finding,) = [f for f in payload["findings"] if f["lane"] == "ghost_regression"]
+    assert (finding["state"], finding["severity"]) == ("INCONCLUSIVE_TIMEOUT", "info")
+    assert "review mode" in finding["summary"] and "dry-run" not in finding["summary"]
+    ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
+    assert ghost["status"] == "INCONCLUSIVE"
+
+
+def test_ultra_review_test_timeout_is_configurable(tmp_path, monkeypatch):
+    monkeypatch.delenv("NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC", raising=False)
+    assert UltraReviewService(tmp_path)._ghost_timeout_sec() == 300.0
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC", "90")
+    assert UltraReviewService(tmp_path)._ghost_timeout_sec() == 90.0
+    assert UltraReviewService(tmp_path, test_timeout_sec=7)._ghost_timeout_sec() == 7.0
+    for bad in ("abc", "0", "-5"):
+        monkeypatch.setenv("NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC", bad)
+        assert UltraReviewService(tmp_path)._ghost_timeout_sec() == 300.0
+    try:
+        UltraReviewService(tmp_path, test_timeout_sec=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-positive test_timeout_sec must be refused")
+
+
+def test_ultra_review_test_failing_on_base_and_head_is_pre_existing(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value.strip()\n\n\ndef shout(value):\n    return handler(value).upper()\n",
+        encoding="utf-8",
+    )
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "PASS", payload["findings"]
+    assert payload["gate_passed"] is True
+    assert ghost["failed_tests"] == []
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_always_red"]
+    assert ghost["base_comparison"]["base_returncode"] == 1
+    (finding,) = [f for f in payload["findings"] if f["lane"] == "ghost_regression"]
+    assert (finding["state"], finding["severity"]) == ("PRE_EXISTING_FAILURE", "info")
+    # the base checkout is a temporary worktree: removed again after the comparison
+    listed = subprocess.run(["git", "worktree", "list"], cwd=tmp_path, capture_output=True, text=True).stdout
+    assert "base_worktree" not in listed
+
+
+def test_ultra_review_only_base_pass_head_fail_is_a_regression(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL"
+    assert payload["gate_passed"] is False
+    assert ghost["failed_tests"] == ["tests/test_app.py::test_handler_strips"]
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_always_red"]
+    states = {f["rule_id"]: f for f in payload["findings"] if f["lane"] == "ghost_regression"}
+    assert states["regression_test_failed"]["state"] == "VERIFIED_FINDING"
+    assert states["regression_test_failed"]["tests"] == ["tests/test_app.py::test_handler_strips"]
+    assert "review mode" in states["regression_test_failed"]["summary"]
+    assert states["pre_existing_test_failure"]["state"] == "PRE_EXISTING_FAILURE"
+
+
+def test_ultra_review_unpreparable_base_is_inconclusive_not_fail(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    original_git_run = UltraReviewService._git_run
+
+    def failing_base_checkout(self, args, **kwargs):
+        if args[:2] == ["worktree", "add"] and str(args[3]).endswith("base_worktree"):
+            return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: no base")
+        return original_git_run(self, args, **kwargs)
+
+    monkeypatch.setattr(UltraReviewService, "_git_run", failing_base_checkout)
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["gate_passed"] is False
+    assert payload["summary"]["verified_findings"] == 0
+    assert payload["ghost_regression"]["inconclusive_tests"] == ["tests/test_app.py::test_handler_strips"]
+    (finding,) = [f for f in payload["findings"] if f["lane"] == "ghost_regression"]
+    assert (finding["state"], finding["severity"]) == ("INCONCLUSIVE", "info")
+    assert "base_worktree_unavailable" in finding["summary"]
+
+
+def test_ultra_review_explicit_regression_test_gets_no_base_exemption(tmp_path, monkeypatch):
+    # Callers that require a test to pass (the post-candidate seam's visible test) keep strict
+    # semantics: failing on base too does not excuse it.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_visible.py").write_text("def test_visible():\n    assert False\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "visible"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+
+    payload = _review(tmp_path, regression_tests=["tests/test_visible.py"])
+
+    assert payload["status"] == "FAIL"
+    assert payload["ghost_regression"]["failed_tests"] == ["tests/test_visible.py::test_visible"]
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+
+
+def test_ultra_review_head_failure_attribution_fails_closed(tmp_path):
+    attribute = UltraReviewService._attribute_head_failures
+    candidates = ["tests/test_a.py", "tests/test_b.py"]
+    # unparseable failing run: every candidate counts, nothing is compared on base
+    assert attribute([], candidates, ()) == (candidates, [])
+    assert attribute(["tests/test_a.py::t", "other.py::t", "tests/test_b.py"], candidates, ("tests/test_b.py",)) == (
+        ["other.py::t", "tests/test_b.py"],
+        ["tests/test_a.py::t"],
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        '<?xml version="1.0"?><testsuites><testsuite>'
+        '<testcase classname="tests.test_a" name="t[a - b]" file="tests/test_a.py"><failure message="x"/></testcase>'
+        '<testcase classname="tests.test_a" name="t[a - c]" file="tests/test_a.py"/>'
+        '<testcase classname="tests.test_a.TestK" name="m" file="tests/test_a.py"><skipped/></testcase>'
+        '<testcase classname="" name="tests.test_b"><error message="collection failure"/></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    assert UltraReviewService._junit_outcomes(junit) == {
+        "tests/test_a.py::t[a - b]": "failed",
+        "tests/test_a.py::t[a - c]": "passed",
+        "tests/test_a.py::TestK::m": "skipped",
+        "tests/test_b.py": "error_file",
+    }
+    junit.write_text("<testsuites><testcase classname='x' name='y'/>", encoding="utf-8")
+    assert UltraReviewService._junit_outcomes(junit) is None  # unparseable -> fail closed
+    assert UltraReviewService._junit_outcomes(tmp_path / "missing.xml") is None
+    junit.write_text('<!DOCTYPE x [<!ENTITY a "b">]><testsuites/>', encoding="utf-8")
+    assert UltraReviewService._junit_outcomes(junit) is None  # entity declarations refused
+
+
+
+def test_ultra_review_review_mode_summaries_do_not_say_dry_run(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if str(cmd[-1]).endswith("ultra_logic_repro.py"):
+            return subprocess.CompletedProcess(cmd, 1, stdout="logic failed", stderr="edge mismatch")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    review = _review(tmp_path)
+    dry = _review(tmp_path, dry_run=True)
+
+    review_logic = next(f for f in review["findings"] if f["rule_id"] == "logic_repro_failed")
+    dry_logic = next(f for f in dry["findings"] if f["rule_id"] == "logic_repro_failed")
+    assert review_logic["summary"] == "Logic Breaker deterministic repro failed in ultra-review review mode."
+    assert dry_logic["summary"] == "Logic Breaker deterministic repro failed in ultra-review dry-run."
+
+
+def _commit(path, msg):
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", msg], cwd=path, check=True, capture_output=True)
+
+
+# Adversarial cases from the independent review of PR #2628.
+def test_ultra_review_new_head_failure_beside_passing_base_is_regression(tmp_path, monkeypatch):
+    # base: both tests pass. head: change breaks a second behaviour.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler\n\ndef test_handler_strips():\n    assert handler('  a ') == 'a'\n\n"
+        "def test_handler_type():\n    assert isinstance(handler(' b'), str)\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "two tests")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return 1 if value == ' b' else value.strip()\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["failed_tests"] == ["tests/test_app.py::test_handler_type"]
+
+
+def test_ultra_review_head_session_abort_is_never_excused_by_base(tmp_path, monkeypatch):
+    # base: red test first, handler test passes. head: handler raises KeyboardInterrupt, so
+    # pytest aborts (exit 2) and only the pre-existing failure is reported.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler\n\ndef test_a_always_red():\n    assert False\n\n"
+        "def test_handler_strips():\n    assert handler('  a ') == 'a'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text("def handler(value):\n    raise KeyboardInterrupt\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+    assert payload["ghost_regression"]["base_comparison"] == {}
+
+
+def test_ultra_review_parametrized_ids_with_dash_do_not_collide(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import pytest\nfrom app import handler\n\n"
+        "@pytest.mark.parametrize('v', ['a - b', 'a - c'], ids=['a - b', 'a - c'])\n"
+        "def test_p(v):\n    assert handler(v) == v.strip() and v != 'a - b'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "param")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return '' if value == 'a - c' else value.strip()\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert ghost["failed_tests"] == ["tests/test_app.py::test_p[a - c]"]
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_p[a - b]"]
+
+
+def test_ultra_review_base_collection_error_is_inconclusive_not_pre_existing(tmp_path, monkeypatch):
+    # base: the test file does not even import; head fixes the import but the test fails.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from app import handler, missing\n\n\ndef test_handler_strips():\n    assert handler('  a ') == 'a'\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "broken import on base")
+    (tmp_path / "app.py").write_text(
+        "def handler(value):\n    return value\n\n\ndef missing():\n    return 1\n", encoding="utf-8"
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "INCONCLUSIVE", payload["findings"]
+    assert ghost["pre_existing_failures"] == []
+    assert ghost["inconclusive_tests"] == ["tests/test_app.py::test_handler_strips"]
+
+
+def test_ultra_review_base_worktree_cleanup_failure_is_surfaced(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    original_git_run = UltraReviewService._git_run
+
+    def failing_base_removal(self, args, **kwargs):
+        if args[:2] == ["worktree", "remove"] and str(args[-1]).endswith("base_worktree"):
+            original_git_run(self, args, **kwargs)
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="cannot remove")
+        return original_git_run(self, args, **kwargs)
+
+    monkeypatch.setattr(UltraReviewService, "_git_run", failing_base_removal)
+    payload = _review(tmp_path)
+    assert payload["ghost_regression"]["base_comparison"]["base_cleanup"] == {"removed": False, "detail": "cannot remove"}
+    assert any(f["rule_id"] == "base_worktree_cleanup_failed" for f in payload["findings"])
+
+
+# --- #2644: forgeries by code that does NOT read the HMAC key ---------------------------------
+# Scope (confirmed residual, #2644 stays open): the key lives in pytest's process, so code under
+# review that reads it from the interpreter (gc / closures of the witness plugin) can still sign
+# a forged report. These tests cover code that does not read the key; the real fix is
+# out-of-process result collection.
+# The first three are the #2628 round-2 reviewer's adversarial tests
+# (rev-2628 tests/engine/test_zz_review2628_v3.py), renamed; the exit-0 control now asserts
+# the fixed verdict instead of only printing it.
+
+_RED_FIRST = (
+    "from app import handler\n\ndef test_a_always_red():\n    assert False\n\n"
+    "def test_handler_strips():\n    assert handler('  a ') == 'a'\n"
+)
+_FORGED_JUNIT = (
+    '<?xml version="1.0"?><testsuites><testsuite><testcase classname="tests.test_app" '
+    'name="test_a_always_red" file="tests/test_app.py"><failure message="x"/></testcase>'
+    "</testsuite></testsuites>"
+)
+_FORGED_ALL_PASS = (
+    '<?xml version="1.0"?><testsuites><testsuite><testcase classname="tests.test_app" '
+    'name="test_handler_strips" file="tests/test_app.py"/></testsuite></testsuites>'
+)
+
+
+def test_ultra_review_crafted_param_ids_cannot_collide_with_base_failure(tmp_path, monkeypatch):
+    # A head-only failure must not pass as pre-existing by crafting '::', '.', ' - ' into ids.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import pytest\nfrom app import handler\n\n"
+        "class TestK:\n    def test_m(self):\n        assert False\n\n"
+        "@pytest.mark.parametrize('v', ['x', 'y'], ids=['TestK::test_m', 'K.test_m - z'])\n"
+        "def test_p(v):\n    assert handler(' ' + v) == v\n",
+        encoding="utf-8",
+    )
+    _commit(tmp_path, "crafted")
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL"
+    assert sorted(ghost["failed_tests"]) == [
+        "tests/test_app.py::test_p[K.test_m - z]",
+        "tests/test_app.py::test_p[TestK::test_m]",
+    ]
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::TestK::test_m"]
+
+
+def test_ultra_review_forged_junit_then_exit1_is_not_a_pass(tmp_path, monkeypatch):
+    # Candidate code writes a junit naming only the pre-existing failure, then os._exit(1).
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(
+        "import os\n"
+        f"FORGED = {_FORGED_JUNIT!r}\n"
+        "def handler(value):\n"
+        "    for p in ['../ghost-head-junit.xml']:\n"
+        "        try:\n            open(p, 'w').write(FORGED)\n"
+        "        except OSError as e:\n            print('WRITE_FAIL', e)\n"
+        "    os._exit(1)\n",
+        encoding="utf-8",
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] != "PASS"
+    assert payload["status"] == "FAIL"
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+
+
+def test_ultra_review_os_exit0_in_candidate_code_is_not_a_pass(tmp_path, monkeypatch):
+    # Before #2644 an os._exit(0) in the code under test made the review PASS.
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("import os\ndef handler(value):\n    os._exit(0)\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] != "PASS"
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["gate_passed"] is False
+    assert any(f["rule_id"] == "pytest_report_unverified" for f in payload["findings"])
+    assert payload["ghost_regression"]["head_report"]["verified"] is False
+
+
+def _argv_forger(exit_code, junit_text, *, witness=True):
+    # Keyless forger: finds the real report paths in argv (stronger than the reviewer's fixed
+    # path) but does not read the key from the interpreter, so it cannot produce a valid MAC.
+    return (
+        "import json, os, sys\n"
+        f"FORGED = {junit_text!r}\n"
+        "def handler(value):\n"
+        "    paths = [a for a in sys.argv if a.startswith('/') and a.endswith(('junit.xml', 'witness.json'))]\n"
+        "    for p in paths:\n"
+        "        if p.endswith('junit.xml'):\n"
+        "            open(p, 'w').write(FORGED)\n"
+        f"        elif {witness!r}:\n"
+        "            payload = json.dumps({'exitstatus': " + str(exit_code) + ", 'junit_sha256': ''})\n"
+        "            open(p, 'w').write(json.dumps({'payload': payload, 'mac': '0' * 64}))\n"
+        f"    os._exit({exit_code})\n"
+    )
+
+
+def test_ultra_review_keyless_argv_forged_report_and_witness_exit0_is_not_a_pass(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(_argv_forger(0, _FORGED_ALL_PASS), encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "INCONCLUSIVE"
+    assert payload["ghost_regression"]["head_report"]["reason"] in {"witness_mac_mismatch", "witness_missing"}
+
+
+def test_ultra_review_keyless_argv_forged_report_exit1_is_a_regression(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(_argv_forger(1, _FORGED_JUNIT), encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    assert payload["status"] == "FAIL"
+    assert payload["ghost_regression"]["pre_existing_failures"] == []
+
+
+def test_ultra_review_keyless_junit_rewrite_after_session_is_not_trusted(tmp_path, monkeypatch):
+    # Keyless: an atexit hook rewrites the junit after pytest signed it: the hash no longer matches.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_app.py").write_text(_RED_FIRST, encoding="utf-8")
+    _commit(tmp_path, "red first")
+    (tmp_path / "app.py").write_text(
+        "import atexit, sys\n"
+        f"FORGED = {_FORGED_JUNIT!r}\n"
+        "def _rewrite():\n"
+        "    for p in sys.argv:\n"
+        "        if p.startswith('/') and p.endswith('junit.xml'):\n"
+        "            open(p, 'w').write(FORGED)\n"
+        "atexit.register(_rewrite)\n"
+        "def handler(value):\n    return value\n",
+        encoding="utf-8",
+    )
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert payload["status"] == "FAIL"
+    assert ghost["head_report"] == {"verified": False, "reason": "junit_hash_mismatch"}
+    assert ghost["pre_existing_failures"] == []
+
+
+def test_ultra_review_honest_run_has_verified_report(tmp_path, monkeypatch):
+    _init_app_repo_with_red_test(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    _allow_ghost_run(monkeypatch)
+    payload = _review(tmp_path)
+    ghost = payload["ghost_regression"]
+    assert ghost["head_report"] == {"verified": True, "reason": ""}
+    assert ghost["pre_existing_failures"] == ["tests/test_app.py::test_always_red"]
+    assert payload["status"] == "PASS", payload["findings"]
+    assert "<ghost-pytest-bootstrap>" in ghost["base_comparison"]["repro_command"]
+
+
+def test_verify_ghost_report_rejects_wrong_key_exit_code_and_swapped_dir(tmp_path):
+    import hashlib
+    import hmac as hmac_mod
+
+    def signed(report, exitstatus, junit_bytes, key=None):
+        report["junit"].write_bytes(junit_bytes)
+        payload = json.dumps(
+            {"exitstatus": exitstatus, "junit_sha256": hashlib.sha256(junit_bytes).hexdigest()}, sort_keys=True
+        )
+        mac = hmac_mod.new(key or report["key"], payload.encode(), hashlib.sha256).hexdigest()
+        report["witness"].write_text(json.dumps({"payload": payload, "mac": mac}), encoding="utf-8")
+
+    verify = UltraReviewService._verify_ghost_report
+    report = UltraReviewService._new_ghost_report(tmp_path, "head")
+    assert verify(report, 0)["reason"] == "witness_missing"
+    signed(report, 0, _FORGED_ALL_PASS.encode())
+    good = verify(report, 0)
+    assert good["verified"] is True and good["junit_bytes"] == _FORGED_ALL_PASS.encode()
+    assert verify(report, 1)["reason"] == "exit_code_mismatch"
+
+    other = UltraReviewService._new_ghost_report(tmp_path, "head")
+    signed(other, 0, b"<testsuites/>", key=b"k" * 32)
+    assert verify(other, 0)["reason"] == "witness_mac_mismatch"
+
+    swapped = UltraReviewService._new_ghost_report(tmp_path, "head")
+    signed(swapped, 0, b"<testsuites/>")
+    moved = tmp_path / "moved"
+    swapped["dir"].rename(moved)
+    swapped["dir"].mkdir()
+    for name in ("junit.xml", "witness.json"):
+        (swapped["dir"] / name).write_bytes((moved / name).read_bytes())
+    assert verify(swapped, 0)["reason"] == "report_dir_replaced"

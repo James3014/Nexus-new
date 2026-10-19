@@ -11,6 +11,8 @@ import time
 import yaml
 from dataclasses import dataclass
 
+from nexus.core.argv_command import run_command_string
+
 from .models import RepairExecutionResult, RepairPlan
 from .sandbox import SpeculativeSandbox
 
@@ -120,9 +122,8 @@ class RepairExecutor:
                 break
                 
             try:
-                proc = subprocess.run(
-                    action.run, shell=True, cwd=self.repo_root,
-                    check=False, capture_output=True, text=True,
+                proc = run_command_string(
+                    action.run, cwd=self.repo_root,
                     timeout=self.safe_action_timeout_sec,
                 )
                 executed.append(action.id)
