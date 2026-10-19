@@ -7,6 +7,7 @@ leases dir) with a one-account fake manager, so "busy" is a real held lease.
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import threading
 import time
@@ -216,3 +217,38 @@ def test_pool_wait_budget_is_bounded(monkeypatch, raw, expected) -> None:
     else:
         monkeypatch.setenv(model_probe.MODEL_PROBE_POOL_WAIT_ENV, raw)
     assert model_probe.model_probe_pool_wait_seconds() == expected
+
+
+def test_submit_registering_during_refresh_is_not_marked_interrupted(env) -> None:
+    """Gemini r1 F2: the in-flight check must happen after the record is read."""
+    workspace = Path(tempfile.mkdtemp(prefix="nexus-probe-pool-wait-race-", dir="/tmp"))
+    task_id = "pool-wait-race"
+    env.gateway._assist_write({
+        "schema": "nexus.assisted_provider_job.v1",
+        "job_kind": "model_probe",
+        "task_id": task_id,
+        "status": "SUBMITTED",
+        "provider": "agy",
+        "workspace_root": str(workspace),
+        "account_pool_wait_started_at": "2026-10-19T00:00:00+00:00",
+    })
+    real_read = env.gateway._assist_read
+    calls = {"n": 0}
+
+    def read_then_submit_registers(tid):
+        record = real_read(tid)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # A submit registers right after the refresh's first read.
+            env.gateway._model_probe_inflight().add(tid)
+        return record
+
+    env.monkeypatch.setattr(env.gateway, "_assist_read", read_then_submit_registers)
+    try:
+        result = env.gateway._assist_refresh(task_id)
+        assert result["status"] == "SUBMITTED"
+        assert workspace.exists()
+        assert real_read(task_id)["status"] == "SUBMITTED"
+    finally:
+        env.gateway._model_probe_inflight().discard(task_id)
+        shutil.rmtree(workspace, ignore_errors=True)

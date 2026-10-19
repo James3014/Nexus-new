@@ -57,40 +57,48 @@ class _AssistResponseMixin(_ResponseBase):
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
-        # #2716: a model-probe submit may wait for an Agy account while its
-        # SUBMITTED record is on disk.  Its own thread owns that record until
-        # launch; check before reading so a finished submit is read in full.
-        with self._assist_lock:
-            inflight_ids = getattr(self, "_model_probe_inflight_ids", None)
-            submit_in_flight = bool(inflight_ids) and task_id in inflight_ids
         job = self._assist_read(task_id)
         if job is None:
             return None
-        if submit_in_flight and job.get("status") == "SUBMITTED":
-            return job
-        if (
-            job.get("status") == "SUBMITTED"
-            and job.get("job_kind") == "model_probe"
-            and job.get("provider") == "agy"
-            and job.get("account_pool_wait_started_at")
-            and not job.get("account_alias_hash")
-            and not job.get("pid")
-        ):
-            # The submit that owned this record ended (e.g. a Gateway restart)
-            # while it waited for an account: no account was leased and no
-            # provider was started, so the probe failed without any effect.
-            workspace_root = str(job.get("workspace_root") or "")
-            if workspace_root.startswith("/tmp/nexus-probe-"):
-                shutil.rmtree(workspace_root, ignore_errors=True)
-            job.update({
-                "status": "FAILED",
-                "finished_at": self._utc_now(),
-                "blocker": "AGY_ACCOUNT_POOL_WAIT_INTERRUPTED",
-                "provider_error": "Agy account pool wait ended before a model probe launched",
-                "model_response_verified": False,
-                "process_cleanup": True,
-            })
-            return self._assist_write(job)
+        if job.get("status") == "SUBMITTED":
+            # #2716: a model-probe submit may wait for an Agy account while its
+            # SUBMITTED record is on disk; that thread owns the record until it
+            # writes its final state.  It registers in the in-flight set (under
+            # this lock) before the first write and leaves only after the last,
+            # so re-reading under the lock never sees a stale pre-launch record.
+            with self._assist_lock:
+                inflight_ids = getattr(self, "_model_probe_inflight_ids", None)
+                if inflight_ids and task_id in inflight_ids:
+                    return job
+                job = self._assist_read(task_id)
+                if job is None:
+                    return None
+                if (
+                    job.get("status") == "SUBMITTED"
+                    and job.get("job_kind") == "model_probe"
+                    and job.get("provider") == "agy"
+                    and job.get("account_pool_wait_started_at")
+                    and not job.get("account_alias_hash")
+                    and not job.get("pid")
+                ):
+                    # The submit that owned this record ended (e.g. a Gateway
+                    # restart) while it waited for an account: no account was
+                    # leased and no provider was started, so the probe failed
+                    # without any effect.
+                    workspace_root = os.path.realpath(str(job.get("workspace_root") or ""))
+                    if os.path.dirname(workspace_root) in {"/tmp", "/private/tmp"} and os.path.basename(
+                        workspace_root
+                    ).startswith("nexus-probe-"):
+                        shutil.rmtree(workspace_root, ignore_errors=True)
+                    job.update({
+                        "status": "FAILED",
+                        "finished_at": self._utc_now(),
+                        "blocker": "AGY_ACCOUNT_POOL_WAIT_INTERRUPTED",
+                        "provider_error": "Agy account pool wait ended before a model probe launched",
+                        "model_response_verified": False,
+                        "process_cleanup": True,
+                    })
+                    return self._assist_write(job)
         if job.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
             return job
         with self._assist_lock:
