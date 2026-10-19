@@ -141,8 +141,9 @@ def test_seam_kill_switch_restores_the_old_inputs(monkeypatch: pytest.MonkeyPatc
     ) == {"route_features": {}, "codeintel": {}}
 
 
-def test_facts_select_codeintel_without_moving_the_tier_or_workforce_demand() -> None:
-    """#2688 live witness: facts must not move the routing tier (L3 -> main_engineering)."""
+def test_planner_tiers_a_cross_module_code_task_above_l1_with_the_facts() -> None:
+    """Id kept for the impact gate. #2688 live witness: the facts must select codeintel
+    without moving the routing tier (L3 -> main_engineering Workforce demand)."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.engine.canonical_task_seam import REPO_ROOT
