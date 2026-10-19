@@ -1305,13 +1305,15 @@ class CrossProcessLeaseCoordinator:
                             # later.  Never overwrite that unresolved receipt;
                             # explicit reconciliation must remove it first.
                             #
-                            # #2717 exception: a foreground desktop dispatch
-                            # (``desktop-`` consumer) has no operation journal,
-                            # so no reconciler would ever remove its receipt.
-                            # Its provider inherits the per-account lock, so a
+                            # #2717 exception: receipts written by
+                            # nexus-agy-dispatch (``desktop-`` consumer; the
+                            # foreground path has no operation journal, so
+                            # nothing else would ever remove them).  Its
+                            # provider inherits the per-account lock, so a
                             # free lock plus a dead owner PID with a matching
                             # identity proves nothing still runs on the
                             # account; remove that receipt and claim normally.
+                            # Journal reconcilers accept ALREADY_ABSENT.
                             if receipt_path.exists() and not _reclaim_orphaned_desktop_receipt(
                                 receipt_path, candidate.alias_hash
                             ):
