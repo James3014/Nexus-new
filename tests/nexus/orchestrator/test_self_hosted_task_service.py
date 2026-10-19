@@ -2763,6 +2763,117 @@ def test_pid_permission_error_is_treated_as_alive(monkeypatch):
     assert SelfHostedTaskService._pid_alive(12345) is True
 
 
+def _start_unwaited_child(argv):
+    # Mirrors the worker launch: a Popen that nobody waits on (#2646).
+    # The returned object keeps the child out of subprocess's auto-reap list.
+    read_fd, write_fd = os.pipe()
+    process = subprocess.Popen(argv, stdout=write_fd, start_new_session=True)
+    os.close(write_fd)
+    return process, read_fd
+
+
+def _wait_for_exit_eof(read_fd):
+    # EOF on the child's stdout means it has exited (or is exiting).
+    try:
+        while os.read(read_fd, 4096):
+            pass
+    finally:
+        os.close(read_fd)
+
+
+def _pid_alive_settles_false(pid, deadline_seconds=10.0):
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        if SelfHostedTaskService._pid_alive(pid) is False:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_pid_alive_reports_finished_unreaped_child_as_dead():
+    process, read_fd = _start_unwaited_child([sys.executable, "-c", "pass"])
+    _wait_for_exit_eof(read_fd)
+
+    assert _pid_alive_settles_false(process.pid)
+    # _pid_alive reaped the zombie: the pid no longer exists at all.
+    with pytest.raises(ProcessLookupError):
+        os.kill(process.pid, 0)
+    # The abandoned Popen still copes with its child having been reaped.
+    assert process.poll() is not None
+
+
+def test_pid_alive_keeps_running_child_alive_without_reaping():
+    process, read_fd = _start_unwaited_child(
+        [sys.executable, "-c", "import time; print('up', flush=True); time.sleep(60)"]
+    )
+    try:
+        assert os.read(read_fd, 16).startswith(b"up")
+        assert SelfHostedTaskService._pid_alive(process.pid) is True
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait(timeout=10)
+        os.close(read_fd)
+
+
+def test_pid_alive_falls_back_to_kill_for_non_child_pid(monkeypatch):
+    waited = []
+    real_waitpid = os.waitpid
+
+    def recording_waitpid(pid, options):
+        waited.append(pid)
+        return real_waitpid(pid, options)
+
+    monkeypatch.setattr("os.waitpid", recording_waitpid)
+
+    # Our own pid is not our child: waitpid raises ChildProcessError.
+    assert SelfHostedTaskService._pid_alive(os.getpid()) is True
+    assert waited == [os.getpid()]
+
+
+def test_pid_alive_never_waits_on_process_groups(monkeypatch):
+    def forbidden_waitpid(pid, options):
+        raise AssertionError(f"waitpid({pid}) would reap any child of a process group")
+
+    monkeypatch.setattr("os.waitpid", forbidden_waitpid)
+    monkeypatch.setattr("os.kill", lambda pid, signal: None)
+
+    assert SelfHostedTaskService._pid_alive(0) is True
+    assert SelfHostedTaskService._pid_alive(-os.getpgrp()) is True
+
+
+def test_cancel_succeeds_once_worker_child_is_a_zombie(tmp_path):
+    process, read_fd = _start_unwaited_child([sys.executable, "-c", "pass"])
+    _wait_for_exit_eof(read_fd)
+    # Let the child finish exiting so it is a zombie, not still running.
+    # Not waitid(WNOWAIT): macOS ignores WNOWAIT and would reap the child.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        stat = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(process.pid)],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if stat.startswith("Z"):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"worker child {process.pid} never became a zombie (ps stat {stat!r})")
+    # The unfixed probe (os.kill(pid, 0)) still sees the zombie as alive.
+    os.kill(process.pid, 0)
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("zombie-worker", {
+        "task_id": "zombie-worker", "status": "SUBMITTED", "attempt_id": "a" * 32,
+        "worker_pid": process.pid,
+    })
+    assert service._read_state("zombie-worker")["worker_pid"] == process.pid
+
+    cancelled = service.cancel_task("zombie-worker")
+
+    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["final_disposition"] == "CANCELLED"
+
+
 def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
 

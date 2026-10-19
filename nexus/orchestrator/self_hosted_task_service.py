@@ -1972,6 +1972,18 @@ class SelfHostedTaskService(
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
+        # os.kill(pid, 0) succeeds on a zombie. Worker children are launched
+        # via a Popen that nobody waits on, so reap a finished child of ours
+        # here; otherwise cancel sees it as running until the next Popen (#2646).
+        # pid <= 0 would make waitpid reap any child of a process group.
+        if pid > 0:
+            try:
+                reaped_pid, _status = os.waitpid(pid, os.WNOHANG)
+            except OSError:  # ChildProcessError: not our child
+                pass
+            else:
+                if reaped_pid == pid:
+                    return False
         try:
             os.kill(pid, 0)
         except PermissionError:
