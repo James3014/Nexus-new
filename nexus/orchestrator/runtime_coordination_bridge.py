@@ -487,7 +487,7 @@ def _bounded_shadow_value(value):
     return value
 
 
-def _record_effect_authority_shadow(task_id, attempt_id, request):
+def _record_effect_authority_shadow(task_id, attempt_id, request, state=None):
     """Record what strict mode would decide, without enforcing it (#2344).
 
     The decision is logged and returned; callers persist it on the task state
@@ -502,7 +502,9 @@ def _record_effect_authority_shadow(task_id, attempt_id, request):
     try:
         from nexus.orchestrator import effect_authority
 
-        decision = effect_authority.shadow_decision(request, attempt_id=str(attempt_id))
+        decision = effect_authority.shadow_decision(
+            request, attempt_id=str(attempt_id), state=state
+        )
         decision = {key: _bounded_shadow_value(value) for key, value in decision.items()}
         decision.update({
             "task_id": str(task_id),
@@ -551,19 +553,25 @@ def _persist_effect_authority_shadow(service, task_id, attempt_id, decision):
         logger.warning("effect_authority_shadow_persist_failed %s", type(exc).__name__)
 
 
-def _record_owned_attempt_shadow(service, task_id, attempt_id):
-    """Shadow for the worker's owned-attempt entry point; never raises."""
+def _read_state_for_shadow(service, task_id):
+    """The task state for the shadow's durable-copy check; never raises."""
     try:
         state = service._read_state(task_id)
     except Exception as exc:  # observation must never break execution
         logger.warning("effect_authority_shadow_failed %s", type(exc).__name__)
         return None
+    return state if isinstance(state, Mapping) else None
+
+
+def _record_owned_attempt_shadow(service, task_id, attempt_id):
+    """Shadow for the worker's owned-attempt entry point; never raises."""
+    state = _read_state_for_shadow(service, task_id)
     if not isinstance(state, Mapping) or str(state.get("attempt_id") or "") != str(attempt_id):
         return None
     request = state.get("request")
     if not isinstance(request, Mapping):
         return None
-    decision = _record_effect_authority_shadow(task_id, attempt_id, request)
+    decision = _record_effect_authority_shadow(task_id, attempt_id, request, state)
     _persist_effect_authority_shadow(service, task_id, attempt_id, decision)
     return decision
 
@@ -610,8 +618,10 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
-        decision = _record_effect_authority_shadow(task_id, attempt_id, request)
-        _persist_effect_authority_shadow(self.service, task_id, attempt_id, decision)
+        if request is not None:
+            state = _read_state_for_shadow(self.service, task_id)
+            decision = _record_effect_authority_shadow(task_id, attempt_id, request, state)
+            _persist_effect_authority_shadow(self.service, task_id, attempt_id, decision)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)

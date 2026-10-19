@@ -160,6 +160,30 @@ def record_backed_port(lookup: RecordLookup = production_record_lookup) -> Effec
     return EffectAuthorityPort(verifier)
 
 
+def _durable_copy_refusal(requested: EffectAuthorization, state: Mapping[str, Any]) -> str | None:
+    """The runtime coordinator's durable-copy checks; ``None`` when they pass."""
+    raw_durable = state.get("effect_authorization")
+    if raw_durable is None:
+        may_create = (
+            str(state.get("status")) == "SUBMITTED"
+            and not state.get("executions")
+            and state.get("execution") is None
+        )
+        return None if may_create else "DURABLE_AUTHORIZATION_MISSING"
+    if not isinstance(raw_durable, Mapping):
+        return "DURABLE_AUTHORIZATION_MALFORMED"
+    try:
+        durable = EffectAuthorization.from_mapping(raw_durable)
+        durable.assert_fresh()
+    except EffectAuthorizationError as exc:
+        return f"DURABLE_AUTHORIZATION_INVALID:{exc}"
+    if durable.authorization_hash != requested.authorization_hash:
+        return "DURABLE_AUTHORIZATION_SUBSTITUTED"
+    if state.get("effect_authorization_hash") != durable.authorization_hash:
+        return "DURABLE_AUTHORIZATION_HASH_MISMATCH"
+    return None
+
+
 def _request_identity(request: Mapping[str, Any], key: str) -> str | None:
     # Same projection as the runtime coordinator's ``_request_identity_value``.
     value = request.get(key)
@@ -171,14 +195,16 @@ def shadow_decision(
     lookup: RecordLookup = production_record_lookup,
     *,
     attempt_id: str | None = None,
+    state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """What strict mode would decide for ``request``, without enforcing it.
 
     Mirrors the runtime coordinator's strict request checks: freshness and,
     when ``attempt_id`` is given, the request identity (attempt, operation,
-    repository and the optional revision/workspace/target ids), then the
-    record match. Only the later durable-copy substitution check is not
-    modelled, because the shadow runs before the durable copy is written.
+    repository and the optional revision/workspace/target ids), the record
+    match and, when the task ``state`` is given, the durable-copy checks
+    (a resumed attempt needs a fresh durable copy whose hash equals the
+    request's and the recorded ``effect_authorization_hash``).
     """
     raw = request.get("effect_authorization") if isinstance(request, Mapping) else None
     if not isinstance(raw, Mapping):
@@ -212,6 +238,10 @@ def shadow_decision(
         except EffectAuthorizationError as exc:
             return {"decision": DECISION_WOULD_REFUSE, "reason": f"IDENTITY_MISMATCH:{exc}"}
     accepted, reason = evaluate_authorization(authorization, lookup)
+    if accepted and state is not None:
+        durable_reason = _durable_copy_refusal(authorization, state)
+        if durable_reason is not None:
+            accepted, reason = False, durable_reason
     return {
         "decision": DECISION_ALLOW if accepted else DECISION_WOULD_REFUSE,
         "reason": reason,

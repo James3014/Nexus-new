@@ -124,10 +124,13 @@ def test_execute_calls_effect_authority_shadow(monkeypatch):
         def _bridge_validate_claim(self, *_a, **_k):
             return None
 
+        def _read_state(self, _task_id):
+            return None
+
     class _Stop(Exception):
         pass
 
-    def fake_shadow(task_id, attempt_id, request):
+    def fake_shadow(task_id, attempt_id, request, state=None):
         calls.append((task_id, attempt_id, request))
 
     def stop(self, *_a, **_k):
@@ -359,3 +362,58 @@ def test_shadow_record_bounds_caller_supplied_text(monkeypatch):
     assert decision is not None
     assert len(decision["authority_ref"]) < 300
     assert "len=1000000" in decision["authority_ref"]
+
+
+# --- Codex r2: resumed attempts also model the durable-copy checks -----------
+
+
+def _durable_state(auth=None, **over):
+    state = {"status": "RUNNING", "executions": [{"n": 1}]}
+    if auth is not None:
+        state["effect_authorization"] = auth.to_dict()
+        state["effect_authorization_hash"] = auth.authorization_hash
+    state.update(over)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("state", "decision", "reason"),
+    [
+        ({"status": "SUBMITTED"}, ea.DECISION_ALLOW, "RECORD_MATCH"),
+        (_durable_state(), ea.DECISION_WOULD_REFUSE, "DURABLE_AUTHORIZATION_MISSING"),
+        (_durable_state(_auth()), ea.DECISION_ALLOW, "RECORD_MATCH"),
+        (
+            _durable_state(_auth(), effect_authorization="bad"),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_MALFORMED",
+        ),
+        (
+            _durable_state(_auth(effects={"filesystem.write_paths": {"paths": ["b.py"]}})),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_SUBSTITUTED",
+        ),
+        (
+            _durable_state(_auth(), effect_authorization_hash="0" * 64),
+            ea.DECISION_WOULD_REFUSE,
+            "DURABLE_AUTHORIZATION_HASH_MISMATCH",
+        ),
+    ],
+)
+def test_shadow_models_durable_copy_checks(state, decision, reason):
+    got = ea.shadow_decision(_req(_auth()), _lookup(_record()), attempt_id="att-1", state=state)
+    assert (got["decision"], got["reason"]) == (decision, reason)
+
+
+def test_owned_attempt_shadow_uses_task_state_for_durable_check(tmp_path, monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    seen = []
+    real = ea.shadow_decision
+
+    def spy(request, *args, **kwargs):
+        seen.append(kwargs.get("state"))
+        return real(request, *args, **kwargs)
+
+    monkeypatch.setattr(ea, "shadow_decision", spy)
+    service, task_id = _owned_service(tmp_path, _ok_runner)
+    bridge._record_owned_attempt_shadow(service, task_id, "attempt-1")
+    assert seen and seen[0]["attempt_id"] == "attempt-1"
