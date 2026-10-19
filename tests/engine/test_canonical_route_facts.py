@@ -266,3 +266,41 @@ def test_path_aliases_collapse_to_one_file(tmp_path: Path) -> None:
     )
 
     assert facts["route_features"]["is_cross_module_task"] is False
+
+
+def test_moving_an_import_between_dirty_files_changes_the_graph_key(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    a, b = root / "pkg" / "user_a.py", root / "pkg" / "user_b.py"
+    a.write_text("from pkg.core import f\nx = 1\n", encoding="utf-8")
+    b.write_text("x = 1\n", encoding="utf-8")
+    first = facts_mod._graph_key(root)
+    a.write_text("x = 1\n", encoding="utf-8")
+    b.write_text("from pkg.core import f\nx = 1\n", encoding="utf-8")
+
+    assert facts_mod._graph_key(root) != first
+
+
+def test_cached_and_live_impact_give_the_same_risk(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    cached = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+    plain = tmp_path / "plain"
+    subprocess.run(["cp", "-R", str(root), str(plain)], check=True)
+    subprocess.run(["rm", "-rf", str(plain / ".git")], check=True)
+
+    live = derive_canonical_route_facts(
+        repo_root=plain, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert cached["route_features"]["risk_score"] == live["route_features"]["risk_score"]
+
+
+def test_no_hits_keep_the_planners_default_confidence(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+
+    facts = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert facts["route_features"]["adjusted_root_cause_confidence"] == 1.0

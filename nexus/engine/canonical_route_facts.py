@@ -22,7 +22,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
 
 SCHEMA = "nexus.canonical_route_facts.v1"
-_ROOT_CAUSE_CONFIDENCE = 0.8
+# The planner's default when the fact is absent; findings/memory hits lower it.
+_ROOT_CAUSE_CONFIDENCE = 1.0
 _CONTRACT_PREFIXES = ("nexus/orchestrator/", "nexus/delivery/", "nexus/contracts/")
 
 # One import graph per (root, HEAD, worktree status) for the life of the process: a full
@@ -61,9 +62,11 @@ def _graph_key(root: Path) -> tuple[str, str, str] | None:
         if not relative:
             continue
         try:
-            digest.update((root / relative).read_bytes())
+            content = (root / relative).read_bytes()
         except OSError:
-            digest.update(b"<unreadable>")
+            content = b"<unreadable>"
+        # One framed digest per file: moving an import between two dirty files changes it.
+        digest.update(hashlib.sha256(relative.encode("utf-8") + b"\0" + content).digest())
     return (str(root.resolve()), head, digest.hexdigest())
 
 
@@ -136,7 +139,8 @@ def derive_canonical_route_facts(
 
     Only repo-relative ``allowed_files`` inside ``repo_root`` are read.  Each source
     degrades to "no fact": an error leaves its keys out and is listed in ``errors``, so
-    the planner sees the pre-#2688 inputs for it (never less than before this module).
+    the planner sees the pre-#2688 inputs for it.  The allowed-files cross-module rule
+    (and ``impact_complexity``) does not depend on the signal builder and always applies.
     """
     root = Path(repo_root)
     files = _bounded_relative_files(root, allowed_files)
@@ -179,7 +183,10 @@ def derive_canonical_route_facts(
 
             impact = analyze_impact(root, files, index_path=_graph_index(root)).to_dict()
             impacted = list(impact.get("impacted_files") or [])
-            features["risk_score"] = int(impact.get("risk_score") or 0)
+            # analyze_impact adds 15 for "scan_index_used"; that reflects the cache, not
+            # the change, so the score is the same with or without the cached graph.
+            index_bonus = 15 if "scan_index_used" in (impact.get("risk_reason") or []) else 0
+            features["risk_score"] = max(0, int(impact.get("risk_score") or 0) - index_bonus)
             codeintel.update({
                 "impact_report_present": True,
                 "risk_score": features["risk_score"],
