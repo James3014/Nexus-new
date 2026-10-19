@@ -573,6 +573,10 @@ _OBSERVATION_OUTCOME_KEYS = (
     "lookup_symbol",
     "found",
     "match_count",
+    # #2732: ultra_review is record-only; its own verdict must survive into the record.
+    "advisory_only",
+    "review_status",
+    "review_passed",
 )
 _OBSERVATION_MAX_TEXT = 512
 _OBSERVATION_MAX_ITEMS = 16
@@ -628,6 +632,10 @@ def _capability_observations(results: Any) -> dict[str, Any]:
                     entry[key] = value
         if outcome.get("error"):
             entry["error_present"] = True  # never the message: it can carry task text
+        if outcome.get("review_error"):
+            entry["review_error_present"] = True  # #2732: same rule, presence only
+        if outcome.get("advisory_only") is True and isinstance(outcome.get("findings"), list):
+            entry["review_findings_count"] = len(outcome["findings"])
         if "root" in result:
             root = _observation_value(result["root"])
             if isinstance(root, str):

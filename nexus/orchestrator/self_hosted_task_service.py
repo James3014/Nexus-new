@@ -890,7 +890,14 @@ def resolve_execution_lane(
         name = Path(path).name
         if name in lockfile_names:
             blockers.append("lockfile_change_forbidden")
-        if path.startswith(("generated/", "dist/", "build/", ".next/")) or name.endswith(".generated.json"):
+        # the directory entry itself counts too ("generated/" is stripped to "generated"
+        # above), and case is ignored for case-insensitive file systems (#2727)
+        folded = path.casefold()
+        if (
+            folded in {"generated", "dist", "build", ".next"}
+            or folded.startswith(("generated/", "dist/", "build/", ".next/"))
+            or name.casefold().endswith(".generated.json")
+        ):
             blockers.append("generated_or_large_change_forbidden")
     for flag in ("migration_authority", "schema_authority", "route_authority_mutation", "security_policy_weakening", "public_claim_allowed", "production_ready"):
         if request.get(flag):

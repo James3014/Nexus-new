@@ -521,7 +521,7 @@ def requires_ultra_review(changed_paths: list[str]) -> bool:
 def run_ultra_review_check() -> bool:
     report_path = ROOT / ".nexus" / "reports" / "ultra_review_report.json"
     sandbox_root = ROOT / ".nexus" / "reports" / "ultra_review" / "sandboxes"
-    print("\n🚀 [CI-Gate] Running Ultra Review Gate...")
+    print("\n🚀 [CI-Gate] Running Ultra Review (advisory, #2732)...")
     review_cmd = [
         str(VENV_PYTHON),
         "scripts/engine/nexus_cli.py",
@@ -935,7 +935,12 @@ def main():
         if getattr(args, "jit_promotion_report", False) and not run_jit_promotion_report():
             sys.exit(1)
         if requires_ultra_review(changed_paths) and not run_ultra_review_check():
-            sys.exit(1)
+            # #2732: ultra_review is retired as a gate (#2701 pilot: NO_SIGNAL). The review
+            # still runs and its report is printed, but a FAIL/BLOCK no longer stops the gate.
+            print(
+                "⚠️ [CI-Gate] Ultra Review is advisory only (retired as a gate, #2701/#2732); "
+                "continuing"
+            )
     
     # 0. Agent Protocol Check
     if not run_protocol_check(dry_run=args.dry_run):

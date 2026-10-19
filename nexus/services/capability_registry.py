@@ -3011,6 +3011,11 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 },
             }
         contract_violations = _execution_contract_violations(outcome_map) if gate_passed else []
+        # #2732: a record-only capability (ultra_review) never blocks; a contract shortfall
+        # (e.g. the review could not run a lane) is reported next to the record instead.
+        advisory_contract_violations: list[str] = []
+        if contract_violations and _is_advisory_only_outcome(name, outcome_map):
+            advisory_contract_violations, contract_violations = contract_violations, []
         if contract_violations:
             return {
                 "task_id": task_id,
@@ -3075,10 +3080,22 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 "outcome": outcome_map,
                 "consumer_payload": consumer_payload,
                 "stub": False,
+                **(
+                    {"advisory_contract_violations": advisory_contract_violations}
+                    if advisory_contract_violations
+                    else {}
+                ),
             },
         }
 
     return invoke
+
+
+def _is_advisory_only_outcome(name: str, outcome: Mapping[str, Any]) -> bool:
+    """True for a record-only capability receipt (#2732: ultra_review is not a gate)."""
+    from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
+
+    return name in ADVISORY_ONLY_CAPABILITIES and outcome.get("advisory_only") is True
 
 
 PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE = "planner_mainchain_gate_policy"

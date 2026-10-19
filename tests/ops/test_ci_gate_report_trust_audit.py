@@ -2,6 +2,8 @@ import argparse
 import json
 from unittest.mock import patch
 
+import pytest
+
 from scripts.ops import ci_gate
 
 
@@ -214,9 +216,20 @@ def test_ci_gate_main_strict_runs_changed_only_preflight(monkeypatch):
 
 
 def test_ci_gate_main_strict_high_risk_runs_ultra_review(monkeypatch):
+    """#2732: the review still runs on high-risk paths, but its FAIL is advisory: the strict
+    lane continues to the next check instead of exiting on the review."""
     calls = []
+
+    class _Stop(Exception):
+        pass
+
+    def _protocol(dry_run):
+        calls.append("protocol")
+        raise _Stop
+
     monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: True)
     monkeypatch.setattr(ci_gate, "run_ultra_review_check", lambda: calls.append("ultra") or False)
+    monkeypatch.setattr(ci_gate, "run_protocol_check", _protocol)
 
     args = argparse.Namespace(
         dry_run=False,
@@ -237,12 +250,10 @@ def test_ci_gate_main_strict_high_risk_runs_ultra_review(monkeypatch):
 
     with patch("argparse.ArgumentParser.parse_args", return_value=args):
         with patch("sys.exit", side_effect=SystemExit) as mock_exit:
-            try:
+            with pytest.raises(_Stop):
                 ci_gate.main()
-            except SystemExit:
-                pass
-            assert calls == ["ultra"]
-            mock_exit.assert_called_with(1)
+            assert calls == ["ultra", "protocol"]
+            mock_exit.assert_not_called()
 
 
 def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
