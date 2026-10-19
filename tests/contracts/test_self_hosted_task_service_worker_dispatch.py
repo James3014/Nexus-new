@@ -1663,11 +1663,21 @@ def test_materialization_codeintel_lookup_context(ctx, stubs) -> None:
 
 def test_materialization_passes_allowed_files_as_xray_targets(ctx, stubs) -> None:
     """#2688: xray scanned a default file on the worker path; it now gets the task's files."""
-    ctx.request["allowed_files"] = ["nexus/a.py", "nexus/b.py"]
+    (ctx.target / "nexus").mkdir()
+    (ctx.target / "nexus" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (ctx.target / "nexus" / "b.py").write_text("y = 2\n", encoding="utf-8")
+    # nexus/new.py does not exist yet (the task creates it): xray would block on it.
+    ctx.request["allowed_files"] = ["nexus/a.py", "nexus/new.py", "nexus/b.py"]
     ctx.run()
     context = stubs.log[2][1]["capability_context"]
     assert context["xray_targets"] == ["nexus/a.py", "nexus/b.py"]
     assert "target_files" not in context  # other executors keep their inputs
+
+
+def test_materialization_omits_xray_targets_when_no_allowed_file_exists(ctx, stubs) -> None:
+    ctx.request["allowed_files"] = ["nexus/new.py"]
+    ctx.run()
+    assert "xray_targets" not in stubs.log[2][1]["capability_context"]
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

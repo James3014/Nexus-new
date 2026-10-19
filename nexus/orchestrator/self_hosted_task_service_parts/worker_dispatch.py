@@ -419,13 +419,9 @@ class _WorkerDispatchMixin:
                     **_service_module()._codeintel_lookup_context(
                         request.get("codeintel_lookup"), target_worktree
                     ),
-                    # #2688: xray scans the task's own files (only xray reads this key).
-                    **(
-                        {"xray_targets": [str(path) for path in request["allowed_files"]]}
-                        if isinstance(request.get("allowed_files"), (list, tuple))
-                        and request.get("allowed_files")
-                        else {}
-                    ),
+                    # #2688: xray scans the task's own files (only xray reads this key);
+                    # files the task will create do not exist yet and are left out.
+                    **_xray_targets_context(request.get("allowed_files"), target_worktree),
                     "workspace_root": target_worktree,
                     "target_worktree": target_worktree,
                     "target_revision": target_revision,
@@ -513,3 +509,12 @@ class _WorkerDispatchMixin:
             attempt_id=str((self._read_state(contract.task_id) or {}).get("attempt_id", "")),
         )
     # fmt: on
+
+
+def _xray_targets_context(allowed_files: Any, target_worktree: Any) -> dict[str, Any]:
+    """``{"xray_targets": [...]}`` for the allowed files that already exist (#2688)."""
+    if not isinstance(allowed_files, (list, tuple)) or not target_worktree:
+        return {}
+    root = Path(str(target_worktree))
+    existing = [str(path) for path in allowed_files if (root / str(path)).is_file()]
+    return {"xray_targets": existing} if existing else {}
