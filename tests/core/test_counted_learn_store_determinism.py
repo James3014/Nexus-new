@@ -74,6 +74,7 @@ def test_counted_lane_learn_outcome_is_identical_across_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executor: Any, name: str
 ) -> None:
     monkeypatch.setenv("NEXUS_SYMMETRIC_PROMPT", "1")
+    monkeypatch.delenv("NEXUS_STATE_ROOT", raising=False)  # live Gateway exports it (#2704)
     first = executor(_plan(tmp_path), "task")
     _seed_failing_phase_rows(tmp_path)  # an earlier run's rows in the project store
     second = executor(_plan(tmp_path), "task")
@@ -100,6 +101,7 @@ def test_outside_counted_lanes_the_project_store_is_read_as_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("NEXUS_SYMMETRIC_PROMPT", raising=False)
+    monkeypatch.delenv("NEXUS_STATE_ROOT", raising=False)  # live Gateway exports it (#2704)
     _seed_failing_phase_rows(tmp_path)
     receipt = _exec_learn_phase_slo(_plan(tmp_path), "task")
     outcome = _outcome(receipt)

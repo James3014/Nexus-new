@@ -25,6 +25,12 @@ TRACKED_LEARN_FILES = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_state_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The live Gateway exports NEXUS_STATE_ROOT (#2704); learn stores must stay under tmp_path.
+    monkeypatch.delenv("NEXUS_STATE_ROOT", raising=False)
+
+
 def _file_hash(path: Path) -> str:
     if not path.exists():
         return "MISSING"

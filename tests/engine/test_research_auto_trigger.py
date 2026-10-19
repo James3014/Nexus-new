@@ -19,6 +19,8 @@ class MockPipeline(PipelineStagesMixin):
 @pytest.fixture(autouse=True)
 def _isolate_run_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(MockPipeline, "default_run_dir", tmp_path)
+    # The live Gateway exports NEXUS_STATE_ROOT (#2704); summary lookups must stay in tmp.
+    monkeypatch.delenv("NEXUS_STATE_ROOT", raising=False)
 
 
 @pytest.fixture
