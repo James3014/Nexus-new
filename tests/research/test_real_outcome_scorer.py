@@ -3001,6 +3001,17 @@ def test_v3_stub_refuses_when_project_already_installed(tmp_path, entry, metadat
     assert sorted(p.name for p in site.iterdir()) == [entry]
 
 
+def test_v3_stub_survives_deeply_nested_pyproject(tmp_path):
+    base = tmp_path / "base"
+    deep = "[" * 100000 + "]" * 100000
+    _write(base, {"pyproject.toml": f'[project]\nname = "demo"\nversion = "1.0"\nx = {deep}\n'})
+    site = tmp_path / "site"
+    site.mkdir()
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert stub is None and reason == "pyproject_unreadable:RecursionError"
+    assert list(site.iterdir()) == []
+
+
 def test_v3_stub_ignores_other_projects_with_a_shared_prefix(tmp_path):
     base = tmp_path / "base"
     _write(base, {"pyproject.toml": V3_PYPROJECT})

@@ -871,7 +871,14 @@ def project_metadata(base_wt: Path) -> tuple[dict[str, str] | None, str | None]:
         return None, "no_pyproject_toml"
     try:
         doc = tomllib.loads(path.read_text())
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+    # Untrusted TOML: deep nesting raises RecursionError, not TOMLDecodeError.
+    except (
+        tomllib.TOMLDecodeError,
+        UnicodeDecodeError,
+        RecursionError,
+        ValueError,
+        OSError,
+    ) as exc:
         return None, f"pyproject_unreadable:{type(exc).__name__}"
     project = doc.get("project")
     if not isinstance(project, dict):
