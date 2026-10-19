@@ -254,7 +254,9 @@ def _product_task_id(task_text: str, requested: str = "") -> str:
 
 
 def _safe_receipt_name(task_id: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", task_id)[:120] or "task"
+    from nexus.engine.run_receipt_store import safe_receipt_name
+
+    return safe_receipt_name(task_id)
 
 
 def _bounded_product_file(
@@ -896,13 +898,11 @@ def execute_canonical_product_task(
         if verified_world_c:
             verifier = build_world_c_verifier_projection
 
-    receipt_path = (
-        root
-        / ".nexus"
-        / "reports"
-        / "run"
-        / f"{_safe_receipt_name(task_id)}.canonical_runtime.json"
-    )
+    # <root>/.nexus/reports/run, or $NEXUS_STATE_ROOT/.nexus/reports/run when the
+    # root is a per-deploy checkout, so receipts survive the next deploy (#2689).
+    from nexus.engine.run_receipt_store import run_receipt_path
+
+    receipt_path = run_receipt_path(root, task_id)
     request = UnifiedRuntimeRequest(
         task_id=task_id,
         workspace_revision=revision,
