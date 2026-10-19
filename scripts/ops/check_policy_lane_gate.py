@@ -76,7 +76,8 @@ def _module_file(module: str, repo_root: Path) -> Path | None:
     if not module or any(not part or part in (".", "..") for part in parts):
         return None
     base = repo_root.joinpath(*parts)
-    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+    # Python resolves a regular package before a same-named module.
+    for candidate in (base / "__init__.py", base.with_suffix(".py")):
         resolved = _contained(candidate, repo_root)
         if resolved is not None and resolved.is_file():
             return resolved

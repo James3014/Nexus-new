@@ -380,3 +380,67 @@ class TestManifestStructure:
         manifest = load_manifest()
         hard_count = sum(1 for p in manifest["policies"] if p["lane"] == "hard")
         assert hard_count == 9
+
+
+def _module_layout(root: Path, *, package: bool, module: bool) -> None:
+    (root / "ns").mkdir()
+    (root / "ns" / "__init__.py").write_text("", encoding="utf-8")
+    if module:
+        (root / "ns" / "route.py").write_text("VALUE = 'module'\n", encoding="utf-8")
+    if package:
+        (root / "ns" / "route").mkdir()
+        (root / "ns" / "route" / "__init__.py").write_text("VALUE = 'package'\n", encoding="utf-8")
+
+
+def _imported_file(root: Path) -> Path:
+    import importlib
+    import sys
+
+    sys.path.insert(0, str(root))
+    importlib.invalidate_caches()
+    try:
+        return Path(importlib.import_module("ns.route").__file__).resolve()
+    finally:
+        sys.path.remove(str(root))
+        for name in [n for n in sys.modules if n == "ns" or n.startswith("ns.")]:
+            del sys.modules[name]
+
+
+def test_module_file_prefers_package_over_same_named_module(tmp_path: Path) -> None:
+    from scripts.ops.check_policy_lane_gate import _module_file
+
+    root = tmp_path.resolve()
+    _module_layout(root, package=True, module=True)
+    chosen = _module_file("ns.route", root)
+    assert chosen == root / "ns" / "route" / "__init__.py"
+    assert chosen == _imported_file(root)
+
+
+def test_module_file_resolves_module_when_only_module_exists(tmp_path: Path) -> None:
+    from scripts.ops.check_policy_lane_gate import _module_file
+
+    root = tmp_path.resolve()
+    _module_layout(root, package=False, module=True)
+    chosen = _module_file("ns.route", root)
+    assert chosen == root / "ns" / "route.py"
+    assert chosen == _imported_file(root)
+
+
+def test_module_file_resolves_package_when_only_package_exists(tmp_path: Path) -> None:
+    from scripts.ops.check_policy_lane_gate import _module_file
+
+    root = tmp_path.resolve()
+    _module_layout(root, package=True, module=False)
+    chosen = _module_file("ns.route", root)
+    assert chosen == root / "ns" / "route" / "__init__.py"
+    assert chosen == _imported_file(root)
+
+
+def test_module_file_returns_none_when_neither_exists(tmp_path: Path) -> None:
+    from scripts.ops.check_policy_lane_gate import _module_file
+
+    root = tmp_path.resolve()
+    _module_layout(root, package=False, module=False)
+    assert _module_file("ns.route", root) is None
+    assert _module_file("", root) is None
+    assert _module_file("ns..route", root) is None
