@@ -416,7 +416,7 @@
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
-| nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
+| nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py, tests/infrastructure/test_storage_implementations.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
 | tests/engine/test_ultra_review_service.py | tests/engine/test_ultra_review_service.py | active | medium | test_contract |
 | tests/ops/test_ultra_gate.py | tests/ops/test_ultra_gate.py | active | medium | test_contract |
