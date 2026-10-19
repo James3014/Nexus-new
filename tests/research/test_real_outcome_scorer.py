@@ -3009,6 +3009,7 @@ def test_v3_stub_ignores_other_projects_with_a_shared_prefix(tmp_path):
     other.mkdir(parents=True)
     (other / "METADATA").write_text("Metadata-Version: 2.1\nName: nexus-certify-demo-extra\n")
     (site / "nexus_certify_demo_tools.egg-info").mkdir()  # no Name, rest is not a version
+    (site / "nexus_certify_demo-2bar-1.0.dist-info").mkdir()  # no Name; "2bar" is no version
     stub, reason = ros.write_project_metadata_stub(base, site)
     assert reason is None and stub is not None
     assert stub["dist_info"] == "nexus_certify_demo-0.3.0.dist-info"

@@ -916,7 +916,8 @@ def _installed_as(site_packages: Path, name: str) -> str | None:
     for entry in sorted(site_packages.iterdir()):
         for suffix in (".dist-info", ".egg-info"):
             if entry.name.lower().endswith(suffix):
-                stem = _pep503(entry.name[: -len(suffix)])
+                raw = entry.name[: -len(suffix)]
+                stem = _pep503(raw)
                 break
         else:
             continue
@@ -926,9 +927,12 @@ def _installed_as(site_packages: Path, name: str) -> str | None:
             if _pep503(listed) == want:
                 return entry.name
             continue
-        # No readable Name: decide by the entry name (the rest must look like a version).
-        if stem == want or (
-            stem.startswith(want + "-") and stem[len(want) + 1 : len(want) + 2].isdigit()
+        # No readable Name: decide by the entry name. ``<name>-<version>[-<tag>...]``: some
+        # split of the raw stem must give this project's name and a valid version.
+        if stem == want or any(
+            _pep503(raw[:i]) == want and _valid_version(raw[i + 1 :].split("-")[0])
+            for i, ch in enumerate(raw)
+            if ch == "-"
         ):
             return entry.name
     return None
