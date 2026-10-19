@@ -67,7 +67,7 @@ def _read_inside(root: Path, parts: tuple[str, ...]) -> bytes | None:
     """Bytes of ``root/parts`` opened without following any symlink, or ``None``."""
     fds: list[int] = []
     try:
-        fds.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY))
+        fds.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
         for part in parts[:-1]:
             fds.append(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1]))
         fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fds[-1])
@@ -90,17 +90,26 @@ def _module_name(parts: tuple[str, ...]) -> str:
     return ".".join(names)
 
 
-def _symbols(module: str, source: bytes) -> list[str]:
-    """Top-level functions/classes and class methods, as the skeleton provider names them."""
+def _qualified(*names: str) -> str:
+    return ".".join(name for name in names if name)
+
+
+def _symbols(module: str, source: bytes, limit: int) -> list[str]:
+    """Top-level functions/classes and class methods, as the skeleton provider names them
+    (a root ``__init__.py`` has an empty module, so its symbols carry no prefix)."""
     tree = ast.parse(source)
     found: list[str] = []
     for node in tree.body:
+        if len(found) >= limit:
+            break
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            found.append(f"{module}.{node.name}")
+            found.append(_qualified(module, node.name))
         if isinstance(node, ast.ClassDef):
             for child in node.body:
+                if len(found) >= limit:
+                    break
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    found.append(f"{module}.{node.name}.{child.name}")
+                    found.append(_qualified(module, node.name, child.name))
     return found
 
 
@@ -121,7 +130,7 @@ def _derive(
         if source is None or len(source) > MAX_FILE_BYTES:
             continue
         files.append(rel)
-        for symbol in _symbols(_module_name(parts), source):
+        for symbol in _symbols(_module_name(parts), source, MAX_SYMBOLS - len(docs)):
             if len(docs) >= MAX_SYMBOLS:
                 break
             if len(symbol) <= MAX_SYMBOL_LENGTH and _SYMBOL.fullmatch(symbol):

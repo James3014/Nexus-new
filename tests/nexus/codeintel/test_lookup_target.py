@@ -134,3 +134,28 @@ def test_non_identifier_module_names_do_not_block_a_valid_symbol(tmp_path: Path)
     found = derive_codeintel_lookup("parse widget", ["my-mod.py", "pkg/widgets.py"], tmp_path)
 
     assert found["target_symbol"] == "pkg.widgets.parse_widget"
+
+
+def test_root_init_symbols_match_the_skeleton_provider(tmp_path: Path) -> None:
+    _write(tmp_path, "__init__.py", "def handler():\n    return 1\n")
+
+    found = derive_codeintel_lookup("handler fails", ["__init__.py"], tmp_path)
+
+    assert found["target_symbol"] == "handler"
+    assert lookup_implementation(tmp_path, "handler", search_paths=["__init__.py"]).found
+
+
+def test_symbol_cap_applies_while_parsing(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    monkeypatch.setattr(lookup_target, "MAX_SYMBOLS", 5)
+    _write(tmp_path, "many.py", "".join(f"def fn_{i}():\n    return {i}\n" for i in range(50)))
+    seen: list[int] = []
+    real = lookup_target._symbols
+    monkeypatch.setattr(
+        lookup_target, "_symbols", lambda m, s, n: seen.append(len(real(m, s, n))) or real(m, s, n)
+    )
+
+    lookup_target.derive_codeintel_lookup("fn 3", ["many.py"], tmp_path)
+
+    assert seen and max(seen) <= 5
