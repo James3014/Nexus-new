@@ -186,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
     ctx = ros.ScoreContext(
         work=args.work,
         env_provider=ros.UvEnvProvider(args.work / "envs", log=log),
-        runner=ros.PytestRunner(args.work / "scratch", log=log, sandbox=args.sandbox),
+        runner=ros.PytestRunner(
+            args.work / "scratch", log=log, sandbox=args.sandbox, store=args.store
+        ),
         repo_sources=sources,
         spec_sha256=_spec_sha256(),
         spec_v2_sha256=ros.sha256_bytes((ROOT / ros.SPEC_V2_RELATIVE_PATH).read_bytes()),

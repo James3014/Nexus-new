@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import gzip
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -13,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.engine import sandboxed_lane
 from nexus.research import real_outcome_scorer as ros
 
 ADD_TEST = "from pkg.calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n"
@@ -2164,11 +2167,23 @@ def test_scratch_home_leak_counts_toward_per_run_cap(tmp_path, monkeypatch):
 
 # Amendment A9: opt-in OS sandbox for pytest runs (default "none" = v1 §8 unchanged).
 
-from nexus.engine import sandboxed_lane  # noqa: E402
 
-_needs_os_sandbox = pytest.mark.skipif(
-    not sandboxed_lane.os_sandbox_available(), reason="no OS sandbox (non-macOS or disabled)"
-)
+def _os_runner(scratch: Path, timeout: int = 300, **kw) -> ros.PytestRunner | None:
+    """A bound "os" runner where the OS barrier exists (macOS).
+
+    Without one (Linux CI, or a disable variable set) these tests never skip: they assert
+    the fail-closed path instead (the runner refuses before creating anything, so nothing
+    can run) and return None, after which the caller returns.
+    """
+    if sandboxed_lane.os_sandbox_available():
+        return ros.PytestRunner(
+            scratch, timeout=timeout, log=lambda m: None, sandbox=ros.SANDBOX_OS, **kw
+        )
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        ros.PytestRunner(scratch, timeout=timeout, log=lambda m: None, sandbox=ros.SANDBOX_OS, **kw)
+    assert not scratch.exists()
+    return None
+
 
 SANDBOX_PROBE_TEST = (
     "import os, socket\n"
@@ -2268,8 +2283,49 @@ def test_sandbox_mode_separates_result_cache_keys(tmp_path):
     os_key = runner.result_key(env, "t", "tests", [], 0, "cand")
     assert none_key != os_key
     assert os_key == ros.sha256_bytes(
-        json.dumps([env.cache_key, "t", "tests", [], 0, "cand", "sandbox:os"]).encode()
+        json.dumps([
+            env.cache_key,
+            "t",
+            "tests",
+            [],
+            0,
+            "cand",
+            "sandbox:os",
+            f"profile:{runner.sandbox_profile_sha256}",
+        ]).encode()
     )
+
+
+def _hash_runner(scratch: Path, **kw) -> ros.PytestRunner:
+    runner = ros.PytestRunner(scratch, log=lambda m: None, **kw)
+    runner.sandbox = ros.SANDBOX_OS  # the hash needs no barrier, so this runs everywhere
+    return runner
+
+
+def test_sandbox_profile_hash_ignores_work_dir_and_home(tmp_path, monkeypatch):
+    assert ros.PytestRunner(tmp_path / "none", log=lambda m: None).sandbox_profile_sha256 is None
+    first = _hash_runner(tmp_path / "a" / "work" / "scratch").sandbox_profile_sha256
+    monkeypatch.setenv("HOME", str(tmp_path / "other-home"))
+    second = _hash_runner(tmp_path / "b" / "elsewhere" / "scratch").sandbox_profile_sha256
+    assert first == second and len(first or "") == 64
+
+
+def test_sandbox_profile_hash_and_result_key_track_profile_changes(tmp_path, monkeypatch):
+    env = LocalEnv().get("fixture-repo", tmp_path)
+    before = _hash_runner(tmp_path / "s1")
+    before_key = before.result_key(env, "t", "tests", [], 0)  # hashes the real profile
+    real = sandboxed_lane.build_sandbox_profile
+
+    def without_child_signals(**kwargs):
+        return real(**{**kwargs, "allow_signal_same_sandbox": False})
+
+    monkeypatch.setattr(sandboxed_lane, "build_sandbox_profile", without_child_signals)
+    after = _hash_runner(tmp_path / "s2")
+    assert before.sandbox_profile_sha256 != after.sandbox_profile_sha256
+    assert before_key != after.result_key(env, "t", "tests", [], 0)
+    # The store deny is part of the profile too.
+    with_store = _hash_runner(tmp_path / "s3", store=tmp_path / "store")
+    assert with_store.sandbox_profile_sha256 != after.sandbox_profile_sha256
 
 
 def test_shared_profile_signals_stay_self_only_unless_asked(tmp_path):
@@ -2360,15 +2416,15 @@ def test_receipt_records_runner_sandbox_none(tmp_path, fx):
         "receipt"
     ]
     assert receipt["runner_sandbox"] == ros.SANDBOX_NONE
+    assert receipt["runner_sandbox_profile_sha256"] is None
 
 
-@_needs_os_sandbox
 def test_sandbox_os_denies_network_and_outside_writes(tmp_path):
     tree = _sandbox_probe_tree(tmp_path)
     env = LocalEnv().get("fixture-repo", tree)
-    confined = ros.PytestRunner(
-        tmp_path / "scratch-os", timeout=300, log=lambda m: None, sandbox=ros.SANDBOX_OS
-    )
+    confined = _os_runner(tmp_path / "scratch-os")
+    if confined is None:
+        return
     res = confined.run(env, tree, "t", "tests", (), 0)
     node = "tests.test_probe::"
     assert res.outcomes == {
@@ -2391,7 +2447,6 @@ def test_sandbox_os_denies_network_and_outside_writes(tmp_path):
     assert unconfined[node + "test_net_denied_by_barrier"] == ros.FAIL
 
 
-@_needs_os_sandbox
 def test_sandbox_os_keeps_timeout_and_group_kill(tmp_path):
     tree = tmp_path / "tree"
     _write(
@@ -2405,21 +2460,214 @@ def test_sandbox_os_keeps_timeout_and_group_kill(tmp_path):
         },
     )
     env = LocalEnv().get("fixture-repo", tree)
-    runner = ros.PytestRunner(
-        tmp_path / "scratch", timeout=2, log=lambda m: None, sandbox=ros.SANDBOX_OS
-    )
+    runner = _os_runner(tmp_path / "scratch", timeout=2)
+    if runner is None:
+        return
     res = runner.run(env, tree, "t", "tests", (), 0)
     assert (res.timed_out, res.exit_code, res.outcomes) == (True, -1, {})
     time.sleep(5)  # the orphan would have written by now had it survived the group kill
     assert not (runner.tmp / "orphan").exists()
 
 
-@_needs_os_sandbox
 def test_sandbox_os_gold_self_check_resolves_and_is_recorded(tmp_path, fx):
     ctx = _ctx(tmp_path, fx)
-    ctx.runner = ros.PytestRunner(
-        ctx.work / "scratch", timeout=300, log=lambda m: None, sandbox=ros.SANDBOX_OS
-    )
+    runner = _os_runner(ctx.work / "scratch-os")
+    if runner is None:
+        return
+    ctx.runner = runner
     receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
     assert receipt["runner_sandbox"] == ros.SANDBOX_OS
+    assert receipt["runner_sandbox_profile_sha256"] == runner.sandbox_profile_sha256
+    assert len(runner.sandbox_profile_sha256 or "") == 64
     assert receipt["label"] == ros.RESOLVED
+
+
+# A9 review fixes: per-run HOME/TMPDIR in "os" mode, extra import roots, unreadable paths.
+
+LEAK_WRITER_TEST = (
+    "import json, os\n"
+    "from pathlib import Path\n\n\n"
+    "def test_leave_fix(tmp_path):\n"
+    "    paths = [\n"
+    "        Path(os.environ['TMPDIR']) / 'leak-gold.txt',\n"
+    "        Path(os.environ['HOME']) / 'leak-gold.txt',\n"
+    "        tmp_path / 'leak-gold.txt',\n"
+    "    ]\n"
+    "    for path in paths:\n"
+    "        path.write_text('the fix')\n"
+    "    out = Path(__file__).resolve().parent / 'paths.json'\n"
+    "    out.write_text(json.dumps([str(p) for p in paths]))\n"
+)
+
+READ_DENIED_TEST = (
+    "import json, os\n"
+    "from pathlib import Path\n\n\n"
+    "def test_cannot_read():\n"
+    "    paths = json.loads((Path(__file__).resolve().parent / 'targets.json').read_text())\n"
+    "    readable = []\n"
+    "    for p in paths:\n"
+    "        try:\n"
+    "            Path(p).read_text()\n"
+    "        except OSError:\n"
+    "            continue\n"
+    "        readable.append(p)\n"
+    "    scratch = Path(os.environ['TMPDIR']).parents[2]\n"
+    "    for root in (Path(os.environ['TMPDIR']), Path(os.environ['HOME']), scratch):\n"
+    "        try:\n"
+    "            found = list(root.rglob('leak-*'))\n"
+    "        except OSError:\n"
+    "            continue\n"
+    "        for f in found:\n"
+    "            try:\n"
+    "                f.read_text()\n"
+    "            except OSError:\n"
+    "                continue\n"
+    "            readable.append(str(f))\n"
+    "    assert readable == []\n"
+)
+
+
+def test_sandbox_os_gold_leftovers_are_invisible_to_a_later_candidate_run(tmp_path):
+    work = tmp_path / "work"
+    gold = work / "trees" / "task" / "gold"
+    cand = work / "trees" / "task" / "cand"
+    _write(gold, {"tests/test_gold.py": LEAK_WRITER_TEST})
+    _write(cand, {"tests/test_cand.py": READ_DENIED_TEST})
+    env = LocalEnv().get("fixture-repo", gold)
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    res = runner.run(env, gold, "g", "tests", (), 0, role="GOLD")
+    assert res.outcomes == {"tests.test_gold::test_leave_fix": ros.PASS}
+    leaked = json.loads((gold / "tests" / "paths.json").read_text())
+    assert len(leaked) == 3
+    # The GOLD run's own HOME/TMPDIR were per-run and are gone; nothing reached the shared ones.
+    assert not any(Path(p).exists() for p in leaked)
+    assert list(runner.runs.iterdir()) == []
+    assert ros.tree_bytes(runner.tmp) == 0 and ros.tree_bytes(runner.home) == 0
+    (cand / "tests" / "targets.json").write_text(json.dumps(leaked))
+    res = runner.run(env, cand, "c", "tests", (), 0, role="CAND+T")
+    assert res.outcomes == {"tests.test_cand::test_cannot_read": ros.PASS}
+    assert list(runner.runs.iterdir()) == []
+
+
+def test_sandbox_os_session_escaping_child_cannot_touch_the_next_run(tmp_path):
+    work = tmp_path / "work"
+    first = work / "trees" / "task" / "first"
+    second = work / "trees" / "task" / "second"
+    attack = (
+        'S="$TMPDIR/../../.."; end=$(($(date +%s) + 8)); '
+        'while [ "$(date +%s)" -lt "$end" ]; do '
+        'echo x > "$S/tmp/planted"; echo x > "$S/home/planted"; '
+        'echo "{}" > "$S/pytest-cache/planted.json"; '
+        'for d in "$S"/runs/*; do echo x > "$d/tmp/planted"; echo junk > "$d/junit.xml"; done; '
+        "sleep 0.1; done"
+    )
+    _write(
+        first,
+        {
+            "tests/test_escape.py": (
+                "import subprocess\nfrom pathlib import Path\n\n\n"
+                "def test_escape():\n"
+                f"    child = subprocess.Popen(['/bin/sh', '-c', {attack!r}],"
+                " start_new_session=True)\n"
+                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    _write(
+        second,
+        {
+            "tests/test_next.py": (
+                "import os, time\nfrom pathlib import Path\n\n\n"
+                "def test_next():\n"
+                "    time.sleep(2)\n"
+                "    assert not (Path(os.environ['TMPDIR']) / 'planted').exists()\n"
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", first)
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    assert runner.run(env, first, "a", "tests", (), 0).outcomes == {
+        "tests.test_escape::test_escape": ros.PASS
+    }
+    pid = int((first / "tests" / "child.pid").read_text())
+    try:
+        res = runner.run(env, second, "b", "tests", (), 0)
+        os.kill(pid, 0)  # the escaped child really outlived the first run's group kill
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+    assert (res.outcomes, res.exit_code, res.timed_out) == (
+        {"tests.test_next::test_next": ros.PASS},
+        0,
+        False,
+    )
+    assert not [p for p in runner.scratch.rglob("planted*")]
+    key = runner.result_key(env, "b", "tests", (), 0)
+    cached = json.loads((runner.cache / f"{key}.json").read_text())
+    assert cached["outcomes"] == {"tests.test_next::test_next": ros.PASS}
+
+
+@pytest.mark.parametrize("which", ["work", "work_parent", "repos", "trees", "store"])
+def test_sandbox_os_refuses_extra_import_roots_covering_work(tmp_path, monkeypatch, which):
+    work = tmp_path / "w" / "work"
+    store = tmp_path / "store"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    root = {
+        "work": work,
+        "work_parent": work.parent,
+        "repos": work / "repos" / "r",
+        "trees": work / "trees" / "task" / "gold",
+        "store": store / "tasks",
+    }[which]
+    root.mkdir(parents=True, exist_ok=True)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None, store=store)
+    runner.sandbox = ros.SANDBOX_OS  # the check runs before any barrier-specific step
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran with an overbroad import root")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    env = ros.TestEnv("e", sys.executable, "fixture", extra_pythonpath=(str(root),))
+    with pytest.raises(sandboxed_lane.SandboxError, match="extra_import_root_overbroad"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.runs.iterdir()) == [] and list(runner.cache.iterdir()) == []
+
+
+def test_sandbox_os_cannot_read_repos_sibling_trees_or_home(tmp_path):
+    import shutil
+    import tempfile
+
+    work = tmp_path / "work"
+    store = tmp_path / "store"
+    runner = _os_runner(work / "scratch", store=store)
+    if runner is None:
+        return
+    cand = work / "trees" / "task" / "cand"
+    _write(cand, {"tests/test_cand.py": READ_DENIED_TEST})
+    secrets = [
+        work / "repos" / "repo" / ".git" / "secret.txt",
+        work / "trees" / "task" / "gold" / "secret.txt",
+        store / "tasks" / "secret.txt",
+    ]
+    home_dir = Path(tempfile.mkdtemp(prefix=".wt-83-probe-", dir=Path.home()))
+    try:
+        secrets.append(home_dir / "secret.txt")
+        for path in secrets:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("secret")
+        (cand / "tests" / "targets.json").write_text(json.dumps([str(p) for p in secrets]))
+        env = LocalEnv().get("fixture-repo", cand)
+        node = "tests.test_cand::test_cannot_read"
+        res = runner.run(env, cand, "c", "tests", (), 0)
+        assert res.outcomes == {node: ros.PASS}
+        # Control: unconfined, the same test reads them all (so the paths are real).
+        plain = ros.PytestRunner(tmp_path / "plain", timeout=300, log=lambda m: None)
+        assert plain.run(env, cand, "c", "tests", (), 0).outcomes == {node: ros.FAIL}
+    finally:
+        shutil.rmtree(home_dir, ignore_errors=True)

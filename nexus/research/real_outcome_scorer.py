@@ -24,6 +24,7 @@ import signal
 import stat
 import subprocess
 import time
+import uuid
 import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass, field
@@ -40,10 +41,10 @@ SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
 
 PYTEST_TIMEOUT_SECONDS = 1800
-# Amendment A9 (opt-in, #ISSUE). "none" (the default) runs pytest exactly as v1 §8 says;
+# Amendment A9 (opt-in, #2723). "none" (the default) runs pytest exactly as v1 §8 says;
 # "os" runs the same command under the shared macOS sandbox (nexus.engine.sandboxed_lane):
-# no network, writes only to the tree and scratch HOME/TMPDIR. "os" never falls back to an
-# unconfined run.
+# no network, writes only to the tree and a fresh per-run HOME/TMPDIR under scratch/runs.
+# "os" never falls back to an unconfined run.
 SANDBOX_NONE, SANDBOX_OS = "none", "os"
 RUNNER_SANDBOX_MODES = (SANDBOX_NONE, SANDBOX_OS)
 # Amendment A6 (operational, #2291). Every pytest run gets scratch/tmp as TMPDIR and
@@ -1087,6 +1088,33 @@ def _require_os_sandbox() -> None:
         raise lane.SandboxError("no_os_barrier")
 
 
+def _scorer_profile(
+    *,
+    writable: Sequence[str],
+    reads: Sequence[str],
+    denied: Sequence[Path | str],
+    all_system_subpaths: bool = False,
+) -> str:
+    """A9: the scorer's SBPL profile from the shared sandboxed_lane primitives.
+
+    ``all_system_subpaths`` lists every shared system subpath whether or not it exists on
+    this machine (used only for the machine-independent profile hash).
+    """
+    from nexus.engine import sandboxed_lane as lane
+
+    read_roots = lane.checked_read_roots([*writable, *reads])
+    if all_system_subpaths:
+        read_roots = sorted(set(read_roots) | set(lane.SANDBOX_SYSTEM_READ_SUBPATHS))
+    # Tests may signal the processes they start (e.g. a process-group kill); never one
+    # outside the sandbox.
+    return lane.build_sandbox_profile(
+        writable=list(writable),
+        read_roots=read_roots,
+        deny_subtrees=list(denied),
+        allow_signal_same_sandbox=True,
+    )
+
+
 class PytestRunner:
     """Spec §8 test run.
 
@@ -1103,6 +1131,7 @@ class PytestRunner:
         timeout: int = PYTEST_TIMEOUT_SECONDS,
         log: Callable[[str], None] = print,
         sandbox: str = SANDBOX_NONE,
+        store: Path | None = None,
     ):
         if sandbox not in RUNNER_SANDBOX_MODES:
             raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
@@ -1117,6 +1146,11 @@ class PytestRunner:
         self.log = log
         self.total_seconds = 0.0
         self.tmp = self.scratch / "tmp"
+        # A9 ("os" only): one fresh HOME/TMPDIR/junit dir per run, removed after the run.
+        self.runs = self.scratch / "runs"
+        # A9 ("os" only): the experiment store; never readable by a confined run.
+        self.store = Path(store) if store is not None else None
+        self._profile_sha256: str | None = None
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1148,6 +1182,10 @@ class PytestRunner:
                 sizes.append(-1)
         errors = clean_scratch_tmp(self.tmp, self._live_junits)
         errors += [f"home/{e}" for e in clean_scratch_tmp(self.home)]
+        if os.path.lexists(self.runs):  # A9 "os": dirs a crash or an escaped child left
+            if self.runs.is_symlink():
+                raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use or clean it")
+            errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1164,9 +1202,12 @@ class PytestRunner:
         except (ProcessLookupError, PermissionError):
             return
 
-    def _env(self, env: TestEnv, tree: Path) -> dict[str, str]:
-        home = self.scratch / "home"
-        tmp = self.scratch / "tmp"
+    def _env(
+        self, env: TestEnv, tree: Path, home: Path | None = None, tmp: Path | None = None
+    ) -> dict[str, str]:
+        # A9 "os" passes a per-run HOME/TMPDIR; "none" uses the shared ones (1.2.3).
+        home = home or self.scratch / "home"
+        tmp = tmp or self.scratch / "tmp"
         home.mkdir(parents=True, exist_ok=True)
         tmp.mkdir(parents=True, exist_ok=True)
         pythonpath = [str(tree)]
@@ -1196,42 +1237,99 @@ class PytestRunner:
         """Test-result cache key (also names the run's junit report)."""
         key_parts: list[Any] = [env.cache_key, tree_id, target, sorted(set(ignores)), run_idx, role]
         if self.sandbox != SANDBOX_NONE:
-            # A9: a confined run never shares a cache entry with an unconfined one.
+            # A9: a confined run never shares a cache entry with an unconfined one, nor
+            # with a run under a different sandbox profile.
             key_parts.append(f"sandbox:{self.sandbox}")
+            key_parts.append(f"profile:{self.sandbox_profile_sha256}")
         return sha256_bytes(json.dumps(key_parts).encode())
 
-    def _confine(self, env: TestEnv, tree: Path) -> list[str]:
+    def _confine(self, env: TestEnv, tree: Path, run_dir: Path) -> list[str]:
         """A9: ``sandbox-exec -p <profile>`` for one run of ``env`` on ``tree``.
 
-        Writes: the tree and scratch HOME/TMPDIR (the junit report lives in TMPDIR). Reads:
+        Writes: the tree and this run's own ``run_dir`` (its HOME, TMPDIR and junit report;
+        never the shared scratch HOME/TMPDIR, so no run sees what another left). Reads:
         those, the env dir, the resolved interpreter prefix it points to (uv pythons live
         under ``$HOME``, which the profile otherwise denies), the env's extra import roots
-        and the fixed system/toolchain paths. No network; credential stores stay denied.
-        Signals only reach processes inside the same sandbox.
-        Raises SandboxError when no barrier exists or a path is unsafe for the policy.
+        and the fixed system/toolchain paths. No network; credential stores, ``<work>/repos``
+        and the store stay denied. Signals only reach processes inside the same sandbox.
+        Raises SandboxError when no barrier exists, an extra import root covers the work
+        dir, repos, trees or store, or a path is unsafe for the policy.
         """
         from nexus.engine import sandboxed_lane as lane
         from nexus.engine.confined_test_runner import TOOLCHAIN_READ_ROOTS
 
         _require_os_sandbox()
-        writable = [lane.sbpl_path(p) for p in (Path(tree), self.home, self.tmp)]
+        work = self.scratch.parent.resolve()
+        denied = [work / "repos", *([self.store.resolve()] if self.store else [])]
+        for root in env.extra_pythonpath:
+            resolved = Path(root).resolve()
+            if lane.in_tree(work, [resolved]) or lane.in_tree(resolved, [*denied, work / "trees"]):
+                raise lane.SandboxError(f"extra_import_root_overbroad:{root}")
+        writable = [lane.sbpl_path(p) for p in (Path(tree), run_dir)]
         interpreter = Path(os.path.realpath(env.python))
         if lane.in_tree(interpreter, writable):
             raise lane.SandboxError("interpreter_inside_sandbox")
-        read_roots = lane.checked_read_roots([
-            *writable,
-            str(Path(env.python).parent.parent),  # the env (venv) dir
-            str(interpreter.parent.parent),  # the base installation it resolves to
-            *env.extra_pythonpath,
-            *lane.tool_read_roots(),
-            *(p for p in TOOLCHAIN_READ_ROOTS if os.path.exists(p)),
-        ])
-        # Tests may signal the processes they start (e.g. a process-group kill); never one
-        # outside the sandbox.
-        profile = lane.build_sandbox_profile(
-            writable=writable, read_roots=read_roots, allow_signal_same_sandbox=True
+        profile = _scorer_profile(
+            writable=writable,
+            reads=[
+                str(Path(env.python).parent.parent),  # the env (venv) dir
+                str(interpreter.parent.parent),  # the base installation it resolves to
+                *env.extra_pythonpath,
+                *lane.tool_read_roots(),
+                *(p for p in TOOLCHAIN_READ_ROOTS if os.path.exists(p)),
+            ],
+            denied=denied,
         )
         return [lane.SANDBOX_EXEC, "-p", profile]
+
+    @property
+    def sandbox_profile_sha256(self) -> str | None:
+        """A9: sha256 of the SBPL profile shape this runner uses (None for "none").
+
+        Built by the same ``_scorer_profile`` as every run, with each run- or
+        machine-specific path replaced by a fixed placeholder (tree, per-run dir, env dir,
+        interpreter prefix, extra import roots, developer toolchain, work dir, store,
+        ``$HOME``) and every system/toolchain root listed, unresolved, whether or not it
+        exists here.
+        So the same scorer gives the same hash on any machine, and any change to the
+        shared profile or to the scorer's roots changes it. Part of the "os" result key.
+        """
+        if self.sandbox == SANDBOX_NONE:
+            return None
+        if self._profile_sha256 is None:
+            from nexus.engine import sandboxed_lane as lane
+            from nexus.engine.confined_test_runner import TOOLCHAIN_READ_ROOTS
+
+            denied = ["/__WORK__/repos", *(["/__STORE__"] if self.store else [])]
+            profile = _scorer_profile(
+                writable=["/__TREE__", "/__RUN_DIR__"],
+                reads=[
+                    "/__ENV_DIR__",
+                    "/__INTERPRETER_PREFIX__",
+                    "/__EXTRA_IMPORT_ROOTS__",
+                    *lane.SANDBOX_TOOL_READ_FILES,
+                    "/__DEVELOPER_DIR__",
+                    *TOOLCHAIN_READ_ROOTS,
+                ],
+                denied=denied,
+                all_system_subpaths=True,
+            )
+            # sbpl_path resolves symlinks (e.g. /usr/share/zoneinfo points to a tz-version
+            # dir): put each fixed root back in its unresolved, machine-independent form.
+            for fixed in (
+                *lane.SANDBOX_SYSTEM_READ_SUBPATHS,
+                *lane.SANDBOX_TOOL_READ_FILES,
+                *TOOLCHAIN_READ_ROOTS,
+            ):
+                resolved = str(Path(fixed).resolve())
+                if resolved != fixed:
+                    profile = profile.replace(f'"{resolved}"', f'"{fixed}"')
+            home = lane.sbpl_path(Path(os.path.expanduser("~")).resolve())
+            profile = profile.replace(f'"{home}"', '"/__HOME__"').replace(
+                f'"{home}/', '"/__HOME__/'
+            )
+            self._profile_sha256 = sha256_bytes(profile.encode())
+        return self._profile_sha256
 
     def run(
         self,
@@ -1249,10 +1347,57 @@ class PytestRunner:
         if cached.exists():
             data = json.loads(cached.read_text())
             return RunResult(data["outcomes"], data["exit_code"], data["timed_out"], 0.0)
+        if self.sandbox != SANDBOX_OS:
+            return self._execute(env, tree, target, ignores, run_idx, role, key, None)
+        # A9 "os": a fresh HOME/TMPDIR/junit dir for this run only, removed afterwards on
+        # every path (result, timeout, cap refusal, error).
+        run_dir = self.runs / f"{key[:16]}-{uuid.uuid4().hex[:12]}"
+        try:
+            return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
+        finally:
+            self._remove_run_dir(run_dir)
+
+    def _remove_run_dir(self, run_dir: Path) -> None:
+        """Delete one A9 per-run dir without following links; log what could not go."""
+        if run_dir.is_symlink():
+            run_dir.unlink(missing_ok=True)
+            return
+        errors = clean_scratch_tmp(run_dir)
+        try:
+            run_dir.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            errors.append(f"rmdir:{type(exc).__name__}")
+        for err in errors:
+            self.log(f"  run dir cleanup {run_dir.name}: {err}")
+
+    def _execute(
+        self,
+        env: TestEnv,
+        tree: Path,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+        role: str,
+        key: str,
+        run_dir: Path | None,
+    ) -> RunResult:
+        """One uncached pytest run. ``run_dir`` is None for "none" (1.2.3 behaviour)."""
+        cached = self.cache / f"{key}.json"
         self.check_scratch()
-        junit = self.tmp / f"junit-{key}.xml"
-        junit.parent.mkdir(parents=True, exist_ok=True)
-        junit.unlink(missing_ok=True)
+        if run_dir is None:
+            junit = self.tmp / f"junit-{key}.xml"
+            junit.parent.mkdir(parents=True, exist_ok=True)
+            junit.unlink(missing_ok=True)
+        else:
+            if self.runs.is_symlink():
+                raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use it")
+            self.runs.mkdir(parents=True, exist_ok=True)
+            run_dir.mkdir()
+            (run_dir / "home").mkdir()
+            (run_dir / "tmp").mkdir()
+            junit = run_dir / "junit.xml"
         cmd = [
             env.python,
             "-m",
@@ -1267,11 +1412,16 @@ class PytestRunner:
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
-        run_env = self._env(env, tree)
-        # A9: the same command and env, only wrapped in sandbox-exec; built before the run
-        # starts, so a refusal (SandboxError) never runs anything unconfined.
-        launch = self._confine(env, tree) + cmd if self.sandbox == SANDBOX_OS else cmd
-        self._live_junits.add(junit.name)
+        if run_dir is None:
+            run_env = self._env(env, tree)
+            launch = cmd
+            self._live_junits.add(junit.name)
+        else:
+            # A9: the same command and env (but a per-run HOME/TMPDIR), wrapped in
+            # sandbox-exec; built before the run starts, so a refusal (SandboxError) never
+            # runs anything unconfined.
+            run_env = self._env(env, tree, run_dir / "home", run_dir / "tmp")
+            launch = self._confine(env, tree, run_dir) + cmd
         before = self.scratch_bytes()
         start = time.monotonic()
         timed_out = False
@@ -1299,6 +1449,8 @@ class PytestRunner:
         # A6: what this run left in scratch (its own junit report excluded).
         junit_bytes = junit.stat().st_size if junit.is_file() and not junit.is_symlink() else 0
         after = self.scratch_bytes() - junit_bytes
+        if run_dir is not None:  # A9: the per-run dir counts as this run's scratch
+            after += tree_bytes(run_dir)
         left = after - before
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
@@ -1425,6 +1577,7 @@ def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
         "schema": RECEIPT_SCHEMA,
         "scorer_version": SCORER_VERSION,
         "runner_sandbox": getattr(ctx.runner, "sandbox", SANDBOX_NONE),
+        "runner_sandbox_profile_sha256": getattr(ctx.runner, "sandbox_profile_sha256", None),
         "spec_sha256": ctx.spec_sha256,
         "spec_version": SPEC_V1,
         "task_key": inputs.task_key,
