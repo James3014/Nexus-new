@@ -27,8 +27,9 @@ through ``_service_module()``, so patches on the facade keep taking effect.
 lock, then the runtime store's atomic replace) and runs the selected capability invokers
 outside the lock; ``_run_default_resumable`` hands the attempt to
 ``RuntimeCoordinationBridge.execute`` (worker launch and leasing stay there).  Members are
-reached through ``self``; ``_launch_worker`` and the process helpers stay in the facade
-(``_launch_worker`` derives the worker source root from the facade's ``__file__``).
+reached through ``self``; ``_launch_worker`` and the process helpers live in
+``_FinalizeRuntimeMixin`` (``parts/finalize_runtime.py``, split S11; ``_launch_worker``
+still derives the worker source root from the facade's ``__file__``).
 """
 
 from __future__ import annotations

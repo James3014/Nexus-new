@@ -13,8 +13,9 @@ name it loads (``validate_operator_outcome_receipt``) is resolved at call time t
 
 This is not read-only code: it reads the state through ``_read_state`` (state lock) and
 appends through ``_mutate_state`` (state lock, then the runtime store's atomic replace);
-both are reached through ``self`` (``_StateStoreMixin``).  ``_promotion_authority_error``
-and ``_bound_custom_runner_values``, which sat next to it, stay in the facade class.
+both are reached through ``self`` (``_StateStoreMixin``).  ``_bound_custom_runner_values``,
+which sat next to it, stays in the facade class; ``_promotion_authority_error`` lives in
+``_FinalizeRuntimeMixin`` (``parts/finalize_runtime.py``, split S11).
 """
 
 from __future__ import annotations
