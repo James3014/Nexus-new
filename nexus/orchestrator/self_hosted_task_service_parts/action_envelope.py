@@ -13,10 +13,10 @@ effect; the status sets stay imported (from ``nexus_runtime.task_lifecycle``) by
 facade only.
 
 They take no lock and do no I/O: they map a state mapping to a new value and never mutate
-their input. The state lock and the state store stay in the facade class, which still
-computes the persisted ``task_action`` (``_normalize_state_write``) and the read-side one
-(``_validate_state_payload`` / ``_invalid_state_status``) through these methods via
-``cls`` / ``self``.
+their input. The state lock and the state store live in ``_StateStoreMixin``
+(``parts/state_store.py``, split S6b), which still computes the persisted ``task_action``
+(``_normalize_state_write``) and the read-side one (``_validate_state_payload`` /
+``_invalid_state_status``) through these methods via ``cls`` / ``self``.
 """
 
 from __future__ import annotations

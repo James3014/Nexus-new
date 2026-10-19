@@ -12,7 +12,8 @@ facade defines or that tests patch on the facade (``SelfHostedTaskService``,
 is resolved at call time through ``_service_module()``.
 
 The state lock and state store (``_state_lock``, ``_state_path``, ``_read_state``,
-``_write_state_locked``) stay in the facade class and are reached through ``self``.
+``_write_state_locked``) live in ``_StateStoreMixin`` (``parts/state_store.py``, split S6b)
+and are reached through ``self``.
 """
 
 from __future__ import annotations
