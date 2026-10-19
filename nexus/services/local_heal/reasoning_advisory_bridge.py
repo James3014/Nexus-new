@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from nexus.core.belief_contracts import AuditOutcome
-from nexus.core.belief_engine import BeliefEngine
+from nexus.core.belief_engine import BeliefEngine, repair_target_key
 from nexus.engine.autoreason_service import AutoreasonService
 
 
@@ -44,12 +44,25 @@ def apply_autoreason_advisory(ctx: Any, service: AutoreasonService | None = None
     return advisory
 
 
+def repair_target_file(op: Any) -> str:
+    """Repo-relative file the repair targeted (first localized file), or ""."""
+    for loc in list(getattr(op, "localized_files", None) or []):
+        path = str(getattr(loc, "path", "") or "").strip()
+        if path:
+            return path
+    return ""
+
+
 def apply_belief_update(ctx: Any, engine: BeliefEngine | None = None) -> dict[str, Any]:
     op = ctx.op if hasattr(ctx, "op") else ctx
     task_id = str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown")
     assumption = f"local_heal:{task_id}:repair_outcome"
+    target_file = repair_target_file(op)
     belief = engine or BeliefEngine()
-    before = float(belief.get_confidence(task_id, assumption))
+    if target_file:
+        before = float(belief.get_confidence(task_id, assumption, target_file=target_file))
+    else:
+        before = float(belief.get_confidence(task_id, assumption))
     verifier_passed = bool(getattr(op, "solve_eligible", False) and not getattr(op, "failure_reason", ""))
     owner_gated = "owner" in str(getattr(op, "failure_reason", "")).lower()
     if owner_gated:
@@ -70,6 +83,10 @@ def apply_belief_update(ctx: Any, engine: BeliefEngine | None = None) -> dict[st
         )
     )
     after = float(result["confidence"])
+    target_key = repair_target_key(target_file)
+    if target_key:
+        # Mirror under the shared per-file key so later reads for the same target see it (#2688).
+        belief.update_belief(task_id, target_key, after, str(result.get("evidence_id") or ""))
     trace = {
         "schema": "nexus.local_heal.belief_trace.v1",
         "belief_before": before,

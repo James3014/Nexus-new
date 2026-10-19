@@ -19,6 +19,7 @@ from nexus.core.lite_route_oracle import (
     GATE_ONLY_RECEIPT_LITE_LANES,
     ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
 )
+from nexus.core.state_root import persistent_state_root
 from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
@@ -199,6 +200,7 @@ def merge_runtime_learning_policy(
     runtime_identity: str = "",
     source_revision: str = "",
 ) -> dict[str, Any]:
+    project_root = persistent_state_root(project_root)  # #2688: policy files are state
     merged = dict(budget or {})
     caller_policy = merged.get("learning_policy")
     caller_policy = dict(caller_policy) if isinstance(caller_policy, dict) else {}

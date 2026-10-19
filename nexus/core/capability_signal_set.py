@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from nexus.core.state_root import persistent_state_root
 from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 
@@ -50,7 +52,9 @@ class CapabilitySignalSet:
 
         # 1.1 [P12] 路由接 LanceDB & Memory 實體檢索 (FTS & 語意)
         # 如果檢索到歷史失敗案例，則進行信心度扣減
-        memory_index_path = resolve_lancedb_root(MEMORY_INDEX, project_root, honor_env=False)
+        memory_index_path = resolve_lancedb_root(
+            MEMORY_INDEX, persistent_state_root(Path(project_root)), honor_env=False
+        )
         if memory_index_path.exists():
             try:
                 from nexus.services.memory_repository import MemoryRepository

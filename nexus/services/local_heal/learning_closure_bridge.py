@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from nexus.core.state_root import persistent_state_root
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text, post_local_json
 from nexus.services.local_heal.memory_trace import MemoryTrace
@@ -350,7 +351,7 @@ class LearningClosureBridge:
         project_root: Path | None = None,
         enable_findings: bool = True,
     ) -> None:
-        root = Path(__file__).resolve().parents[3]
+        root = persistent_state_root(Path(__file__).resolve().parents[3])  # #2688
         self.project_root = project_root or root
         self.path = path or root / ".nexus/reports/learn/learning_closure.jsonl"
         self.findings_store = findings_store

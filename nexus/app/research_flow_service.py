@@ -1092,7 +1092,9 @@ def run_auto_flow(
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
     )
 
-    history_store = HistorySignalStore(repo_root)
+    from nexus.core.state_root import persistent_state_root
+
+    history_store = HistorySignalStore(persistent_state_root(repo_root))  # #2688
     recent = history_store.recent_for(target_file=target_file, test_file=test_file)
     asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     plateau = _detect_plateau(asi_ledger)
@@ -2191,7 +2193,7 @@ def run_auto_flow(
                 trust_mismatch=bool(nexus_usage_trace.get("trust_mismatch", False)),
                 receipts=nexus_usage_trace["capability_receipts"],
             ),
-            project_root=repo_root,
+            project_root=persistent_state_root(repo_root),
         )
     except (OSError, ValueError, TypeError) as exc:
         outcome_memory = {

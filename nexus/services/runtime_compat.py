@@ -17,6 +17,7 @@ from nexus_runtime import build_runtime_exports
 
 from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
 from nexus.core.repo_root import REPO_ROOT
+from nexus.core.state_root import persistent_state_root
 from nexus.services.capability_registry import (
     build_real_executor_invoker,
     clear_executor_resolution_errors_for_key,
@@ -46,7 +47,7 @@ PLANNER_BINDING_SURFACES = (
 
 
 def _build_default_memory_retrieval_adapter(project_root: str | Path) -> Any:
-    root = Path(project_root).expanduser().resolve()
+    root = persistent_state_root(Path(project_root).expanduser().resolve())  # #2688
     return MemoryRetrievalAdapter(
         store=NexusCompositeLessonStore([
             LocalJsonlLessonStore(

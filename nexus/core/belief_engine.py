@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 from nexus.core.belief_contracts import AuditOutcome
+from nexus.core.state_root import persistent_state_root
 from nexus.infrastructure.state_json_store import StateJsonStore
 from nexus.telemetry.tracer import NexusTracer
 
@@ -13,9 +14,26 @@ def blend_semantic_confidence(audit_confidence: float, semantic_confidence: floa
     weight = max(0.0, min(1.0, float(semantic_weight)))
     return round((audit * (1.0 - weight)) + (semantic * weight), 4)
 
+def repair_target_key(target_file: str) -> str:
+    """Shared belief key for repair outcomes on one target file (#2688).
+
+    Writers keyed outcomes by ``local_heal:<task>:repair_outcome``; readers ask with
+    free task text, so they never found them.  A key derived from the target file is
+    stable across tasks and known to both sides.  Empty when there is no target.
+    """
+    text = str(target_file or "").strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return f"repair_outcome:file:{text}" if text else ""
+
+
 class BeliefEngine:
     """維護當前的邏輯假設與信心度 (Subjective Trust)。"""
-    def __init__(self, state_file: Path = Path(".nexus/belief_state.json"), state_store: StateJsonStore | None = None):
+
+    def __init__(self, state_file: Path | None = None, state_store: StateJsonStore | None = None):
+        if state_file is None:
+            # Unset NEXUS_STATE_ROOT keeps the old cwd-relative default (#2688).
+            state_file = persistent_state_root(Path(".")) / ".nexus" / "belief_state.json"
         self.state_file = state_file
         self.state_store = state_store or StateJsonStore()
         self.beliefs: Dict[str, Any] = {}
@@ -27,14 +45,21 @@ class BeliefEngine:
     def _persist(self) -> None:
         self.state_store.write_dict(self.state_file, self.beliefs)
 
-    def assess_confidence(self, task_id: str, assumption: str = "") -> float:
-        """根據歷史證據評估信心。"""
+    def assess_confidence(self, task_id: str, assumption: str = "", target_file: str = "") -> float:
+        """根據歷史證據評估信心。
+
+        Lookup order: the exact ``assumption or task_id`` key, then the shared
+        ``repair_target_key(target_file)`` written by the repair path; else 0.7.
+        """
         # 簡單模型：若有歷史相同假設則提高，否則基準為 0.7
         key = assumption or task_id
+        target_key = repair_target_key(target_file)
+        if target_key and key not in self.beliefs and target_key in self.beliefs:
+            key = target_key
         return self.beliefs.get(key, {}).get("confidence", 0.7)
 
-    def get_confidence(self, task_id: str, assumption: str = "") -> float:
-        return self.assess_confidence(task_id, assumption)
+    def get_confidence(self, task_id: str, assumption: str = "", target_file: str = "") -> float:
+        return self.assess_confidence(task_id, assumption, target_file)
 
     def update_belief(self, task_id: str, assumption: str, confidence: float, evidence_id: str):
         self.beliefs[assumption] = {
