@@ -3629,7 +3629,34 @@ class _Cycle:
         if receipt.get("outcome") == "DEPLOYED":
             self.end_deferral()
         status["receipt"] = receipt
+        self.record_switched_live(status, previous_root, previous_commit)
         return finish(receipt["outcome"])
+
+    def record_switched_live(
+        self, status: Dict[str, Any], previous_root: Optional[Path], previous_commit: Optional[str]
+    ) -> None:
+        """Make ``live_commit``/``live_root`` name what the plist now runs (#2770).
+
+        They were read before the attempt, so after a switch they still named the old
+        deployment until the next poll, and anyone loading the live code from
+        ``live_root`` loaded the old tree.  Re-read the plist: it is the source of truth
+        whether the attempt switched, rolled back or never reached the switch.
+        """
+        try:
+            current_root = live_root(self.cfg.plist.read_bytes())
+        except (OSError, DeployError) as exc:
+            status.setdefault("warnings", []).append(
+                f"LIVE_ROOT_UNREADABLE_AFTER_ATTEMPT:{type(exc).__name__}"
+            )
+            return
+        if current_root == previous_root:
+            return
+        status.update(
+            previous_commit=previous_commit,
+            previous_root=str(previous_root),
+            live_commit=commit_of(current_root),
+            live_root=str(current_root),
+        )
 
     # -- parked pin bumps (#2309) ----------------------------------------------
 

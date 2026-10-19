@@ -846,6 +846,44 @@ def test_backoff_grows_with_failures(cfg: ad.Config) -> None:
     assert result["status"] == "BACKOFF" and result["retry_in_seconds"] == cfg.min_interval_seconds
 
 
+def test_deployed_status_names_the_new_live_deployment_at_once(cfg: ad.Config) -> None:
+    # #2770: the status written by the switching cycle itself must name the new tree,
+    # not the one the plist ran before the attempt.
+    old_root = cfg.deployments / f"r1-{OLD}"
+    new_root = cfg.deployments / f"a1-{NEW}"
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "DEPLOYED"
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["status"] == "DEPLOYED"
+    assert status["live_commit"] == NEW == status["receipt"]["candidate_commit"]
+    assert status["live_root"] == str(new_root) == status["receipt"]["deployment_root"]
+    assert status["previous_commit"] == OLD
+    assert status["previous_root"] == str(old_root)
+
+
+def test_rolled_back_status_keeps_the_previous_live_deployment(cfg: ad.Config) -> None:
+    old_root = cfg.deployments / f"r1-{OLD}"
+    result = cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "ROLLED_BACK"
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["live_commit"] == OLD and status["live_root"] == str(old_root)
+    assert "previous_commit" not in status and "previous_root" not in status
+
+
+def test_unreadable_plist_after_attempt_keeps_status_and_warns(cfg: ad.Config, monkeypatch) -> None:
+    old_root = cfg.deployments / f"r1-{OLD}"
+    real = ad._Cycle.record_switched_live
+
+    def unreadable(self, status, previous_root, previous_commit):
+        cfg.plist.unlink()
+        return real(self, status, previous_root, previous_commit)
+
+    monkeypatch.setattr(ad._Cycle, "record_switched_live", unreadable)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["live_commit"] == OLD and result["live_root"] == str(old_root)
+    assert "LIVE_ROOT_UNREADABLE_AFTER_ATTEMPT:FileNotFoundError" in result["warnings"]
+
+
 def test_post_switch_failure_rolls_back_to_exact_previous_plist(cfg: ad.Config) -> None:
     host = FakeHost()
     prober = FakeProber({(ad.LIVE_PORT, NEW): False})
