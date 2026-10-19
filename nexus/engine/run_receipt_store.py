@@ -123,6 +123,7 @@ def find_run_receipt(
     *,
     suffix: str = CANONICAL_RUNTIME_SUFFIX,
     expected_root_receipt_hash: str | None = None,
+    allow_unbound: bool = False,
 ) -> Path | None:
     """Return the receipt file written for exactly ``task_id``, or None.
 
@@ -137,12 +138,23 @@ def find_run_receipt(
 
     The shared state root keeps one file per task id across deploys: a later run of
     the same task id overwrites it, and an earlier run's receipt stays there until
-    then.  **Callers that confirm completion MUST pass ``expected_root_receipt_hash``**
-    (``root_receipt.root_receipt_hash`` from the ``nexus_task_run`` response they are
-    confirming), so a stale receipt from another run of the same task id is rejected.
+    then.  Every lookup is therefore bound to one run by default:
+    ``expected_root_receipt_hash`` (``root_receipt.root_receipt_hash`` from the
+    ``nexus_task_run`` response being confirmed) must equal the receipt's, so a stale
+    receipt from another run of the same task id is rejected.  **Without it the lookup
+    refuses and returns None** (None rather than an exception, so a forgotten binding
+    can only produce "not found", never a confirmation).  An empty hash never matches.
+
+    ``allow_unbound=True`` permits a lookup with no hash (a hash that is given is still
+    enforced).  It exists only for discovery and
+    witness tooling that lists what is on disk (#2689 follow-up).  **Completion
+    confirmers must never use it**: an unbound lookup can return an earlier run's
+    receipt for the same task id.
     """
     if suffix not in _RECEIPT_SUFFIXES:
         raise ValueError(f"run_receipt_suffix_invalid:{suffix}")
+    if expected_root_receipt_hash is None and not allow_unbound:
+        return None  # unbound lookup refused; see docstring
     name = f"{safe_receipt_name(task_id)}{suffix}"
     field = _TASK_ID_FIELD[suffix]
     for directory in _search_dirs(root):

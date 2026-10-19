@@ -117,8 +117,8 @@ def test_unset_find_and_copy_use_only_root(tmp_path: Path) -> None:
     path = tmp_path / RUN / "t-old.canonical_runtime.json"
     path.parent.mkdir(parents=True)
     path.write_text('{"task_id": "t-old"}', encoding="utf-8")
-    assert find_run_receipt("t-old", tmp_path) == path
-    assert find_run_receipt("t-old") is None
+    assert find_run_receipt("t-old", tmp_path, allow_unbound=True) == path
+    assert find_run_receipt("t-old", allow_unbound=True) is None
     assert copy_run_receipts_to_state_root(tmp_path) == []
 
 
@@ -157,7 +157,7 @@ def test_receipt_written_in_deploy_a_is_found_in_deploy_b(
 
     deploy_b = deploy.next()
     assert deploy_b != deploy_a
-    found = find_run_receipt("cross-deploy-1", deploy_b)
+    found = find_run_receipt("cross-deploy-1", deploy_b, allow_unbound=True)
     assert found is not None
     assert found.parent == deploy.state / RUN
     assert json.loads(found.read_text(encoding="utf-8")) == written
@@ -172,14 +172,15 @@ def test_find_prefers_state_root_then_falls_back_to_root(deploy: SimpleNamespace
     legacy = deploy.ws / RUN / "t-both.canonical_runtime.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text('{"task_id": "t-both", "where": "root"}', encoding="utf-8")
-    assert find_run_receipt("t-both", deploy.ws) == legacy  # only the old location exists
+    # only the old location exists
+    assert find_run_receipt("t-both", deploy.ws, allow_unbound=True) == legacy
 
     moved = deploy.state / RUN / "t-both.canonical_runtime.json"
     moved.parent.mkdir(parents=True)
     moved.write_text('{"task_id": "t-both", "where": "state"}', encoding="utf-8")
-    assert find_run_receipt("t-both", deploy.ws) == moved
-    assert find_run_receipt("t-both") == moved
-    assert find_run_receipt("t-missing", deploy.ws) is None
+    assert find_run_receipt("t-both", deploy.ws, allow_unbound=True) == moved
+    assert find_run_receipt("t-both", allow_unbound=True) == moved
+    assert find_run_receipt("t-missing", deploy.ws, allow_unbound=True) is None
 
 
 @pytest.mark.parametrize(
@@ -203,7 +204,7 @@ def test_task_id_cannot_escape_run_dir(deploy: SimpleNamespace, task_id: str) ->
     # A file at the traversal target is never returned.
     outside = deploy.tmp / "outside.canonical_runtime.json"
     outside.write_text(json.dumps({"task_id": task_id}), encoding="utf-8")
-    found = find_run_receipt(task_id, deploy.ws)
+    found = find_run_receipt(task_id, deploy.ws, allow_unbound=True)
     assert found is None or found.parent in (run_dir, deploy.ws / RUN)
 
 
@@ -213,7 +214,7 @@ def test_find_does_not_follow_symlinks(deploy: SimpleNamespace) -> None:
     run_dir = deploy.state / RUN
     run_dir.mkdir(parents=True)
     (run_dir / "t-link.canonical_runtime.json").symlink_to(secret)
-    assert find_run_receipt("t-link", deploy.ws) is None
+    assert find_run_receipt("t-link", deploy.ws, allow_unbound=True) is None
 
 
 def test_invalid_suffix_is_rejected(tmp_path: Path) -> None:
@@ -262,7 +263,9 @@ def test_copy_is_idempotent_keeps_originals_and_skips_symlinks(deploy: SimpleNam
         "t-a.canonical_runtime.json",
         "t-b.unified_runtime_pointer.json",
     ]
-    found = find_run_receipt("t-b", deploy.next(), suffix=UNIFIED_RUNTIME_POINTER_SUFFIX)
+    found = find_run_receipt(
+        "t-b", deploy.next(), suffix=UNIFIED_RUNTIME_POINTER_SUFFIX, allow_unbound=True
+    )
     assert found == deploy.state / RUN / "t-b.unified_runtime_pointer.json"
 
 
@@ -292,8 +295,8 @@ def test_isolated_root_finds_its_own_receipt_before_state_root(deploy: SimpleNam
     shared.parent.mkdir(parents=True)
     shared.write_text(_receipt("t-same", where="state"), encoding="utf-8")
     assert run_receipt_path(canary, "t-same") == own  # the writer keeps the canary path
-    assert find_run_receipt("t-same", canary) == own
-    assert find_run_receipt("t-same", deploy.ws) == shared
+    assert find_run_receipt("t-same", canary, allow_unbound=True) == own
+    assert find_run_receipt("t-same", deploy.ws, allow_unbound=True) == shared
 
 
 @pytest.mark.parametrize(
@@ -307,8 +310,8 @@ def test_name_collision_returns_only_the_matching_task(
     path = run_receipt_path(deploy.ws, stored)
     path.parent.mkdir(parents=True)
     path.write_text(_receipt(stored), encoding="utf-8")
-    assert find_run_receipt(stored, deploy.ws) == path
-    assert find_run_receipt(requested, deploy.ws) is None
+    assert find_run_receipt(stored, deploy.ws, allow_unbound=True) == path
+    assert find_run_receipt(requested, deploy.ws, allow_unbound=True) is None
 
 
 def test_mismatch_in_state_root_falls_through_to_matching_legacy_receipt(
@@ -320,7 +323,7 @@ def test_mismatch_in_state_root_falls_through_to_matching_legacy_receipt(
     legacy = deploy.ws / RUN / "a_b.canonical_runtime.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text(_receipt("a b"), encoding="utf-8")
-    assert find_run_receipt("a b", deploy.ws) == legacy
+    assert find_run_receipt("a b", deploy.ws, allow_unbound=True) == legacy
 
 
 @pytest.mark.parametrize("content", ["", "not json", "[1, 2]", '{"task_id": 7}', "{}"])
@@ -330,14 +333,14 @@ def test_unreadable_or_untagged_receipt_is_not_returned(
     path = run_receipt_path(deploy.ws, "7")
     path.parent.mkdir(parents=True)
     path.write_text(content, encoding="utf-8")
-    assert find_run_receipt("7", deploy.ws) is None
+    assert find_run_receipt("7", deploy.ws, allow_unbound=True) is None
 
 
 def test_binding_rejects_stale_receipt_of_same_task_id(deploy: SimpleNamespace) -> None:
     path = run_receipt_path(deploy.ws, "t-rerun")
     path.parent.mkdir(parents=True)
     path.write_text(_receipt("t-rerun", root_hash="hash-of-earlier-run"), encoding="utf-8")
-    assert find_run_receipt("t-rerun", deploy.ws) == path
+    assert find_run_receipt("t-rerun", deploy.ws, allow_unbound=True) == path
     assert (
         find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="hash-of-earlier-run")
         == path
@@ -426,3 +429,36 @@ def test_copy_temp_name_is_unique_per_call(
     copy_run_receipts_to_state_root(deploy.tmp / "a1-old")
     assert len(seen) == 2 and seen[0] != seen[1]
     assert all(re.fullmatch(r"\.t-u\.canonical_runtime\.json\.copy-[0-9a-f]{32}", n) for n in seen)
+
+
+# --- #2689 follow-up: lookups are bound to one run unless explicitly opted out ---
+
+
+def test_lookup_without_binding_is_refused(deploy: SimpleNamespace) -> None:
+    path = run_receipt_path(deploy.ws, "t-bound")
+    path.parent.mkdir(parents=True)
+    path.write_text(_receipt("t-bound", root_hash="rh-bound"), encoding="utf-8")
+    assert find_run_receipt("t-bound", deploy.ws) is None
+    assert find_run_receipt("t-bound") is None
+    assert find_run_receipt("t-bound", deploy.ws, allow_unbound=False) is None
+    assert find_run_receipt("t-bound", deploy.ws, allow_unbound=True) == path
+    assert find_run_receipt("t-bound", deploy.ws, expected_root_receipt_hash="rh-bound") == path
+    assert find_run_receipt("t-bound", deploy.ws, expected_root_receipt_hash="") is None
+    assert (
+        find_run_receipt("t-bound", deploy.ws, expected_root_receipt_hash="", allow_unbound=True)
+        is None
+    )
+    assert (
+        find_run_receipt(
+            "t-bound", deploy.ws, expected_root_receipt_hash="rh-other", allow_unbound=True
+        )
+        is None
+    )
+
+
+def test_unbound_refusal_also_applies_to_legacy_root(tmp_path: Path) -> None:
+    path = tmp_path / RUN / "t-legacy.canonical_runtime.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(_receipt("t-legacy"), encoding="utf-8")
+    assert find_run_receipt("t-legacy", tmp_path) is None
+    assert find_run_receipt("t-legacy", tmp_path, allow_unbound=True) == path
