@@ -20,8 +20,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.0` | GOLD port fallback (#2233) | v1 for every task whose PR patches apply whole; `REAL_OUTCOME_SCORER_SPEC.v2.md` (v1 + A5) for the tasks that need the fallback. Each receipt records `spec_version` and that spec file's sha256. For all tasks, a symlinked oracle source file is refused (`NOT_SCORABLE_ORACLE_INVALID` / `ORACLE_FILE_UNSAFE`), an unsafe-input refusal like A3. `--summarize` headline numbers are what v1 would report (each v2 receipt counted as `NOT_SCORABLE_ORACLE_INVALID` / `GOLD_PORT_FAILED`); receipts of any other spec version are left out of both blocks (`unknown_spec_versions`) |
 | `1.2.1` | scratch TMPDIR cleanup and cap (#2291), A6 below | unchanged from 1.2.0 (v1, or v2 for the GOLD port fallback); A6 is operational behaviour only |
 | `1.2.2` | oracle-module run failure diagnostic (#2297), A7 below | unchanged from 1.2.1; A7 only adds a receipt field |
+| `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 
-Current scorer: `SCORER_VERSION = "1.2.2"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.2.3"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -147,3 +148,26 @@ candidate is evaluated.
   Receipts already sealed are neither changed nor recomputed.
 - The test-result cache key includes the scorer version (A4), so 1.2.2 does not reuse
   1.2.1 results.
+
+## 2026-10-19: A8, pytest rootdir pinned to the tree (no rule change)
+
+Every pytest run now passes `--rootdir=<tree>`. Without it, a `--work` directory inside
+another repository whose `pytest.ini` sits above the tree made pytest use that outer
+directory as rootdir. Node ids then carried the path prefix (`work.tree.tests...`), no
+expected F2P/P2P id matched, and a gold candidate was labelled `UNRESOLVED`
+(nexus-runtime#200 in the layer-1 verifier audit, knowledge
+`nexus/research/2026-10-19-layer1-remaining-verifiers/`).
+
+- This adds one flag to the literal §8 test-run command. Scoring rules are unchanged:
+  §8 already runs pytest with cwd = tree root, and v1 §6 always meant ids relative to
+  that root. The flag only stops an outer directory from overriding it.
+- Work directories outside any repository (all #2147 batches so far) gave the same ids
+  before and after.
+- One layout does change ids: a tree whose only pytest config file sits in a
+  subdirectory (e.g. `py/pytest.ini`) now gets ids with that prefix (`py.tests...`).
+  Labels do not change, because GOLD, BASE+T and CAND+T all run with the same flag and
+  the oracle ids come from those runs. No Nexus repository has this layout.
+- `--rootdir` does not stop pytest from loading an outer config file when the tree has
+  none of its own. Keep `--work` outside other repositories.
+- The test-result cache key includes the scorer version (A4), so 1.2.3 does not reuse
+  1.2.2 results.
