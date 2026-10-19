@@ -1,72 +1,108 @@
 """Measurement-only Claude worker for the #2721 bare-vs-Nexus study.
 
-#2721 (prereg v0.4 §9) runs one model, ``claude-haiku-5-5``, in both arms:
-the BARE arm calls the Claude CLI directly in the task worktree; the NEXUS arm
-reaches the same CLI through P1 (``nexus_worker_candidate``).  This module is
-the single definition of that invocation, so both arms run byte-identical
-argv and environment and differ only by the prompt text Nexus appends.
+#2721 (prereg v0.4 §9) runs one model, ``claude-haiku-5-5``, in both arms.
+The NEXUS arm reaches it through P1 (``nexus_worker_candidate``); the BARE arm
+calls ``ClaudeMeasurementWorkerAdapter.invoke`` directly.  This module is the
+single definition of the run, so both arms get the same argv, environment,
+sandbox, network policy and time cap; they differ only in the prompt text
+Nexus appends and in the work directory path.
 
-The worker exists only on the measurement Gateway: every entry point is inert
-unless ``NEXUS_MEASUREMENT_CLAUDE_WORKER=1`` is set in the process
-environment, and the live Gateway never sets it.  When it is unset the worker
-registry, the provider allowlist and the workforce policy are exactly what
-they were before this module existed.
+The worker is inert unless ``NEXUS_MEASUREMENT_CLAUDE_WORKER=1`` is set in the
+process environment (only the measurement Gateway sets it).  With the switch
+off, the worker registry, provider allowlist and workforce policy are exactly
+what they were before this module existed.
 
-Invocation (fixed, no caller may change it):
+One run:
 
-* executable: the absolute path in ``NEXUS_MEASUREMENT_CLAUDE_BIN`` (a host
-  may have several ``claude`` binaries; no PATH lookup);
-* ``--safe-mode --setting-sources ""``: no CLAUDE.md, memory, hooks,
-  plugins, MCP servers, or user/project/local settings (``--bare`` cannot be
-  used: it never reads the OAuth login the measurement accounts use);
-* ``--disallowedTools WebSearch,WebFetch``: no web lookup in either arm;
-* ``--permission-mode acceptEdits``, ``--output-format stream-json
-  --verbose`` (the tool trace), ``--no-session-persistence``;
-* an exact child environment (``measurement_child_env``): HOME, USER,
-  LOGNAME, LANG, TMPDIR from the process, a fixed system-only PATH and
-  ``CLAUDE_CODE_DISABLE_AUTO_MEMORY=1``; ``run_cli_worker`` adds only its
-  run tag and the GitHub-credential isolation keys.
+* executable: ``NEXUS_MEASUREMENT_CLAUDE_BIN``, an absolute path that is not a
+  symlink (a pinned ``versions/<x.y.z>`` binary, so auto-update cannot move
+  it); ``NEXUS_MEASUREMENT_CLAUDE_VERSION`` optionally pins the version string;
+* auth: a subscription OAuth token (``claude setup-token``) read from the
+  0600 file ``NEXUS_MEASUREMENT_CLAUDE_TOKEN_FILE`` (else the process's
+  ``CLAUDE_CODE_OAUTH_TOKEN``), passed as ``CLAUDE_CODE_OAUTH_TOKEN``;
+  ``--bare`` is not used because it never reads OAuth;
+* isolation: a fresh empty HOME and ``CLAUDE_CONFIG_DIR`` per run,
+  ``--safe-mode --setting-sources "" --strict-mcp-config`` with an empty MCP
+  config, no web tools and no subagents (``--disallowedTools``), auto-update,
+  telemetry and non-essential traffic off;
+* sandbox: a Seatbelt profile that allows writes only to the target (its
+  ``.git`` stays read-only) and the run root, allows reads of user data only
+  in the target, the run root, the task venv and the CLI install, and allows
+  outbound network only to a local proxy that tunnels ``api.anthropic.com``;
+* task environment: when ``<controller_repo_root>/../venv`` exists it is put
+  first on PATH (read-only) with ``VIRTUAL_ENV``; the target's ``src``
+  directory (or the target itself) is on ``PYTHONPATH``;
+* trace: ``--output-format stream-json --verbose``; with
+  ``NEXUS_MEASUREMENT_TRACE_DIR`` the raw stream and a sidecar (init event,
+  proxy log, sandbox hash) are kept per task, keyed by the receipt's
+  ``stdout_sha256``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+import select
+import shutil
+import socket
+import tempfile
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
 MEASUREMENT_CLAUDE_ENV = "NEXUS_MEASUREMENT_CLAUDE_WORKER"
 MEASUREMENT_CLAUDE_BIN_ENV = "NEXUS_MEASUREMENT_CLAUDE_BIN"
+MEASUREMENT_CLAUDE_VERSION_ENV = "NEXUS_MEASUREMENT_CLAUDE_VERSION"
+MEASUREMENT_CLAUDE_TOKEN_FILE_ENV = "NEXUS_MEASUREMENT_CLAUDE_TOKEN_FILE"
 MEASUREMENT_TRACE_DIR_ENV = "NEXUS_MEASUREMENT_TRACE_DIR"
+CLAUDE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
 CLAUDE_MEASUREMENT_PROVIDER = "claude"
 CLAUDE_MEASUREMENT_MODEL = "claude-haiku-5-5"
 CLAUDE_MEASUREMENT_WORKER_ID = "claude_haiku_measure"
+CLAUDE_DISALLOWED_TOOLS = "WebSearch,WebFetch,Task,Agent"
+EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
 CLAUDE_MEASUREMENT_FLAGS: tuple[str, ...] = (
     "-p",
     "--safe-mode",
     "--setting-sources",
     "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    EMPTY_MCP_CONFIG,
     "--model",
     CLAUDE_MEASUREMENT_MODEL,
     "--permission-mode",
     "acceptEdits",
     "--disallowedTools",
-    "WebSearch,WebFetch",
+    CLAUDE_DISALLOWED_TOOLS,
     "--output-format",
     "stream-json",
     "--verbose",
     "--no-session-persistence",
 )
-CLAUDE_MEASUREMENT_ENV: Mapping[str, str] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
-# Fixed so that the Gateway and the BARE runner give the agent the same tools:
-# system directories only (no Homebrew, no ~/.local/bin, so no gh or agy).
-CLAUDE_MEASUREMENT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
-# Identity keys the CLI needs for its own login; taken from the process.
-_PASSED_IDENTITY_KEYS = ("HOME", "USER", "LOGNAME", "LANG", "TMPDIR")
+CLAUDE_MEASUREMENT_ENV: Mapping[str, str] = {
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+}
+# System directories only: no Homebrew, no ~/.local/bin (so no gh, agy, uv).
+CLAUDE_MEASUREMENT_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+ALLOWED_API_HOSTS: tuple[str, ...] = ("api.anthropic.com",)
+# User-data roots whose contents a run may not read unless re-allowed.
+_READ_DENIED_ROOTS: tuple[str, ...] = ("/Users", "/private/tmp", "/private/var/folders", "/Volumes", "/opt")
 _SAFE_TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_INFRA_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("rate_limited", re.compile(r"\b429\b|rate[ _-]?limit|usage limit|quota", re.I)),
+    ("overloaded", re.compile(r"\b529\b|overloaded", re.I)),
+    ("auth", re.compile(r"\b401\b|\b403\b|authenticat|invalid api key|oauth|not logged in|login", re.I)),
+    ("api_error", re.compile(r"\b5\d\d\b|api[_ ]error|connection (?:error|refused|reset)|timed? ?out", re.I)),
+)
 
 
 def measurement_claude_enabled(environ: Optional[Mapping[str, str]] = None) -> bool:
@@ -76,24 +112,34 @@ def measurement_claude_enabled(environ: Optional[Mapping[str, str]] = None) -> b
 
 
 def measurement_claude_executable(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
-    """The configured absolute Claude CLI path, or None when unset or unusable."""
+    """The configured CLI: absolute, executable and not a symlink; else None."""
     env = os.environ if environ is None else environ
     raw = str(env.get(MEASUREMENT_CLAUDE_BIN_ENV, "") or "").strip()
     if not raw or not os.path.isabs(raw):
         return None
     path = Path(raw)
+    if path.is_symlink() or os.path.realpath(raw) != os.path.normpath(raw):
+        return None
     if not path.is_file() or not os.access(path, os.X_OK):
         return None
     return str(path)
 
 
-def measurement_child_env(environ: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """The exact child environment of every measurement Claude run (both arms)."""
+def measurement_claude_token(environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    """The OAuth token from the 0600 token file, else from the process env."""
     env = os.environ if environ is None else environ
-    child = {key: str(env[key]) for key in _PASSED_IDENTITY_KEYS if env.get(key)}
-    child["PATH"] = CLAUDE_MEASUREMENT_PATH
-    child.update(CLAUDE_MEASUREMENT_ENV)
-    return child
+    token_file = str(env.get(MEASUREMENT_CLAUDE_TOKEN_FILE_ENV, "") or "").strip()
+    if token_file:
+        path = Path(token_file)
+        try:
+            if not path.is_absolute() or path.stat().st_mode & 0o077:
+                return None
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return text if text and "\n" not in text else None
+    token = str(env.get(CLAUDE_OAUTH_TOKEN_ENV, "") or "").strip()
+    return token or None
 
 
 def claude_measurement_argv(prompt: str) -> tuple[str, ...]:
@@ -104,6 +150,207 @@ def claude_measurement_argv(prompt: str) -> tuple[str, ...]:
     if text.startswith("-"):
         raise ValueError("claude measurement prompt must not start with '-'")
     return (*CLAUDE_MEASUREMENT_FLAGS, text)
+
+
+def task_venv_for(contract: Any) -> Optional[Path]:
+    """The task venv: ``<controller_repo_root>/../venv`` when it holds a python."""
+    root = str(getattr(contract, "controller_repo_root", "") or "").strip()
+    if not root:
+        return None
+    venv = Path(os.path.realpath(Path(root).parent / "venv"))
+    return venv if (venv / "bin" / "python").exists() else None
+
+
+def _venv_interpreter_home(venv: Path) -> Optional[Path]:
+    """The base interpreter install a venv's python links to (must stay readable)."""
+    cfg = venv / "pyvenv.cfg"
+    try:
+        for line in cfg.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "home" and value.strip():
+                return Path(os.path.realpath(Path(value.strip()).parent))
+    except OSError:
+        return None
+    return None
+
+
+def measurement_child_env(
+    *,
+    run_root: Path,
+    target: Path,
+    proxy_url: str,
+    token: Optional[str],
+    venv: Optional[Path] = None,
+    environ: Optional[Mapping[str, str]] = None,
+) -> dict[str, str]:
+    """The exact child environment of one measurement run (both arms)."""
+    env = os.environ if environ is None else environ
+    home = run_root / "home"
+    child = {key: str(env[key]) for key in ("USER", "LOGNAME", "LANG") if env.get(key)}
+    child.update(
+        HOME=str(home),
+        CLAUDE_CONFIG_DIR=str(home / ".claude"),
+        TMPDIR=str(run_root / "tmp"),
+        CLAUDE_CODE_TMPDIR=str(run_root / "tmp"),
+        PATH=(f"{venv}/bin:" if venv else "") + CLAUDE_MEASUREMENT_SYSTEM_PATH,
+        HTTPS_PROXY=proxy_url,
+        HTTP_PROXY=proxy_url,
+        ALL_PROXY=proxy_url,
+        https_proxy=proxy_url,
+        http_proxy=proxy_url,
+        NO_PROXY="",
+    )
+    if venv is not None:
+        src = target / "src"
+        child["VIRTUAL_ENV"] = str(venv)
+        child["PYTHONPATH"] = str(src if src.is_dir() else target)
+    child.update(CLAUDE_MEASUREMENT_ENV)
+    if token:
+        child[CLAUDE_OAUTH_TOKEN_ENV] = token
+    return child
+
+
+def _sbpl(path: Path | str) -> str:
+    text = str(path)
+    if '"' in text or "\\" in text or "\n" in text:
+        raise ValueError("path not representable in a Seatbelt profile")
+    return text
+
+
+def build_claude_seatbelt_profile(
+    *,
+    target: Path,
+    run_root: Path,
+    readable: tuple[Path, ...],
+    proxy_port: int,
+) -> str:
+    """Writes: target (not .git) and run root.  Reads: user data only in
+    target, run root and ``readable``.  Network: the local proxy only."""
+    target = Path(os.path.realpath(target))
+    run_root = Path(os.path.realpath(run_root))
+    reads = [target, run_root, *(Path(os.path.realpath(p)) for p in readable)]
+    git_entry = _sbpl(target / ".git")
+    lines = [
+        "(version 1)",
+        "(allow default)",
+        "(deny file-write*)",
+        "(allow file-write*",
+        f'  (subpath "{_sbpl(target)}")',
+        f'  (subpath "{_sbpl(run_root)}")',
+        '  (literal "/dev/null")',
+        '  (literal "/dev/tty")',
+        '  (regex #"^/dev/fd/")',
+        '  (regex #"^/dev/ttys"))',
+        f'(deny file-write* (literal "{git_entry}") (subpath "{git_entry}"))',
+        "(deny file-read-data",
+        *[f'  (subpath "{root}")' for root in _READ_DENIED_ROOTS],
+        ")",
+        "(allow file-read-data",
+        *[f'  (subpath "{_sbpl(path)}")' for path in reads],
+        ")",
+        "(deny network-outbound)",
+        f'(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))',
+        '(allow network-outbound (literal "/private/var/run/syslog"))',
+    ]
+    return "\n".join(lines) + "\n"
+
+
+class HostAllowlistProxy:
+    """A local HTTP CONNECT proxy that tunnels only ``ALLOWED_API_HOSTS:443``.
+
+    Every attempt is logged (host, port, allowed), so a run that tried to
+    reach anything else (a package index, GitHub) is visible in the trace.
+    """
+
+    def __init__(self, allowed_hosts: tuple[str, ...] = ALLOWED_API_HOSTS):
+        self.allowed_hosts = tuple(host.lower() for host in allowed_hosts)
+        self.attempts: list[dict[str, Any]] = []
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server.bind(("127.0.0.1", 0))
+        self._server.listen(16)
+        self.port = int(self._server.getsockname()[1])
+        self._closed = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def __enter__(self) -> "HostAllowlistProxy":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._closed.set()
+        try:
+            self._server.close()
+        except OSError:
+            pass
+
+    def _serve(self) -> None:
+        while not self._closed.is_set():
+            try:
+                client, _ = self._server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(client,), daemon=True).start()
+
+    def _record(self, host: str, port: int, allowed: bool) -> None:
+        with self._lock:
+            self.attempts.append({"host": host, "port": port, "allowed": allowed})
+
+    def _handle(self, client: socket.socket) -> None:
+        upstream: Optional[socket.socket] = None
+        try:
+            client.settimeout(30)
+            head = b""
+            while b"\r\n\r\n" not in head and len(head) < 16384:
+                chunk = client.recv(4096)
+                if not chunk:
+                    return
+                head += chunk
+            request_line = head.split(b"\r\n", 1)[0].decode("latin-1")
+            parts = request_line.split()
+            if len(parts) < 2 or parts[0].upper() != "CONNECT":
+                host = parts[1] if len(parts) > 1 else ""
+                self._record(host[:200], 0, False)
+                client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                return
+            host, _, port_text = parts[1].rpartition(":")
+            port = int(port_text) if port_text.isdigit() else 0
+            allowed = host.lower() in self.allowed_hosts and port == 443
+            self._record(host[:200], port, allowed)
+            if not allowed:
+                client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                return
+            upstream = socket.create_connection((host, port), timeout=30)
+            client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            client.settimeout(None)
+            upstream.settimeout(None)
+            sockets = [client, upstream]
+            while not self._closed.is_set():
+                ready, _, errored = select.select(sockets, [], sockets, 1.0)
+                if errored:
+                    return
+                for source in ready:
+                    data = source.recv(65536)
+                    if not data:
+                        return
+                    (upstream if source is client else client).sendall(data)
+        except (OSError, ValueError):
+            return
+        finally:
+            for sock in (client, upstream):
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
 
 
 @dataclass(frozen=True)
@@ -121,6 +368,10 @@ class ClaudeStreamSummary:
     tool_calls: tuple[dict[str, Any], ...]
     permission_denials: tuple[Any, ...]
     session_id: str
+    result_text: str = ""
+    api_error_status: Any = None
+    terminal_reason: str = ""
+    init: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -135,7 +386,15 @@ class ClaudeStreamSummary:
             "tool_calls": [dict(call) for call in self.tool_calls],
             "permission_denials": list(self.permission_denials),
             "session_id": self.session_id,
+            "api_error_status": self.api_error_status,
+            "terminal_reason": self.terminal_reason,
+            "init": self.init,
         }
+
+
+# Init-event fields that describe the agent's shell (compared across arms).
+INIT_SHELL_FIELDS = ("tools", "mcp_servers", "model", "permissionMode", "slash_commands", "skills",
+                     "plugins", "agents", "claude_code_version", "output_style", "apiKeySource")
 
 
 def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
@@ -144,6 +403,7 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
     tool_calls: list[dict[str, Any]] = []
     models: list[str] = []
     result: dict[str, Any] = {}
+    init: dict[str, Any] = {}
     session_id = ""
     for line in text.splitlines():
         line = line.strip()
@@ -156,7 +416,8 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
         if not isinstance(event, dict):
             continue
         kind = event.get("type")
-        if kind == "system" and event.get("subtype") == "init":
+        if kind == "system" and event.get("subtype") == "init" and not init:
+            init = {key: event.get(key) for key in INIT_SHELL_FIELDS if key in event}
             session_id = str(event.get("session_id") or session_id)
             model = event.get("model")
             if isinstance(model, str) and model not in models:
@@ -196,34 +457,142 @@ def summarize_stream_json(stdout: str | bytes) -> ClaudeStreamSummary:
         tool_calls=tuple(tool_calls),
         permission_denials=tuple(denials) if isinstance(denials, list) else (),
         session_id=str(result.get("session_id") or session_id),
+        result_text=str(result.get("result") or "")[-4000:],
+        api_error_status=result.get("api_error_status"),
+        terminal_reason=str(result.get("terminal_reason") or ""),
+        init=init,
     )
 
 
-def write_measurement_trace(task_id: str, stdout: bytes, stdout_sha256: str,
-                            environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
-    """Keep the raw stream-json trace when the measurement host asks for it.
+def classify_claude_infra(summary: ClaudeStreamSummary, stderr: str | bytes) -> Optional[str]:
+    """``rate_limited`` / ``overloaded`` / ``auth`` / ``api_error`` when the
+    run failed for a provider reason (both arms re-run it), else None."""
+    err = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else str(stderr)
+    if summary.result_seen and summary.is_error is False and summary.terminal_reason != "api_error":
+        return None
+    evidence = " ".join(
+        str(part) for part in (summary.api_error_status, summary.terminal_reason, summary.subtype,
+                                summary.result_text if summary.is_error or summary.terminal_reason == "api_error" else "",
+                                err[-4000:])
+        if part
+    )
+    if summary.terminal_reason == "api_error" or summary.api_error_status not in (None, ""):
+        for kind, pattern in _INFRA_PATTERNS:
+            if pattern.search(evidence):
+                return kind
+        return "api_error"
+    for kind, pattern in _INFRA_PATTERNS[:3]:
+        if pattern.search(evidence):
+            return kind
+    return None
 
-    Only ``NEXUS_MEASUREMENT_TRACE_DIR`` (absolute) enables this; the file is
-    content-addressed by the receipt's ``stdout_sha256``, so the receipt
-    binds it.  Returns the path written, or None.
+
+def write_measurement_trace(
+    task_id: str,
+    stdout: bytes,
+    stdout_sha256: str,
+    sidecar: Mapping[str, Any],
+    environ: Optional[Mapping[str, str]] = None,
+) -> Optional[str]:
+    """Keep the raw stream-json trace (and its sidecar) on a measurement host.
+
+    Only ``NEXUS_MEASUREMENT_TRACE_DIR`` (absolute) enables this.  Files are
+    content-addressed by the receipt's ``stdout_sha256``.
     """
     env = os.environ if environ is None else environ
     root = str(env.get(MEASUREMENT_TRACE_DIR_ENV, "") or "").strip()
     if not root or not os.path.isabs(root) or not _SAFE_TASK_ID.fullmatch(str(task_id)):
         return None
-    target = Path(root) / str(task_id) / f"{stdout_sha256}.stream.jsonl"
-    target.parent.mkdir(parents=True, exist_ok=True)
+    directory = Path(root) / str(task_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{stdout_sha256}.stream.jsonl"
     target.write_bytes(stdout)
-    os.chmod(target, 0o600)
+    side = directory / f"{stdout_sha256}.run.json"
+    side.write_text(json.dumps(dict(sidecar), sort_keys=True, indent=2, default=str), encoding="utf-8")
+    for path in (target, side):
+        os.chmod(path, 0o600)
     return str(target)
+
+
+@dataclass
+class ClaudeRun:
+    """One sandboxed CLI run: its raw result plus what the shell looked like."""
+
+    result: Any
+    summary: ClaudeStreamSummary
+    infra: Optional[str]
+    seatbelt_sha256: str
+    proxy_attempts: list[dict[str, Any]]
+    venv: Optional[str]
+    env_keys: tuple[str, ...]
+
+
+def run_claude_once(
+    executable: str,
+    *,
+    target: Path,
+    prompt: str,
+    timeout_seconds: float,
+    venv: Optional[Path],
+    environ: Optional[Mapping[str, str]] = None,
+    on_process_group: Any = None,
+) -> ClaudeRun:
+    """Run the CLI once in ``target`` under the measurement sandbox."""
+    from nexus.executors.cli_worker import CliWorkerRequest, run_cli_worker
+
+    target = Path(os.path.realpath(target))
+    run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-claude-run-")))
+    try:
+        (run_root / "home" / ".claude").mkdir(parents=True)
+        (run_root / "tmp").mkdir()
+        readable: list[Path] = [Path(os.path.realpath(executable)).parent]
+        if venv is not None:
+            readable.append(venv)
+            interpreter_home = _venv_interpreter_home(venv)
+            if interpreter_home is not None:
+                readable.append(interpreter_home)
+        with HostAllowlistProxy() as proxy:
+            env = measurement_child_env(
+                run_root=run_root, target=target, proxy_url=proxy.url,
+                token=measurement_claude_token(environ), venv=venv, environ=environ,
+            )
+            profile = build_claude_seatbelt_profile(
+                target=target, run_root=run_root, readable=tuple(readable), proxy_port=proxy.port,
+            )
+            request = CliWorkerRequest(
+                executable=executable,
+                argv=claude_measurement_argv(prompt),
+                cwd=str(target),
+                timeout_seconds=float(timeout_seconds),
+                env=env,
+                exact_env=True,
+                seatbelt_profile=profile,
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(target), str(run_root)),
+            )
+            result = run_cli_worker(request, on_process_group=on_process_group)
+            attempts = list(proxy.attempts)
+        summary = summarize_stream_json(result.stdout)
+        return ClaudeRun(
+            result=result,
+            summary=summary,
+            infra=classify_claude_infra(summary, result.stderr),
+            seatbelt_sha256=hashlib.sha256(profile.encode("utf-8")).hexdigest(),
+            proxy_attempts=attempts,
+            venv=str(venv) if venv is not None else None,
+            env_keys=tuple(sorted(env)),
+        )
+    finally:
+        shutil.rmtree(run_root, ignore_errors=True)
 
 
 class ClaudeMeasurementWorkerAdapter:
     """``WorkerRegistry`` adapter for provider ``claude`` (measurement only).
 
-    Refuses unless the measurement switch is on and the absolute executable is
-    configured, refuses any model other than ``claude-haiku-5-5`` (no silent
-    substitution), and runs only in the contract's leased target worktree.
+    Refuses unless the switch is on and the pinned executable is configured,
+    refuses any model other than ``claude-haiku-5-5`` (no silent substitution),
+    and runs only in the contract's leased target worktree.  The BARE arm calls
+    ``invoke`` directly with a contract/lease of the same shape.
     """
 
     provider = CLAUDE_MEASUREMENT_PROVIDER
@@ -243,7 +612,7 @@ class ClaudeMeasurementWorkerAdapter:
         if not enabled:
             reason = f"{MEASUREMENT_CLAUDE_ENV}=1 is required (measurement Gateway only)"
         elif executable is None:
-            reason = f"{MEASUREMENT_CLAUDE_BIN_ENV} must name an absolute executable claude CLI"
+            reason = f"{MEASUREMENT_CLAUDE_BIN_ENV} must name an absolute, non-symlink claude CLI"
         else:
             reason = "ready"
         return WorkerPreflight(
@@ -269,7 +638,7 @@ class ClaudeMeasurementWorkerAdapter:
         **_ignored: Any,
     ) -> Any:
         from nexus.executors.agy_write_admission import leased_target_failure
-        from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
+        from nexus.executors.cli_worker import CliWorkerStatus
         from nexus.executors.worker_contract import (
             WorkerExecutionReceipt,
             WorkerOutcome,
@@ -288,19 +657,13 @@ class ClaudeMeasurementWorkerAdapter:
             failure = leased_target_failure(contract, lease)
             if failure is not None:
                 raise WorkerProviderUnavailable(f"{self.provider}: {failure}")
-        target = str(Path(lease.target_worktree).resolve())
-        request = CliWorkerRequest(
-            executable=str(preflight.executable),
-            argv=claude_measurement_argv(prompt),
-            cwd=target,
-            timeout_seconds=float(timeout_seconds or 900.0),
-            env=measurement_child_env(self._env()),
-            exact_env=True,
-            sweep_descendants_on_exit=True,
-            sweep_roots=(target,),
+        target = Path(os.path.realpath(lease.target_worktree))
+        run = run_claude_once(
+            str(preflight.executable), target=target, prompt=prompt,
+            timeout_seconds=float(timeout_seconds or 900.0), venv=task_venv_for(contract),
+            environ=self._env(), on_process_group=on_process_group,
         )
-        result = run_cli_worker(request, on_process_group=on_process_group)
-        summary = summarize_stream_json(result.stdout)
+        result, summary = run.result, run.summary
         if result.status is CliWorkerStatus.TIMED_OUT:
             outcome = WorkerOutcome.INCOMPLETE
         elif (
@@ -317,14 +680,31 @@ class ClaudeMeasurementWorkerAdapter:
         if foreign:
             outcome = WorkerOutcome.FAILED
             failure = f"{self.provider}: model substitution observed: {sorted(foreign)}"
+        elif run.infra is not None and outcome is not WorkerOutcome.EXECUTION_COMPLETED:
+            failure = f"claude_infra:{run.infra}"
         elif outcome is not WorkerOutcome.EXECUTION_COMPLETED:
             failure = f"{self.provider} execution did not complete successfully ({summary.subtype or result.status.value})"
-        write_measurement_trace(str(getattr(contract, "task_id", "")), result.stdout, result.stdout_sha256,
-                                self._env())
+        write_measurement_trace(
+            str(getattr(contract, "task_id", "")), result.stdout, result.stdout_sha256,
+            {
+                "schema": "nexus.measurement_claude_run.v1",
+                "argv_sha256": hashlib.sha256(json.dumps(list(result.argv)).encode("utf-8")).hexdigest(),
+                "flags": list(CLAUDE_MEASUREMENT_FLAGS),
+                "env_keys": list(run.env_keys),
+                "seatbelt_sha256": run.seatbelt_sha256,
+                "proxy_attempts": run.proxy_attempts,
+                "venv": run.venv,
+                "init": summary.init,
+                "infra": run.infra,
+                "wall_time_ms": result.wall_time_ms,
+                "timed_out": result.timed_out,
+            },
+            self._env(),
+        )
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
-            target_worktree=target,
+            target_worktree=str(target),
             worker_status=result.status.value,
             outcome=outcome.value,
             exit_code=result.exit_code,
@@ -343,7 +723,9 @@ class ClaudeMeasurementWorkerAdapter:
             push_performed=False,
             failure_reason=failure,
             provider_attempt_count=1,
-            provider_permission_mode="acceptEdits_no_web",
+            provider_permission_mode="acceptEdits_no_web_no_subagents",
+            provider_permission_profile_sha256=run.seatbelt_sha256,
+            provider_write_sandbox=f"seatbelt:{run.seatbelt_sha256}",
             provider_env_keys_sha256=result.env_keys_sha256 or None,
             stdout_tail=redacted_output_tail(result.stdout),
             stderr_tail=redacted_output_tail(result.stderr),
@@ -371,18 +753,16 @@ def measurement_claude_preflight(
 ) -> dict[str, Any]:
     """``nexus.provider_preflight.v1`` for provider ``claude`` on a measurement Gateway.
 
-    Readiness is proven by one real call of the exact measurement invocation
-    (a one-word reply, run in an empty temporary directory) whose stream-json
-    result must be a success served only by ``claude-haiku-5-5``.  The proof
-    is cached per (binary sha256, CLI version, model) for one hour.
+    Readiness is proven by one real run of the exact measurement invocation
+    (sandbox included) in an empty directory; its stream-json result must be a
+    success served only by ``claude-haiku-5-5``.  The proof is cached per
+    (binary sha256, CLI version, model) for one hour.
     """
     import datetime
-    import hashlib
     import subprocess
-    import tempfile
 
     env = os.environ if environ is None else environ
-    run = runner or subprocess.run
+    run_version = runner or subprocess.run
     clock = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
     result: dict[str, Any] = {
         "schema": "nexus.provider_preflight.v1",
@@ -414,35 +794,41 @@ def measurement_claude_preflight(
     binary_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
     result.update(binary_found=True, binary_path=executable, binary_sha256=binary_sha256)
     with tempfile.TemporaryDirectory(prefix="nexus-claude-preflight-") as scratch:
-        version = run([executable, "--version"], cwd=scratch, capture_output=True, text=True,
-                      timeout=15, check=False)
+        version = run_version([executable, "--version"], cwd=scratch, capture_output=True, text=True,
+                              timeout=15, check=False, env={"PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH,
+                                                            **CLAUDE_MEASUREMENT_ENV})
         cli_version = (version.stdout or version.stderr or "").strip()[:512]
         result.update(cli_version=cli_version,
                       cli_version_sha256=hashlib.sha256(cli_version.encode("utf-8")).hexdigest())
         if version.returncode != 0 or not cli_version:
             return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_FAILED")
+        pinned = str(env.get(MEASUREMENT_CLAUDE_VERSION_ENV, "") or "").strip()
+        if pinned and not cli_version.startswith(pinned):
+            return _blocked(result, "MEASUREMENT_CLAUDE_VERSION_MISMATCH")
         key = (binary_sha256, cli_version, CLAUDE_MEASUREMENT_MODEL)
         cached = _PROBE_CACHE.get(key)
         current = clock()
         if cached is None or datetime.datetime.fromisoformat(cached["probe_expires_at"]) <= current:
-            child_env = measurement_child_env(env)
-            probe = run([executable, *claude_measurement_argv(PROBE_PROMPT)], cwd=scratch, capture_output=True,
-                        text=True, timeout=120, check=False, env=child_env)
-            summary = summarize_stream_json(probe.stdout or "")
+            probe_target = Path(scratch) / "probe"
+            probe_target.mkdir()
+            run = run_claude_once(executable, target=probe_target, prompt=PROBE_PROMPT,
+                                  timeout_seconds=120.0, venv=None, environ=env)
+            summary = run.summary
             served = set(summary.models_seen)
             if (
-                probe.returncode != 0
+                run.result.exit_code != 0
                 or summary.is_error is not False
-                or not served
                 or served != {CLAUDE_MEASUREMENT_MODEL}
             ):
                 return _blocked(result, "MEASUREMENT_CLAUDE_PROBE_FAILED",
-                                probe_subtype=summary.subtype, probe_models=sorted(served))
+                                probe_subtype=summary.subtype, probe_models=sorted(served),
+                                probe_infra=run.infra)
             evidence = {
                 "binary_sha256": binary_sha256,
                 "cli_version": cli_version,
                 "model": CLAUDE_MEASUREMENT_MODEL,
                 "session_id": summary.session_id,
+                "seatbelt_sha256": run.seatbelt_sha256,
                 "probed_at": current.isoformat(),
             }
             cached = {
@@ -451,6 +837,7 @@ def measurement_claude_preflight(
                 ).hexdigest(),
                 "probe_expires_at": (current + datetime.timedelta(seconds=PROBE_TTL_SECONDS)).isoformat(),
                 "probed_at": evidence["probed_at"],
+                "probe_usage": summary.usage,
             }
             _PROBE_CACHE[key] = cached
     result.update(
@@ -464,5 +851,6 @@ def measurement_claude_preflight(
         probe_evidence_hash=cached["probe_evidence_hash"],
         probe_expires_at=cached["probe_expires_at"],
         probed_at=cached["probed_at"],
+        probe_usage=cached.get("probe_usage"),
     )
     return result

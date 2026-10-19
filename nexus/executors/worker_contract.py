@@ -24,13 +24,16 @@ SUPPORTED_WORKER_PROVIDERS = (
 MEASUREMENT_WORKER_PROVIDERS = ("claude",)
 
 
-def admitted_worker_providers() -> tuple[str, ...]:
-    """Providers a contract may name: the supported set plus enabled measurement ones."""
+def enabled_measurement_worker_providers() -> tuple[str, ...]:
+    """The measurement providers whose switch is on (empty on every live process)."""
     from nexus.executors.claude_measurement_worker import measurement_claude_enabled
 
-    if measurement_claude_enabled():
-        return (*SUPPORTED_WORKER_PROVIDERS, *MEASUREMENT_WORKER_PROVIDERS)
-    return SUPPORTED_WORKER_PROVIDERS
+    return MEASUREMENT_WORKER_PROVIDERS if measurement_claude_enabled() else ()
+
+
+def admitted_worker_providers() -> tuple[str, ...]:
+    """Providers a contract may name: the supported set plus enabled measurement ones."""
+    return (*SUPPORTED_WORKER_PROVIDERS, *enabled_measurement_worker_providers())
 
 
 class WorkerOutcome(str, Enum):

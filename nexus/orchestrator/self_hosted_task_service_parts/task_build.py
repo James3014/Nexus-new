@@ -82,7 +82,10 @@ class _TaskBuildMixin:
         worker = str(request.get("worker", "codex")).strip().lower()
         requested_worker = worker
         # #2721: measurement-only providers count only while their switch is on.
-        admitted_providers = _service_module().admitted_worker_providers()
+        admitted_providers = (
+            *_service_module().SUPPORTED_WORKER_PROVIDERS,
+            *_service_module().enabled_measurement_worker_providers(),
+        )
         if worker not in admitted_providers:
             if worker != "auto":
                 raise ValueError(
