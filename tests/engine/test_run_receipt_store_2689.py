@@ -116,7 +116,7 @@ def test_unset_canonical_seam_writes_under_root(
 def test_unset_find_and_copy_use_only_root(tmp_path: Path) -> None:
     path = tmp_path / RUN / "t-old.canonical_runtime.json"
     path.parent.mkdir(parents=True)
-    path.write_text("{}", encoding="utf-8")
+    path.write_text('{"task_id": "t-old"}', encoding="utf-8")
     assert find_run_receipt("t-old", tmp_path) == path
     assert find_run_receipt("t-old") is None
     assert copy_run_receipts_to_state_root(tmp_path) == []
@@ -171,12 +171,12 @@ def test_receipt_written_in_deploy_a_is_found_in_deploy_b(
 def test_find_prefers_state_root_then_falls_back_to_root(deploy: SimpleNamespace) -> None:
     legacy = deploy.ws / RUN / "t-both.canonical_runtime.json"
     legacy.parent.mkdir(parents=True)
-    legacy.write_text('{"where": "root"}', encoding="utf-8")
+    legacy.write_text('{"task_id": "t-both", "where": "root"}', encoding="utf-8")
     assert find_run_receipt("t-both", deploy.ws) == legacy  # only the old location exists
 
     moved = deploy.state / RUN / "t-both.canonical_runtime.json"
     moved.parent.mkdir(parents=True)
-    moved.write_text('{"where": "state"}', encoding="utf-8")
+    moved.write_text('{"task_id": "t-both", "where": "state"}', encoding="utf-8")
     assert find_run_receipt("t-both", deploy.ws) == moved
     assert find_run_receipt("t-both") == moved
     assert find_run_receipt("t-missing", deploy.ws) is None
@@ -202,14 +202,14 @@ def test_task_id_cannot_escape_run_dir(deploy: SimpleNamespace, task_id: str) ->
     assert "/" not in path.name and "\\" not in path.name
     # A file at the traversal target is never returned.
     outside = deploy.tmp / "outside.canonical_runtime.json"
-    outside.write_text("{}", encoding="utf-8")
+    outside.write_text(json.dumps({"task_id": task_id}), encoding="utf-8")
     found = find_run_receipt(task_id, deploy.ws)
     assert found is None or found.parent in (run_dir, deploy.ws / RUN)
 
 
 def test_find_does_not_follow_symlinks(deploy: SimpleNamespace) -> None:
     secret = deploy.tmp / "secret.json"
-    secret.write_text("{}", encoding="utf-8")
+    secret.write_text('{"task_id": "t-link"}', encoding="utf-8")
     run_dir = deploy.state / RUN
     run_dir.mkdir(parents=True)
     (run_dir / "t-link.canonical_runtime.json").symlink_to(secret)
@@ -231,7 +231,9 @@ def test_copy_is_idempotent_keeps_originals_and_skips_symlinks(deploy: SimpleNam
     old_dir = old_root / RUN
     old_dir.mkdir(parents=True)
     (old_dir / "t-a.canonical_runtime.json").write_text('{"a": 1}', encoding="utf-8")
-    (old_dir / "t-b.unified_runtime_pointer.json").write_text('{"b": 1}', encoding="utf-8")
+    (old_dir / "t-b.unified_runtime_pointer.json").write_text(
+        '{"unified_runtime_task_id": "t-b"}', encoding="utf-8"
+    )
     (old_dir / "notes.txt").write_text("not a receipt", encoding="utf-8")
     secret = deploy.tmp / "secret.json"
     secret.write_text('{"secret": 1}', encoding="utf-8")
@@ -268,3 +270,159 @@ def test_copy_from_state_root_or_missing_dir_is_noop(deploy: SimpleNamespace) ->
     assert copy_run_receipts_to_state_root(deploy.state) == []
     assert copy_run_receipts_to_state_root(deploy.tmp / "does-not-exist") == []
     assert CANONICAL_RUNTIME_SUFFIX == ".canonical_runtime.json"
+
+
+# --- review round 1 (#2703): writer-order search, identity, binding, fresh state root ---
+
+
+def _receipt(task_id: str, root_hash: str = "h-1", **extra: Any) -> str:
+    return json.dumps({
+        "task_id": task_id,
+        "root_receipt": {"root_receipt_hash": root_hash},
+        **extra,
+    })
+
+
+def test_isolated_root_finds_its_own_receipt_before_state_root(deploy: SimpleNamespace) -> None:
+    canary = deploy.tmp / "canary-root"
+    own = canary / RUN / "t-same.canonical_runtime.json"
+    own.parent.mkdir(parents=True)
+    own.write_text(_receipt("t-same", where="canary"), encoding="utf-8")
+    shared = deploy.state / RUN / "t-same.canonical_runtime.json"
+    shared.parent.mkdir(parents=True)
+    shared.write_text(_receipt("t-same", where="state"), encoding="utf-8")
+    assert run_receipt_path(canary, "t-same") == own  # the writer keeps the canary path
+    assert find_run_receipt("t-same", canary) == own
+    assert find_run_receipt("t-same", deploy.ws) == shared
+
+
+@pytest.mark.parametrize(
+    ("stored", "requested"),
+    [("a_b", "a b"), ("task/1", "task:1"), ("x" * 120 + "A", "x" * 120 + "B")],
+)
+def test_name_collision_returns_only_the_matching_task(
+    deploy: SimpleNamespace, stored: str, requested: str
+) -> None:
+    assert safe_receipt_name(stored) == safe_receipt_name(requested)
+    path = run_receipt_path(deploy.ws, stored)
+    path.parent.mkdir(parents=True)
+    path.write_text(_receipt(stored), encoding="utf-8")
+    assert find_run_receipt(stored, deploy.ws) == path
+    assert find_run_receipt(requested, deploy.ws) is None
+
+
+def test_mismatch_in_state_root_falls_through_to_matching_legacy_receipt(
+    deploy: SimpleNamespace,
+) -> None:
+    shared = run_receipt_path(deploy.ws, "a b")
+    shared.parent.mkdir(parents=True)
+    shared.write_text(_receipt("a_b"), encoding="utf-8")  # collides, other task
+    legacy = deploy.ws / RUN / "a_b.canonical_runtime.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(_receipt("a b"), encoding="utf-8")
+    assert find_run_receipt("a b", deploy.ws) == legacy
+
+
+@pytest.mark.parametrize("content", ["", "not json", "[1, 2]", '{"task_id": 7}', "{}"])
+def test_unreadable_or_untagged_receipt_is_not_returned(
+    deploy: SimpleNamespace, content: str
+) -> None:
+    path = run_receipt_path(deploy.ws, "7")
+    path.parent.mkdir(parents=True)
+    path.write_text(content, encoding="utf-8")
+    assert find_run_receipt("7", deploy.ws) is None
+
+
+def test_binding_rejects_stale_receipt_of_same_task_id(deploy: SimpleNamespace) -> None:
+    path = run_receipt_path(deploy.ws, "t-rerun")
+    path.parent.mkdir(parents=True)
+    path.write_text(_receipt("t-rerun", root_hash="hash-of-earlier-run"), encoding="utf-8")
+    assert find_run_receipt("t-rerun", deploy.ws) == path
+    assert (
+        find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="hash-of-earlier-run")
+        == path
+    )
+    assert (
+        find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="hash-of-this-run")
+        is None
+    )
+    assert find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="") is None
+    path.write_text(json.dumps({"task_id": "t-rerun"}), encoding="utf-8")  # no root receipt
+    assert (
+        find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="hash-of-this-run")
+        is None
+    )
+    assert find_run_receipt("t-rerun", deploy.ws, expected_root_receipt_hash="") is None
+
+
+def test_fresh_state_root_written_by_real_runtime_writer(
+    monkeypatch: pytest.MonkeyPatch, deploy: SimpleNamespace
+) -> None:
+    """No pre-created run dir; the fake gateway uses nexus-runtime's real receipt writer
+    (``_write_receipt_atomic``) and does not mkdir itself."""
+    from nexus_runtime.kernel.receipts import _write_receipt_atomic
+
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+
+    assert not deploy.state.exists()
+
+    class _Gateway:
+        def __init__(self, project_root):
+            self.project_root = project_root
+
+        def ask_unified(self, request, **kwargs):
+            receipt = {
+                "task_id": request.task_id,
+                "terminal_status": "SUCCEEDED",
+                "receipt_complete": True,
+                "canonical_execution": {"execution_decision_authority": "CapabilityPlanner"},
+                "root_receipt": {
+                    "schema": "nexus.root_receipt.v1",
+                    "root_receipt_hash": "rh-fresh",
+                },
+            }
+            _write_receipt_atomic(Path(kwargs["receipt_path"]), receipt)
+            return receipt
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    monkeypatch.setattr("nexus.contracts.root_receipt.validate_root_receipt", lambda _r: (True, []))
+    result = execute_canonical_product_task(
+        "audit the bounded runtime",
+        deploy.ws,
+        execution_context={
+            "task_id": "fresh-1",
+            "workspace_revision": "rev-1",
+            "local_assist_mode": "disabled",
+            "online_policy": "auto",
+        },
+    )
+    expected = deploy.state / RUN / "fresh-1.canonical_runtime.json"
+    assert Path(result.receipt_path) == expected
+    assert result.root_receipt_valid is True
+    assert sorted(p.name for p in expected.parent.iterdir()) == [expected.name]  # no temp left
+    deploy.next()
+    assert find_run_receipt("fresh-1", deploy.ws, expected_root_receipt_hash="rh-fresh") == expected
+
+
+def test_copy_temp_name_is_unique_per_call(
+    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil as _shutil
+
+    old_dir = deploy.tmp / "a1-old" / RUN
+    old_dir.mkdir(parents=True)
+    (old_dir / "t-u.canonical_runtime.json").write_text(_receipt("t-u"), encoding="utf-8")
+    seen: list[str] = []
+    real_copy = _shutil.copyfile
+
+    def _spy(src, dst, *, follow_symlinks=True):
+        seen.append(Path(dst).name)
+        return real_copy(src, dst, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr("nexus.engine.run_receipt_store.shutil.copyfile", _spy)
+    monkeypatch.setattr("nexus.engine.run_receipt_store.os.getpid", lambda: 1)
+    copy_run_receipts_to_state_root(deploy.tmp / "a1-old")
+    (deploy.state / RUN / "t-u.canonical_runtime.json").unlink()
+    copy_run_receipts_to_state_root(deploy.tmp / "a1-old")
+    assert len(seen) == 2 and seen[0] != seen[1]
+    assert all(re.fullmatch(r"\.t-u\.canonical_runtime\.json\.copy-[0-9a-f]{32}", n) for n in seen)

@@ -13,19 +13,24 @@ when ``NEXUS_STATE_ROOT`` is set and ``<root>`` is a per-deploy root, the direct
 unchanged.  Unset, or for any isolated root (tests, canaries), the path is exactly the
 old one.
 
-Readers use :func:`find_run_receipt`, which looks in the state root first and then in
-the given root, so receipts written before the variable was set are still found.
+Readers use :func:`find_run_receipt`, which searches where the writer would write
+first and then the other location (so receipts written before the variable was set are
+still found), and accepts only a receipt whose embedded task id matches.
 :func:`copy_run_receipts_to_state_root` copies receipts from an old root into the
 state root once (idempotent, never deletes, never follows symlinks).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import stat
+import uuid
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from nexus.core.state_root import configured_state_root, rebase_state_path
 
@@ -66,13 +71,28 @@ def _regular_file(path: Path) -> bool:
     return stat.S_ISREG(info.st_mode)
 
 
+# Field in each receipt kind that holds the task id it was written for.
+_TASK_ID_FIELD = {
+    CANONICAL_RUNTIME_SUFFIX: "task_id",
+    UNIFIED_RUNTIME_POINTER_SUFFIX: "unified_runtime_task_id",
+}
+
+
 def _search_dirs(root: Path | str | None) -> list[Path]:
+    """Writer's directory first, then the other location.
+
+    For a root the writer rebases (a per-deploy root) that is the state root, then the
+    root itself (receipts from before the variable was set).  For an isolated root
+    (canary, test) the writer keeps ``<root>/.nexus/reports/run``, so that is searched
+    first and a same-name receipt in the shared state root never shadows it.
+    """
     dirs: list[Path] = []
     state_root = configured_state_root()
+    if root is not None:
+        dirs.append(run_reports_dir(root))
+        dirs.append(Path(root) / RUN_REPORTS_RELATIVE)
     if state_root is not None:
         dirs.append(state_root / RUN_REPORTS_RELATIVE)
-    if root is not None:
-        dirs.append(Path(root) / RUN_REPORTS_RELATIVE)
     unique: list[Path] = []
     for directory in dirs:
         if directory not in unique:
@@ -80,27 +100,64 @@ def _search_dirs(root: Path | str | None) -> list[Path]:
     return unique
 
 
+def _read_receipt(path: Path) -> dict[str, Any] | None:
+    if not _regular_file(path):
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _root_receipt_hash(payload: Mapping[str, Any]) -> str:
+    root_receipt = payload.get("root_receipt")
+    if not isinstance(root_receipt, Mapping):
+        return ""
+    return str(root_receipt.get("root_receipt_hash") or "")
+
+
 def find_run_receipt(
     task_id: str,
     root: Path | str | None = None,
     *,
     suffix: str = CANONICAL_RUNTIME_SUFFIX,
+    expected_root_receipt_hash: str | None = None,
 ) -> Path | None:
-    """Return the receipt file for ``task_id``, or None.
+    """Return the receipt file written for exactly ``task_id``, or None.
 
-    Looks in ``$NEXUS_STATE_ROOT/.nexus/reports/run`` first (when configured), then
-    in ``<root>/.nexus/reports/run``.  The task id is reduced to one safe file-name
-    segment, so it can never leave those directories; symlinks are not followed.
+    Search order mirrors the writer (see ``_search_dirs``); with no ``root`` only the
+    state root is searched.  The task id is reduced to one safe file-name segment, so
+    it can never leave those directories, and symlinks are not followed.
+
+    A file is accepted only if it parses as a JSON object whose embedded task id
+    (``task_id``; ``unified_runtime_task_id`` for pointers) equals ``task_id``
+    exactly.  File names can collide (``a b``/``a_b``, ``task:1``/``task/1``, ids
+    cut at 120 characters), so a mismatching file is skipped and the search goes on.
+
+    The shared state root keeps one file per task id across deploys: a later run of
+    the same task id overwrites it, and an earlier run's receipt stays there until
+    then.  **Callers that confirm completion MUST pass ``expected_root_receipt_hash``**
+    (``root_receipt.root_receipt_hash`` from the ``nexus_task_run`` response they are
+    confirming), so a stale receipt from another run of the same task id is rejected.
     """
     if suffix not in _RECEIPT_SUFFIXES:
         raise ValueError(f"run_receipt_suffix_invalid:{suffix}")
     name = f"{safe_receipt_name(task_id)}{suffix}"
+    field = _TASK_ID_FIELD[suffix]
     for directory in _search_dirs(root):
         candidate = directory / name
         if candidate.parent != directory or os.sep in name:
             continue
-        if _regular_file(candidate):
-            return candidate
+        payload = _read_receipt(candidate)
+        if payload is None or payload.get(field) != task_id:
+            continue
+        if expected_root_receipt_hash is not None and (
+            not expected_root_receipt_hash
+            or _root_receipt_hash(payload) != expected_root_receipt_hash
+        ):
+            continue
+        return candidate
     return None
 
 
@@ -135,7 +192,7 @@ def copy_run_receipts_to_state_root(source_root: Path | str) -> list[Path]:
         if destination.exists() or destination.is_symlink():
             continue
         target_dir.mkdir(parents=True, exist_ok=True)
-        temporary = target_dir / f".{entry.name}.copy-{os.getpid()}"
+        temporary = target_dir / f".{entry.name}.copy-{uuid.uuid4().hex}"
         try:
             shutil.copyfile(entry.path, temporary, follow_symlinks=False)
             try:
