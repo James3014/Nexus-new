@@ -44,6 +44,9 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _compile_agy_command,
     observe_github_issue,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts.model_probe import (  # noqa: E402
+    MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS,
+)
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa: E402
 from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
@@ -2858,7 +2861,7 @@ def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch,
     assert submitted["account_lease_released"] is False
     assert "account_lease_owner_pid" not in submitted
     assert captured["consumer_id"] == "model-probe:agy-lease-probe"
-    assert captured["wait_timeout"] == 0.0
+    assert captured["wait_timeout"] == MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS
     assert captured["model_family"] == "gemini"
     assert captured["env"]["HOME"] == "/isolated/agy-account"
     assert captured["pass_fds"] == (77,)

@@ -725,7 +725,7 @@
    },
    "_acquire_agy_probe_claim": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:model: str)"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:model: str, KEYWORD_ONLY:wait_timeout: Optional[float] = None)"
    },
    "_agy_probe_model_family": {
     "kind": "staticmethod",
@@ -907,9 +907,17 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
    },
+   "_model_probe_inflight": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> set[str]"
+   },
    "_model_probe_submit": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_model_probe_submit_guarded": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:registered: list[str]) -> dict[str, Any]"
    },
    "_mutation_admission_status": {
     "kind": "function",
