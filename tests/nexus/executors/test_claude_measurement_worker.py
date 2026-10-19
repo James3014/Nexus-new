@@ -188,7 +188,7 @@ def test_argv_is_fixed_and_the_prompt_is_last():
     assert argv[:-1] == cmw.CLAUDE_MEASUREMENT_FLAGS and argv[-1] == "WHAT: x"
     assert "--bare" not in argv and "--dangerously-skip-permissions" not in argv
     assert "--fallback-model" not in argv
-    assert argv[argv.index("--disallowedTools") + 1] == "WebSearch,WebFetch,Task,Agent"
+    assert argv[argv.index("--disallowedTools") + 1] == "WebSearch,WebFetch,Task,Agent,Workflow"
     assert argv[argv.index("--model") + 1] == "claude-haiku-5-5"
     assert argv[argv.index("--setting-sources") + 1] == ""
     assert argv[argv.index("--mcp-config") + 1] == '{"mcpServers":{}}' and "--strict-mcp-config" in argv

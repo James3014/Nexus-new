@@ -23,7 +23,7 @@ One run:
   ``--bare`` is not used because it never reads OAuth;
 * isolation: a fresh empty HOME and ``CLAUDE_CONFIG_DIR`` per run,
   ``--safe-mode --setting-sources "" --strict-mcp-config`` with an empty MCP
-  config, no web tools and no subagents (``--disallowedTools``), auto-update,
+  config, no web tools, subagents or workflows (``--disallowedTools``), auto-update,
   telemetry and non-essential traffic off;
 * sandbox: a Seatbelt profile that allows writes only to the target (its
   ``.git`` stays read-only) and the run root, allows reads of user data only
@@ -63,7 +63,7 @@ CLAUDE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 CLAUDE_MEASUREMENT_PROVIDER = "claude"
 CLAUDE_MEASUREMENT_MODEL = "claude-haiku-5-5"
 CLAUDE_MEASUREMENT_WORKER_ID = "claude_haiku_measure"
-CLAUDE_DISALLOWED_TOOLS = "WebSearch,WebFetch,Task,Agent"
+CLAUDE_DISALLOWED_TOOLS = "WebSearch,WebFetch,Task,Agent,Workflow"
 EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
 CLAUDE_MEASUREMENT_FLAGS: tuple[str, ...] = (
     "-p",
