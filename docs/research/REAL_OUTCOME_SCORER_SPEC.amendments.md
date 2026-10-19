@@ -23,7 +23,7 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
-| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, a cap trip caused by a candidate run's leftover run directory is `NOT_RUNNABLE`, so that task stays in the denominator. Low host disk, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). A version string too long for Python's int parser is `version_invalid` |
+| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, cap or host-disk trips caused by the candidate (its runs, its trees' growth, its survivors' leftover run directories) are `NOT_RUNNABLE`, so that task stays in the denominator. Host disk that is low for other reasons, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). Survivors are reaped after each scoring. A version string too long for Python's int parser is `version_invalid` |
 
 Current scorer: `SCORER_VERSION = "1.3.1"`. Receipts record the version that wrote them.
 
@@ -304,62 +304,93 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
 
     Rescored under 1.3.1, such a task would get a different label only if its bytes
     were sparse or hard-linked. Receipts already sealed are not changed.
-- **Per-scoring run parents and charged cap trips (`--sandbox os`).** Each scoring of a
-  task puts its run directories under a fresh parent,
+- **Per-scoring run parents (`--sandbox os`).** Each scoring of a task puts its run
+  directories under a fresh parent,
   `<scratch>/runs/<random12>/<role>-<key16>-<random12>`. `<role>` is `candt` for
   candidate runs (`CAND+T`) and `oracle` otherwise. A rescore of the same task gets a
-  new parent too.
-  - The parent is removed whenever it is empty after a run, and always by the A6
-    cleanup at the end of the scoring. The next run re-creates it under the same name.
-  - A confined process may write only inside its own run directory. Once the parent is
-    gone it cannot re-create anything under `runs/`. Checked under real sandbox-exec:
-    a session-escaping child's `mkdir` of its old directory is denied after the parent
-    is removed, and the next task is unaffected.
-  - So a survivor can write again only while a later run of the same scoring has
-    re-created the parent, and then only into its own directory. Directory names can
-    be trusted: a confined process cannot create, rename or link entries in `runs/` or
-    in the parent.
-  - **Charging.** A cap can trip on a candidate-independent run (BASE+T, GOLD,
-    GOLD_REF, the P2P(d) trees) that would not have tripped without the bytes in
-    leftover `candt-*` directories of the current scoring. Those are directories
-    re-created by a session-escaping child of one of its candidate runs. The trip is
-    then charged to the candidate:
-    - the label is `NOT_RUNNABLE` with sub-reason `SCRATCH_TMP_CAP_EXCEEDED` or
-      `SCRATCH_TMP_TASK_CAP_EXCEEDED`, as A6 already gives for a candidate run that
-      hits a cap;
-    - the receipt adds `cap_attributed_role: "CAND+T"`;
-    - the task stays in the denominator.
-  - Growth in the current scoring's oracle directories is still a candidate-independent
-    refusal, as before.
-  - Bytes under any other parent should not exist. If they would make the cap trip,
-    scoring stops with `ScratchInfraAbort` and writes no receipt (below).
-  - So a candidate never causes a candidate-independent refusal receipt. Its growth is
-    either charged to it (`NOT_RUNNABLE`) or the scoring is an infra abort without a
-    receipt.
-  - **One scan per measurement point.** The size before and after each run comes from a
-    single walk of scratch HOME, TMPDIR and `runs/`. That walk splits the bytes by
-    top-level entry, so the total and the candidate's share come from the same files.
-    A survivor that empties its directory between two scans can no longer move blame
-    (layer1-rie F1).
-  - **Hard links.** Each inode is counted once. An inode linked from several places is
-    charged in favour of the candidate: first to the candidate directory, then to
-    another parent, otherwise to the run. Under `--sandbox os` a confined candidate
-    cannot write oracle directories or the shared HOME/TMPDIR, so it cannot link into
-    them. The precedence rule is a safeguard for a case that cannot happen.
-  - `--sandbox none` has no run directories, so nothing changes there.
-- **Host-disk check (`--sandbox os`).** Before every pytest run the scorer checks free
-  space on the scratch filesystem (`shutil.disk_usage(scratch).free`). It needs at
-  least `--min-free-disk-gib` GiB free. The default is 40, two per-run caps, so one run
-  that fills its cap still leaves room for the next. There is no percentage check.
-  `--min-free-percent` stays the memory check only, unchanged.
-  - Below the floor, scoring stops with `ScratchInfraAbort` and writes no receipt and no
-    cache entry. The CLI exits **8**, a new code; codes 2-7 are taken. The driver or
-    lab should treat exit 8 as infra and rerun.
-  - The caps cannot see blocks that a test holds in an unlinked but still open file (a
-    session-escaping child can keep one). The disk check now bounds that case, which is
-    still tracked by #2740. The same infra abort applies when bytes under another
-    scoring's parent would make a cap trip.
-  - `--sandbox none` does not run this check.
+  new parent too, as its trees already do (A9).
+  - A confined process may write only inside its own run directory, its tree and
+    nothing above them.
+  - The parent is removed whenever it is empty after a run, and the next run re-creates
+    it under the same name. So a session-escaping child can write again only while a
+    later run of the same scoring has re-created the parent, and then only into its own
+    directory.
+  - Directory names can be trusted: a confined process cannot create, rename or link
+    entries in `runs/` or in the parent.
+- **End of a scoring (`--sandbox os`): rename, reap, then delete.**
+  1. The trees parent `trees/<task>-<random>` (unless `--keep-trees`) and every run
+     parent are renamed to a `.trash-<random>` sibling. Each rename is one atomic step.
+     A survivor's write rule names paths under the old parents, which no longer exist,
+     so even a child that re-creates its directory in a tight loop can create nothing.
+     Before this, `rmtree` worked bottom-up, and such a child re-created its directory
+     before the parent was removed (independent review, 5/5 under real sandbox-exec).
+  2. The scorer runs `lsof -nP -w -Fpfn -u <uid>` from a fixed path (`/usr/sbin/lsof`
+     or `/usr/bin/lsof`, never PATH). It SIGKILLs, by PID, every process of the same
+     user that still has its cwd or an open file, deleted files included, under this
+     scoring's trees parent, its trash, or `runs/`. No other process is touched, and
+     `pkill`/`killall` are never used. The reaped PIDs are recorded in the receipt
+     timing as `reaped_pids`, a diagnostic.
+     - This closes the unlinked-open-file case (#2740) for any process that still holds
+       such a file there. A survivor that holds nothing under those paths cannot write
+       anywhere that is counted.
+     - Without lsof, `os` mode fails closed: `ScratchInfraAbort`, no receipt, exit 8.
+  3. The trash is deleted and `git worktree prune` drops the stale worktree entries.
+     The A6 cleanup then empties scratch HOME/TMPDIR and `runs/`. `clean_tmp` also
+     renames run parents to trash before it deletes them.
+- **What is charged to the candidate (`NOT_RUNNABLE`, task stays in the denominator,
+  receipt field `cap_attributed_role: "CAND+T"` when the run that trips is not a
+  candidate run):**
+  - A candidate run's own growth. That is its run directory plus the allocated growth
+    of its tree during the run. The tree is walked whole, `.git` included (a small
+    worktree pointer file, the same in every measurement), in the same walk and with
+    the same inode dedupe. A per-run cap trip from that growth is
+    `NOT_RUNNABLE` / `SCRATCH_TMP_CAP_EXCEEDED`. Oracle runs' trees are not counted,
+    as before.
+  - A cap trip on any run that would not have happened without bytes in leftover
+    `candt-*` directories of the current scoring, that is, directories re-created by a
+    session-escaping child of one of its candidate runs. Sub-reason
+    `SCRATCH_TMP_CAP_EXCEEDED` or `SCRATCH_TMP_TASK_CAP_EXCEEDED`.
+  - Host disk below the floor before or right after a run, when this scoring's
+    candidate bytes cover the shortfall (floor minus free). Candidate bytes are its
+    leftover run directories, the current run's directory if it is a candidate run, and
+    its trees' growth since their first candidate run. Sub-reason `HOST_DISK_LOW`. This
+    is the case where the disk was fine when the scoring started and the candidate
+    filled it, for example by writing about 110 GiB into its own tree.
+- **What is an infra abort (`ScratchInfraAbort`: no receipt, no cache entry, the run's
+  outcome discarded, CLI exit 8; the driver or lab reruns the task):**
+  - Host disk below the floor when the candidate's bytes do not cover the shortfall,
+    for example the disk was already low before the scoring.
+  - A cap trip, on a run of any role, that would not happen without bytes under another
+    scoring's run parent, alone or together with this scoring's candidate bytes. Such
+    bytes should not exist after rename-and-reap.
+  - An env build failure (`ENV_FAILED`) while the disk is below the floor.
+  - No lsof for the reaper.
+- **Everything else is a candidate-independent refusal, as before.** That covers growth
+  in the current scoring's oracle run directories, and refusals built from oracle run
+  results (`GOLD_COLLECTION_FAILED`, `GOLD_REF_RUN_FAILED`, `ORACLE_RUN_FAILED`,
+  `ENV_FAILED`) when the disk is above the floor. Every such run gets the after-check
+  first. So a candidate never causes a candidate-independent refusal receipt: its bytes
+  are either charged to it or the scoring is an infra abort.
+- **One scan per measurement point.** The size before and after each run comes from a
+  single walk of scratch HOME, TMPDIR, `runs/` and this scoring's candidate trees. That
+  walk splits the bytes by top-level entry, so the total and the candidate's share come
+  from the same files. A survivor that empties its directory between two scans can no
+  longer move blame (layer1-rie F1).
+- **Hard links.** Each inode is counted once. An inode linked from several places is
+  charged in favour of the candidate: first to its run directories, then to its trees,
+  then to another parent, otherwise to the run. Under `--sandbox os` a confined
+  candidate cannot write oracle directories or the shared HOME/TMPDIR, so it cannot
+  link into them. The precedence rule is a safeguard for a case that cannot happen.
+- **Host-disk check (`--sandbox os`).** Before and right after every pytest run the
+  scorer checks `shutil.disk_usage(scratch).free` against `--min-free-disk-gib`. The
+  after-check comes before the run's result is read or cached. The default is 40 GiB,
+  two per-run caps, so one run that fills its cap still leaves room for the next. There
+  is no percentage check, and `--min-free-percent` stays the memory check only. The
+  outcome above the floor is unchanged. Below it, see the charged and infra cases above.
+  Exit 8 is a new code; codes 2-7 are taken. The caps cannot see blocks in an unlinked
+  but still open file (#2740). The reaper and this check now bound that case.
+- `--sandbox none` has no run directories, no reaper and no disk check, so nothing
+  above changes it.
 - **`--sandbox os` needs the store.** A runner in `os` mode refuses
   (`SandboxError: store_required`) without an existing store directory. The store is
   therefore always denied, and the A9 profile hash always includes that deny. Before,
