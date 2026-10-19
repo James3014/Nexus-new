@@ -35,6 +35,7 @@ still derives the worker source root from the facade's ``__file__``).
 from __future__ import annotations
 
 import importlib
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
@@ -557,20 +558,13 @@ def _observation_value(value: Any) -> Any:
     if isinstance(value, bool) or value is None:
         return value
     if isinstance(value, (int, float)):
-        return value if value == value else None  # drop NaN
+        return value if math.isfinite(value) else None  # drop NaN and +/-inf
     if isinstance(value, str):
         return value[:_OBSERVATION_MAX_TEXT]
     if isinstance(value, (list, tuple)):
         items = [v[:_OBSERVATION_MAX_TEXT] for v in value if isinstance(v, str)]
         return items[:_OBSERVATION_MAX_ITEMS]
     return None
-
-
-def _error_kind(value: Any) -> str:
-    """Only the error's kind (text before the first ':'), never its message."""
-    text = str(value or "")
-    head = text.split(":", 1)[0].strip()
-    return head[:80] if head.replace("_", "").replace(".", "").isalnum() else "error"
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -581,7 +575,7 @@ def _capability_observations(results: Any) -> dict[str, Any]:
     """Bounded per-capability facts from the raw executor receipts (#2688).
 
     Keeps only identifiers, paths and counts, bounded and JSON-safe (never prompt
-    content, payloads or error messages), so a witness can tell whether and how a
+    content, payloads or any error text), so a witness can tell whether and how a
     capability ran and which store it used.  The record binds them with a hash.
     """
     if not isinstance(results, Mapping):
@@ -605,7 +599,7 @@ def _capability_observations(results: Any) -> dict[str, Any]:
                 if value is not None:
                     entry[key] = value
         if outcome.get("error"):
-            entry["error_kind"] = _error_kind(outcome["error"])
+            entry["error_present"] = True  # never the message: it can carry task text
         if "root" in result:
             root = _observation_value(result["root"])
             if isinstance(root, str):

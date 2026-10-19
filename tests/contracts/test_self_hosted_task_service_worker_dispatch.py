@@ -1743,7 +1743,9 @@ def test_capability_observations_are_bounded_json_safe_and_message_free() -> Non
                         "output_paths": [huge] * 100 + [{"nested": "dict"}, 3],
                         "scan_targets": {"a", "b"},
                         "confidence": float("nan"),
-                        "error": "ValueError: task text with SECRET_TOKEN=abc",
+                        "hit_count": float("inf"),
+                        "findings_hit_count": float("-inf"),
+                        "error": "SECRET_TOKEN",
                         "result": {"root": {"nested": True}},
                     }
                 },
@@ -1756,8 +1758,9 @@ def test_capability_observations_are_bounded_json_safe_and_message_free() -> Non
 
     assert len(xray["trigger_source"]) == 512
     assert len(xray["output_paths"]) == 16 and all(len(p) == 512 for p in xray["output_paths"])
-    assert "scan_targets" not in xray and "confidence" not in xray and "store_root" not in xray
-    assert xray["error_kind"] == "ValueError" and "SECRET" not in json.dumps(observed)
+    assert not {"scan_targets", "confidence", "hit_count", "findings_hit_count", "store_root"} & set(xray)
+    assert xray["error_present"] is True and "SECRET" not in json.dumps(observed)
+    json.dumps(observed, allow_nan=False)  # strict JSON
     assert len(json.dumps(observed)) < 20_000
 
 
