@@ -126,7 +126,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "pytest confinement (amendment A9). none (default): v1 §8 as pre-registered."
             " os: macOS sandbox-exec, no network, writes only to the tree and scratch;"
-            " refused (exit 7) when no OS sandbox is available, never run unconfined"
+            " refused (exit 7) when no OS sandbox is available, never run unconfined."
+            " Before every os run the scratch disk must keep --min-free-percent %% and"
+            " 40 GiB free, else the batch stops with exit 8 and no receipt (infra, A11)"
         ),
     )
     p.add_argument(
@@ -197,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
         work=args.work,
         env_provider=ros.UvEnvProvider(args.work / "envs", log=log, spec_version=args.spec_version),
         runner=ros.PytestRunner(
-            args.work / "scratch", log=log, sandbox=args.sandbox, store=args.store
+            args.work / "scratch",
+            log=log,
+            sandbox=args.sandbox,
+            store=args.store,
+            min_free_percent=args.min_free_percent,
         ),
         repo_sources=sources,
         spec_sha256=_spec_sha256(),
@@ -231,6 +237,10 @@ def main(argv: list[str] | None = None) -> int:
         except ros.ScorerBusy as exc:
             log(f"{key}: SCORER_BUSY {exc}; stopping")
             return 6
+        except ros.ScratchInfraAbort as exc:
+            # A11: infra, not a label: no receipt; the driver reruns the task.
+            log(f"{key}: INFRA_ABORT {exc}; stopping, no receipt written")
+            return ros.INFRA_ABORT_EXIT_CODE
         except Exception as exc:  # noqa: BLE001 - one task must not stop the batch
             log(f"{key}: SCORER_ERROR {type(exc).__name__}: {exc}")
             rc = 4

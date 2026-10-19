@@ -154,6 +154,22 @@ class ScorerBusy(RuntimeError):
     """Another scorer process holds the lock on the same --work directory."""
 
 
+class ScratchInfraAbort(RuntimeError):
+    """A11 (``--sandbox os``): an infrastructure condition, never a label. Either the host
+    disk under the scratch dir is low (bytes a test holds in an unlinked open file are not
+    visible to the caps, #2740, but they do use disk), or bytes left under another task
+    scoring's run parent (which no confined process can re-create) would push a cap. Neither may yield a receipt; the CLI exits
+    ``INFRA_ABORT_EXIT_CODE`` so the driver reruns the task."""
+
+
+# A11: the CLI's exit code for ScratchInfraAbort (2-7 are already used).
+INFRA_ABORT_EXIT_CODE = 8
+# A11: free space the scratch filesystem must keep before every "os" pytest run: at least
+# two per-run caps, so one run that fills its cap still leaves room for the next.
+SCRATCH_MIN_FREE_BYTES = 2 * SCRATCH_TMP_CAP_BYTES
+_disk_usage = shutil.disk_usage  # indirection so tests can simulate a full disk
+
+
 # --------------------------------------------------------------------------- utils
 
 
@@ -1210,12 +1226,11 @@ def allocated_bytes(st: os.stat_result) -> int:
     return int(blocks) * 512 if blocks is not None else st.st_size
 
 
-def tree_bytes(root: Path) -> int:
-    """Allocated size (A11) of the regular files under ``root``; symlinks are never
-    followed."""
-    total = 0
+def _regular_files(root: Path) -> Iterator[os.stat_result]:
+    """lstat of every regular file under ``root``; symlinks are never followed, and a
+    file that vanishes during the walk is skipped."""
     if not root.is_dir() or root.is_symlink():
-        return 0
+        return
     for dirpath, _dirs, files in os.walk(root, followlinks=False):
         for name in files:
             try:
@@ -1223,8 +1238,32 @@ def tree_bytes(root: Path) -> int:
             except OSError:
                 continue
             if stat.S_ISREG(st.st_mode):
-                total += allocated_bytes(st)
-    return total
+                yield st
+
+
+def tree_bytes(root: Path) -> int:
+    """Allocated size (A11) of the regular files under ``root``, each inode counted once
+    (hard links are not double-counted); symlinks are never followed."""
+    seen: dict[tuple[int, int], int] = {}
+    for st in _regular_files(root):
+        seen[(st.st_dev, st.st_ino)] = allocated_bytes(st)
+    return sum(seen.values())
+
+
+@dataclass(frozen=True)
+class ScratchUsage:
+    """A11: one walk of scratch (shared HOME/TMPDIR and runs/), partitioned.
+
+    ``own_candidate``: candidate-role run dirs of the current task scoring other than the
+    current run's (re-created by a session-escaping child of a candidate run).
+    ``foreign``: anything under runs/ outside the current task's parent (cannot be
+    re-created by a confined process once that parent is gone; an infra condition).
+    Each inode is counted once, charged in favour of the candidate: own_candidate, then
+    foreign, then the rest."""
+
+    total: int
+    own_candidate: int
+    foreign: int
 
 
 def clean_scratch_tmp(tmp: Path, keep: Iterable[str] = ()) -> list[str]:
@@ -1417,6 +1456,7 @@ class PytestRunner:
         log: Callable[[str], None] = print,
         sandbox: str = SANDBOX_NONE,
         store: Path | None = None,
+        min_free_percent: int = 20,
     ):
         if sandbox not in RUNNER_SANDBOX_MODES:
             raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
@@ -1441,10 +1481,13 @@ class PytestRunner:
         # A9 ("os" only): the experiment store; never readable by a confined run.
         self.store = Path(store) if store is not None else None
         self._profile_sha256: str | None = None
-        # A11 ("os"): candidate-role run dirs created since the last clean_tmp (this task).
-        # Only their leftover growth is charged to the candidate; a leftover from an
-        # earlier task's candidate is not this task's candidate's doing.
-        self._cand_run_dirs: set[str] = set()
+        # A11 ("os"): the per-task-scoring parent of the run dirs, runs/<uuid12>, created
+        # at the first run and removed by clean_tmp. A confined process may write only its
+        # own run dir, so once this parent is gone it can re-create nothing under runs/.
+        self.task_dir: Path | None = None
+        # A11 ("os"): host free-space floor checked before every run (<= 0 disables the
+        # percentage part; SCRATCH_MIN_FREE_BYTES always applies).
+        self.min_free_percent = min_free_percent
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1461,7 +1504,44 @@ class PytestRunner:
     def scratch_bytes(self) -> int:
         # A9 "os": everything under runs/ counts too (a session-escaping child may re-create
         # its deleted run dir and keep writing). Absent in "none" mode, so 0 there.
-        return tree_bytes(self.tmp) + tree_bytes(self.home) + tree_bytes(self.runs)
+        return self.measure(None).total
+
+    def measure(self, current: Path | None) -> ScratchUsage:
+        """A11: ONE walk of scratch/tmp, scratch/home and scratch/runs, partitioned by
+        top-level entry, so the total and the candidate share come from the same files
+        (no window between two scans in which a survivor could move bytes)."""
+        rank = {"other": 0, "foreign": 1, "own_candidate": 2}
+        inodes: dict[tuple[int, int], list[Any]] = {}
+
+        def add(root: Path, part: str) -> None:
+            for st in _regular_files(root):
+                entry = inodes.setdefault((st.st_dev, st.st_ino), [allocated_bytes(st), part])
+                if rank[part] > rank[entry[1]]:
+                    entry[1] = part
+
+        add(self.tmp, "other")
+        add(self.home, "other")
+        if self.runs.is_dir() and not self.runs.is_symlink():
+            cand = _role_slug(CAND_ROLE) + "-"
+            for parent in sorted(self.runs.iterdir()):
+                if parent.is_symlink() or not parent.is_dir():
+                    continue
+                if self.task_dir is None or parent.name != self.task_dir.name:
+                    add(parent, "foreign")
+                    continue
+                for run in sorted(parent.iterdir()):
+                    if current is not None and run.name == current.name:
+                        add(run, "other")  # the current run's own bytes: its role's
+                    elif run.name.startswith(cand):
+                        add(run, "own_candidate")
+                    else:
+                        add(run, "other")
+        total = own = foreign = 0
+        for size, part in inodes.values():
+            total += size
+            own += size if part == "own_candidate" else 0
+            foreign += size if part == "foreign" else 0
+        return ScratchUsage(total, own, foreign)
 
     def clean_tmp(self) -> tuple[int, int, list[str]]:
         """A6: empty scratch/tmp and scratch/home after a task.
@@ -1482,7 +1562,7 @@ class PytestRunner:
             if self.runs.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use or clean it")
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
-        self._cand_run_dirs.clear()
+        self.task_dir = None  # the next task scoring gets a fresh parent
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1664,26 +1744,33 @@ class PytestRunner:
         # A11: the dir name starts with the run's role, so growth a session-escaping child
         # leaves in it later is attributed to that role (runs/ is not writable by any run,
         # so a confined process can only re-create its own dir, never rename one).
-        run_dir = self.runs / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
-        if role == CAND_ROLE:
-            self._cand_run_dirs.add(run_dir.name)
+        if self.task_dir is None:
+            self.task_dir = self.runs / uuid.uuid4().hex[:12]
+        run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
         try:
             return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
         finally:
             self._remove_run_dir(run_dir)
 
-    def _candidate_leftover_bytes(self, current: Path | None) -> int:
-        """A11: allocated bytes in this task's candidate-role run dirs other than
-        ``current`` (re-created by a session-escaping child of a candidate run). 0 when
-        there is no runs/ dir ("none" mode)."""
-        if current is None or not self.runs.is_dir() or self.runs.is_symlink():
-            return 0
-        total = 0
-        with os.scandir(self.runs) as it:
-            for entry in it:
-                if entry.name != current.name and entry.name in self._cand_run_dirs:
-                    total += tree_bytes(Path(entry.path))
-        return total
+    def begin_task(self, task_key: str) -> None:
+        """A11: start a task scoring: its run dirs go under a fresh runs/<uuid12> parent
+        (a rescore of the same task gets a new one too)."""
+        del task_key  # the parent is random; the task key is not needed
+        self.task_dir = None
+
+    def check_host_disk(self) -> None:
+        """A11: raise ScratchInfraAbort when the scratch filesystem has less free space
+        than ``min_free_percent`` % or SCRATCH_MIN_FREE_BYTES."""
+        probe = self.scratch if self.scratch.exists() else self.scratch.parent
+        usage = _disk_usage(probe)
+        percent = 100.0 * usage.free / usage.total if usage.total else 0.0
+        if usage.free < SCRATCH_MIN_FREE_BYTES or (
+            self.min_free_percent > 0 and percent < self.min_free_percent
+        ):
+            raise ScratchInfraAbort(
+                f"host_disk_low:free={usage.free}B ({percent:.1f}%) < "
+                f"{SCRATCH_MIN_FREE_BYTES}B or {self.min_free_percent}%"
+            )
 
     def _remove_run_dir(self, run_dir: Path) -> None:
         """Delete one A9 per-run dir without following links; log what could not go."""
@@ -1699,6 +1786,10 @@ class PytestRunner:
             errors.append(f"rmdir:{type(exc).__name__}")
         for err in errors:
             self.log(f"  run dir cleanup {run_dir.name}: {err}")
+        # A11: drop the task parent while it is empty (the next run re-creates it with
+        # the same name); while it is gone a survivor cannot re-create its own dir.
+        with contextlib.suppress(OSError):
+            run_dir.parent.rmdir()
 
     def _execute(
         self,
@@ -1719,9 +1810,10 @@ class PytestRunner:
             junit.parent.mkdir(parents=True, exist_ok=True)
             junit.unlink(missing_ok=True)
         else:
-            if self.runs.is_symlink():
+            self.check_host_disk()  # A11: before every "os" run (no receipt if low)
+            if self.runs.is_symlink() or run_dir.parent.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use it")
-            self.runs.mkdir(parents=True, exist_ok=True)
+            run_dir.parent.mkdir(parents=True, exist_ok=True)
             run_dir.mkdir()
             (run_dir / "home").mkdir()
             (run_dir / "tmp").mkdir()
@@ -1750,8 +1842,10 @@ class PytestRunner:
             # runs anything unconfined.
             run_env = self._env(env, tree, run_dir / "home", run_dir / "tmp")
             launch = self._confine(env, tree, run_dir) + cmd
-        before = self.scratch_bytes()
-        cand_before = self._candidate_leftover_bytes(run_dir)
+        # A11: one walk per measurement point (total and candidate share together).
+        usage_before = self.measure(run_dir)
+        before = usage_before.total
+        own_before, foreign_before = usage_before.own_candidate, usage_before.foreign
         start = time.monotonic()
         timed_out = False
         # Own process group, so whatever the tests spawned is killed with the run and
@@ -1779,28 +1873,46 @@ class PytestRunner:
         junit_bytes = (
             allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0
         )
-        after = self.scratch_bytes() - junit_bytes
+        usage_after = self.measure(run_dir)
+        after = usage_after.total - junit_bytes
         left = after - before
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
         self._live_junits.discard(junit.name)
         kind = None
-        # A11 ("os" only, 0 under "none"): bytes in leftover candidate-role run dirs.
-        cand_after = self._candidate_leftover_bytes(run_dir)
+        # A11 ("os" only, 0 under "none"): bytes in leftover candidate-role run dirs of
+        # this task scoring (chargeable to its candidate) and anything left under other
+        # task parents (an infra condition).
+        own_after, foreign_after = usage_after.own_candidate, usage_after.foreign
         attributed = role
+        infra = False
         if left > SCRATCH_TMP_CAP_BYTES:
             kind = SCRATCH_TMP_CAP_EXCEEDED
-            if left - max(0, cand_after - cand_before) <= SCRATCH_TMP_CAP_BYTES:
+            own_growth = max(0, own_after - own_before)
+            foreign_growth = max(0, foreign_after - foreign_before)
+            if role != CAND_ROLE and left - own_growth <= SCRATCH_TMP_CAP_BYTES:
                 attributed = CAND_ROLE
+            elif role != CAND_ROLE and left - own_growth - foreign_growth <= SCRATCH_TMP_CAP_BYTES:
+                infra = True
         elif after > SCRATCH_TMP_TASK_CAP_BYTES:
             kind = SCRATCH_TMP_TASK_CAP_EXCEEDED
-            if after - cand_after <= SCRATCH_TMP_TASK_CAP_BYTES:
+            if role != CAND_ROLE and after - own_after <= SCRATCH_TMP_TASK_CAP_BYTES:
                 attributed = CAND_ROLE
+            elif (
+                role != CAND_ROLE
+                and after - own_after - foreign_after <= SCRATCH_TMP_TASK_CAP_BYTES
+            ):
+                infra = True
         self.log(
             f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
             f"{' TIMEOUT' if timed_out else ''}{' ' + kind if kind else ''}"
             f" nodes={len(outcomes)} {seconds:.0f}s"
         )
+        if kind and infra:
+            # A11: bytes outside this task scoring's run parent pushed the cap: no receipt.
+            raise ScratchInfraAbort(
+                f"foreign_run_dir_leftover:{kind}:{tree.name}:{target}:run{run_idx}"
+            )
         if kind:
             # Not cached: an infrastructure refusal, never test results.
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, timed_out, seconds, kind)
@@ -2070,6 +2182,9 @@ def _score_task(
         inputs.candidate = Candidate(b"", [], override="empty")
     receipt = _base_receipt(inputs, ctx)
     timing: dict[str, Any] = {"task_key": inputs.task_key}
+    begin_task = getattr(ctx.runner, "begin_task", None)
+    if begin_task is not None:
+        begin_task(inputs.task_key)  # A11: run dirs carry this task's hash
     gt = load_ground_truth(inputs)  # §4 step 2
     if gt is None:
         receipt["label"] = PENDING_GROUND_TRUTH

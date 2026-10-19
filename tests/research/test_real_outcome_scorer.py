@@ -1961,7 +1961,9 @@ def test_scratch_tmp_cleanup_keeps_only_live_junit_and_never_follows_links(tmp_p
     # A11: allocated size (st_blocks * 512), so each small file counts whole blocks.
     files = [tmp / "nested" / "ro" / "f", tmp / "junit-live.xml", tmp / "junit-planted.xml"]
     files.append(tmp / "loose.bin")
-    assert ros.tree_bytes(tmp) == sum(ros.allocated_bytes(os.lstat(f)) for f in files)
+    # Independent of allocated_bytes: the blocks the OS reports, and never below the bytes.
+    assert ros.tree_bytes(tmp) == sum(os.lstat(f).st_blocks * 512 for f in files)
+    assert ros.tree_bytes(tmp) >= 10 + 2 * len("<testsuite/>") + 7
     try:
         assert ros.clean_scratch_tmp(tmp, keep={"junit-live.xml"}) == []
         assert sorted(p.name for p in tmp.iterdir()) == ["junit-live.xml"]
@@ -2747,7 +2749,7 @@ def test_sandbox_os_survivor_growth_in_a_recreated_run_dir_is_counted(tmp_path, 
         return
     first = work / "trees" / "task" / "first"
     second = work / "trees" / "task" / "second"
-    grow = 'sleep 1; mkdir -p "$TMPDIR"; head -c 5000 /dev/urandom > "$TMPDIR/grow"; sleep 30'
+    grow = _survivor_script(5000)
     _write(
         first,
         {
@@ -2760,21 +2762,22 @@ def test_sandbox_os_survivor_growth_in_a_recreated_run_dir_is_counted(tmp_path, 
             )
         },
     )
-    _write(second, {"tests/test_next.py": "def test_next():\n    pass\n"})
+    # A11: the survivor can re-create its dir only while a later run of the same scoring
+    # has re-created the task parent; this run keeps it there for 3 s (the survivor
+    # retries every 0.1 s, so no fixed race with the cleanup).
+    _write(
+        second,
+        {"tests/test_next.py": "import time\n\n\ndef test_next():\n    time.sleep(3)\n"},
+    )
     env = LocalEnv().get("fixture-repo", first)
     assert runner.run(env, first, "a", "tests", (), 0).outcomes
     pid = int((first / "tests" / "child.pid").read_text())
     try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not list(runner.runs.rglob("grow")):
-            time.sleep(0.1)
-        grown = list(runner.runs.rglob("grow"))
-        assert grown and grown[0].stat().st_size == 5000  # the survivor re-created its dir
-        assert runner.scratch_bytes() >= 5000
         monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 1000)
         with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
             runner.run(env, second, "b", "tests", (), 0)
         assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
+        assert exc.value.left_bytes >= 4096  # the survivor's re-created dir was counted
     finally:
         with contextlib.suppress(OSError):
             os.kill(pid, 9)
@@ -3537,9 +3540,52 @@ def test_allocated_bytes_falls_back_to_st_size_without_st_blocks():
     assert ros.allocated_bytes(types.SimpleNamespace(st_size=123)) == 123  # type: ignore[arg-type]
 
 
+def _survivor_script(nbytes: int, log: Path | None = None) -> str:
+    """A session-escaping child that keeps re-creating its (deleted) run dir and filling
+    ``grow`` there until it is killed; no fixed sleep, so the test does not race the
+    runner's cleanup. ``log`` (in its tree) records each attempt: ok or denied."""
+    record = ""
+    if log is not None:
+        record = (
+            f'; if [ -s "$TMPDIR/grow" ]; then echo ok >> "{log}"; else echo denied >> "{log}"; fi'
+        )
+    return (
+        'while :; do mkdir -p "$TMPDIR" 2>/dev/null; '
+        f'[ -s "$TMPDIR/grow" ] || head -c {nbytes} /dev/urandom > "$TMPDIR/grow" 2>/dev/null'
+        f"{record}; sleep 0.1; done"
+    )
+
+
+def _wait_for_grow(runner: ros.PytestRunner, nbytes: int, timeout: float = 30) -> Path | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for path in runner.runs.rglob("grow") if runner.runs.exists() else ():
+            with contextlib.suppress(OSError):
+                if path.stat().st_size >= nbytes:
+                    return path
+        time.sleep(0.1)
+    return None
+
+
+def _survivor_tree(root: Path, script: str) -> Path:
+    _write(
+        root,
+        {
+            "tests/test_survivor.py": (
+                "import subprocess\nfrom pathlib import Path\n\n\n"
+                "def test_survivor():\n"
+                f"    child = subprocess.Popen(['/bin/sh', '-c', {script!r}],"
+                " start_new_session=True)\n"
+                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    return root
+
+
 def _unconfined_os_runner(scratch: Path, monkeypatch) -> ros.PytestRunner:
-    """The "os" code path (per-run dirs, role names, cap attribution) without sandbox-exec,
-    so the accounting is tested on every platform."""
+    """The "os" code path (per-run dirs, task parents, cap attribution) without
+    sandbox-exec, so the accounting is tested on every platform."""
     runner = ros.PytestRunner(scratch, timeout=300, log=lambda m: None)
     runner.sandbox = ros.SANDBOX_OS
     runner.store = scratch.parent / "_store"
@@ -3547,12 +3593,16 @@ def _unconfined_os_runner(scratch: Path, monkeypatch) -> ros.PytestRunner:
     return runner
 
 
-def _leftover(runner: ros.PytestRunner, name: str, nbytes: int) -> Path:
-    """A run dir as a session-escaping child re-creates it after deletion. A "candt-" one
-    is registered as created by this task's candidate run."""
-    if name.startswith("candt-"):
-        runner._cand_run_dirs.add(name)
-    blob = runner.runs / name / "tmp" / "blob"
+def _leftover(runner: ros.PytestRunner, name: str, nbytes: int, foreign: bool = False) -> Path:
+    """A run dir as a session-escaping child re-creates it: in the current task scoring's
+    parent, or (``foreign``) under another scoring's parent."""
+    if foreign:
+        parent = runner.runs / "0ther0task000"
+    else:
+        if runner.task_dir is None:
+            runner.task_dir = runner.runs / "c0rrent0task"
+        parent = runner.task_dir
+    blob = parent / name / "tmp" / "blob"
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"z" * nbytes)
     return blob
@@ -3573,9 +3623,8 @@ def test_task_cap_trip_is_charged_to_the_role_of_the_leftover_run_dir(
         runner.run(env, tree, "t", "tests", (), 0)  # a candidate-independent run
     assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
     assert (exc.value.role, exc.value.attributed_role) == ("", attributed)
-    assert sorted(p.name.split("-", 1)[0] for p in runner.runs.iterdir()) == [
-        leftover.split("-", 1)[0]
-    ]  # the tripping run's own dir ("oracle-...") is gone
+    assert runner.task_dir is not None
+    assert [p.name for p in runner.task_dir.iterdir()] == [leftover]  # own run dir gone
 
 
 def test_per_run_cap_trip_from_candidate_leftover_growth_is_charged_to_the_candidate(
@@ -3588,8 +3637,8 @@ def test_per_run_cap_trip_from_candidate_leftover_growth_is_charged_to_the_candi
         {
             "tests/test_grow.py": (
                 "import os\nfrom pathlib import Path\n\n\ndef test_grow():\n"
-                "    runs = Path(os.environ['TMPDIR']).parents[1]\n"
-                "    (runs / 'candt-x' / 'tmp' / 'grow').write_bytes(b'g' * 300_000)\n"
+                "    parent = Path(os.environ['TMPDIR']).parents[1]\n"
+                "    (parent / 'candt-x' / 'tmp' / 'grow').write_bytes(b'g' * 300_000)\n"
             )
         },
     )
@@ -3626,14 +3675,179 @@ def test_candidate_survivor_leftover_keeps_the_task_in_the_denominator(
     ctx = _ctx(tmp_path, fx)
     runner = _unconfined_os_runner(ctx.work / "scratch", monkeypatch)
     ctx.runner = runner
+    # A survivor of a run of THIS scoring (same task parent): begin_task keeps it.
     _leftover(runner, leftover, 200_000)
+    monkeypatch.setattr(runner, "begin_task", lambda task_key: None)
     monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
     receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
     assert (receipt["label"], receipt["sub_reason"]) == (label, sub_reason)
     assert receipt.get("cap_attributed_role") == (
         ros.CAND_ROLE if label == ros.NOT_RUNNABLE else None
     )
-    assert not list(runner.runs.iterdir())  # A6 cleanup removes leftover run dirs
+    assert not runner.runs.exists() or not list(runner.runs.iterdir())  # A6 cleanup
+
+
+def test_candidate_leftover_from_an_earlier_task_is_not_charged_to_this_candidate(
+    tmp_path, monkeypatch
+):
+    """Bytes under another task scoring's parent: neither charged nor refused (A11)."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    tree = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", tree)
+    _leftover(runner, "candt-earlier", 200_000, foreign=True)
+    runner.begin_task("James3014/this#2")
+    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
+    with pytest.raises(ros.ScratchInfraAbort, match="foreign_run_dir_leftover"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.cache.iterdir()) == []
+
+
+def test_real_candidate_survivor_growth_is_charged_to_the_candidate(tmp_path, monkeypatch):
+    """A candidate-role run's session-escaping child re-creates its deleted run dir and
+    writes there; the next candidate-independent run's task-cap trip is the candidate's."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _survivor_tree(tmp_path / "cand", _survivor_script(300_000))
+    base = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
+    pid = int((cand / "tests" / "child.pid").read_text())
+    try:
+        grown = _wait_for_grow(runner, 300_000)
+        assert grown is not None and grown.parents[1].name.startswith("candt-")
+        monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, base, "b", "tests", (), 0)
+        assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
+        assert (exc.value.role, exc.value.attributed_role) == ("", ros.CAND_ROLE)
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+
+
+def test_rescore_of_the_same_task_gets_a_fresh_run_parent(tmp_path, monkeypatch):
+    """An earlier scoring's parent is removed by clean_tmp; if anything re-appears there
+    (only possible unconfined) it is foreign to the rescore: an infra abort, no label."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    tree = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", tree)
+    runner.begin_task("James3014/x#7")
+    assert runner.run(env, tree, "t1", "tests", (), 0).outcomes
+    first_parent = runner.task_dir
+    runner.clean_tmp()
+    assert runner.task_dir is None and not list(runner.runs.iterdir())
+    assert first_parent is not None
+    blob = first_parent / "candt-old" / "tmp" / "blob"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"z" * 200_000)
+    runner.begin_task("James3014/x#7")  # the same task, scored again
+    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
+    with pytest.raises(ros.ScratchInfraAbort, match="foreign_run_dir_leftover"):
+        runner.run(env, tree, "t2", "tests", (), 0)
+    assert runner.task_dir is not None and runner.task_dir.name != first_parent.name
+
+
+def test_another_tasks_survivor_aborts_scoring_without_a_receipt(tmp_path, fx, monkeypatch):
+    ctx = _ctx(tmp_path, fx)
+    runner = _unconfined_os_runner(ctx.work / "scratch", monkeypatch)
+    ctx.runner = runner
+    _leftover(runner, "candt-x", 200_000, foreign=True)
+    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
+    with pytest.raises(ros.ScratchInfraAbort):
+        ros.score_task(fx.task(b""), ctx, candidate_override="gold")
+    assert not list(runner.runs.iterdir())  # cleanup still ran
+
+
+def test_cap_measurement_is_one_scan_so_a_survivor_cannot_shift_blame(tmp_path, monkeypatch):
+    """layer1-rie F1: the total and the candidate share come from ONE walk. A survivor
+    that empties its dir right after it was walked (the old window between two scans)
+    still has its bytes charged to the candidate, consistently with the total."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    tree = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", tree)
+    blob = _leftover(runner, "candt-x", 200_000)
+    calls: list[str] = []
+    real_measure = runner.measure
+    real_walk = ros._regular_files
+    phase = {"after": False}
+
+    def measure(current):
+        calls.append("measure")
+        phase["after"] = len(calls) == 2  # the post-run measurement
+        return real_measure(current)
+
+    def walk(root):
+        yield from real_walk(root)
+        if phase["after"] and root.name == "candt-x":
+            blob.unlink()  # the survivor empties its dir just after it was counted
+
+    monkeypatch.setattr(runner, "measure", measure)
+    monkeypatch.setattr(ros, "_regular_files", walk)
+    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
+    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert calls == ["measure", "measure"]  # one walk before, one after
+    assert not blob.exists()
+    assert (exc.value.role, exc.value.attributed_role) == ("", ros.CAND_ROLE)
+
+
+def test_hard_links_are_counted_once_and_in_favour_of_the_candidate(tmp_path, monkeypatch):
+    big = tmp_path / "d" / "big.bin"
+    big.parent.mkdir()
+    big.write_bytes(b"h" * 100_000)
+    os.link(big, tmp_path / "d" / "link.bin")
+    assert ros.tree_bytes(tmp_path / "d") == os.lstat(big).st_blocks * 512  # once
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    oracle_blob = _leftover(runner, "oracle-x", 100_000)
+    cand_dir = runner.task_dir / "candt-x" / "tmp"
+    cand_dir.mkdir(parents=True)
+    os.link(oracle_blob, cand_dir / "linked")
+    usage = runner.measure(None)
+    size = os.lstat(oracle_blob).st_blocks * 512
+    assert (usage.total, usage.own_candidate, usage.foreign) == (size, size, 0)
+
+
+def test_sandbox_os_survivor_cannot_recreate_its_dir_after_the_task_parent_is_gone(
+    tmp_path, monkeypatch
+):
+    """Real sandbox-exec: while the task parent exists a survivor can re-create its own
+    run dir; after clean_tmp removes the parent it can create nothing under runs/, and
+    the next task is unaffected. Without a barrier: the fail-closed refusal."""
+    work = tmp_path / "work"
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    cand = work / "trees" / "a" / "cand"
+    log = cand / "attempts.log"
+    _survivor_tree(cand, _survivor_script(5000, log))
+    nxt = work / "trees" / "b" / "base"
+    _write(nxt, {"tests/test_next.py": "def test_next():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", cand)
+    runner.begin_task("James3014/a#1")
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
+    pid = int((cand / "tests" / "child.pid").read_text())
+    try:
+        # The survivor is alive and retrying, but its parent is already gone.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (log.exists() and "denied" in log.read_text()):
+            time.sleep(0.1)
+        assert "denied" in log.read_text()
+        runner.clean_tmp()
+        mark = len(log.read_text().splitlines())
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if log.read_text().splitlines()[mark:].count("denied") >= 5:
+                break
+            time.sleep(0.1)
+        assert log.read_text().splitlines()[mark:].count("denied") >= 5
+        assert "ok" not in log.read_text().splitlines()[mark:]
+        assert list(runner.runs.iterdir()) == []  # nothing re-created under runs/
+        runner.begin_task("James3014/b#2")
+        monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 1000)
+        res = runner.run(env, nxt, "n", "tests", (), 0)
+        assert res.outcomes == {"tests.test_next::test_next": ros.PASS}
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
 
 
 @pytest.mark.parametrize("store", [None, "", "missing"])
@@ -3695,57 +3909,80 @@ def test_valid_version_rejects_a_version_over_the_int_digit_limit(tmp_path):
     assert ros.write_project_metadata_stub(base, site) == (None, "version_invalid")
 
 
-def test_candidate_leftover_from_an_earlier_task_is_not_charged_to_this_candidate(
-    tmp_path, monkeypatch
+@pytest.fixture(autouse=True)
+def _plenty_of_scratch_disk(monkeypatch):
+    """A11: "os" runs check host free disk; tests see a roomy disk unless they say not."""
+    import collections
+
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: usage(10 * 1024**4, 0, 9 * 1024**4))
+
+
+def _fake_disk(monkeypatch, *, total: int, free: int) -> None:
+    import collections
+
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: usage(total, total - free, free))
+
+
+@pytest.mark.parametrize(
+    ("total", "free", "min_percent", "aborts"),
+    [
+        (1000 * 1024**3, 100 * 1024**3, 20, True),  # 10 % < 20 %
+        (1000 * 1024**3, 100 * 1024**3, 0, False),  # percentage check disabled
+        (1000 * 1024**3, 30 * 1024**3, 0, True),  # under the 40 GiB floor regardless
+        (1000 * 1024**3, 500 * 1024**3, 20, False),
+    ],
+)
+def test_sandbox_os_host_disk_check_before_every_run(
+    tmp_path, monkeypatch, total, free, min_percent, aborts
 ):
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    runner.min_free_percent = min_percent
     tree = _leak_tree(tmp_path, 0)
     env = LocalEnv().get("fixture-repo", tree)
-    _leftover(runner, "candt-earlier", 200_000)
-    runner.clean_tmp()  # end of the earlier task
-    _leftover(runner, "candt-earlier", 200_000)  # its survivor writes on afterwards
-    runner._cand_run_dirs.discard("candt-earlier")  # (not created in this task)
-    monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
-    with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+    _fake_disk(monkeypatch, total=total, free=free)
+    if not aborts:
+        assert runner.run(env, tree, "t", "tests", (), 0).outcomes
+        return
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran on a full disk")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
         runner.run(env, tree, "t", "tests", (), 0)
-    assert exc.value.attributed_role == ""  # candidate-independent, as before A11
+    assert list(runner.cache.iterdir()) == []
+    assert not runner.runs.exists() or list(runner.runs.iterdir()) == []
 
 
-def test_real_candidate_survivor_growth_is_charged_to_the_candidate(tmp_path, monkeypatch):
-    """A candidate-role run's session-escaping child re-creates its deleted run dir and
-    writes there; the next candidate-independent run's task-cap trip is the candidate's."""
-    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
-    cand = tmp_path / "cand"
-    grow = 'sleep 1; mkdir -p "$TMPDIR"; head -c 300000 /dev/urandom > "$TMPDIR/grow"; sleep 30'
-    _write(
-        cand,
-        {
-            "tests/test_survivor.py": (
-                "import subprocess\nfrom pathlib import Path\n\n\n"
-                "def test_survivor():\n"
-                f"    child = subprocess.Popen(['/bin/sh', '-c', {grow!r}],"
-                " start_new_session=True)\n"
-                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
-            )
-        },
-    )
-    base = _leak_tree(tmp_path, 0)
-    env = LocalEnv().get("fixture-repo", cand)
-    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
-    pid = int((cand / "tests" / "child.pid").read_text())
-    try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not list(runner.runs.rglob("grow")):
-            time.sleep(0.1)
-        grown = list(runner.runs.rglob("grow"))
-        while grown and grown[0].stat().st_size < 300_000 and time.monotonic() < deadline:
-            time.sleep(0.1)
-        assert grown and grown[0].parents[1].name.startswith("candt-")
-        monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 100_000)
-        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
-            runner.run(env, base, "b", "tests", (), 0)
-        assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
-        assert (exc.value.role, exc.value.attributed_role) == ("", ros.CAND_ROLE)
-    finally:
-        with contextlib.suppress(OSError):
-            os.kill(pid, 9)
+def test_none_mode_does_not_check_host_disk(tmp_path, monkeypatch):
+    _fake_disk(monkeypatch, total=1000, free=1)
+    tree = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", tree)
+    assert _runner(tmp_path).run(env, tree, "t", "tests", (), 0).outcomes
+
+
+def test_cli_infra_abort_exits_8_without_a_receipt(tmp_path, monkeypatch):
+    from nexus.research import score_real_outcome_cli as cli
+
+    def abort(*a, **k):
+        raise ros.ScratchInfraAbort("host_disk_low:test")
+
+    monkeypatch.setattr(cli.ros, "score_task", abort)
+    monkeypatch.setattr(cli, "wait_for_memory", lambda *a, **k: 0.0)
+    store = tmp_path / "store"
+    (store / "tasks" / "James3014__nexus-runtime--1").mkdir(parents=True)
+    out = tmp_path / "out"
+    rc = cli.main([
+        "--store",
+        str(store),
+        "--out",
+        str(out),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+    ])
+    assert rc == ros.INFRA_ABORT_EXIT_CODE == 8
+    assert not list(out.rglob("real_outcome.json"))

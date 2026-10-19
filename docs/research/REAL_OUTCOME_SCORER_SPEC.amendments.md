@@ -23,7 +23,7 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
-| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, a cap trip caused by a candidate run's leftover run directory is `NOT_RUNNABLE`, so that task stays in the denominator. A version string too long for Python's int parser is `version_invalid` |
+| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, a cap trip caused by a candidate run's leftover run directory is `NOT_RUNNABLE`, so that task stays in the denominator. Low host disk, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). A version string too long for Python's int parser is `version_invalid` |
 
 Current scorer: `SCORER_VERSION = "1.3.1"`. Receipts record the version that wrote them.
 
@@ -288,32 +288,78 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
   - A sparse file counts only the blocks it uses. Before, a candidate's session-escaping
     child could write a large sparse file and push the task over a cap.
   - A normal file now counts whole blocks, so a small file counts at least one block
-    (4 KiB on APFS and ext4). The A6 timing numbers are a little higher than in 1.3.0.
+    (4 KiB on APFS and ext4). Each inode is counted once, so hard links are not counted
+    twice. The A6 timing numbers are therefore a little higher than in 1.3.0 for small
+    files, and lower where files are hard-linked.
   - The caps are 20 GiB per run and 40 GiB per task. A label changes only for a task
-    whose run actually hits a cap. The local receipts on 2026-10-20 had four such
-    tasks: V12 batch 3 nexus-core#271 (`SCRATCH_TMP_TASK_CAP_EXCEEDED` on GOLD) and
-    Nexus-new#2291 (BASE+T), and two pilot-2219 scorings of Nexus-new#2272 (BASE+T),
-    all `NOT_SCORABLE_ORACLE_INVALID`. Rescored under 1.3.1, such a task would get a
-    different label only if its bytes were sparse. Receipts already sealed are not
-    changed.
-- **Cap trips are charged to the role that caused them (`--sandbox os`).** Each run
-  directory is now named `<scratch>/runs/<role>-<key16>-<random>`, where the role is
-  `candt` for candidate runs (`CAND+T`) and `oracle` otherwise.
-  - The scorer remembers which candidate run directories it created in the current
-    task. A confined process cannot write to `runs/` itself, so it cannot rename a
-    directory or create one under another name.
-  - A cap can also trip on a candidate-independent run (BASE+T, GOLD, GOLD_REF, the
-    P2P(d) trees). If it would not have tripped without the bytes in this task's
-    leftover candidate run directories (re-created by a session-escaping child of a
-    candidate run), the trip is charged to the candidate. The label is then
-    `NOT_RUNNABLE` with sub-reason `SCRATCH_TMP_CAP_EXCEEDED` or
-    `SCRATCH_TMP_TASK_CAP_EXCEEDED`, as A6 already gives for a candidate run that hits a
-    cap. The receipt adds `cap_attributed_role: "CAND+T"`, and the task stays in the
-    denominator.
-  - Growth in any other leftover directory is still a candidate-independent refusal, as
-    before. That covers an oracle run's directory, and a candidate directory left by an
-    earlier task, which is not this task's candidate's doing.
+    whose run actually hits a cap. On 2026-10-20 the Mac mini had four receipts that
+    hit one, all `NOT_SCORABLE_ORACLE_INVALID`. Paths are relative to
+    `~/.local/state/nexus-real-outcome/`:
+    - `v12-replay/receipts-batch3/tasks/James3014__nexus-core--271`
+      (`SCRATCH_TMP_TASK_CAP_EXCEEDED` on GOLD);
+    - `v12-replay/receipts-batch3/tasks/James3014__Nexus-new--2291`
+      (`ORACLE_RUN_FAILED`, per-run cap on BASE+T);
+    - `pilot-2219/runs/James3014__Nexus-new--2272/C/score` (per-run cap on BASE+T);
+    - `pilot-2219/runs/James3014__Nexus-new--2272/C/score_amend1` (same).
+
+    Rescored under 1.3.1, such a task would get a different label only if its bytes
+    were sparse or hard-linked. Receipts already sealed are not changed.
+- **Per-scoring run parents and charged cap trips (`--sandbox os`).** Each scoring of a
+  task puts its run directories under a fresh parent,
+  `<scratch>/runs/<random12>/<role>-<key16>-<random12>`. `<role>` is `candt` for
+  candidate runs (`CAND+T`) and `oracle` otherwise. A rescore of the same task gets a
+  new parent too.
+  - The parent is removed whenever it is empty after a run, and always by the A6
+    cleanup at the end of the scoring. The next run re-creates it under the same name.
+  - A confined process may write only inside its own run directory. Once the parent is
+    gone it cannot re-create anything under `runs/`. Checked under real sandbox-exec:
+    a session-escaping child's `mkdir` of its old directory is denied after the parent
+    is removed, and the next task is unaffected.
+  - So a survivor can write again only while a later run of the same scoring has
+    re-created the parent, and then only into its own directory. Directory names can
+    be trusted: a confined process cannot create, rename or link entries in `runs/` or
+    in the parent.
+  - **Charging.** A cap can trip on a candidate-independent run (BASE+T, GOLD,
+    GOLD_REF, the P2P(d) trees) that would not have tripped without the bytes in
+    leftover `candt-*` directories of the current scoring. Those are directories
+    re-created by a session-escaping child of one of its candidate runs. The trip is
+    then charged to the candidate:
+    - the label is `NOT_RUNNABLE` with sub-reason `SCRATCH_TMP_CAP_EXCEEDED` or
+      `SCRATCH_TMP_TASK_CAP_EXCEEDED`, as A6 already gives for a candidate run that
+      hits a cap;
+    - the receipt adds `cap_attributed_role: "CAND+T"`;
+    - the task stays in the denominator.
+  - Growth in the current scoring's oracle directories is still a candidate-independent
+    refusal, as before.
+  - Bytes under any other parent should not exist. If they would make the cap trip,
+    scoring stops with `ScratchInfraAbort` and writes no receipt (below).
+  - So a candidate never causes a candidate-independent refusal receipt. Its growth is
+    either charged to it (`NOT_RUNNABLE`) or the scoring is an infra abort without a
+    receipt.
+  - **One scan per measurement point.** The size before and after each run comes from a
+    single walk of scratch HOME, TMPDIR and `runs/`. That walk splits the bytes by
+    top-level entry, so the total and the candidate's share come from the same files.
+    A survivor that empties its directory between two scans can no longer move blame
+    (layer1-rie F1).
+  - **Hard links.** Each inode is counted once. An inode linked from several places is
+    charged in favour of the candidate: first to the candidate directory, then to
+    another parent, otherwise to the run. Under `--sandbox os` a confined candidate
+    cannot write oracle directories or the shared HOME/TMPDIR, so it cannot link into
+    them. The precedence rule is a safeguard for a case that cannot happen.
   - `--sandbox none` has no run directories, so nothing changes there.
+- **Host-disk check (`--sandbox os`).** Before every pytest run the scorer checks free
+  space on the scratch filesystem (`shutil.disk_usage`). It needs at least
+  `--min-free-percent` % free (the same threshold as the memory check, default 20; 0
+  turns this part off) and at least 40 GiB free (two per-run caps, so one run that
+  fills its cap still leaves room for the next).
+  - Below either, scoring stops with `ScratchInfraAbort` and writes no receipt and no
+    cache entry. The CLI exits **8**, a new code; codes 2-7 are taken. The driver or
+    lab should treat exit 8 as infra and rerun.
+  - The caps cannot see blocks that a test holds in an unlinked but still open file (a
+    session-escaping child can keep one). The disk check now bounds that case, which is
+    still tracked by #2740. The same infra abort applies when bytes under another
+    scoring's parent would make a cap trip.
+  - `--sandbox none` does not run this check.
 - **`--sandbox os` needs the store.** A runner in `os` mode refuses
   (`SandboxError: store_required`) without an existing store directory. The store is
   therefore always denied, and the A9 profile hash always includes that deny. Before,
