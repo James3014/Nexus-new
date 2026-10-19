@@ -573,11 +573,10 @@ _OBSERVATION_OUTCOME_KEYS = (
     "lookup_symbol",
     "found",
     "match_count",
-    # #2732: ultra_review is record-only; its own verdict must survive into the record.
-    "advisory_only",
-    "review_status",
-    "review_passed",
 )
+# #2732: ultra_review is record-only; its own verdict must survive into the record.
+# #2772: only for ADVISORY_ONLY_CAPABILITIES, so no other capability can spoof them.
+_ADVISORY_OBSERVATION_KEYS = ("advisory_only", "review_status", "review_passed")
 _OBSERVATION_MAX_TEXT = 512
 _OBSERVATION_MAX_ITEMS = 16
 _OBSERVATION_MAX_CAPABILITIES = 64
@@ -612,6 +611,8 @@ def _capability_observations(results: Any) -> dict[str, Any]:
     """
     if not isinstance(results, Mapping):
         return {}
+    from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
+
     observations: dict[str, Any] = {}
     for name, stage in results.items():
         if not isinstance(stage, Mapping):
@@ -632,10 +633,16 @@ def _capability_observations(results: Any) -> dict[str, Any]:
                     entry[key] = value
         if outcome.get("error"):
             entry["error_present"] = True  # never the message: it can carry task text
-        if outcome.get("review_error"):
-            entry["review_error_present"] = True  # #2732: same rule, presence only
-        if outcome.get("advisory_only") is True and isinstance(outcome.get("findings"), list):
-            entry["review_findings_count"] = len(outcome["findings"])
+        if str(name) in ADVISORY_ONLY_CAPABILITIES:
+            for key in _ADVISORY_OBSERVATION_KEYS:
+                if key in outcome:
+                    value = _observation_value(outcome[key])
+                    if value is not None:
+                        entry[key] = value
+            if outcome.get("review_error"):
+                entry["review_error_present"] = True  # #2732: same rule, presence only
+            if outcome.get("advisory_only") is True and isinstance(outcome.get("findings"), list):
+                entry["review_findings_count"] = len(outcome["findings"])
         if "root" in result:
             root = _observation_value(result["root"])
             if isinstance(root, str):
