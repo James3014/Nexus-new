@@ -4505,10 +4505,14 @@ def _xray_targets(plan: CapabilityExecutionPlan, project_root: Path) -> list[Pat
     """Scan targets from the request, contained in the project root; root as fallback."""
     constraints = dict(plan.constraints or {})
     root = _scoped_workspace(constraints, project_root)
-    named = _task_files(constraints, "xray_targets", "target_file", "target_files")[:16]
-    if not named and isinstance(constraints.get("xray_targets"), (list, tuple)):
-        # The task named its files but none exists yet: do not scan an unrelated default.
-        raise _ScopeError("no_existing_task_files")
+    if isinstance(constraints.get("xray_targets"), (list, tuple)):
+        # An explicit task scope is authoritative (#2700): never mixed with target_file(s),
+        # and when none of the task's files exists yet nothing unrelated is scanned.
+        named = _task_files(constraints, "xray_targets")[:16]
+        if not named:
+            raise _ScopeError("no_existing_task_files")
+    else:
+        named = _task_files(constraints, "target_file", "target_files")[:16]
     if not named:
         legacy = root / "nexus" / "services" / "capability_registry.py"
         return [legacy if legacy.exists() else root]

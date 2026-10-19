@@ -388,7 +388,11 @@ def test_xray_scans_the_worker_supplied_targets(tmp_path, monkeypatch) -> None:
     plan = CapabilityExecutionPlan(
         plan_id="p-xray",
         task_id="t-xray",
-        constraints={"workspace_root": str(workspace), "xray_targets": ["pkg/task.py"]},
+        constraints={
+            "workspace_root": str(workspace),
+            "xray_targets": ["pkg/task.py"],
+            "target_files": ["nexus/services/capability_registry.py"],
+        },
     )
 
     receipt = _exec_xray(plan, "deep scan")
@@ -409,7 +413,12 @@ def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeyp
     plan = CapabilityExecutionPlan(
         plan_id="p-xray",
         task_id="t-xray",
-        constraints={"workspace_root": str(workspace), "xray_targets": []},
+        # target_file can arrive from codeintel; an explicit xray_targets must win.
+        constraints={
+            "workspace_root": str(workspace),
+            "xray_targets": [],
+            "target_file": "nexus/services/capability_registry.py",
+        },
     )
 
     receipt = _exec_xray(plan, "deep scan")
