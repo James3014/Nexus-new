@@ -9,8 +9,11 @@ import os
 import json
 import uuid
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from nexus.core.state_root import persistent_state_root
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +39,11 @@ class SandboxRunner:
     
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self.sandbox_base = project_root / ".nexus" / "sandbox"
-        self.sandbox_base.mkdir(parents=True, exist_ok=True)
+        # Run records (sandbox_result.json, collected artifacts) stay readable after
+        # run_task returns.  They follow NEXUS_STATE_ROOT (#2688), so on the live
+        # Gateway they no longer land inside the per-deploy tree (#2698).  Created on
+        # first use, not here: constructing a runner writes nothing.
+        self.sandbox_base = persistent_state_root(project_root) / ".nexus" / "sandbox"
 
         # 偵測 macOS 特有的 sandbox-exec 是否可用
         self.has_sandbox_exec = False
@@ -53,6 +59,22 @@ class SandboxRunner:
                 self.has_sandbox_exec = res.returncode == 0
             except Exception:
                 self.has_sandbox_exec = False
+
+    def _make_scratch_dir(self, prefix: str) -> Path:
+        """A fresh system temp directory outside the project and the deployment tree (#2698).
+
+        The working copy and the Python network guard live here, never under
+        ``project_root``: on the live Gateway that is the per-deploy directory.
+        """
+        scratch = Path(tempfile.mkdtemp(prefix=prefix)).resolve()
+        project_real = Path(self.project_root).resolve()
+        if scratch == project_real or project_real in scratch.parents:
+            shutil.rmtree(scratch, ignore_errors=True)
+            raise RuntimeError(
+                f"sandbox temp dir {scratch} is inside the project root {project_real}; "
+                "set TMPDIR to a directory outside it"
+            )
+        return scratch
 
     def _copy_workspace(self, workspace_path: Path) -> None:
         ignored_names = {
@@ -234,9 +256,12 @@ socket.socket.connect = _guarded_socket_connect
         start_time = time.time()
         run_id = f"run_{int(start_time * 1000)}_{uuid.uuid4().hex[:8]}"
         run_dir = self.sandbox_base / "runs" / run_id
-        workspace_path = run_dir / "workspace"
         command_list = [str(part) for part in command]
         run_dir.mkdir(parents=True, exist_ok=True)
+        # The working copy goes to a system temp dir, removed on exit when cleanup is
+        # set (#2698); only the run record stays in run_dir.
+        scratch_dir = self._make_scratch_dir(f"nexus-sandbox-{run_id}-")
+        workspace_path = scratch_dir / "workspace"
 
         result_payload: dict[str, Any] | None = None
         try:
@@ -294,7 +319,7 @@ socket.socket.connect = _guarded_socket_connect
                     return self._write_result(run_dir, result_payload)
 
             env = os.environ.copy()
-            guard_dir = self._write_python_network_guard(run_dir)
+            guard_dir = self._write_python_network_guard(scratch_dir)
             env["NEXUS_SANDBOX_NO_NETWORK"] = "1"
             env["NEXUS_SANDBOX_WORKSPACE"] = str(workspace_path)
             env["PYTHONPATH"] = os.pathsep.join(
@@ -459,8 +484,8 @@ socket.socket.connect = _guarded_socket_connect
             )
             return self._write_result(run_dir, result_payload)
         finally:
-            if cleanup and workspace_path.exists():
-                shutil.rmtree(workspace_path, ignore_errors=True)
+            if cleanup:
+                shutil.rmtree(scratch_dir, ignore_errors=True)
 
     def _collect_runtime_signals(self, target_dir: Path) -> tuple[List[str], int]:
         """Read runtime event log and derive executed phases + phantom triggers."""
@@ -496,7 +521,9 @@ socket.socket.connect = _guarded_socket_connect
         start_time = time.time()
         # 1. 創立隔離目錄
         session_id = f"challenge_{int(time.time())}"
-        target_dir = self.sandbox_base / session_id
+        # Clone into a system temp dir, not under project_root (#2698).
+        scratch_dir = self._make_scratch_dir(f"nexus-sandbox-{session_id}-")
+        target_dir = scratch_dir / session_id
         
         logger.info(f"🥊 [Sandbox] Starting challenge on {repo_url}...")
         
@@ -569,6 +596,5 @@ socket.socket.connect = _guarded_socket_connect
                 duration_sec=time.time() - start_time
             )
         finally:
-            # 4. 清理 (可選)
-            # shutil.rmtree(target_dir, ignore_errors=True)
-            pass
+            # 4. 清理: the report is built above; nothing reads the clone afterwards.
+            shutil.rmtree(scratch_dir, ignore_errors=True)
