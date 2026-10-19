@@ -1,11 +1,13 @@
 
-import sys
 import json
-import uuid
+import os
+import sys
+
 import requests
 
-MCP_URL = "http://127.0.0.1:12307/mcp"
-TOKEN = "8d0bdae063e8912d5d089c5c694de31653063ba9ca73561cce1ef0ce60ccda7d"
+MCP_URL = os.environ.get("NEXUS_BROWSER_MCP_URL", "http://127.0.0.1:12307/mcp")
+# Never hardcode the bearer: this repo is public (#2678).
+TOKEN = os.environ.get("NEXUS_BROWSER_MCP_TOKEN", "")
 
 def parse_sse(text):
     for line in text.split('\n'):
@@ -18,6 +20,10 @@ def run():
         print("Usage: python browser_lite_util.py <tool_name> [json_arguments]")
         sys.exit(1)
     
+    if not TOKEN:
+        print("Set NEXUS_BROWSER_MCP_TOKEN to the browser MCP bearer token.")
+        sys.exit(1)
+
     tool_name = sys.argv[1]
     tool_args = {}
     if len(sys.argv) > 2:
