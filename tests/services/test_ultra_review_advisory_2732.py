@@ -228,7 +228,47 @@ def test_seam_stage_keeps_the_advisory_record(tmp_path, monkeypatch) -> None:
     assert kept["retired_reason"] == "ultra_review_retired_as_completion_gate_2701"
     assert kept["review_status"] == "FAIL"
     assert kept["review_passed"] is False
+    assert kept["review_error"] == ""
     assert len(kept["findings"]) == 2
+
+
+def test_seam_stage_keeps_the_infra_review_error(tmp_path, monkeypatch) -> None:
+    _bind(monkeypatch, _fake_service(exc=RuntimeError("sandbox exploded")))
+    invoker = capability_registry.build_real_executor_invoker("ultra_review")
+    assert invoker is not None
+    stage = seam.stage_from_invocation(
+        "ultra_review", invoker(_context(tmp_path)), phase="post_candidate"
+    )
+    assert stage["gate_passed"] is True
+    assert stage["outcome"]["review_status"] == "ERROR"
+    assert stage["outcome"]["review_error"] == "sandbox exploded"
+
+
+def _observed(tmp_path, monkeypatch, service) -> dict[str, Any]:
+    from nexus.orchestrator.self_hosted_task_service_parts import worker_dispatch
+
+    _bind(monkeypatch, service)
+    invoker = capability_registry.build_real_executor_invoker("ultra_review")
+    assert invoker is not None
+    out = invoker(_context(tmp_path))
+    results = {"ultra_review": {"status": out["status"], "response": {"response": out["response"]}}}
+    return worker_dispatch._capability_observations(results)["ultra_review"]
+
+
+def test_worker_observation_persists_the_fail_verdict(tmp_path, monkeypatch) -> None:
+    entry = _observed(tmp_path, monkeypatch, _fake_service(_fail_payload()))
+    assert entry["advisory_only"] is True
+    assert entry["review_status"] == "FAIL"
+    assert entry["review_passed"] is False
+    assert entry["review_findings_count"] == 2
+    assert "review_error_present" not in entry
+
+
+def test_worker_observation_persists_the_crash_without_its_text(tmp_path, monkeypatch) -> None:
+    entry = _observed(tmp_path, monkeypatch, _fake_service(exc=RuntimeError("secret task text")))
+    assert entry["review_status"] == "ERROR"
+    assert entry["review_error_present"] is True
+    assert "secret task text" not in repr(entry)
 
 
 def _obs(gate_passed: bool, outcome: dict[str, Any]) -> audit.Obs:
