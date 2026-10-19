@@ -7476,12 +7476,12 @@ def test_ensure_state_root_creates_0700_and_keeps_existing(tmp_path: Path) -> No
     marker.parent.mkdir()
     marker.write_text("{}")
     os.chmod(c.state_root, 0o750)
-    ad.ensure_state_root(c)  # existing memory is never touched
+    ad.ensure_state_root(c)  # existing memory is kept, mode tightened
     assert marker.read_text() == "{}"
-    assert stat.S_IMODE(c.state_root.stat().st_mode) == 0o750
+    assert stat.S_IMODE(c.state_root.stat().st_mode) == 0o700
 
 
-@pytest.mark.parametrize("kind", ["symlink", "file", "relative"])
+@pytest.mark.parametrize("kind", ["symlink", "file", "relative", "parent_symlink"])
 def test_ensure_state_root_refuses_non_directories(tmp_path: Path, kind: str) -> None:
     target = tmp_path / "elsewhere"
     target.mkdir()
@@ -7491,6 +7491,9 @@ def test_ensure_state_root_refuses_non_directories(tmp_path: Path, kind: str) ->
         state_root.symlink_to(target)
     elif kind == "file":
         state_root.write_text("x")
+    elif kind == "parent_symlink":
+        (tmp_path / "home" / "link").symlink_to(target)
+        state_root = tmp_path / "home" / "link" / "state"
     else:
         state_root = Path("relative/state")
     c = ad.Config.default(tmp_path / "home", state_root=state_root)
@@ -7506,3 +7509,19 @@ def test_bad_state_root_fails_before_live_switch(cfg: ad.Config) -> None:
     assert result["status"] == "BUILD_FAILED"
     assert "STATE_ROOT_NOT_ABSOLUTE" in result["receipt"]["reason"]
     assert bad.plist.read_bytes() == before and host.reloads == []
+
+
+def test_ensure_state_root_creates_no_runtime_writer_markers(tmp_path: Path) -> None:
+    """#2689: receipts under $NEXUS_STATE_ROOT/.nexus/reports/run are refused when
+    the state root carries a writer hold, a state-owner manifest or a writer
+    generation; the deployer creates only the empty directory."""
+    c = ad.Config.default(tmp_path / "home")
+    ad.ensure_state_root(c)
+    assert list(c.state_root.iterdir()) == []
+    for marker in (
+        ".nexus/writer-quiescence-hold.json",
+        ".nexus/events/state_owner.manifest.v1.json",
+        ".nexus/events/event_log.generation.v1.json",
+    ):
+        assert not (c.state_root / marker).exists()
+        assert not (c.gateway_root / marker).exists()

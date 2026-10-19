@@ -91,6 +91,7 @@ import shlex
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1979,9 +1980,18 @@ def commit_of(root: Optional[Path]) -> Optional[str]:
 def ensure_state_root(cfg: Config) -> Path:
     """Create the fixed ``NEXUS_STATE_ROOT`` (mode 0700) before the live switch (#2688).
 
-    An existing directory is kept as is (its contents are the Gateway's memory);
-    a symlink or a non-directory is refused so the live state never lands
-    somewhere the deployer did not choose.
+    An existing directory keeps its contents (the Gateway's memory) but is
+    tightened to 0700.  A symlink anywhere in the path (the exported path must
+    be its own real path), a non-directory, a relative path or a directory
+    owned by another user is refused, so the live state never lands somewhere
+    the deployer did not choose.  The checks re-run after creation.
+
+    Only the empty directory is created: no ``.nexus`` content.  The runtime
+    receipt writer refuses (``runtime_writer_factory_required``) when an
+    ancestor of a receipt path carries ``.nexus/writer-quiescence-hold.json``,
+    a state-owner manifest or a writer generation, and canonical receipts go
+    to ``$NEXUS_STATE_ROOT/.nexus/reports/run`` (#2689), so the deployer must
+    never place those markers here.
     """
     path = cfg.state_root
     if not path.is_absolute():
@@ -1992,9 +2002,15 @@ def ensure_state_root(cfg: Config) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         with contextlib.suppress(FileExistsError):
             path.mkdir(mode=0o700)
-        os.chmod(path, 0o700)
-    if path.is_symlink() or not path.is_dir():
+    if os.path.realpath(path) != str(path):
+        raise DeployError(f"STATE_ROOT_NOT_CANONICAL:{path}")
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode):
         raise DeployError(f"STATE_ROOT_NOT_A_DIRECTORY:{path}")
+    if info.st_uid != os.getuid():
+        raise DeployError(f"STATE_ROOT_FOREIGN_OWNER:{path}")
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        os.chmod(path, 0o700, follow_symlinks=False)
     return path
 
 
