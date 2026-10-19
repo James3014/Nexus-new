@@ -190,3 +190,21 @@ def test_format_gemini_fastlane_response_formats_structured_sections():
     assert "根因：" in text
     assert "為何會漏過：" in text
     assert "修補策略：" in text
+
+
+def test_coerce_long_gemini_answer_uses_second_pass_for_non_json():
+    """Retired behaviour (#1929): the second-pass compression was removed.
+
+    The id is kept so the impact gate can compare base and head; it now asserts
+    that coerce_long_gemini_answer returns the raw text unchanged.
+    """
+    from nexus.pilot_cli.gemini_client import coerce_long_gemini_answer
+
+    raw = "這是一段沒有 JSON 的長回答"
+    text = coerce_long_gemini_answer(
+        session=PilotSession(provider="Gemini", model="gemini-2.5-flash", api_key="k"),
+        user_request="x" * 1200,
+        raw_text=raw,
+        finish_reason="MAX_TOKENS",
+    )
+    assert text == raw

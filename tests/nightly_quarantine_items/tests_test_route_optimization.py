@@ -2,5 +2,5 @@
 
 from __future__ import annotations
 
-# Tombstone (#1929): both lazy-activation tests deleted: CapabilityAssembler.assemble was removed (e3ab547b5), only assemble_chains(flow) remains; Owner decision on #1929 (2026-10-19, workspace-32).
+# Tombstone (#1929): both lazy-activation tests now assert the retirement (id kept for the impact gate): CapabilityAssembler.assemble was removed (e3ab547b5), only assemble_chains(flow) remains; Owner decision on #1929 (2026-10-19, workspace-32).
 ENTRY = None

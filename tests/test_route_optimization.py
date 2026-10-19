@@ -36,3 +36,21 @@ class TestRouteOptimization(unittest.TestCase):
             {"model_calls": 1, "total_tokens": 1000, "capability_count": 8}
         )
         self.assertEqual(profile.profile, "full_chain_delivery")
+
+    def test_rule_driven_lazy_activation(self):
+        """Retired behaviour (#1929): rule-driven lazy activation was removed.
+
+        The id is kept for the impact gate; only assemble_chains(flow) remains.
+        """
+        self.assertFalse(hasattr(CapabilityAssembler, "assemble"))
+        chain = CapabilityAssembler.assemble_chains("hyper_sprint")
+        self.assertIn("codeintel", chain.optional)
+
+    def test_risk_driven_lazy_activation(self):
+        """Retired behaviour (#1929): risk-driven activation was removed.
+
+        The id is kept for the impact gate; the optional chain depends on flow only.
+        """
+        self.assertFalse(hasattr(CapabilityAssembler, "assemble"))
+        chain = CapabilityAssembler.assemble_chains("hyper_sprint")
+        self.assertIn("mempalace_gate", chain.optional)
