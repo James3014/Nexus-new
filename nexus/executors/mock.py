@@ -1,16 +1,6 @@
 import time
-
 from .base import BaseExecutor
-from .protocol import (
-    ExecutionEvidence,
-    ExecutorInput,
-    ExecutorMeta,
-    ExecutorOutput,
-    ExecutorStatusEnum,
-    ProviderErrorType,
-    RepairResult,
-)
-
+from .protocol import ExecutorInput, ExecutorOutput, ExecutorStatusEnum, ProviderErrorType, RepairResult, ExecutionEvidence, ExecutorMeta
 
 class MockExecutor(BaseExecutor):
     """
