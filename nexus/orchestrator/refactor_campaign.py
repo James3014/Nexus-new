@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 import re
-import tempfile
-from typing import Any, Mapping, Optional, Sequence
 import subprocess
+import tempfile
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Mapping, Optional, Sequence
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
-from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
-
+from nexus.orchestrator.worker_competition import (
+    WorkerCompetitionCoordinator,
+    contained_child_path,
+    contained_state_path,
+    sanitize_state_id,
+    validate_state_id,
+)
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_MAX_STATE_ID_LENGTH = 128
 
 
 @dataclass(frozen=True)
@@ -42,7 +47,7 @@ class RefactorCampaignCoordinator:
         self.state_dir = Path(configured).expanduser().resolve()
 
     def _path(self, campaign_id: str) -> Path:
-        return self.state_dir / f"{campaign_id}.json"
+        return contained_state_path(self.state_dir, campaign_id, code="CAMPAIGN_ID_INVALID")
 
     def _write(self, state: Mapping[str, Any]) -> dict[str, Any]:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +65,10 @@ class RefactorCampaignCoordinator:
         path = self._path(campaign_id)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("campaign_id") != campaign_id:
+            raise ValueError("CAMPAIGN_STATE_ID_MISMATCH")
+        return state
 
     def create(
         self,
@@ -71,10 +79,8 @@ class RefactorCampaignCoordinator:
         *,
         max_scope_entries: int = 100,
     ) -> dict[str, Any]:
-        safe_id = _SAFE.sub("-", str(campaign_id)).strip("-")
+        safe_id = sanitize_state_id(campaign_id, code="CAMPAIGN_ID_INVALID")
         normalized = tuple(str(provider).strip().lower() for provider in providers)
-        if not safe_id:
-            raise ValueError("campaign_id must contain a safe identifier")
         if len(normalized) < 2 or len(set(normalized)) != len(normalized):
             raise ValueError("campaign requires at least two distinct providers")
         if set(normalized) - set(SUPPORTED_WORKER_PROVIDERS):
@@ -84,9 +90,13 @@ class RefactorCampaignCoordinator:
         seen: set[str] = set()
         for wave in waves:
             wave.validate(max_scope_entries)
+            validate_state_id(wave.wave_id, code="WAVE_ID_INVALID")
             if wave.wave_id in seen:
                 raise ValueError(f"duplicate wave_id: {wave.wave_id}")
             seen.add(wave.wave_id)
+        # advance() derives "<campaign_id>-<wave_id>" task/competition ids, which must stay valid.
+        if len(safe_id) + 1 + max(len(wave.wave_id) for wave in waves) > _MAX_STATE_ID_LENGTH:
+            raise ValueError("CAMPAIGN_ID_TOO_LONG")
         if self._read(safe_id) is not None:
             raise ValueError(f"campaign already exists: {safe_id}")
         state = {
@@ -161,6 +171,7 @@ class RefactorCampaignCoordinator:
         state = self._read(campaign_id)
         if state is None:
             raise KeyError(f"unknown campaign: {campaign_id}")
+        validate_state_id(wave_id, code="WAVE_ID_INVALID")
         checkpoint = state.get("checkpoints", {}).get(wave_id)
         if not checkpoint or not _SHA.fullmatch(str(checkpoint)):
             raise RuntimeError("wave checkpoint is missing or invalid")
@@ -168,7 +179,7 @@ class RefactorCampaignCoordinator:
         repo_root = Path(str(state["base_request"]["controller_repo_root"])).expanduser().resolve()
         integration_root = Path(str(state["base_request"]["target_worktree_root"])).expanduser().resolve() / "campaign-rollbacks"
         integration_root.mkdir(parents=True, exist_ok=True)
-        path = integration_root / f"{state['campaign_id']}-{wave_id}"
+        path = contained_child_path(integration_root, f"{state['campaign_id']}-{wave_id}", code="WAVE_ID_INVALID")
         if path.exists():
             raise RuntimeError("rollback worktree path already exists")
         subprocess.run(["git", "worktree", "add", str(path), branch], cwd=repo_root, capture_output=True, text=True, check=True)
