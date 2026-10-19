@@ -7560,12 +7560,13 @@ def _run_wrapper(
 
 def test_measurement_env_list_is_one_constant_of_valid_names() -> None:
     names = ad.MEASUREMENT_ONLY_ENV_VARS
-    assert len(set(names)) == len(names) >= 4
+    assert len(set(names)) == len(names) >= 5
     assert {
         "NEXUS_MEASUREMENT_CLAUDE_WORKER",
         "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT",
         "NEXUS_LEARNING_WRITEBACK",
         "NEXUS_STATE_READ_ONLY",
+        "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
     } <= set(names)
     guard = ad.measurement_env_guard()
     for name in names:
