@@ -8952,3 +8952,56 @@ def test_2177_corrupt_ledger_blocks_materialization_before_any_write(tmp_path, m
         g.gateway_recovery_materialize(request)
     assert not _i2177_receipt_path(request).exists()
     assert not g.GATEWAY_RECOVERY_AUTHORITY_STORE.exists()
+
+
+def _exported(command: str, name: str) -> str:
+    import shlex
+
+    values = [t.split("=", 1)[1] for t in shlex.split(command) if t.startswith(f"{name}=")]
+    assert len(values) == 1, values
+    return values[0]
+
+
+def test_r1_recovery_wrapper_exports_same_state_root_as_deployer(tmp_path, monkeypatch):
+    """#2713: the R1 emergency path and the auto-deployer export one NEXUS_STATE_ROOT."""
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    home = tmp_path / "test-home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    r1 = g._recovery_wrapper_command(plan.desired_root)
+    cfg = ad.Config.default(home)
+    live = ad.wrapper_command(cfg, cfg.deployments / f"a1-{'b' * 40}", Path("/p/python"))
+    assert _exported(r1, "NEXUS_STATE_ROOT") == _exported(live, "NEXUS_STATE_ROOT")
+    assert _exported(r1, "NEXUS_STATE_ROOT") == str(
+        home / "Library/Application Support/Nexus/gateway-direct/state"
+    )
+    # Exported after the env file, so the env file cannot override it.
+    assert r1.index("NEXUS_STATE_ROOT=") > r1.index("source ")
+    # #2745: the same measurement-only guard, after the env file, before exec.
+    guard = ad.measurement_env_guard()
+    assert r1.index("source ") < r1.index(guard) < r1.index("exec ")
+    plist = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
+    assert plist["ProgramArguments"][2] == r1
+
+
+def test_r1_recovery_state_root_is_created_0700_and_validated(tmp_path, monkeypatch):
+    home = tmp_path / "test-home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    root = g._ensure_recovery_state_root()
+    assert root == home / "Library/Application Support/Nexus/gateway-direct/state"
+    assert root.is_dir() and stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert not any(root.iterdir())  # no .nexus markers are planted
+
+
+def test_r1_recovery_state_root_symlink_is_refused(tmp_path, monkeypatch):
+    home = tmp_path / "test-home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    link = home / "Library/Application Support/Nexus/gateway-direct/state"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+    with pytest.raises(g.GatewayContractError, match="R1 recovery state root rejected"):
+        g._ensure_recovery_state_root()

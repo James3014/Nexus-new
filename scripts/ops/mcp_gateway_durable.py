@@ -4038,12 +4038,31 @@ def _recovery_wrapper_command(root: str) -> str:
     # Durable lifecycle and research evidence belong to host state storage,
     # never an incidental directory under the repository workspace (#1539).
     state_dir = Path.home() / ".local/state/Nexus-new-self-hosted-state"
+    # Same fixed NEXUS_STATE_ROOT and measurement-only guard as the
+    # auto-deployer's live wrapper (#2713, #2745): one definition, reused.
+    from scripts.ops import nexus_gateway_auto_deploy as deployer
+
+    state_root = deployer.live_state_root()
+    if any(token in str(state_root) for token in deployer._SHELL_UNSAFE + (";", "|", "&")):
+        raise _gateway_error("R1 recovery wrapper state root contains shell metacharacter")
     return (
-        f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f'cd "{root_path}" ; source "{ENV_PATH}" ; {deployer.measurement_env_guard()}'
+        f"export PYTHONDONTWRITEBYTECODE=1 ; "
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state_dir}" ; '
+        f'export NEXUS_STATE_ROOT="{state_root}" ; '
         f'exec {_ACTUAL_INTERPRETER} "{entrypoint}"'
     )
+
+
+def _ensure_recovery_state_root() -> Path:
+    """Create/validate the fixed live state root before an R1 plist write (#2713)."""
+    from scripts.ops import nexus_gateway_auto_deploy as deployer
+
+    try:
+        return deployer.ensure_state_root_path(deployer.live_state_root())
+    except deployer.DeployError as exc:
+        raise _gateway_error("R1 recovery state root rejected", exc) from exc
 
 
 def _recovery_expected_plist_bytes(root: str) -> bytes:
@@ -4710,6 +4729,9 @@ def _production_recovery_adapters(
                 return RecoveryEffectAck(
                     **values, evidence_hash=canonical_hash(values)
                 )
+        # The R1 wrapper exports the fixed NEXUS_STATE_ROOT (#2713); it must
+        # exist (0700, owned, not a symlink) before any host effect.
+        _ensure_recovery_state_root()
         token = _recovery_token(token_loader)
         try:
             current_health = _recovery_health(token=token, opener=opener)
