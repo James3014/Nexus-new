@@ -2716,7 +2716,9 @@ def test_subclass_overrides_are_dispatched_through_self(tmp_path, monkeypatch) -
     assert svc._pid_alive(3) is True
 
 
-def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, monkeypatch) -> None:
+def test_finalize_records_learning_writeback_only_under_measurement_switch(
+    fin, monkeypatch
+) -> None:
     """#2721: with NEXUS_LEARNING_WRITEBACK=1 the VERIFIED update carries the write-back observation."""
     from nexus.orchestrator import p1_learning_writeback as learning_writeback
 
@@ -2724,7 +2726,12 @@ def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, 
 
     def fake_writeback(**kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
-        return {"schema": learning_writeback.SCHEMA, "enabled": True, "read_only": False, "card_written": True}
+        return {
+            "schema": learning_writeback.SCHEMA,
+            "enabled": True,
+            "read_only": False,
+            "card_written": True,
+        }
 
     monkeypatch.setattr(learning_writeback, "run_learning_writeback", fake_writeback)
     fin.reads = [dict(READ1), dict(READ2), dict(READ3)]

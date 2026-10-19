@@ -160,7 +160,9 @@ def test_writeback_failure_never_raises(tmp_path, state_root, monkeypatch):
 
 
 def test_finalize_calls_writeback_before_verified_update():
-    src = (Path(lw.__file__).parent / "self_hosted_task_service_parts" / "finalize_runtime.py").read_text()
+    src = (
+        Path(lw.__file__).parent / "self_hosted_task_service_parts" / "finalize_runtime.py"
+    ).read_text()
     call = src.index("writeback = run_learning_writeback(")
     assert call < src.index('update("VERIFIED", verified_values)')
 
