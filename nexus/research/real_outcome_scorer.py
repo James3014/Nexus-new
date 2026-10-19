@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
 SCORER_VERSION = "1.3.0"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
@@ -809,8 +809,50 @@ def _workflow_learning_pin(base_wt: Path) -> str:
 # Spec v3 §8 (#2709): recipes whose ``uv sync`` runs with ``--no-install-project``.
 NO_INSTALL_PROJECT_RECIPES = ("uv-sync-all-extras+canonical", "uv-sync-all-groups")
 STUB_INSTALLER = "nexus-real-outcome-scorer"
-_DIST_NAME = re.compile(r"^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])$", re.IGNORECASE)
-_STUB_VERSION = re.compile(r"^[A-Za-z0-9!+._-]+$")
+# PEP 508 distribution name, ASCII only (no IGNORECASE: it would also match some
+# non-ASCII letters). Used with fullmatch, so a trailing newline never matches.
+_DIST_NAME = re.compile(r"[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]")
+# Fallback when ``packaging`` is not importable: a strict ASCII PEP 440 public/local
+# version shape (epoch, release, pre/post/dev, local label).
+_STUB_VERSION = re.compile(
+    r"(?:[0-9]+!)?[0-9]+(?:\.[0-9]+)*"
+    r"(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?"
+    r"(?:-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?"
+    r"(?:[-_.]?dev[-_.]?[0-9]*)?"
+    r"(?:\+[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)?"
+)
+_SAFE_VERSION_CHARS = re.compile(r"[A-Za-z0-9!+._-]+")
+STUB_WHEEL = (
+    "Wheel-Version: 1.0\nGenerator: nexus-real-outcome-scorer\nRoot-Is-Purelib: true\n"
+    "Tag: py3-none-any\n"
+)
+
+
+def _pep503(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _valid_dist_name(name: object) -> TypeGuard[str]:
+    return isinstance(name, str) and name.isascii() and bool(_DIST_NAME.fullmatch(name))
+
+
+def _valid_version(version: object) -> TypeGuard[str]:
+    """PEP 440 (``packaging.version.Version`` when importable, else ``_STUB_VERSION``),
+    and in every case only ASCII letters, digits and ``!+._-``: no whitespace, newline,
+    path separator or non-ASCII character, which ``Version`` alone would tolerate."""
+    if not isinstance(version, str) or not version.isascii():
+        return False
+    if not _SAFE_VERSION_CHARS.fullmatch(version):
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:
+        return bool(_STUB_VERSION.fullmatch(version.lower()))
+    try:
+        Version(version)
+    except InvalidVersion:
+        return False
+    return True
 
 
 def _dist_info_name(name: str, version: str) -> str:
@@ -820,9 +862,11 @@ def _dist_info_name(name: str, version: str) -> str:
 
 
 def project_metadata(base_wt: Path) -> tuple[dict[str, str] | None, str | None]:
-    """(``{"name", "version"}``, None) from BASE ``pyproject.toml`` ``[project]``, or
-    (None, reason) when there is no static name and version to stub."""
+    """(``{"name", "version"}``, None) from ``pyproject.toml`` ``[project]`` in ``base_wt``,
+    or (None, reason) when there is no valid static name and version."""
     path = base_wt / "pyproject.toml"
+    if path.is_symlink():
+        return None, "pyproject_symlink"
     if not path.is_file():
         return None, "no_pyproject_toml"
     try:
@@ -833,7 +877,7 @@ def project_metadata(base_wt: Path) -> tuple[dict[str, str] | None, str | None]:
     if not isinstance(project, dict):
         return None, "no_project_table"
     name = project.get("name")
-    if not isinstance(name, str) or not _DIST_NAME.match(name):
+    if not _valid_dist_name(name):
         return None, "project_name_missing_or_invalid"
     dynamic = project.get("dynamic") or []
     if isinstance(dynamic, list) and "version" in dynamic:
@@ -841,17 +885,61 @@ def project_metadata(base_wt: Path) -> tuple[dict[str, str] | None, str | None]:
     version = project.get("version")
     if version is None:
         return None, "version_missing"
-    if not isinstance(version, str) or not _STUB_VERSION.match(version):
+    if not _valid_version(version):
         return None, "version_invalid"
     return {"name": name, "version": version}, None
+
+
+def _metadata_name(entry: Path) -> str | None:
+    """``Name:`` from a ``.dist-info`` (METADATA) or ``.egg-info`` (PKG-INFO, or the file
+    itself) entry, or None when it cannot be read."""
+    candidates = [entry / "METADATA", entry / "PKG-INFO"] if entry.is_dir() else [entry]
+    for meta in candidates:
+        try:
+            text = meta.read_text(errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if not line.strip():
+                break  # end of the header block
+            key, _, value = line.partition(":")
+            if key.strip().lower() == "name":
+                return value.strip()
+    return None
+
+
+def _installed_as(site_packages: Path, name: str) -> str | None:
+    """The first ``*.dist-info`` / ``*.egg-info`` entry in ``site_packages`` that is the
+    project ``name`` (PEP 503 comparison, whatever separator or case the entry uses): by
+    its METADATA / PKG-INFO ``Name`` when readable, else by the entry name."""
+    want = _pep503(name)
+    for entry in sorted(site_packages.iterdir()):
+        for suffix in (".dist-info", ".egg-info"):
+            if entry.name.lower().endswith(suffix):
+                stem = _pep503(entry.name[: -len(suffix)])
+                break
+        else:
+            continue
+        # The Name field decides whenever it can be read, whatever the entry is called.
+        listed = _metadata_name(entry)
+        if listed is not None:
+            if _pep503(listed) == want:
+                return entry.name
+            continue
+        # No readable Name: decide by the entry name (the rest must look like a version).
+        if stem == want or (
+            stem.startswith(want + "-") and stem[len(want) + 1 : len(want) + 2].isdigit()
+        ):
+            return entry.name
+    return None
 
 
 def write_project_metadata_stub(
     base_wt: Path, site_packages: Path
 ) -> tuple[dict[str, str] | None, str | None]:
     """Spec v3 §8: write a metadata-only ``<name>-<version>.dist-info`` for the BASE project
-    into ``site_packages``. It holds METADATA, INSTALLER and RECORD only: no code, no
-    ``.pth`` and no ``direct_url.json``, so imports still resolve only through
+    into ``site_packages``. It holds METADATA, INSTALLER, WHEEL and RECORD only: no code,
+    no ``.pth`` and no ``direct_url.json``, so imports still resolve only through
     ``PYTHONPATH=<tree>``. Returns (stub, None) or (None, reason) when nothing was written."""
     meta, reason = project_metadata(base_wt)
     if meta is None:
@@ -859,18 +947,20 @@ def write_project_metadata_stub(
     site_packages = Path(site_packages)
     if not site_packages.is_dir():
         return None, "site_packages_not_found"
+    installed = _installed_as(site_packages, meta["name"])
+    if installed is not None:
+        return None, f"project_already_installed:{installed}"
     dist_info = _dist_info_name(meta["name"], meta["version"])
-    prefix = dist_info.split("-", 1)[0] + "-"
-    for existing in site_packages.iterdir():
-        if existing.name.endswith(".dist-info") and existing.name.lower().startswith(prefix):
-            return None, f"project_already_installed:{existing.name}"
     target = site_packages / dist_info
+    if target.parent != site_packages or target.name != dist_info or "/" in dist_info:
+        return None, "project_name_missing_or_invalid"
     target.mkdir()
     files = {
         "METADATA": (
             f"Metadata-Version: 2.1\nName: {meta['name']}\nVersion: {meta['version']}\n"
         ).encode(),
         "INSTALLER": f"{STUB_INSTALLER}\n".encode(),
+        "WHEEL": STUB_WHEEL.encode(),
     }
     record = []
     for fname, body in files.items():
@@ -880,6 +970,23 @@ def write_project_metadata_stub(
     record.append(f"{dist_info}/RECORD,,")
     (target / "RECORD").write_text("\n".join(record) + "\n")
     return {**meta, "dist_info": dist_info}, None
+
+
+def tree_project_metadata(wt: Path) -> dict[str, str]:
+    """v3 diagnostic: ``{"name", "version"}`` of a scored tree's pyproject, or
+    ``{"reason": ...}``. Never read by a label rule."""
+    meta, reason = project_metadata(wt)
+    return dict(meta) if meta is not None else {"reason": str(reason)}
+
+
+def _metadata_mismatch(stub: Mapping[str, Any] | None, trees: Mapping[str, Any]) -> bool:
+    if not stub:
+        return False
+    want = (_pep503(str(stub["name"])), str(stub["version"]))
+    return any(
+        t is not None and (_pep503(str(t.get("name", ""))), str(t.get("version", ""))) != want
+        for t in trees.values()
+    )
 
 
 def _site_packages(env_dir: Path) -> Path | None:
@@ -2004,6 +2111,15 @@ def _score_task(
             else:
                 receipt["project_metadata_stub"] = None
                 receipt["project_metadata_stub_reason"] = "env_provider_without_v3_stub"
+            # Diagnostic only (#2709 review): the stub is BASE's; a GOLD or candidate
+            # pyproject with another name or version is flagged, never used by a label.
+            receipt["project_metadata_tree_versions"] = {
+                "GOLD": tree_project_metadata(wts["gold"]),
+                "CAND": None,
+            }
+            receipt["project_metadata_version_mismatch"] = _metadata_mismatch(
+                receipt["project_metadata_stub"], receipt["project_metadata_tree_versions"]
+            )
 
         if candidate_override and candidate_override.startswith("gold"):
             diff = repo.git("diff", "--binary", "--no-renames", base_tree, gold_tree).stdout
@@ -2141,6 +2257,11 @@ def _score_task(
             return _finish(receipt, timing, t0, ctx)
         candt_tree = repo.tree_id(wts["candt"], untracked_paths)
         receipt["trees"].update({"CAND": cand_tree, "CAND+T": candt_tree})
+        if "project_metadata_tree_versions" in receipt:
+            receipt["project_metadata_tree_versions"]["CAND"] = tree_project_metadata(wts["candt"])
+            receipt["project_metadata_version_mismatch"] = _metadata_mismatch(
+                receipt["project_metadata_stub"], receipt["project_metadata_tree_versions"]
+            )
         # v2 P2P(d): BASE tests in a merge-taken test file are gone from every scored
         # tree (main deleted or rewrote them), and P2P(b/c) ignores oracle files. So the
         # BASE version of each such module is also run, on trees that all carry the BASE

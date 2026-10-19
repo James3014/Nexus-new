@@ -2892,7 +2892,15 @@ def test_v3_stub_has_normalized_name_and_metadata_version_works(tmp_path):
         "dist_info": "nexus_certify_demo-0.3.0.dist-info",
     }
     dist = site / stub["dist_info"]
-    assert sorted(p.name for p in dist.iterdir()) == ["INSTALLER", "METADATA", "RECORD"]
+    assert sorted(p.name for p in dist.iterdir()) == ["INSTALLER", "METADATA", "RECORD", "WHEEL"]
+    assert (dist / "WHEEL").read_text() == (
+        "Wheel-Version: 1.0\nGenerator: nexus-real-outcome-scorer\nRoot-Is-Purelib: true\n"
+        "Tag: py3-none-any\n"
+    )
+    listed = [line.split(",")[0] for line in (dist / "RECORD").read_text().splitlines()]
+    assert sorted(listed) == sorted(
+        f"{stub['dist_info']}/{f}" for f in ("INSTALLER", "METADATA", "RECORD", "WHEEL")
+    )
     assert (dist / "METADATA").read_text() == (
         "Metadata-Version: 2.1\nName: Nexus.Certify_Demo\nVersion: 0.3.0\n"
     )
@@ -2924,7 +2932,10 @@ def test_v3_stub_never_shadows_the_tree(tmp_path):
     assert stub is not None
     added = {p.relative_to(env_dir) for p in env_dir.rglob("*")} - before
     dist_rel = site.relative_to(env_dir) / stub["dist_info"]
-    assert added == {dist_rel, *(dist_rel / f for f in ("INSTALLER", "METADATA", "RECORD"))}
+    assert added == {
+        dist_rel,
+        *(dist_rel / f for f in ("INSTALLER", "METADATA", "RECORD", "WHEEL")),
+    }
     assert not [p for p in added if p.suffix in {".pth", ".py", ".pyc", ".so", ".json"}]
     tree = tmp_path / "tree"
     shutil.copytree(base, tree)
@@ -2961,15 +2972,90 @@ def test_v3_no_static_version_means_no_stub_and_a_reason(tmp_path, pyproject, re
     assert list(site.iterdir()) == []
 
 
-def test_v3_stub_refuses_when_project_already_installed(tmp_path):
+@pytest.mark.parametrize(
+    ("entry", "metadata"),
+    [
+        ("nexus_certify_demo-0.2.0.dist-info", None),
+        ("nexus-certify-demo-0.2.0.dist-info", None),
+        ("Nexus.Certify.Demo-0.2.0.dist-info", None),
+        ("nexus_certify_demo-0.2.0-py3.12.egg-info", None),
+        ("nexus_certify_demo.egg-info", "file"),
+        ("odd-name-9.dist-info", "Name: Nexus-Certify.DEMO\n"),
+    ],
+)
+def test_v3_stub_refuses_when_project_already_installed(tmp_path, entry, metadata):
     base = tmp_path / "base"
     _write(base, {"pyproject.toml": V3_PYPROJECT})
     site = tmp_path / "site"
-    (site / "nexus_certify_demo-0.2.0.dist-info").mkdir(parents=True)
+    site.mkdir()
+    if metadata == "file":  # an egg-info that is itself the PKG-INFO file
+        (site / entry).write_text("Metadata-Version: 1.0\nName: nexus-certify-demo\n")
+    else:
+        (site / entry).mkdir()
+        if metadata:
+            (site / entry / "METADATA").write_text(metadata)
     assert ros.write_project_metadata_stub(base, site) == (
         None,
-        "project_already_installed:nexus_certify_demo-0.2.0.dist-info",
+        f"project_already_installed:{entry}",
     )
+    assert sorted(p.name for p in site.iterdir()) == [entry]
+
+
+def test_v3_stub_ignores_other_projects_with_a_shared_prefix(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT})
+    site = tmp_path / "site"
+    other = site / "nexus_certify_demo_extra-1.0.dist-info"
+    other.mkdir(parents=True)
+    (other / "METADATA").write_text("Metadata-Version: 2.1\nName: nexus-certify-demo-extra\n")
+    (site / "nexus_certify_demo_tools.egg-info").mkdir()  # no Name, rest is not a version
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert reason is None and stub is not None
+    assert stub["dist_info"] == "nexus_certify_demo-0.3.0.dist-info"
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "reason"),
+    [
+        ('"demo\\n"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"d\u00e9mo"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"\u212aelvin"', '"1.0"', "project_name_missing_or_invalid"),  # KELVIN SIGN
+        ('"../x"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"a/b"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"demo"', '"1.0\\n"', "version_invalid"),
+        ('"demo"', '" 1.0"', "version_invalid"),
+        ('"demo"', '"1.\u0661"', "version_invalid"),  # ARABIC-INDIC DIGIT ONE
+        ('"demo"', '"../1.0"', "version_invalid"),
+        ('"demo"', '"1.0/x"', "version_invalid"),
+        ('"demo"', '"not-a-version"', "version_invalid"),
+        ('"demo"', "1", "version_invalid"),
+    ],
+)
+def test_v3_stub_rejects_unsafe_name_or_version(tmp_path, name, version, reason):
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "pyproject.toml").write_text(f"[project]\nname = {name}\nversion = {version}\n")
+    site = tmp_path / "site"
+    site.mkdir()
+    assert ros.write_project_metadata_stub(base, site) == (None, reason)
+    assert list(site.iterdir()) == []
+
+
+def test_v3_version_fallback_regex_without_packaging(tmp_path, monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_packaging(name, *a, **k):
+        if name.startswith("packaging"):
+            raise ImportError(name)
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_packaging)
+    for good in ("1.0", "0.3.0", "1!2.0rc1.post2.dev3+local.1", "2.0b1"):
+        assert ros._valid_version(good), good
+    for bad in ("1.0\n", "x1", "1.0/x", "..", "1..0", "1.0+", ""):
+        assert not ros._valid_version(bad), bad
 
 
 class _FakeUv:
@@ -3234,9 +3320,35 @@ def test_v3_stub_restores_p2p_and_catches_a_regression(tmp_path):
         "dist_info": "fixture_proj-1.0.dist-info",
     }
     assert v3["project_metadata_stub_reason"] is None
+    same = {"name": "fixture-proj", "version": "1.0"}
+    assert v3["project_metadata_tree_versions"] == {"GOLD": same, "CAND": same}
+    assert v3["project_metadata_version_mismatch"] is False
+    assert "project_metadata_tree_versions" not in v1
     gold_ctx = _v3_ctx(tmp_path, fx, work="w-gold", env=_StubLocalEnv(tmp_path / "s2"))
     gold = ros.score_task(task, gold_ctx, candidate_override="gold")["receipt"]
     assert gold["label"] == ros.RESOLVED
+
+
+def test_v3_flags_a_candidate_project_version_without_changing_the_label(tmp_path):
+    pyproject = '[project]\nname = "fixture-proj"\nversion = "1.0"\n'
+    fx = Fixture(
+        tmp_path,
+        extra_base={"pyproject.toml": pyproject, "tests/test_version.py": METADATA_TEST},
+    )
+    bumped = fx.diff_from_base({
+        "pkg/calc.py": FIXED,
+        "pyproject.toml": pyproject.replace('"1.0"', '"1.1"'),
+    })
+    ctx = _v3_ctx(tmp_path, fx, env=_StubLocalEnv(tmp_path / "stub"))
+    r = ros.score_task(fx.task(bumped), ctx)["receipt"]
+    # The env carries BASE's metadata (1.0), so the BASE test still passes: RESOLVED.
+    assert r["label"] == ros.RESOLVED
+    assert r["project_metadata_stub"]["version"] == "1.0"
+    assert r["project_metadata_tree_versions"] == {
+        "GOLD": {"name": "fixture-proj", "version": "1.0"},
+        "CAND": {"name": "fixture-proj", "version": "1.1"},
+    }
+    assert r["project_metadata_version_mismatch"] is True
 
 
 def test_v1_receipt_shape_is_unchanged(tmp_path, fx):
@@ -3246,6 +3358,8 @@ def test_v1_receipt_shape_is_unchanged(tmp_path, fx):
         "spec_v3_base_rules",
         "project_metadata_stub",
         "project_metadata_stub_reason",
+        "project_metadata_tree_versions",
+        "project_metadata_version_mismatch",
     } & set(r)
     pending = ros.score_task(fx.task(terminal=None), _ctx(tmp_path, fx, work="w2"))["receipt"]
     assert set(pending) == V124_BASE_RECEIPT_KEYS | {"flaky_dropped"}

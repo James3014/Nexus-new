@@ -257,11 +257,14 @@ The default is `none`.
 
 `REAL_OUTCOME_SCORER_SPEC.v3.md` holds the rule. In short: after
 `uv sync --no-install-project`, the env gets a `<name>-<version>.dist-info` with only
-`METADATA`, `INSTALLER` and `RECORD`, taken from BASE `pyproject.toml` `[project]`, so
+`METADATA`, `INSTALLER`, `WHEEL` and `RECORD`, taken from BASE `pyproject.toml` `[project]`, so
 `importlib.metadata.version(<project>)` works while imports still resolve only through
 `PYTHONPATH=<tree>`. Without it, nexus-core's `pytest tests` stops at a
-`PackageNotFoundError` for `nexus-certify` and collects about 2 nodes, which hides
-regressions (Issue #2709).
+`PackageNotFoundError` for `nexus-certify`: the `BASE+T` run exits 2 with no passing
+node, so the P2P(c) base set is empty (`p2p_total` 0), which hides regressions
+(Issue #2709). v3 receipts also carry the diagnostic `project_metadata_tree_versions` /
+`project_metadata_version_mismatch` (GOLD or candidate pyproject differs from the BASE
+stub); no label reads it.
 
 - This is a rule change, so it is a new spec file and it is opt-in: the CLI gains
   `--spec-version {v1,v3}`, default `v1`. With `v1` nothing changes (env build, pytest

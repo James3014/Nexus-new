@@ -32,7 +32,9 @@ and v2:
   scorer 1.2.4. `spec_version_counts` counts every receipt by version, and
   `unknown_spec_versions` now counts the versions other than `"v1"`, `"v2"` and `"v3"`.
 - The intended use is to rescore the affected V12 tasks under v3 and report them next to
-  the unchanged v1 headline, never in place of it.
+  the unchanged v1 headline, never in place of it. A v3 rescore needs its own `--out`
+  store: the CLI skips every task that already has a receipt in `--out`, so pointing it
+  at a v1 store would rescore nothing.
 
 ## A10: a metadata-only stub for the BASE project
 
@@ -41,9 +43,10 @@ and v2:
 `--all-extras`), so the project's own distribution metadata is never installed. Code
 under test that asks for it fails. In nexus-core, `tests/product/test_client_conformance.py`
 calls `importlib.metadata.version("nexus-certify")` at import time. That raises
-`PackageNotFoundError`, pytest stops collecting, and the P2P(c) run `pytest tests` collects
-about 2 nodes. A candidate that breaks existing tests is then `UNRESOLVED` instead of
-`BROKE_EXISTING`.
+`PackageNotFoundError`, pytest stops collecting, and the P2P(c) run `pytest tests` on
+`BASE+T` exits 2 (collection interrupted) with no passing node. The P2P(c) base set is
+empty (`p2p_total` 0). A candidate that breaks existing tests is then `UNRESOLVED` (or
+even `RESOLVED`) instead of `BROKE_EXISTING`.
 
 **Why not install the project.** A regular or editable install of BASE would put BASE
 code (or a `.pth` that points at the BASE tree) on `sys.path`, where it can shadow the
@@ -63,25 +66,36 @@ installs; and `uv-sync-all-groups`), the scorer writes one directory into the en
   `nexus-certify` 0.3.0 gives `nexus_certify-0.3.0.dist-info`, so
   `importlib.metadata.version("nexus-certify")` returns `0.3.0`.
 - Content: `METADATA` (`Metadata-Version: 2.1`, `Name`, `Version`), `INSTALLER`
-  (`nexus-real-outcome-scorer`) and a valid `RECORD` that lists those files. Nothing else:
+  (`nexus-real-outcome-scorer`), `WHEEL` (`Wheel-Version: 1.0`,
+  `Generator: nexus-real-outcome-scorer`, `Root-Is-Purelib: true`, `Tag: py3-none-any`,
+  so `uv pip check` does not report the stub as broken) and a valid `RECORD` that lists
+  those files with their sha256 and size. Nothing else:
   no code, no `.pth`, no `direct_url.json`, no entry points, no editable install. Imports
   still resolve only through `PYTHONPATH=<tree>` (plus `<tree>/src`), so the tree under
   test is never shadowed.
+- Name and version come from an untrusted file, so they are checked before use, with
+  ASCII-only full matches (a trailing newline, a non-ASCII letter or digit, whitespace or a
+  path separator such as `../x` or `a/b` is refused). The name must match the PEP 508
+  name pattern `[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]`. The version must be a
+  PEP 440 version (`packaging.version.Version` when `packaging` is importable, otherwise a
+  strict ASCII PEP 440 pattern) made only of ASCII letters, digits and `!+._-`. The
+  directory written must be a direct child of `site-packages`.
 - The stub comes from BASE only, like the rest of the env (§8). A candidate or GOLD change
-  to the project name or version is not reflected.
+  to the project name or version is not reflected (see "BASE metadata on every tree").
 
 No stub is written, and the receipt says why, when:
 
 | Case | `project_metadata_stub_reason` |
 |---|---|
 | BASE has no `pyproject.toml` | `no_pyproject_toml` |
-| `pyproject.toml` does not parse | `pyproject_unreadable:<error>` |
+| `pyproject.toml` is a symlink | `pyproject_symlink` |
+| `pyproject.toml` does not parse | `pyproject_unreadable:<ExceptionType>` (e.g. `TOMLDecodeError`) |
 | no `[project]` table | `no_project_table` |
-| `[project].name` missing or not a valid distribution name | `project_name_missing_or_invalid` |
+| `[project].name` missing or fails the name check above | `project_name_missing_or_invalid` |
 | `version` is listed in `[project].dynamic` | `dynamic_version` |
 | `[project].version` missing | `version_missing` |
-| `[project].version` is not a plain version string | `version_invalid` |
-| a `.dist-info` for the same normalised name is already in `site-packages` | `project_already_installed:<dir>` |
+| `[project].version` fails the version check above | `version_invalid` |
+| a `*.dist-info` or `*.egg-info` in `site-packages` is the same project: its METADATA / PKG-INFO `Name` when readable, otherwise its entry name, equals the project name after PEP 503 normalisation (`re.sub(r"[-_.]+", "-", name).lower()`), whatever separator or case the entry uses | `project_already_installed:<dir>` |
 | the env has no single `lib/python*/site-packages` | `site_packages_not_found` |
 | the recipe has no project install step (below) | `recipe_without_project_install:<recipe>` |
 
@@ -93,6 +107,34 @@ with `uv venv` plus pinned packages. That recipe has no project and no
 `--no-install-project` step, so v3 leaves it unchanged and writes no stub
 (`recipe_without_project_install:uv-venv-runtime-pins`). Under v3 such a task differs from
 v1 only in its spec fields and its env key.
+
+### BASE metadata on every tree
+
+The env, and so the stub, is built once from BASE and used for every tree (`BASE+T`,
+`GOLD`, `CAND+T` and the others). Per-tree envs are out of scope. So when GOLD or the
+candidate changes `[project].name` or `[project].version`, the installed metadata still
+says BASE's. Consequences:
+
+- **GOLD and the candidate both bump the version** (the usual case when the human fix
+  bumps it and the candidate copies the bump). A test that needs the installed metadata to
+  match the tree fails on GOLD as well. As an oracle node it cannot be F2P (it must pass
+  3/3 on GOLD). As a P2P suspect it fails on GOLD and is dropped as `gold_also_fails`.
+  Either way it never counts against the candidate.
+- **Only the candidate bumps the version** and a BASE test compares the installed
+  metadata with the tree's `pyproject.toml`. That test passes on `BASE+T` and fails on
+  `CAND+T` and passes on GOLD, so it is a P2P new failure: a false `BROKE_EXISTING` is
+  possible. The diagnostic below flags this case.
+
+**Diagnostic.** Every v3 receipt that reached the env build records
+`project_metadata_tree_versions`: `{"GOLD": …, "CAND": …}`, each the `{"name",
+"version"}` read from that tree's `pyproject.toml` with the same checks as the stub, or
+`{"reason": …}` when there is none. `"CAND"` is `null` when scoring stopped before the
+candidate tree was built (for example `NO_CANDIDATE`). It also records
+`project_metadata_version_mismatch`: `true` when a stub was written and either tree's
+name (PEP 503 normalised) or version differs from it (a tree with no valid static
+metadata counts as differing), otherwise `false`. No label, sub-reason or
+`shadow_label` reads these fields. A reader should check a v3 `BROKE_EXISTING` that has
+`project_metadata_version_mismatch: true` by hand.
 
 ### Receipt and cache keys
 
