@@ -221,3 +221,100 @@ def test_task_root_outside_gateway_targets_is_not_written(tmp_path, state_root, 
     obs = _run(tmp_path, target=other)
     assert obs["skip_reason"] == "ROOT_NOT_REBASED"
     assert not (other / ".nexus").exists() and not (state_root / ".nexus").exists()
+
+
+def test_only_diff_checks_is_unverified_and_writes_no_belief(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    verified = SimpleNamespace(
+        verifier_gate_passed=True,
+        candidate_state_hash="cd" * 32,
+        verifier_evidence=(
+            SimpleNamespace(command="git diff --check", status="COMPLETED", exit_code=0),
+        ),
+    )
+    obs = lw.run_learning_writeback(
+        contract=_contract(_target(tmp_path)),
+        candidate=_candidate(),
+        verified=verified,
+        resolution_verdict="PROVEN",
+    )
+    assert obs["outcome"] == "UNVERIFIED" and obs["belief_keys"] == []
+    assert not (Path(obs["store_root"]) / ".nexus" / "belief_state.json").exists()
+
+
+def test_fail_to_pass_not_run_is_unverified(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    obs = _run(tmp_path, fail_to_pass_status="NOT_RUN")
+    assert obs["outcome"] == "UNVERIFIED" and obs["belief_keys"] == []
+
+
+def test_state_root_inside_the_task_worktree_is_refused(tmp_path, state_root, monkeypatch):
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    target = _target(tmp_path)
+    inside = target / "state"
+    inside.mkdir()
+    monkeypatch.setenv("NEXUS_STATE_ROOT", str(inside))
+    obs = _run(tmp_path, target=target)
+    assert obs["skip_reason"] == "ROOT_NOT_REBASED" and not (inside / ".nexus").exists()
+
+
+def test_card_is_built_from_whitelisted_fields_only(tmp_path, state_root, monkeypatch):
+    """Poisoned extra inputs (hidden tests, scorer, task bank) never reach the card or Belief."""
+    monkeypatch.setenv(lw.WRITEBACK_ENV, "1")
+    poison = "POISON_F2P_P2P_SCORER_TASKBANK"
+    contract = _contract(_target(tmp_path))
+    contract.hidden_tests = poison
+    contract.scorer_result = poison
+    contract.task_bank_entry = poison
+    candidate = _candidate()
+    candidate.fail_to_pass = poison
+    candidate.stdout = poison
+    verified = _verified(True)
+    verified.scorer = poison
+    verified.verifier_evidence = (
+        SimpleNamespace(
+            command="python -m pytest tests/test_mod.py",
+            status="COMPLETED",
+            exit_code=0,
+            stdout=poison,
+            stderr=poison,
+        ),
+    )
+    written = []
+
+    class Recorder:
+        def __init__(self, root):
+            pass
+
+        def write(self, card):
+            written.append(card)
+            return "x"
+
+    obs = lw.run_learning_writeback(
+        contract=contract,
+        candidate=candidate,
+        verified=verified,
+        resolution_verdict="PROVEN",
+        fail_to_pass_status=poison,
+        memory_store_factory=Recorder,
+    )
+    assert poison not in json.dumps(written[0].to_dict())
+    beliefs = (Path(obs["store_root"]) / ".nexus" / "belief_state.json").read_text()
+    assert poison not in beliefs and poison not in json.dumps(obs)
+
+
+def test_read_only_leaves_in_memory_belief_unchanged(tmp_path, state_root, monkeypatch):
+    engine = BeliefEngine(tmp_path / "b2" / "belief_state.json")
+    monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
+    engine.update_belief("t", "repair_outcome:file:x.py", 0.9, "e")
+    assert "repair_outcome:file:x.py" not in engine.beliefs
+
+
+def test_read_only_disables_local_heal_learning_closure(monkeypatch):
+    from nexus.services.local_heal import learning_closure_bridge as bridge
+
+    monkeypatch.delenv(bridge.LEARNING_WRITEBACK_ENV, raising=False)
+    monkeypatch.delenv(lw.READ_ONLY_ENV, raising=False)
+    assert bridge._learning_writeback_disabled() is False
+    monkeypatch.setenv(lw.READ_ONLY_ENV, "1")
+    assert bridge._learning_writeback_disabled() is True

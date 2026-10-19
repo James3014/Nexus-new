@@ -413,6 +413,8 @@ class LearnModeService:
         4) skill_outcome_events writeback
         5) policy_memory route-phase weight sync
         """
+        if state_read_only():  # #2721 L-B: frozen learning state, nothing persisted or synced
+            return {"action": action, "status": status, "skipped": "NEXUS_STATE_READ_ONLY"}
         closure: dict[str, Any] = {
             "action": action,
             "status": status,
@@ -564,8 +566,6 @@ class LearnModeService:
             "stages": episode["stages"],
             "learning_write_succeeded": write_ok,
         })
-        if state_read_only():  # #2721 L-B: frozen learning state
-            return
         if not append_learning_episode(
             canonical_learning_episode_path(persistent_state_root(self.project_root)), episode
         ):

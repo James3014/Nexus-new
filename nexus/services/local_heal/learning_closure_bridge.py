@@ -35,6 +35,8 @@ _DISABLED_WRITEBACK_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _learning_writeback_disabled() -> bool:
+    if state_read_only():  # #2721 L-B: frozen learning state, no episode, lesson or reflection
+        return True
     return os.environ.get(LEARNING_WRITEBACK_ENV, "").strip().lower() in _DISABLED_WRITEBACK_VALUES
 
 
@@ -543,8 +545,6 @@ class LearningClosureBridge:
         lesson["stages"] = dict(episode.get("stages") or {})
         if reflection is not None:
             lesson["reflection"] = reflection
-        if state_read_only():  # #2721 L-B: frozen learning state, nothing persisted
-            return lesson
         lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:

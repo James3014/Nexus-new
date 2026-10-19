@@ -64,6 +64,19 @@ def _changed_files(candidate: Any) -> list[str]:
     return sorted(files)[:_MAX_FILES]
 
 
+# Verifier commands that check the diff but run no test: they cannot make a run PASSED
+# (#2721 gap review: L-A must not store unverified "successes").
+_NON_TEST_VERIFIERS = frozenset({"git diff --check", "code_integrity_v1"})
+
+
+def _has_real_test(verifiers: list[dict[str, Any]]) -> bool:
+    return any(
+        str(item.get("command") or "").strip() not in _NON_TEST_VERIFIERS
+        and str(item.get("command") or "").strip()
+        for item in verifiers
+    )
+
+
 def _verifier_results(verified: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in list(_get(verified, "verifier_evidence", None) or ())[:_MAX_VERIFIERS]:
@@ -127,9 +140,18 @@ def run_learning_writeback(
         # A task whose acceptance requires fail-to-pass counts as PASSED only once the
         # probe recorded VERIFIED (finalize calls this after the probe for such tasks).
         # The probe status decides the outcome only; it is not written to the card.
-        f2p_ok = fail_to_pass_status is None or str(fail_to_pass_status) == "VERIFIED"
-        proven = str(resolution_verdict) == "PROVEN" and f2p_ok
-        outcome = "PASSED" if (proven and verifier_passed) else "FAILED"
+        if not _has_real_test(verifiers) or str(fail_to_pass_status) == "NOT_RUN":
+            # Only diff checks ran, or a required fail-to-pass probe never ran: no
+            # evidence either way.  Card says so; no Belief entry is written.
+            outcome = "UNVERIFIED"
+        elif (
+            str(resolution_verdict) == "PROVEN"
+            and verifier_passed
+            and (fail_to_pass_status is None or str(fail_to_pass_status) == "VERIFIED")
+        ):
+            outcome = "PASSED"
+        else:
+            outcome = "FAILED"
         # Same root the P1 memory reader uses: workspace_root = the task's own worktree,
         # contract.target_repo_root.  (target_worktree_root is the shared targets
         # directory, its parent, which persistent_state_root does not rebase.)
@@ -137,8 +159,9 @@ def run_learning_writeback(
         if not str(task_root).strip():
             observation["skip_reason"] = "NO_TASK_ROOT"
             return observation
-        root = persistent_state_root(Path(str(task_root)))
-        if root == Path(str(task_root)) or not root.is_absolute():
+        task_path = Path(str(task_root)).resolve()
+        root = persistent_state_root(Path(str(task_root))).resolve()
+        if root == task_path or root.is_relative_to(task_path) or not root.is_absolute():
             # Not rebased to NEXUS_STATE_ROOT (not a Gateway task worktree): never
             # write into the candidate's own tree.
             observation["skip_reason"] = "ROOT_NOT_REBASED"
@@ -178,9 +201,13 @@ def run_learning_writeback(
 
         engine = (belief_engine_factory or BeliefEngine)(root / ".nexus" / "belief_state.json")
         confidence = _PASS_CONFIDENCE if outcome == "PASSED" else _FAIL_CONFIDENCE
+        if outcome == "UNVERIFIED":
+            files_for_belief: list[str] = []
+        else:
+            files_for_belief = files
         evidence_id = f"p1_writeback:{task_id}:{card.id}"
         keys: list[str] = []
-        for path in files:
+        for path in files_for_belief:
             key = repair_target_key(path)
             if not key:
                 continue

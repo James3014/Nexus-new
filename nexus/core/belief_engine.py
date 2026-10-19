@@ -83,6 +83,8 @@ class BeliefEngine:
         return self.assess_confidence(task_id, assumption, target_file)
 
     def update_belief(self, task_id: str, assumption: str, confidence: float, evidence_id: str):
+        if state_read_only():  # #2721 L-B: no change in memory either (long-lived engines)
+            return
         self.beliefs[assumption] = {
             "confidence": confidence,
             "evidence": evidence_id,

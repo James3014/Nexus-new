@@ -389,7 +389,10 @@ class _FinalizeRuntimeMixin:
         # #2721 measurement only: write the run back to memory/Belief (no-op unless
         # NEXUS_LEARNING_WRITEBACK=1 and not NEXUS_STATE_READ_ONLY=1).  A task that
         # requires fail-to-pass writes back after its probe instead (below).
-        if not fail_to_pass_required:
+        proven = resolution.verdict == _service_module().AttemptResolutionVerdict.PROVEN.value
+        writeback_deferred = fail_to_pass_required and proven
+        if not writeback_deferred:
+            # Failed attempts (they raise just below) and non-F2P tasks write back now.
             writeback = self._learning_writeback(contract, candidate, verified, resolution, None)
             if writeback:
                 verified_values["learning_writeback"] = writeback
@@ -404,6 +407,11 @@ class _FinalizeRuntimeMixin:
             request=request,
         )
         if authority_error:
+            deferred_writeback = (
+                self._learning_writeback(contract, candidate, verified, resolution, "NOT_RUN")
+                if writeback_deferred
+                else {}
+            )
             cleanup = manager.cleanup_terminal_target(contract, lease)
             cleanup_ok = cleanup.decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
             terminal_status = (
@@ -433,6 +441,7 @@ class _FinalizeRuntimeMixin:
                     "terminal_status": terminal_status,
                     "state_retention_status": "TERMINAL",
                     "archive_eligible": False,
+                    **({"learning_writeback": deferred_writeback} if deferred_writeback else {}),
                 },
             )
             return {

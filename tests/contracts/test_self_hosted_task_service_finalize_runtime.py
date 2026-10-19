@@ -2762,3 +2762,49 @@ def test_finalize_writeback_failure_without_switch_leaves_state_unchanged(fin, m
     fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
     fin.run()
     assert "learning_writeback" not in dict(fin.updates)["VERIFIED"]
+
+
+def _capture_writeback(monkeypatch) -> list[dict[str, Any]]:
+    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+
+    calls: list[dict[str, Any]] = []
+
+    def fake(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"schema": learning_writeback.SCHEMA, "enabled": True, "read_only": False}
+
+    monkeypatch.setattr(learning_writeback, "run_learning_writeback", fake)
+    return calls
+
+
+def test_finalize_f2p_required_failed_attempt_still_writes_back(fin, monkeypatch) -> None:
+    """#2721: a non-PROVEN attempt on an F2P task writes FAILED back before it raises."""
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.resolution = SimpleNamespace(verdict="FAILED", failure_reasons=["verifier"])
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    with pytest.raises(RuntimeError):
+        fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == [None]
+    assert "learning_writeback" in dict(fin.updates)["VERIFIED"]
+
+
+def test_finalize_f2p_required_proven_writes_back_after_the_probe(fin, monkeypatch) -> None:
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.probe = {"status": "BASE_ALREADY_PASS", "base_exit_codes": [0]}
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    with pytest.raises(RuntimeError):
+        fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == ["BASE_ALREADY_PASS"]
+    assert fin.updates[-1][1]["learning_writeback"]["enabled"] is True
+
+
+def test_finalize_f2p_required_authority_return_writes_back_not_run(fin, monkeypatch) -> None:
+    calls = _capture_writeback(monkeypatch)
+    fin.contract.acceptance_profile = SimpleNamespace(required_evidence=(TOKEN,))
+    fin.authority = "PROMOTION_AUTHORITY_REQUIRED"
+    fin.reads = [dict(READ1), dict(READ2), dict(READ3)]
+    fin.run()
+    assert [c["fail_to_pass_status"] for c in calls] == ["NOT_RUN"]
+    assert "learning_writeback" in fin.updates[-1][1]
