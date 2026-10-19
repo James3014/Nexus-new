@@ -286,7 +286,7 @@ class _FinalizeRuntimeMixin:
         is recorded only under a switch, so live state stays byte-identical.
         """
         try:
-            from nexus.orchestrator.self_hosted_task_service_parts.learning_writeback import (
+            from nexus.orchestrator.p1_learning_writeback import (
                 run_learning_writeback,
             )
 

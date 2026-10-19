@@ -90,7 +90,7 @@ def _verifier_results(verified: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _sha256_json(value: Any) -> str:
+def _card_sha256(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     ).hexdigest()
@@ -199,7 +199,7 @@ def run_learning_writeback(
         store.write(card)
         observation["card_written"] = True
         observation["card_id"] = card.id
-        observation["card_sha256"] = _sha256_json(card.to_dict() | {"updated_at": "", "extra": {}})
+        observation["card_sha256"] = _card_sha256(card.to_dict() | {"updated_at": "", "extra": {}})
 
         engine = (belief_engine_factory or BeliefEngine)(root / ".nexus" / "belief_state.json")
         confidence = _PASS_CONFIDENCE if outcome == "PASSED" else _FAIL_CONFIDENCE

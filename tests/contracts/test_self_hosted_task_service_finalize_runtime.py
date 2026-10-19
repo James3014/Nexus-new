@@ -2718,7 +2718,7 @@ def test_subclass_overrides_are_dispatched_through_self(tmp_path, monkeypatch) -
 
 def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, monkeypatch) -> None:
     """#2721: with NEXUS_LEARNING_WRITEBACK=1 the VERIFIED update carries the write-back observation."""
-    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
 
     calls: list[dict[str, Any]] = []
 
@@ -2736,7 +2736,7 @@ def test_finalize_records_learning_writeback_only_under_measurement_switch(fin, 
 
 def test_finalize_writeback_failure_never_fails_finalize(fin, monkeypatch) -> None:
     """#2721: an exception inside the write-back is contained; finalize still completes."""
-    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
 
     def boom(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("boom")
@@ -2751,7 +2751,7 @@ def test_finalize_writeback_failure_never_fails_finalize(fin, monkeypatch) -> No
 
 def test_finalize_writeback_failure_without_switch_leaves_state_unchanged(fin, monkeypatch) -> None:
     """#2721: with no measurement switch even a failing write-back adds nothing to VERIFIED."""
-    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
 
     def boom(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("boom")
@@ -2765,7 +2765,7 @@ def test_finalize_writeback_failure_without_switch_leaves_state_unchanged(fin, m
 
 
 def _capture_writeback(monkeypatch) -> list[dict[str, Any]]:
-    from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback
+    from nexus.orchestrator import p1_learning_writeback as learning_writeback
 
     calls: list[dict[str, Any]] = []
 

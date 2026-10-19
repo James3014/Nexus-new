@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from nexus.core.belief_engine import BeliefEngine
-from nexus.orchestrator.self_hosted_task_service_parts import learning_writeback as lw
+from nexus.orchestrator import p1_learning_writeback as lw
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 
 
@@ -160,7 +160,7 @@ def test_writeback_failure_never_raises(tmp_path, state_root, monkeypatch):
 
 
 def test_finalize_calls_writeback_before_verified_update():
-    src = Path(lw.__file__).with_name("finalize_runtime.py").read_text()
+    src = (Path(lw.__file__).parent / "self_hosted_task_service_parts" / "finalize_runtime.py").read_text()
     call = src.index("writeback = run_learning_writeback(")
     assert call < src.index('update("VERIFIED", verified_values)')
 
