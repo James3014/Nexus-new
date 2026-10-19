@@ -368,17 +368,24 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
      included, under this scoring's candidate run directories and candidate trees. The
      reap kills by PID, checks that each process is gone, and fails closed, as above.
      The reaped PIDs are recorded in `reaped_pids`.
-  3. The scorer measures free space again.
+  3. The scorer measures free space again. `reclaimed = max(0, free_after_reap -
+     free_before_reap)` is the space the reap gave back: bytes the candidate's
+     survivors held. `cand_total = candidate_visible_bytes + reclaimed`. Visible bytes
+     are its leftover run directories, the current run's directory if it is a
+     candidate run, and its trees' growth since their first candidate run.
   4. The candidate is charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if both hold:
      - `free_start` was at or above the floor. `free_start` is the free space at the
        pre-run check of the scoring's first candidate run, before any candidate code
        ran, so disk taken during the oracle runs never counts against the candidate.
-     - `free_after_reap + candidate_visible_bytes >= floor`, that is, the bytes the
-       candidate held (now freed by the reap) and the bytes it still has visible explain
-       the shortfall. Visible bytes are its leftover run directories, the current run's
-       directory if it is a candidate run, and its trees' growth since their first
-       candidate run.
+     - `cand_total >= free_start - floor`: the candidate's own bytes, visible plus
+       what its survivors held, account for the whole headroom it started with.
   5. Otherwise the result is an infra abort.
+
+  Three cases show how the rule works:
+  - A survivor holding a large deleted file is reclaimed by the reap and charged.
+  - A harmless daemon reclaims about nothing, so it is infra.
+  - An honest candidate whose small bytes tip a disk that external use brought close
+    to the floor does not account for the headroom, so it is infra.
 
   A reap only frees space; the arithmetic decides. A reap alone never charges the
   candidate.
@@ -387,8 +394,9 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
   - Host disk below the floor that the single rule does not charge. That covers:
     - no candidate run yet;
     - the disk already low at the first candidate run;
-    - external work on the shared host taking the disk, beyond what the candidate's
-      bytes explain;
+    - external work on the shared host taking the disk, even when the candidate's small
+      honest bytes tip it over the floor (they do not account for the starting
+      headroom);
     - a harmless daemon left by an honest candidate that held no space (it is reaped,
       but the disk stays low).
   - A cap trip, on a run of any role, that would not happen without bytes under another

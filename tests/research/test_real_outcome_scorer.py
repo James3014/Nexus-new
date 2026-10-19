@@ -4349,15 +4349,15 @@ def _disk_by_phase(monkeypatch, runner: ros.PytestRunner, before: int, after: in
 
 
 @pytest.mark.parametrize(
-    ("short", "charged"),
-    [(200_000, True), (1024**2, False)],  # its 300 kB explain the shortfall / they do not
+    ("headroom", "charged"),
+    [(100_000, True), (1024**3, False)],  # its 300 kB used up the headroom / they did not
 )
-def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, short, charged):
-    """A11 single rule: free_start (first candidate run) is above the floor; the
-    candidate then writes 300 kB into its tree and the disk ends ``short`` below the
-    floor. Charged (HOST_DISK_LOW, NOT_RUNNABLE) iff free_after_reap + its visible bytes
-    >= floor; else infra abort."""
-    headroom = 100_000
+def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, headroom, charged):
+    """A11 rule: free_start (first candidate run) is above the floor; the candidate then
+    writes 300 kB into its tree and the disk ends 200 kB below the floor. Charged
+    (HOST_DISK_LOW, NOT_RUNNABLE) iff the candidate's bytes (visible + reclaimed by the
+    reap) cover the whole headroom it started with; else infra abort."""
+    short = 200_000
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
     cand = _tree_writer(tmp_path / "cand", 300_000)
     base = _leak_tree(tmp_path, 0)
@@ -4398,14 +4398,14 @@ def test_host_disk_low_right_after_the_candidate_run_that_filled_it(tmp_path, mo
 
 
 def test_another_process_taking_disk_between_candidate_runs_is_infra(tmp_path, monkeypatch):
-    """layer1-rie R2: 1 GiB headroom at free_start; another process takes all of it and
-    more between candidate runs; the honest candidate grows 300 kB, which does not
-    explain the 1 MiB shortfall (free_after_reap + 300 kB < floor): infra abort."""
+    """layer1-rie R2: 1 GiB headroom at free_start; another process takes nearly all of
+    it between candidate runs; the honest candidate's 300 kB tip the disk 200 kB below
+    the floor. They do not account for the 1 GiB headroom: infra abort, not charged."""
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
     cand = _tree_writer(tmp_path / "cand", 300_000)
     env = LocalEnv().get("fixture-repo", cand)
     floor = runner.min_free_disk_bytes
-    _disk_by_phase(monkeypatch, runner, floor + 1024**3, floor - 1024**2)
+    _disk_by_phase(monkeypatch, runner, floor + 1024**3, floor - 200_000)
     assert runner.run(env, cand, "c1", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
     with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
         runner.run(env, cand, "c2", "tests", (), 0, ros.CAND_ROLE)

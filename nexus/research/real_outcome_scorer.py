@@ -1893,9 +1893,10 @@ class PytestRunner:
         scoring's candidate scope (survivors holding cwd or files, deleted ones included,
         under its candidate run dirs and trees), measure free space again, and charge the
         candidate (HOST_DISK_LOW, NOT_RUNNABLE) only if free_start (at its first run) was
-        at or above the floor and free_after_reap + candidate_visible_bytes >= floor: the
-        candidate's held and visible bytes explain the shortfall. Otherwise infra abort
-        (external disk use, a harmless daemon that held no space, a disk already low)."""
+        at or above the floor and cand_total = candidate_visible_bytes + reclaimed (space
+        the reap gave back) >= free_start - floor: the candidate's own bytes account for
+        the whole headroom it started with. Otherwise infra abort (external disk use, a
+        harmless daemon that held no space, a disk already low)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
         free = _disk_usage(probe).free
         if pre and role == CAND_ROLE and self.free_start is None:
@@ -1907,14 +1908,21 @@ class PytestRunner:
             raise ScratchInfraAbort(
                 f"host_disk_low:free={free}B floor={floor}B (no candidate run yet)"
             )
+        free_before_reap = free
         self._reap_candidate_scope()
         free = _disk_usage(probe).free
         shortfall = floor - free
+        # Space the reap gave back was held by the candidate's survivors: its bytes too.
+        reclaimed = max(0, free - free_before_reap)
         # A candidate run's own run dir is the candidate's: measure it as one (current
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
-        started_ok = self.free_start is not None and self.free_start >= floor
-        if started_ok and free + cand >= floor:
+        cand_total = cand + reclaimed
+        if (
+            self.free_start is not None
+            and self.free_start >= floor
+            and cand_total >= self.free_start - floor
+        ):
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
             raise ScratchTmpCapExceeded(
                 tree.name,
@@ -1928,6 +1936,7 @@ class PytestRunner:
             )
         raise ScratchInfraAbort(
             f"host_disk_low:free_after_reap={free}B candidate_bytes={cand}B"
+            f" reclaimed={reclaimed}B"
             f" free_start={self.free_start} floor={floor}B"
         )
 
