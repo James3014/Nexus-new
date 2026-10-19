@@ -53,6 +53,7 @@ def test_cross_module_rule_matches_the_old_mcp_ingress() -> None:
     assert not allowed_files_cross_module(["docs/a.md", "docs/b.md"])
     assert not allowed_files_cross_module(["nexus/a.py"])
     assert not allowed_files_cross_module(["nexus/a.py", "nexus/a.py"])
+    assert not allowed_files_cross_module(["nexus/a.py", "nexus/./a.py"])
 
 
 def test_facts_report_impact_risk_and_reverse_importers(tmp_path: Path) -> None:
@@ -233,3 +234,35 @@ def test_a_root_without_a_revision_is_not_cached(
     )
 
     assert facts["errors"] == [] and facts["codeintel"]["impact_report_present"] is True
+
+
+def test_a_second_edit_of_a_modified_file_rebuilds_the_graph(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    user = root / "pkg" / "user_a.py"
+    user.write_text("import os\n", encoding="utf-8")  # first edit: drops the importer
+    first = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+    user.write_text("from pkg.core import f\nimport os\n", encoding="utf-8")  # second edit
+
+    second = derive_canonical_route_facts(
+        repo_root=root, task_text="fix f", task_type="repair", allowed_files=["pkg/core.py"]
+    )
+
+    assert (
+        second["codeintel"]["impacted_files_count"]
+        == first["codeintel"]["impacted_files_count"] + 1
+    )
+
+
+def test_path_aliases_collapse_to_one_file(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+
+    facts = derive_canonical_route_facts(
+        repo_root=root,
+        task_text="fix f",
+        task_type="repair",
+        allowed_files=["pkg/core.py", "pkg/./core.py"],
+    )
+
+    assert facts["route_features"]["is_cross_module_task"] is False

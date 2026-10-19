@@ -14,6 +14,7 @@ Planner stays the sole route authority. No model or network call is made.
 from __future__ import annotations
 
 import hashlib
+import posixpath
 import subprocess
 import tempfile
 import threading
@@ -49,10 +50,21 @@ def _git(root: Path, *args: str) -> str | None:
 
 def _graph_key(root: Path) -> tuple[str, str, str] | None:
     head = (_git(root, "rev-parse", "HEAD") or "").strip()
-    status = _git(root, "status", "--porcelain", "--untracked-files=normal", "--", "*.py")
+    status = _git(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", "*.py")
     if not head or status is None:
         return None
-    return (str(root.resolve()), head, hashlib.sha256(status.encode("utf-8")).hexdigest())
+    # Hash the status and the current bytes of every dirty Python file, so a second
+    # edit of an already-modified file also rebuilds the graph.
+    digest = hashlib.sha256(status.encode("utf-8"))
+    for entry in status.split("\0"):
+        relative = entry[3:] if len(entry) > 3 else ""
+        if not relative:
+            continue
+        try:
+            digest.update((root / relative).read_bytes())
+        except OSError:
+            digest.update(b"<unreadable>")
+    return (str(root.resolve()), head, digest.hexdigest())
 
 
 def _graph_index(root: Path) -> Path | None:
@@ -87,10 +99,11 @@ def _bounded_relative_files(root: Path, allowed_files: Sequence[str]) -> list[st
     resolved_root = root.resolve()
     bounded: list[str] = []
     for raw in allowed_files:
-        text = str(raw).strip()
-        path = PurePosixPath(text)
-        if not text or path.is_absolute() or ".." in path.parts or "\\" in text:
+        raw_text = str(raw).strip()
+        path = PurePosixPath(raw_text)
+        if not raw_text or path.is_absolute() or ".." in path.parts or "\\" in raw_text:
             continue
+        text = posixpath.normpath(raw_text)
         try:
             (resolved_root / text).resolve().relative_to(resolved_root)
         except (OSError, ValueError):
@@ -102,7 +115,11 @@ def _bounded_relative_files(root: Path, allowed_files: Sequence[str]) -> list[st
 
 def allowed_files_cross_module(allowed_files: Sequence[str]) -> bool:
     """The MCP ingress rule removed in 5665fa00f: several files across modules."""
-    files = tuple(sorted({str(path) for path in allowed_files if str(path).strip()}))
+    files = tuple(
+        sorted({
+            posixpath.normpath(str(path).strip()) for path in allowed_files if str(path).strip()
+        })
+    )
     top_level = {path.split("/", 1)[0] for path in files}
     return len(files) > 1 and (len(top_level) > 1 or any(p.startswith("nexus/") for p in files))
 
@@ -153,7 +170,8 @@ def derive_canonical_route_facts(
 
     if allowed_files_cross_module(files):
         features["is_cross_module_task"] = True
-    features["impact_complexity"] = 0.8 if features.get("is_cross_module_task") else 0.1
+    if "is_cross_module_task" in features:
+        features["impact_complexity"] = 0.8 if features["is_cross_module_task"] else 0.1
 
     if files:
         try:
