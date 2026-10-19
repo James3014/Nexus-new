@@ -476,8 +476,23 @@ def _effect_authority_kwargs():
     }
 
 
-def _record_effect_authority_shadow(task_id, attempt_id, request):
-    """Log what strict mode would decide, without enforcing it (#2344).
+_SHADOW_TEXT_LIMIT = 256
+
+
+def _bounded_shadow_value(value):
+    """Keep caller-supplied text (e.g. ``authority_ref``) from bloating state."""
+    if isinstance(value, str) and len(value) > _SHADOW_TEXT_LIMIT:
+        digest = hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()
+        return f"{value[:64]}...[truncated len={len(value)} sha256={digest}]"
+    return value
+
+
+def _record_effect_authority_shadow(task_id, attempt_id, request, state=None):
+    """Record what strict mode would decide, without enforcing it (#2344).
+
+    The decision is logged and returned; callers persist it on the task state
+    with ``_persist_effect_authority_shadow`` because the worker subprocess's
+    own log goes nowhere readable.
 
     Observation only: any error here is swallowed so the shadow can never
     change an execution's outcome.
@@ -487,21 +502,78 @@ def _record_effect_authority_shadow(task_id, attempt_id, request):
     try:
         from nexus.orchestrator import effect_authority
 
-        decision = effect_authority.shadow_decision(request)
+        decision = effect_authority.shadow_decision(
+            request, attempt_id=str(attempt_id), state=state
+        )
+        decision = {key: _bounded_shadow_value(value) for key, value in decision.items()}
         decision.update({
             "task_id": str(task_id),
             "attempt_id": str(attempt_id),
             "mode": "STRICT" if effect_authority.strict_enabled() else "SHADOW",
+            "recorded_at": _utc_now(),
         })
         logger.info(
             "%s %s",
             effect_authority.SHADOW_FIELD,
             json.dumps(decision, sort_keys=True, ensure_ascii=False),
         )
-        return decision
     except Exception as exc:  # observation must never break execution
         logger.warning("effect_authority_shadow_failed %s", type(exc).__name__)
         return None
+    return decision
+
+
+def _persist_effect_authority_shadow(service, task_id, attempt_id, decision):
+    """Attach ``decision`` to the task state; never raises (#2344).
+
+    Written as ``effect_authority_shadow`` on the task state and on the
+    matching ``attempts[]`` entry, so the Gateway's task read shows it per task
+    and attempt. Never writes into a state owned by a different attempt.
+    """
+    if not isinstance(decision, Mapping):
+        return
+    try:
+        from nexus.orchestrator import effect_authority
+
+        field = effect_authority.SHADOW_FIELD
+        record = json.loads(json.dumps(decision, sort_keys=True, default=str))
+
+        def mutate(state):
+            if str(state.get("attempt_id") or "") != str(attempt_id):
+                return  # another attempt owns the state now: record nothing
+            state[field] = dict(record)
+            for attempt in state.get("attempts") or []:
+                if isinstance(attempt, dict) and attempt.get("attempt_id") == state.get(
+                    "attempt_id"
+                ):
+                    attempt[field] = dict(record)
+
+        service._mutate_state(task_id, mutate)
+    except Exception as exc:  # observation must never break execution
+        logger.warning("effect_authority_shadow_persist_failed %s", type(exc).__name__)
+
+
+def _read_state_for_shadow(service, task_id):
+    """The task state for the shadow's durable-copy check; never raises."""
+    try:
+        state = service._read_state(task_id)
+    except Exception as exc:  # observation must never break execution
+        logger.warning("effect_authority_shadow_failed %s", type(exc).__name__)
+        return None
+    return state if isinstance(state, Mapping) else None
+
+
+def _record_owned_attempt_shadow(service, task_id, attempt_id):
+    """Shadow for the worker's owned-attempt entry point; never raises."""
+    state = _read_state_for_shadow(service, task_id)
+    if not isinstance(state, Mapping) or str(state.get("attempt_id") or "") != str(attempt_id):
+        return None
+    request = state.get("request")
+    if not isinstance(request, Mapping):
+        return None
+    decision = _record_effect_authority_shadow(task_id, attempt_id, request, state)
+    _persist_effect_authority_shadow(service, task_id, attempt_id, decision)
+    return decision
 
 
 class RuntimeCoordinationBridge:
@@ -530,6 +602,7 @@ class RuntimeCoordinationBridge:
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="RUN_OWNED_ATTEMPT")
+        _record_owned_attempt_shadow(self.service, task_id, attempt_id)
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
             task_id, attempt_id, custom_runner
         )
@@ -545,7 +618,12 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
-        _record_effect_authority_shadow(task_id, attempt_id, request)
+        state = _read_state_for_shadow(self.service, task_id) if request is not None else None
+        # Without the task state the durable-copy check cannot be modelled, so
+        # record nothing rather than a possibly misleading decision.
+        if state is not None:
+            decision = _record_effect_authority_shadow(task_id, attempt_id, request, state)
+            _persist_effect_authority_shadow(self.service, task_id, attempt_id, decision)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)
