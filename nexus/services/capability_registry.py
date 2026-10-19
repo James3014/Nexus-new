@@ -3086,25 +3086,35 @@ _PLANNER_MAINCHAIN_GATE_REASONS = frozenset(
 _PLANNER_MAINCHAIN_GATE_CAPABILITIES = frozenset({"forecast_gate"})
 
 
-def _planner_plan(context: Mapping[str, Any]) -> Mapping[str, Any] | None:
+# Executors safe to trigger from the Gateway worker-path envelope: no model call and no
+# write under the target worktree or cwd (xray writes its report to a temp run root).
+# research / learn_* / multi_agent still need a scoped root before they may run there.
+_ENVELOPE_TRIGGER_CAPABILITIES = frozenset({"xray"})
+
+
+def _planner_plan(context: Mapping[str, Any], name: str = "") -> Mapping[str, Any] | None:
     """The planner's plan from ``context["planner"]``.
 
     UnifiedRuntime passes the flat plan payload; the Gateway worker path
     (materialize_selected_capability_evidence) passes the planning-bundle envelope,
-    whose plan is under ``plan_payload`` (#2688 live witness).
+    whose plan is under ``plan_payload`` (#2688 live witness).  The envelope is only
+    unwrapped for ``_ENVELOPE_TRIGGER_CAPABILITIES``; for any other name it reads as
+    before (no plan at the top level, so no trigger).
     """
     planner = context.get("planner")
     if not isinstance(planner, Mapping):
         return None
     payload = planner.get("plan_payload")
-    return payload if isinstance(payload, Mapping) else planner
+    if isinstance(payload, Mapping):
+        return payload if name in _ENVELOPE_TRIGGER_CAPABILITIES else planner
+    return planner
 
 
 def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> bool:
     """True when the planner's mainchain gate policy explicitly selected ``name``."""
     if name not in _PLANNER_MAINCHAIN_GATE_CAPABILITIES:
         return False
-    planner = _planner_plan(context)
+    planner = _planner_plan(context, name)
     if planner is None:
         return False
     selected = planner.get("selected_capabilities") or []
@@ -3180,7 +3190,7 @@ def planner_signal_trigger(name: str, context: Mapping[str, Any]) -> str:
     if spec is None:
         return ""
     reasons_required, signal_keys = spec
-    planner = _planner_plan(context)
+    planner = _planner_plan(context, name)
     if planner is None:
         return ""
     selected = planner.get("selected_capabilities") or []

@@ -344,6 +344,29 @@ def test_envelope_shape_matches_a_real_worker_dispatch_state() -> None:
         "schema": "nexus.canonical_planning_bundle.v1",
     }
 
-    assert _planner_plan({"planner": envelope}) == envelope["plan_payload"]
-    assert _planner_plan({"planner": envelope["plan_payload"]}) == envelope["plan_payload"]
-    assert _planner_plan({}) is None
+    assert _planner_plan({"planner": envelope}, "xray") == envelope["plan_payload"]
+    assert _planner_plan({"planner": envelope["plan_payload"]}, "xray") == envelope["plan_payload"]
+    assert _planner_plan({}, "xray") is None
+
+
+@pytest.mark.parametrize(
+    ("name", "reasons", "snapshot"),
+    [
+        ("research", ["context_or_retrieval_gap"], {"memory_hits": 3}),
+        ("learn_mode", ["claim_or_citation_learning_signal"], {"learning_signal": True}),
+        ("learn_phase_slo", ["learn_phase_policy_needed"], {"learning_signal": True}),
+        ("multi_agent", ["coordinated_ownership_required"], {"multi_agent_signal": True}),
+    ],
+)
+def test_unscoped_writers_stay_skipped_on_the_worker_envelope(name, reasons, snapshot) -> None:
+    """research / learn_* / multi_agent would write under cwd or block on the worker path
+    (#2697 Codex review); they keep their pre-#2688 behaviour there until scoped."""
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker(name, real_invoker=_real(calls))
+    flat = _context(name, reasons=reasons, snapshot=snapshot)
+    envelope = dict(flat)
+    envelope["planner"] = {"plan_hash": "0" * 64, "plan_payload": flat["planner"]}
+
+    receipt = invoker(envelope)
+
+    assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
