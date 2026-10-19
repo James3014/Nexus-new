@@ -44,7 +44,7 @@ from scripts.bench.measure_2721.arms import (
     task_prompt,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_json
-from scripts.bench.measure_2721.leakage import FLAG_TIMEOUT, lookup_signals
+from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
 
 LIVE_GATEWAY_PORT = 8766
 NEXUS_REPO = "James3014/Nexus-new"
@@ -54,7 +54,14 @@ OUTCOME_GATEWAY_ERROR = "GATEWAY_ERROR"
 OUTCOME_INFRA = "INFRA"
 OUTCOME_DONE = "OK"
 _INFRA_MARKERS = ("agy_pool_busy", "AGY_POOL_BUSY", "POOL_EXHAUSTED", "agy_pool_exhausted",
-                  "credentials_unavailable", "MODEL_PROBE_REQUIRED")
+                  "credentials_unavailable", "MODEL_PROBE_REQUIRED", "claude_infra:",
+                  "MEASUREMENT_CLAUDE_PROBE_FAILED", "MEASUREMENT_CLAUDE_BINARY_UNAVAILABLE")
+TERMINAL_STATUSES = frozenset({"CANCELLED", "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "INTEGRATED",
+                               "INTEGRATION_FAILED", "RETAINED_FOR_REVIEW", "FAILED", "TERMINAL"})
+
+
+class GatewayStuck(RuntimeError):
+    """The previous task did not reach a terminal state: stop the batch (infra)."""
 
 
 class LiveGatewayRefused(RuntimeError):
@@ -164,7 +171,8 @@ def _is_infra(error: str) -> bool:
 class NexusArmDriver:
     def __init__(self, client: GatewayClient, *, campaign_id: str, goal_id: str, scope_id: str,
                  controller_git: Optional[Path] = None, state_dir: Optional[Path] = None,
-                 external_target_root: Optional[Path] = None, probe_model: str = "gemini-3.8-flash-medium",
+                 external_target_root: Optional[Path] = None, probe_model: str = "claude-haiku-5-5",
+                 probe_provider: str = "claude", trace_dir: Optional[Path] = None, arm_label: str = ARM_NEXUS,
                  poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep):
         self.client = client
         self.campaign_id = campaign_id
@@ -174,6 +182,11 @@ class NexusArmDriver:
         self.state_dir = state_dir
         self.external_target_root = external_target_root
         self.probe_model = probe_model
+        self.probe_provider = probe_provider
+        self.trace_dir = trace_dir
+        # NEXUS_NOOP: the same P1 path while the Gateway's claude binary is the
+        # no-model fake (``fake_claude.py`` mode noop); must score 0 RESOLVED.
+        self.arm_label = arm_label
         self.poll_seconds = poll_seconds
         self.sleep = sleep
 
@@ -192,7 +205,7 @@ class NexusArmDriver:
         }
 
     def worker_args(self, task: Mapping[str, Any], gw_task: str, card_path: str, card_hash: str,
-                    external: bool) -> dict[str, Any]:
+                    external: bool, controller: Optional[Path] = None) -> dict[str, Any]:
         text = task["text"]
         args = {
             "owner_confirmation": True,
@@ -206,36 +219,54 @@ class NexusArmDriver:
         }
         if external:
             args[EXTERNAL_TARGET_FIELD] = {
-                "repo_root": str(self._external_repo_root(task)),
+                "repo_root": str(self._external_repo_root(controller or Path(task["base_checkout"]))),
                 "base_revision": task["base_commit"],
             }
         return args
 
-    def _external_repo_root(self, task: Mapping[str, Any]) -> Path:
-        # The materialized base checkout doubles as the external Controller.
-        root = Path(task["base_checkout"]).resolve()
+    def _external_repo_root(self, controller: Path) -> Path:
+        root = Path(controller).resolve()
         if self.external_target_root is not None and self.external_target_root.resolve() not in root.parents:
-            raise ValueError("base checkout is outside the external target root the Gateway allows")
+            raise ValueError("controller is outside the external target root the Gateway allows")
         return root
+
+    def fresh_controller(self, task: Mapping[str, Any], run_root: Path, run_id: str) -> Path:
+        """A new Controller per (task, repeat): only the base commit, no refs (gap F6).
+
+        A shared Controller would let repeat 2 see repeat 1's candidate refs.
+        The task venv is linked beside it as ``../venv`` (the adapter's rule).
+        """
+        from scripts.bench.measure_2721.materialize import (
+            checkout_base,
+            link_venv,
+            verify_base_checkout,
+        )
+
+        controller = run_root / "controllers" / run_id / "base"
+        checkout_base(Path(task["base_checkout"]), task["base_commit"], controller)
+        link_venv(task, controller)
+        verify_base_checkout(controller, task["base_commit"])
+        return controller
 
     # -- one run -------------------------------------------------------------
     def run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float) -> dict[str, Any]:
-        run_id = new_run_id(ARM_NEXUS, task["task_id"], repeat)
+        run_id = new_run_id(self.arm_label, task["task_id"], repeat)
         gw_task = gateway_task_id(run_id)
         external = task.get("repo") != NEXUS_REPO
         prompt = task_prompt(task)
         tree_sha = git(Path(task["base_checkout"]), "rev-parse", "HEAD^{tree}").strip()
-        capture = input_capture(ARM_NEXUS, task, repeat, run_id, prompt=prompt, tree_sha=tree_sha,
+        capture = input_capture(self.arm_label, task, repeat, run_id, prompt=prompt, tree_sha=tree_sha,
                                 timeout_seconds=timeout_seconds)
         transcript: list[dict[str, Any]] = []
         row: dict[str, Any] = {
-            "schema": ROW_SCHEMA, "arm": ARM_NEXUS, "run_id": run_id, "task_id": task["task_id"],
+            "schema": ROW_SCHEMA, "arm": self.arm_label, "run_id": run_id, "task_id": task["task_id"],
             "repeat": repeat, "gateway_task_id": gw_task, "gateway_url": self.client.url,
             "non_model_solve_path": False,
         }
         started = time.monotonic()
         created = False
         diff = ""
+        controller: Optional[Path] = None
         try:
             health = self.client.health()
             row["gateway_health"] = {key: health.get(key) for key in (
@@ -245,6 +276,8 @@ class NexusArmDriver:
                 capture["gateway_worker_args"] = self.worker_args(task, gw_task, "<card>", "<hash>", external)
                 row.update(outcome=OUTCOME_BLOCKED_EXTERNAL, infra=False, model_calls=0, total_tokens=None)
                 return row
+            if external:
+                controller = self.fresh_controller(task, run_root, run_id)
             card = self.client.call("nexus_task_card_create", self.card_args(task, gw_task))
             created = True
             transcript.append({"tool": "nexus_task_card_create", "result": card})
@@ -255,27 +288,33 @@ class NexusArmDriver:
                 "authority_goal_id": self.goal_id, "authority_coordination_scope_id": self.scope_id,
             })
             transcript.append({"tool": "nexus_task_card_commit", "result": commit})
-            worker_args = self.worker_args(task, gw_task, card["card_path"], card["card_hash"], external)
+            worker_args = self.worker_args(task, gw_task, card["card_path"], card["card_hash"], external,
+                                           controller)
             capture["gateway_worker_args"] = worker_args
             submitted = self._submit_worker(worker_args, transcript)
             transcript.append({"tool": "nexus_worker_candidate", "result": submitted})
             final = self._wait(gw_task, started + timeout_seconds + 600.0, transcript)
             status = self.client.call("nexus_task_status", {"task_id": gw_task})
             transcript.append({"tool": "nexus_task_status", "result": status})
-            row.update(self._collect(gw_task, status, final, self._controller_for(task, external),
-                                     repo=str(task.get("repo") or "")))
+            row.update(self._collect(gw_task, status, final,
+                                     controller if external else self.controller_git,
+                                     repo=str(task.get("repo") or ""), base=task["base_commit"]))
             diff = row.pop("_diff", "")
         except GatewayToolError as exc:
             message = json.dumps(exc.payload)
             row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
                        infra=_is_infra(message), error=message[:2000])
         finally:
+            stuck = None
             if created:
                 try:
                     transcript.append({"tool": "nexus_task_cancel",
                                        "result": self.client.call("nexus_task_cancel", {"task_id": gw_task})})
                 except GatewayToolError as exc:
                     transcript.append({"tool": "nexus_task_cancel", "error": exc.payload})
+                stuck = self._await_terminal(gw_task, transcript)
+                if stuck is not None:
+                    row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
             row["wall_seconds"] = round(time.monotonic() - started, 3)
             write_json(run_root / "inputs" / f"{run_id}.json", capture)
             write_json(run_root / "transcripts" / f"{run_id}.json", self.client.redact(transcript))
@@ -285,7 +324,24 @@ class NexusArmDriver:
             row["diff_path"] = str(diff_path)
             row.update(candidate_facts(diff, task))
             append_jsonl(run_root / "rows.jsonl", row)
+        if stuck is not None:
+            raise GatewayStuck(f"{gw_task}: {stuck}")
         return row
+
+    def _await_terminal(self, gw_task: str, transcript: list[dict[str, Any]], *, attempts: int = 12) -> Optional[str]:
+        """None once the task is terminal (lease released), else the last status (gap F7)."""
+        status = ""
+        for _ in range(attempts):
+            try:
+                snapshot = self.client.call("nexus_task_status", {"task_id": gw_task})
+            except GatewayToolError as exc:
+                return f"status_error:{json.dumps(exc.payload)[:200]}"
+            status = str(snapshot.get("status") or "")
+            if status in TERMINAL_STATUSES:
+                return None
+            self.sleep(10.0)
+        transcript.append({"tool": "nexus_task_status", "stuck_status": status})
+        return status or "unknown"
 
     def _submit_worker(self, args: Mapping[str, Any], transcript: list[dict[str, Any]]) -> dict[str, Any]:
         try:
@@ -295,7 +351,7 @@ class NexusArmDriver:
                 raise
         probe_id = f"{args['task_id']}-probe"[:96]
         probe = self.client.call("nexus_model_probe", {
-            "provider": "agy", "model": self.probe_model, "task_id": probe_id,
+            "provider": self.probe_provider, "model": self.probe_model, "task_id": probe_id,
             "prompt": "Return exactly a JSON object with boolean field ok=true. Do not use tools or modify files.",
             "output_schema": {"type": "object", "additionalProperties": False, "required": ["ok"],
                               "properties": {"ok": {"type": "boolean", "const": True}}},
@@ -325,48 +381,84 @@ class NexusArmDriver:
         path = self.state_dir / f"{gw_task}.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
-    def _controller_for(self, task: Mapping[str, Any], external: bool) -> Optional[Path]:
-        # External tasks: the candidate commit lives in the external Controller.
-        return self._external_repo_root(task) if external else self.controller_git
-
     def _collect(self, gw_task: str, status: Mapping[str, Any], final: Mapping[str, Any],
-                 controller: Optional[Path], *, repo: str = "") -> dict[str, Any]:
+                 controller: Optional[Path], *, repo: str = "", base: str = "") -> dict[str, Any]:
+        """Row fields for one P1 task.
+
+        Candidate (gap F2, same rule as BARE): the worker's raw worktree diff
+        at stop.  Sources in order: the Gateway's measurement snapshot
+        (``measurement_worktree_diff``, workspace-33), the live target
+        worktree, then the candidate commit; ``candidate_source`` says which.
+        """
+        from scripts.bench.measure_2721.arms import claude_row_fields
+        from scripts.bench.measure_2721.common import capture_diff
+        from scripts.bench.measure_2721.providers import claude_usage_fields, read_claude_trace
+
         state = {**status, **self._read_state(gw_task)}
         materialization = state.get("worker_model_context_materialization") or {}
         error = json.dumps(state.get("error") or state.get("blocker") or "")
-        base = state.get("target_initial_revision") or ""
+        initial = state.get("target_initial_revision") or base
         candidate = state.get("candidate_commit_sha") or ""
-        diff = ""
-        if base and candidate and controller is not None:
-            diff = git(controller, "diff", "--binary", "--no-color", "--no-ext-diff", base, candidate)
+        target = Path(str(state.get("target_worktree") or ""))
+        diff, source = "", "none"
+        if isinstance(state.get("measurement_worktree_diff"), str):
+            diff, source = state["measurement_worktree_diff"], "gateway_snapshot"
+        elif initial and str(target) not in ("", ".") and target.is_dir():
+            diff, source = capture_diff(target, initial), "target_worktree"
+        elif initial and candidate and controller is not None:
+            diff = git(controller, "diff", "--binary", "--no-color", "--no-ext-diff", initial, candidate)
+            source = "candidate_commit"
+        claude: dict[str, Any] = {}
+        trace_text = ""
+        runs = sorted((self.trace_dir / gw_task).glob("*.run.json"), key=lambda p: p.stat().st_mtime) \
+            if self.trace_dir is not None and (self.trace_dir / gw_task).is_dir() else []
+        if runs:
+            stdout_sha = runs[-1].name.split(".", 1)[0]
+            trace = read_claude_trace(self.trace_dir, gw_task, stdout_sha)
+            summary = trace["summary"]
+            claude = claude_row_fields({
+                "claude_version": (summary.init or {}).get("claude_code_version"),
+                "usage": claude_usage_fields(summary), "num_turns": summary.num_turns,
+                "tool_call_count": len(summary.tool_calls), "total_cost_usd": summary.total_cost_usd,
+                "models_seen": list(summary.models_seen),
+                "seatbelt_sha256": trace["sidecar"].get("seatbelt_sha256"),
+                "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
+                "worker_span_ms": trace["sidecar"].get("wall_time_ms"),
+            })
+            claude["claude_trace_path"] = trace["trace_path"]
+            claude["claude_attempts"] = len(runs)
+            claude["fake_observed"] = trace["fake_observed"]
+            trace_text = "\n".join(json.dumps(call.get("input"), default=str) for call in summary.tool_calls)
         telemetry = state.get("telemetry") or {}
-        infra = _is_infra(error) and not candidate
-        # Only the worker's own execution evidence is scanned (the redacted
-        # stdout/stderr tails the Gateway keeps); a lower bound on web use.
+        infra = _is_infra(error) and not diff.strip()
         worker_texts = [json.dumps(state.get(key), default=str) for key in
                         ("execution", "executions", "execution_outcome", "error") if state.get(key) is not None]
-        lookup = lookup_signals(worker_texts, repo=repo)
+        lookup = lookup_signals([*worker_texts, trace_text], repo=repo)
         timed_out = bool((final.get("wait") or {}).get("timed_out")) or "timed_out\": true" in " ".join(worker_texts)
-        flags = [flag for flag in (FLAG_TIMEOUT if timed_out else None, lookup["flag"]) if flag]
+        network = [a for a in claude.get("proxy_denied") or []]
+        flags = [flag for flag in (FLAG_TIMEOUT if timed_out else None, lookup["flag"],
+                                   FLAG_NETWORK_ATTEMPT if network else None) if flag]
         return {
             "flags": flags,
             "lookup": lookup,
             "_diff": diff,
+            "candidate_source": source,
             "outcome": OUTCOME_INFRA if infra else OUTCOME_DONE,
             "infra": infra,
             "gateway_status": state.get("status"),
             "verification_verdict": state.get("verification_verdict"),
             "candidate_commit_sha": candidate or None,
-            "target_initial_revision": base or None,
+            "target_initial_revision": initial or None,
             "selected_capabilities": materialization.get("selected_capabilities"),
             "capability_observations": materialization.get("capability_observations"),
             "selected_provider": state.get("selected_provider"),
             "selected_model": state.get("selected_model"),
             "worker_started_at": state.get("worker_started_at"),
             "worker_finished_at": state.get("worker_finished_at"),
-            "model_calls": telemetry.get("provider_calls") if isinstance(telemetry, Mapping) else None,
-            "total_tokens": telemetry.get("total_tokens") if isinstance(telemetry, Mapping) else None,
+            "model_calls": claude.get("num_turns", telemetry.get("provider_calls") if isinstance(telemetry, Mapping) else None),
+            "total_tokens": None,
             "telemetry": telemetry,
+            **claude,
             "error": error[:2000] if error not in ('""', "null") else "",
             "final_wait": {key: final.get(key) for key in ("status", "blocker", "wait")},
         }
@@ -384,6 +476,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--controller-git", help="git dir holding candidate commits (for the diff)")
     parser.add_argument("--state-dir", help="the instance's self-hosted state dir (read only)")
     parser.add_argument("--external-target-root", help="root the Gateway allows external targets under")
+    parser.add_argument("--trace-dir", help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only)")
+    parser.add_argument("--arm-label", choices=[ARM_NEXUS, "NEXUS_NOOP"], default=ARM_NEXUS,
+                        help="NEXUS_NOOP when the Gateway runs the no-model fake claude binary")
     parser.add_argument("--repeats", type=int, nargs="+", default=[1])
     parser.add_argument("--ids", nargs="*")
     parser.add_argument("--timeout", type=float, default=900.0)
@@ -394,9 +489,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         controller_git=Path(args.controller_git) if args.controller_git else None,
         state_dir=Path(args.state_dir) if args.state_dir else None,
         external_target_root=Path(args.external_target_root) if args.external_target_root else None,
+        trace_dir=Path(args.trace_dir) if args.trace_dir else None,
+        arm_label=args.arm_label,
     )
-    rows = [driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout)
-            for task in load_manifest(args.manifest, args.ids) for repeat in args.repeats]
+    rows = []
+    try:
+        for task in load_manifest(args.manifest, args.ids):
+            for repeat in args.repeats:
+                rows.append(driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout))
+    except GatewayStuck as exc:
+        print(json.dumps({"stopped": "GATEWAY_STUCK", "detail": str(exc), "rows": len(rows)}))
+        return 75
     print(json.dumps({"rows": len(rows), "outcomes": sorted({row["outcome"] for row in rows})}))
     return 0
 

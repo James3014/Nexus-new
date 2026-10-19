@@ -78,11 +78,30 @@ def verify_base_checkout(dest: Path, base_commit: str) -> None:
         raise RuntimeError("checkout is not clean")
 
 
+def task_venv(venv_root: Path | None, task_id: str) -> str | None:
+    if venv_root is None:
+        return None
+    venv = Path(venv_root) / task_id
+    if not (venv / "bin" / "python").exists():
+        raise FileNotFoundError(f"{task_id}: no venv at {venv}")
+    return str(venv.resolve())
+
+
+def link_venv(task: Mapping[str, Any], repo_dir: Path) -> None:
+    """Put the task venv beside a run's controller/target repo as ``../venv``."""
+    if task.get("venv"):
+        link = repo_dir.parent / "venv"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(task["venv"])
+
+
 def _patch_files(patch: str) -> list[str]:
     return re.findall(r"^diff --git a/(\S+) b/", patch or "", re.M)
 
 
-def materialize_task(row: Mapping[str, Any], repos_root: Path, out: Path) -> dict[str, Any]:
+def materialize_task(row: Mapping[str, Any], repos_root: Path, out: Path,
+                     venv_root: Path | None = None) -> dict[str, Any]:
     task_id = str(row["id"])
     if not _ID_RE.fullmatch(task_id):
         raise ValueError(f"unsafe task id: {task_id!r}")
@@ -117,6 +136,9 @@ def materialize_task(row: Mapping[str, Any], repos_root: Path, out: Path) -> dic
         "prompt_sha256": sha256_text(prompt),
         "test_patch_withheld": True,
         "hidden_test_file_count": len(_patch_files(str(row.get("test_patch") or ""))),
+        # Per-task read-only venv (built separately, deps at base, no package
+        # install); both arms see it at <run controller>/../venv.
+        "venv": task_venv(venv_root, task_id),
     }
     write_json(task_dir / "task.json", record)
     return record
@@ -129,6 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--ids", nargs="*", help="only these task ids")
     parser.add_argument("--set", dest="task_set", help="only rows of this set (M, LA, LB)")
+    parser.add_argument("--venv-root", help="directory of per-task venvs named by task id (optional)")
     args = parser.parse_args(argv)
     out = Path(args.out)
     rows = list(read_jsonl(args.tasks))
@@ -140,7 +163,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(f"unknown ids: {sorted(missing)}")
     if args.task_set:
         rows = [row for row in rows if row.get("set") == args.task_set]
-    records = [materialize_task(row, Path(args.repos_root), out) for row in rows]
+    venv_root = Path(args.venv_root) if args.venv_root else None
+    records = [materialize_task(row, Path(args.repos_root), out, venv_root) for row in rows]
     write_jsonl(out / "manifest.jsonl", records)
     print(json.dumps({"materialized": len(records), "manifest": str(out / "manifest.jsonl")}))
     return 0

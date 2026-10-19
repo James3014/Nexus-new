@@ -14,6 +14,7 @@ from scripts.bench.measure_2721 import (
     arms,
     blind,
     dryrun,
+    leakage,
     materialize,
     nexus_driver,
     scope,
@@ -22,6 +23,8 @@ from scripts.bench.measure_2721 import (
 from scripts.bench.measure_2721.common import capture_diff, read_jsonl
 from scripts.bench.measure_2721.fakes import FakeGateway
 from scripts.bench.measure_2721.providers import FakeProvider
+
+needs_sandbox = pytest.mark.skipif(not Path("/usr/bin/sandbox-exec").exists(), reason="macOS sandbox-exec required")
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t",
@@ -104,9 +107,9 @@ def test_p1_allowed_files_limit(allowed):
 
 
 def test_harness_prompt_matches_gateway_worker_template():
-    real = dryrun.real_gateway_prompt_template()
-    if real is None:
-        pytest.skip("nexus not importable")
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    real = SelfHostedTaskService._prompt
     text = task_text.build_task_text("Issue\n\nbody with `code`", ["src/pkg/", "src/x.py"])
     from types import SimpleNamespace
 
@@ -242,11 +245,14 @@ def test_driver_runs_the_p1_sequence_and_always_cancels(manifest, tmp_path):
     row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
     tools = [call["tool"] for call in gateway.calls]
     assert tools == ["nexus_task_card_create", "nexus_task_card_commit", "nexus_worker_candidate",
-                     "nexus_task_wait", "nexus_task_status", "nexus_task_cancel"]
+                     "nexus_task_wait", "nexus_task_status", "nexus_task_cancel", "nexus_task_status"]
     worker = gateway.calls[2]["arguments"]
     assert worker["what"] == task["text"]["what"] and worker["why"] == task["text"]["why"]
-    assert worker["external_target"] == {"repo_root": str(Path(task["base_checkout"]).resolve()),
-                                         "base_revision": task["base_commit"]}
+    controller = Path(worker["external_target"]["repo_root"])
+    # A fresh Controller per (task, repeat): never the shared materialized checkout (gap F6).
+    assert controller != Path(task["base_checkout"]).resolve()
+    assert controller.parent.name == row["run_id"] and worker["external_target"]["base_revision"] == task["base_commit"]
+    assert _git(controller, "rev-list", "--all").split() == [task["base_commit"]]
     assert row["outcome"] == "OK" and row["empty"]
 
 
@@ -254,7 +260,7 @@ def test_driver_cancels_after_a_worker_error_and_redacts_the_token(manifest, tmp
     (task,) = arms.load_manifest(manifest)
     gateway = FakeGateway(worker_error={"error": "agy_pool_busy for tok-123"})
     row = _driver(gateway, token="tok-123").run(task, 1, tmp_path / "run", timeout_seconds=5)
-    assert gateway.calls[-1]["tool"] == "nexus_task_cancel"
+    assert [c["tool"] for c in gateway.calls][-2:] == ["nexus_task_cancel", "nexus_task_status"]
     assert row["infra"] is True and row["outcome"] == "INFRA"
     for path in (tmp_path / "run").rglob("*"):
         if path.is_file():
@@ -270,7 +276,8 @@ def test_blinding_separates_the_arm_map(manifest, tmp_path):
     arms.run_noop(task, 1, run)
     _driver(FakeGateway(worker_error={"error": "agy_pool_busy"})).run(task, 1, run, timeout_seconds=5)
     out, arm_map = tmp_path / "blind", tmp_path / "b6" / "arm_map.json"
-    assert blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map)]) == 0
+    assert blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map),
+                       "--manifest", str(manifest)]) == 0
     candidates = list(read_jsonl(out / "candidates.jsonl"))
     assert len(candidates) == 2
     for item in candidates:
@@ -292,17 +299,28 @@ def test_blinding_refuses_arm_map_inside_scorer_dir(tmp_path):
 
 # -- dry run --------------------------------------------------------------------
 
-def test_zero_model_dry_run_passes_and_detects_tampering(manifest, tmp_path):
-    report = dryrun.dry_run(manifest, tmp_path / "dry")
-    assert report["status"] == "PASS", report
-    assert report["model_calls"] == 0
-    inputs = [json.loads(p.read_text()) for p in (tmp_path / "dry" / "inputs").glob("*.json")]
-    rows = list(read_jsonl(tmp_path / "dry" / "rows.jsonl"))
-    tampered = [dict(item) for item in inputs]
-    for item in tampered:
-        if item["arm"] == "NEXUS":
-            item["gateway_worker_args"] = dict(item["gateway_worker_args"], why="extra Nexus hint")
-    assert dryrun.check_task(tampered, rows)["status"] == "FAIL"
+@needs_sandbox
+def test_claude_dry_run_proves_identical_invocations(manifest, tmp_path):
+    report = dryrun.dry_run(manifest, tmp_path / "dry", file_scope=True)
+    assert report["status"] == "PASS", json.dumps(report, indent=1)
+    assert report["model_calls"] == 0 and report["zero_model_edits"] == []
+    (task_id,) = report["per_task"]
+    traces = tmp_path / "dry" / "traces"
+    bare_id = next(p.name for p in traces.iterdir() if p.name.startswith("m2721-bare-"))
+    nexus_id = next(p.name for p in traces.iterdir() if p.name.startswith("m2721-nexus-"))
+    bare, nexus = dryrun._trace_for(traces, bare_id), dryrun._trace_for(traces, nexus_id)
+    prompt = bare["observed"]["argv"][-1]
+    assert dryrun.compare_invocations(bare, nexus, prompt, prompt) == []
+    # Tampering is caught: an extra env value, a different flag, a prompt hint.
+    env_tamper = json.loads(json.dumps(nexus))
+    env_tamper["observed"]["env"]["LANG"] = "xx"
+    assert "env LANG differs" in dryrun.compare_invocations(bare, env_tamper, prompt, prompt)
+    flag_tamper = json.loads(json.dumps(nexus))
+    flag_tamper["observed"]["argv"][1] = "--bare"
+    assert "argv flags differ between arms" in dryrun.compare_invocations(bare, flag_tamper, prompt, prompt)
+    hint = json.loads(json.dumps(bare))
+    hint["observed"]["argv"][-1] = prompt + " hint"
+    assert dryrun.compare_invocations(hint, nexus, prompt, prompt)
 
 
 def test_agy_provider_fails_closed_without_the_pool(monkeypatch, tmp_path):
@@ -318,7 +336,6 @@ def test_agy_provider_fails_closed_without_the_pool(monkeypatch, tmp_path):
 
 # -- prereg v0.2 §8: test-hunk stripping, timeout flag, UPSTREAM_LOOKUP -----------
 
-from scripts.bench.measure_2721 import leakage  # noqa: E402
 
 _MIXED_DIFF = (
     "diff --git a/sympy/core/add.py b/sympy/core/add.py\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n"
@@ -395,7 +412,7 @@ def test_blinding_strips_test_blocks_and_records_it_only_in_the_arm_map(manifest
     run = tmp_path / "run"
     arms.run_bare(task, 1, run, FakeProvider(edit=edit_with_test), timeout_seconds=5)
     out, arm_map = tmp_path / "blind", tmp_path / "b6" / "arm_map.json"
-    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map)])
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map), "--manifest", str(manifest)])
     (item,) = list(read_jsonl(out / "candidates.jsonl"))
     scored = (out / "candidates" / f"{item['opaque_id']}.diff").read_text()
     assert "test_mine" not in scored and "+    return a + b" in scored
@@ -404,3 +421,79 @@ def test_blinding_strips_test_blocks_and_records_it_only_in_the_arm_map(manifest
     assert leakage.FLAG_TEST_HUNKS_STRIPPED in entry["flags"]
     assert entry["scored_diff_sha256"] == item["diff_sha256"] != entry["raw_diff_sha256"]
     assert "TEST_HUNKS" not in (out / "candidates.jsonl").read_text()
+
+
+
+# -- gap review: filter order, stuck Gateway, Claude BARE -------------------------
+
+def test_filter_order_is_tamper_then_tests_then_scope():
+    diff = (
+        "diff --git a/sympy/conftest.py b/sympy/conftest.py\n--- a/sympy/conftest.py\n+++ b/sympy/conftest.py\n"
+        "@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/setup.cfg b/setup.cfg\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1 +1 @@\n-c\n+d\n"
+        "diff --git a/sympy/core/add.py b/sympy/core/add.py\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n"
+        "@@ -1 +1 @@\n-e\n+f\n"
+    )
+    result = leakage.filter_candidate(diff, ["sympy/"])
+    # conftest is a tamper even though the test strip would remove it.
+    assert result["tamper_paths"] == ["sympy/conftest.py", "setup.cfg"]
+    assert result["stripped_test_paths"] == ["sympy/conftest.py"]
+    assert result["stripped_out_of_scope_paths"] == ["setup.cfg"]
+    assert result["flags"] == [leakage.FLAG_HARNESS_TAMPER, leakage.FLAG_TEST_HUNKS_STRIPPED,
+                               leakage.FLAG_OUT_OF_SCOPE_STRIPPED]
+    assert leakage.split_file_blocks(result["scored_diff"])[0][0] == "sympy/core/add.py"
+    assert len(leakage.split_file_blocks(result["scored_diff"])) == 1
+
+
+def test_blinding_flags_a_scored_diff_that_does_not_apply(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    row = arms.run_bare(task, 1, run, FakeProvider(edit=_edit), timeout_seconds=5)
+    Path(row["diff_path"]).write_text(
+        "diff --git a/sympy/core/add.py b/sympy/core/add.py\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n"
+        "@@ -1 +1 @@\n-no such line\n+x\n")
+    rows = list(read_jsonl(run / "rows.jsonl"))
+    rows[0]["diff_sha256"] = __import__("hashlib").sha256(Path(row["diff_path"]).read_bytes()).hexdigest()
+    result = blind.blind(rows, tmp_path / "o", tmp_path / "b6" / "m.json", {task["task_id"]: task})
+    entry = next(iter(json.loads((tmp_path / "b6" / "m.json").read_text())["map"].values()))
+    assert result["candidates"] == 1 and leakage.FLAG_PATCH_DOES_NOT_APPLY in entry["flags"]
+
+
+def test_driver_stops_the_batch_when_a_task_does_not_terminate(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name == "nexus_task_status":
+            payload["status"] = "PENDING_HUMAN_APPROVAL"
+        return payload
+
+    gateway._answer = answer
+    with pytest.raises(nexus_driver.GatewayStuck):
+        _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    (row,) = list(read_jsonl(tmp_path / "run" / "rows.jsonl"))
+    assert row["infra"] is True and row["gateway_stuck"] == "PENDING_HUMAN_APPROVAL"
+
+
+@needs_sandbox
+def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path):
+    from scripts.bench.measure_2721.fake_claude import write_fake_claude
+    from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
+
+    (task,) = arms.load_manifest(manifest)
+    fake = write_fake_claude(tmp_path / "bin" / "claude", "edit")
+    token = tmp_path / "token"
+    token.write_text("tok\n")
+    token.chmod(0o600)
+    provider = ClaudeProvider(str(fake), tmp_path / "run" / "traces", str(token),
+                              identity=claude_identity(str(fake), str(token)))
+    (task_root := Path(task["base_checkout"])).joinpath("README.md").exists()
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=60)
+    assert row["outcome"] == "OK", row
+    assert row["claude_version"].startswith("0.0.0") and row["models_seen"] == ["claude-haiku-5-5"]
+    assert row["cache_read_input_tokens"] == 0 and row["cache_creation_input_tokens"] == 0
+    assert row["seatbelt_sha256"] and row["proxy_denied"] == []
+    assert "README.md" in row["changed_paths"]
+    del task_root

@@ -23,6 +23,12 @@ from scripts.bench.measure_2721.scope import is_test_path
 FLAG_UPSTREAM_LOOKUP = "UPSTREAM_LOOKUP"
 FLAG_TIMEOUT = "TIMEOUT_AT_CAP"
 FLAG_TEST_HUNKS_STRIPPED = "TEST_HUNKS_STRIPPED"
+FLAG_NETWORK_ATTEMPT = "NETWORK_ATTEMPT_BLOCKED"
+FLAG_HARNESS_TAMPER = "HARNESS_TAMPER"
+FLAG_OUT_OF_SCOPE_STRIPPED = "OUT_OF_SCOPE_STRIPPED"
+FLAG_PATCH_DOES_NOT_APPLY = "PATCH_DOES_NOT_APPLY"
+# S0.4: edits to test configuration count as harness tampering (never a solve).
+HARNESS_TAMPER_NAMES = frozenset({"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"})
 WEB_TOOL_NAMES = ("search_web", "read_url_content", "read_url", "execute_url", "web_search", "web_fetch",
                   "browser_subagent", "ReadUrlContent", "SearchWeb")
 _WEB_TOOL_RE = re.compile(r"\b(" + "|".join(re.escape(name) for name in WEB_TOOL_NAMES) + r")\b")
@@ -59,6 +65,48 @@ def strip_test_hunks(diff: str) -> tuple[str, list[str]]:
         else:
             kept.append(block)
     return "".join(kept), removed
+
+
+def tamper_paths(diff: str) -> list[str]:
+    """Paths of file blocks (either side) that touch test configuration."""
+    found: list[str] = []
+    for path, block in split_file_blocks(diff):
+        old = _FILE_BLOCK_RE.match(block.splitlines()[0]).group(1)  # type: ignore[union-attr]
+        if any(p.rsplit("/", 1)[-1] in HARNESS_TAMPER_NAMES for p in (path, old)):
+            found.append(path)
+    return found
+
+
+def strip_out_of_scope(diff: str, scope: Iterable[str]) -> tuple[str, list[str]]:
+    """The diff without file blocks outside ``scope`` (either side), and those paths."""
+    from scripts.bench.measure_2721.scope import in_scope
+
+    entries = list(scope)
+    kept: list[str] = []
+    removed: list[str] = []
+    for path, block in split_file_blocks(diff):
+        old = _FILE_BLOCK_RE.match(block.splitlines()[0]).group(1)  # type: ignore[union-attr]
+        if in_scope(path, entries) and in_scope(old, entries):
+            kept.append(block)
+        else:
+            removed.append(path)
+    return "".join(kept), removed
+
+
+def filter_candidate(diff: str, scope: Iterable[str]) -> dict[str, Any]:
+    """Pre-registered order (both arms): tamper check -> test blocks -> scope.
+
+    Tampering is judged on the raw diff (so a conftest edit is never hidden by
+    the test strip); the scored diff is the raw diff minus test-path blocks,
+    then minus out-of-scope blocks.
+    """
+    tamper = tamper_paths(diff)
+    without_tests, test_paths = strip_test_hunks(diff)
+    scored, scope_paths = strip_out_of_scope(without_tests, scope)
+    flags = [flag for flag, hit in ((FLAG_HARNESS_TAMPER, tamper), (FLAG_TEST_HUNKS_STRIPPED, test_paths),
+                                    (FLAG_OUT_OF_SCOPE_STRIPPED, scope_paths)) if hit]
+    return {"scored_diff": scored, "tamper_paths": tamper, "stripped_test_paths": test_paths,
+            "stripped_out_of_scope_paths": scope_paths, "flags": flags}
 
 
 def lookup_signals(texts: Iterable[str], *, repo: str = "", denied_actions: Iterable[Mapping[str, Any]] = ()) -> dict[str, Any]:

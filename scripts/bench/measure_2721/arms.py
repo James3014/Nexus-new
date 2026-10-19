@@ -31,8 +31,8 @@ from scripts.bench.measure_2721.common import (
     sha256_text,
     write_json,
 )
-from scripts.bench.measure_2721.leakage import FLAG_TIMEOUT, lookup_signals
-from scripts.bench.measure_2721.materialize import checkout_base
+from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
+from scripts.bench.measure_2721.materialize import checkout_base, link_venv
 from scripts.bench.measure_2721.providers import (
     STATUS_INFRA,
     STATUS_OK,
@@ -115,6 +115,7 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     run_id = new_run_id(ARM_BARE, task["task_id"], repeat)
     workdir = run_root / "work" / run_id / "repo"
     checkout_base(Path(task["base_checkout"]), task["base_commit"], workdir)
+    link_venv(task, workdir)
     tree_sha = git(workdir, "rev-parse", "HEAD^{tree}").strip()
     prompt = task_prompt(task)
     write_json(run_root / "inputs" / f"{run_id}.json",
@@ -130,13 +131,20 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     diff_path.parent.mkdir(parents=True, exist_ok=True)
     diff_path.write_text(diff, encoding="utf-8")
     extra = result.extra or {}
-    lookup = lookup_signals([extra.get("response_text") or "", extra.get("stderr_tail") or ""],
-                            repo=task.get("repo", ""), denied_actions=extra.get("denied_actions") or ())
-    flags = [flag for flag in (FLAG_TIMEOUT if result.status == STATUS_TIMEOUT else None, lookup["flag"]) if flag]
+    lookup = lookup_signals(
+        [extra.get("response_text") or "", extra.get("stderr_tail") or "", extra.get("tool_inputs_text") or ""],
+        repo=task.get("repo", ""), denied_actions=extra.get("denied_actions") or ())
+    network = [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")]
+    flags = [flag for flag in (
+        FLAG_TIMEOUT if result.status == STATUS_TIMEOUT else None,
+        lookup["flag"],
+        FLAG_NETWORK_ATTEMPT if network else None,
+    ) if flag]
     row = {
         "schema": ROW_SCHEMA,
         "arm": ARM_BARE,
         "flags": flags,
+        **claude_row_fields(extra),
         "lookup": lookup,
         "run_id": run_id,
         "task_id": task["task_id"],
@@ -156,6 +164,29 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     if not keep_workdir:
         shutil.rmtree(workdir.parent, ignore_errors=True)
     return row
+
+
+def claude_row_fields(extra: Mapping[str, Any]) -> dict[str, Any]:
+    """Per-row model/cost/identity fields of a Claude run (empty otherwise)."""
+    if "claude_version" not in extra:
+        return {}
+    usage = extra.get("usage") or {}
+    return {
+        "claude_version": extra.get("claude_version"),
+        "claude_executable": extra.get("claude_executable"),
+        "account": extra.get("account"),
+        "worker_span_ms": extra.get("worker_span_ms"),
+        "num_turns": extra.get("num_turns"),
+        "tool_call_count": extra.get("tool_call_count"),
+        "total_cost_usd": extra.get("total_cost_usd"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+        "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+        "models_seen": extra.get("models_seen"),
+        "seatbelt_sha256": extra.get("seatbelt_sha256"),
+        "proxy_denied": [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")],
+    }
 
 
 def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, Any]:
@@ -205,14 +236,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--run-root", required=True)
     parser.add_argument("--repeats", type=int, nargs="+", default=[1])
     parser.add_argument("--ids", nargs="*")
-    parser.add_argument("--provider", choices=["agy", "fake"], default="fake",
-                        help="'fake' makes no model call (default); 'agy' is a paid pool run")
+    parser.add_argument("--provider", choices=["claude", "agy", "fake"], default="fake",
+                        help="'fake' makes no model call (default); 'claude' (prereg v0.4) and 'agy' are paid")
+    parser.add_argument("--claude-bin", help="absolute, non-symlink claude CLI (same file as the Gateway's)")
+    parser.add_argument("--token-file", help="0600 file with the measurement OAuth token (claude setup-token)")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     args = parser.parse_args(argv)
     run_root = Path(args.run_root)
     tasks = load_manifest(args.manifest, args.ids)
-    provider = build_provider(args.provider) if args.arm == "bare" else None
+    provider = (
+        build_provider(args.provider, claude_bin=args.claude_bin, trace_dir=run_root / "traces",
+                       token_file=args.token_file)
+        if args.arm == "bare" else None
+    )
     rows = []
     for task in tasks:
         for repeat in args.repeats:

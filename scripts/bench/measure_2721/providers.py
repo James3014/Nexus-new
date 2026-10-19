@@ -191,7 +191,193 @@ def run_evidence(stdout: str, stderr: str, response: str) -> dict[str, Any]:
     return {"response_text": response[-20000:], "denied_actions": denied, "stderr_tail": stderr[-4000:]}
 
 
-def build_provider(name: str) -> Provider:
+def claude_identity(executable: str, token_file: Optional[str] = None) -> dict[str, Any]:
+    """CLI version and the account the run will use (no secret is kept).
+
+    Runs ``auth status`` in the same isolated configuration as a measurement
+    run (fresh HOME/config dir, the token from ``token_file``), so it reports
+    the token's account, never the host user's own login.  The email is kept
+    only as a sha256.
+    """
+    import hashlib
+    import json as _json
+    import subprocess
+    import tempfile
+
+    from nexus.executors.claude_measurement_worker import (
+        CLAUDE_MEASUREMENT_ENV,
+        CLAUDE_MEASUREMENT_SYSTEM_PATH,
+        CLAUDE_OAUTH_TOKEN_ENV,
+        MEASUREMENT_CLAUDE_TOKEN_FILE_ENV,
+        measurement_claude_token,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="m2721-claude-id-") as tmp:
+        env = {"HOME": tmp, "CLAUDE_CONFIG_DIR": f"{tmp}/.claude", "TMPDIR": tmp, "CLAUDE_CODE_TMPDIR": tmp,
+               "PATH": CLAUDE_MEASUREMENT_SYSTEM_PATH, **CLAUDE_MEASUREMENT_ENV}
+        token = measurement_claude_token({MEASUREMENT_CLAUDE_TOKEN_FILE_ENV: token_file} if token_file else {})
+        if token:
+            env[CLAUDE_OAUTH_TOKEN_ENV] = token
+        version = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=30,
+                                 env=env, cwd=tmp, check=False)
+        status = subprocess.run([executable, "auth", "status"], capture_output=True, text=True, timeout=30,
+                                env=env, cwd=tmp, check=False)
+    try:
+        auth = _json.loads(status.stdout or "{}")
+    except ValueError:
+        auth = {}
+    email = str(auth.get("email") or "")
+    return {
+        "claude_executable": executable,
+        "claude_version": (version.stdout or version.stderr).strip(),
+        "account": {
+            "logged_in": bool(auth.get("loggedIn")),
+            "auth_method": auth.get("authMethod"),
+            "org_id": auth.get("orgId"),
+            "subscription_type": auth.get("subscriptionType"),
+            "email_sha256": hashlib.sha256(email.encode("utf-8")).hexdigest() if email else None,
+        },
+    }
+
+
+def read_claude_trace(trace_dir: Path, task_id: str, stdout_sha256: str) -> dict[str, Any]:
+    """The adapter's kept trace (summary) and sidecar for one run."""
+    import json as _json
+
+    from nexus.executors.claude_measurement_worker import summarize_stream_json
+
+    base = Path(trace_dir) / task_id
+    stream = base / f"{stdout_sha256}.stream.jsonl"
+    side = base / f"{stdout_sha256}.run.json"
+    summary = summarize_stream_json(stream.read_bytes() if stream.is_file() else b"")
+    sidecar = _json.loads(side.read_text(encoding="utf-8")) if side.is_file() else {}
+    observed = None
+    if stream.is_file():
+        first = stream.read_text(encoding="utf-8").splitlines()[:1]
+        try:
+            observed = _json.loads(first[0]).get("fake_observed") if first else None
+        except ValueError:
+            observed = None
+    return {"summary": summary, "sidecar": sidecar, "trace_path": str(stream) if stream.is_file() else None,
+            "fake_observed": observed}
+
+
+def _json_dumps(value: Any) -> str:
+    import json as _json
+
+    return _json.dumps(value, ensure_ascii=False, default=str)
+
+
+def claude_usage_fields(summary: Any) -> dict[str, Any]:
+    usage = summary.usage or {}
+    fields = {key: int(usage.get(key) or 0) for key in (
+        "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")}
+    fields["total_tokens"] = sum(fields.values())
+    return fields
+
+
+class ClaudeProvider:
+    """BARE arm on ``claude-haiku-5-5`` through the Nexus measurement adapter itself.
+
+    ``ClaudeMeasurementWorkerAdapter`` is exactly what the measurement Gateway's
+    P1 worker runs, so the BARE arm gets the identical argv, isolated HOME and
+    config dir, OAuth token, Seatbelt profile, API-only proxy, task venv and
+    time cap; only the prompt (no Nexus context) and the paths differ.
+    """
+
+    name = "claude"
+
+    def __init__(self, executable: str, trace_dir: Path, token_file: Optional[str] = None,
+                 identity: Optional[dict[str, Any]] = None):
+        if not os.path.isabs(executable):
+            raise ValueError("claude executable must be an absolute path")
+        self.executable = executable
+        self.trace_dir = Path(trace_dir).resolve()
+        self.token_file = token_file
+        self.identity = identity if identity is not None else claude_identity(executable, token_file)
+
+    def environ(self) -> dict[str, str]:
+        from nexus.executors.claude_measurement_worker import (
+            MEASUREMENT_CLAUDE_BIN_ENV,
+            MEASUREMENT_CLAUDE_ENV,
+            MEASUREMENT_CLAUDE_TOKEN_FILE_ENV,
+            MEASUREMENT_TRACE_DIR_ENV,
+        )
+
+        env = {key: value for key, value in os.environ.items() if key in ("USER", "LOGNAME", "LANG")}
+        env.update({MEASUREMENT_CLAUDE_ENV: "1", MEASUREMENT_CLAUDE_BIN_ENV: self.executable,
+                    MEASUREMENT_TRACE_DIR_ENV: str(self.trace_dir)})
+        if self.token_file:
+            env[MEASUREMENT_CLAUDE_TOKEN_FILE_ENV] = self.token_file
+        return env
+
+    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
+        from types import SimpleNamespace
+
+        from nexus.executors.claude_measurement_worker import (
+            CLAUDE_MEASUREMENT_MODEL,
+            ClaudeMeasurementWorkerAdapter,
+        )
+        from nexus.executors.worker_contract import WorkerOutcome, WorkerProviderUnavailable
+
+        workdir = Path(workdir).resolve()
+        # Same contract shape as P1: controller root -> ../venv is the task venv.
+        contract = SimpleNamespace(task_id=run_id, target_worktree_root=str(workdir.parent),
+                                   target_repo_root=str(workdir), controller_repo_root=str(workdir))
+        lease = SimpleNamespace(task_id=run_id, target_worktree=str(workdir))
+        base = dict(provider=self.name, model=CLAUDE_MEASUREMENT_MODEL)
+        started = time.monotonic()
+        try:
+            receipt = ClaudeMeasurementWorkerAdapter(environ=self.environ()).invoke(
+                contract, lease, prompt=prompt, timeout_seconds=float(timeout_seconds), model=CLAUDE_MEASUREMENT_MODEL
+            )
+        except WorkerProviderUnavailable as exc:
+            return ProviderResult(status=STATUS_INFRA, infra_reason="CLAUDE_UNAVAILABLE", failure_reason=str(exc),
+                                  wall_seconds=time.monotonic() - started, extra=dict(self.identity), **base)
+        wall = time.monotonic() - started
+        trace = read_claude_trace(self.trace_dir, run_id, receipt.stdout_sha256)
+        summary = trace["summary"]
+        usage = claude_usage_fields(summary)
+        extra = {
+            **self.identity,
+            "trace_path": trace["trace_path"],
+            "worker_span_ms": receipt.wall_time_ms,
+            "num_turns": summary.num_turns,
+            "total_cost_usd": summary.total_cost_usd,
+            "usage": usage,
+            "models_seen": list(summary.models_seen),
+            "tool_calls": [{"name": call["name"]} for call in summary.tool_calls],
+            "tool_call_count": len(summary.tool_calls),
+            # Tool inputs (Bash commands, paths) for the UPSTREAM_LOOKUP scan.
+            "tool_inputs_text": "\n".join(
+                _json_dumps(call.get("input")) for call in summary.tool_calls
+            )[:200000],
+            "permission_denials": list(summary.permission_denials),
+            "init": summary.init,
+            "seatbelt_sha256": receipt.provider_permission_profile_sha256,
+            "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
+            "env_keys": trace["sidecar"].get("env_keys"),
+            "argv_sha256": trace["sidecar"].get("argv_sha256"),
+            "fake_observed": trace["fake_observed"],
+            "receipt_failure_reason": receipt.failure_reason,
+        }
+        common = dict(model_calls=summary.num_turns or 0, total_tokens=usage["total_tokens"],
+                      token_status="measured" if summary.result_seen else "missing_result",
+                      exit_code=receipt.exit_code, wall_seconds=wall, extra=extra, **base)
+        reason = str(receipt.failure_reason or "")
+        if reason.startswith("claude_infra:"):
+            return ProviderResult(status=STATUS_INFRA, infra_reason=reason.split(":", 1)[1].upper(),
+                                  failure_reason=reason, **common)
+        if receipt.timed_out:
+            return ProviderResult(status=STATUS_TIMEOUT, timed_out=True, failure_reason="timeout", **common)
+        if receipt.outcome != WorkerOutcome.EXECUTION_COMPLETED.value:
+            return ProviderResult(status=STATUS_MODEL_FAILED, failure_reason=reason, **common)
+        return ProviderResult(status=STATUS_OK, **common)
+
+
+def build_provider(name: str, **options: Any) -> Provider:
+    if name == "claude":
+        return ClaudeProvider(options["claude_bin"], options["trace_dir"], options.get("token_file"))
     if name == "agy":
         return AgyPoolProvider()
     if name == "fake":
