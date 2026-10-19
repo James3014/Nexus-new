@@ -13,9 +13,9 @@
 
 Zero model calls.  GitHub is read only through ``~/workspace/agent-coord/bin/ghc``
 (shared 60 s cache, separate quota) with a delay between calls; diffs come from a
-dedicated clone under ``~/.local/state/nexus-l2-shadow/clone/`` (created on first run;
-the shared ``~/workspace/<repo>`` main clone is only a read-only ``--reference`` object
-store and is never fetched into).  Nothing here comments on, blocks, or labels a PR, and
+dedicated clone ``~/.local/state/nexus-l2-shadow/clone/<owner>__<repo>`` (created on first
+run with ``--reference ... --dissociate``; a clone root that overlaps ``~/workspace`` is refused,
+and the shared main clone is never fetched into).  Nothing here comments on, blocks, or labels a PR, and
 no gate or Gateway path reads the log.
 
 Merged PR diff: against the merge commit's first parent (squash commit or true merge).
@@ -260,22 +260,50 @@ def scan_pr(repo: str, pr: dict, state: str, clone: Path, issues: IssueText) -> 
             row["result"] = None
             row["skipped"] = "diff_too_large"
         else:
-            row["result"] = flags_lib.flag_candidate(
+            result = flags_lib.flag_candidate(
                 diff, issue_text, intake, head_tree=flags_lib.GitTree(clone, base)
             )
+            if result["errors"]:  # a checker that could not read its input is not "clean"
+                raise RuntimeError(
+                    "checker errors: "
+                    + "; ".join(f"{e['kind']} {e['path']}" for e in result["errors"][:5])
+                )
+            row["result"] = result
     except Exception as exc:  # never raise: a bad PR must not stop the stream
         row["result"] = None
         row["error"] = str(exc)[:300]
     return row
 
 
-def ensure_clone(repo: str, clone_root: Path) -> Path:
-    """Dedicated clone under the shadow state dir (created on first use).
+def _check_clone_root(root: Path, repo: str) -> Path:
+    """Refuse a clone root that is, is inside, or contains a shared main clone location."""
+    resolved = root.expanduser().resolve()
+    home = Path.home().resolve()
+    shared = {
+        (home / "workspace").resolve(),
+        (home / "Workspace").resolve(),
+        SEED_CLONE_ROOT.resolve(),
+    }
+    for s_dir in shared:
+        if resolved == s_dir or s_dir in resolved.parents or resolved in s_dir.parents:
+            raise RuntimeError(
+                f"refusing clone root {resolved}: it overlaps the shared clones in {s_dir}"
+            )
+    if (resolved / repo.split("/")[-1] / ".git").exists():
+        raise RuntimeError(
+            f"refusing clone root {resolved}: it already holds a main clone of {repo}"
+        )
+    return resolved
 
-    The shared ``~/workspace/<repo>`` main clone is only used as a read-only ``--reference``
-    object store; nothing is fetched into it.
+
+def ensure_clone(repo: str, clone_root: Path) -> Path:
+    """Dedicated clone ``<root>/<owner>__<repo>`` (created on first use, never a shared main clone).
+
+    The shared ``~/workspace/<repo>`` main clone is only used as a read-only ``--reference`` source
+    and the new clone is ``--dissociate``d from it; nothing is ever fetched into the shared one.
     """
-    dest = clone_root / repo.split("/")[-1]
+    root = _check_clone_root(Path(clone_root), repo)
+    dest = root / repo.replace("/", "__")
     if (dest / ".git").exists() or (dest / "HEAD").exists():
         return dest
     seed = SEED_CLONE_ROOT / repo.split("/")[-1]
@@ -291,7 +319,7 @@ def ensure_clone(repo: str, clone_root: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone", "-q", "--no-checkout"]
     if (seed / ".git").exists():
-        cmd += ["--reference", str(seed)]
+        cmd += ["--reference", str(seed), "--dissociate"]
     r = subprocess.run([*cmd, url, str(dest)], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise RuntimeError(f"clone of {repo} failed: {r.stderr.strip()[:300]}")
@@ -374,6 +402,10 @@ def main_commits(clone: Path) -> dict[int, dict]:
     return out
 
 
+class FollowupError(RuntimeError):
+    """A git failure while computing a follow-up; the PR's follow-up is unknown, not "clean"."""
+
+
 def _changed_old_ranges(
     clone: Path, commit: str, paths: list[str]
 ) -> dict[str, list[tuple[int, int]]]:
@@ -388,7 +420,6 @@ def _changed_old_ranges(
         commit,
         "--",
         *paths,
-        check=False,
     )
     path = None
     for line in text.splitlines():
@@ -416,7 +447,14 @@ def is_ref_subject(subject: str, pr_number: int) -> bool:
 def followup(
     clone: Path, merge_sha: str, pr_number: int, merged_iso: str, commits: list[dict] | None = None
 ) -> dict:
-    """Follow-up signal for one merged PR; see the module docstring."""
+    """Follow-up signal for one merged PR; raises FollowupError on any git failure."""
+    try:
+        return _followup(clone, merge_sha, pr_number, merged_iso)
+    except RuntimeError as exc:
+        raise FollowupError(str(exc)) from exc
+
+
+def _followup(clone: Path, merge_sha: str, pr_number: int, merged_iso: str) -> dict:
     start = dt.datetime.fromisoformat(merged_iso)
     until = start + dt.timedelta(days=FOLLOWUP_DAYS)
     # files and lines of the PR: diff against the first parent (squash commit or true merge)
@@ -468,7 +506,6 @@ def followup(
                     f"{c['sha']}^1",
                     "--",
                     path,
-                    check=False,
                 )
                 if any(ln.split(" ", 1)[0] in owned for ln in blame.splitlines() if len(ln) > 40):
                     hit = True
@@ -522,6 +559,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         latest[(r["repo"], r["pr"])] = r
     scored: list[dict] = []
     pending = unmerged = 0
+    unknown: list[dict] = []
     by_repo: dict[str, list[dict]] = {}
     for r in latest.values():
         by_repo.setdefault(r["repo"], []).append(r)
@@ -538,7 +576,11 @@ def cmd_report(args: argparse.Namespace) -> int:
             if dt.datetime.fromisoformat(info["date"]) + dt.timedelta(days=FOLLOWUP_DAYS) > now:
                 pending += 1
                 continue
-            fu = followup(clone, info["sha"], r["pr"], info["date"])
+            try:
+                fu = followup(clone, info["sha"], r["pr"], info["date"])
+            except FollowupError as exc:
+                unknown.append({"repo": repo, "pr": r["pr"], "error": str(exc)[:200]})
+                continue
             res = r["result"]
             refined = res.get("flags_refined", res["flags"])  # v1 log lines had one tier
             scored.append({
@@ -555,16 +597,18 @@ def cmd_report(args: argparse.Namespace) -> int:
         "scored": len(scored),
         "pending_under_7d": pending,
         "not_merged_or_unknown": unmerged,
+        "followup_unknown": {"n": len(unknown), "prs": [u["pr"] for u in unknown]},
         **summarize(scored),
     }
     if args.json:
         print(json.dumps(out, indent=2, sort_keys=True))
     else:
         print(
-            f"scored {len(scored)} merged PRs (pending <7d: {pending}, not merged/unknown: {unmerged})"
+            f"scored {len(scored)} merged PRs (pending <7d: {pending}, not merged/unknown: {unmerged}, "
+            f"follow-up unknown after git failure: {len(unknown)})"
         )
         for name in out:
-            if name in ("scored", "pending_under_7d", "not_merged_or_unknown"):
+            if name in ("scored", "pending_under_7d", "not_merged_or_unknown", "followup_unknown"):
                 continue
             cells = "  ".join(f"{k}: {v['k']}/{v['n']} ({v['rate']})" for k, v in out[name].items())
             print(f"{name:14s} {cells}")

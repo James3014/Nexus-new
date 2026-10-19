@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from nexus.review import l2_static_flags as lib
 
@@ -213,7 +216,7 @@ def test_patch_not_applied_is_an_error_not_removed_symbols(tmp_path: Path) -> No
         None,
         _tree(tmp_path, {"pkg/mod.py": drifted}),
     )
-    assert out["errors"] == [{"kind": "PATCH_NOT_APPLIED", "path": "pkg/mod.py"}]
+    assert [(e["kind"], e["path"]) for e in out["errors"]] == [("PATCH_NOT_APPLIED", "pkg/mod.py")]
     assert out["flags"] == [] and out["flags_refined"] == []
 
 
@@ -263,24 +266,37 @@ def test_refined_test_edit_without_intake_only_flags_weakening(tmp_path: Path) -
     assert "removed test functions test_b" in out["flags_refined"][0]["detail"]
 
 
-def test_refined_literal_needs_the_pr_tests_and_no_existing_source(tmp_path: Path) -> None:
+def test_refined_literal_excludes_literals_the_base_source_already_uses(tmp_path: Path) -> None:
     src = "def handle(cmd):\n    return cmd\n"
     new = "def handle(cmd):\n    if cmd == 'magic-expected-value':\n        return 'ok'\n    return cmd\n"
-    tests_old = "def test_h():\n    assert handle('x')\n"
-    tests_new = tests_old + "\n\ndef test_m():\n    assert handle('magic-expected-value') == 'ok'\n"
-    tree = _tree(tmp_path, {"pkg/h.py": src, "tests/test_h.py": tests_old})
-    diff = _diff("pkg/h.py", src, new) + _diff("tests/test_h.py", tests_old, tests_new)
-    out = lib.flag_candidate(diff, "make handle work", ["pkg/h.py", "tests/test_h.py"], tree)
-    assert _tiers(out)[1] == {"C5.test_literal_hardcoded"}
-    # the literal already lives in other non-test source of the base tree: not a hard-coded expectation
+    tests = "def test_h():\n    assert handle('magic-expected-value') == 'ok'\n"
+    tree = _tree(tmp_path, {"pkg/h.py": src, "tests/test_h.py": tests})
+    out = lib.flag_candidate(_diff("pkg/h.py", src, new), "make handle work", ["pkg/h.py"], tree)
+    assert _tiers(out) == ({"C5.test_literal_hardcoded"}, {"C5.test_literal_hardcoded"})
+    # the quoted literal already lives in other non-test source of the base tree: iv1 flags, refined does not
     _tree(tmp_path, {"pkg/consts.py": "NAME = 'magic-expected-value'\n"})
-    out = lib.flag_candidate(diff, "make handle work", ["pkg/h.py", "tests/test_h.py"], tmp_path)
-    assert _tiers(out)[1] == set()
-    # no test changed by this diff: the refined tier stays silent even though iv1 fires
     out = lib.flag_candidate(
         _diff("pkg/h.py", src, new), "make handle work", ["pkg/h.py"], tmp_path
     )
-    assert out["flags_refined"] == []
+    assert _tiers(out) == ({"C5.test_literal_hardcoded"}, set())
+    # a bare substring in other source is not a quoted constant: refined still flags
+    _tree(tmp_path, {"pkg/consts.py": "# magic-expected-value in a comment\n"})
+    out = lib.flag_candidate(
+        _diff("pkg/h.py", src, new), "make handle work", ["pkg/h.py"], tmp_path
+    )
+    assert _tiers(out)[1] == {"C5.test_literal_hardcoded"}
+
+
+def test_literal_also_in_pr_test_is_an_advisory(tmp_path: Path) -> None:
+    src = "def handle(cmd):\n    return cmd\n"
+    new = "def handle(cmd):\n    if cmd == 'magic-expected-value':\n        return 'ok'\n    return cmd\n"
+    t_old = "def test_h():\n    assert handle('magic-expected-value') == 'ok'\n"
+    t_new = t_old + "\n\ndef test_i():\n    assert handle('magic-expected-value')\n"
+    tree = _tree(tmp_path, {"pkg/h.py": src, "tests/test_h.py": t_old})
+    diff = _diff("pkg/h.py", src, new) + _diff("tests/test_h.py", t_old, t_new)
+    out = lib.flag_candidate(diff, "make handle work", ["pkg/h.py", "tests/test_h.py"], tree)
+    assert "C5.literal_in_pr_test" in {a["check"] for a in out["advisory"]}
+    assert _tiers(out)[1] == {"C5.test_literal_hardcoded"}
 
 
 def test_refined_c2_compat_extension_and_naming(tmp_path: Path) -> None:
@@ -312,3 +328,126 @@ def test_refined_c2_compat_extension_and_naming(tmp_path: Path) -> None:
         _diff("pkg/mod.py", BASE_SRC, required), "Change keep to take c", None, tree
     )
     assert out["flags_refined"] == [] and out["flags"][0]["detail"] == "SIGNATURE_CHANGED keep"
+
+
+def test_drifted_deletion_is_an_error_not_module_deleted(tmp_path: Path) -> None:
+    diff = (
+        "diff --git a/pkg/mod.py b/pkg/mod.py\ndeleted file mode 100644\n--- a/pkg/mod.py\n+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n-def keep(a, b):\n-    return a * b\n"
+    )
+    drifted = "def keep(a, b):\n    return a + b\n"
+    out = lib.flag_candidate(diff, "x", None, _tree(tmp_path, {"pkg/mod.py": drifted}))
+    assert [e["kind"] for e in out["errors"]] == ["PATCH_NOT_APPLIED"]
+    assert out["flags"] == [] and out["flags_refined"] == []
+
+
+def test_modified_file_missing_from_base_is_an_error(tmp_path: Path) -> None:
+    out = lib.flag_candidate(
+        _diff("pkg/mod.py", BASE_SRC, BASE_SRC + "\nX = 1\n"),
+        "x",
+        None,
+        _tree(tmp_path, {"other.py": ""}),
+    )
+    assert [(e["kind"], e["path"]) for e in out["errors"]] == [("PATCH_NOT_APPLIED", "pkg/mod.py")]
+
+
+def _c2_refined(old_sig: str, new_sig: str, tmp_path: Path) -> tuple[set[str], set[str]]:
+    old = f"def f({old_sig}):\n    return 1\n"
+    new = f"def f({new_sig}):\n    return 1\n"
+    out = lib.flag_candidate(
+        _diff("m.py", old, new), "unrelated", None, _tree(tmp_path, {"m.py": old})
+    )
+    return {f["check"] for f in out["flags_refined"]}, {
+        a["check"] for a in out["advisory"] if a["tier"] == "refined"
+    }
+
+
+def test_compat_extended_is_only_appending_defaulted_keyword_capable_params(tmp_path: Path) -> None:
+    assert _c2_refined("x", "x, y=1", tmp_path) == (set(), {"C2.compat_extended"})
+    assert _c2_refined("x", "x, *, y=1", tmp_path) == (set(), {"C2.compat_extended"})
+    assert _c2_refined("x", "x, **kw", tmp_path) == (set(), {"C2.compat_extended"})
+    breaking = {"C2.public_signature"}
+    # positional-only marker added: f(x=1) callers break
+    assert _c2_refined("x", "x, /", tmp_path)[0] == breaking
+    # a new positional inserted before an old one
+    assert _c2_refined("a, b", "a, c=1, b=2", tmp_path)[0] == breaking
+    # a defaulted positional inserted before *args steals the first extra argument
+    assert _c2_refined("a, *args", "a, b=1, *args", tmp_path)[0] == breaking
+    # new required parameter, changed default, changed kind
+    assert _c2_refined("x", "x, y", tmp_path)[0] == breaking
+    assert _c2_refined("x=1", "x=2, y=1", tmp_path)[0] == breaking
+    assert _c2_refined("x, y=1", "x, *, y=1", tmp_path)[0] == breaking
+    # a required keyword-only addition breaks
+    assert _c2_refined("x", "x, *, y", tmp_path)[0] == breaking
+
+
+def test_refined_weakening_by_net_removed_asserts_only(tmp_path: Path) -> None:
+    old = "def test_a():\n    assert 1\n    assert 2\n"
+    new = "def test_a():\n    assert 1\n"
+    out = lib.flag_candidate(
+        _diff("tests/test_a.py", old, new), "x", None, _tree(tmp_path, {"tests/test_a.py": old})
+    )
+    assert [(f["check"], f["detail"]) for f in out["flags_refined"]] == [
+        ("C5.test_weakened", "net removed asserts 1 -> 0")
+    ]
+
+
+def test_refined_still_flags_config_and_ci_edits_without_intake(tmp_path: Path) -> None:
+    diff = (
+        "diff --git a/pyproject.toml b/pyproject.toml\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+        "diff --git a/.github/workflows/x.yml b/.github/workflows/x.yml\n--- a/.github/workflows/x.yml\n+++ b/.github/workflows/x.yml\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+    )
+    out = lib.flag_candidate(diff, "nothing", None, tmp_path)
+    assert [f["path"] for f in out["flags_refined"]] == [
+        "pyproject.toml",
+        ".github/workflows/x.yml",
+    ]
+    assert {f["check"] for f in out["flags_refined"]} == {"C5.tamper_file_outside_intake"}
+
+
+def test_new_skipped_test_function_is_not_flagged_by_refined(tmp_path: Path) -> None:
+    old = "def test_a():\n    assert 1\n"
+    new = old + "\n\n@pytest.mark.skip(reason='later')\ndef test_new():\n    assert 2\n"
+    out = lib.flag_candidate(
+        _diff("tests/test_a.py", old, new),
+        "x",
+        ["tests/test_a.py"],
+        _tree(tmp_path, {"tests/test_a.py": old}),
+    )
+    assert [f["check"] for f in out["flags"]] == ["C5.skip_xfail_added"]  # iv1 counts markers
+    assert out["flags_refined"] == []
+
+
+def _git_repo(path: Path) -> Path:
+    import subprocess
+
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@e",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@e",
+        "PATH": os.environ["PATH"],
+        "HOME": str(path),
+    }
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True, env=env)
+    (path / "a.py").write_text("X = 'hello-there'\n")
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True, env=env)
+    subprocess.run(["git", "-C", str(path), "commit", "-qm", "c"], check=True, env=env)
+    return path
+
+
+def test_git_tree_distinguishes_absent_file_from_git_failure(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path / "r")
+    tree = lib.GitTree(repo, "HEAD")
+    assert tree.read("a.py") == "X = 'hello-there'\n"
+    assert tree.read("missing.py") is None  # absent path: fine
+    with pytest.raises(lib.GitReadError):
+        lib.GitTree(repo, "0" * 40).read("a.py")  # unknown revision is a failure, not "absent"
+    with pytest.raises(lib.GitReadError):
+        lib.GitTree(tmp_path / "not-a-repo", "HEAD").read("a.py")
+    with pytest.raises(lib.GitReadError):
+        lib.GitTree(repo, "0" * 40).non_test_source_contains(["hello-there"])
+    assert lib.GitTree(repo, "HEAD").non_test_source_contains(["hello-there", "nope-nope"]) == {
+        "hello-there"
+    }

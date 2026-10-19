@@ -35,7 +35,8 @@ def clone(tmp_path: Path) -> Path:
     """origin (bare) + clone `work`; main history: base, PR #10 (changes API + line), later fix, unrelated."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    work = tmp_path / "Nexus-new"
+    work = tmp_path / "root" / "James3014__Nexus-new"
+    work.parent.mkdir(exist_ok=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
     (work / "pkg").mkdir()
     (work / "pkg/mod.py").write_text(
@@ -278,12 +279,14 @@ def test_ref_signal_needs_subject_and_same_repo() -> None:
     assert not shadow.is_ref_subject("fix: other repo piece of other/repo#10 (#12)", 10)
     assert not shadow.is_ref_subject("fix: itself (#10)", 10)
     assert not shadow.is_ref_subject("feat: add thing (#12)", 10)  # no fix word
+    assert not shadow.is_ref_subject("feat: extends #10 with more (#12)", 10)  # #P but no fix word
 
 
 def test_body_mention_is_not_a_ref_signal(tmp_path: Path) -> None:
     origin = tmp_path / "o.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    work = tmp_path / "Nexus-new"
+    work = tmp_path / "root" / "James3014__Nexus-new"
+    work.parent.mkdir(exist_ok=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
     (work / "z.py").write_text("z = 0\n")
     _git(work, "add", "-A")
@@ -311,14 +314,15 @@ def merge_repo(tmp_path: Path) -> Path:
     """True merge commit `Merge pull request #20 from x/feature` followed by a rewrite of its line."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    work = tmp_path / "Nexus-new"
+    work = tmp_path / "root" / "James3014__Nexus-new"
+    work.parent.mkdir(exist_ok=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True, capture_output=True)
     (work / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
     _git(work, "add", "-A")
     _git(work, "commit", "-qm", "base", date="2026-10-01T00:00:00+00:00")
     _git(work, "checkout", "-qb", "feature")
     (work / "f.py").write_text("a = 1\nb = 22\nc = 3\n")
-    _git(work, "commit", "-qam", "feature work", date="2026-10-02T00:00:00+00:00")
+    _git(work, "commit", "-qam", "branch only commit (#30)", date="2026-10-02T00:00:00+00:00")
     _git(work, "checkout", "-q", "main")
     (work / "other.py").write_text("z = 1\n")
     _git(work, "add", "-A")
@@ -342,6 +346,7 @@ def merge_repo(tmp_path: Path) -> Path:
 def test_true_merge_commits_use_first_parent(merge_repo: Path, tmp_path: Path) -> None:
     merged = shadow.main_commits(merge_repo)
     assert {19, 20, 21} <= set(merged)
+    assert 30 not in merged  # --first-parent: a commit that only lives on the merged branch
     assert len(merged[20]["parents"]) == 2
     merge = merged[20]["sha"]
     pr = {
@@ -373,9 +378,123 @@ def test_default_clone_root_is_dedicated_and_created_on_first_use(
     clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert shadow.DEFAULT_CLONE_ROOT == Path.home() / ".local/state/nexus-l2-shadow/clone"
-    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", clone.parent)  # the shared main clone stand-in
+    seed_root = tmp_path / "seed"
+    seed_root.mkdir()
+    subprocess.run(
+        ["git", "clone", "-q", str(clone), str(seed_root / "Nexus-new")],
+        check=True,
+        capture_output=True,
+    )
+    # the seed's origin is `clone` (a path), standing in for the GitHub URL
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", seed_root)
     root = tmp_path / "state/clone"
     dest = shadow.ensure_clone("James3014/Nexus-new", root)
-    assert dest == root / "Nexus-new" and dest != clone
+    assert dest == root.resolve() / "James3014__Nexus-new"  # keyed by owner__repo
     assert shadow.main_commits(dest).keys() == {10, 11, 12, 13}
+    assert not (
+        dest / ".git/objects/info/alternates"
+    ).exists()  # --dissociate: independent of the shared clone
     assert shadow.ensure_clone("James3014/Nexus-new", root) == dest  # second call reuses it
+    assert shadow.ensure_clone("Other/Nexus-new", root) != dest  # same repo name, other owner
+
+
+def test_clone_root_overlapping_shared_clones_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / "workspace/Nexus-new/.git").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", home / "workspace")
+    for bad in (home / "workspace", home / "workspace/sub", home, home / "Workspace/x"):
+        with pytest.raises(RuntimeError, match="refusing clone root"):
+            shadow.ensure_clone("James3014/Nexus-new", bad)
+    holder = tmp_path / "elsewhere"
+    (holder / "Nexus-new/.git").mkdir(parents=True)  # a root that already holds a main clone
+    with pytest.raises(RuntimeError, match="main clone"):
+        shadow.ensure_clone("James3014/Nexus-new", holder)
+
+
+def test_checker_errors_make_the_scan_errored(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merged = shadow.main_commits(clone)
+    monkeypatch.setattr(
+        shadow.flags_lib,
+        "flag_candidate",
+        lambda *a, **k: {
+            "flags": [],
+            "errors": [{"kind": "PATCH_NOT_APPLIED", "path": "pkg/mod.py"}],
+        },
+    )
+
+    def gh(*args: str) -> object:
+        return _pr_list(merged) if args[:2] == ("pr", "list") else {"title": "t", "body": "b"}
+
+    log = tmp_path / "state/flags.jsonl"
+    assert shadow.cmd_run(_run_args(log, clone), gh_json=gh) == 0
+    assert shadow.read_log(log) == []  # not logged as a clean record, not seen
+    errs = shadow.read_log(log.parent / "errors.jsonl")
+    assert len(errs) == 1 and "PATCH_NOT_APPLIED pkg/mod.py" in errs[0]["error"]
+
+
+def test_git_failure_in_followup_is_unknown_not_clean(clone: Path, tmp_path: Path) -> None:
+    merged = shadow.main_commits(clone)
+    with pytest.raises(shadow.FollowupError):
+        shadow.followup(clone, "0" * 40, 10, merged[10]["date"])
+    with pytest.raises(RuntimeError):
+        shadow._changed_old_ranges(clone, "0" * 40, ["pkg/mod.py"])
+
+
+def test_report_excludes_unknown_followups_and_uses_refined_for_flagged(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    flag = {"check": "C2.public_signature", "path": "p.py", "line": 1, "detail": "d", "tier": "iv1"}
+
+    def row(pr: int, iv1: list, refined: list) -> dict:
+        return {
+            "repo": "James3014/Nexus-new",
+            "pr": pr,
+            "head_sha": f"h{pr}",
+            "state": "merged",
+            "result": {
+                "flags": iv1,
+                "flags_refined": refined,
+                "tamper": False,
+                "api_delta": bool(iv1),
+                "tamper_refined": False,
+                "api_delta_refined": bool(refined),
+                "errors": [],
+            },
+        }
+
+    log = tmp_path / "state/flags.jsonl"
+    shadow.append_log(log, row(10, [flag], []))  # iv1 flags it, refined does not
+    shadow.append_log(log, row(11, [flag], [dict(flag, tier="refined")]))  # both flag it
+    shadow.append_log(log, row(12, [], []))
+    real = shadow.followup
+
+    def fake(clone_: Path, sha: str, pr: int, date: str, commits=None) -> dict:
+        if pr == 11:
+            raise shadow.FollowupError("git blame failed")
+        return real(clone_, sha, pr, date)
+
+    monkeypatch.setattr(shadow, "followup", fake)
+    argv = [
+        "report",
+        "--log",
+        str(log),
+        "--clone-root",
+        str(clone.parent),
+        "--no-fetch",
+        "--now",
+        "2026-10-30T00:00:00+00:00",
+        "--json",
+    ]
+    capsys.readouterr()
+    assert shadow.cmd_report(shadow.build_parser().parse_args(argv)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["scored"] == 2 and out["followup_unknown"] == {"n": 1, "prs": [11]}
+    assert out["flagged"]["any"]["n"] == 0  # refined tier: PR 10 is unflagged, PR 11 is unknown
+    assert out["iv1_flagged"]["any"]["n"] == 1  # iv1 tier flags PR 10
+    assert out["unflagged"]["any"]["n"] == 2 and out["iv1_unflagged"]["any"]["n"] == 1
+    assert out["flagged"] != out["iv1_flagged"]

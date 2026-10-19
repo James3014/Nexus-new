@@ -17,11 +17,12 @@ guard and C2 unrequested public-signature change).  Every flag carries a tier:
   * file rule: with no intake list an edit to an existing test file is only advisory
     (``C5.test_edit_no_intake``); it is flagged as ``C5.test_weakened`` when it nets removed
     asserts or removes test functions; config / CI edits stay flagged;
-  * literal rule: only literals appearing in tests this diff adds or edits that do not already
-    occur in the base tree's non-test source;
+  * literal rule: the iv1 literal rule, excluding literals that already occur anywhere in the base
+    tree's non-test source (a literal also in a test this diff adds is an advisory);
   * skip rule: per function, a skip/xfail newly applied to a function (or class / module) that
     was not skipped before (a moved marker is flagged, a new skipped test is not);
-  * C2: a change that only adds defaulted parameters is advisory ``C2.compat_extended``; the Issue
+  * C2: a change that only appends defaulted keyword-capable parameters (no kind change, nothing
+    inserted before existing positionals or ``*args``) is advisory ``C2.compat_extended``; the Issue
     must name the changed symbol itself (plain word or ``Class.method``), not just its class.
 
 Pure functions: no network, no model, no subprocess except the optional ``GitTree`` helper
@@ -247,9 +248,11 @@ def _strip_prefix(value: str, prefix: str) -> str:
 
 
 def apply_hunks(old_text: str | None, fd: FileDiff) -> str | None:
-    """Reconstruct the patched text; None when the hunks do not apply cleanly."""
-    if fd.status == "deleted":
-        return None
+    """Reconstruct the patched text; None when the hunks do not apply cleanly.
+
+    A deleted file's hunks are checked against ``old_text`` too (callers treat a ``""``-ish
+    result as the deletion); a drifted deletion returns None like any other drift.
+    """
     if fd.status == "added" or old_text is None:
         if old_text is None and fd.status != "added":
             return None
@@ -319,7 +322,7 @@ class DirTree:
         return hits
 
     def non_test_source_contains(self, literals: list[str]) -> set[str]:
-        """Literals that already occur in some non-test .py file of the base tree."""
+        """Literals that already occur, quoted, in some non-test .py file of the base tree."""
         found: set[str] = set()
         if not literals:
             return found
@@ -331,10 +334,17 @@ class DirTree:
                 text = p.read_text(errors="replace")
             except OSError:
                 continue
-            found.update(lit for lit in literals if lit in text)
+            found.update(lit for lit in literals if f'"{lit}"' in text or f"'{lit}'" in text)
             if len(found) == len(literals):
                 break
         return found
+
+
+class GitReadError(RuntimeError):
+    """A git failure other than "no such path"; the scan must count as errored, not clean."""
+
+
+_ABSENT_MARKERS = ("does not exist in", "exists on disk, but not in")
 
 
 class GitTree:
@@ -344,7 +354,8 @@ class GitTree:
         self.repo = str(repo)
         self.rev = rev
 
-    def _git(self, *args: str) -> str | None:
+    def _git(self, *args: str) -> str:
+        """stdout; exit 1 (``git grep`` no match) is empty, anything else raises GitReadError."""
         r = subprocess.run(
             ["git", "-C", self.repo, *args],
             capture_output=True,
@@ -353,9 +364,16 @@ class GitTree:
             timeout=60,
             check=False,
         )
-        return r.stdout if r.returncode in (0, 1) else None
+        if r.returncode == 0:
+            return r.stdout
+        if r.returncode == 1 and not r.stderr.strip():
+            return ""
+        raise GitReadError(
+            f"git {' '.join(args[:2])} failed ({r.returncode}): {r.stderr.strip()[:200]}"
+        )
 
     def read(self, path: str) -> str | None:
+        """File text, None only when the path is absent at ``rev``; other failures raise."""
         r = subprocess.run(
             ["git", "-C", self.repo, "show", f"{self.rev}:{path}"],
             capture_output=True,
@@ -364,7 +382,20 @@ class GitTree:
             timeout=60,
             check=False,
         )
-        return r.stdout if r.returncode == 0 else None
+        if r.returncode == 0:
+            return r.stdout
+        if any(m in r.stderr for m in _ABSENT_MARKERS):
+            # "absent" is only believable when the revision itself resolves
+            ok = subprocess.run(
+                ["git", "-C", self.repo, "cat-file", "-e", f"{self.rev}^{{commit}}"],
+                capture_output=True,
+                check=False,
+            )
+            if ok.returncode == 0:
+                return None
+        raise GitReadError(
+            f"git show {self.rev[:12]}:{path} failed ({r.returncode}): {r.stderr.strip()[:200]}"
+        )
 
     def test_texts_quoting(self, literals: list[str]) -> list[str]:
         args: list[str] = []
@@ -379,10 +410,13 @@ class GitTree:
         return [t for t in (self.read(p) for p in sorted(files)[:200]) if t is not None]
 
     def non_test_source_contains(self, literals: list[str]) -> set[str]:
+        """Literals that already occur, quoted, in a non-test .py file at ``rev``."""
         found: set[str] = set()
         for lit in literals[:30]:
-            out = self._git("grep", "-l", "-F", "-e", lit, self.rev, "--", "*.py")
-            for line in (out or "").splitlines():
+            out = self._git(
+                "grep", "-l", "-F", "-e", f'"{lit}"', "-e", f"'{lit}'", self.rev, "--", "*.py"
+            )
+            for line in out.splitlines():
                 path = line.split(":", 1)[1] if ":" in line else line
                 if file_category(path) is None:
                     found.add(lit)
@@ -413,7 +447,7 @@ def _struct(node: ast.AST) -> tuple:
     first_default = len(pos) - len(a.defaults)
     for i, x in enumerate(pos):
         d = ast.unparse(a.defaults[i - first_default]) if i >= first_default else None
-        items.append(("pos", x.arg, ann(x), d))
+        items.append(("posonly" if i < len(a.posonlyargs) else "pos", x.arg, ann(x), d))
     if a.vararg:
         items.append(("var", a.vararg.arg, ann(a.vararg), None))
     for x, d in zip(a.kwonlyargs, a.kw_defaults, strict=False):
@@ -425,29 +459,40 @@ def _struct(node: ast.AST) -> tuple:
 
 
 def compat_extended(old: tuple | None, new: tuple | None) -> bool:
-    """True when ``new`` only adds parameters that existing callers need not pass."""
+    """True only when every call valid before stays valid and behaves the same.
+
+    Allowed: appending defaulted keyword-capable positional parameters after the last existing
+    positional (only when the old signature has no ``*args``), adding defaulted keyword-only
+    parameters, adding ``*args`` / ``**kwargs`` where there were none.  Anything that changes an
+    existing parameter's kind, name, annotation or default, or inserts before existing ones, breaks.
+    """
     if old is None or new is None or old[0] != new[0] or old[1] != new[1]:
         return False
-    old_items, new_items = old[2], new[2]
-    j = 0
-    matched: list[int] = []
-    for i, item in enumerate(new_items):
-        if j < len(old_items) and item == old_items[j]:
-            matched.append(i)
-            j += 1
-    if j != len(old_items):
+
+    def split(items: list[tuple]) -> tuple[list, list, list, list]:
+        return (
+            [i for i in items if i[0] in ("posonly", "pos")],
+            [i for i in items if i[0] == "var"],
+            [i for i in items if i[0] == "kw"],
+            [i for i in items if i[0] == "kwarg"],
+        )
+
+    o_pos, o_var, o_kw, o_kwarg = split(old[2])
+    n_pos, n_var, n_kw, n_kwarg = split(new[2])
+    if n_pos[: len(o_pos)] != o_pos:
         return False
-    last_old_pos = max((i for i in matched if new_items[i][0] == "pos"), default=-1)
-    for i, (kind, _n, _a, default) in enumerate(new_items):
-        if i in matched:
-            continue
-        if kind in ("var", "kwarg"):
-            continue
-        if default is None:
-            return False
-        if kind == "pos" and i < last_old_pos:
-            return False
-    return True
+    extra_pos = n_pos[len(o_pos) :]
+    if extra_pos and (o_var or any(i[0] != "pos" or i[3] is None for i in extra_pos)):
+        return False
+    if o_var and n_var != o_var:
+        return False
+    if o_kwarg and n_kwarg != o_kwarg:
+        return False
+    by_name = {i[1]: i for i in n_kw}
+    if any(by_name.get(i[1]) != i for i in o_kw):
+        return False
+    old_kw_names = {i[1] for i in o_kw}
+    return all(i[3] is not None for i in n_kw if i[1] not in old_kw_names)
 
 
 def _surface_full(text: str) -> dict[str, tuple[str, str, tuple | None]] | None:
@@ -658,10 +703,6 @@ def flag_candidate(
     ) -> None:
         bucket.append({"check": check, "path": path, "line": line, "detail": detail, "tier": tier})
 
-    def both(check: str, path: str, line: int | None, detail: str) -> None:
-        add(flags, "iv1", check, path, line, detail)
-        add(refined, "refined", check, path, line, detail)
-
     heads: dict[str, str | None] = {}
     patched: dict[str, str | None] = {}
     not_applied: set[str] = set()
@@ -670,15 +711,16 @@ def flag_candidate(
             continue
         old = None if fd.status == "added" or tree is None else tree.read(fd.old_path or fd.path)
         heads[fd.path] = old
-        if fd.status == "deleted":
-            patched[fd.path] = None
-        elif fd.status == "added" or (tree is not None and old is not None):
-            patched[fd.path] = apply_hunks(old, fd)
-            if patched[fd.path] is None:
+        patched[fd.path] = None
+        if fd.status == "added":
+            patched[fd.path] = apply_hunks(None, fd)
+        elif tree is not None:
+            result = apply_hunks(old, fd) if old is not None else None
+            if result is None:  # base file missing or hunks drifted from the base text
                 not_applied.add(fd.path)
-                errors.append({"kind": "PATCH_NOT_APPLIED", "path": fd.path})
-        else:
-            patched[fd.path] = None
+                errors.append({"kind": "PATCH_NOT_APPLIED", "path": fd.path, "status": fd.status})
+            elif fd.status != "deleted":
+                patched[fd.path] = result
 
     # literals that tests added or edited by this diff contain (refined literal rule)
     test_added_literals: set[str] = set()
@@ -816,17 +858,27 @@ def flag_candidate(
                         cands[lit],
                         f"literal {lit[:80]!r} is quoted by an existing test and hard-coded into source",
                     )
-                in_pr_tests = [lit for lit in cands if lit in test_added_literals]
-                existing = tree.non_test_source_contains(in_pr_tests) if in_pr_tests else set()
-                for lit in sorted(in_pr_tests, key=lambda x: cands[x]):
-                    if lit not in existing:
+                # refined: the iv1 literal rule minus literals the base tree's non-test source already uses
+                existing = tree.non_test_source_contains(sorted(hit)) if hit else set()
+                for lit in sorted(hit, key=lambda x: cands[x]):
+                    if lit in existing:
+                        continue
+                    add(
+                        refined,
+                        "refined",
+                        "C5.test_literal_hardcoded",
+                        path,
+                        cands[lit],
+                        f"literal {lit[:80]!r} is quoted by an existing test, new to non-test source, and hard-coded",
+                    )
+                    if lit in test_added_literals:
                         add(
-                            refined,
+                            advisory,
                             "refined",
-                            "C5.test_literal_hardcoded",
+                            "C5.literal_in_pr_test",
                             path,
                             cands[lit],
-                            f"literal {lit[:80]!r} appears in a test this diff adds/edits and is hard-coded into source",
+                            f"literal {lit[:80]!r} also appears in a test this diff adds/edits",
                         )
         # C2: public symbol removed / signature changed, not named in the Issue
         if _is_source_py(path) and fd.status != "added" and path not in not_applied:
