@@ -26,6 +26,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from nexus.engine.sandboxed_lane import (  # noqa: E402
+    DISABLE_OS_SANDBOX_ENVS,
+    os_sandbox_available,
+)
 from nexus.research import real_outcome_scorer as ros  # noqa: E402
 
 
@@ -115,6 +119,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--min-free-percent", type=int, default=20)
     p.add_argument("--keep-trees", action="store_true")
+    p.add_argument(
+        "--sandbox",
+        choices=ros.RUNNER_SANDBOX_MODES,
+        default=ros.SANDBOX_NONE,
+        help=(
+            "pytest confinement (amendment A9). none (default): v1 §8 as pre-registered."
+            " os: macOS sandbox-exec, no network, writes only to the tree and scratch;"
+            " refused (exit 7) when no OS sandbox is available, never run unconfined"
+        ),
+    )
+    p.add_argument(
+        "--spec-version",
+        choices=ros.SCORING_SPEC_VERSIONS,
+        default=ros.SPEC_V1,
+        help=(
+            "scoring rules. v1 (default): the pre-registered v1, with the v2 GOLD port"
+            " fallback (A5), exactly as before. v3 (opt-in, #2709): adds a metadata-only"
+            " dist-info stub for the BASE project to the env (REAL_OUTCOME_SCORER_SPEC.v3.md)"
+        ),
+    )
     p.add_argument("--dry-run", action="store_true", help="verify seals and list labels only")
     p.add_argument("--summarize", action="store_true", help="print summary of --out receipts")
     return p.parse_args(argv)
@@ -136,6 +160,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.store or not args.work:
         print("--store and --work are required", file=sys.stderr)
         return 2
+    if args.sandbox == ros.SANDBOX_OS and not os_sandbox_available():
+        print(
+            "--sandbox os: no OS sandbox available (macOS sandbox-exec missing, or disabled by"
+            f" {' / '.join(DISABLE_OS_SANDBOX_ENVS)}); refusing to score unconfined",
+            file=sys.stderr,
+        )
+        return 7
     tasks_dir = args.store / "tasks"
     keys = args.task or sorted(d.name for d in tasks_dir.iterdir() if (d / "raw.json").exists())
     if args.dry_run:
@@ -164,14 +195,20 @@ def main(argv: list[str] | None = None) -> int:
     leakage = json.loads(args.leakage_flags.read_text()) if args.leakage_flags else {}
     ctx = ros.ScoreContext(
         work=args.work,
-        env_provider=ros.UvEnvProvider(args.work / "envs", log=log),
-        runner=ros.PytestRunner(args.work / "scratch", log=log),
+        env_provider=ros.UvEnvProvider(args.work / "envs", log=log, spec_version=args.spec_version),
+        runner=ros.PytestRunner(
+            args.work / "scratch", log=log, sandbox=args.sandbox, store=args.store
+        ),
         repo_sources=sources,
         spec_sha256=_spec_sha256(),
         spec_v2_sha256=ros.sha256_bytes((ROOT / ros.SPEC_V2_RELATIVE_PATH).read_bytes()),
         leakage_flags=leakage,
         log=log,
         keep_trees=args.keep_trees,
+        spec_version=args.spec_version,
+        spec_v3_sha256=ros.sha256_bytes((ROOT / ros.SPEC_V3_RELATIVE_PATH).read_bytes())
+        if args.spec_version == ros.SPEC_V3
+        else None,
     )
     rc = 0
     for key in keys:

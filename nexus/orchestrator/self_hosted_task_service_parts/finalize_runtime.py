@@ -278,6 +278,34 @@ class _FinalizeRuntimeMixin:
                     pass
         return probe
 
+    @staticmethod
+    def _learning_writeback(contract, candidate, verified, resolution, fail_to_pass_status):
+        """#2721: post-verification write-back; {} unless a measurement switch is set.
+
+        Never raises: the write-back cannot change the task outcome.  The observation
+        is recorded only under a switch, so live state stays byte-identical.
+        """
+        try:
+            from nexus.orchestrator.p1_learning_writeback import (
+                run_learning_writeback,
+            )
+
+            writeback = run_learning_writeback(
+                contract=contract,
+                candidate=candidate,
+                verified=verified,
+                resolution_verdict=str(getattr(resolution, "verdict", "") or ""),
+                fail_to_pass_status=fail_to_pass_status,
+            )
+        except Exception as exc:  # noqa: BLE001 - measurement code must not fail finalize
+            switches = ("NEXUS_LEARNING_WRITEBACK", "NEXUS_STATE_READ_ONLY")
+            if any(_service_module().os.environ.get(name, "").strip() == "1" for name in switches):
+                return {"schema": "nexus.p1_learning_writeback.v1", "error_type": type(exc).__name__}
+            return {}
+        if writeback.get("enabled") or writeback.get("read_only"):
+            return writeback
+        return {}
+
     def _finalize_runtime_candidate(
         self, contract, request, lease, state, attempts, update, *, execution, status
     ):
@@ -358,6 +386,16 @@ class _FinalizeRuntimeMixin:
                 "status": "PENDING",
                 "required": True,
             }
+        # #2721 measurement only: write the run back to memory/Belief (no-op unless
+        # NEXUS_LEARNING_WRITEBACK=1 and not NEXUS_STATE_READ_ONLY=1).  A task that
+        # requires fail-to-pass writes back after its probe instead (below).
+        proven = resolution.verdict == _service_module().AttemptResolutionVerdict.PROVEN.value
+        writeback_deferred = fail_to_pass_required and proven
+        if not writeback_deferred:
+            # Failed attempts (they raise just below) and non-F2P tasks write back now.
+            writeback = self._learning_writeback(contract, candidate, verified, resolution, None)
+            if writeback:
+                verified_values["learning_writeback"] = writeback
         update("VERIFIED", verified_values)
 
         if resolution.verdict != _service_module().AttemptResolutionVerdict.PROVEN.value:
@@ -369,6 +407,11 @@ class _FinalizeRuntimeMixin:
             request=request,
         )
         if authority_error:
+            deferred_writeback = (
+                self._learning_writeback(contract, candidate, verified, resolution, "NOT_RUN")
+                if writeback_deferred
+                else {}
+            )
             cleanup = manager.cleanup_terminal_target(contract, lease)
             cleanup_ok = cleanup.decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
             terminal_status = (
@@ -398,6 +441,7 @@ class _FinalizeRuntimeMixin:
                     "terminal_status": terminal_status,
                     "state_retention_status": "TERMINAL",
                     "archive_eligible": False,
+                    **({"learning_writeback": deferred_writeback} if deferred_writeback else {}),
                 },
             )
             return {
@@ -418,7 +462,11 @@ class _FinalizeRuntimeMixin:
 
         if fail_to_pass_required:
             probe = self._run_fail_to_pass_probe(manager, contract)
-            update("VERIFIED", {"fail_to_pass": probe})
+            probe_values: dict[str, Any] = {"fail_to_pass": probe}
+            writeback = self._learning_writeback(contract, candidate, verified, resolution, str(probe["status"]))
+            if writeback:
+                probe_values["learning_writeback"] = writeback
+            update("VERIFIED", probe_values)
             if probe["status"] != "VERIFIED":
                 # Raised after the probe is persisted; _finalize_runtime_failure
                 # treats a blocked probe as an unverified candidate, so the

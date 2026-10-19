@@ -4038,12 +4038,88 @@ def _recovery_wrapper_command(root: str) -> str:
     # Durable lifecycle and research evidence belong to host state storage,
     # never an incidental directory under the repository workspace (#1539).
     state_dir = Path.home() / ".local/state/Nexus-new-self-hosted-state"
+    # Same fixed NEXUS_STATE_ROOT and measurement-only guard as the
+    # auto-deployer's live wrapper (#2713, #2745).  Defined in this file (not
+    # imported) so the R1 receipt's final_manager_sha256 binds every byte of
+    # the rendered wrapper; tests assert equality with the deployer.
+    state_root = _recovery_state_root()
+    if any(
+        token in str(state_root)
+        for token in (";", "&&", "|", "$", "`", '"', "\\", "\n", "\r", "\x00")
+    ):
+        raise _gateway_error("R1 recovery wrapper state root contains shell metacharacter")
     return (
-        f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f'cd "{root_path}" ; source "{ENV_PATH}" ; {_r1_measurement_env_guard()}'
+        f"export PYTHONDONTWRITEBYTECODE=1 ; "
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state_dir}" ; '
+        f'export NEXUS_STATE_ROOT="{state_root}" ; '
         f'exec {_ACTUAL_INTERPRETER} "{entrypoint}"'
     )
+
+
+# Must equal nexus_gateway_auto_deploy.MEASUREMENT_ONLY_ENV_VARS,
+# MEASUREMENT_ENV_REFUSED(_EXIT) and measurement_env_guard() (#2745; asserted
+# by tests, kept here so R1's manager hash covers them).
+R1_MEASUREMENT_ONLY_ENV_VARS = (
+    "NEXUS_MEASUREMENT_CLAUDE_WORKER",
+    "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT",
+    "NEXUS_LEARNING_WRITEBACK",
+    "NEXUS_STATE_READ_ONLY",
+    "NEXUS_MEASUREMENT_WORKTREE_DIFF",
+)
+R1_MEASUREMENT_ENV_REFUSED = "NEXUS_LIVE_LAUNCH_REFUSED_MEASUREMENT_ENV"
+R1_MEASUREMENT_ENV_REFUSED_EXIT = 78
+
+
+def _r1_measurement_env_guard() -> str:
+    """Refuse an R1 launch with a measurement-only switch set (#2745)."""
+    parts = []
+    for name in R1_MEASUREMENT_ONLY_ENV_VARS:
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+            raise _gateway_error("R1 measurement env name invalid")
+        parts.append(
+            f'if [ -n "${{{name}:-}}" ] ; then '
+            f'echo "{R1_MEASUREMENT_ENV_REFUSED}:{name}" >&2 ; '
+            f"exit {R1_MEASUREMENT_ENV_REFUSED_EXIT} ; fi ; "
+        )
+    return "".join(parts)
+
+
+def _recovery_state_root() -> Path:
+    """Must equal ``nexus_gateway_auto_deploy.live_state_root()`` (#2713)."""
+    return Path.home() / "Library/Application Support/Nexus/gateway-direct/state"
+
+
+def _ensure_recovery_state_root() -> Path:
+    """Create/validate the fixed live state root before an R1 plist write (#2713).
+
+    Same rules as the deployer's ``ensure_state_root_path`` (asserted by
+    tests): absolute, not a symlink, its own real path, a directory owned by
+    this uid, tightened to 0700; only the empty directory is created.
+    """
+    path = _recovery_state_root()
+    try:
+        if not path.is_absolute():
+            raise ValueError("not absolute")
+        if path.is_symlink():
+            raise ValueError("symlink")
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(FileExistsError):
+                path.mkdir(mode=0o700)
+        if os.path.realpath(path) != str(path):
+            raise ValueError("not canonical")
+        info = os.lstat(path)
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("not a directory")
+        if info.st_uid != os.getuid():
+            raise ValueError("foreign owner")
+        if stat.S_IMODE(info.st_mode) != 0o700:
+            os.chmod(path, 0o700, follow_symlinks=False)
+    except (OSError, ValueError) as exc:
+        raise _gateway_error("R1 recovery state root rejected", exc) from exc
+    return path
 
 
 def _recovery_expected_plist_bytes(root: str) -> bytes:
@@ -4710,6 +4786,9 @@ def _production_recovery_adapters(
                 return RecoveryEffectAck(
                     **values, evidence_hash=canonical_hash(values)
                 )
+        # The R1 wrapper exports the fixed NEXUS_STATE_ROOT (#2713); it must
+        # exist (0700, owned, not a symlink) before any host effect.
+        _ensure_recovery_state_root()
         token = _recovery_token(token_loader)
         try:
             current_health = _recovery_health(token=token, opener=opener)

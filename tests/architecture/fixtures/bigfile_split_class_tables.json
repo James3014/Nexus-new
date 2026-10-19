@@ -169,6 +169,10 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> Optional[dict[str, Any]]"
    },
+   "_learning_writeback": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:candidate, POSITIONAL_OR_KEYWORD:verified, POSITIONAL_OR_KEYWORD:resolution, POSITIONAL_OR_KEYWORD:fail_to_pass_status)"
+   },
    "_lease_from_state": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> TargetWorktreeLease"
@@ -837,7 +841,7 @@
    },
    "_canonical_request": {
     "kind": "staticmethod",
-    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str], POSITIONAL_OR_KEYWORD:base: str, KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:contract_binding: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str], POSITIONAL_OR_KEYWORD:base: str, KEYWORD_ONLY:action: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:contract_binding: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:bound_action_request: Optional[Mapping[str, Any]] = None, KEYWORD_ONLY:controller_repo_root: Optional[Path] = None) -> dict[str, Any]"
    },
    "_cleanup_assist_workspace": {
     "kind": "function",

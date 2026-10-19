@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import dataclasses
 import gzip
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from nexus.engine import sandboxed_lane
 from nexus.research import real_outcome_scorer as ros
 
 ADD_TEST = "from pkg.calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n"
@@ -1059,12 +1065,16 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.2.3"
+    assert ros.SCORER_VERSION == "1.3.0"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
     # The pre-registered spec itself is frozen (spec header); amendments live beside it.
     assert hashlib.sha256(spec).hexdigest().startswith("315d95de21ea7ec8")
+    # A10: the 1.3.0 row and note point to the v3 file, the Issue and the owner decision.
+    assert "| `1.3.0` |" in amendments and "A10" in amendments
+    assert "REAL_OUTCOME_SCORER_SPEC.v3.md" in amendments and "#2709" in amendments
+    assert "「同意」" in amendments
 
 
 # Amendment A5: GOLD port fallback when main moved between BASE and the merge.
@@ -1827,21 +1837,23 @@ def test_summary_v1_block_maps_v2_receipts_to_gold_port_failed():
 
 
 def test_summary_excludes_unknown_spec_versions():
-    # Review round 5, Codex 4: only v1 and v2 receipts are counted.
+    # Review round 5, Codex 4: only v1 and v2 receipts are counted in the headline; v3
+    # (1.3.0) has its own block, and any other version is in none.
     rows = [_summary_row(0, ros.RESOLVED), _summary_row(1, ros.UNRESOLVED, "v1")]
     before = ros.summarize(rows)
     after = ros.summarize([
         *rows,
-        _summary_row(2, ros.RESOLVED, "v3"),
-        _summary_row(3, ros.RESOLVED, "v3"),
+        _summary_row(2, ros.RESOLVED, "v4"),
+        _summary_row(3, ros.RESOLVED, "v4"),
         _summary_row(4, ros.RESOLVED, ""),
     ])
     for key in ("counts", "resolved", "valid_oracle_n", "ci95"):
         assert after[key] == before[key]
         assert after["v1_plus_v2"][key] == before["v1_plus_v2"][key]
-    assert after["unknown_spec_versions"] == {"": 1, "v3": 2}
+    assert after["unknown_spec_versions"] == {"": 1, "v4": 2}
     assert before["unknown_spec_versions"] == {}
-    assert after["spec_version_counts"] == {"": 1, "v1": 2, "v3": 2}
+    assert after["spec_version_counts"] == {"": 1, "v1": 2, "v4": 2}
+    assert "v3" not in after
 
 
 @pytest.mark.parametrize("field", ["spec_sha256", "spec_v2_sha256"])
@@ -2160,3 +2172,1330 @@ def test_scratch_home_leak_counts_toward_per_run_cap(tmp_path, monkeypatch):
     with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
         runner.run(env, tree, "t", "tests", (), 0)
     assert exc.value.kind == ros.SCRATCH_TMP_CAP_EXCEEDED and exc.value.left_bytes >= 5000
+
+
+# Amendment A9: opt-in OS sandbox for pytest runs (default "none" = v1 §8 unchanged).
+
+
+def _os_runner(scratch: Path, timeout: int = 300, **kw) -> ros.PytestRunner | None:
+    """A bound "os" runner where the OS barrier exists (macOS).
+
+    Without one (Linux CI, or a disable variable set) these tests never skip: they assert
+    the fail-closed path instead (the runner refuses before creating anything, so nothing
+    can run) and return None, after which the caller returns.
+    """
+    if sandboxed_lane.os_sandbox_available():
+        return ros.PytestRunner(
+            scratch, timeout=timeout, log=lambda m: None, sandbox=ros.SANDBOX_OS, **kw
+        )
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        ros.PytestRunner(scratch, timeout=timeout, log=lambda m: None, sandbox=ros.SANDBOX_OS, **kw)
+    assert not scratch.exists()
+    return None
+
+
+SANDBOX_PROBE_TEST = (
+    "import os, socket\n"
+    "from pathlib import Path\n\n\n"
+    "def test_ok():\n    pass\n\n\n"
+    "def test_net():\n"
+    "    socket.create_connection(('1.1.1.1', 53), timeout=2).close()\n\n\n"
+    "def test_net_denied_by_barrier():\n"
+    "    try:\n"
+    "        socket.create_connection(('1.1.1.1', 53), timeout=2).close()\n"
+    "    except PermissionError:\n"
+    "        return\n"
+    "    raise AssertionError('connect was not refused by the sandbox')\n\n\n"
+    "def test_write_outside():\n"
+    "    (Path(__file__).resolve().parents[2] / 'escape.txt').write_text('x')\n\n\n"
+    "def test_kill_own_child():\n"
+    "    import signal, subprocess\n"
+    "    child = subprocess.Popen(['/bin/sleep', '30'])\n"
+    "    os.kill(child.pid, signal.SIGKILL)\n"
+    "    assert child.wait(timeout=10) == -signal.SIGKILL\n\n\n"
+    "def test_signal_outside_denied():\n"
+    "    try:\n"
+    "        os.kill(1, 0)\n"
+    "    except PermissionError:\n"
+    "        return\n"
+    "    raise AssertionError('signalled a process outside the run')\n\n\n"
+    "def test_write_allowed():\n"
+    "    (Path(os.environ['TMPDIR']) / 'ok.txt').write_text('x')\n"
+    "    (Path(os.environ['HOME']) / 'ok.txt').write_text('x')\n"
+    "    (Path(__file__).resolve().parent / 'ok.txt').write_text('x')\n"
+)
+
+
+def _sandbox_probe_tree(tmp_path: Path) -> Path:
+    tree = tmp_path / "trees" / "tree"
+    _write(tree, {"tests/test_probe.py": SANDBOX_PROBE_TEST})
+    return tree
+
+
+def test_default_sandbox_none_runs_the_v1_command_and_env(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _runner(tmp_path)
+    assert runner.sandbox == ros.SANDBOX_NONE
+    seen: list[tuple[list[str], dict[str, str]]] = []
+    real_popen = subprocess.Popen
+
+    def spy(cmd, **kwargs):
+        seen.append((list(cmd), dict(kwargs["env"])))
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr(ros.subprocess, "Popen", spy)
+    key = runner.result_key(env, "t", "tests", ["b", "a"], 0)
+    assert runner.run(env, tree, "t", "tests", ["b", "a"], 0).outcomes
+    junit = runner.tmp / f"junit-{key}.xml"
+    pythonpath = ":".join([str(tree), *env.extra_pythonpath])
+    # Exactly the 1.2.3 command and env (spec §8 + A8 --rootdir): no sandbox-exec wrapper.
+    assert seen == [
+        (
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                f"--rootdir={tree.resolve()}",
+                f"--junitxml={junit}",
+                "--ignore=a",
+                "--ignore=b",
+            ],
+            {
+                "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
+                "HOME": str(runner.scratch / "home"),
+                "TMPDIR": str(runner.scratch / "tmp"),
+                "PYTHONPATH": pythonpath,
+                "PYTHONHASHSEED": "0",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "LANG": "en_US.UTF-8",
+                "TZ": "UTC",
+            },
+        )
+    ]
+    # The "none" result key is the 1.2.3 formula (no sandbox component).
+    assert key == ros.sha256_bytes(
+        json.dumps([env.cache_key, "t", "tests", ["a", "b"], 0, ""]).encode()
+    )
+
+
+def test_sandbox_mode_separates_result_cache_keys(tmp_path):
+    env = LocalEnv().get("fixture-repo", tmp_path)
+    runner = _runner(tmp_path)
+    none_key = runner.result_key(env, "t", "tests", [], 0, "cand")
+    runner.sandbox = ros.SANDBOX_OS  # key only; no run (works without a barrier)
+    os_key = runner.result_key(env, "t", "tests", [], 0, "cand")
+    assert none_key != os_key
+    assert os_key == ros.sha256_bytes(
+        json.dumps([
+            env.cache_key,
+            "t",
+            "tests",
+            [],
+            0,
+            "cand",
+            "sandbox:os",
+            f"profile:{runner.sandbox_profile_sha256}",
+        ]).encode()
+    )
+
+
+def _hash_runner(scratch: Path, **kw) -> ros.PytestRunner:
+    runner = ros.PytestRunner(scratch, log=lambda m: None, **kw)
+    runner.sandbox = ros.SANDBOX_OS  # the hash needs no barrier, so this runs everywhere
+    return runner
+
+
+def test_sandbox_profile_hash_ignores_work_dir_and_home(tmp_path, monkeypatch):
+    assert ros.PytestRunner(tmp_path / "none", log=lambda m: None).sandbox_profile_sha256 is None
+    first = _hash_runner(tmp_path / "a" / "work" / "scratch").sandbox_profile_sha256
+    monkeypatch.setenv("HOME", str(tmp_path / "other-home"))
+    second = _hash_runner(tmp_path / "b" / "elsewhere" / "scratch").sandbox_profile_sha256
+    assert first == second and len(first or "") == 64
+
+
+def test_sandbox_profile_hash_and_result_key_track_profile_changes(tmp_path, monkeypatch):
+    env = LocalEnv().get("fixture-repo", tmp_path)
+    before = _hash_runner(tmp_path / "s1")
+    before_key = before.result_key(env, "t", "tests", [], 0)  # hashes the real profile
+    real = sandboxed_lane.build_sandbox_profile
+
+    def without_child_signals(**kwargs):
+        return real(**{**kwargs, "allow_signal_same_sandbox": False})
+
+    monkeypatch.setattr(sandboxed_lane, "build_sandbox_profile", without_child_signals)
+    after = _hash_runner(tmp_path / "s2")
+    assert before.sandbox_profile_sha256 != after.sandbox_profile_sha256
+    assert before_key != after.result_key(env, "t", "tests", [], 0)
+    # The store deny is part of the profile too.
+    with_store = _hash_runner(tmp_path / "s3", store=tmp_path / "store")
+    assert with_store.sandbox_profile_sha256 != after.sandbox_profile_sha256
+
+
+def test_shared_profile_signals_stay_self_only_unless_asked(tmp_path):
+    kwargs = {"writable": [str(tmp_path)], "read_roots": [str(tmp_path)]}
+    default = sandboxed_lane.build_sandbox_profile(**kwargs)
+    widened = sandboxed_lane.build_sandbox_profile(**kwargs, allow_signal_same_sandbox=True)
+    assert "same-sandbox" not in default and "(allow signal (target self))" in default
+    assert widened.splitlines() == [
+        *default.splitlines()[: default.splitlines().index("(allow signal (target self))") + 1],
+        "(allow signal (target same-sandbox))",
+        *default.splitlines()[default.splitlines().index("(allow signal (target self))") + 1 :],
+    ]
+
+
+def test_unknown_sandbox_mode_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        ros.PytestRunner(tmp_path / "scratch", sandbox="docker")
+
+
+@pytest.mark.parametrize("how", ["probe", "env_var"])
+def test_sandbox_os_refuses_without_a_barrier(tmp_path, monkeypatch, how):
+    if how == "probe":
+        monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: False)
+    else:
+        monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        ros.PytestRunner(tmp_path / "scratch", sandbox=ros.SANDBOX_OS)
+
+
+def test_sandbox_os_run_refuses_when_barrier_disappears(tmp_path, monkeypatch):
+    """A runner bound to "os" never falls back to an unconfined run."""
+    tree = tmp_path / "tree"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _runner(tmp_path)
+    runner.sandbox = ros.SANDBOX_OS
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: False)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran without the OS barrier")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    with pytest.raises(sandboxed_lane.SandboxError, match="no_os_barrier"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.cache.iterdir()) == []
+
+
+def test_cli_sandbox_os_refuses_before_scoring(tmp_path, monkeypatch, capsys):
+    from nexus.research import score_real_outcome_cli as cli
+
+    monkeypatch.setattr(cli, "os_sandbox_available", lambda: False)
+
+    def no_scoring(*a, **k):
+        raise AssertionError("scored without the OS barrier")
+
+    monkeypatch.setattr(cli.ros, "score_task", no_scoring)
+    monkeypatch.setattr(cli.ros, "load_sealed_task", no_scoring)
+    store = tmp_path / "store"
+    (store / "tasks").mkdir(parents=True)
+    rc = cli.main([
+        "--store",
+        str(store),
+        "--out",
+        str(tmp_path / "out"),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+        "--sandbox",
+        "os",
+    ])
+    assert rc == 7
+    assert "refusing to score unconfined" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists() and not (tmp_path / "work").exists()
+
+
+def test_cli_sandbox_defaults_to_none():
+    from nexus.research import score_real_outcome_cli as cli
+
+    assert cli.parse_args(["--out", "o"]).sandbox == ros.SANDBOX_NONE
+    assert cli.parse_args(["--out", "o", "--sandbox", "os"]).sandbox == ros.SANDBOX_OS
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--out", "o", "--sandbox", "docker"])
+
+
+def test_receipt_records_runner_sandbox_none(tmp_path, fx):
+    receipt = ros.score_task(fx.task(b""), _ctx(tmp_path, fx), candidate_override="empty")[
+        "receipt"
+    ]
+    assert receipt["runner_sandbox"] == ros.SANDBOX_NONE
+    assert receipt["runner_sandbox_profile_sha256"] is None
+
+
+def test_sandbox_os_denies_network_and_outside_writes(tmp_path):
+    tree = _sandbox_probe_tree(tmp_path)
+    env = LocalEnv().get("fixture-repo", tree)
+    confined = _os_runner(tmp_path / "scratch-os")
+    if confined is None:
+        return
+    res = confined.run(env, tree, "t", "tests", (), 0)
+    node = "tests.test_probe::"
+    assert res.outcomes == {
+        node + "test_ok": ros.PASS,
+        node + "test_net": ros.FAIL,
+        node + "test_net_denied_by_barrier": ros.PASS,
+        node + "test_write_outside": ros.FAIL,
+        node + "test_kill_own_child": ros.PASS,
+        node + "test_signal_outside_denied": ros.PASS,
+        node + "test_write_allowed": ros.PASS,
+    }
+    assert not (tmp_path / "trees" / "escape.txt").exists()
+    # The unconfined run of the same tree gives the same node ids, and its outside write
+    # succeeds (network is not blocked there, so its test_net outcome is not asserted).
+    plain = ros.PytestRunner(tmp_path / "scratch-none", timeout=300, log=lambda m: None)
+    unconfined = plain.run(env, tree, "t", "tests", (), 0).outcomes
+    assert set(unconfined) == set(res.outcomes)
+    assert unconfined[node + "test_ok"] == ros.PASS
+    assert unconfined[node + "test_write_outside"] == ros.PASS
+    assert unconfined[node + "test_net_denied_by_barrier"] == ros.FAIL
+
+
+def test_sandbox_os_keeps_timeout_and_group_kill(tmp_path):
+    tree = tmp_path / "tree"
+    _write(
+        tree,
+        {
+            "tests/test_spawn.py": (
+                "import subprocess, time\n\n\ndef test_spawn():\n"
+                "    subprocess.Popen(['/bin/sh', '-c', 'sleep 5; echo x > \"$TMPDIR/orphan\"'])\n"
+                "    time.sleep(60)\n"
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", tree)
+    runner = _os_runner(tmp_path / "scratch", timeout=2)
+    if runner is None:
+        return
+    res = runner.run(env, tree, "t", "tests", (), 0)
+    assert (res.timed_out, res.exit_code, res.outcomes) == (True, -1, {})
+    time.sleep(5)  # the orphan would have written by now had it survived the group kill
+    assert not (runner.tmp / "orphan").exists()
+
+
+def test_sandbox_os_gold_self_check_resolves_and_is_recorded(tmp_path, fx):
+    ctx = _ctx(tmp_path, fx)
+    runner = _os_runner(ctx.work / "scratch-os")
+    if runner is None:
+        return
+    ctx.runner = runner
+    receipt = ros.score_task(fx.task(b""), ctx, candidate_override="gold")["receipt"]
+    assert receipt["runner_sandbox"] == ros.SANDBOX_OS
+    assert receipt["runner_sandbox_profile_sha256"] == runner.sandbox_profile_sha256
+    assert len(runner.sandbox_profile_sha256 or "") == 64
+    assert receipt["label"] == ros.RESOLVED
+
+
+# A9 review fixes: per-run HOME/TMPDIR in "os" mode, extra import roots, unreadable paths.
+
+LEAK_WRITER_TEST = (
+    "import json, os\n"
+    "from pathlib import Path\n\n\n"
+    "def test_leave_fix(tmp_path):\n"
+    "    paths = [\n"
+    "        Path(os.environ['TMPDIR']) / 'leak-gold.txt',\n"
+    "        Path(os.environ['HOME']) / 'leak-gold.txt',\n"
+    "        tmp_path / 'leak-gold.txt',\n"
+    "    ]\n"
+    "    for path in paths:\n"
+    "        path.write_text('the fix')\n"
+    "    out = Path(__file__).resolve().parent / 'paths.json'\n"
+    "    out.write_text(json.dumps([str(p) for p in paths]))\n"
+)
+
+READ_DENIED_TEST = (
+    "import json, os\n"
+    "from pathlib import Path\n\n\n"
+    "def test_cannot_read():\n"
+    "    paths = json.loads((Path(__file__).resolve().parent / 'targets.json').read_text())\n"
+    "    readable = []\n"
+    "    for p in paths:\n"
+    "        try:\n"
+    "            Path(p).read_text()\n"
+    "        except OSError:\n"
+    "            continue\n"
+    "        readable.append(p)\n"
+    "    scratch = Path(os.environ['TMPDIR']).parents[2]\n"
+    "    for root in (Path(os.environ['TMPDIR']), Path(os.environ['HOME']), scratch):\n"
+    "        try:\n"
+    "            found = list(root.rglob('leak-*'))\n"
+    "        except OSError:\n"
+    "            continue\n"
+    "        for f in found:\n"
+    "            try:\n"
+    "                f.read_text()\n"
+    "            except OSError:\n"
+    "                continue\n"
+    "            readable.append(str(f))\n"
+    "    assert readable == []\n"
+)
+
+
+def test_sandbox_os_gold_leftovers_are_invisible_to_a_later_candidate_run(tmp_path):
+    work = tmp_path / "work"
+    gold = work / "trees" / "task" / "gold"
+    cand = work / "trees" / "task" / "cand"
+    _write(gold, {"tests/test_gold.py": LEAK_WRITER_TEST})
+    _write(cand, {"tests/test_cand.py": READ_DENIED_TEST})
+    env = LocalEnv().get("fixture-repo", gold)
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    res = runner.run(env, gold, "g", "tests", (), 0, role="GOLD")
+    assert res.outcomes == {"tests.test_gold::test_leave_fix": ros.PASS}
+    leaked = json.loads((gold / "tests" / "paths.json").read_text())
+    assert len(leaked) == 3
+    # The GOLD run's own HOME/TMPDIR were per-run and are gone; nothing reached the shared ones.
+    assert not any(Path(p).exists() for p in leaked)
+    assert list(runner.runs.iterdir()) == []
+    assert ros.tree_bytes(runner.tmp) == 0 and ros.tree_bytes(runner.home) == 0
+    (cand / "tests" / "targets.json").write_text(json.dumps(leaked))
+    res = runner.run(env, cand, "c", "tests", (), 0, role="CAND+T")
+    assert res.outcomes == {"tests.test_cand::test_cannot_read": ros.PASS}
+    assert list(runner.runs.iterdir()) == []
+
+
+def test_sandbox_os_session_escaping_child_cannot_touch_the_next_run(tmp_path):
+    work = tmp_path / "work"
+    first = work / "trees" / "task" / "first"
+    second = work / "trees" / "task" / "second"
+    attack = (
+        'S="$TMPDIR/../../.."; end=$(($(date +%s) + 8)); '
+        'while [ "$(date +%s)" -lt "$end" ]; do '
+        'echo x > "$S/tmp/planted"; echo x > "$S/home/planted"; '
+        'echo "{}" > "$S/pytest-cache/planted.json"; '
+        'for d in "$S"/runs/*; do echo x > "$d/tmp/planted"; echo junk > "$d/junit.xml"; done; '
+        "sleep 0.1; done"
+    )
+    _write(
+        first,
+        {
+            "tests/test_escape.py": (
+                "import subprocess\nfrom pathlib import Path\n\n\n"
+                "def test_escape():\n"
+                f"    child = subprocess.Popen(['/bin/sh', '-c', {attack!r}],"
+                " start_new_session=True)\n"
+                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    _write(
+        second,
+        {
+            "tests/test_next.py": (
+                "import os, time\nfrom pathlib import Path\n\n\n"
+                "def test_next():\n"
+                "    time.sleep(2)\n"
+                "    assert not (Path(os.environ['TMPDIR']) / 'planted').exists()\n"
+            )
+        },
+    )
+    env = LocalEnv().get("fixture-repo", first)
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    assert runner.run(env, first, "a", "tests", (), 0).outcomes == {
+        "tests.test_escape::test_escape": ros.PASS
+    }
+    pid = int((first / "tests" / "child.pid").read_text())
+    try:
+        res = runner.run(env, second, "b", "tests", (), 0)
+        os.kill(pid, 0)  # the escaped child really outlived the first run's group kill
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+    assert (res.outcomes, res.exit_code, res.timed_out) == (
+        {"tests.test_next::test_next": ros.PASS},
+        0,
+        False,
+    )
+    assert not [p for p in runner.scratch.rglob("planted*")]
+    key = runner.result_key(env, "b", "tests", (), 0)
+    cached = json.loads((runner.cache / f"{key}.json").read_text())
+    assert cached["outcomes"] == {"tests.test_next::test_next": ros.PASS}
+
+
+@pytest.mark.parametrize("which", ["work", "work_parent", "repos", "trees", "store"])
+def test_sandbox_os_refuses_extra_import_roots_covering_work(tmp_path, monkeypatch, which):
+    work = tmp_path / "w" / "work"
+    store = tmp_path / "store"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    root = {
+        "work": work,
+        "work_parent": work.parent,
+        "repos": work / "repos" / "r",
+        "trees": work / "trees" / "task" / "gold",
+        "store": store / "tasks",
+    }[which]
+    root.mkdir(parents=True, exist_ok=True)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None, store=store)
+    runner.sandbox = ros.SANDBOX_OS  # the check runs before any barrier-specific step
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran with an overbroad import root")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    env = ros.TestEnv("e", sys.executable, "fixture", extra_pythonpath=(str(root),))
+    with pytest.raises(sandboxed_lane.SandboxError, match="read_root_overbroad"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.runs.iterdir()) == [] and list(runner.cache.iterdir()) == []
+
+
+def test_sandbox_os_cannot_read_repos_sibling_trees_or_home(tmp_path):
+    import shutil
+    import tempfile
+
+    work = tmp_path / "work"
+    store = tmp_path / "store"
+    runner = _os_runner(work / "scratch", store=store)
+    if runner is None:
+        return
+    cand = work / "trees" / "task" / "cand"
+    _write(cand, {"tests/test_cand.py": READ_DENIED_TEST})
+    secrets = [
+        work / "repos" / "repo" / ".git" / "secret.txt",
+        work / "trees" / "task" / "gold" / "secret.txt",
+        store / "tasks" / "secret.txt",
+    ]
+    home_dir = Path(tempfile.mkdtemp(prefix=".wt-83-probe-", dir=Path.home()))
+    try:
+        secrets.append(home_dir / "secret.txt")
+        for path in secrets:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("secret")
+        (cand / "tests" / "targets.json").write_text(json.dumps([str(p) for p in secrets]))
+        env = LocalEnv().get("fixture-repo", cand)
+        node = "tests.test_cand::test_cannot_read"
+        res = runner.run(env, cand, "c", "tests", (), 0)
+        assert res.outcomes == {node: ros.PASS}
+        # Control: unconfined, the same test reads them all (so the paths are real).
+        plain = ros.PytestRunner(tmp_path / "plain", timeout=300, log=lambda m: None)
+        assert plain.run(env, cand, "c", "tests", (), 0).outcomes == {node: ros.FAIL}
+    finally:
+        shutil.rmtree(home_dir, ignore_errors=True)
+
+
+@pytest.mark.parametrize("where", ["work_bin", "work_itself", "trees", "repos", "store"])
+def test_sandbox_os_refuses_an_interpreter_or_env_dir_covering_work(tmp_path, monkeypatch, where):
+    """Env dir / interpreter prefix are read roots too: one covering <work> would expose
+    sibling trees (GOLD), so it is refused before anything runs."""
+    work = tmp_path / "w" / "work"
+    store = tmp_path / "store"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    python = {
+        "work_bin": work / "bin" / "python",  # env dir == <work>
+        "work_itself": work / "python",  # env dir == <work>'s parent
+        "trees": work / "trees" / "task" / "gold" / "venv" / "bin" / "python",
+        "repos": work / "repos" / "r" / "venv" / "bin" / "python",
+        "store": store / "venv" / "bin" / "python",
+    }[where]
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.symlink_to(sys.executable)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None, store=store)
+    runner.sandbox = ros.SANDBOX_OS  # the check runs before any barrier-specific step
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+
+    def no_popen(*a, **k):
+        raise AssertionError("ran with an overbroad read root")
+
+    monkeypatch.setattr(ros.subprocess, "Popen", no_popen)
+    env = ros.TestEnv("e", str(python), "fixture")
+    with pytest.raises(sandboxed_lane.SandboxError, match="read_root_overbroad"):
+        runner.run(env, tree, "t", "tests", (), 0)
+    assert list(runner.runs.iterdir()) == [] and list(runner.cache.iterdir()) == []
+
+
+def test_sandbox_os_uv_env_layout_is_accepted(tmp_path, monkeypatch):
+    """The scorer's own layout (<work>/envs/<key>/bin/python) is not overbroad."""
+    work = tmp_path / "work"
+    tree = work / "trees" / "task" / "cand"
+    _write(tree, {"tests/test_a.py": "def test_a():\n    pass\n"})
+    python = work / "envs" / "abc" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    runner = ros.PytestRunner(work / "scratch", log=lambda m: None)
+    runner.sandbox = ros.SANDBOX_OS
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+    launch = runner._confine(ros.TestEnv("e", str(python), "fixture"), tree, work / "scratch" / "r")
+    assert launch[:2] == [sandboxed_lane.SANDBOX_EXEC, "-p"]
+    assert str((work / "envs" / "abc").resolve()) in launch[2]
+
+
+def test_sandbox_os_survivor_growth_in_a_recreated_run_dir_is_counted(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return
+    first = work / "trees" / "task" / "first"
+    second = work / "trees" / "task" / "second"
+    grow = 'sleep 1; mkdir -p "$TMPDIR"; head -c 5000 /dev/urandom > "$TMPDIR/grow"; sleep 30'
+    _write(
+        first,
+        {
+            "tests/test_survivor.py": (
+                "import subprocess\nfrom pathlib import Path\n\n\n"
+                "def test_survivor():\n"
+                f"    child = subprocess.Popen(['/bin/sh', '-c', {grow!r}],"
+                " start_new_session=True)\n"
+                "    (Path(__file__).resolve().parent / 'child.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    _write(second, {"tests/test_next.py": "def test_next():\n    pass\n"})
+    env = LocalEnv().get("fixture-repo", first)
+    assert runner.run(env, first, "a", "tests", (), 0).outcomes
+    pid = int((first / "tests" / "child.pid").read_text())
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not list(runner.runs.rglob("grow")):
+            time.sleep(0.1)
+        grown = list(runner.runs.rglob("grow"))
+        assert grown and grown[0].stat().st_size == 5000  # the survivor re-created its dir
+        assert runner.scratch_bytes() >= 5000
+        monkeypatch.setattr(ros, "SCRATCH_TMP_TASK_CAP_BYTES", 1000)
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, second, "b", "tests", (), 0)
+        assert exc.value.kind == ros.SCRATCH_TMP_TASK_CAP_EXCEEDED
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, 9)
+    runner.clean_tmp()
+    assert list(runner.runs.iterdir()) == []
+
+
+def test_sandbox_profile_hash_and_confine_share_one_root_source(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    tree = work / "trees" / "task" / "cand"
+    tree.mkdir(parents=True)
+    before = _hash_runner(work / "scratch").sandbox_profile_sha256
+    monkeypatch.setattr(ros, "_PROFILE_ROOT_SPEC", (*ros._PROFILE_ROOT_SPEC, ("read", "new_kind")))
+    runner = _hash_runner(work / "scratch")
+    assert runner.sandbox_profile_sha256 != before
+    # _confine must supply a real value for every kind of the same source.
+    monkeypatch.setattr(sandboxed_lane, "os_sandbox_available", lambda: True)
+    env = ros.TestEnv("e", sys.executable, "fixture")
+    with pytest.raises(KeyError, match="new_kind"):
+        runner._confine(env, tree, work / "scratch" / "runs" / "r")
+
+
+def _record_tree_paths(monkeypatch) -> list[Path]:
+    seen: list[Path] = []
+    real = ros.GitRepo.worktree
+
+    def spy(self, dest, sha):
+        seen.append(Path(dest))
+        return real(self, dest, sha)
+
+    monkeypatch.setattr(ros.GitRepo, "worktree", spy)
+    return seen
+
+
+def test_tree_paths_stay_fixed_in_none_mode(tmp_path, fx, monkeypatch):
+    seen = _record_tree_paths(monkeypatch)
+    task = fx.task(b"")
+    receipt = ros.score_task(task, _ctx(tmp_path, fx), candidate_override="gold")["receipt"]
+    assert receipt["label"] == ros.RESOLVED
+    assert seen and {p.parent for p in seen} == {tmp_path / "work" / "trees" / task.name}
+
+
+def test_sandbox_os_rescoring_uses_fresh_tree_paths(tmp_path, fx, monkeypatch):
+    """A survivor that keeps planting a conftest.py at the previous scoring's tree paths
+    never reaches the next scoring of the same task."""
+    import shutil
+    import threading
+
+    ctx = _ctx(tmp_path, fx)
+    runner = _os_runner(ctx.work / "scratch-os")
+    if runner is None:
+        return
+    ctx.runner = runner
+    seen = _record_tree_paths(monkeypatch)
+    task = fx.task(b"")
+    first = ros.score_task(task, ctx, candidate_override="gold")["receipt"]
+    assert first["label"] == ros.RESOLVED
+    first_paths = list(seen)
+    seen.clear()
+    assert {p.parent.parent for p in first_paths} == {ctx.work / "trees"}
+    assert all(p.parent.name.startswith(task.name + "-") for p in first_paths)
+    stop = threading.Event()
+
+    def plant() -> None:
+        while not stop.is_set():
+            for path in first_paths:
+                with contextlib.suppress(OSError):
+                    path.mkdir(parents=True, exist_ok=True)
+                    (path / "conftest.py").write_text("raise RuntimeError('planted')\n")
+            time.sleep(0.02)
+
+    planter = threading.Thread(target=plant, daemon=True)
+    shutil.rmtree(runner.cache)
+    runner.cache.mkdir()  # the second scoring really runs the tests again
+    planter.start()
+    try:
+        second = ros.score_task(task, ctx, candidate_override="gold")["receipt"]
+    finally:
+        stop.set()
+        planter.join()
+    assert second["label"] == ros.RESOLVED
+    assert seen and not set(seen) & set(first_paths)
+
+
+# Spec v3 (A10, #2709): metadata-only stub for the BASE project, opt-in.
+
+V3_PYPROJECT = '[project]\nname = "Nexus.Certify_Demo"\nversion = "0.3.0"\n'
+
+
+def _venv(tmp: Path) -> tuple[Path, Path]:
+    """A fresh venv (no pip) and its single site-packages directory."""
+    env_dir = tmp / "env"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(env_dir)],
+        check=True,
+        capture_output=True,
+    )
+    site = ros._site_packages(env_dir)
+    assert site is not None
+    return env_dir, site
+
+
+def _env_python(env_dir: Path, code: str, pythonpath: Path | None, cwd: Path):
+    env = {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"}
+    if pythonpath is not None:
+        env["PYTHONPATH"] = str(pythonpath)
+    return subprocess.run(
+        [str(env_dir / "bin" / "python"), "-c", code],
+        env=env,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_v3_stub_has_normalized_name_and_metadata_version_works(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT, "product/__init__.py": "VALUE = 'base'\n"})
+    env_dir, site = _venv(tmp_path)
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert reason is None and stub is not None
+    assert stub == {
+        "name": "Nexus.Certify_Demo",
+        "version": "0.3.0",
+        "dist_info": "nexus_certify_demo-0.3.0.dist-info",
+    }
+    dist = site / stub["dist_info"]
+    assert sorted(p.name for p in dist.iterdir()) == ["INSTALLER", "METADATA", "RECORD", "WHEEL"]
+    assert (dist / "WHEEL").read_text() == (
+        "Wheel-Version: 1.0\nGenerator: nexus-real-outcome-scorer\nRoot-Is-Purelib: true\n"
+        "Tag: py3-none-any\n"
+    )
+    listed = [line.split(",")[0] for line in (dist / "RECORD").read_text().splitlines()]
+    assert sorted(listed) == sorted(
+        f"{stub['dist_info']}/{f}" for f in ("INSTALLER", "METADATA", "RECORD", "WHEEL")
+    )
+    assert (dist / "METADATA").read_text() == (
+        "Metadata-Version: 2.1\nName: Nexus.Certify_Demo\nVersion: 0.3.0\n"
+    )
+    for line in (dist / "RECORD").read_text().splitlines():
+        path, digest, size = line.split(",")
+        if path.endswith("/RECORD"):
+            assert (digest, size) == ("", "")
+            continue
+        body = (site / path).read_bytes()
+        want = base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
+        assert (digest, int(size)) == (f"sha256={want}", len(body))
+    tree = tmp_path / "tree"
+    shutil.copytree(base, tree)
+    code = (
+        "import importlib.metadata as m\n"
+        "print(m.version('nexus-certify-demo'), m.version('Nexus_Certify.Demo'))"
+    )
+    out = _env_python(env_dir, code, tree, tmp_path)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["0.3.0", "0.3.0"]
+
+
+def test_v3_stub_never_shadows_the_tree(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT, "product/__init__.py": "VALUE = 'base'\n"})
+    env_dir, site = _venv(tmp_path)
+    before = {p.relative_to(env_dir) for p in env_dir.rglob("*")}
+    stub, _ = ros.write_project_metadata_stub(base, site)
+    assert stub is not None
+    added = {p.relative_to(env_dir) for p in env_dir.rglob("*")} - before
+    dist_rel = site.relative_to(env_dir) / stub["dist_info"]
+    assert added == {
+        dist_rel,
+        *(dist_rel / f for f in ("INSTALLER", "METADATA", "RECORD", "WHEEL")),
+    }
+    assert not [p for p in added if p.suffix in {".pth", ".py", ".pyc", ".so", ".json"}]
+    tree = tmp_path / "tree"
+    shutil.copytree(base, tree)
+    (tree / "product" / "__init__.py").write_text("VALUE = 'tree'\n")
+    code = "import product, importlib.metadata as m; print(product.VALUE, product.__file__)"
+    out = _env_python(env_dir, code, tree, tmp_path)
+    assert out.returncode == 0, out.stderr
+    value, file = out.stdout.split()
+    assert value == "tree" and Path(file).resolve().is_relative_to(tree.resolve())
+    # Without the tree on PYTHONPATH the project code is not importable at all.
+    out = _env_python(env_dir, "import product", None, tmp_path)
+    assert out.returncode != 0 and "ModuleNotFoundError" in out.stderr
+
+
+@pytest.mark.parametrize(
+    ("pyproject", "reason"),
+    [
+        ('[project]\nname = "x"\ndynamic = ["version"]\n', "dynamic_version"),
+        ('[project]\nname = "x"\n', "version_missing"),
+        ("[tool.x]\na = 1\n", "no_project_table"),
+        ('[project]\nversion = "1"\n', "project_name_missing_or_invalid"),
+        ("[project\n", "pyproject_unreadable:TOMLDecodeError"),
+        (None, "no_pyproject_toml"),
+    ],
+)
+def test_v3_no_static_version_means_no_stub_and_a_reason(tmp_path, pyproject, reason):
+    base = tmp_path / "base"
+    base.mkdir()
+    if pyproject is not None:
+        (base / "pyproject.toml").write_text(pyproject)
+    site = tmp_path / "site"
+    site.mkdir()
+    assert ros.write_project_metadata_stub(base, site) == (None, reason)
+    assert list(site.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("entry", "metadata"),
+    [
+        ("nexus_certify_demo-0.2.0.dist-info", None),
+        ("nexus-certify-demo-0.2.0.dist-info", None),
+        ("Nexus.Certify.Demo-0.2.0.dist-info", None),
+        ("nexus_certify_demo-0.2.0-py3.12.egg-info", None),
+        ("nexus_certify_demo.egg-info", "file"),
+        ("odd-name-9.dist-info", "Name: Nexus-Certify.DEMO\n"),
+    ],
+)
+def test_v3_stub_refuses_when_project_already_installed(tmp_path, entry, metadata):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT})
+    site = tmp_path / "site"
+    site.mkdir()
+    if metadata == "file":  # an egg-info that is itself the PKG-INFO file
+        (site / entry).write_text("Metadata-Version: 1.0\nName: nexus-certify-demo\n")
+    else:
+        (site / entry).mkdir()
+        if metadata:
+            (site / entry / "METADATA").write_text(metadata)
+    assert ros.write_project_metadata_stub(base, site) == (
+        None,
+        f"project_already_installed:{entry}",
+    )
+    assert sorted(p.name for p in site.iterdir()) == [entry]
+
+
+def test_v3_stub_survives_deeply_nested_pyproject(tmp_path):
+    base = tmp_path / "base"
+    deep = "[" * 100000 + "]" * 100000
+    _write(base, {"pyproject.toml": f'[project]\nname = "demo"\nversion = "1.0"\nx = {deep}\n'})
+    site = tmp_path / "site"
+    site.mkdir()
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert stub is None and reason == "pyproject_unreadable:RecursionError"
+    assert list(site.iterdir()) == []
+
+
+def test_v3_stub_ignores_other_projects_with_a_shared_prefix(tmp_path):
+    base = tmp_path / "base"
+    _write(base, {"pyproject.toml": V3_PYPROJECT})
+    site = tmp_path / "site"
+    other = site / "nexus_certify_demo_extra-1.0.dist-info"
+    other.mkdir(parents=True)
+    (other / "METADATA").write_text("Metadata-Version: 2.1\nName: nexus-certify-demo-extra\n")
+    (site / "nexus_certify_demo_tools.egg-info").mkdir()  # no Name, rest is not a version
+    (site / "nexus_certify_demo-2bar-1.0.dist-info").mkdir()  # no Name; "2bar" is no version
+    stub, reason = ros.write_project_metadata_stub(base, site)
+    assert reason is None and stub is not None
+    assert stub["dist_info"] == "nexus_certify_demo-0.3.0.dist-info"
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "reason"),
+    [
+        ('"demo\\n"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"d\u00e9mo"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"\u212aelvin"', '"1.0"', "project_name_missing_or_invalid"),  # KELVIN SIGN
+        ('"../x"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"a/b"', '"1.0"', "project_name_missing_or_invalid"),
+        ('"demo"', '"1.0\\n"', "version_invalid"),
+        ('"demo"', '" 1.0"', "version_invalid"),
+        ('"demo"', '"1.\u0661"', "version_invalid"),  # ARABIC-INDIC DIGIT ONE
+        ('"demo"', '"../1.0"', "version_invalid"),
+        ('"demo"', '"1.0/x"', "version_invalid"),
+        ('"demo"', '"not-a-version"', "version_invalid"),
+        ('"demo"', "1", "version_invalid"),
+    ],
+)
+def test_v3_stub_rejects_unsafe_name_or_version(tmp_path, name, version, reason):
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "pyproject.toml").write_text(f"[project]\nname = {name}\nversion = {version}\n")
+    site = tmp_path / "site"
+    site.mkdir()
+    assert ros.write_project_metadata_stub(base, site) == (None, reason)
+    assert list(site.iterdir()) == []
+
+
+def test_v3_version_fallback_regex_without_packaging(tmp_path, monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_packaging(name, *a, **k):
+        if name.startswith("packaging"):
+            raise ImportError(name)
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_packaging)
+    for good in ("1.0", "0.3.0", "1!2.0rc1.post2.dev3+local.1", "2.0b1"):
+        assert ros._valid_version(good), good
+    for bad in ("1.0\n", "x1", "1.0/x", "..", "1..0", "1.0+", ""):
+        assert not ros._valid_version(bad), bad
+
+
+class _FakeUv:
+    """Stands in for ``subprocess`` inside UvEnvProvider: records argv and env, and lays
+    out an env directory the way ``uv sync`` / ``uv venv`` would."""
+
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def run(self, cmd, **kw):
+        self.calls.append((list(cmd), kw.get("env")))
+        out = ""
+        if cmd[:3] == ["uv", "python", "find"]:
+            out = "/uv/python3.12\n"
+        elif cmd[:1] == ["uv"] and cmd[1:2] == ["--version"]:
+            out = "uv 0.0.test\n"
+        elif len(cmd) > 1 and cmd[1] == "-c":
+            out = "3.12.7\n"
+        elif cmd[:2] == ["uv", "sync"]:
+            env_dir = Path(kw["env"]["UV_PROJECT_ENVIRONMENT"])
+            (env_dir / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+        elif cmd[:2] == ["uv", "venv"]:
+            (Path(cmd[-1]) / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+
+LEARNING_PIN = "a" * 40
+
+
+def _recipe_bases(tmp: Path) -> dict[str, tuple[str, Path]]:
+    nexus = tmp / "nexus-new"
+    _write(
+        nexus,
+        {
+            "pyproject.toml": V3_PYPROJECT,
+            "uv.lock": "lock\n",
+            "requirements/canonical-learning.txt": "x==1\n",
+            "requirements/canonical-runtime.txt": "y==1\n",
+        },
+    )
+    groups = tmp / "core"
+    _write(groups, {"pyproject.toml": V3_PYPROJECT, "uv.lock": "lock\n"})
+    pins = tmp / "runtime"
+    _write(
+        pins,
+        {
+            "pyproject.toml": V3_PYPROJECT,
+            ".github/workflows/tests.yml": (
+                f"  repository: James3014/nexus-learning\n  ref: {LEARNING_PIN}\n"
+            ),
+        },
+    )
+    return {
+        "uv-sync-all-extras+canonical": ("Nexus-new", nexus),
+        "uv-sync-all-groups": ("nexus-core", groups),
+        "uv-venv-runtime-pins": ("nexus-runtime", pins),
+    }
+
+
+def _build(tmp: Path, monkeypatch, spec_version: str | None, repo: str, base: Path):
+    fake = _FakeUv()
+    monkeypatch.setattr(ros, "subprocess", fake)
+    kw = {} if spec_version is None else {"spec_version": spec_version}
+    provider = ros.UvEnvProvider(tmp / f"envs-{spec_version}-{repo}", log=lambda m: None, **kw)
+    env = provider.get(repo, base)
+    return env, fake.calls, provider
+
+
+def _v124_key(repo: str, recipe: str, base: Path) -> str:
+    """The 1.2.4 env-key formula, copied verbatim (only SCORER_VERSION moved on)."""
+    files = [
+        "pyproject.toml",
+        "uv.lock",
+        "requirements/canonical-learning.txt",
+        "requirements/canonical-runtime.txt",
+    ]
+    digests = {f: ros.sha256_bytes((base / f).read_bytes()) for f in files if (base / f).exists()}
+    if recipe == "uv-venv-runtime-pins":
+        digests["learning_pin"] = LEARNING_PIN
+    interp = {"path": "/uv/python3.12", "version": "3.12.7"}
+    parts = [repo, recipe, "3.12", digests, interp, [], ros.SCORER_VERSION]
+    return ros.sha256_bytes(json.dumps(parts, sort_keys=True).encode())
+
+
+def _v124_argv(recipe: str, base: Path, env_dir: Path) -> list[list[str]]:
+    py = str(env_dir / "bin" / "python")
+    if recipe == "uv-venv-runtime-pins":
+        return [
+            ["uv", "venv", "-q", "--python", "3.12", str(env_dir)],
+            [
+                "uv", "pip", "install", "--python", py, *ros.UvEnvProvider.RUNTIME_PINS,
+                "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@"
+                + LEARNING_PIN,
+            ],
+        ]  # fmt: skip
+    sync = [
+        "uv", "sync", "--directory", str(base), "--frozen", "--all-groups",
+        "--no-install-project", "--python", "3.12",
+    ]  # fmt: skip
+    if recipe == "uv-sync-all-groups":
+        return [sync]
+    return [
+        [*sync, "--all-extras"],
+        ["uv", "pip", "install", "--python", py, "-r", str(base / "requirements/canonical-learning.txt")],
+        ["uv", "pip", "install", "--python", py, "-r", str(base / "requirements/canonical-runtime.txt")],
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("recipe", list(ros.NO_INSTALL_PROJECT_RECIPES) + ["uv-venv-runtime-pins"])
+def test_v1_default_env_build_is_unchanged(tmp_path, monkeypatch, recipe):
+    repo, base = _recipe_bases(tmp_path)[recipe]
+    env, calls, provider = _build(tmp_path, monkeypatch, None, repo, base)
+    assert provider.spec_version == ros.SPEC_V1
+    assert env.recipe == recipe
+    assert env.key == _v124_key(repo, recipe, base)
+    env_dir = provider.envs_dir / env.key[:16]
+    build = [(c, e) for c, e in calls if c[:2] in (["uv", "sync"], ["uv", "venv"], ["uv", "pip"])]
+    assert [c for c, _ in build] == _v124_argv(recipe, base, env_dir)
+    want_env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "PYTHONPATH"}}
+    want_env["UV_PROJECT_ENVIRONMENT"] = str(env_dir)
+    assert all(e == want_env for _, e in build)
+    assert set(env.description) == {
+        "python",
+        "python_path",
+        "scorer_version",
+        "uv",
+        "recipe",
+        "inputs",
+    }
+    assert not list(env_dir.rglob("*.dist-info"))
+    assert env.cache_key == ros.sha256_bytes(
+        json.dumps([env.key, env.python, "3.12.7", [], ros.SCORER_VERSION], sort_keys=True).encode()
+    )
+
+
+@pytest.mark.parametrize("recipe", list(ros.NO_INSTALL_PROJECT_RECIPES) + ["uv-venv-runtime-pins"])
+def test_v3_env_build_adds_only_the_stub_and_a_separate_key(tmp_path, monkeypatch, recipe):
+    repo, base = _recipe_bases(tmp_path)[recipe]
+    v1, v1_calls, _ = _build(tmp_path, monkeypatch, "v1", repo, base)
+    v3, v3_calls, provider = _build(tmp_path, monkeypatch, "v3", repo, base)
+    assert v1.key != v3.key and v1.cache_key != v3.cache_key
+    env_dir = provider.envs_dir / v3.key[:16]
+    v1_dir = tmp_path / f"envs-v1-{repo}" / v1.key[:16]
+    # Same commands and environment apart from the env directory itself.
+    assert [c for c, _ in v3_calls] == [
+        [a.replace(str(v1_dir), str(env_dir)) for a in c] for c, _ in v1_calls
+    ]
+    assert v3.description["spec_version"] == "v3"
+    stub = json.loads(v3.description["project_metadata_stub"])
+    reason = json.loads(v3.description["project_metadata_stub_reason"])
+    dists = sorted(p.name for p in env_dir.rglob("*.dist-info"))
+    if recipe == "uv-venv-runtime-pins":
+        assert (stub, reason) == (None, "recipe_without_project_install:uv-venv-runtime-pins")
+        assert dists == []
+    else:
+        assert reason is None
+        assert stub["dist_info"] == "nexus_certify_demo-0.3.0.dist-info"
+        assert dists == [stub["dist_info"]]
+    # A cached v3 env keeps its stub record.
+    again = provider.get(repo, base)
+    assert again.description == v3.description
+
+
+def test_v3_dynamic_version_env_records_reason(tmp_path, monkeypatch):
+    base = tmp_path / "core"
+    _write(
+        base, {"pyproject.toml": '[project]\nname = "x"\ndynamic = ["version"]\n', "uv.lock": "l\n"}
+    )
+    env, _, provider = _build(tmp_path, monkeypatch, "v3", "nexus-core", base)
+    assert json.loads(env.description["project_metadata_stub"]) is None
+    assert json.loads(env.description["project_metadata_stub_reason"]) == "dynamic_version"
+    assert not list((provider.envs_dir / env.key[:16]).rglob("*.dist-info"))
+
+
+def test_spec_version_is_validated():
+    with pytest.raises(ValueError):
+        ros.UvEnvProvider(Path("e"), spec_version="v2")
+    ctx: dict[str, Any] = {
+        "work": Path("w"),
+        "env_provider": None,
+        "runner": None,
+        "repo_sources": {},
+        "spec_sha256": "0" * 64,
+        "spec_v2_sha256": "2" * 64,
+    }
+    with pytest.raises(ValueError, match="spec_v3_sha256"):
+        ros.ScoreContext(**ctx, spec_version="v3")
+    with pytest.raises(ValueError):
+        ros.ScoreContext(**ctx, spec_version="v2")
+    ros.ScoreContext(**ctx)  # v1 needs no v3 hash
+
+
+class _StubLocalEnv(LocalEnv):
+    """LocalEnv plus the v3 stub, written to an extra import root (a dist-info directory
+    is found on any sys.path entry, as in site-packages)."""
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def get(self, repo: str, base_wt: Path) -> ros.TestEnv:
+        env = super().get(repo, base_wt)
+        site = self.root / "site"
+        shutil.rmtree(site, ignore_errors=True)
+        site.mkdir(parents=True)
+        stub, reason = ros.write_project_metadata_stub(base_wt, site)
+        desc = {
+            "spec_version": "v3",
+            "project_metadata_stub": json.dumps(stub, sort_keys=True),
+            "project_metadata_stub_reason": json.dumps(reason),
+        }
+        return ros.TestEnv(
+            "fixture-env-v3", env.python, "fixture", desc, (*env.extra_pythonpath, str(site))
+        )
+
+
+METADATA_TEST = (
+    "import importlib.metadata\n\nVERSION = importlib.metadata.version('fixture-proj')\n\n\n"
+    "def test_version():\n    assert VERSION == '1.0'\n"
+)
+
+
+def _v3_ctx(tmp: Path, fx: Fixture, work: str = "work-v3", env=None) -> ros.ScoreContext:
+    ctx = _ctx(tmp, fx, work=work)
+    return dataclasses.replace(
+        ctx,
+        env_provider=env or ctx.env_provider,
+        spec_version="v3",
+        spec_v3_sha256="3" * 64,
+    )
+
+
+def test_v3_stub_restores_p2p_and_catches_a_regression(tmp_path):
+    # The #2709 shape: a BASE test reads the project's own metadata at import time.
+    fx = Fixture(
+        tmp_path,
+        extra_base={
+            "pyproject.toml": '[project]\nname = "fixture-proj"\nversion = "1.0"\n',
+            "tests/test_version.py": METADATA_TEST,
+        },
+    )
+    broken = fx.diff_from_base({"pkg/calc.py": FIXED.replace("return a + b", "return a - b")})
+    task = fx.task(broken)
+    v1 = ros.score_task(task, _ctx(tmp_path, fx))["receipt"]
+    v3 = ros.score_task(task, _v3_ctx(tmp_path, fx, env=_StubLocalEnv(tmp_path / "stub")))[
+        "receipt"
+    ]
+    # v1: `pytest tests` stops at PackageNotFoundError, so the regression is invisible.
+    assert v1["label"] == ros.RESOLVED and v1["p2p_total"] == 0
+    assert v3["label"] == ros.BROKE_EXISTING
+    assert "tests.test_add::test_add" in v3["p2p_new_failures"]
+    assert v3["p2p_total"] >= 2
+    assert (v3["spec_version"], v3["spec_sha256"], v3["spec_v3_base_rules"]) == (
+        "v3",
+        "3" * 64,
+        "v1",
+    )
+    assert v3["project_metadata_stub"] == {
+        "name": "fixture-proj",
+        "version": "1.0",
+        "dist_info": "fixture_proj-1.0.dist-info",
+    }
+    assert v3["project_metadata_stub_reason"] is None
+    same = {"name": "fixture-proj", "version": "1.0"}
+    assert v3["project_metadata_tree_versions"] == {"GOLD": same, "CAND": same}
+    assert v3["project_metadata_version_mismatch"] is False
+    assert "project_metadata_tree_versions" not in v1
+    gold_ctx = _v3_ctx(tmp_path, fx, work="w-gold", env=_StubLocalEnv(tmp_path / "s2"))
+    gold = ros.score_task(task, gold_ctx, candidate_override="gold")["receipt"]
+    assert gold["label"] == ros.RESOLVED
+
+
+def test_v3_flags_a_candidate_project_version_without_changing_the_label(tmp_path):
+    pyproject = '[project]\nname = "fixture-proj"\nversion = "1.0"\n'
+    fx = Fixture(
+        tmp_path,
+        extra_base={"pyproject.toml": pyproject, "tests/test_version.py": METADATA_TEST},
+    )
+    bumped = fx.diff_from_base({
+        "pkg/calc.py": FIXED,
+        "pyproject.toml": pyproject.replace('"1.0"', '"1.1"'),
+    })
+    ctx = _v3_ctx(tmp_path, fx, env=_StubLocalEnv(tmp_path / "stub"))
+    r = ros.score_task(fx.task(bumped), ctx)["receipt"]
+    # The env carries BASE's metadata (1.0), so the BASE test still passes: RESOLVED.
+    assert r["label"] == ros.RESOLVED
+    assert r["project_metadata_stub"]["version"] == "1.0"
+    assert r["project_metadata_tree_versions"] == {
+        "GOLD": {"name": "fixture-proj", "version": "1.0"},
+        "CAND": {"name": "fixture-proj", "version": "1.1"},
+    }
+    assert r["project_metadata_version_mismatch"] is True
+
+
+def test_v1_receipt_shape_is_unchanged(tmp_path, fx):
+    r = ros.score_task(fx.task(fx.gold_diff), _ctx(tmp_path, fx))["receipt"]
+    assert (r["spec_version"], r["spec_sha256"]) == ("v1", "0" * 64)
+    assert not {
+        "spec_v3_base_rules",
+        "project_metadata_stub",
+        "project_metadata_stub_reason",
+        "project_metadata_tree_versions",
+        "project_metadata_version_mismatch",
+    } & set(r)
+    pending = ros.score_task(fx.task(terminal=None), _ctx(tmp_path, fx, work="w2"))["receipt"]
+    assert set(pending) == V124_BASE_RECEIPT_KEYS | {"flaky_dropped"}
+
+
+# The keys of a 1.2.4 receipt before any scoring step (``_base_receipt``).
+V124_BASE_RECEIPT_KEYS = {
+    "schema",
+    "scorer_version",
+    "runner_sandbox",
+    "runner_sandbox_profile_sha256",
+    "spec_sha256",
+    "spec_version",
+    "task_key",
+    "repo",
+    "issue",
+    "route",
+    "base_sha",
+    "candidate_digest",
+    "candidate_empty",
+    "candidate_override",
+    "candidate_raw_status",
+    "failure_kind",
+    "scope_valid",
+    "capped",
+    "leakage_flags",
+    "label",
+    "sub_reason",
+    "shadow_label",
+}
+
+
+def test_v3_receipt_with_a_provider_without_stub_and_with_the_a5_fallback(tmp_path, fx):
+    r = ros.score_task(fx.task(fx.gold_diff), _v3_ctx(tmp_path, fx))["receipt"]
+    assert r["label"] == ros.RESOLVED
+    assert (r["project_metadata_stub"], r["project_metadata_stub_reason"]) == (
+        None,
+        "env_provider_without_v3_stub",
+    )
+    (tmp_path / "b").mkdir()
+    fx2, merge = _docs_drop_fixture(tmp_path / "b")
+    task = fx2.task(fx2.diff_from_base({"pkg/calc.py": FIXED}), merge=merge)
+    r = ros.score_task(task, _v3_ctx(tmp_path / "b", fx2))["receipt"]
+    assert r["gold_port_method"] != "3way"
+    assert (r["spec_version"], r["spec_sha256"], r["spec_v3_base_rules"]) == ("v3", "3" * 64, "v2")
+
+
+def _golden_rows() -> list[dict]:
+    def row(i, label, version=None, **extra):
+        r = {
+            "label": label,
+            "route": "B" if i % 2 else "C",
+            "candidate_raw_status": "VALID" if i % 3 else "TIMEOUT",
+            "capped": i % 4 == 0,
+            "candidate_empty": i == 5,
+            "failure_kind": None,
+            "task_key": f"t{i}",
+            "leakage_flags": ["x"] if i == 2 else [],
+            **extra,
+        }
+        if version is not None:
+            r["spec_version"] = version
+        return r
+
+    return [
+        row(0, ros.RESOLVED),
+        row(1, ros.UNRESOLVED, "v1"),
+        row(2, ros.RESOLVED, "v2"),
+        row(3, ros.BROKE_EXISTING, "v1"),
+        row(4, ros.NOT_SCORABLE_ORACLE_INVALID, "v1", sub_reason="GOLD_PORT_FAILED"),
+        row(5, ros.NO_CANDIDATE, "v1"),
+        row(6, ros.PARTIAL, "v2"),
+        row(7, ros.RESOLVED, "v1"),
+    ]
+
+
+# sha256 of json.dumps(summarize(_golden_rows()), sort_keys=True) under scorer 1.2.4.
+V124_SUMMARY_SHA256 = "0f2bd6522b7adfb49b66b4c4e252ddf05c8de740ee28cccd335a86563f03251a"
+
+
+def test_v1_v2_receipts_summarize_exactly_as_1_2_4():
+    s = ros.summarize(_golden_rows())
+    assert "v3" not in s
+    assert hashlib.sha256(json.dumps(s, sort_keys=True).encode()).hexdigest() == (
+        V124_SUMMARY_SHA256
+    )
+
+
+def test_summary_v3_block_is_apart_from_v1_headline():
+    rows = _golden_rows()
+    before = ros.summarize(rows)
+    v3_rows = [
+        _summary_row(10, ros.BROKE_EXISTING, "v3"),
+        _summary_row(11, ros.RESOLVED, "v3"),
+        _summary_row(12, ros.NOT_SCORABLE_ORACLE_INVALID, "v3", sub_reason="GOLD_PORT_FAILED"),
+    ]
+    after = ros.summarize([*rows, *v3_rows])
+    for key in set(before) - {"spec_version_counts"}:
+        assert after[key] == before[key], key
+    assert after["spec_version_counts"] == {"v1": 6, "v2": 2, "v3": 3}
+    assert after["unknown_spec_versions"] == {}
+    assert after["v3"] == ros._summary(v3_rows)
+    assert after["v3"]["counts"] == {
+        ros.BROKE_EXISTING: 1,
+        ros.NOT_SCORABLE_ORACLE_INVALID: 1,
+        ros.RESOLVED: 1,
+    }
+    assert (after["v3"]["resolved"], after["v3"]["valid_oracle_n"]) == (1, 2)
+
+
+def test_cli_spec_version_defaults_to_v1():
+    from nexus.research import score_real_outcome_cli as cli
+
+    assert cli.parse_args(["--out", "o"]).spec_version == ros.SPEC_V1
+    assert cli.parse_args(["--out", "o", "--spec-version", "v3"]).spec_version == ros.SPEC_V3
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--out", "o", "--spec-version", "v2"])
+
+
+def test_spec_v3_file_names_base_specs_and_is_post_hoc():
+    root = Path(__file__).resolve().parents[2]
+    v3 = (root / ros.SPEC_V3_RELATIVE_PATH).read_text()
+    v2_sha = hashlib.sha256((root / ros.SPEC_V2_RELATIVE_PATH).read_bytes()).hexdigest()
+    assert "315d95de21ea7ec82c97bf80165feaa052cb8a36fe99f3a1072d45ff74bb2bda" in v3
+    assert v2_sha in v3
+    assert "not pre-registered" in v3 and "#2709" in v3
+    assert "uv-venv-runtime-pins" in v3

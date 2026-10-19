@@ -14,6 +14,7 @@ Planner stays the sole route authority. No model or network call is made.
 from __future__ import annotations
 
 import hashlib
+import os
 import posixpath
 import subprocess
 import tempfile
@@ -37,14 +38,36 @@ _GRAPH_INDEX: dict[tuple[str, str, str], Path] = {}
 _GRAPH_DIR: Path | None = None
 
 
+# Read-only probes: repository-local config must not run commands (fsmonitor, hooks)
+# and inherited GIT_* variables must not redirect them, since the root may be an
+# external measurement target (#2742).
+_GIT_SAFE_CONFIG = (
+    "-c", "core.fsmonitor=false",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "protocol.allow=never",
+)  # fmt: skip
+
+
+def _git_environment() -> dict[str, str]:
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return environment
+
+
 def _git(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), *args],
+            ["git", *_GIT_SAFE_CONFIG, "-C", str(root), *args],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
+            env=_git_environment(),
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None

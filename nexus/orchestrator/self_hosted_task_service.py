@@ -148,7 +148,7 @@ from nexus.orchestrator.autonomy_policy import (
 )
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.governed_integration import (
     ControlledIntegrationManager,
@@ -161,6 +161,7 @@ from nexus.orchestrator.lifecycle_guards import (
     validate_approval_grant,
     validate_architecture_approval,
 )
+from nexus.orchestrator.measure_external_target import accepted_external_controller
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.runtime_retry_bridge import (
     project_candidate_acceptance_for_runtime_repair,  # noqa: F401 - facade surface, used by parts/read_projection.py
@@ -891,7 +892,14 @@ def resolve_execution_lane(
         name = Path(path).name
         if name in lockfile_names:
             blockers.append("lockfile_change_forbidden")
-        if path.startswith(("generated/", "dist/", "build/", ".next/")) or name.endswith(".generated.json"):
+        # the directory entry itself counts too ("generated/" is stripped to "generated"
+        # above), and case is ignored for case-insensitive file systems (#2727)
+        folded = path.casefold()
+        if (
+            folded in {"generated", "dist", "build", ".next"}
+            or folded.startswith(("generated/", "dist/", "build/", ".next/"))
+            or name.casefold().endswith(".generated.json")
+        ):
             blockers.append("generated_or_large_change_forbidden")
     for flag in ("migration_authority", "schema_authority", "route_authority_mutation", "security_policy_weakening", "public_claim_allowed", "production_ready"):
         if request.get(flag):
@@ -1883,6 +1891,22 @@ class SelfHostedTaskService(
             if autonomy_grant.expires_at <= now:
                 raise ValueError("AUTONOMY_GOAL_GRANT_EXPIRED")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
+        # #2721: on a measurement Gateway only, a worker-candidate Target may
+        # be cut from a re-validated external repository; its HEAD (not the
+        # Nexus-new HEAD) is then the one the envelope binds.  The Task Card
+        # is still checked under CANONICAL_SOURCE_ROOT.  With the measurement
+        # variable unset at start this is None and the guard is unchanged.
+        # The re-check runs in ephemeral mode too (#2742).
+        external_controller = (
+            accepted_external_controller(
+                request.get("controller_repo_root"),
+                action.get("expected_head"),
+                nexus_root=Path(CANONICAL_SOURCE_ROOT),
+                forbidden_roots=(LOADED_SOURCE_ROOT,),
+            )
+            if action and request.get("worker_candidate_ingress") is True
+            else None
+        )
         if action and not self.ephemeral:
             # The service remains lifecycle authority; this synchronous guard
             # only validates the caller's already-built envelope before any
@@ -1895,6 +1919,11 @@ class SelfHostedTaskService(
                 request=request,
                 canonical_root=CANONICAL_SOURCE_ROOT,
                 tool_manifest_hash=trusted_manifest,
+                **(
+                    {"current_head": external_controller.base_revision}
+                    if external_controller is not None
+                    else {}
+                ),
             )
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")

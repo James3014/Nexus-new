@@ -12,6 +12,7 @@ from nexus.core.state_root import (
     configured_state_root,
     persistent_state_root,
     rebase_state_path,
+    state_read_only,
 )
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text, post_local_json
@@ -34,6 +35,8 @@ _DISABLED_WRITEBACK_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _learning_writeback_disabled() -> bool:
+    if state_read_only():  # #2721 L-B: frozen learning state, no episode, lesson or reflection
+        return True
     return os.environ.get(LEARNING_WRITEBACK_ENV, "").strip().lower() in _DISABLED_WRITEBACK_VALUES
 
 

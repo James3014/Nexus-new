@@ -1762,8 +1762,12 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
         expected_positive_statuses = {"NOT_EXECUTABLE"}
     elif name == "ultra_review" and not os_sandbox_available():
-        # The review re-runs PR tests only behind an OS sandbox; elsewhere it fails closed.
-        assert pos["final_status"] == "FAIL", pos
+        # The review re-runs PR tests only behind an OS sandbox; elsewhere it cannot. Since
+        # #2732 the review is record-only: recorded as BLOCKED + review_error, never blocking.
+        assert pos["final_status"] == "OK", pos
+        assert pos["gate_passed"] is True
+        assert _find_key_2732(pos, "review_status") == "BLOCKED"
+        assert _find_key_2732(pos, "review_error") == "ghost_regression_not_executed:no_os_barrier"
         assert neg["final_status"] == "OK", (name, neg["first_broken_edge"], neg)
         return
     elif name in {"claim_gate", "delivery_gate"}:
@@ -1846,3 +1850,22 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     if contract["execution_class"] in REAL_EXECUTION_CLASSES:
         if neg["gate_passed"] is True and neg["invoked"] is True:
             assert neg["status"] != "SUCCEEDED" or neg["evidence_refs"] or neg["skipped"]
+
+
+def _find_key_2732(value, key, depth=0):
+    """First value of ``key`` anywhere in a nested receipt (bounded; #2732)."""
+    if depth > 8:
+        return None
+    if isinstance(value, dict):
+        if key in value:
+            return value[key]
+        items = list(value.values())
+    elif isinstance(value, list):
+        items = value
+    else:
+        return None
+    for item in items:
+        found = _find_key_2732(item, key, depth + 1)
+        if found is not None:
+            return found
+    return None

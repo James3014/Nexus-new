@@ -32,6 +32,13 @@ from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
     build_canonical_dispatch_envelope,
 )
+from nexus.orchestrator.measure_external_target import (
+    ExternalTarget,
+    ExternalTargetError,
+    external_target_enabled,
+    external_target_head,
+    validate_external_target,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     resolve_lifecycle_identity,
     validate_task_card_binding,
@@ -89,7 +96,7 @@ _CODEINTEL_LOOKUP_KEYS = frozenset({"target_symbol", "search_paths"})
 _CODEINTEL_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
-def _codeintel_lookup(raw: Any) -> dict[str, Any]:
+def _codeintel_lookup(raw: Any, *, root: Optional[Path] = None) -> dict[str, Any]:
     """Validate the optional codeintel lookup target (#1579).
 
     Lets the Planner-selected codeintel executor perform its real, read-only
@@ -111,7 +118,10 @@ def _codeintel_lookup(raw: Any) -> dict[str, Any]:
         if not isinstance(path, str) or not path.endswith(".py"):
             raise invalid
         try:
-            _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths")
+            if root is None:
+                _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths")
+            else:
+                _gateway()._safe_relative_path(path, "codeintel_lookup.search_paths", root=root)
         except Exception as exc:  # noqa: BLE001 - one stable refusal code
             raise invalid from exc
     # Containment, existence and symlinks are re-checked against the leased target
@@ -139,6 +149,7 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             contract_binding: Optional[Mapping[str, Any]] = ...,
             controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = ...,
             bound_action_request: Optional[Mapping[str, Any]] = ...,
+            controller_repo_root: Optional[Path] = ...,
         ) -> dict[str, Any]: ...
 
         @staticmethod
@@ -176,12 +187,31 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             "task_card_path", "task_card_hash", "fail_to_pass_required",
             "rie_knowledge_identity", "codeintel_lookup",
         }
+        # #2721: ``external_target`` exists only on a measurement Gateway
+        # (NEXUS_MEASURE_EXTERNAL_TARGET_ROOT set).  Elsewhere it stays an
+        # unknown field and is refused exactly like any other.
+        if external_target_enabled():
+            allowed_keys.add("external_target")
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
             raise _gateway().GatewayInputError(f"WORKER_CANDIDATE_UNKNOWN_FIELDS:{','.join(unknown)}")
         if arguments.get("owner_confirmation") is not True:
             raise _gateway().GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         _gateway()._require_bound_controller()
+        external: Optional[ExternalTarget] = None
+        if "external_target" in arguments:
+            try:
+                external = validate_external_target(
+                    arguments["external_target"],
+                    nexus_root=Path(_gateway().CANONICAL_SOURCE_ROOT),
+                    forbidden_roots=(Path(_gateway().LOADED_SOURCE_ROOT),),
+                )
+            except ExternalTargetError as exc:
+                raise _gateway().GatewayInputError(str(exc)) from exc
+            if "rie_knowledge_identity" in arguments:
+                # Its ancestry check reads the Nexus-new history, not the external one.
+                raise _gateway().GatewayInputError("EXTERNAL_TARGET_RIE_KNOWLEDGE_UNSUPPORTED")
+        external_root = external.repo_root if external is not None else None
         authority_confirmation = arguments.get("authority_change_candidate_confirmation", False)
         if not isinstance(authority_confirmation, bool):
             raise _gateway().GatewayInputError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
@@ -195,7 +225,10 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         if not 1 <= len(allowed) <= 4:
             raise _gateway().GatewayInputError("allowed_files must contain 1-4 bounded paths")
         for path in allowed:
-            _gateway()._safe_relative_path(path, "allowed_files")
+            if external_root is None:
+                _gateway()._safe_relative_path(path, "allowed_files")
+            else:
+                _gateway()._safe_relative_path(path, "allowed_files", root=external_root)
         verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
         if not verifiers or len(verifiers) > 4:
             raise _gateway().GatewayInputError("verifier_commands must contain 1-4 bounded commands")
@@ -216,15 +249,22 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             raise _gateway().GatewayInputError("TASK_CARD_HASH_INVALID")
         head = self._exact_hash(_gateway()._git("rev-parse", "HEAD").strip(), "expected_head", 40)
         _gateway()._require_bound_controller(head)
+        # ``head`` stays the Nexus-new Controller HEAD (it holds the Task Card);
+        # ``target_head`` is the revision the Target is cut from and the one the
+        # action envelope binds.  They differ only for an external target (#2721).
+        target_head = external.base_revision if external is not None else head
         rie_identity = (
             _rie_knowledge_identity(arguments["rie_knowledge_identity"], head)
             if "rie_knowledge_identity" in arguments
             else None
         )
         codeintel_lookup = (
-            _codeintel_lookup(arguments["codeintel_lookup"])
+            _codeintel_lookup(arguments["codeintel_lookup"], root=external_root)
             if "codeintel_lookup" in arguments
             else None
+        )
+        external_request: dict[str, Any] = (
+            {"controller_repo_root": external_root} if external_root is not None else {}
         )
         contract_binding = {
             "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
@@ -240,8 +280,9 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             why,
             allowed,
             verifiers,
-            head,
+            target_head,
             contract_binding=contract_binding,
+            **external_request,
         )
         card_request.update({
             "worker": "auto",
@@ -308,6 +349,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
                 allowed_files=tuple(allowed),
                 verifier_command=tuple(verifiers),
                 task_card_identity=verified_task_card,
+                # Route facts and codeintel describe the repository the Target is cut from.
+                **({"route_facts_repo_root": external_root} if external_root is not None else {}),
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             raise _gateway().GatewayInputError(f"WORKFORCE_INTERNAL_BINDING_INVALID:{exc}") from exc
@@ -395,8 +438,9 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             ),
         }
         bound = self._canonical_request(
-            task_id, what, why, allowed, verifiers, head,
+            task_id, what, why, allowed, verifiers, target_head,
             contract_binding=contract_binding,
+            **external_request,
         )
         protected_contracts = ["repository-authority-change.v1"] if authority_confirmation else []
         bound.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
@@ -421,7 +465,7 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         action = build_action_envelope(
             task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
             request=bound, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION,
-            expected_head=head, allowed_paths=allowed, mutation=True,
+            expected_head=target_head, allowed_paths=allowed, mutation=True,
             task_card_path=task_card_path, task_card_hash=task_card_hash,
             contract_kind=ContractKind.TRACKED_TASK_CARD,
             contract_hash=None,
@@ -445,7 +489,7 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         action = build_action_envelope(
             task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
             request=bound, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION,
-            expected_head=head, allowed_paths=allowed, mutation=True,
+            expected_head=target_head, allowed_paths=allowed, mutation=True,
             task_card_path=task_card_path, task_card_hash=task_card_hash,
             contract_kind=ContractKind.TRACKED_TASK_CARD,
             contract_hash=None,
@@ -455,9 +499,10 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             idempotency_key=bound["idempotency_key"],
         ).model_dump(mode="json")
         request = self._canonical_request(
-            task_id, what, why, allowed, verifiers, head,
+            task_id, what, why, allowed, verifiers, target_head,
             action=action, contract_binding=contract_binding,
             bound_action_request=bound,
+            **external_request,
         )
         request["request_hash"] = action["request_hash"]
         request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
@@ -483,7 +528,15 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         current_head = self._exact_hash(_gateway()._git("rev-parse", "HEAD").strip(), "current_head", 40)
         if current_head != head:
             raise _gateway().GatewayInputError("HEAD_DRIFT")
-        _gateway().pre_action_guard(action, request=request, current_head=head, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION)
+        current_target_head = current_head
+        if external is not None:
+            try:
+                current_target_head = external_target_head(external.repo_root)
+            except ExternalTargetError as exc:
+                raise _gateway().GatewayInputError(str(exc)) from exc
+            if current_target_head != target_head:
+                raise _gateway().GatewayInputError("EXTERNAL_TARGET_HEAD_DRIFT")
+        _gateway().pre_action_guard(action, request=request, current_head=current_target_head, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION)
         result = self.service.submit_task(request)
         payload = dict(result or {})
         payload.update({"schema": "nexus.worker_candidate.v1", "worker_id": worker_id,
