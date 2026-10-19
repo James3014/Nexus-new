@@ -476,6 +476,17 @@ def _effect_authority_kwargs():
     }
 
 
+_SHADOW_TEXT_LIMIT = 256
+
+
+def _bounded_shadow_value(value):
+    """Keep caller-supplied text (e.g. ``authority_ref``) from bloating state."""
+    if isinstance(value, str) and len(value) > _SHADOW_TEXT_LIMIT:
+        digest = hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()
+        return f"{value[:64]}...[truncated len={len(value)} sha256={digest}]"
+    return value
+
+
 def _record_effect_authority_shadow(task_id, attempt_id, request):
     """Record what strict mode would decide, without enforcing it (#2344).
 
@@ -491,7 +502,8 @@ def _record_effect_authority_shadow(task_id, attempt_id, request):
     try:
         from nexus.orchestrator import effect_authority
 
-        decision = effect_authority.shadow_decision(request)
+        decision = effect_authority.shadow_decision(request, attempt_id=str(attempt_id))
+        decision = {key: _bounded_shadow_value(value) for key, value in decision.items()}
         decision.update({
             "task_id": str(task_id),
             "attempt_id": str(attempt_id),

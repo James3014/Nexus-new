@@ -294,3 +294,68 @@ def test_execute_persists_shadow_with_service(monkeypatch):
     with pytest.raises(_Stop):
         bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
     assert persisted == [("t1", "a1", ea.DECISION_WOULD_REFUSE)]
+
+
+# --- Codex r1: the shadow mirrors strict's freshness and identity checks ------
+
+
+def _req(auth, **over):
+    request = {
+        "operation_id": "op-1",
+        "repository": "James3014/Nexus-new",
+        "effect_authorization": auth.to_dict(),
+    }
+    request.update(over)
+    return request
+
+
+def test_shadow_allows_fresh_matching_authorization_for_its_attempt():
+    decision = ea.shadow_decision(_req(_auth()), _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_ALLOW
+    assert decision["reason"] == "RECORD_MATCH"
+
+
+def test_shadow_refuses_expired_authorization_even_with_record_match():
+    expired = _auth(expires_at="2000-01-01T00:00:00Z")
+    decision = ea.shadow_decision(_req(expired), _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith("AUTHORIZATION_INVALID:")
+
+
+@pytest.mark.parametrize(
+    ("attempt", "over", "prefix"),
+    [
+        ("other-attempt", {}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"operation_id": "op-2"}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"repository": "James3014/other"}, "IDENTITY_MISMATCH:"),
+        ("att-1", {"operation_id": None}, "REQUEST_IDENTITY_MISSING"),
+        ("att-1", {"repository": " "}, "REQUEST_IDENTITY_MISSING"),
+    ],
+)
+def test_shadow_refuses_identity_mismatch(attempt, over, prefix):
+    decision = ea.shadow_decision(_req(_auth(), **over), _lookup(_record()), attempt_id=attempt)
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith(prefix)
+
+
+def test_bridge_shadow_checks_identity_against_its_attempt(monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    # The identity check runs before any record lookup.
+    decision = bridge._record_effect_authority_shadow("t1", "other-attempt", _req(_auth()))
+    assert decision is not None
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert decision["reason"].startswith("IDENTITY_MISMATCH:")
+
+
+def test_shadow_record_bounds_caller_supplied_text(monkeypatch):
+    monkeypatch.delenv(ea.STRICT_ENV, raising=False)
+    huge = "x" * 1_000_000
+    monkeypatch.setattr(
+        ea,
+        "shadow_decision",
+        lambda *_a, **_k: {"decision": "WOULD_REFUSE", "reason": "R", "authority_ref": huge},
+    )
+    decision = bridge._record_effect_authority_shadow("t1", "a1", {"task": "x"})
+    assert decision is not None
+    assert len(decision["authority_ref"]) < 300
+    assert "len=1000000" in decision["authority_ref"]

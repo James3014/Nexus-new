@@ -160,10 +160,26 @@ def record_backed_port(lookup: RecordLookup = production_record_lookup) -> Effec
     return EffectAuthorityPort(verifier)
 
 
+def _request_identity(request: Mapping[str, Any], key: str) -> str | None:
+    # Same projection as the runtime coordinator's ``_request_identity_value``.
+    value = request.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def shadow_decision(
-    request: Any, lookup: RecordLookup = production_record_lookup
+    request: Any,
+    lookup: RecordLookup = production_record_lookup,
+    *,
+    attempt_id: str | None = None,
 ) -> dict[str, Any]:
-    """What strict mode would decide for ``request``, without enforcing it."""
+    """What strict mode would decide for ``request``, without enforcing it.
+
+    Mirrors the runtime coordinator's strict request checks: freshness and,
+    when ``attempt_id`` is given, the request identity (attempt, operation,
+    repository and the optional revision/workspace/target ids), then the
+    record match. Only the later durable-copy substitution check is not
+    modelled, because the shadow runs before the durable copy is written.
+    """
     raw = request.get("effect_authorization") if isinstance(request, Mapping) else None
     if not isinstance(raw, Mapping):
         return {
@@ -172,8 +188,29 @@ def shadow_decision(
         }
     try:
         authorization = EffectAuthorization.from_mapping(raw)
+        authorization.assert_fresh()
     except EffectAuthorizationError as exc:
         return {"decision": DECISION_WOULD_REFUSE, "reason": f"AUTHORIZATION_INVALID:{exc}"}
+    if attempt_id is not None:
+        operation_id = _request_identity(request, "operation_id")
+        repository = _request_identity(request, "repository")
+        if operation_id is None or repository is None:
+            return {
+                "decision": DECISION_WOULD_REFUSE,
+                "reason": "REQUEST_IDENTITY_MISSING",
+            }
+        try:
+            authorization.assert_identity(
+                attempt_id=str(attempt_id),
+                operation_id=operation_id,
+                repository=repository,
+                source_revision=_request_identity(request, "source_revision"),
+                base_revision=_request_identity(request, "base_revision"),
+                workspace_id=_request_identity(request, "workspace_id"),
+                target_id=_request_identity(request, "target_id"),
+            )
+        except EffectAuthorizationError as exc:
+            return {"decision": DECISION_WOULD_REFUSE, "reason": f"IDENTITY_MISMATCH:{exc}"}
     accepted, reason = evaluate_authorization(authorization, lookup)
     return {
         "decision": DECISION_ALLOW if accepted else DECISION_WOULD_REFUSE,
