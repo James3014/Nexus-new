@@ -23,8 +23,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
+| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, cap or host-disk trips caused by the candidate (its runs, its trees' growth, its survivors' leftover run directories) are `NOT_RUNNABLE`, so that task stays in the denominator. Host disk that is low for other reasons, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). Survivors are reaped after each scoring. A version string too long for Python's int parser is `version_invalid` |
 
-Current scorer: `SCORER_VERSION = "1.3.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.3.1"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -276,3 +277,205 @@ stub); no label reads it.
   "Install only the project's metadata without letting it shadow the tree", as spec v3,
   opt-in, with the affected V12 tasks rescored and reported next to the unchanged v1
   headline.
+
+## 2026-10-20: A11, sandbox and cap hardening (operational, #2751)
+
+Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
+
+- **Caps count allocated bytes.** The A6 caps and the receipt timing fields
+  `scratch_tmp_bytes` / `scratch_home_bytes` now measure the disk space files really use,
+  `st_blocks * 512` (`st_size` where `st_blocks` is missing), not their apparent size.
+  - A sparse file counts only the blocks it uses. Before, a candidate's session-escaping
+    child could write a large sparse file and push the task over a cap.
+  - A normal file now counts whole blocks, so a small file counts at least one block
+    (4 KiB on APFS and ext4). Each inode is counted once, so hard links are not counted
+    twice. The A6 timing numbers are therefore a little higher than in 1.3.0 for small
+    files, and lower where files are hard-linked.
+  - The caps are 20 GiB per run and 40 GiB per task. A label changes only for a task
+    whose run actually hits a cap. On 2026-10-20 the Mac mini had four receipts that
+    hit one, all `NOT_SCORABLE_ORACLE_INVALID`. Paths are relative to
+    `~/.local/state/nexus-real-outcome/`:
+    - `v12-replay/receipts-batch3/tasks/James3014__nexus-core--271`
+      (`SCRATCH_TMP_TASK_CAP_EXCEEDED` on GOLD);
+    - `v12-replay/receipts-batch3/tasks/James3014__Nexus-new--2291`
+      (`ORACLE_RUN_FAILED`, per-run cap on BASE+T);
+    - `pilot-2219/runs/James3014__Nexus-new--2272/C/score` (per-run cap on BASE+T);
+    - `pilot-2219/runs/James3014__Nexus-new--2272/C/score_amend1` (same).
+
+    Rescored under 1.3.1, such a task would get a different label only if its bytes
+    were sparse or hard-linked. Receipts already sealed are not changed.
+- **Per-scoring run parents (`--sandbox os`).** Each scoring of a task puts its run
+  directories under a fresh parent,
+  `<scratch>/runs/<random12>/<role>-<key16>-<random12>`. `<role>` is `candt` for
+  candidate runs (`CAND+T`) and `oracle` otherwise. A rescore of the same task gets a
+  new parent too, as its trees already do (A9).
+  - A confined process may write only inside its own run directory, its tree and
+    nothing above them.
+  - The parent is removed whenever it is empty after a run, and the next run re-creates
+    it under the same name. So a session-escaping child can write again only while a
+    later run of the same scoring has re-created the parent, and then only into its own
+    directory.
+  - Directory names can be trusted: a confined process cannot create, rename or link
+    entries in `runs/` or in the parent.
+- **End of a scoring (`--sandbox os`): rename, reap, then delete.**
+  1. The trees parent `trees/<task>-<random>` (unless `--keep-trees`) and every run
+     parent are renamed to a `.trash-<random>` sibling. Each rename is one atomic step.
+     A survivor's write rule names paths under the old parents, which no longer exist,
+     so even a child that re-creates its directory in a tight loop can create nothing.
+     Before this, `rmtree` worked bottom-up, and such a child re-created its directory
+     before the parent was removed (independent review, 5/5 under real sandbox-exec).
+  2. The scorer runs `lsof -nP -w -Fpfn -u <uid>` from a fixed path (`/usr/sbin/lsof`
+     or `/usr/bin/lsof`, never PATH). It SIGKILLs, by PID, every process of the same
+     user that still has its cwd or an open file, deleted files included, under this
+     scoring's trees parent, its trash, or `runs/`. No other process is touched, and
+     `pkill`/`killall` are never used. The reaped PIDs are recorded in the receipt
+     timing as `reaped_pids`, a diagnostic.
+     - This closes the unlinked-open-file case (#2740) for any process that still holds
+       such a file there. A survivor that holds nothing under those paths cannot write
+       anywhere that is counted.
+     - Without lsof, `os` mode fails closed: `ScratchInfraAbort`, no receipt, exit 8.
+     - Every reaped PID must be gone (`kill(pid, 0)` gives ESRCH, or it is a zombie)
+       within 5 seconds. Otherwise: infra abort.
+     - The same reaper also runs on this scoring's candidate scope at every host-disk
+       shortfall (the single rule below). There is no separate reap after each
+       candidate run: the reap at the shortfall covers it, including survivors that
+       held nothing when their run ended and only opened a file later.
+  3. The trash is deleted and `git worktree prune` drops the stale worktree entries.
+     The A6 cleanup then empties scratch HOME/TMPDIR and `runs/`. `clean_tmp` also
+     renames run parents to trash before it deletes them.
+- **What is charged to the candidate (`NOT_RUNNABLE`, task stays in the denominator,
+  receipt field `cap_attributed_role: "CAND+T"` when the run that trips is not a
+  candidate run):**
+  - A candidate run's own growth. That is its run directory plus the allocated growth
+    of its tree during the run. The tree is walked whole, `.git` included (a small
+    worktree pointer file, the same in every measurement), in the same walk and with
+    the same inode dedupe. A per-run cap trip from that growth is
+    `NOT_RUNNABLE` / `SCRATCH_TMP_CAP_EXCEEDED`. Oracle runs' trees are not counted,
+    as before.
+  - A cap trip on any run that would not have happened without bytes in leftover
+    `candt-*` directories of the current scoring, that is, directories re-created by a
+    session-escaping child of one of its candidate runs. Sub-reason
+    `SCRATCH_TMP_CAP_EXCEEDED` or `SCRATCH_TMP_TASK_CAP_EXCEEDED`.
+  - Host disk below the floor before or right after a run, when the single rule below
+    charges it. Sub-reason `HOST_DISK_LOW`. Example: the disk was fine when the scoring
+    started and the candidate filled it, by writing about 110 GiB into its own tree or
+    by a survivor holding a large deleted file.
+- **The single host-disk rule (`--sandbox os`).** It applies whenever a disk check,
+  before or after a run, finds free space below the floor:
+  1. If no candidate run has run yet in this scoring, the result is an infra abort.
+  2. Otherwise the scorer reaps this scoring's whole candidate scope right then. That
+     means every process of the user holding a cwd or an open file, deleted files
+     included, under this scoring's candidate run directories and candidate trees. The
+     run directories are matched by the name prefix `<task parent>/candt-` in lsof's
+     output, not by listing the directories that still exist. So a survivor that
+     unlinked a file it keeps open and then removed its own run directory is still
+     found; the scorer also removes finished run directories itself. Trees match as
+     the path itself or below it (`<tree>/…`), so similarly named siblings never match.
+     The reap kills by PID, checks that each process is gone, and fails closed, as
+     above. The reaped PIDs are recorded in `reaped_pids`.
+  3. The scorer measures free space again (`free_now`; `free_before` is the value
+     before the reap, `shortfall_before = floor - free_before`).
+     - `reclaimed = max(0, free_now - free_before)` is the space the reap gave back.
+       It counts only if the reap killed at least one process. A recovery without a
+       reaped survivor came back for some other reason.
+     - It also appears in the infra-abort message and, summed per scoring, as
+       `reap_reclaimed_bytes` in the receipt timing.
+     - The candidate's visible bytes are its leftover run directories, the current
+       run's directory if it is a candidate run, and its trees' growth since their
+       first candidate run.
+  4. **The disk recovered (`free_now >= floor`).**
+     - At a pre-run check, the run just goes on: no charge, no abort (H2).
+     - At a post-run check, the run that just finished may have run on an exhausted
+       disk, so its result is never used. If `reclaimed >= shortfall_before`, the
+       candidate's survivor caused the shortfall: charged (`NOT_RUNNABLE` /
+       `HOST_DISK_LOW`). Otherwise it is an infra abort.
+  5. **The disk is still below the floor.** The candidate is charged only if all
+     three hold:
+     - `free_start` was at or above the floor. `free_start` is the free space at the
+       pre-run check of the scoring's first candidate run, before any candidate code
+       ran, so disk taken during the oracle runs never counts against the candidate.
+     - `visible >= floor - free_now`: the candidate's visible bytes cover the
+       shortfall. Without them the disk would be above the floor.
+     - `visible + reclaimed >= 0.5 * (free_start - free_now)`: the candidate accounts
+       for at least half of the drop since `free_start`. `reclaimed` counts toward this
+       majority term only, never toward the shortfall term, which is measured after
+       the reap.
+  6. Otherwise the result is an infra abort.
+
+  Cases that show how the rule works:
+  - H2, pre-run: a survivor's held deleted file has the disk below the floor at the
+    next run's pre-run check. The reap recovers the disk and scoring continues to its
+    normal receipt.
+  - H2 / R1b, post-run: the survivor holds nothing when its candidate run ends, then
+    opens a deleted file, and the disk fills while the next run is running. That run's
+    post-run check reaps the survivor; the space it gave back covers the shortfall, so
+    the candidate is charged. The candidate cannot time this to force an infra abort.
+  - Partial recovery: the reap gives back a survivor's 1 MiB, but external use alone
+    leaves the disk 50 kB short with no candidate bytes visible. That is infra.
+  - A harmless daemon holds no space: it reclaims about nothing, so it never causes a
+    charge.
+  - An honest candidate whose small bytes tip a disk that external use brought close
+    to the floor made far less than half of the drop, so it is infra.
+  - H1 (layer1-rie): the candidate fills the disk to just above the floor and stops;
+    an oracle run's own small writes then cross it. The candidate covers the shortfall
+    and most of the drop, so it is charged, and the rerun does not repeat an infra
+    abort.
+  - External use alone crosses the floor, even if the candidate wrote more than it:
+    the candidate does not cover the shortfall, so it is infra.
+
+  A reap only frees space; the arithmetic decides. A reap alone never charges the
+  candidate.
+- **What is an infra abort (`ScratchInfraAbort`: no receipt, no cache entry, the run's
+  outcome discarded, CLI exit 8; the driver or lab reruns the task):**
+  - Host disk below the floor that the single rule does not charge. That covers:
+    - no candidate run yet;
+    - the disk already low at the first candidate run;
+    - external work on the shared host taking the disk, even when the candidate's small
+      honest bytes tip it over the floor (they do not account for the starting
+      headroom);
+    - a harmless daemon left by an honest candidate that held no space (it is reaped,
+      but the disk stays low).
+  - A cap trip, on a run of any role, that would not happen without bytes under another
+    scoring's run parent, alone or together with this scoring's candidate bytes. Such
+    bytes should not exist after rename-and-reap.
+  - An env build failure (`ENV_FAILED`) while the disk is below the floor.
+  - No lsof for the reaper.
+- **Everything else is a candidate-independent refusal, as before.** That covers growth
+  in the current scoring's oracle run directories, and refusals built from oracle run
+  results (`GOLD_COLLECTION_FAILED`, `GOLD_REF_RUN_FAILED`, `ORACLE_RUN_FAILED`,
+  `ENV_FAILED`) when the disk is above the floor. Every such run gets the after-check
+  first. So a candidate never causes a candidate-independent refusal receipt: its bytes
+  are either charged to it or the scoring is an infra abort.
+- **One scan per measurement point.** The size before and after each run comes from a
+  single walk of scratch HOME, TMPDIR, `runs/` and this scoring's candidate trees. That
+  walk splits the bytes by top-level entry, so the total and the candidate's share come
+  from the same files. A survivor that empties its directory between two scans can no
+  longer move blame (layer1-rie F1).
+- **Hard links.** Each inode is counted once. An inode linked from several places is
+  charged in favour of the candidate: first to its run directories, then to its trees,
+  then to another parent, otherwise to the run. Under `--sandbox os` a confined
+  candidate cannot write oracle directories or the shared HOME/TMPDIR, so it cannot
+  link into them. The precedence rule is a safeguard for a case that cannot happen.
+- **Host-disk check (`--sandbox os`).** Before and right after every pytest run the
+  scorer checks `shutil.disk_usage(scratch).free` against `--min-free-disk-gib`. The
+  after-check comes before the run's result is read or cached. The default is 40 GiB,
+  two per-run caps, so one run that fills its cap still leaves room for the next. There
+  is no percentage check, and `--min-free-percent` stays the memory check only. The
+  outcome above the floor is unchanged. Below it, see the charged and infra cases above.
+  Exit 8 is a new code; codes 2-7 are taken. The caps cannot see blocks in an unlinked
+  but still open file (#2740). The reaper and this check now bound that case.
+- `--sandbox none` has no run directories, no reaper and no disk check, so nothing
+  above changes it.
+- **`--sandbox os` needs the store.** A runner in `os` mode refuses
+  (`SandboxError: store_required`) without an existing store directory. The store is
+  therefore always denied, and the A9 profile hash always includes that deny. Before,
+  an empty or missing store argument left the store readable while the hash looked
+  normal. The CLI always passes `--store`.
+- **Version strings.** `_valid_version` also treats `ValueError` as invalid. A version
+  whose release segment has more digits than Python's int limit (for example 5000 `1`s)
+  is `version_invalid` (v3 stub). Before, it stopped scoring of that task with a
+  scorer error.
+- **New tests.** One test checks the interpreter-prefix read-root refusal on its own:
+  the env directory is fine and the interpreter it resolves to is overbroad.
+- The test-result cache key includes the scorer version (A4), so 1.3.1 does not reuse
+  1.3.0 results.
