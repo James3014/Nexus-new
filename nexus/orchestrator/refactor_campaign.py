@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 import re
-import tempfile
-from typing import Any, Mapping, Optional, Sequence
 import subprocess
+import tempfile
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Mapping, Optional, Sequence
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
-from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
-
+from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator, contained_state_path
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -42,7 +41,7 @@ class RefactorCampaignCoordinator:
         self.state_dir = Path(configured).expanduser().resolve()
 
     def _path(self, campaign_id: str) -> Path:
-        return self.state_dir / f"{campaign_id}.json"
+        return contained_state_path(self.state_dir, campaign_id, code="CAMPAIGN_ID_INVALID")
 
     def _write(self, state: Mapping[str, Any]) -> dict[str, Any]:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +59,10 @@ class RefactorCampaignCoordinator:
         path = self._path(campaign_id)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("campaign_id") != campaign_id:
+            raise ValueError("CAMPAIGN_STATE_ID_MISMATCH")
+        return state
 
     def create(
         self,

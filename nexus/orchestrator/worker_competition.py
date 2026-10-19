@@ -19,6 +19,27 @@ from nexus.orchestrator.standing_grant_store import StandingGrantKey
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
+_VALID_STATE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def validate_state_id(value: object, *, code: str) -> str:
+    """Return ``value`` if it is a safe state-file id, else raise ``ValueError(code)``.
+
+    A safe id full-matches ``[A-Za-z0-9][A-Za-z0-9._-]{0,127}`` and contains no
+    ``..``, so it can never name a path outside the state directory (SEC-015/016).
+    """
+    if not isinstance(value, str) or not _VALID_STATE_ID.fullmatch(value) or ".." in value:
+        raise ValueError(code)
+    return value
+
+
+def contained_state_path(state_dir: Path, state_id: object, *, code: str) -> Path:
+    """Return ``state_dir/<state_id>.json`` after proving it stays directly in ``state_dir``."""
+    safe_id = validate_state_id(state_id, code=code)
+    path = state_dir / f"{safe_id}.json"
+    if path.resolve().parent != state_dir.resolve():
+        raise ValueError(code)
+    return path
 
 
 @dataclass(frozen=True)
@@ -94,7 +115,7 @@ class WorkerCompetitionCoordinator:
         self.state_dir = Path(configured).expanduser().resolve() / "competitions"
 
     def _path(self, competition_id: str) -> Path:
-        return self.state_dir / f"{competition_id}.json"
+        return contained_state_path(self.state_dir, competition_id, code="COMPETITION_ID_INVALID")
 
     def _write(self, state: Mapping[str, Any]) -> dict[str, Any]:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +138,10 @@ class WorkerCompetitionCoordinator:
         path = self._path(competition_id)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("competition_id") != competition_id:
+            raise ValueError("COMPETITION_STATE_ID_MISMATCH")
+        return state
 
     @staticmethod
     def _candidate_request(
