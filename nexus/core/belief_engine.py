@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from nexus.core.belief_contracts import AuditOutcome
-from nexus.core.state_root import rebase_state_path
+from nexus.core.state_root import rebase_state_path, state_read_only
 from nexus.infrastructure.state_json_store import StateJsonStore, StateMergeError
 from nexus.telemetry.tracer import NexusTracer
 
@@ -53,6 +53,8 @@ class BeliefEngine:
         self.beliefs = self.state_store.read_dict(self.state_file)
 
     def _persist(self, key: str | None = None) -> None:
+        if state_read_only():  # #2721 L-B: frozen state, in-memory only
+            return
         merge = getattr(self.state_store, "merge_dict", None)
         if key is None or merge is None:
             self.state_store.write_dict(self.state_file, self.beliefs)
@@ -81,6 +83,8 @@ class BeliefEngine:
         return self.assess_confidence(task_id, assumption, target_file)
 
     def update_belief(self, task_id: str, assumption: str, confidence: float, evidence_id: str):
+        if state_read_only():  # #2721 L-B: no change in memory either (long-lived engines)
+            return
         self.beliefs[assumption] = {
             "confidence": confidence,
             "evidence": evidence_id,
@@ -100,6 +104,15 @@ class BeliefEngine:
         if semantic_raw is not None:
             semantic_confidence = max(0.0, min(1.0, float(semantic_raw)))
             confidence = blend_semantic_confidence(confidence, semantic_confidence)
+        result = {
+            "task_id": outcome.task_id,
+            "assumption": outcome.assumption,
+            "confidence": confidence,
+            "evidence_id": outcome.evidence_id,
+            "accepted": bool(outcome.passed),
+        }
+        if state_read_only():  # #2721 L-B: same result, no Belief change (memory or disk)
+            return result
         self.update_belief(
             task_id=outcome.task_id,
             assumption=outcome.assumption,
@@ -120,10 +133,4 @@ class BeliefEngine:
             self.beliefs[outcome.assumption]["confidence_policy"] = "audit_semantic_weighted"
         self._persist(outcome.assumption)
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)
-        return {
-            "task_id": outcome.task_id,
-            "assumption": outcome.assumption,
-            "confidence": confidence,
-            "evidence_id": outcome.evidence_id,
-            "accepted": bool(outcome.passed),
-        }
+        return result

@@ -169,6 +169,10 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str) -> Optional[dict[str, Any]]"
    },
+   "_learning_writeback": {
+    "kind": "staticmethod",
+    "signature": "(POSITIONAL_OR_KEYWORD:contract, POSITIONAL_OR_KEYWORD:candidate, POSITIONAL_OR_KEYWORD:verified, POSITIONAL_OR_KEYWORD:resolution, POSITIONAL_OR_KEYWORD:fail_to_pass_status)"
+   },
    "_lease_from_state": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:state: Mapping[str, Any]) -> TargetWorktreeLease"
