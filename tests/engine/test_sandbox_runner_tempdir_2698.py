@@ -59,11 +59,14 @@ def test_working_copy_is_outside_project_and_removed(tmp_path):
     assert root_real not in workspace.resolve().parents
     assert workspace.parent.name.startswith("nexus-sandbox-run_")
     assert Path(tempfile.gettempdir()).resolve() in workspace.resolve().parents
-    # cleanup=True removes the whole temp dir, network guard included.
+    # cleanup=True removes the whole temp dir.
     assert not workspace.parent.exists()
     # Nothing but the run record (report + network guard) was written under the project.
+    # Without sandbox-exec (Linux) the child may cache the guard's bytecode next to it.
     written = sorted(
-        p.relative_to(root).as_posix() for p in (root / ".nexus").rglob("*") if p.is_file()
+        p.relative_to(root).as_posix()
+        for p in (root / ".nexus").rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
     )
     run = f".nexus/sandbox/runs/{result['run_id']}"
     assert written == [f"{run}/python_network_guard/sitecustomize.py", f"{run}/sandbox_result.json"]
