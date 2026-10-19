@@ -331,3 +331,43 @@ def test_run_dir_deny_rule_lists_literal_and_resolved_forms(tmp_path):
     assert f'(deny file-write* (literal "{link}"))' in rules
     assert f'(deny file-write* (literal "{os.path.realpath(real)}"))' in rules
     assert len(rules) == len(set(rules))
+
+
+def test_symlinked_project_root_uses_the_real_run_dir_everywhere(tmp_path, monkeypatch):
+    # #2791 review: project root reached through a user symlink.  The child may
+    # rename and repoint that symlink (its entry is not an ancestor of the real
+    # run_dir), so the guard on PYTHONPATH, the profile and the report must all
+    # name the real run_dir, never a path through the symlink.
+    real_root = _project(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(real_root, target_is_directory=True)
+    attacker = tmp_path / "attacker"
+    runner = SandboxRunner(link)
+    monkeypatch.setattr(runner, "has_sandbox_exec", True)
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        guard = Path(kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+        seen["guard"] = guard
+        seen["profile"] = cmd[2]
+        planted = attacker / guard.relative_to(os.path.realpath(real_root))
+        planted.mkdir(parents=True)
+        (planted / "sitecustomize.py").write_text("# planted\n", encoding="utf-8")
+        link.rename(tmp_path / "link.old")
+        link.symlink_to(attacker, target_is_directory=True)
+        return _Proc()
+
+    monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    result = runner.run_task("linked", command=_cmd(), timeout_sec=5)
+
+    real_run_dir = Path(os.path.realpath(real_root)) / ".nexus" / "sandbox" / "runs"
+    real_run_dir = real_run_dir / result["run_id"]
+    assert seen["guard"] == real_run_dir / "python_network_guard"
+    assert str(seen["guard"]) == os.path.realpath(seen["guard"])
+    subpaths = re.findall(r'\(deny file-write\* \(subpath "([^"]+)"\)\)', seen["profile"])
+    assert all(str(link) not in path for path in subpaths), subpaths
+    assert str(real_run_dir) in subpaths
+    assert result["success"] is True
+    assert Path(result["report_path"]) == real_run_dir / "sandbox_result.json"
+    assert (real_run_dir / "sandbox_result.json").is_file()
+    assert not list(attacker.rglob("sandbox_result.json"))

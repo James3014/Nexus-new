@@ -399,6 +399,12 @@ socket.socket.connect = _guarded_socket_connect
         run_dir = self.sandbox_base / "runs" / run_id
         command_list = [str(part) for part in command]
         run_dir.mkdir(parents=True, exist_ok=True)
+        # From here on run_dir is its real path: the guard on PYTHONPATH, the profile
+        # denies and the report all name a path with no symlink in it.  A symlink in
+        # the project or state root (e.g. /tmp/x/link -> /private/tmp/x/real) could
+        # otherwise be renamed and repointed by the child, because the ancestor denies
+        # cover the real parents but not the symlink's own entry (#2791 review).
+        run_dir = Path(os.path.realpath(run_dir))
         # Recorded before the child starts; checked again before anything is written
         # back into run_dir (#2785).
         run_dir_identity = _capture_run_dir_identity(run_dir)

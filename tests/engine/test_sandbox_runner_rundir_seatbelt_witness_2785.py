@@ -51,6 +51,15 @@ rm -rf "$R" 2>&1; echo "remove_run_dir=$?"
 printf x > "$R/sandbox_result.json" 2>&1; echo "plant_report=$?"
 printf x > "$G/sitecustomize.py" 2>&1; echo "rewrite_guard=$?"
 printf ok > "$(dirname "$P")/sibling_2785.txt" 2>&1; echo "sibling_write=$?"
+if [ -n "${ROOT_LINK_2785:-}" ]; then
+  # The project root was given through a user symlink: repoint that symlink at a
+  # tree with a planted guard under the same relative path (#2791 review).
+  T="$PWD/linked-attacker"
+  mkdir -p "$T/.nexus/sandbox/runs/$(basename "$R")/python_network_guard"
+  printf 'import socket\nsocket.PLANTED = True\n' > "$T/.nexus/sandbox/runs/$(basename "$R")/python_network_guard/sitecustomize.py"
+  mv "$ROOT_LINK_2785" "$ROOT_LINK_2785.old" 2>&1; echo "rename_root_link=$?"
+  ln -s "$T" "$ROOT_LINK_2785" 2>&1; echo "repoint_root_link=$?"
+fi
 """
 
 
@@ -142,8 +151,20 @@ def test_child_cannot_rename_or_replace_run_dir_under_real_sandbox_exec(tmp_proj
 
 
 @physical_seatbelt_witness
-def test_python_child_still_loads_the_parent_guard_after_a_swap_attempt(tmp_project):
-    runner = SandboxRunner(tmp_project)
+def test_python_child_still_loads_the_parent_guard_after_a_swap_attempt(tmp_project, monkeypatch):
+    for linked in (False, True):
+        root = tmp_project
+        if linked:
+            real_base = tmp_project.parent
+            (real_base / "link").symlink_to(tmp_project, target_is_directory=True)
+            root = Path("/tmp") / real_base.name / "link"
+            assert root.is_symlink() and os.path.realpath(root) == str(tmp_project)
+            monkeypatch.setenv("ROOT_LINK_2785", str(root))
+        _assert_guard_survives_swap(root, linked=linked)
+
+
+def _assert_guard_survives_swap(root: Path, *, linked: bool) -> None:
+    runner = SandboxRunner(root)
     probe = (
         "import socket; "
         "print('guard=' + socket.create_connection.__name__); "
@@ -160,3 +181,10 @@ def test_python_child_still_loads_the_parent_guard_after_a_swap_attempt(tmp_proj
     assert "guard=_guarded_create_connection" in out, out
     assert "planted=False" in out, out
     assert not _run_dir(result).is_symlink()
+    # run_dir, and so the guard on PYTHONPATH and the report, is a real path.
+    assert str(_run_dir(result)) == os.path.realpath(_run_dir(result))
+    if linked:
+        # The child really did repoint the user symlink; it just no longer matters.
+        assert "rename_root_link=0" in out and "repoint_root_link=0" in out, out
+        assert Path(os.path.realpath(root)).name == "linked-attacker"
+        assert _run_dir(result).is_relative_to(Path(os.path.realpath(root.parent / "proj")))
