@@ -125,7 +125,7 @@ def test_execute_calls_effect_authority_shadow(monkeypatch):
             return None
 
         def _read_state(self, _task_id):
-            return None
+            return {"attempt_id": "a1", "status": "SUBMITTED"}
 
     class _Stop(Exception):
         pass
@@ -281,6 +281,9 @@ def test_execute_persists_shadow_with_service(monkeypatch):
         def _bridge_validate_claim(self, *_a, **_k):
             return None
 
+        def _read_state(self, _task_id):
+            return {"attempt_id": "a1", "status": "SUBMITTED"}
+
     class _Stop(Exception):
         pass
 
@@ -417,3 +420,49 @@ def test_owned_attempt_shadow_uses_task_state_for_durable_check(tmp_path, monkey
     service, task_id = _owned_service(tmp_path, _ok_runner)
     bridge._record_owned_attempt_shadow(service, task_id, "attempt-1")
     assert seen and seen[0]["attempt_id"] == "attempt-1"
+
+
+@pytest.mark.parametrize("field", ["source_revision", "base_revision", "workspace_id", "target_id"])
+def test_shadow_checks_optional_identity_fields(field):
+    request = _req(_auth(**{field: "expected"}), **{field: "other"})
+    decision = ea.shadow_decision(request, _lookup(_record()), attempt_id="att-1")
+    assert decision["decision"] == ea.DECISION_WOULD_REFUSE
+    assert (
+        decision["reason"] == f"IDENTITY_MISMATCH:effect authorization identity mismatch: {field}"
+    )
+
+
+def test_owned_attempt_shadow_swallows_state_read_error():
+    class _Broken:
+        def _read_state(self, _task_id):
+            raise OSError("state unreadable")
+
+        def _mutate_state(self, *_a, **_k):
+            raise AssertionError("must not write after a failed read")
+
+    assert bridge._record_owned_attempt_shadow(_Broken(), "t1", "a1") is None
+
+
+def test_execute_records_nothing_when_state_unreadable(monkeypatch):
+    # Codex r3: without the state the durable check cannot be modelled.
+    calls = []
+
+    class _Service:
+        def _bridge_validate_claim(self, *_a, **_k):
+            return None
+
+        def _read_state(self, _task_id):
+            raise OSError("state unreadable")
+
+    class _Stop(Exception):
+        pass
+
+    def stop(self, *_a, **_k):
+        raise _Stop
+
+    monkeypatch.setattr(bridge, "_record_effect_authority_shadow", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(bridge, "_persist_effect_authority_shadow", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(bridge.RuntimeCoordinationBridge, "_coordinator", stop)
+    with pytest.raises(_Stop):
+        bridge.RuntimeCoordinationBridge(_Service()).execute("t1", "a1", request={"k": 1})
+    assert calls == []

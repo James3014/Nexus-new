@@ -618,8 +618,10 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
-        if request is not None:
-            state = _read_state_for_shadow(self.service, task_id)
+        state = _read_state_for_shadow(self.service, task_id) if request is not None else None
+        # Without the task state the durable-copy check cannot be modelled, so
+        # record nothing rather than a possibly misleading decision.
+        if state is not None:
             decision = _record_effect_authority_shadow(task_id, attempt_id, request, state)
             _persist_effect_authority_shadow(self.service, task_id, attempt_id, decision)
         return self._coordinator(
