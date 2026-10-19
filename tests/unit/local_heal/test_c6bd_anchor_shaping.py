@@ -6,7 +6,6 @@ task-local only - single minimal patch candidate - no public API changes
 """
 from pathlib import Path
 
-
 # Pre-fix astropy/table/table.py, i.e. `git show a04fb7c355^:astropy/table/table.py`
 # (parent 6ed769d58d89380ebaa1ef52b300691eefda8928), committed as a fixture so the
 # test no longer needs the M4-only astropy workspace (#1926). Provenance and
