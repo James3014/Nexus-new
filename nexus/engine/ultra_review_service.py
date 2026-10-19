@@ -198,11 +198,13 @@ TEST_DIR_BY_SOURCE_DIR = {
 }
 SECURITY_PATTERNS = (
     # One whole quoted literal (same quote both ends, >= 8 non-quote non-space chars) assigned
-    # to a credential-named identifier; never spans two literals (#2336, #2665).
+    # to an identifier that ENDS with a credential keyword (so token_capture_status does not
+    # match); never spans two literals (#2336, #2665).
     (
         "secret_literal",
         re.compile(
-            r"(?i)\b\w*(api[_-]?key|secret|token|password)\w*\s*=\s*(['\"])(?P<v>[^'\"\s]{8,})\2"
+            r"(?i)\b\w*(?:api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|password|passwd)"
+            r"\s*=\s*(['\"])(?P<v>[^'\"\s]{8,})\1"
         ),
     ),
     ("shell_true_subprocess", re.compile(r"subprocess\.(run|Popen|call|check_output)\([^#\n]*shell\s*=\s*True")),
