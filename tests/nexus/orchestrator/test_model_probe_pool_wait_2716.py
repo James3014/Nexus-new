@@ -7,6 +7,7 @@ leases dir) with a one-account fake manager, so "busy" is a real held lease.
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -162,7 +163,9 @@ def test_refresh_and_duplicate_submit_during_the_wait_do_not_touch_the_record(en
 
 
 def test_wait_interrupted_by_restart_fails_without_effect(env) -> None:
+    workspace = Path(tempfile.mkdtemp(prefix="nexus-probe-pool-wait-restart-", dir="/tmp"))
     record = {
+        "workspace_root": str(workspace),
         "schema": "nexus.assisted_provider_job.v1",
         "job_kind": "model_probe",
         "task_id": "pool-wait-restart",
@@ -176,6 +179,22 @@ def test_wait_interrupted_by_restart_fails_without_effect(env) -> None:
     assert result["status"] == "FAILED"
     assert result["blocker"] == "AGY_ACCOUNT_POOL_WAIT_INTERRUPTED"
     assert result["model_response_verified"] is False
+    assert not workspace.exists()
+
+
+def test_interrupted_rule_ignores_non_probe_and_non_agy_records(env) -> None:
+    for task_id, extra in (
+        ("assist-wait-like", {"job_kind": "assist", "provider": "agy"}),
+        ("cline-wait-like", {"job_kind": "model_probe", "provider": "cline"}),
+    ):
+        env.gateway._assist_write({
+            "schema": "nexus.assisted_provider_job.v1",
+            "task_id": task_id,
+            "status": "SUBMITTED",
+            "account_pool_wait_started_at": "2026-10-19T00:00:00+00:00",
+            **extra,
+        })
+        assert env.gateway._assist_refresh(task_id)["status"] != "FAILED"
 
 
 @pytest.mark.parametrize(

@@ -70,6 +70,8 @@ class _AssistResponseMixin(_ResponseBase):
             return job
         if (
             job.get("status") == "SUBMITTED"
+            and job.get("job_kind") == "model_probe"
+            and job.get("provider") == "agy"
             and job.get("account_pool_wait_started_at")
             and not job.get("account_alias_hash")
             and not job.get("pid")
@@ -77,6 +79,9 @@ class _AssistResponseMixin(_ResponseBase):
             # The submit that owned this record ended (e.g. a Gateway restart)
             # while it waited for an account: no account was leased and no
             # provider was started, so the probe failed without any effect.
+            workspace_root = str(job.get("workspace_root") or "")
+            if workspace_root.startswith("/tmp/nexus-probe-"):
+                shutil.rmtree(workspace_root, ignore_errors=True)
             job.update({
                 "status": "FAILED",
                 "finished_at": self._utc_now(),
