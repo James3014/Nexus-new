@@ -65,3 +65,22 @@ def test_evaluate_direct_mode_completion_passes_when_targets_changed_and_verify_
     assert result["semantic_failures"] == []
     assert result["changed_targets"] == ["nexus/engine/pipeline.py"]
     assert result["verify_results"][0]["exit_code"] == 0
+
+
+def test_evaluate_direct_mode_completion_never_runs_task_text_through_a_shell(tmp_path):
+    # #2635: the verify command is parsed from task text, so a "; cmd" tail must not run.
+    marker = tmp_path / "injected"
+    result = evaluate_direct_mode_completion(
+        project_root=tmp_path,
+        task_desc=(
+            "失敗測試:\n"
+            f"pytest --version ; touch {marker}\n"
+            "修法:\n"
+            "- nexus/engine/pipeline.py:339\n"
+        ),
+    )
+
+    assert result["enabled"] is True
+    assert not marker.exists()
+    assert result["verify_results"][0]["exit_code"] != 0
+    assert any(item.startswith("direct_mode_verify_failed:") for item in result["semantic_failures"])

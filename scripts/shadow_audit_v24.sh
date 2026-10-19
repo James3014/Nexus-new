@@ -2,6 +2,12 @@
 # Nexus Swarm Shadow Audit (v24 SRE Hardening)
 # Purpose: Verify Observability, Security, and Degradation logic in a real-world scenario.
 
+# ARCHIVED 2026-10-19 (#2637): dead v24 swarm script (needs the removed
+# nexus-swarm/ directory and kills processes by name match).
+# Unreachable + manifest: see ARCHIVED_2026-10-19-swarm-scripts.md. Do not run.
+echo "ARCHIVED 2026-10-19 (#2637): retired swarm script; see ARCHIVED_2026-10-19-swarm-scripts.md." >&2
+exit 1
+
 echo "🚀 Starting Nexus Swarm Phase 24 Shadow Audit..."
 
 # 1. Start a Small Fleet (5 Nodes)

@@ -38,18 +38,19 @@ class TestRouteOptimization(unittest.TestCase):
         self.assertEqual(profile.profile, "full_chain_delivery")
 
     def test_rule_driven_lazy_activation(self):
-        """驗證：裝配器能根據 Rule 引擎正確追加能力"""
-        # 模擬證據不足的場景
-        context = {"evidence_density": 0.2, "risk_flag": False}
-        chain = CapabilityAssembler.assemble(flow="hyper_sprint", risk_score=55, current_context=context)
-        
-        # 應追加 codeintel 但不應有 mempalace
-        self.assertIn("codeintel", chain["optional"])
-        self.assertNotIn("mempalace_gate", chain["optional"])
+        """Retired behaviour (#1929): rule-driven lazy activation was removed.
+
+        The id is kept for the impact gate; only assemble_chains(flow) remains.
+        """
+        self.assertFalse(hasattr(CapabilityAssembler, "assemble"))
+        chain = CapabilityAssembler.assemble_chains("hyper_sprint")
+        self.assertIn("codeintel", chain.optional)
 
     def test_risk_driven_lazy_activation(self):
-        """驗證：風險標籤觸發的升級"""
-        context = {"evidence_density": 0.8, "risk_flag": True}
-        chain = CapabilityAssembler.assemble(flow="hyper_sprint", risk_score=55, current_context=context)
-        
-        self.assertIn("mempalace_gate", chain["optional"])
+        """Retired behaviour (#1929): risk-driven activation was removed.
+
+        The id is kept for the impact gate; the optional chain depends on flow only.
+        """
+        self.assertFalse(hasattr(CapabilityAssembler, "assemble"))
+        chain = CapabilityAssembler.assemble_chains("hyper_sprint")
+        self.assertIn("mempalace_gate", chain.optional)

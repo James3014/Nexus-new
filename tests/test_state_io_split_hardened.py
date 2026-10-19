@@ -29,19 +29,17 @@ def test_state_failure_isolated_from_metrics(tmp_path):
 
 
 def test_state_repository_append_mode(tmp_path):
-    """StateRepository 應使用 append 模式，保留歷史版本。"""
-    repo = StateRepository(tmp_path / ".musestate")
-    s1 = NexusState(task_id="state-v1")
-    s2 = NexusState(task_id="state-v2")
+    """Retired behaviour (#1929): StateRepository.save no longer appends.
 
-    repo.save(s1)
-    repo.save(s2)
+    The id is kept for the impact gate; save is an atomic overwrite since v26.2.
+    """
+    repo = StateRepository(tmp_path / ".musestate")
+    repo.save(NexusState(task_id="state-v1"))
+    repo.save(NexusState(task_id="state-v2"))
 
     content = (tmp_path / ".musestate").read_text().strip().split("\n")
-    assert len(content) == 2
-    # load() 應取最後一個
-    loaded = repo.load()
-    assert loaded.task_id == "state-v2"
+    assert len(content) == 1
+    assert repo.load().task_id == "state-v2"
 
 
 def test_contract_writer_json_format(tmp_path):

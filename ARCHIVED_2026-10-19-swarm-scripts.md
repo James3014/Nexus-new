@@ -33,6 +33,7 @@ Why dead: every script drives `./swarm-manager` or `nexus_cli.py --swarm-mode` i
 | 9 | `scripts/tests/p3_swarm_stress.py` | no importer; runs `nexus-swarm/swarm-manager` | refuses to run, warns on import | pending |
 | 10 | `nexus/federation/fleet_manager.py` | already archived and warning on import since #1863 (`ARCHIVED_2026-10-12.md` row 3); no non-test importer (only `tests/federation/test_fleet_manager.py`, `tests/test_lab_only_deprecations.py`, `tests/services/test_archived_capabilities_2026_10_12.py`) | `stop_fleet()` now raises instead of the name-matching kill (old line 42); the CLI (default token) raises `SystemExit`; `get_node_id`/`start_fleet` kept for the existing tests | pending |
 | 11 | `nexus/federation/{__init__,config,node_launcher,node_registry}.py` | unchanged, as recorded in `ARCHIVED_2026-10-12.md` row 3; only test importers | left byte-identical | pending |
+| 12 | `scripts/shadow_audit_v24.sh` | added 2026-10-19 (#2645 review F3): no workflow, Taskfile, plist or code caller (`git grep shadow_audit_v24` finds only archived reports); runs `./swarm-manager` in `nexus-swarm/` with `NEXUS_GATE_BYPASS=true` and kills by name match (`pkill -f "nexus_cli.py nexus:swarm"`) | refuses to run (exits 1 before any command) | pending |
 
 ## Self-heal selector fix (not a retirement)
 

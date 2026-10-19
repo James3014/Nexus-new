@@ -67,3 +67,20 @@ def test_manifest_lists_fleet_manager_and_self_heal_fix():
     text = MANIFEST.read_text(encoding="utf-8")
     assert "`nexus/federation/fleet_manager.py`" in text
     assert "`nexus/services/self_heal_selector.py`" in text
+
+
+def test_retired_shadow_audit_shell_script_refuses_to_run(tmp_path):
+    rel = "scripts/shadow_audit_v24.sh"
+    assert f"`{rel}`" in MANIFEST.read_text(encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(REPO / rel)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert "ARCHIVED 2026-10-19 (#2637)" in proc.stderr
+    # The guard stops it before the fleet starts or nodes_shadow.json is written.
+    assert proc.stdout == ""
+    assert list(tmp_path.iterdir()) == []
