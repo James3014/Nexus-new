@@ -39,6 +39,12 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
+from nexus.orchestrator.self_hosted_task_service_parts.worker_gate_inputs import (
+    RECEIPT_ONLY_WORKER_GATES,
+    worker_gate_inputs,
+    wrap_worker_gate_invokers,
+)
+
 if TYPE_CHECKING:
     from nexus.executors.worker_contract import WorkerExecutionReceipt
     from nexus.executors.worker_registry import WorkerRegistry
@@ -282,6 +288,7 @@ class _WorkerDispatchMixin:
             build_worker_context_package,
         )
 
+        from nexus.core.state_root import configured_state_root
         from nexus.services.mainchain_entry import build_mainchain_capability_invokers
         from nexus.services.unified_runtime import materialize_selected_capability_evidence
 
@@ -403,6 +410,19 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
                 include_postflight_gates=True,
             )
+            # #2734: feed the pre-execution gates from the Task Card, record-only.
+            invokers = wrap_worker_gate_invokers(
+                invokers,
+                worker_gate_inputs(
+                    planner=planner,
+                    task_statement=task_statement,
+                    allowed_files=getattr(contract, "allowed_files", None)
+                    or request.get("allowed_files"),
+                    verifier_commands=getattr(contract, "verifier_commands", None)
+                    or request.get("verifier_commands"),
+                    state_root=configured_state_root(),
+                ),
+            )
             capability_results, bundle = materialize_selected_capability_evidence(
                 planner_output=planner,
                 selected_capabilities=selected,
@@ -438,6 +458,7 @@ class _WorkerDispatchMixin:
                     "controller_revision": controller_revision,
                 },
                 codeintel=codeintel,
+                receipt_only_capabilities=RECEIPT_ONLY_WORKER_GATES,
             )
             bundle = dict(bundle)
             observations = _capability_observations(capability_results)
