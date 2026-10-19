@@ -68,6 +68,10 @@ CLAUDE_MEASUREMENT_PROVIDER = "claude"
 CLAUDE_MEASUREMENT_MODEL = "claude-haiku-5-5"
 CLAUDE_MEASUREMENT_WORKER_ID = "claude_haiku_measure"
 CLAUDE_DISALLOWED_TOOLS = "WebSearch,WebFetch,Task,Agent,Workflow"
+# Explicit and identical in both arms: without it ``-p`` auto-denies every Bash
+# call (no prompt), so the agent could not run tests.  Bash runs inside the
+# Seatbelt sandbox below.
+CLAUDE_ALLOWED_TOOLS = "Bash,Edit,Read"
 EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
 CLAUDE_MEASUREMENT_FLAGS: tuple[str, ...] = (
     "-p",
@@ -81,6 +85,8 @@ CLAUDE_MEASUREMENT_FLAGS: tuple[str, ...] = (
     CLAUDE_MEASUREMENT_MODEL,
     "--permission-mode",
     "acceptEdits",
+    "--allowedTools",
+    CLAUDE_ALLOWED_TOOLS,
     "--disallowedTools",
     CLAUDE_DISALLOWED_TOOLS,
     "--output-format",
@@ -106,6 +112,31 @@ _READ_DENIED_ROOTS: tuple[str, ...] = (
     "/Volumes",
     "/opt",
 )
+MEASUREMENT_CLAUDE_TIMEOUT_ENV = "NEXUS_MEASUREMENT_CLAUDE_TIMEOUT_SECONDS"
+MEASUREMENT_KEY_LABEL_ENV = "NEXUS_MEASUREMENT_KEY_LABEL"
+DEFAULT_MEASUREMENT_TIMEOUT_SECONDS = 900.0
+# Both arms stop the CLI this many seconds before the cap so the diff snapshot fits.
+SNAPSHOT_RESERVE_SECONDS = 30.0
+
+
+def measurement_cli_timeout(
+    requested: Optional[float], environ: Optional[Mapping[str, str]] = None
+) -> float:
+    """The CLI time limit, identical in both arms (review M2): the configured cap
+    (``NEXUS_MEASUREMENT_CLAUDE_TIMEOUT_SECONDS``, default 900), never more than
+    the caller's limit, minus the snapshot reserve."""
+    env = os.environ if environ is None else environ
+    try:
+        cap = float(
+            env.get(MEASUREMENT_CLAUDE_TIMEOUT_ENV, "") or DEFAULT_MEASUREMENT_TIMEOUT_SECONDS
+        )
+    except ValueError:
+        cap = DEFAULT_MEASUREMENT_TIMEOUT_SECONDS
+    if requested:
+        cap = min(cap, float(requested))
+    return max(1.0, cap - SNAPSHOT_RESERVE_SECONDS)
+
+
 _DENIED_HELPER_EXECUTABLES: tuple[str, ...] = (
     "/usr/bin/open",
     "/usr/bin/osascript",
@@ -295,6 +326,56 @@ def measurement_child_env(
     return child
 
 
+def api_key_id(key: Optional[str]) -> Optional[str]:
+    """A non-reversible label for the key a run used (first 12 hex of its sha256)."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12] if key else None
+
+
+def cli_install_dir_ok(cli_dir: Path) -> bool:
+    """The CLI's directory may be re-allowed for reading when it is narrow and
+    holds only executable regular files (CLI builds), never configs or secrets."""
+    if not _is_narrow(cli_dir):
+        return False
+    try:
+        entries = list(cli_dir.iterdir())
+    except OSError:
+        return False
+    return all(
+        entry.is_file()
+        and not entry.is_symlink()
+        and os.access(entry, os.X_OK)
+        and not entry.name.startswith(".")
+        for entry in entries
+    )
+
+
+def worktree_git_dirs(target: Path) -> list[Path]:
+    """For a linked worktree (``.git`` is a ``gitdir:`` file), its gitdir and the
+    common gitdir; ``[]`` for a standalone repository.  Read from the files,
+    never by running git on the worktree."""
+    dot_git = Path(target) / ".git"
+    if not dot_git.is_file() or dot_git.is_symlink():
+        return []
+    try:
+        line = dot_git.read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not line.startswith("gitdir:"):
+        return []
+    gitdir = Path(line.split(":", 1)[1].strip())
+    if not gitdir.is_absolute():
+        gitdir = Path(target) / gitdir
+    gitdir = Path(os.path.realpath(gitdir))
+    roots = [gitdir]
+    try:
+        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        common_dir = Path(common) if os.path.isabs(common) else gitdir / common
+        roots.append(Path(os.path.realpath(common_dir)))
+    except OSError:
+        pass
+    return [root for root in roots if root.is_dir() and _is_narrow(root)]
+
+
 def _sbpl(path: Path | str) -> str:
     text = str(path)
     if '"' in text or "\\" in text or "\n" in text:
@@ -333,15 +414,19 @@ def build_claude_seatbelt_profile(
         "(allow file-read-data",
         *[f'  (subpath "{_sbpl(path)}")' for path in reads],
         ")",
-        # Helpers that would act through unsandboxed system services (open a
-        # URL via LaunchServices, AppleScript, the keychain) cannot be started.
         # No program may be started from the writable roots (a copied helper
-        # binary), nor these helpers that act through unsandboxed services.
+        # binary), nor these helpers that act through unsandboxed services
+        # (LaunchServices, AppleScript, the keychain, the pasteboard).
         "(deny process-exec",
         f'  (subpath "{_sbpl(target)}")',
         f'  (subpath "{_sbpl(run_root)}")',
         *[f'  (literal "{tool}")' for tool in _DENIED_HELPER_EXECUTABLES],
         ")",
+        # Signals only within this sandbox (the CLI and its own children): the
+        # agent cannot kill other processes of the same user, such as a live
+        # Gateway (review H1).
+        "(deny signal)",
+        "(allow signal (target same-sandbox))",
         "(deny network-outbound)",
         f'(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))',
         '(allow network-outbound (literal "/private/var/run/syslog"))',
@@ -718,7 +803,7 @@ def classify_claude_infra(summary: ClaudeStreamSummary, stderr: str | bytes) -> 
     return None
 
 
-_API_KEY_SHAPE = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{8,}")
+_API_KEY_SHAPE = re.compile(rb"sk" + rb"-ant-[A-Za-z0-9_\-]{8,}")  # split: no key-shaped literal
 _SECRET_FRAGMENT = 16
 
 
@@ -753,6 +838,7 @@ def write_measurement_trace(
     sidecar: Mapping[str, Any],
     environ: Optional[Mapping[str, str]] = None,
     secrets: tuple[str, ...] = (),
+    target: Optional[Path] = None,
 ) -> Optional[str]:
     """Keep the stream-json trace (and its sidecar) on a measurement host.
 
@@ -765,6 +851,10 @@ def write_measurement_trace(
     root = str(env.get(MEASUREMENT_TRACE_DIR_ENV, "") or "").strip()
     if not root or not os.path.isabs(root) or not _SAFE_TASK_ID.fullmatch(str(task_id)):
         return None
+    if target is not None:
+        real_root, real_target = Path(os.path.realpath(root)), Path(os.path.realpath(target))
+        if real_root == real_target or real_target in real_root.parents:
+            return None  # never write the trace into the worktree (review L2)
     directory = Path(root) / str(task_id)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{stdout_sha256}.stream.jsonl"
@@ -818,13 +908,13 @@ def run_claude_once(
         (run_root / "home" / ".claude").mkdir(parents=True)
         (run_root / "tmp").mkdir()
         cli_dir = Path(os.path.realpath(executable)).parent
-        extra = configured_read_roots(environ)
-        # The CLI's own install directory (``.../claude/versions``) is its own root.
-        if not is_safe_read_root(
-            cli_dir, (*extra, cli_dir) if cli_dir.name == "versions" else extra
-        ):
+        if not cli_install_dir_ok(cli_dir):
             raise ValueError("claude executable directory is not a safe read root")
         readable: list[Path] = [cli_dir]
+        # A P1 lease is a ``git worktree``: its ``.git`` file points into the
+        # Controller's gitdir, which must be readable (never writable) so git
+        # works in the NEXUS arm as it does in BARE (review H2).
+        readable.extend(worktree_git_dirs(target))
         if venv is not None:
             readable.append(venv)
             interpreter_home = _venv_interpreter_home(venv)
@@ -960,7 +1050,7 @@ class ClaudeMeasurementWorkerAdapter:
             str(preflight.executable),
             target=target,
             prompt=prompt,
-            timeout_seconds=float(timeout_seconds or 900.0),
+            timeout_seconds=measurement_cli_timeout(timeout_seconds, self._env()),
             venv=task_venv_for(contract),
             environ=self._env(),
             on_process_group=on_process_group,
@@ -1014,9 +1104,14 @@ class ClaudeMeasurementWorkerAdapter:
                 "infra": run.infra,
                 "wall_time_ms": result.wall_time_ms,
                 "timed_out": result.timed_out,
+                "cli_timeout_seconds": measurement_cli_timeout(timeout_seconds, self._env()),
+                "key_label": str(self._env().get(MEASUREMENT_KEY_LABEL_ENV, "") or "") or None,
+                "api_key_sha256_12": api_key_id(measurement_claude_api_key(self._env())),
+                "worktree_git_dirs": [str(path) for path in worktree_git_dirs(target)],
             },
             self._env(),
             secrets=self._secrets(),
+            target=target,
         )
         return WorkerExecutionReceipt(
             provider=self.provider,

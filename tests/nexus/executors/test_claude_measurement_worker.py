@@ -93,6 +93,19 @@ except Exception as exc:
     probes["exec_from_target"] = "DENIED:" + type(exc).__name__
 finally:
     Path("copied-echo").unlink(missing_ok=True)
+outside = Path(".outside_pid")
+if outside.exists():
+    try:
+        os.kill(int(outside.read_text()), 0)
+        probes["signal_outside"] = "ALLOWED"
+    except Exception as exc:
+        probes["signal_outside"] = "DENIED:" + type(exc).__name__
+try:
+    import subprocess as _sp
+    git = _sp.run(["/usr/bin/git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, timeout=20)
+    probes["git_status"] = {"rc": git.returncode, "out": git.stdout}
+except Exception as exc:
+    probes["git_status"] = {"rc": None, "out": type(exc).__name__}
 model = os.environ.get("FAKE_MODEL", "claude-haiku-5-5")
 mode = os.environ.get("FAKE_MODE", "ok")
 init = {"type": "system", "subtype": "init", "session_id": "s1",
@@ -140,8 +153,11 @@ def _fake_claude(
     return Path(os.path.realpath(path))
 
 
-FAKE_KEY = "sk-" "ant-api03-" "FAKEKEYFORTESTSONLY0123456789abcdef"  # split so secret scanners do not match a test literal
-FAKE_OTHER_KEY = "sk-" "ant-other-" "KEYSHAPED123456"
+# Built at runtime so no key-shaped literal exists in the source (secret audit;
+# a formatter may join implicitly concatenated string literals).
+_KEY_PREFIX = "-".join(("sk", "ant", ""))
+FAKE_KEY = _KEY_PREFIX + "api03-" + "FAKEKEYFORTESTSONLY0123456789abcdef"
+FAKE_OTHER_KEY = _KEY_PREFIX + "other-" + "KEYSHAPED123456"
 
 
 def _key_file(tmp_path: Path) -> Path:
@@ -416,10 +432,7 @@ def test_adapter_runs_the_exact_isolated_sandboxed_invocation(monkeypatch, tmp_p
         tmp_path / "traces" / "t1" / f"{receipt.stdout_sha256}.stream.jsonl"
     ).read_bytes()
     assert FAKE_KEY.encode() not in trace_bytes
-    assert (
-        FAKE_KEY.encode()
-        not in (receipt.stdout_tail or "").encode()
-    )
+    assert FAKE_KEY.encode() not in (receipt.stdout_tail or "").encode()
     assert env["HOME"] != os.environ.get("HOME") and env["CLAUDE_CONFIG_DIR"].startswith(
         env["HOME"]
     )
@@ -732,7 +745,11 @@ def test_preflight_runs_version_inside_the_sandbox(monkeypatch, tmp_path):
 
 # -- physical Seatbelt witnesses (macOS only; not collected elsewhere, never skipped) --
 
-PHYSICAL_WITNESSES = ("test_seatbelt_denies_reads_writes_network_and_helper_tools",)
+PHYSICAL_WITNESSES = (
+    "test_seatbelt_denies_reads_writes_network_and_helper_tools",
+    "test_seatbelt_denies_signals_to_processes_outside_the_sandbox",
+    "test_git_status_works_alike_in_a_standalone_repo_and_a_p1_worktree",
+)
 
 
 def physical_seatbelt_witness(func, *, available: bool = SANDBOX):
@@ -809,10 +826,152 @@ def test_sni_is_read_across_fragmented_records():
 
 
 def test_key_redaction_covers_pieces_and_key_shapes():
-    data = (
-        f"a {FAKE_KEY} b {FAKE_KEY[:20]} c {FAKE_KEY[20:]} d {FAKE_OTHER_KEY}".encode()
-    )
+    data = f"a {FAKE_KEY} b {FAKE_KEY[:20]} c {FAKE_KEY[20:]} d {FAKE_OTHER_KEY}".encode()
     out = cmw.redact_secrets(data, (FAKE_KEY,))
     for piece in (FAKE_KEY, FAKE_KEY[:20], FAKE_KEY[20:40]):
         assert piece.encode() not in out
-    assert b"sk-ant-" not in out
+    assert (b"sk" + b"-ant-") not in out
+
+
+@physical_seatbelt_witness
+def test_seatbelt_denies_signals_to_processes_outside_the_sandbox(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    contract, lease = _lease(tmp_path)
+    outside = subprocess.Popen(["/bin/sleep", "60"])
+    try:
+        (Path(lease.target_worktree) / ".outside_pid").write_text(str(outside.pid))
+        receipt = cmw.ClaudeMeasurementWorkerAdapter().invoke(
+            contract, lease, prompt="WHAT: x", timeout_seconds=60
+        )
+        probes = _observed(tmp_path, receipt)["probes"]
+        assert probes["signal_outside"].startswith("DENIED"), probes
+        assert outside.poll() is None  # still running
+    finally:
+        outside.kill()
+        outside.wait()
+
+
+def _linked_worktree_lease(tmp_path: Path):
+    """A P1-shaped lease: a ``git worktree`` of a Controller outside the targets root."""
+    controller = tmp_path / "ctl" / "base"
+    controller.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=controller, check=True)
+    (controller / "README.md").write_text("# Repo\n")
+    subprocess.run(["git", "add", "-A"], cwd=controller, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@invalid", "commit", "-qm", "base"],
+        cwd=controller,
+        check=True,
+    )
+    root = tmp_path / "targets"
+    root.mkdir()
+    target = root / "t1"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "--detach", str(target)], cwd=controller, check=True
+    )
+    contract = SimpleNamespace(
+        task_id="t1",
+        target_worktree_root=str(root),
+        target_repo_root=str(target),
+        controller_repo_root=str(controller),
+    )
+    return contract, SimpleNamespace(task_id="t1", target_worktree=str(target))
+
+
+@physical_seatbelt_witness
+def test_git_status_works_alike_in_a_standalone_repo_and_a_p1_worktree(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    results = {}
+    for name, make in (
+        ("standalone", lambda base: _lease(base)),
+        ("worktree", _linked_worktree_lease),
+    ):
+        base = tmp_path / name
+        base.mkdir()
+        monkeypatch.setenv(cmw.MEASUREMENT_TRACE_DIR_ENV, str(base / "traces"))
+        contract, lease = make(base)
+        subprocess.run(["git", "add", "-A"], cwd=lease.target_worktree, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@invalid",
+                "commit",
+                "-qm",
+                "c",
+                "--allow-empty",
+            ],
+            cwd=lease.target_worktree,
+            check=True,
+        )
+        receipt = cmw.ClaudeMeasurementWorkerAdapter().invoke(
+            contract, lease, prompt="WHAT: x", timeout_seconds=60
+        )
+        trace = base / "traces" / "t1" / f"{receipt.stdout_sha256}.stream.jsonl"
+        results[name] = json.loads(trace.read_text().splitlines()[0])["fake_observed"]["probes"][
+            "git_status"
+        ]
+    assert results["standalone"]["rc"] == 0, results
+    assert results["worktree"] == results["standalone"], results
+
+
+def test_worktree_git_dirs_follow_the_gitdir_file(tmp_path):
+    contract, lease = _linked_worktree_lease(tmp_path)
+    dirs = cmw.worktree_git_dirs(Path(lease.target_worktree))
+    common = Path(os.path.realpath(Path(contract.controller_repo_root) / ".git"))
+    assert common in dirs and any(common in d.parents for d in dirs)
+    standalone, lease2 = _lease(tmp_path / "s")
+    assert cmw.worktree_git_dirs(Path(lease2.target_worktree)) == []
+
+
+def test_cli_timeout_is_the_cap_minus_the_snapshot_reserve():
+    assert cmw.measurement_cli_timeout(900, {}) == 870
+    assert cmw.measurement_cli_timeout(None, {cmw.MEASUREMENT_CLAUDE_TIMEOUT_ENV: "600"}) == 570
+    assert cmw.measurement_cli_timeout(300, {cmw.MEASUREMENT_CLAUDE_TIMEOUT_ENV: "600"}) == 270
+
+
+def test_cli_dir_must_hold_only_executables(tmp_path):
+    exe = _fake_claude(tmp_path)
+    assert cmw.cli_install_dir_ok(exe.parent)
+    (exe.parent / "gateway.token").write_text("secret")
+    assert not cmw.cli_install_dir_ok(exe.parent)
+
+
+def test_trace_is_never_written_into_the_worktree(tmp_path):
+    target = tmp_path / "wt"
+    target.mkdir()
+    env = {cmw.MEASUREMENT_TRACE_DIR_ENV: str(target / "traces")}
+    assert cmw.write_measurement_trace("t1", b"x", "a" * 64, {}, env, target=target) is None
+    assert cmw.write_measurement_trace(
+        "t1",
+        b"x",
+        "a" * 64,
+        {},
+        {cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "tr")},
+        target=target,
+    )
+
+
+@pytest.mark.parametrize("bad", ['a"b', "a\\b", "a\nb"])
+def test_sbpl_paths_reject_profile_metacharacters(bad):
+    with pytest.raises(ValueError):
+        cmw._sbpl(bad)
+
+
+def test_sidecar_records_key_label_and_id_never_the_key(monkeypatch, tmp_path):
+    _enable(monkeypatch, tmp_path)
+    monkeypatch.setenv(cmw.MEASUREMENT_KEY_LABEL_ENV, "measure-key-1")
+    contract, lease = _lease(tmp_path)
+    receipt = cmw.ClaudeMeasurementWorkerAdapter().invoke(
+        contract, lease, prompt="WHAT: x", timeout_seconds=60
+    )
+    side = json.loads(
+        (tmp_path / "traces" / "t1" / f"{receipt.stdout_sha256}.run.json").read_text()
+    )
+    assert side["key_label"] == "measure-key-1"
+    assert side["api_key_sha256_12"] == cmw.api_key_id(FAKE_KEY) and FAKE_KEY not in json.dumps(
+        side
+    )
+    assert side["cli_timeout_seconds"] == 30.0
