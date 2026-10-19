@@ -17,6 +17,7 @@ def retrieve_successful_repair_patterns(
     jsonl_path: str | Path,
     limit: int = 5,
     query_hint: str = "",
+    error_sink: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve bounded successful repair patterns from learning closure JSONL.
 
@@ -24,6 +25,10 @@ def retrieve_successful_repair_patterns(
     Excludes verifier_fail, owner_gated, parser_fail, etc.
 
     Returns list of dicts with: classification, summary, task_id, lesson_id, provenance.
+
+    An unreadable file (permission denied, a directory, ...) still returns [];
+    when ``error_sink`` is given, the read error is appended to it so callers
+    can tell "no patterns" from "could not read the closure file" (#2661).
     """
     path = Path(jsonl_path)
     if not path.exists():
@@ -72,7 +77,9 @@ def retrieve_successful_repair_patterns(
                     "pattern_type": "success",
                     "uplift_eligible": bool((rec.get("stages") or {}).get("outcome_uplift_observed", False)),
                 })
-    except (OSError, IOError):
+    except OSError as exc:
+        if error_sink is not None:
+            error_sink.append(f"{type(exc).__name__}: {exc}"[:300])
         return []
 
     if query_hint:
