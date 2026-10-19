@@ -324,7 +324,11 @@ def _repo_path(value: str, field: str) -> str:
     if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
         raise ValueError(f"{field} must be a repository-relative path")
     path = PurePosixPath(value)
-    if ".." in path.parts or ".git" in path.parts or path.as_posix() != value:
+    if (
+        ".." in path.parts
+        or any(part.casefold() == ".git" for part in path.parts)
+        or path.as_posix() != value
+    ):
         raise ValueError(f"{field} must be a normalized repository-relative path")
     return value
 

@@ -970,6 +970,11 @@ def _require_no_legacy_default_state() -> None:
         require_no_legacy_self_hosted_state(repository_root)
 
 
+def _names_git_metadata(path: Path) -> bool:
+    """True when any component is ``.git`` in any case (APFS is case-insensitive, #2789)."""
+    return any(part.casefold() == ".git" for part in path.parts)
+
+
 class SelfHostedTaskService(
     _ReconcileRecoveryMixin,
     _FinalizeRuntimeMixin,
@@ -5648,7 +5653,11 @@ class SelfHostedTaskService(
             artifact_path.resolve().relative_to(evidence_root)
         except ValueError as exc:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED") from exc
-        if not artifact_path.is_absolute() or ".git" in artifact_path.parts or not artifact_path.is_file():
+        if (
+            not artifact_path.is_absolute()
+            or _names_git_metadata(artifact_path)
+            or not artifact_path.is_file()
+        ):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED")
         try:
             artifact_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
