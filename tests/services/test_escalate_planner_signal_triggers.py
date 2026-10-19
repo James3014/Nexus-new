@@ -257,8 +257,10 @@ def test_xray_needs_the_planners_deep_scan_reason() -> None:
     assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
 
 
-def test_xray_executor_writes_only_under_the_scanned_workspace(tmp_path, monkeypatch) -> None:
-    """#2688 Codex: the report followed cwd; a high-coupling scan also wrote a findings card."""
+def test_xray_executor_leaves_the_scanned_worktree_and_cwd_clean(tmp_path, monkeypatch) -> None:
+    """#2688 reviews: the report followed cwd, then landed in the candidate worktree."""
+    import subprocess
+
     from nexus.core.belief_contracts import CapabilityExecutionPlan
     from nexus.core.capability_executor_registry import _exec_xray
 
@@ -267,6 +269,24 @@ def test_xray_executor_writes_only_under_the_scanned_workspace(tmp_path, monkeyp
     imports = "".join(f"import mod{i}\n" for i in range(20))  # > 15 crossings
     (workspace / "pkg" / "hub.py").write_text(
         imports + "def f():\n    return 1\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)  # no .nexus ignore
+    subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "c",
+        ],
+        check=True,
     )
     elsewhere = tmp_path / "cwd"
     elsewhere.mkdir()
@@ -279,7 +299,12 @@ def test_xray_executor_writes_only_under_the_scanned_workspace(tmp_path, monkeyp
 
     receipt = _exec_xray(plan, "deep scan pkg")
 
-    assert not any(elsewhere.rglob("*")), "xray wrote outside the scanned workspace"
-    reports = list(workspace.rglob("xray_report_full.md"))
-    assert len(reports) == 1 and receipt.gate_passed is True
-    assert not list(workspace.rglob("*.json")), "xray wrote a findings card"
+    assert receipt.gate_passed is True
+    status = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == "", f"xray left files in the candidate worktree: {status}"
+    assert not any(elsewhere.rglob("*")), "xray wrote under cwd"

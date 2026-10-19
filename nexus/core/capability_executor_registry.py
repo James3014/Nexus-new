@@ -3925,8 +3925,12 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
 
         constraints = plan.constraints or {}
         if not constraints.get("project_root") and constraints.get("workspace_root"):
-            # The scan is scoped to workspace_root; keep its report there too, not under cwd.
-            plan = dataclasses.replace(plan, constraints={**constraints, "project_root": constraints["workspace_root"]})
+            # Scope the scan to workspace_root, but keep the report out of it: an untracked
+            # file in a candidate worktree fails the candidate's allowed-scope check (#2688).
+            updated = {**constraints, "project_root": constraints["workspace_root"]}
+            if not (constraints.get("run_root") or constraints.get("runtime_root")):
+                updated["run_root"] = tempfile.mkdtemp(prefix="nexus-xray-")
+            plan = dataclasses.replace(plan, constraints=updated)
         project_root, run_root, run_id = _resolve_run_root(plan)
         report_path = run_root / "xray_report_full.md"
         output_paths = [report_path]
