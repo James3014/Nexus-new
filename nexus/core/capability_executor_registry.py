@@ -499,6 +499,26 @@ def _exec_mempalace(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             artifact_type=artifact_type,
             data=artifact_map,
         )
+        if isinstance(stored, Mapping) and stored.get("status") == "SKIPPED_READ_ONLY":
+            # #2721 L-B: the frozen state took no ingest, so there is no round trip to check.
+            # Report an explicit skip (the worker path records it NOT_APPLICABLE), never a
+            # failure or a pass borrowed from an older row with the same artifact id.
+            return _make_receipt(
+                "mempalace",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="ingest+retrieve+verify",
+                    semantic_status="BLOCKED",
+                    error="MEMPALACE_STATE_READ_ONLY",
+                    evidence_refs=[f"ev_mempalace_read_only_{plan.task_id}"],
+                    ingest_performed=False,
+                    retrieve_performed=False,
+                    verification_passed=False,
+                ),
+            )
         retrieved = inst.retrieve_from_shards(
             tenant_id=tenant_id,
             query=query,
