@@ -54,6 +54,7 @@ import nexus_runtime.task_context as task_context_module
 import pytest
 
 import nexus.orchestrator.self_hosted_task_service as service_module
+import nexus.orchestrator.self_hosted_task_service_parts.worker_dispatch as worker_dispatch_module
 import nexus.services.mainchain_entry as mainchain_module
 import nexus.services.unified_runtime as unified_runtime_module
 from nexus.contracts.lifecycle_action import ContractKind
@@ -1301,6 +1302,8 @@ def _complete(ctx: _Ctx, bundle: Any = BUNDLE) -> dict[str, Any]:
         "status": "COMPLETE",
         "bundle_hash": service_module._sha256_json(bundle),
         "bundle": copy.deepcopy(bundle),
+        "capability_observations": {},
+        "capability_observations_hash": service_module._sha256_json({}),
         "producer_revision": "c" * 40,
     }
 
@@ -1678,6 +1681,113 @@ def test_materialization_passes_empty_xray_targets_when_no_allowed_file_exists(c
     ctx.request["allowed_files"] = ["nexus/new.py"]
     ctx.run()
     assert stubs.log[2][1]["capability_context"]["xray_targets"] == []
+
+
+def test_capability_observations_keep_trigger_store_and_outputs() -> None:
+    """#2688 witnesses could not see trigger_source or store paths: the runtime bundle
+    entries drop them. The raw stage results keep them under response."""
+    results = {
+        "xray": {
+            "status": "INVOKED",
+            "response": {
+                "trigger_source": "planner_task_signal:xray_signal",
+                "response": {
+                    "outcome": {
+                        "semantic_status": "SUCCEEDED",
+                        "output_paths": ["/tmp/nexus-xray-x/xray_report_full.md"],
+                        "scan_targets": ["/wt/pkg/a.py"],
+                        "result": {"report_preview": "secret prompt text not kept"},
+                    }
+                },
+            },
+        },
+        "memory": {
+            "status": "INVOKED",
+            "response": {"response": {"outcome": {"hit_count": 0, "result": {"root": "/state"}}}},
+        },
+        "belief": {
+            "status": "INVOKED",
+            "response": {
+                "response": {"outcome": {"confidence": 0.7, "state_file": "/state/.nexus/b.json"}}
+            },
+        },
+        "pregate": {"status": "SKIPPED", "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED"},
+        "broken": "not-a-mapping",
+    }
+
+    observed = worker_dispatch_module._capability_observations(results)
+
+    assert observed["xray"] == {
+        "status": "INVOKED",
+        "skip_reason": "",
+        "trigger_source": "planner_task_signal:xray_signal",
+        "semantic_status": "SUCCEEDED",
+        "output_paths": ["/tmp/nexus-xray-x/xray_report_full.md"],
+        "scan_targets": ["/wt/pkg/a.py"],
+    }
+    assert observed["memory"]["store_root"] == "/state" and observed["memory"]["hit_count"] == 0
+    assert observed["belief"]["state_file"] == "/state/.nexus/b.json"
+    assert observed["pregate"]["skip_reason"] == "SKIPPED_POLICY_NOT_TRIGGERED"
+    assert "broken" not in observed
+    assert worker_dispatch_module._capability_observations(None) == {}
+
+
+def test_capability_observations_are_bounded_json_safe_and_message_free() -> None:
+    """#2719 Codex: unbounded, nested or non-JSON values and raw error text."""
+    huge = "x" * 300_000
+    results = {
+        "xray": {
+            "status": "INVOKED",
+            "response": {
+                "trigger_source": huge,
+                "response": {
+                    "outcome": {
+                        "output_paths": [huge] * 100 + [{"nested": "dict"}, 3],
+                        "scan_targets": {"a", "b"},
+                        "confidence": float("nan"),
+                        "hit_count": float("inf"),
+                        "findings_hit_count": float("-inf"),
+                        "resolved_run_root": 10**400,
+                        "error": "SECRET_TOKEN",
+                        "result": {"root": {"nested": True}},
+                    }
+                },
+            },
+        }
+    }
+
+    observed = worker_dispatch_module._capability_observations(results)
+    xray = observed["xray"]
+
+    assert len(xray["trigger_source"]) == 512
+    assert len(xray["output_paths"]) == 16 and all(len(p) == 512 for p in xray["output_paths"])
+    assert not {
+        "scan_targets",
+        "confidence",
+        "hit_count",
+        "findings_hit_count",
+        "store_root",
+        "resolved_run_root",
+    } & set(xray)
+    assert xray["error_present"] is True and "SECRET" not in json.dumps(observed)
+    json.dumps(observed, allow_nan=False)  # strict JSON
+    assert len(json.dumps(observed)) < 20_000
+
+
+def test_resume_rejects_tampered_capability_observations(ctx, stubs) -> None:
+    record = _complete(ctx)
+    record["capability_observations"] = {"xray": {"status": "INVOKED"}}  # hash still of {}
+    ctx.state["worker_model_context_materialization"] = record
+    with pytest.raises(RuntimeError, match="worker_context_observations_hash_mismatch"):
+        ctx.run(fresh_submission=False)
+
+
+def test_resume_accepts_a_record_written_before_observations(ctx, stubs) -> None:
+    record = _complete(ctx)
+    record.pop("capability_observations")
+    record.pop("capability_observations_hash")
+    ctx.state["worker_model_context_materialization"] = record
+    ctx.run(fresh_submission=False)
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

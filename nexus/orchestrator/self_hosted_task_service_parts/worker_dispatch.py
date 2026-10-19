@@ -35,6 +35,7 @@ still derives the worker source root from the facade's ``__file__``).
 from __future__ import annotations
 
 import importlib
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence
 
@@ -359,6 +360,14 @@ class _WorkerDispatchMixin:
             bundle_hash = str(record.get("bundle_hash") or "")
             if not bundle_hash or _service_module()._sha256_json(bundle) != bundle_hash:
                 raise RuntimeError("worker_context_bundle_hash_mismatch")
+            # Records written before #2688 have no observations; when present they are bound.
+            if "capability_observations" in record or "capability_observations_hash" in record:
+                observations_hash = str(record.get("capability_observations_hash") or "")
+                observations = record.get("capability_observations")
+                if not observations_hash or _service_module()._sha256_json(
+                    observations
+                ) != observations_hash:
+                    raise RuntimeError("worker_context_observations_hash_mismatch")
         else:
             if not fresh_submission:
                 raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_missing")
@@ -394,7 +403,7 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
                 include_postflight_gates=True,
             )
-            _, bundle = materialize_selected_capability_evidence(
+            capability_results, bundle = materialize_selected_capability_evidence(
                 planner_output=planner,
                 selected_capabilities=selected,
                 task_id=task_id,
@@ -431,6 +440,7 @@ class _WorkerDispatchMixin:
                 codeintel=codeintel,
             )
             bundle = dict(bundle)
+            observations = _capability_observations(capability_results)
             record = {
                 "schema": "nexus.worker_model_context_materialization.v1",
                 "status": "COMPLETE",
@@ -446,6 +456,10 @@ class _WorkerDispatchMixin:
                 "selected_capabilities": selected,
                 "bundle_hash": _service_module()._sha256_json(bundle),
                 "bundle": bundle,
+                # #2688: what each executor actually did (trigger, store, outputs). The
+                # runtime's bundle entries drop these fields; witnesses need them.
+                "capability_observations": observations,
+                "capability_observations_hash": _service_module()._sha256_json(observations),
                 "producer_revision": revision,
             }
 
@@ -522,3 +536,77 @@ def _xray_targets_context(allowed_files: Any, target_worktree: Any) -> dict[str,
         return {}
     root = Path(str(target_worktree))
     return {"xray_targets": [str(path) for path in allowed_files if (root / str(path)).exists()]}
+
+
+_OBSERVATION_OUTCOME_KEYS = (
+    "semantic_status",
+    "output_paths",
+    "resolved_run_root",
+    "scan_targets",
+    "hit_count",
+    "findings_hit_count",
+    "confidence",
+    "state_file",
+)
+_OBSERVATION_MAX_TEXT = 512
+_OBSERVATION_MAX_ITEMS = 16
+_OBSERVATION_MAX_CAPABILITIES = 64
+
+
+def _observation_value(value: Any) -> Any:
+    """JSON-safe, bounded scalar or list of short strings; anything else is dropped."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return value if abs(value) < 2**53 else None  # counts; huge ints are not facts
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None  # drop NaN and +/-inf
+    if isinstance(value, str):
+        return value[:_OBSERVATION_MAX_TEXT]
+    if isinstance(value, (list, tuple)):
+        items = [v[:_OBSERVATION_MAX_TEXT] for v in value if isinstance(v, str)]
+        return items[:_OBSERVATION_MAX_ITEMS]
+    return None
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _capability_observations(results: Any) -> dict[str, Any]:
+    """Bounded per-capability facts from the raw executor receipts (#2688).
+
+    Keeps only identifiers, paths and counts, bounded and JSON-safe (never prompt
+    content, payloads or any error text), so a witness can tell whether and how a
+    capability ran and which store it used.  The record binds them with a hash.
+    """
+    if not isinstance(results, Mapping):
+        return {}
+    observations: dict[str, Any] = {}
+    for name, stage in results.items():
+        if not isinstance(stage, Mapping):
+            continue
+        receipt = _mapping(stage.get("response"))
+        inner = _mapping(receipt.get("response"))
+        outcome = _mapping(inner.get("outcome"))
+        result = _mapping(outcome.get("result"))
+        entry: dict[str, Any] = {
+            "status": _observation_value(stage.get("status")),
+            "skip_reason": _observation_value(stage.get("skip_reason") or ""),
+            "trigger_source": _observation_value(receipt.get("trigger_source") or ""),
+        }
+        for key in _OBSERVATION_OUTCOME_KEYS:
+            if key in outcome:
+                value = _observation_value(outcome[key])
+                if value is not None:
+                    entry[key] = value
+        if outcome.get("error"):
+            entry["error_present"] = True  # never the message: it can carry task text
+        if "root" in result:
+            root = _observation_value(result["root"])
+            if isinstance(root, str):
+                entry["store_root"] = root
+        observations[str(name)[:_OBSERVATION_MAX_TEXT]] = entry
+        if len(observations) >= _OBSERVATION_MAX_CAPABILITIES:
+            break
+    return observations
