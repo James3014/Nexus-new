@@ -1834,6 +1834,7 @@ MEASUREMENT_ONLY_ENV_VARS: Tuple[str, ...] = (
     "NEXUS_LEARNING_WRITEBACK",  # #2736
     "NEXUS_STATE_READ_ONLY",  # #2736
     "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
+    "NEXUS_MEASURE_DIR_SCOPE",  # #2721 dir/ scope
 )
 # sysexits EX_CONFIG: the launch configuration is wrong, not the code.
 MEASUREMENT_ENV_REFUSED_EXIT = 78

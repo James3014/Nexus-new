@@ -154,6 +154,7 @@ from nexus.orchestrator.governed_integration import (
     IntegrationExecutionError,
 )
 from nexus.orchestrator.lifecycle_guards import (
+    guard_dir_scopes,
     pre_action_guard,
     require_bound_approval_grant,
     trusted_runtime_manifest_hash,
@@ -1929,6 +1930,10 @@ class SelfHostedTaskService(
                     else {}
                 ),
             )
+        if action and self.ephemeral:
+            # The ephemeral service skips the full guard above; a measurement
+            # ``dir/`` scope is still checked (no-op unless the switch is on), #2786.
+            guard_dir_scopes(action, request=request, canonical_root=CANONICAL_SOURCE_ROOT)
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")

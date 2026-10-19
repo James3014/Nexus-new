@@ -8,7 +8,9 @@ service's lifecycle authority.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import stat
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +24,13 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     validate_owner_inline_contract,
 )
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.contracts.measure_dir_scope import dir_scope_enabled, split_dir_scope
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT
+from nexus.orchestrator.measure_external_target import (
+    ExternalTargetError,
+    accepted_external_controller,
+)
+from nexus.orchestrator.task_card_scope import protected_path_reason
 
 _TRUSTED_TOOL_MANIFEST_HASH: Optional[str] = None
 
@@ -428,6 +436,148 @@ def _repo_relative(path: str, *, root: Path) -> Path:
     return resolved
 
 
+def _bounded_path(path: str, *, root: Path) -> str:
+    """The envelope path as validated under ``root``.
+
+    On a measurement Gateway with ``NEXUS_MEASURE_DIR_SCOPE=1`` (#2721) a
+    ``dir/`` scope keeps its trailing ``/`` so it matches the request entry;
+    the same resolve/containment check as for a file still runs.  Otherwise
+    unchanged.
+    """
+    bounded = str(_repo_relative(path, root=root).relative_to(root.resolve()))
+    if dir_scope_enabled() and split_dir_scope(path) is not None:
+        if bounded == ".":
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_INVALID",
+                "directory scope covers the repository root",
+                details={"path": str(path)},
+            )
+        # A directory covers everything below it: never a protected path or an
+        # ancestor of one (``docs/`` covers ``docs/governance``), #2786 review.
+        reason = protected_path_reason(path) or protected_path_reason(bounded)
+        if reason is not None:
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_PROTECTED",
+                "directory scope covers a protected path",
+                details={"path": str(path), "reason": reason},
+            )
+        return bounded + "/"
+    return bounded
+
+
+def guard_dir_scopes(
+    envelope: LifecycleActionEnvelope | Mapping[str, Any],
+    *,
+    request: Optional[Mapping[str, Any]],
+    canonical_root: Path = CANONICAL_SOURCE_ROOT,
+) -> None:
+    """The ``dir/`` scope checks of ``pre_action_guard`` on their own (#2786).
+
+    For a caller that does not run the full guard (the ephemeral service): the
+    same root/protected-path checks and the external-target requirement.  A
+    no-op unless ``NEXUS_MEASURE_DIR_SCOPE=1`` was set at start.
+    """
+    if not dir_scope_enabled():
+        return
+    try:
+        action = (
+            envelope
+            if isinstance(envelope, LifecycleActionEnvelope)
+            else LifecycleActionEnvelope.model_validate(envelope)
+        )
+    except Exception as exc:
+        raise LifecycleGuardError(
+            "ACTION_ENVELOPE_INVALID",
+            "lifecycle action envelope is invalid",
+            details={"error": str(exc)},
+        ) from exc
+    for path in action.allowed_paths:
+        if split_dir_scope(path) is not None:
+            _bounded_path(path, root=canonical_root)
+    _require_external_dir_scope(action, request, root=canonical_root)
+
+
+def _require_external_dir_scope(
+    action: LifecycleActionEnvelope,
+    request: Optional[Mapping[str, Any]],
+    *,
+    root: Path,
+) -> None:
+    """A ``dir/`` scope exists only for a validated measurement external target (#2786).
+
+    Every entry point that carries an action envelope runs ``pre_action_guard``,
+    so this is the one place that confines directory scopes to a
+    ``nexus_worker_candidate`` request whose Controller is re-validated here as
+    an external measurement copy (never the Nexus-new checkout itself).
+    """
+    if not any(split_dir_scope(path) is not None for path in action.allowed_paths):
+        return
+    refused = LifecycleGuardError(
+        "DIR_SCOPE_REQUIRES_EXTERNAL_TARGET",
+        "a directory scope requires a measurement external target",
+    )
+    if not isinstance(request, Mapping) or request.get("worker_candidate_ingress") is not True:
+        raise refused
+    try:
+        external = accepted_external_controller(
+            request.get("controller_repo_root"),
+            action.expected_head,
+            nexus_root=root,
+            forbidden_roots=(LOADED_SOURCE_ROOT,),
+        )
+    except ExternalTargetError as exc:
+        raise LifecycleGuardError(str(exc), "external target re-validation failed") from exc
+    if external is None:
+        raise refused
+    for path in action.allowed_paths:
+        stripped = split_dir_scope(path)
+        if stripped is not None:
+            _external_dir_scope(stripped, path, root=external.repo_root)
+
+
+def _external_dir_scope(stripped: str, path: str, *, root: Path) -> None:
+    """Resolve one ``dir/`` scope inside the external Controller (#2786 r2).
+
+    Walked component by component with ``lstat``: each component must exist and
+    be a real directory, never a symlink (a tracked ``alias -> .`` or
+    ``alias -> docs/governance`` would otherwise widen the scope), so the
+    scope is strictly below the root.  A missing directory is refused: a
+    benchmark task scopes an existing package of the pinned repository.
+    """
+    parts = tuple(part for part in stripped.split("/"))
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise LifecycleGuardError(
+            "ALLOWED_PATH_INVALID",
+            "directory scope is not strictly inside the external target",
+            details={"path": str(path)},
+        )
+    current = Path(root)
+    for part in parts:
+        current = current / part
+        try:
+            mode = os.lstat(current).st_mode
+        except OSError as exc:
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_INVALID",
+                "directory scope does not exist in the external target",
+                details={"path": str(path)},
+            ) from exc
+        if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_INVALID",
+                "directory scope is not a real directory of the external target",
+                details={"path": str(path)},
+            )
+    relative = current.relative_to(root).as_posix()
+    reason = protected_path_reason(relative)
+    if reason is not None:
+        raise LifecycleGuardError(
+            "ALLOWED_PATH_PROTECTED",
+            "directory scope covers a protected path",
+            details={"path": str(path), "reason": reason},
+        )
+
+
 def _head(root: Path) -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=3, check=False,
@@ -487,7 +637,9 @@ def pre_action_guard(
     if action.approval_scope == ApprovalScope.REJECT:
         raise LifecycleGuardError("APPROVAL_REJECTED", "approval scope explicitly rejects this action")
 
-    bounded_paths = {str(_repo_relative(path, root=canonical_root).relative_to(canonical_root.resolve())) for path in action.allowed_paths}
+    bounded_paths = {_bounded_path(path, root=canonical_root) for path in action.allowed_paths}
+    if dir_scope_enabled():
+        _require_external_dir_scope(action, request, root=canonical_root)
     if request is not None:
         requested_paths = {str(path).strip() for path in request.get("allowed_files", ()) if str(path).strip()}
         unknown = sorted(requested_paths - bounded_paths)
