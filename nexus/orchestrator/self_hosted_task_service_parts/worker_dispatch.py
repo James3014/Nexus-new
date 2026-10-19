@@ -557,7 +557,9 @@ def _observation_value(value: Any) -> Any:
     """JSON-safe, bounded scalar or list of short strings; anything else is dropped."""
     if isinstance(value, bool) or value is None:
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, int):
+        return value if abs(value) < 2**53 else None  # counts; huge ints are not facts
+    if isinstance(value, float):
         return value if math.isfinite(value) else None  # drop NaN and +/-inf
     if isinstance(value, str):
         return value[:_OBSERVATION_MAX_TEXT]

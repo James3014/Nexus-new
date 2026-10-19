@@ -1707,7 +1707,9 @@ def test_capability_observations_keep_trigger_store_and_outputs() -> None:
         },
         "belief": {
             "status": "INVOKED",
-            "response": {"response": {"outcome": {"confidence": 0.7, "state_file": "/state/.nexus/b.json"}}},
+            "response": {
+                "response": {"outcome": {"confidence": 0.7, "state_file": "/state/.nexus/b.json"}}
+            },
         },
         "pregate": {"status": "SKIPPED", "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED"},
         "broken": "not-a-mapping",
@@ -1745,6 +1747,7 @@ def test_capability_observations_are_bounded_json_safe_and_message_free() -> Non
                         "confidence": float("nan"),
                         "hit_count": float("inf"),
                         "findings_hit_count": float("-inf"),
+                        "resolved_run_root": 10**400,
                         "error": "SECRET_TOKEN",
                         "result": {"root": {"nested": True}},
                     }
@@ -1758,7 +1761,14 @@ def test_capability_observations_are_bounded_json_safe_and_message_free() -> Non
 
     assert len(xray["trigger_source"]) == 512
     assert len(xray["output_paths"]) == 16 and all(len(p) == 512 for p in xray["output_paths"])
-    assert not {"scan_targets", "confidence", "hit_count", "findings_hit_count", "store_root"} & set(xray)
+    assert not {
+        "scan_targets",
+        "confidence",
+        "hit_count",
+        "findings_hit_count",
+        "store_root",
+        "resolved_run_root",
+    } & set(xray)
     assert xray["error_present"] is True and "SECRET" not in json.dumps(observed)
     json.dumps(observed, allow_nan=False)  # strict JSON
     assert len(json.dumps(observed)) < 20_000
