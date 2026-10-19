@@ -24,14 +24,15 @@ import signal
 import stat
 import subprocess
 import time
+import tomllib
 import uuid
 import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
-SCORER_VERSION = "1.2.4"
+SCORER_VERSION = "1.3.0"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -39,6 +40,13 @@ SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
 # this file's sha256; every other receipt records v1 (pre-registered) and its sha256.
 SPEC_V2_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v2.md"
 SPEC_V1, SPEC_V2 = "v1", "v2"
+# v3 = the rules the task would otherwise use (v1, or v2 under the A5 fallback) plus one §8
+# env rule: a metadata-only dist-info stub for the BASE project (#2709). Opt-in only
+# (``spec_version="v3"``); every v3 receipt records v3 and this file's sha256.
+SPEC_V3_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.v3.md"
+SPEC_V3 = "v3"
+# What a scoring run can be asked to apply. "v1" is today's behaviour (with the v2 fallback).
+SCORING_SPEC_VERSIONS = (SPEC_V1, SPEC_V3)
 
 PYTEST_TIMEOUT_SECONDS = 1800
 # Amendment A9 (opt-in, #2723). "none" (the default) runs pytest exactly as v1 §8 says;
@@ -798,8 +806,210 @@ def _workflow_learning_pin(base_wt: Path) -> str:
     return m.group(1) if m else ""
 
 
+# Spec v3 §8 (#2709): recipes whose ``uv sync`` runs with ``--no-install-project``.
+NO_INSTALL_PROJECT_RECIPES = ("uv-sync-all-extras+canonical", "uv-sync-all-groups")
+STUB_INSTALLER = "nexus-real-outcome-scorer"
+# PEP 508 distribution name, ASCII only (no IGNORECASE: it would also match some
+# non-ASCII letters). Used with fullmatch, so a trailing newline never matches.
+_DIST_NAME = re.compile(r"[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]")
+# Fallback when ``packaging`` is not importable: a strict ASCII PEP 440 public/local
+# version shape (epoch, release, pre/post/dev, local label).
+_STUB_VERSION = re.compile(
+    r"(?:[0-9]+!)?[0-9]+(?:\.[0-9]+)*"
+    r"(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?"
+    r"(?:-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?"
+    r"(?:[-_.]?dev[-_.]?[0-9]*)?"
+    r"(?:\+[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)?"
+)
+_SAFE_VERSION_CHARS = re.compile(r"[A-Za-z0-9!+._-]+")
+STUB_WHEEL = (
+    "Wheel-Version: 1.0\nGenerator: nexus-real-outcome-scorer\nRoot-Is-Purelib: true\n"
+    "Tag: py3-none-any\n"
+)
+
+
+def _pep503(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _valid_dist_name(name: object) -> TypeGuard[str]:
+    return isinstance(name, str) and name.isascii() and bool(_DIST_NAME.fullmatch(name))
+
+
+def _valid_version(version: object) -> TypeGuard[str]:
+    """PEP 440 (``packaging.version.Version`` when importable, else ``_STUB_VERSION``),
+    and in every case only ASCII letters, digits and ``!+._-``: no whitespace, newline,
+    path separator or non-ASCII character, which ``Version`` alone would tolerate."""
+    if not isinstance(version, str) or not version.isascii():
+        return False
+    if not _SAFE_VERSION_CHARS.fullmatch(version):
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:
+        return bool(_STUB_VERSION.fullmatch(version.lower()))
+    try:
+        Version(version)
+    except InvalidVersion:
+        return False
+    return True
+
+
+def _dist_info_name(name: str, version: str) -> str:
+    """``<name>-<version>.dist-info`` with the name normalised as the packaging spec says
+    (runs of ``-_.`` become ``_``, lower case) and ``-`` in the version escaped to ``_``."""
+    return f"{re.sub(r'[-_.]+', '_', name).lower()}-{version.replace('-', '_')}.dist-info"
+
+
+def project_metadata(base_wt: Path) -> tuple[dict[str, str] | None, str | None]:
+    """(``{"name", "version"}``, None) from ``pyproject.toml`` ``[project]`` in ``base_wt``,
+    or (None, reason) when there is no valid static name and version."""
+    path = base_wt / "pyproject.toml"
+    if path.is_symlink():
+        return None, "pyproject_symlink"
+    if not path.is_file():
+        return None, "no_pyproject_toml"
+    try:
+        doc = tomllib.loads(path.read_text())
+    # Untrusted TOML: deep nesting raises RecursionError, not TOMLDecodeError.
+    except (
+        tomllib.TOMLDecodeError,
+        UnicodeDecodeError,
+        RecursionError,
+        ValueError,
+        OSError,
+    ) as exc:
+        return None, f"pyproject_unreadable:{type(exc).__name__}"
+    project = doc.get("project")
+    if not isinstance(project, dict):
+        return None, "no_project_table"
+    name = project.get("name")
+    if not _valid_dist_name(name):
+        return None, "project_name_missing_or_invalid"
+    dynamic = project.get("dynamic") or []
+    if isinstance(dynamic, list) and "version" in dynamic:
+        return None, "dynamic_version"
+    version = project.get("version")
+    if version is None:
+        return None, "version_missing"
+    if not _valid_version(version):
+        return None, "version_invalid"
+    return {"name": name, "version": version}, None
+
+
+def _metadata_name(entry: Path) -> str | None:
+    """``Name:`` from a ``.dist-info`` (METADATA) or ``.egg-info`` (PKG-INFO, or the file
+    itself) entry, or None when it cannot be read."""
+    candidates = [entry / "METADATA", entry / "PKG-INFO"] if entry.is_dir() else [entry]
+    for meta in candidates:
+        try:
+            text = meta.read_text(errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if not line.strip():
+                break  # end of the header block
+            key, _, value = line.partition(":")
+            if key.strip().lower() == "name":
+                return value.strip()
+    return None
+
+
+def _installed_as(site_packages: Path, name: str) -> str | None:
+    """The first ``*.dist-info`` / ``*.egg-info`` entry in ``site_packages`` that is the
+    project ``name`` (PEP 503 comparison, whatever separator or case the entry uses): by
+    its METADATA / PKG-INFO ``Name`` when readable, else by the entry name."""
+    want = _pep503(name)
+    for entry in sorted(site_packages.iterdir()):
+        for suffix in (".dist-info", ".egg-info"):
+            if entry.name.lower().endswith(suffix):
+                raw = entry.name[: -len(suffix)]
+                stem = _pep503(raw)
+                break
+        else:
+            continue
+        # The Name field decides whenever it can be read, whatever the entry is called.
+        listed = _metadata_name(entry)
+        if listed is not None:
+            if _pep503(listed) == want:
+                return entry.name
+            continue
+        # No readable Name: decide by the entry name. ``<name>-<version>[-<tag>...]``: some
+        # split of the raw stem must give this project's name and a valid version.
+        if stem == want or any(
+            _pep503(raw[:i]) == want and _valid_version(raw[i + 1 :].split("-")[0])
+            for i, ch in enumerate(raw)
+            if ch == "-"
+        ):
+            return entry.name
+    return None
+
+
+def write_project_metadata_stub(
+    base_wt: Path, site_packages: Path
+) -> tuple[dict[str, str] | None, str | None]:
+    """Spec v3 §8: write a metadata-only ``<name>-<version>.dist-info`` for the BASE project
+    into ``site_packages``. It holds METADATA, INSTALLER, WHEEL and RECORD only: no code,
+    no ``.pth`` and no ``direct_url.json``, so imports still resolve only through
+    ``PYTHONPATH=<tree>``. Returns (stub, None) or (None, reason) when nothing was written."""
+    meta, reason = project_metadata(base_wt)
+    if meta is None:
+        return None, reason
+    site_packages = Path(site_packages)
+    if not site_packages.is_dir():
+        return None, "site_packages_not_found"
+    installed = _installed_as(site_packages, meta["name"])
+    if installed is not None:
+        return None, f"project_already_installed:{installed}"
+    dist_info = _dist_info_name(meta["name"], meta["version"])
+    target = site_packages / dist_info
+    if target.parent != site_packages or target.name != dist_info or "/" in dist_info:
+        return None, "project_name_missing_or_invalid"
+    target.mkdir()
+    files = {
+        "METADATA": (
+            f"Metadata-Version: 2.1\nName: {meta['name']}\nVersion: {meta['version']}\n"
+        ).encode(),
+        "INSTALLER": f"{STUB_INSTALLER}\n".encode(),
+        "WHEEL": STUB_WHEEL.encode(),
+    }
+    record = []
+    for fname, body in files.items():
+        (target / fname).write_bytes(body)
+        digest = base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
+        record.append(f"{dist_info}/{fname},sha256={digest},{len(body)}")
+    record.append(f"{dist_info}/RECORD,,")
+    (target / "RECORD").write_text("\n".join(record) + "\n")
+    return {**meta, "dist_info": dist_info}, None
+
+
+def tree_project_metadata(wt: Path) -> dict[str, str]:
+    """v3 diagnostic: ``{"name", "version"}`` of a scored tree's pyproject, or
+    ``{"reason": ...}``. Never read by a label rule."""
+    meta, reason = project_metadata(wt)
+    return dict(meta) if meta is not None else {"reason": str(reason)}
+
+
+def _metadata_mismatch(stub: Mapping[str, Any] | None, trees: Mapping[str, Any]) -> bool:
+    if not stub:
+        return False
+    want = (_pep503(str(stub["name"])), str(stub["version"]))
+    return any(
+        t is not None and (_pep503(str(t.get("name", ""))), str(t.get("version", ""))) != want
+        for t in trees.values()
+    )
+
+
+def _site_packages(env_dir: Path) -> Path | None:
+    found = sorted(env_dir.glob("lib/python*/site-packages"))
+    return found[0] if len(found) == 1 else None
+
+
 class UvEnvProvider:
-    """Spec §8 env build. Envs are cached by key under ``envs_dir``."""
+    """Spec §8 env build. Envs are cached by key under ``envs_dir``.
+
+    ``spec_version="v3"`` adds the v3 §8 rule (a metadata-only stub for the BASE project
+    after ``uv sync --no-install-project``); the default ``"v1"`` builds exactly as 1.2.4."""
 
     PYTHON = "3.12"
     RUNTIME_PINS = (
@@ -810,9 +1020,14 @@ class UvEnvProvider:
         "PyYAML==6.0.3",
     )
 
-    def __init__(self, envs_dir: Path, log: Callable[[str], None] = print):
+    def __init__(
+        self, envs_dir: Path, log: Callable[[str], None] = print, spec_version: str = SPEC_V1
+    ):
+        if spec_version not in SCORING_SPEC_VERSIONS:
+            raise ValueError(f"spec_version must be one of {SCORING_SPEC_VERSIONS}")
         self.envs_dir = Path(envs_dir)
         self.log = log
+        self.spec_version = spec_version
 
     def _recipe(self, repo: str, base_wt: Path) -> tuple[str, dict[str, str]]:
         files = [
@@ -861,23 +1076,22 @@ class UvEnvProvider:
     def env_key(self, repo: str, base_wt: Path) -> tuple[str, str, dict[str, str], dict[str, str]]:
         """(key, recipe, input digests, interpreter). The key covers the repo, recipe,
         BASE lock inputs, the resolved interpreter path and version, the extra import roots
-        (none for this provider) and the scorer version."""
+        (none for this provider) and the scorer version. Under spec v3 it also covers the
+        spec version, so v1 and v3 envs never share a cache entry; the v1 key is unchanged."""
         recipe, digests = self._recipe(repo, base_wt)
         interpreter = self._interpreter()
-        key = sha256_bytes(
-            json.dumps(
-                [
-                    repo,
-                    recipe,
-                    self.PYTHON,
-                    digests,
-                    interpreter,
-                    [],  # extra_pythonpath: this provider supplies none
-                    SCORER_VERSION,
-                ],
-                sort_keys=True,
-            ).encode()
-        )
+        parts: list[Any] = [
+            repo,
+            recipe,
+            self.PYTHON,
+            digests,
+            interpreter,
+            [],  # extra_pythonpath: this provider supplies none
+            SCORER_VERSION,
+        ]
+        if self.spec_version != SPEC_V1:
+            parts.append(f"spec:{self.spec_version}")
+        key = sha256_bytes(json.dumps(parts, sort_keys=True).encode())
         return key, recipe, digests, interpreter
 
     def get(self, repo: str, base_wt: Path) -> TestEnv:
@@ -900,6 +1114,8 @@ class UvEnvProvider:
                 raise EnvBuildError(f"{' '.join(cmd[:4])}: {proc.stderr[-600:]}")
 
         py = str(env_dir / "bin" / "python")
+        stub: dict[str, str] | None = None
+        stub_reason: str | None = None
         try:
             if recipe.startswith("uv-sync"):
                 cmd = [
@@ -922,6 +1138,12 @@ class UvEnvProvider:
                 ):
                     if recipe.endswith("canonical") and (base_wt / req).exists():
                         run(["uv", "pip", "install", "--python", py, "-r", str(base_wt / req)])
+                if self.spec_version == SPEC_V3 and recipe in NO_INSTALL_PROJECT_RECIPES:
+                    site = _site_packages(env_dir)
+                    if site is None:
+                        stub_reason = "site_packages_not_found"
+                    else:
+                        stub, stub_reason = write_project_metadata_stub(base_wt, site)
             else:
                 pin = digests.get("learning_pin", "")
                 if not pin:
@@ -952,6 +1174,12 @@ class UvEnvProvider:
             "recipe": recipe,
             "inputs": json.dumps(digests, sort_keys=True),
         }
+        if self.spec_version == SPEC_V3:
+            if stub is None and stub_reason is None:
+                stub_reason = f"recipe_without_project_install:{recipe}"
+            desc["spec_version"] = SPEC_V3
+            desc["project_metadata_stub"] = json.dumps(stub, sort_keys=True)
+            desc["project_metadata_stub_reason"] = json.dumps(stub_reason)
         marker.write_text(json.dumps(desc, sort_keys=True))
         return TestEnv(key, py, recipe, desc)
 
@@ -1604,9 +1832,17 @@ class ScoreContext:
     leakage_flags: Mapping[str, str] = field(default_factory=dict)
     log: Callable[[str], None] = print
     keep_trees: bool = False
+    # Spec v3 (opt-in, #2709). "v1" (the default) is the 1.2.4 behaviour, v2 fallback included.
+    spec_version: str = SPEC_V1
+    spec_v3_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        for name in ("spec_sha256", "spec_v2_sha256"):
+        names = ["spec_sha256", "spec_v2_sha256"]
+        if self.spec_version not in SCORING_SPEC_VERSIONS:
+            raise ValueError(f"spec_version must be one of {SCORING_SPEC_VERSIONS}")
+        if self.spec_version == SPEC_V3:
+            names.append("spec_v3_sha256")
+        for name in names:
             value = getattr(self, name)
             if not isinstance(value, str) or not _SHA256_HEX.fullmatch(value):
                 raise ValueError(f"{name} must be 64 lowercase hex characters")
@@ -1619,6 +1855,16 @@ def _capped(inputs: TaskInputs) -> bool:
 
 
 def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
+    receipt = _base_receipt_v1(inputs, ctx)
+    if ctx.spec_version == SPEC_V3:
+        receipt["spec_version"] = SPEC_V3
+        receipt["spec_sha256"] = ctx.spec_v3_sha256
+        # The rule set v3 builds on for this task: v1, or v2 once the A5 fallback applies.
+        receipt["spec_v3_base_rules"] = SPEC_V1
+    return receipt
+
+
+def _base_receipt_v1(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
     return {
         "schema": RECEIPT_SCHEMA,
         "scorer_version": SCORER_VERSION,
@@ -1805,8 +2051,11 @@ def _score_task(
         receipt.update(port.receipt_fields())
         if port.method != GOLD_PORT_3WAY:
             # Spec v2 (A5): reported apart from the pre-registered v1 results.
-            receipt["spec_version"] = SPEC_V2
-            receipt["spec_sha256"] = ctx.spec_v2_sha256
+            if ctx.spec_version == SPEC_V3:
+                receipt["spec_v3_base_rules"] = SPEC_V2
+            else:
+                receipt["spec_version"] = SPEC_V2
+                receipt["spec_sha256"] = ctx.spec_v2_sha256
         if not port.ok:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "GOLD_PORT_FAILED"
@@ -1862,6 +2111,26 @@ def _score_task(
             return _finish(receipt, timing, t0, ctx)
         receipt["env_key"] = env.key
         timing["env"] = dict(env.description)
+        if ctx.spec_version == SPEC_V3:
+            # v3 §8: the metadata-only stub, or null with the reason none was written.
+            desc = env.description
+            if desc.get("spec_version") == SPEC_V3:
+                receipt["project_metadata_stub"] = json.loads(desc["project_metadata_stub"])
+                receipt["project_metadata_stub_reason"] = json.loads(
+                    desc["project_metadata_stub_reason"]
+                )
+            else:
+                receipt["project_metadata_stub"] = None
+                receipt["project_metadata_stub_reason"] = "env_provider_without_v3_stub"
+            # Diagnostic only (#2709 review): the stub is BASE's; a GOLD or candidate
+            # pyproject with another name or version is flagged, never used by a label.
+            receipt["project_metadata_tree_versions"] = {
+                "GOLD": tree_project_metadata(wts["gold"]),
+                "CAND": None,
+            }
+            receipt["project_metadata_version_mismatch"] = _metadata_mismatch(
+                receipt["project_metadata_stub"], receipt["project_metadata_tree_versions"]
+            )
 
         if candidate_override and candidate_override.startswith("gold"):
             diff = repo.git("diff", "--binary", "--no-renames", base_tree, gold_tree).stdout
@@ -1999,6 +2268,11 @@ def _score_task(
             return _finish(receipt, timing, t0, ctx)
         candt_tree = repo.tree_id(wts["candt"], untracked_paths)
         receipt["trees"].update({"CAND": cand_tree, "CAND+T": candt_tree})
+        if "project_metadata_tree_versions" in receipt:
+            receipt["project_metadata_tree_versions"]["CAND"] = tree_project_metadata(wts["candt"])
+            receipt["project_metadata_version_mismatch"] = _metadata_mismatch(
+                receipt["project_metadata_stub"], receipt["project_metadata_tree_versions"]
+            )
         # v2 P2P(d): BASE tests in a merge-taken test file are gone from every scored
         # tree (main deleted or rewrote them), and P2P(b/c) ignores oracle files. So the
         # BASE version of each such module is also run, on trees that all carry the BASE
@@ -2446,17 +2720,22 @@ def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Headline numbers are what spec v1 (pre-registered) reports: v1 receipts, plus each
     v2 receipt at its v1-equivalent label (GOLD_PORT_FAILED). ``v1_plus_v2`` counts the v2
     receipts at their own labels (A5, designed after the V11/V12 replays), reported apart.
-    A receipt with any other spec version is in neither block (``unknown_spec_versions``)."""
+    ``v3`` counts the v3 receipts (opt-in, #2709) at their own labels, apart from both; they
+    never enter the headline or ``v1_plus_v2``; the block is present only when there is at
+    least one v3 receipt, so a v1/v2 receipt set summarizes exactly as in 1.2.4. A receipt with any other spec version is in
+    no block (``unknown_spec_versions``)."""
     versions: dict[str, int] = {}
     for r in receipts:
         versions[spec_version_of(r)] = versions.get(spec_version_of(r), 0) + 1
     known = [r for r in receipts if spec_version_of(r) in (SPEC_V1, SPEC_V2)]
+    v3 = [r for r in receipts if spec_version_of(r) == SPEC_V3]
     return {
         **_summary([v1_equivalent(r) for r in known]),
         "v1_plus_v2": _summary(known),
+        **({"v3": _summary(v3)} if v3 else {}),
         "spec_version_counts": dict(sorted(versions.items())),
         "unknown_spec_versions": {
-            v: n for v, n in sorted(versions.items()) if v not in (SPEC_V1, SPEC_V2)
+            v: n for v, n in sorted(versions.items()) if v not in (SPEC_V1, SPEC_V2, SPEC_V3)
         },
     }
 
