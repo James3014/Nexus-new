@@ -163,6 +163,10 @@ expected F2P/P2P id matched, and a gold candidate was labelled `UNRESOLVED`
   that root. The flag only stops an outer directory from overriding it.
 - Work directories outside any repository (all #2147 batches so far) gave the same ids
   before and after.
+- One layout does change ids: a tree whose only pytest config file sits in a
+  subdirectory (e.g. `py/pytest.ini`) now gets ids with that prefix (`py.tests...`).
+  Labels do not change, because GOLD, BASE+T and CAND+T all run with the same flag and
+  the oracle ids come from those runs. No Nexus repository has this layout.
 - `--rootdir` does not stop pytest from loading an outer config file when the tree has
   none of its own. Keep `--work` outside other repositories.
 - The test-result cache key includes the scorer version (A4), so 1.2.3 does not reuse

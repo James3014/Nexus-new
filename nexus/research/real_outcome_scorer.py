@@ -1195,7 +1195,7 @@ class PytestRunner:
             "no:cacheprovider",
             # Node ids are relative to the tree even when --work sits inside another
             # repository whose pytest.ini would otherwise become the rootdir.
-            f"--rootdir={tree}",
+            f"--rootdir={Path(tree).resolve()}",
             f"--junitxml={junit}",
             *[f"--ignore={p}" for p in ignores],
         ]
