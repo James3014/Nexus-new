@@ -296,16 +296,12 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
     (tmp_path / "tests" / "engine" / "test_sample.py").write_text("def test_sample(): pass\n", encoding="utf-8")
     (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
 
-    original_run = subprocess.run
+    def fake_group_run(cmd, **kwargs):
+        # The ghost re-run goes through the process-group runner since #2650.
+        assert "pytest" in cmd and "-q" in cmd
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
 
-    def fake_run(cmd, **kwargs):
-        if "pytest" in cmd and "-q" in cmd:
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
-        if cmd and os.path.basename(cmd[0]) == "sandbox-exec" and not OS_SANDBOX:
-            cmd = cmd[3:]
-        return original_run(cmd, **kwargs)
-
-    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    monkeypatch.setattr("nexus.engine.sandboxed_lane._run_in_own_process_group", fake_group_run)
     monkeypatch.setattr("nexus.engine.ultra_review_service.os_sandbox_available", lambda: True)
 
     payload = UltraReviewService(tmp_path).run(
@@ -1178,6 +1174,10 @@ def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monke
         "/usr/lib",
         "/usr/share/zoneinfo",
         "/System/Library",
+        # #2650: one Perl tool file and the system developer toolchain (xcrun git shim)
+        "/usr/bin/shasum",
+        "/Library/Developer/",
+        "/Applications/",
     )
     assert all(root.startswith(allowed_prefixes) for root in roots)
     profile = service._sandbox_profile()
@@ -1368,16 +1368,15 @@ def test_ultra_review_no_mapped_tests_is_advisory_uncovered(tmp_path):
 def test_ultra_review_ghost_timeout_is_inconclusive_info_not_fail(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
-    original_run = subprocess.run
     seen_timeouts = []
 
-    def fake_run(cmd, **kwargs):
-        if "pytest" in cmd and "-q" in cmd:
-            seen_timeouts.append(kwargs.get("timeout"))
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 0, output="running")
-        return original_run(cmd, **kwargs)
+    def fake_group_run(cmd, **kwargs):
+        # The ghost re-run goes through the process-group runner since #2650.
+        assert "pytest" in cmd and "-q" in cmd
+        seen_timeouts.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 0, output="running")
 
-    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    monkeypatch.setattr("nexus.engine.sandboxed_lane._run_in_own_process_group", fake_group_run)
     _allow_ghost_run(monkeypatch)
     monkeypatch.setenv("NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC", "45")
 
@@ -1386,7 +1385,7 @@ def test_ultra_review_ghost_timeout_is_inconclusive_info_not_fail(tmp_path, monk
     assert payload["status"] == "INCONCLUSIVE"
     assert payload["gate_passed"] is False
     assert payload["blocked_reason"] == ""
-    assert seen_timeouts == [45.0]
+    assert seen_timeouts == [45.0, 90.0]  # one retry with twice the budget (#2650)
     assert payload["ghost_regression"]["timeout_sec"] == 45.0
     assert payload["ghost_regression"]["inconclusive"] is True
     assert payload["summary"]["verified_findings"] == 0

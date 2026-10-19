@@ -40,10 +40,6 @@ def suggest_verification_commands(project_root: Path, task_name: str) -> list[st
         return ["cargo test"]
 
     if language == "go":
-        if _has(project_root, "go.mod"):
-            return ["go test ./..."]
-        if (project_root / "nexus-swarm" / "go.mod").exists():
-            return ["cd nexus-swarm && go test ./..."]
         return ["go test ./..."]
 
     if _has(project_root, "pytest.ini"):

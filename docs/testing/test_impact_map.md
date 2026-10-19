@@ -91,6 +91,7 @@
 | scripts/test_swarm_v21_nsp.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
 | scripts/tests/p3_swarm_stress.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
 | scripts/v23_scale_audit.py | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
+| scripts/shadow_audit_v24.sh | tests/ops/test_retired_swarm_scripts_2637.py | active | low | archived_swarm_script_refuses_to_run |
 | nexus/search/sampler.py | tests/unit/committee/search/test_adaptive_resampler.py, tests/unit/committee/test_data_flow_v267.py | active | medium | committee_adaptive_resampler_contract |
 | tests/test_lab_only_deprecations.py | tests/test_lab_only_deprecations.py | active | medium | test_contract |
 | tests/unit/committee/search/test_adaptive_resampler.py | tests/unit/committee/search/test_adaptive_resampler.py | active | medium | test_contract |
