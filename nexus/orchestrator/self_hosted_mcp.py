@@ -477,7 +477,8 @@ class NexusSelfHostedMCPServer:
         if name == "nexus_self_hosted_reconcile_tasks":
             if task_id:
                 return self.service.reconcile_task(task_id)
-            return {"tasks": self.service.reconcile_tasks()}
+            tasks = self.service.reconcile_tasks()
+            return {"tasks": tasks, "reconcile_failures": self.service.reconcile_failures()}
         if name == "nexus_self_hosted_resume_task":
             return self.service.resume_task(task_id)
         if name == "nexus_self_hosted_approve_promotion":

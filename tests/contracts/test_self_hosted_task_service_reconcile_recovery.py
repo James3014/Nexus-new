@@ -2529,11 +2529,21 @@ def test_restart_replays_an_interrupted_adoption_from_its_artifacts(tmp_path, mo
     assert base64.b64decode(replays[0][1]["validation_receipt_b64"]) == VALIDATION
     assert base64.b64decode(replays[0][1]["acceptance_receipt_b64"]) == ACCEPTANCE
 
-    # a removed artifact fails closed on the next restart instead of guessing an outcome
+    # a removed artifact fails closed on the next restart instead of guessing an outcome;
+    # since #2727 the service still starts, leaves the record untouched and reports it
     Path(acceptance_locator).unlink()
-    with pytest.raises(RuntimeError, match="unreadable or escaped service state"):
-        SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=True, ephemeral=True)
+    state_path = tmp_path / "state" / f"{TASK}.json"
+    before = state_path.read_bytes()
+    restarted = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=True, ephemeral=True
+    )
     assert len(replays) == 1
+    assert state_path.read_bytes() == before
+    failures = restarted.lifecycle_status()["reconcile_failures"]
+    assert [(f["task_id"], f["error_type"]) for f in failures] == [(TASK, "RuntimeError")]
+    assert "unreadable or escaped service state" in failures[0]["error"]
+    with pytest.raises(RuntimeError, match="unreadable or escaped service state"):
+        restarted.reconcile_task(TASK)
 
 
 def test_restart_restores_a_lost_pre_apply_projection(tmp_path, fixed_now) -> None:
@@ -2755,3 +2765,164 @@ def test_subclass_overrides_are_dispatched_through_self(tmp_path, monkeypatch) -
         ("mutate", "x"),
         ("project",),
     ]
+
+
+# --- #2727: one unrecoverable record must not stop the service from starting ----------
+
+
+def _seed_records(state_dir: Path, task_ids: list[str]) -> SelfHostedTaskService:
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    for task_id in task_ids:
+        service._write_state(task_id, {"task_id": task_id, "status": "SUBMITTED"})
+    return service
+
+
+def test_reconcile_tasks_isolates_a_failing_record_and_continues(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    service = _seed_records(tmp_path / "state", ["a-task", "b-bad", "c-task"])
+    seen: list[str] = []
+
+    def reconcile(self, task_id: str):
+        seen.append(task_id)
+        if task_id == "b-bad":
+            raise RuntimeError("evidence artifact is gone")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    with caplog.at_level("ERROR", logger=service_module.__name__):
+        states = service.reconcile_tasks()
+
+    assert seen == ["a-task", "b-bad", "c-task"]
+    assert [state["task_id"] for state in states] == ["a-task", "c-task"]
+    failures = service.lifecycle_status()["reconcile_failures"]
+    assert [(f["task_id"], f["error_type"], f["error"]) for f in failures] == [
+        ("b-bad", "RuntimeError", "evidence artifact is gone")
+    ]
+    assert failures[0]["at"]
+    assert any(
+        "b-bad" in record.getMessage() and "left untouched" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_startup_survives_a_failing_record(tmp_path, monkeypatch) -> None:
+    _seed_records(tmp_path / "state", ["a-task", "b-bad"])
+
+    def reconcile(self, task_id: str):
+        if task_id == "b-bad":
+            raise ValueError("corrupt record")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=True, ephemeral=True
+    )
+
+    assert [f["task_id"] for f in service.lifecycle_status()["reconcile_failures"]] == ["b-bad"]
+
+
+def test_reconcile_failure_clears_after_a_successful_pass(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["b-bad"])
+    broken = {"value": True}
+
+    def reconcile(self, task_id: str):
+        if broken["value"]:
+            raise RuntimeError("transient")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    service.reconcile_tasks()
+    assert [f["task_id"] for f in service.lifecycle_status()["reconcile_failures"]] == ["b-bad"]
+    broken["value"] = False
+    assert [state["task_id"] for state in service.reconcile_tasks()] == ["b-bad"]
+    assert service.lifecycle_status()["reconcile_failures"] == []
+
+
+def test_reconcile_tasks_does_not_swallow_base_exceptions(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["a-task"])
+
+    def reconcile(self, task_id: str):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    with pytest.raises(KeyboardInterrupt):
+        service.reconcile_tasks()
+
+
+def test_lifecycle_status_reports_no_reconcile_failures_by_default(tmp_path) -> None:
+    service = _seed_records(tmp_path / "state", [])
+    assert service.lifecycle_status()["reconcile_failures"] == []
+
+
+def test_reconcile_tasks_fails_fast_when_every_record_fails(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["a-task", "b-task"])
+
+    def reconcile(self, task_id: str):
+        raise TypeError(f"schema bug on {task_id}")
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    with pytest.raises(TypeError, match="^schema bug on a-task$"):
+        service.reconcile_tasks()
+    with pytest.raises(TypeError, match="^schema bug on a-task$"):
+        SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=True, ephemeral=True)
+    assert [f["task_id"] for f in service.reconcile_failures()] == ["a-task", "b-task"]
+
+
+def test_reconcile_tasks_isolates_a_single_failing_record(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["only-task"])
+
+    def reconcile(self, task_id: str):
+        raise RuntimeError("bad record")
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    assert service.reconcile_tasks() == []
+    assert [f["task_id"] for f in service.reconcile_failures()] == ["only-task"]
+
+
+def test_reconcile_failure_of_a_removed_record_is_dropped(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["a-task", "b-bad"])
+
+    def reconcile(self, task_id: str):
+        if task_id == "b-bad":
+            raise RuntimeError("bad record")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    service.reconcile_tasks()
+    assert [f["task_id"] for f in service.reconcile_failures()] == ["b-bad"]
+    (tmp_path / "state" / "b-bad.json").unlink()
+    service.reconcile_tasks()
+    assert service.reconcile_failures() == []
+
+
+def test_reconcile_failures_returns_copies(tmp_path, monkeypatch) -> None:
+    service = _seed_records(tmp_path / "state", ["a-task", "b-bad"])
+
+    def reconcile(self, task_id: str):
+        if task_id == "b-bad":
+            raise RuntimeError("bad record")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    service.reconcile_tasks()
+    service.reconcile_failures()[0]["error"] = "tampered"
+    assert service.reconcile_failures()[0]["error"] == "bad record"
+
+
+def test_reconcile_tool_reports_failures(tmp_path, monkeypatch) -> None:
+    from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+
+    service = _seed_records(tmp_path / "state", ["a-task", "b-bad"])
+
+    def reconcile(self, task_id: str):
+        if task_id == "b-bad":
+            raise RuntimeError("bad record")
+        return {"task_id": task_id, "status": "SUBMITTED"}
+
+    monkeypatch.setattr(SelfHostedTaskService, "reconcile_task", reconcile)
+    server = NexusSelfHostedMCPServer.__new__(NexusSelfHostedMCPServer)
+    server.service = service
+    result = server._call_tool("nexus_self_hosted_reconcile_tasks", {})
+    assert [state["task_id"] for state in result["tasks"]] == ["a-task"]
+    assert [f["task_id"] for f in result["reconcile_failures"]] == ["b-bad"]

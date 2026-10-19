@@ -1798,6 +1798,28 @@ def test_resume_accepts_a_record_written_before_observations(ctx, stubs) -> None
     ctx.run(fresh_submission=False)
 
 
+def test_materialization_derives_a_codeintel_lookup_from_the_task(ctx, stubs) -> None:
+    """#2721: without codeintel_lookup, codeintel refused every worker-path task."""
+    (ctx.target / "mod.py").write_text(
+        "def bounded_worker_context():\n    return 1\n", encoding="utf-8"
+    )
+    ctx.request["allowed_files"] = ["mod.py"]
+    ctx.run()
+    context = stubs.log[2][1]["capability_context"]
+    assert context["target_symbol"] == "mod.bounded_worker_context"
+    assert list(context["search_paths"]) == ["mod.py"]
+
+
+def test_materialization_keeps_an_explicit_codeintel_lookup(ctx, stubs) -> None:
+    (ctx.target / "mod.py").write_text(
+        "x = 1\ndef bounded_worker_context():\n    return 1\n", encoding="utf-8"
+    )
+    ctx.request["allowed_files"] = ["mod.py"]
+    ctx.request["codeintel_lookup"] = {"target_symbol": "mod.x", "search_paths": ["mod.py"]}
+    ctx.run()
+    assert stubs.log[2][1]["capability_context"]["target_symbol"] == "mod.x"
+
+
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:
     with pytest.raises(
         RuntimeError, match="^OUTCOME_UNKNOWN:worker_context_materialization_missing$"
