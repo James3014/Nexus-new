@@ -2049,7 +2049,11 @@ def ensure_state_root(cfg: Config) -> Path:
 
 
 def ensure_state_root_path(path: Path) -> Path:
-    """``ensure_state_root`` for an explicit path (also used by R1, #2713)."""
+    """``ensure_state_root`` for an explicit path.
+
+    R1 (``mcp_gateway_durable._ensure_recovery_state_root``, #2713) keeps an
+    identical copy inside its hashed manager; tests assert equal outcomes.
+    """
     if not path.is_absolute():
         raise DeployError(f"STATE_ROOT_NOT_ABSOLUTE:{path}")
     if path.is_symlink():

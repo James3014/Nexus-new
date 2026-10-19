@@ -9020,9 +9020,21 @@ def test_r1_measurement_guard_mirrors_deployer_exactly():
 def test_r1_recovery_module_does_not_import_the_deployer():
     # The R1 receipt binds sha256(mcp_gateway_durable.py) only, so the R1
     # wrapper must not take bytes from another module (#2746 review).
+    import ast
+
     source = Path(g.__file__).read_text(encoding="utf-8")
-    assert "import nexus_gateway_auto_deploy" not in source
-    assert "from scripts.ops.nexus_gateway_auto_deploy" not in source
+    imported = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):  # importlib.import_module / __import__
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    assert "nexus_gateway_auto_deploy" not in arg.value
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.add(node.module or "")
+            imported.update(f"{node.module}.{alias.name}" for alias in node.names)
+    assert not any("nexus_gateway_auto_deploy" in name for name in imported), imported
 
 
 @pytest.mark.parametrize("kind", ["missing", "existing_0755", "symlink", "file"])
