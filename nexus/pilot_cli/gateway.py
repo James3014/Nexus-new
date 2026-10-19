@@ -48,14 +48,12 @@ def _coerce_long_gemini_answer(
     user_request: str,
     raw_text: str,
     finish_reason: str,
-    second_pass_fn=compress_long_gemini_answer,
 ) -> str:
     return coerce_long_gemini_answer(
         session=session,
         user_request=user_request,
         raw_text=raw_text,
         finish_reason=finish_reason,
-        second_pass_fn=second_pass_fn,
     )
 
 
