@@ -64,6 +64,8 @@ def _bound(tmp_path):
 
 
 _GIT_MISSING_OBJECT = "fatal: git cat-file: could not get object info"
+# Prints git's missing-object message on stderr and exits 128, as git cat-file does.
+_STAND_IN_GIT = f"import sys; sys.stderr.write({_GIT_MISSING_OBJECT + chr(10)!r}); sys.exit(128)"
 
 
 # --- P6 ---------------------------------------------------------------------------------------
@@ -128,7 +130,15 @@ def test_2665_git_status_probe_runs_only_with_a_mirror_git_dir(tmp_path, monkeyp
 def test_2665_new_test_failing_on_missing_git_object_is_inconclusive_env(tmp_path, monkeypatch):
     _init_app_repo(tmp_path)
     (tmp_path / "tests" / "test_history.py").write_text(
-        f"def test_reads_an_old_commit():\n    raise RuntimeError({_GIT_MISSING_OBJECT!r})\n",
+        # The #535 shape: a failed subprocess.run whose captured stderr is git's message
+        # (pytest shows it as ``stderr = 'fatal: ...'``). A stand-in process prints it, so the
+        # test does not depend on the installed git's wording.
+        "import subprocess, sys\n\n"
+        f"STAND_IN = {_STAND_IN_GIT!r}\n\n\n"
+        "def test_reads_an_old_commit():\n"
+        "    subprocess.run(\n"
+        "        [sys.executable, '-c', STAND_IN], check=True, capture_output=True, text=True\n"
+        "    )\n",
         encoding="utf-8",
     )
     _git(tmp_path, "add", "tests/test_history.py")
@@ -190,6 +200,49 @@ def test_2665_new_test_with_plain_or_look_alike_failure_stays_a_regression(tmp_p
         "tests/test_new.py::test_prose",
     ]
     assert payload["ghost_regression"]["inconclusive_env_tests"] == []
+
+
+def test_2665_git_message_without_cli_prefix_stays_a_regression(tmp_path, monkeypatch):
+    # No base result, and the words are git's, but not in git's CLI message form (no
+    # ``fatal:``/``error:`` line or captured stderr): the change's own failure.
+    _init_app_repo(tmp_path)
+    (tmp_path / "tests" / "test_new.py").write_text(
+        "def test_prose():\n    assert False, 'lookup said could not get object info'\n\n\n"
+        "def test_assert_prefixed():\n"
+        "    assert False, 'fatal: bad object 1234567890abcdef1234567890abcdef12345678'\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "add", "tests/test_new.py")
+    _allow_ghost_run(monkeypatch)
+    _no_probe_failure(monkeypatch)
+
+    payload = _review(tmp_path)
+
+    assert payload["status"] == "FAIL", payload["findings"]
+    assert sorted(payload["ghost_regression"]["failed_tests"]) == [
+        "tests/test_new.py::test_assert_prefixed",
+        "tests/test_new.py::test_prose",
+    ]
+    assert payload["ghost_regression"]["inconclusive_env_tests"] == []
+
+
+def test_2665_git_history_signature_matches_only_the_cli_form():
+    from nexus.engine.ultra_review_service import GIT_HISTORY_UNAVAILABLE_RE as sig
+
+    # The real #535 junit line (frozen-set replay), and git's own line forms.
+    assert sig.search("stdout = '', stderr = 'fatal: git cat-file: could not get object info\\n'")
+    assert sig.search("fatal: bad object 1234567890abcdef")
+    assert sig.search("  error: could not get object info")
+    assert sig.search(
+        "fatal: ambiguous argument 'HEAD~3': unknown revision or path not in the working tree."
+    )
+    for prose in (
+        "lookup said could not get object info",
+        "E   AssertionError: fatal: bad object 1234567890abcdef",
+        "the parser returned a bad object for shallow input",
+        "unknown revision or path not in the working tree",
+    ):
+        assert not sig.search(prose), prose
 
 
 def test_2665_junit_failure_texts_use_the_outcome_ids():
@@ -312,3 +365,18 @@ def test_2665_pythonpath_override_keeps_a_spaced_root_whole(tmp_path):
 
     assert _pythonpath_entries(ghost) == [str(root.resolve())]
     assert _pythonpath_entries(committee) == [str(root.resolve())]
+
+
+def test_2665_committee_argv_accepts_a_path_mirror(tmp_path):
+    from nexus.committee import execution_verifier as ev
+
+    mirror = tmp_path / "Application Support" / "mirror"
+    mirror.mkdir(parents=True)
+    argv = ev.build_argv(
+        ev.parse_command(["python3", "-m", "pytest", "-q"]),
+        mirror=mirror,
+        interpreter=sys.executable,
+    )
+
+    assert all(isinstance(arg, str) for arg in argv)
+    assert _pythonpath_entries(argv) == [str(mirror.resolve())]

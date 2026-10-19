@@ -106,13 +106,18 @@ GHOST_TIMEOUT_RETRY_FACTOR = 2
 ENV_PROBE_TIMEOUT_SEC = 30
 # git's own error text when the object store lacks history a test asks for (the sandbox mirror
 # git dir holds only the reviewed commit, by design since #2650). Matched only in the junit
-# failure text of a head-failing test that has NO base result (#2665, P7).
+# failure text of a head-failing test that has NO base result (#2665, P7). Only git's CLI
+# message form counts: a ``fatal:``/``error:`` line, either at the start of a line or as the
+# start of a captured ``stderr = '...'`` value (how pytest shows a failed subprocess.run's
+# locals, the #535 shape); the same words in prose or an assertion message do not.
 GIT_HISTORY_UNAVAILABLE_RE = re.compile(
-    r"fatal: bad object [0-9a-f]{7,64}\b"
+    r"(?:^[ \t]*|\bstderr\s*=\s*b?['\"])(?:fatal|error): (?:git [a-z][a-z-]*: )?"
+    r"(?:bad object [0-9a-f]{7,64}\b"
     r"|could not get object info"
-    r"|fatal: bad revision '[^'\n]*'"
-    r"|unknown revision or path not in the working tree"
-    r"|fatal: [^\n]*\bshallow\b"
+    r"|bad revision '[^'\n]*'"
+    r"|ambiguous argument '[^'\n]*': unknown revision or path not in the working tree"
+    r"|[^\n'\"]*\bshallow\b)",
+    re.MULTILINE,
 )
 ENV_PROBE_TMPDIR_WRITE = "import os, tempfile\nfd, path = tempfile.mkstemp()\nos.close(fd)\nos.unlink(path)\n"
 # ``ModuleNotFoundError`` text in a pytest collection-error report (#2650).

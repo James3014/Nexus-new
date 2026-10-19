@@ -246,7 +246,7 @@ def build_argv(command: list[str], *, mirror: Path, interpreter: str) -> list[st
             root,
             "-o",
             # pytest shlex-splits a ``paths`` ini value; quoted, a root with a space stays whole.
-            f"pythonpath={shlex.quote(root)}",
+            f"pythonpath={shlex.quote(str(root))}",
             "-o",
             "addopts=",
             *checked,
