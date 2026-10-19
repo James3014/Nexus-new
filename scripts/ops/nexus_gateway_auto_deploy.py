@@ -3642,6 +3642,9 @@ class _Cycle:
         ``live_root`` loaded the old tree.  Re-read the plist: it is the source of truth
         whether the attempt switched, rolled back or never reached the switch.
         """
+        if self.cfg.journal.exists():
+            # An unfinished switch: the next cycle reconciles it (PENDING_SWITCH_JOURNAL).
+            return
         try:
             current_root = live_root(self.cfg.plist.read_bytes())
         except (OSError, DeployError) as exc:
@@ -3649,11 +3652,11 @@ class _Cycle:
                 f"LIVE_ROOT_UNREADABLE_AFTER_ATTEMPT:{type(exc).__name__}"
             )
             return
-        if current_root == previous_root:
+        if current_root is None or current_root == previous_root:
             return
         status.update(
             previous_commit=previous_commit,
-            previous_root=str(previous_root),
+            previous_root=str(previous_root) if previous_root is not None else None,
             live_commit=commit_of(current_root),
             live_root=str(current_root),
         )
