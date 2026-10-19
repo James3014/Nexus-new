@@ -165,9 +165,28 @@ def _guard(
 
 @pytest.fixture
 def ext(layout, monkeypatch) -> dict[str, Any]:
-    """A measurement external target (``layout``) with the measurement root enabled."""
+    """A clean measurement external target with real directories and tracked symlinks."""
     monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(layout["measure_root"]))
-    return layout
+    repo = layout["measure_root"] / "dirrepo"
+    files = {
+        "README.md": "x\n",
+        "src/pkg/mod.py": "VALUE = 1\n",
+        "real/r.py": "R = 1\n",
+        "docsx/a.md": "a\n",
+        "docs/governance/g.md": "g\n",
+        ".github/workflows/w.yml": "w\n",
+        ".nexus-core/c.txt": "c\n",
+        "a/b.py": "B = 1\n",
+    }
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    # Tracked symlinks inside the EXTERNAL repository (#2786 r2).
+    (repo / "alias").symlink_to(".", target_is_directory=True)
+    (repo / "govalias").symlink_to("docs/governance", target_is_directory=True)
+    (repo / "a" / "link").symlink_to("..", target_is_directory=True)
+    sha = _repo(repo, {})
+    return {**layout, "ext": repo, "sha": sha}
 
 
 def _ext_envelope(allowed: list[str], ext: dict[str, Any]) -> LifecycleActionEnvelope:
@@ -216,7 +235,10 @@ def test_switch_on_pre_action_guard_passes_dir_scope(tmp_path, monkeypatch, ext)
     )
     assert receipt["passed"] is True
     # A directory that does not exist yet resolves inside the root too.
-    assert _guard(_ext_envelope(["newpkg/"], ext), ["newpkg/"], root, ext)["passed"] is True
+    # A directory missing from the external repository is refused (#2786 r2).
+    with pytest.raises(LifecycleGuardError) as caught:
+        _guard(_ext_envelope(["newpkg/"], ext), ["newpkg/"], root, ext)
+    assert caught.value.code == "ALLOWED_PATH_INVALID"
     # The request must name the scope exactly as the envelope does.
     with pytest.raises(LifecycleGuardError) as caught:
         _guard(_ext_envelope(["src/pkg/"], ext), ["src/pkg"], root, ext)
@@ -229,7 +251,7 @@ def test_switch_on_pre_action_guard_refuses_symlink_escape(tmp_path, monkeypatch
     outside.mkdir()
     (root / "escape").symlink_to(outside, target_is_directory=True)
     (root / "real").mkdir()
-    (root / "alias").symlink_to(root / "real", target_is_directory=True)
+    (root / "a").symlink_to(root / "real", target_is_directory=True)
     (root / "self").symlink_to(root, target_is_directory=True)
     _switch_on(monkeypatch)
     assert _guard(_ext_envelope(["real/"], ext), ["real/"], root, ext)["passed"] is True
@@ -238,7 +260,7 @@ def test_switch_on_pre_action_guard_refuses_symlink_escape(tmp_path, monkeypatch
     assert caught.value.code == "ALLOWED_PATH_INVALID"
     # A link inside the root still does not match its own name (fail closed, as for files).
     with pytest.raises(LifecycleGuardError) as caught:
-        _guard(_ext_envelope(["alias/"], ext), ["alias/"], root, ext)
+        _guard(_ext_envelope(["a/"], ext), ["a/"], root, ext)
     assert caught.value.code == "ALLOWED_PATH_MISMATCH"
     # A link to the root itself never becomes a whole-repository scope.
     with pytest.raises(LifecycleGuardError) as caught:
@@ -343,6 +365,30 @@ def test_switch_on_root_equivalent_scopes_are_refused(monkeypatch, scope):
     assert _envelope(["src/pkg/"]).allowed_paths == ("src/pkg/",)  # positive control
     with pytest.raises(ValidationError, match="must not be the repository root"):
         _envelope([scope])
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "alias/",  # tracked alias -> . : the external repository root
+        "govalias/",  # tracked alias -> docs/governance
+        "a/link/",  # nested a/link -> ..
+        "alias/src/",  # a symlink in an intermediate component
+        "nope/",  # missing directory
+        "README.md/",  # a file, not a directory
+    ],
+)
+def test_switch_on_dir_scope_is_resolved_in_the_external_repository(
+    tmp_path, monkeypatch, ext, scope
+):
+    """#2786 r2: symlinks of the external repository never widen a dir scope."""
+    root = _canon(tmp_path)
+    _switch_on(monkeypatch)
+    assert _guard(_ext_envelope(["src/pkg/"], ext), ["src/pkg/"], root, ext)["passed"] is True
+    assert not (root / scope.split("/")[0]).exists()  # the Nexus side has no such path
+    with pytest.raises(LifecycleGuardError) as caught:
+        _guard(_ext_envelope([scope], ext), [scope], root, ext)
+    assert caught.value.code == "ALLOWED_PATH_INVALID"
 
 
 # --------------------------------------------------------------------------
@@ -493,3 +539,80 @@ def test_deployer_and_r1_lists_include_the_dir_scope_switch():
     assert mds.MEASURE_DIR_SCOPE_ENV in ad.MEASUREMENT_ONLY_ENV_VARS
     assert g.R1_MEASUREMENT_ONLY_ENV_VARS == ad.MEASUREMENT_ONLY_ENV_VARS
     assert f"{ad.MEASUREMENT_ENV_REFUSED}:{mds.MEASURE_DIR_SCOPE_ENV}" in ad.measurement_env_guard()
+
+
+# --------------------------------------------------------------------------
+# #2786: the ephemeral service skips pre_action_guard; dir scopes are still checked
+# --------------------------------------------------------------------------
+
+
+class _DirGuardPassed(Exception):
+    pass
+
+
+def _ephemeral_submit(ctx: dict[str, Any], monkeypatch, request: dict[str, Any]) -> None:
+    import nexus.orchestrator.self_hosted_task_service as service_module
+    from nexus.orchestrator.lifecycle_guards import guard_dir_scopes as original
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    def guard_then_stop(*args: Any, **kwargs: Any) -> None:
+        original(*args, **kwargs)
+        raise _DirGuardPassed()
+
+    monkeypatch.setattr(service_module, "guard_dir_scopes", guard_then_stop)
+    monkeypatch.setattr(
+        service_module,
+        "pre_action_guard",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("ephemeral ran the full guard")),
+    )
+    service = SelfHostedTaskService(
+        state_dir=ctx["card_root"].parent / "eph-state", auto_reconcile=False
+    )
+    assert service.ephemeral is True
+    service.submit_task(request)
+
+
+def test_ephemeral_service_still_checks_dir_scopes(gateway_env, monkeypatch):
+    _switch_on(monkeypatch)
+    monkeypatch.setattr(
+        met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", str(gateway_env["measure_root"])
+    )
+    arguments = _arguments(
+        gateway_env, "dir-eph-1", external_target=_ext_arg(gateway_env), allowed_files=["pkg/"]
+    )
+    assert _call(gateway_env, arguments)["isError"] is False
+    request = gateway_env["service"].submitted[0]
+    # Positive control: the external-target request passes the dir-scope check.
+    with pytest.raises(_DirGuardPassed):
+        _ephemeral_submit(gateway_env, monkeypatch, dict(request))
+    # The service re-derives the request from the signed bound request, so the
+    # Controller cannot be swapped; but a process whose external target is not
+    # (or no longer) accepted refuses the dir scope on the ephemeral path too.
+    monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", "")
+    with pytest.raises(LifecycleGuardError) as caught:
+        _ephemeral_submit(gateway_env, monkeypatch, dict(request))
+    assert caught.value.code == "DIR_SCOPE_REQUIRES_EXTERNAL_TARGET"
+
+
+def test_guard_dir_scopes_applies_the_root_and_protected_checks(tmp_path, monkeypatch, ext):
+    from nexus.orchestrator.lifecycle_guards import guard_dir_scopes
+
+    root = _canon(tmp_path)
+    request = {"worker_candidate_ingress": True, "controller_repo_root": str(ext["ext"])}
+    _switch_on(monkeypatch)
+    prebuilt = _ext_envelope(["src/pkg/"], ext)
+    monkeypatch.setattr(mds, "MEASURE_DIR_SCOPE_AT_START", False)
+    guard_dir_scopes(prebuilt, request={}, canonical_root=root)  # switch off: a no-op
+    _switch_on(monkeypatch)
+    guard_dir_scopes(prebuilt, request=request, canonical_root=root)
+    for scope, code in (
+        ("docs/", "ALLOWED_PATH_PROTECTED"),
+        ("alias/", "ALLOWED_PATH_INVALID"),
+        ("nope/", "ALLOWED_PATH_INVALID"),
+    ):
+        with pytest.raises(LifecycleGuardError) as caught:
+            guard_dir_scopes(_ext_envelope([scope], ext), request=request, canonical_root=root)
+        assert caught.value.code == code
+    with pytest.raises(LifecycleGuardError) as caught:
+        guard_dir_scopes(_ext_envelope(["src/pkg/"], ext), request={}, canonical_root=root)
+    assert caught.value.code == "DIR_SCOPE_REQUIRES_EXTERNAL_TARGET"
