@@ -1508,6 +1508,7 @@ class PytestRunner:
         self._candidate_ran = False
         # A11 ("os"): survivors reaped at a host-disk shortfall (diagnostic).
         self.reaped_pids: list[int] = []
+        self.reclaimed_bytes = 0  # A11 diagnostic: space shortfall reaps gave back
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1595,6 +1596,7 @@ class PytestRunner:
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
+        self.reclaimed_bytes = 0
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1793,6 +1795,7 @@ class PytestRunner:
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
+        self.reclaimed_bytes = 0
 
     def retire_runs(self) -> list[Path]:
         """A11: rename every run parent under runs/ to ``.trash-<uuid>`` (one atomic step
@@ -1902,9 +1905,10 @@ class PytestRunner:
         scoring's candidate scope (survivors holding cwd or files, deleted ones included,
         under its candidate run dirs and trees), measure free space again, and charge the
         candidate (HOST_DISK_LOW, NOT_RUNNABLE) only if free_start (at its first run) was
-        at or above the floor, cand_total = candidate_visible_bytes + reclaimed (space
-        the reap gave back) >= the shortfall (floor - free_after_reap), and cand_total >=
-        half of the drop since free_start. Otherwise infra abort (external disk use as
+        at or above the floor, the candidate's visible bytes >= the shortfall
+        (floor - free_after_reap), and they are >= half of the drop since free_start
+        (free_start - free_after_reap). Space the reap gave back (``reclaimed``) is
+        already outside the post-reap drop, so it is a diagnostic only, never counted. Otherwise infra abort (external disk use as
         the majority, a harmless daemon that held no space, a disk already low)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
         free = _disk_usage(probe).free
@@ -1921,12 +1925,14 @@ class PytestRunner:
         self._reap_candidate_scope()
         free = _disk_usage(probe).free
         shortfall = floor - free
-        # Space the reap gave back was held by the candidate's survivors: its bytes too.
+        # Space the reap gave back: a diagnostic only. The shortfall and the drop below
+        # are measured after the reap, so counting it again would double-count.
         reclaimed = max(0, free - free_before_reap)
+        self.reclaimed_bytes += reclaimed
         # A candidate run's own run dir is the candidate's: measure it as one (current
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
-        cand_total = cand + reclaimed
+        cand_total = cand
         # Charged iff the scoring started above the floor, the candidate's bytes cover
         # the shortfall, and they account for at least half of the drop since
         # free_start (so a candidate that filled the disk to just above the floor is
@@ -2851,6 +2857,7 @@ def _retire_os_scoring(
         prefixes.append(trees_trash)
     prefixes += runner.retire_runs()
     timing["reaped_pids"] = [*runner.reaped_pids, *runner.reap_survivors(prefixes)]
+    timing["reap_reclaimed_bytes"] = runner.reclaimed_bytes
     if trees_trash is not None:
         shutil.rmtree(trees_trash, ignore_errors=True)
         if os.path.lexists(trees_trash):

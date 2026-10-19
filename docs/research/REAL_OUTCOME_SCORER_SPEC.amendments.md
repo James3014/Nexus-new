@@ -373,11 +373,16 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
      the path itself or below it (`<tree>/…`), so similarly named siblings never match.
      The reap kills by PID, checks that each process is gone, and fails closed, as
      above. The reaped PIDs are recorded in `reaped_pids`.
-  3. The scorer measures free space again. `reclaimed = max(0, free_after_reap -
-     free_before_reap)` is the space the reap gave back: bytes the candidate's
-     survivors held. `cand_total = candidate_visible_bytes + reclaimed`. Visible bytes
-     are its leftover run directories, the current run's directory if it is a
-     candidate run, and its trees' growth since their first candidate run.
+  3. The scorer measures free space again (`free_now`). `cand_total` is the
+     candidate's visible bytes: its leftover run directories, the current run's
+     directory if it is a candidate run, and its trees' growth since their first
+     candidate run.
+     - `reclaimed = max(0, free_now - free_before_reap)` is the space the reap gave
+       back. It is a diagnostic only: it appears in the infra-abort message and as
+       `reap_reclaimed_bytes` in the receipt timing.
+     - It is never added to `cand_total`. The shortfall and the drop are measured after
+       the reap, so the space it gave back is already outside them, and counting it
+       again would count it twice.
   4. The candidate is charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if all three
      hold, where `free_now` is the free space measured after the reap:
      - `free_start` was at or above the floor. `free_start` is the free space at the
@@ -390,7 +395,10 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
   5. Otherwise the result is an infra abort.
 
   Cases that show how the rule works:
-  - A survivor holding a large deleted file is reclaimed by the reap and charged.
+  - A survivor holding a large deleted file: the reap gives the space back, the
+    shortfall and the drop measured afterwards are about zero, and it is charged.
+  - Partial recovery: the reap gives back a survivor's 1 MiB, but external use alone
+    leaves the disk 50 kB short with no candidate bytes visible. That is infra.
   - A harmless daemon reclaims about nothing, so it is infra.
   - An honest candidate whose small bytes tip a disk that external use brought close
     to the floor made far less than half of the drop, so it is infra.

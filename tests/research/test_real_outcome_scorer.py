@@ -4227,6 +4227,7 @@ def test_os_scoring_renames_its_trees_parent_before_deleting_and_reaps(tmp_path,
     prefixes = runner.reaped_prefixes[-1]  # the end-of-scoring reap
     assert Path(moved[0][1]) in prefixes and runner.runs in prefixes
     assert result["timing"]["reaped_pids"] == []
+    assert result["timing"]["reap_reclaimed_bytes"] == 0
 
 
 def test_reaper_kills_only_processes_holding_paths_under_the_prefixes(tmp_path):
@@ -4760,3 +4761,40 @@ def test_survivor_that_removed_its_run_dir_is_still_reaped_and_charged(tmp_path,
     finally:
         with contextlib.suppress(OSError, ValueError):
             os.kill(int(pidfile.read_text()), 9)
+
+
+def test_partial_recovery_by_the_reap_is_not_counted_twice(tmp_path, monkeypatch):
+    """free_start = floor + 100 kB; a survivor held 1 MiB; external use took 150 kB. The
+    reap gives the 1 MiB back and the disk is still 50 kB short. Measured after the reap,
+    external use alone crossed the floor and the candidate has no visible bytes: infra.
+    (Counting the reclaimed 1 MiB again would wrongly charge the candidate.)"""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    base = _leak_tree(tmp_path / "b", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    state = {"cand_done": False, "reaped": False}
+    real_execute = runner._execute
+
+    def execute(env, tree, target, ignores, run_idx, role, *rest):
+        try:
+            return real_execute(env, tree, target, ignores, run_idx, role, *rest)
+        finally:
+            if role == ros.CAND_ROLE:
+                state["cand_done"] = True
+
+    def reap():
+        state["reaped"] = True  # the survivor's 1 MiB comes back
+
+    def disk(path):
+        if not state["cand_done"]:
+            return _usage(floor + 100_000)
+        return _usage(floor - 50_000 if state["reaped"] else floor - 50_000 - 1024**2)
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    monkeypatch.setattr(runner, "_reap_candidate_scope", reap)
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
+    with pytest.raises(ros.ScratchInfraAbort, match="reclaimed=1048576B"):
+        runner.run(env, base, "b", "tests", (), 0)
+    assert runner.reclaimed_bytes == 1024**2  # kept as a diagnostic
