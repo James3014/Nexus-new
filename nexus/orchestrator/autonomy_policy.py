@@ -93,7 +93,11 @@ def _path(value: str) -> str:
     ):
         raise ValueError("REQUESTED_PATH_INVALID")
     parsed = PurePosixPath(value)
-    if ".." in parsed.parts or ".git" in parsed.parts or parsed.as_posix() != value:
+    if (
+        ".." in parsed.parts
+        or any(part.casefold() == ".git" for part in parsed.parts)
+        or parsed.as_posix() != value
+    ):
         raise ValueError("REQUESTED_PATH_INVALID")
     return value
 

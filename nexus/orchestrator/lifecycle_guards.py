@@ -414,7 +414,11 @@ def require_bound_approval_grant(
 
 def _repo_relative(path: str, *, root: Path) -> Path:
     candidate = Path(str(path))
-    if candidate.is_absolute() or ".." in candidate.parts or ".git" in candidate.parts:
+    if (
+        candidate.is_absolute()
+        or ".." in candidate.parts
+        or any(part.casefold() == ".git" for part in candidate.parts)
+    ):
         raise LifecycleGuardError("ALLOWED_PATH_INVALID", "path is not a bounded repository-relative path", details={"path": str(path)})
     resolved = (root / candidate).resolve()
     try:
