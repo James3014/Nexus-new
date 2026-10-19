@@ -605,6 +605,82 @@ def _acceptance_contract_payload(
     return payload
 
 
+# #2776: one row per Core verification, never one row per session. A crash
+# resume of the same attempt (``RESUME_CANDIDATE_VERIFICATION``) re-verifies
+# the persisted session, so a later verdict must not erase an earlier one.
+_VERIFICATION_COLUMNS = (
+    "session_id",
+    "binding_hash",
+    "candidate_state_hash",
+    "core_status",
+    "change_set_hash",
+    "verification_plan_hash",
+    "evidence_bundle_hash",
+    "change_manifest_hash",
+    "projection_hash",
+    "core_reason_codes_json",
+    "verified_at",
+)
+_VERIFICATIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS core_mutation_verifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        binding_hash TEXT NOT NULL,
+        candidate_state_hash TEXT NOT NULL,
+        core_status TEXT NOT NULL,
+        change_set_hash TEXT NOT NULL,
+        verification_plan_hash TEXT NOT NULL,
+        evidence_bundle_hash TEXT NOT NULL,
+        change_manifest_hash TEXT NOT NULL,
+        projection_hash TEXT NOT NULL,
+        core_reason_codes_json TEXT NOT NULL,
+        verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES core_mutation_sessions(id)
+    )
+"""
+
+
+def _ensure_append_only_verifications(conn: sqlite3.Connection) -> None:
+    """Create or migrate ``core_mutation_verifications`` to append-only (#2776).
+
+    A database created before #2776 keyed the table by ``session_id``. Its
+    rows are copied, in order, into the new table inside one IMMEDIATE
+    transaction, so a concurrent opener sees either the old or the new table.
+    """
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(core_mutation_verifications)")]
+        if columns and "id" not in columns:
+            conn.execute(
+                "ALTER TABLE core_mutation_verifications "
+                "RENAME TO core_mutation_verifications_pre2776"
+            )
+            conn.execute(_VERIFICATIONS_DDL)
+            cols = ", ".join(_VERIFICATION_COLUMNS)
+            conn.execute(
+                f"INSERT INTO core_mutation_verifications ({cols}) "
+                f"SELECT {cols} FROM core_mutation_verifications_pre2776 "
+                "ORDER BY verified_at, rowid"
+            )
+            conn.execute("DROP TABLE core_mutation_verifications_pre2776")
+        conn.execute(_VERIFICATIONS_DDL)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_core_mutation_verifications_session "
+            "ON core_mutation_verifications(session_id, id)"
+        )
+        for event in ("UPDATE", "DELETE"):
+            conn.execute(
+                f"CREATE TRIGGER IF NOT EXISTS core_mutation_verifications_no_{event.lower()} "
+                f"BEFORE {event} ON core_mutation_verifications BEGIN "
+                "SELECT RAISE(ABORT, 'CORE_MUTATION_VERIFICATION_APPEND_ONLY'); END"
+            )
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
 class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
     """
     Host transport boundary that delegates Candidate verification
@@ -649,22 +725,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS core_mutation_verifications (
-                    session_id TEXT PRIMARY KEY,
-                    binding_hash TEXT NOT NULL,
-                    candidate_state_hash TEXT NOT NULL,
-                    core_status TEXT NOT NULL,
-                    change_set_hash TEXT NOT NULL,
-                    verification_plan_hash TEXT NOT NULL,
-                    evidence_bundle_hash TEXT NOT NULL,
-                    change_manifest_hash TEXT NOT NULL,
-                    projection_hash TEXT NOT NULL,
-                    core_reason_codes_json TEXT NOT NULL,
-                    verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES core_mutation_sessions(id)
-                )
-            """)
+            _ensure_append_only_verifications(conn)
             # #2346: a declared-universe task that ended without a Candidate.
             # One row per (task, attempt); additive, so existing rows and
             # readers are unchanged.
@@ -1318,7 +1379,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO core_mutation_verifications
+                INSERT INTO core_mutation_verifications
                 (session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
                  verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
                  core_reason_codes_json)
@@ -1353,13 +1414,19 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             cursor.execute("SELECT * FROM core_mutation_sessions WHERE id = ?", (session_id,))
             s_row = cursor.fetchone()
             cursor.execute(
-                "SELECT * FROM core_mutation_verifications WHERE session_id = ?", (session_id,)
+                "SELECT * FROM core_mutation_verifications WHERE session_id = ? ORDER BY id",
+                (session_id,),
             )
-            v_row = cursor.fetchone()
+            history = [dict(row) for row in cursor.fetchall()]
+            # ``verification_row`` stays the latest verdict; earlier verdicts
+            # for the same session are kept beside it, never dropped (#2776).
             return {
                 "db_path": str(self.db_path),
                 "session_row": dict(s_row) if s_row else None,
-                "verification_row": dict(v_row) if v_row else None,
+                "verification_row": history[-1] if history else None,
+                "verification_count": len(history),
+                "verification_history": history,
+                "prior_core_statuses": [row["core_status"] for row in history[:-1]],
             }
 
 
