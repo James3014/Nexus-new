@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
-SCORER_VERSION = "1.3.0"
+SCORER_VERSION = "1.3.1"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -136,10 +136,14 @@ class ScratchTmpCapExceeded(Exception):
         result: Any,
         kind: str = SCRATCH_TMP_CAP_EXCEEDED,
         left_bytes: int = 0,
+        attributed_role: str | None = None,
     ):
         super().__init__(f"{kind}:{tree}:{target}:run{run_idx}")
         self.tree, self.target, self.run_idx, self.role = tree, target, run_idx, role
         self.result, self.kind, self.left_bytes = result, kind, left_bytes
+        # A11: the role the cap trip is charged to (the run's own role unless growth in a
+        # leftover candidate-role run dir alone pushed it over the cap).
+        self.attributed_role = role if attributed_role is None else attributed_role
 
 
 class ScratchUnsafe(RuntimeError):
@@ -850,7 +854,8 @@ def _valid_version(version: object) -> TypeGuard[str]:
         return bool(_STUB_VERSION.fullmatch(version.lower()))
     try:
         Version(version)
-    except InvalidVersion:
+    except (InvalidVersion, ValueError):
+        # ValueError: e.g. a release segment over Python's int digit limit (A11).
         return False
     return True
 
@@ -1197,8 +1202,17 @@ class RunResult:
     diagnostic: str | None = None
 
 
+def allocated_bytes(st: os.stat_result) -> int:
+    """A11: disk space a file really uses (``st_blocks * 512``), so a sparse file counts
+    what it occupies, not its apparent ``st_size``; ``st_size`` where ``st_blocks`` is
+    unavailable."""
+    blocks = getattr(st, "st_blocks", None)
+    return int(blocks) * 512 if blocks is not None else st.st_size
+
+
 def tree_bytes(root: Path) -> int:
-    """Total size of the regular files under ``root``; symlinks are never followed."""
+    """Allocated size (A11) of the regular files under ``root``; symlinks are never
+    followed."""
     total = 0
     if not root.is_dir() or root.is_symlink():
         return 0
@@ -1209,7 +1223,7 @@ def tree_bytes(root: Path) -> int:
             except OSError:
                 continue
             if stat.S_ISREG(st.st_mode):
-                total += st.st_size
+                total += allocated_bytes(st)
     return total
 
 
@@ -1406,9 +1420,14 @@ class PytestRunner:
     ):
         if sandbox not in RUNNER_SANDBOX_MODES:
             raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
-        # A9: "os" refuses at once (fail closed) when no OS barrier exists.
+        # A9: "os" refuses at once (fail closed) when no OS barrier exists. A11: it also
+        # needs the store, which every confined run must be denied (no store, no deny).
         self.sandbox = sandbox
         if sandbox == SANDBOX_OS:
+            if store is None or not str(store).strip() or not Path(store).is_dir():
+                from nexus.engine.sandboxed_lane import SandboxError
+
+                raise SandboxError("store_required")
             _require_os_sandbox()
         self.scratch = Path(scratch)
         self.cache = self.scratch / "pytest-cache"
@@ -1422,6 +1441,10 @@ class PytestRunner:
         # A9 ("os" only): the experiment store; never readable by a confined run.
         self.store = Path(store) if store is not None else None
         self._profile_sha256: str | None = None
+        # A11 ("os"): candidate-role run dirs created since the last clean_tmp (this task).
+        # Only their leftover growth is charged to the candidate; a leftover from an
+        # earlier task's candidate is not this task's candidate's doing.
+        self._cand_run_dirs: set[str] = set()
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1459,6 +1482,7 @@ class PytestRunner:
             if self.runs.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use or clean it")
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
+        self._cand_run_dirs.clear()
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1532,8 +1556,9 @@ class PytestRunner:
         from nexus.engine import sandboxed_lane as lane
 
         _require_os_sandbox()
+        store = self._required_store()
         work = self.scratch.parent.resolve()
-        denied = [work / "repos", *([self.store.resolve()] if self.store else [])]
+        denied = [work / "repos", store]
         interpreter = Path(os.path.realpath(env.python))
         env_dir = Path(env.python).parent.parent
         # Every read root besides the tree and the run dir (env dir, interpreter prefix,
@@ -1558,9 +1583,17 @@ class PytestRunner:
             "developer_dir": lane.developer_toolchain_read_roots(),
             "toolchain": [p for p in fixed["toolchain"] if os.path.exists(p)],
             "repos": [work / "repos"],
-            "store": [self.store.resolve()] if self.store else [],
+            "store": [store],
         })
         return [lane.SANDBOX_EXEC, "-p", profile]
+
+    def _required_store(self) -> Path:
+        """A11: the resolved store, or SandboxError: an "os" profile always denies it."""
+        if self.store is None or not str(self.store).strip():
+            from nexus.engine.sandboxed_lane import SandboxError
+
+            raise SandboxError("store_required")
+        return self.store.resolve()
 
     @property
     def sandbox_profile_sha256(self) -> str | None:
@@ -1587,7 +1620,8 @@ class PytestRunner:
                 elif kind == "repos":
                     values[kind] = ["/__WORK__/repos"]
                 elif kind == "store":
-                    values[kind] = ["/__STORE__"] if self.store else []
+                    self._required_store()  # A11: "os" never runs without the store deny
+                    values[kind] = ["/__STORE__"]
                 else:
                     values[kind] = [f"/__{kind.upper()}__"]
             profile = _profile_from_roots(values, all_system_subpaths=True)
@@ -1627,11 +1661,29 @@ class PytestRunner:
             return self._execute(env, tree, target, ignores, run_idx, role, key, None)
         # A9 "os": a fresh HOME/TMPDIR/junit dir for this run only, removed afterwards on
         # every path (result, timeout, cap refusal, error).
-        run_dir = self.runs / f"{key[:16]}-{uuid.uuid4().hex[:12]}"
+        # A11: the dir name starts with the run's role, so growth a session-escaping child
+        # leaves in it later is attributed to that role (runs/ is not writable by any run,
+        # so a confined process can only re-create its own dir, never rename one).
+        run_dir = self.runs / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
+        if role == CAND_ROLE:
+            self._cand_run_dirs.add(run_dir.name)
         try:
             return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
         finally:
             self._remove_run_dir(run_dir)
+
+    def _candidate_leftover_bytes(self, current: Path | None) -> int:
+        """A11: allocated bytes in this task's candidate-role run dirs other than
+        ``current`` (re-created by a session-escaping child of a candidate run). 0 when
+        there is no runs/ dir ("none" mode)."""
+        if current is None or not self.runs.is_dir() or self.runs.is_symlink():
+            return 0
+        total = 0
+        with os.scandir(self.runs) as it:
+            for entry in it:
+                if entry.name != current.name and entry.name in self._cand_run_dirs:
+                    total += tree_bytes(Path(entry.path))
+        return total
 
     def _remove_run_dir(self, run_dir: Path) -> None:
         """Delete one A9 per-run dir without following links; log what could not go."""
@@ -1699,6 +1751,7 @@ class PytestRunner:
             run_env = self._env(env, tree, run_dir / "home", run_dir / "tmp")
             launch = self._confine(env, tree, run_dir) + cmd
         before = self.scratch_bytes()
+        cand_before = self._candidate_leftover_bytes(run_dir)
         start = time.monotonic()
         timed_out = False
         # Own process group, so whatever the tests spawned is killed with the run and
@@ -1723,17 +1776,26 @@ class PytestRunner:
         seconds = time.monotonic() - start
         self.total_seconds += seconds
         # A6: what this run left in scratch (its own junit report excluded).
-        junit_bytes = junit.stat().st_size if junit.is_file() and not junit.is_symlink() else 0
+        junit_bytes = (
+            allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0
+        )
         after = self.scratch_bytes() - junit_bytes
         left = after - before
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
         self._live_junits.discard(junit.name)
         kind = None
+        # A11 ("os" only, 0 under "none"): bytes in leftover candidate-role run dirs.
+        cand_after = self._candidate_leftover_bytes(run_dir)
+        attributed = role
         if left > SCRATCH_TMP_CAP_BYTES:
             kind = SCRATCH_TMP_CAP_EXCEEDED
+            if left - max(0, cand_after - cand_before) <= SCRATCH_TMP_CAP_BYTES:
+                attributed = CAND_ROLE
         elif after > SCRATCH_TMP_TASK_CAP_BYTES:
             kind = SCRATCH_TMP_TASK_CAP_EXCEEDED
+            if after - cand_after <= SCRATCH_TMP_TASK_CAP_BYTES:
+                attributed = CAND_ROLE
         self.log(
             f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
             f"{' TIMEOUT' if timed_out else ''}{' ' + kind if kind else ''}"
@@ -1742,7 +1804,9 @@ class PytestRunner:
         if kind:
             # Not cached: an infrastructure refusal, never test results.
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, timed_out, seconds, kind)
-            raise ScratchTmpCapExceeded(tree.name, target, run_idx, role, res, kind, left)
+            raise ScratchTmpCapExceeded(
+                tree.name, target, run_idx, role, res, kind, left, attributed_role=attributed
+            )
         cached.write_text(
             json.dumps(
                 {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
@@ -1909,6 +1973,13 @@ class Oracle:
 
 
 CAND_ROLE = "CAND+T"
+
+
+def _role_slug(role: str) -> str:
+    """A11: a run role as a run-dir name prefix ("CAND+T" -> "candt", "" -> "oracle")."""
+    return re.sub(r"[^a-z0-9]", "", role.lower()) or "oracle"
+
+
 # Worktree directory name -> tree name used in receipts.
 _TREE_NAMES = {
     "base": "BASE",
@@ -2365,9 +2436,12 @@ def _score_task(
         tree = _TREE_NAMES.get(cap.tree, cap.tree)
         # A candidate-role run that trips either cap stays in the denominator
         # (NOT_RUNNABLE); a leaky candidate must never be dropped as not scorable.
-        if cap.role == CAND_ROLE:
+        if cap.attributed_role == CAND_ROLE:
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = cap.kind
+            if cap.role != CAND_ROLE:
+                # A11: a candidate survivor's leftover run dir caused the trip.
+                receipt["cap_attributed_role"] = CAND_ROLE
         elif cap.kind == SCRATCH_TMP_TASK_CAP_EXCEEDED:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = SCRATCH_TMP_TASK_CAP_EXCEEDED

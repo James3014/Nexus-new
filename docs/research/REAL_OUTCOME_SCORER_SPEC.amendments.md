@@ -23,8 +23,9 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.3` | pytest `--rootdir` pinned to the tree (#2707), A8 below | unchanged from 1.2.2; A8 fixes node ids under one work-dir layout |
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
+| `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, a cap trip caused by a candidate run's leftover run directory is `NOT_RUNNABLE`, so that task stays in the denominator. A version string too long for Python's int parser is `version_invalid` |
 
-Current scorer: `SCORER_VERSION = "1.3.0"`. Receipts record the version that wrote them.
+Current scorer: `SCORER_VERSION = "1.3.1"`. Receipts record the version that wrote them.
 
 ## 2026-10-14: A2, P2P(b/c) run diagnostic (no rule change)
 
@@ -276,3 +277,53 @@ stub); no label reads it.
   "Install only the project's metadata without letting it shadow the tree", as spec v3,
   opt-in, with the affected V12 tasks rescored and reported next to the unchanged v1
   headline.
+
+## 2026-10-20: A11, sandbox and cap hardening (operational, #2751)
+
+Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
+
+- **Caps count allocated bytes.** The A6 caps and the receipt timing fields
+  `scratch_tmp_bytes` / `scratch_home_bytes` now measure the disk space files really use,
+  `st_blocks * 512` (`st_size` where `st_blocks` is missing), not their apparent size.
+  - A sparse file counts only the blocks it uses. Before, a candidate's session-escaping
+    child could write a large sparse file and push the task over a cap.
+  - A normal file now counts whole blocks, so a small file counts at least one block
+    (4 KiB on APFS and ext4). The A6 timing numbers are a little higher than in 1.3.0.
+  - The caps are 20 GiB per run and 40 GiB per task. A label changes only for a task
+    whose run actually hits a cap. The local receipts on 2026-10-20 had four such
+    tasks: V12 batch 3 nexus-core#271 (`SCRATCH_TMP_TASK_CAP_EXCEEDED` on GOLD) and
+    Nexus-new#2291 (BASE+T), and two pilot-2219 scorings of Nexus-new#2272 (BASE+T),
+    all `NOT_SCORABLE_ORACLE_INVALID`. Rescored under 1.3.1, such a task would get a
+    different label only if its bytes were sparse. Receipts already sealed are not
+    changed.
+- **Cap trips are charged to the role that caused them (`--sandbox os`).** Each run
+  directory is now named `<scratch>/runs/<role>-<key16>-<random>`, where the role is
+  `candt` for candidate runs (`CAND+T`) and `oracle` otherwise.
+  - The scorer remembers which candidate run directories it created in the current
+    task. A confined process cannot write to `runs/` itself, so it cannot rename a
+    directory or create one under another name.
+  - A cap can also trip on a candidate-independent run (BASE+T, GOLD, GOLD_REF, the
+    P2P(d) trees). If it would not have tripped without the bytes in this task's
+    leftover candidate run directories (re-created by a session-escaping child of a
+    candidate run), the trip is charged to the candidate. The label is then
+    `NOT_RUNNABLE` with sub-reason `SCRATCH_TMP_CAP_EXCEEDED` or
+    `SCRATCH_TMP_TASK_CAP_EXCEEDED`, as A6 already gives for a candidate run that hits a
+    cap. The receipt adds `cap_attributed_role: "CAND+T"`, and the task stays in the
+    denominator.
+  - Growth in any other leftover directory is still a candidate-independent refusal, as
+    before. That covers an oracle run's directory, and a candidate directory left by an
+    earlier task, which is not this task's candidate's doing.
+  - `--sandbox none` has no run directories, so nothing changes there.
+- **`--sandbox os` needs the store.** A runner in `os` mode refuses
+  (`SandboxError: store_required`) without an existing store directory. The store is
+  therefore always denied, and the A9 profile hash always includes that deny. Before,
+  an empty or missing store argument left the store readable while the hash looked
+  normal. The CLI always passes `--store`.
+- **Version strings.** `_valid_version` also treats `ValueError` as invalid. A version
+  whose release segment has more digits than Python's int limit (for example 5000 `1`s)
+  is `version_invalid` (v3 stub). Before, it stopped scoring of that task with a
+  scorer error.
+- **New tests.** One test checks the interpreter-prefix read-root refusal on its own:
+  the env directory is fine and the interpreter it resolves to is overbroad.
+- The test-result cache key includes the scorer version (A4), so 1.3.1 does not reuse
+  1.3.0 results.
