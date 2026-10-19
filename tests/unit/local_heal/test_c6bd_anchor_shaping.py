@@ -4,25 +4,27 @@ Verifies that the locked_search now targets the actual NdarrayMixin view
 block inside Table.__init__ (wrong_nearby_region fix).
 task-local only - single minimal patch candidate - no public API changes
 """
-import os
-import subprocess
-import pytest
+from pathlib import Path
 
 
-_WORKSPACE = "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy"
-_FIX_COMMIT = "a04fb7c355"
+# Pre-fix astropy/table/table.py, i.e. `git show a04fb7c355^:astropy/table/table.py`
+# (parent 6ed769d58d89380ebaa1ef52b300691eefda8928), committed as a fixture so the
+# test no longer needs the M4-only astropy workspace (#1926). Provenance and
+# sha256 are in tests/fixtures/host_evidence_1926/README.md.
+_PRE_FIX_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "host_evidence_1926"
+    / "astropy_13236"
+    / "table_prefix.py.txt"
+)
 _PRE_FIX_SOURCE: str = ""
 
 
 def _read_pre_fix_source() -> str:
     global _PRE_FIX_SOURCE
     if not _PRE_FIX_SOURCE:
-        r = subprocess.run(
-            ["git", "show", f"{_FIX_COMMIT}^:astropy/table/table.py"],
-            cwd=_WORKSPACE, capture_output=True, text=True, timeout=30,
-        )
-        assert r.returncode == 0, f"git show failed: {r.stderr}"
-        _PRE_FIX_SOURCE = r.stdout
+        _PRE_FIX_SOURCE = _PRE_FIX_FIXTURE.read_text(encoding="utf-8")
     return _PRE_FIX_SOURCE
 
 

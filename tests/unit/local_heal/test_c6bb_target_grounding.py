@@ -3,16 +3,20 @@ C6BB: Target grounding minimal patch.
 Verifies that the astropy__astropy-13236 locked_search is grounded in real source
 content, not synthetic code. RED tests first, then GREEN after grounding patch.
 """
-import os
-import subprocess
-import pytest
+from pathlib import Path
 
 
-# Real source file path (post-fix snapshot)
-_REAL_SOURCE = "/Users/jameschen/Workspace/nexus/artifacts/external_sources/astropy_13236/astropy/table/table.py"
-# Workspace git repo for pre-fix source extraction
-_WORKSPACE = "/Users/jameschen/Workspace/nexus/.nexus/workspaces/astropy"
-_FIX_COMMIT = "a04fb7c355"
+# Pre-fix astropy/table/table.py, i.e. `git show a04fb7c355^:astropy/table/table.py`
+# (parent 6ed769d58d89380ebaa1ef52b300691eefda8928), committed as a fixture so the
+# test no longer needs the M4-only astropy workspace (#1926). Provenance and
+# sha256 are in tests/fixtures/host_evidence_1926/README.md.
+_PRE_FIX_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures"
+    / "host_evidence_1926"
+    / "astropy_13236"
+    / "table_prefix.py.txt"
+)
 
 # Cache for pre-fix source
 _PRE_FIX_SOURCE: str = ""
@@ -22,18 +26,8 @@ def _read_pre_fix_source() -> str:
     """Return the pre-fix real source via git history."""
     global _PRE_FIX_SOURCE
     if not _PRE_FIX_SOURCE:
-        r = subprocess.run(
-            ["git", "show", f"{_FIX_COMMIT}^:astropy/table/table.py"],
-            cwd=_WORKSPACE, capture_output=True, text=True, timeout=30,
-        )
-        assert r.returncode == 0, f"git show failed: {r.stderr}"
-        _PRE_FIX_SOURCE = r.stdout
+        _PRE_FIX_SOURCE = _PRE_FIX_FIXTURE.read_text(encoding="utf-8")
     return _PRE_FIX_SOURCE
-
-
-def _read_real_source() -> str:
-    with open(_REAL_SOURCE) as f:
-        return f.read()
 
 
 # ─── RED test 1: grounded locked_search must exist in pre-fix real source ───

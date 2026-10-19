@@ -5,10 +5,14 @@ import json
 import hashlib
 from pathlib import Path
 
+# Real evidence recovered from the 2026-08-09 legacy-repo archive on M4 (#1926);
+# see tests/fixtures/host_evidence_1926/README.md for provenance and hashes.
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_1926"
+
 
 def test_memory_eval_9_real_model_influence_ab_verification():
     """Verify MEMORY-EVAL-9 artifacts, validation values, raw output hashes and claim boundary adherence."""
-    eval_root = Path("artifacts/runtime/memory_eval_9_real_model_influence_ab_v0")
+    eval_root = _FIXTURES / "memory_eval_9_real_model_influence_ab_v0"
     
     # 1. Verify files exist
     validation_path = eval_root / "validation.json"

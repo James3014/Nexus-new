@@ -1,0 +1,29 @@
+{
+  "manifest_name": "P12 Real June-B ABC Replay Manifest",
+  "tasks": [
+    {
+      "task_id": "sympy__sympy-13852",
+      "baseline_status": "blocked",
+      "replay_eligibility": "NOT_REPLAYABLE_MISSING_CONTROLS",
+      "source_root": ".nexus/workspaces/sympy",
+      "target_file": "",
+      "target_symbol": "",
+      "locked_search": "",
+      "verifier_command": ["cd .nexus/workspaces/sympy && python -m pytest sympy/core/tests/ -x -q"],
+      "evidence_refs": [],
+      "blockers": ["missing_target_file", "missing_locked_search", "missing_target_symbol", "missing_evidence_refs"]
+    },
+    {
+      "task_id": "astropy__astropy-12907",
+      "baseline_status": "blocked",
+      "replay_eligibility": "NOT_REPLAYABLE_MISSING_CONTROLS",
+      "source_root": ".nexus/workspaces/astropy",
+      "target_file": "",
+      "target_symbol": "",
+      "locked_search": "",
+      "verifier_command": ["cd .nexus/workspaces/astropy && python -m pytest astropy/tests/ -x -q"],
+      "evidence_refs": [],
+      "blockers": ["missing_target_file", "missing_locked_search", "missing_target_symbol", "missing_evidence_refs"]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "eval_id": "MEMORY_EVAL_9_REAL_MODEL_INFLUENCE_AB_v0",
+  "tasks": [
+    "C_12481"
+  ],
+  "arms": [
+    "nexus_memory_on",
+    "nexus_memory_off"
+  ],
+  "task_arm_pairs_count": 2,
+  "all_task_arm_pairs_have_11_artifacts": true,
+  "all_json_parseable": true,
+  "all_artifacts_live_runtime": true,
+  "all_created_during_run": true,
+  "memory_on_all_trace_available": true,
+  "memory_on_all_retrieved_count_gt_0": true,
+  "memory_on_no_stub_ids": true,
+  "memory_on_sources_real_store": true,
+  "schema_hygiene_primary_selected_id_present": true,
+  "real_model_call_executed": true,
+  "synthetic_delta_measured": false,
+  "real_model_decision_influence_proven": true,
+  "real_patch_synthesis_influence_proven": true,
+  "prompt_delta_observed": true,
+  "model_output_delta_measured_from_artifacts": true,
+  "patch_delta_measured_from_artifacts": true,
+  "outcome_uplift_observed": false,
+  "prompt_sha256_memory_on": "591c90dcb79c2dfe21d8c1d12b096f6a764c471a3d9930759874acba66cf7d6c",
+  "prompt_sha256_memory_off": "0b0674ebe0403f88886838112823405ea9f7c08152cb15cdd8654a3276553180",
+  "raw_model_output_sha256_memory_on": "37fee6a76a0c07b83ce663142573d03a620e2dd5beefcb8ea806e062a1b9aae7",
+  "raw_model_output_sha256_memory_off": "cdfbbf8fced155de501efffcedaaedb1452fa71dab6bca243e4e9c9d3f5cc97a",
+  "patch_sha256_memory_on": "37fee6a76a0c07b83ce663142573d03a620e2dd5beefcb8ea806e062a1b9aae7",
+  "patch_sha256_memory_off": "cdfbbf8fced155de501efffcedaaedb1452fa71dab6bca243e4e9c9d3f5cc97a",
+  "public_claim_allowed": false,
+  "production_ready": false,
+  "training_export_allowed": false,
+  "internal_only": true,
+  "validation_status": "MEMORY_EVAL_9_REAL_MODEL_INFLUENCE_AB_MEASURED"
+}

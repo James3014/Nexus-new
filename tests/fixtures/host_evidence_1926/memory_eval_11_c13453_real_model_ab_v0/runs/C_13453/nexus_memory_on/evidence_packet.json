@@ -1,0 +1,71 @@
+{
+  "task_id": "C_13453",
+  "route_id": "local_heal",
+  "issue_intent": "C_13453: Astropy Table.write ignores the 'formats' parameter. The _set_col_formats() method receives the formats dict but does not apply it to the table columns before writing.",
+  "base_commit": "dummy_base_commit",
+  "source_hash": "e395e9af5f2a1e45",
+  "selected_anchor": {
+    "symbol": "_set_col_formats",
+    "file": "astropy/io/ascii/core.py",
+    "start_line": 2,
+    "end_line": 4,
+    "source_text_preview": "    def _set_col_formats(self, table, formats):\n        # Dummy stub \u2014 formats parameter is ignored\n        pass"
+  },
+  "codeintel_evidence": [
+    {
+      "file": "astropy/io/ascii/core.py",
+      "start_line": 6,
+      "end_line": 9,
+      "symbol": "write",
+      "relation": "same_class_neighbor",
+      "relevance_reason": "method in same file, may interact with _set_col_formats"
+    },
+    {
+      "file": "astropy/io/ascii/core.py",
+      "start_line": 2,
+      "end_line": 2,
+      "symbol": "def _set_col_formats(self, table, formats):",
+      "relation": "data_flow",
+      "relevance_reason": "formatting/data-flow related code"
+    },
+    {
+      "file": "astropy/io/ascii/core.py",
+      "start_line": 3,
+      "end_line": 3,
+      "symbol": "# Dummy stub \u2014 formats parameter is ignored",
+      "relation": "data_flow",
+      "relevance_reason": "formatting/data-flow related code"
+    },
+    {
+      "file": "astropy/io/ascii/core.py",
+      "start_line": 7,
+      "end_line": 7,
+      "symbol": "self._set_col_formats(table, None)",
+      "relation": "data_flow",
+      "relevance_reason": "formatting/data-flow related code"
+    }
+  ],
+  "memory_evidence": [
+    {
+      "finding_id": "lh-13453",
+      "summary": "Local-heal outcome: test repair success\nTask: C_13453\nSummary: test repair\nReceipt: receipt:C_13453",
+      "relevance_reason": "retrieved_from:FindingsMemoryStore",
+      "provenance": "receipt:C_13453"
+    },
+    {
+      "finding_id": "lh-e25a61cb4aa5",
+      "summary": "Local-heal outcome: owner_gated\nTask: C_13453\nSummary: owner_gated\nReceipt: receipt:1\nMemory trace status: TRACE_MISSING\nMemory evidence ids: ",
+      "relevance_reason": "retrieved_from:FindingsMemoryStore",
+      "provenance": "receipt:1"
+    }
+  ],
+  "prior_failure_evidence": [],
+  "missing_context_risks": [],
+  "context_budget": "bounded_evidence_packet",
+  "prompt_inclusion_plan": "include_all_bounded_sections",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "repair_attempt_id": "C_13453",
+  "source_component": "native_evidence_packet.build",
+  "source_timestamp": "2026-06-22T12:55:03"
+}

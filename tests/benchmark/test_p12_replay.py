@@ -4,9 +4,13 @@ import pytest
 
 from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
 
+# Real evidence recovered from the 2026-08-09 legacy-repo archive on M4 (#1926);
+# see tests/fixtures/host_evidence_1926/README.md for provenance and hashes.
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "host_evidence_1926"
+
 def test_p12_manifest_parser():
     # 1. Verify replay_manifest.json structure
-    manifest_path = Path("artifacts/runtime/local_model_armor_p12_real_june_b_replay_v0/replay_manifest.json")
+    manifest_path = _FIXTURES / "local_model_armor_p12_real_june_b_replay_v0/replay_manifest.json"
     assert manifest_path.exists()
     
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -61,15 +65,21 @@ def test_missing_controls_taxonomy(tmp_path):
             repo_root=tmp_path,
         )
         
+    # #1926: the legacy adapter path never supplies route_context.signal_snapshot,
+    # so the adapter now blocks earlier with missing_signal_snapshot (see
+    # nexus/services/local_heal/capability_adapter.py). The same contract is
+    # also asserted by tests/benchmark/test_capability_ab_runner.py::
+    # test_local_model_adapter_missing_controls; this id is kept so the
+    # exact-base impact gate keeps a comparable inventory.
     ad = finalized.get("local_model_adapter")
     assert ad is not None
     assert ad["route_mode"] == "local_only_blocked"
-    assert ad["fallback_block_reason"] == "missing_required_control"
-    assert ad["adapter_missing_control"] is True
+    assert ad["fallback_block_reason"] == "missing_signal_snapshot"
+    assert ad["adapter_missing_control"] is False
 
 def test_bundle_summary_keys():
     # 3. Verify evidence_bundle.json contains local_model_adapter_summary and safety locks are zero
-    bundle_path = Path("artifacts/runtime/local_model_armor_p12_real_june_b_replay_v0/evidence_bundle.json")
+    bundle_path = _FIXTURES / "local_model_armor_p12_real_june_b_replay_v0/evidence_bundle.json"
     assert bundle_path.exists()
     
     with open(bundle_path, "r", encoding="utf-8") as f:

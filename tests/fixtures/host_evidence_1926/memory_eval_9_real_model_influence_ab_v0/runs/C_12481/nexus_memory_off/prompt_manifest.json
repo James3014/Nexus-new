@@ -1,0 +1,9 @@
+{
+  "prompt_length_chars": 932,
+  "memory_section_included": false,
+  "repair_attempt_id": "C_12481",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "native_prompt_builder",
+  "source_timestamp": "2026-06-22T12:33:41"
+}

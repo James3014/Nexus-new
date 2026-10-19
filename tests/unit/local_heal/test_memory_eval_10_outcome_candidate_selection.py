@@ -2,9 +2,11 @@
 import json
 from pathlib import Path
 
-ARTIFACT_ROOT = Path(
-    "artifacts/runtime/memory_eval_10_outcome_candidate_selection_v0"
-)
+# Real evidence recovered from the 2026-08-09 legacy-repo archive on M4 (#1926);
+# see tests/fixtures/host_evidence_1926/README.md for provenance and hashes.
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_1926"
+
+ARTIFACT_ROOT = _FIXTURES / "memory_eval_10_outcome_candidate_selection_v0"
 SELECTED_CANDIDATES_PATH = ARTIFACT_ROOT / "selected_candidates.json"
 REJECTED_CANDIDATES_PATH = ARTIFACT_ROOT / "rejected_candidates.json"
 VALIDATION_PATH = ARTIFACT_ROOT / "validation.json"

@@ -1,0 +1,31 @@
+{
+  "eval_id": "MEMORY_EVAL_10_OUTCOME_CANDIDATE_SELECTION_v0",
+  "timestamp_utc": "2026-06-22T04:49:00Z",
+  "prior_eval_chain": [
+    "MEMORY_EVAL_6_MULTI_TASK_TRUE_MEMORY_BATCH_COMPLETE",
+    "MEMORY_EVAL_7_TASK_SPECIFIC_RETRIEVAL_PRECISION_COMPLETE",
+    "MEMORY_EVAL_8_SYNTHETIC_DECISION_DELTA_MEASURED",
+    "MEMORY_EVAL_9_REAL_MODEL_INFLUENCE_AB_MEASURED"
+  ],
+  "prior_commit_sha": "e8257f4d",
+  "sources_scanned": [
+    "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs/",
+    "artifacts/runtime/be_targeted_14b_action_protocol_v0/tasks/",
+    ".nexus/memory/task/episodes/",
+    ".nexus/memory/task/decisions/",
+    ".nexus/metrics/skill_outcome_events.jsonl",
+    "artifacts/runtime/memory_eval_6_multi_task_true_memory_batch_v0/",
+    "artifacts/runtime/memory_eval_7_task_specific_retrieval_precision_v0/",
+    "artifacts/runtime/memory_eval_9_real_model_influence_ab_v0/"
+  ],
+  "selection_objective": "Find 3-5 candidate tasks where memory may plausibly change verifier outcome. C_12481 already showed real model output delta but no solved delta — must apply objective selection rule to find better candidates.",
+  "prohibited": [
+    "eval_stub_finding_id",
+    "MockEvaluationStore",
+    "synthetic_delta",
+    "hand_filled_model_outputs",
+    "outcome_uplift_claim_without_real_verifier_solved_delta"
+  ],
+  "no_production_behavior_change": true,
+  "internal_only": true
+}

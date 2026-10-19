@@ -1,0 +1,21 @@
+{
+  "report_id": "RRL3C_MISSING_FIELDS_V0",
+  "total_fields": 35,
+  "populated_fields": 12,
+  "missing_fields": 23,
+  "missing_by_category": {
+    "input": ["repo", "issue_summary", "task_class", "difficulty"],
+    "route": ["route_reason", "judge_output", "route_confidence"],
+    "anchor": ["selected_anchor", "anchor_score", "anchor_file", "anchor_line_span", "selection_reason"],
+    "evidence": ["codeintel_nodes", "codeintel_edges", "memory_items", "missing_context_risks", "evidence_confidence"],
+    "memory": ["retrieval_sources", "memory_selected_ids", "provenance_count", "rerank_mode", "influence_status"],
+    "prompt": ["prompt_length_chars", "memory_section_included", "failure_section_included", "evidence_section_included"],
+    "model": ["model_name", "output_length_chars"],
+    "candidate": ["total_candidates", "selected_candidate_id", "selection_method", "arbitration_used"]
+  },
+  "critical_fields": ["task_id", "issue_summary", "patch_produced", "patch_applied", "verifier_status", "final_status", "primary_bottleneck"],
+  "critical_fields_populated": ["task_id", "patch_produced", "patch_applied", "verifier_status", "final_status", "primary_bottleneck"],
+  "critical_fields_missing": ["issue_summary"],
+  "acceptable_for_minimal_proof": true,
+  "reason": "Critical fields mostly populated. issue_summary defaults to failure_reason which may be empty. task_id is 'unknown' because instance_id is used. Minimal proof acceptable for hook validation."
+}

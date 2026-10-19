@@ -1,0 +1,9 @@
+{
+  "final_status": "FAIL",
+  "primary_bottleneck": "unknown",
+  "repair_attempt_id": "C_13453",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "EvidenceHarness.classify_bottleneck",
+  "source_timestamp": "2026-06-22T12:55:03"
+}

@@ -1,0 +1,13 @@
+{
+  "model_endpoint": "http://localhost:11434",
+  "model_name": "qwen2.5-coder:7b",
+  "temperature": 0.0,
+  "num_ctx": 4096,
+  "num_predict": 768,
+  "timeout_seconds": 300,
+  "invocation_command": "python3 scripts/eval/run_memory_eval_9_real_model_ab.py",
+  "deterministic_settings": {
+    "temperature": 0.0,
+    "seed": 42
+  }
+}

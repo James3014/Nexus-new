@@ -1,0 +1,14 @@
+{
+  "report_id": "RRL3C_RUNTIME_INVARIANCE_V0",
+  "repair_behavior_changed": false,
+  "ranking_changed": false,
+  "prompt_changed": false,
+  "verifier_changed": false,
+  "claim_gate_changed": false,
+  "patch_generation_changed": false,
+  "evidence_harness_write_only": true,
+  "before_after_comparison_available": false,
+  "comparison_note": "Before/after comparison unavailable. Hook is write-only and wrapped in try/except pass. No production behavior change observed.",
+  "final_status_after": "MODEL_WRONG",
+  "notes": "EvidenceHarness writes to artifacts/runtime/rrl3_runs/. Hook is write-only observability. No repair loop behavior changed."
+}

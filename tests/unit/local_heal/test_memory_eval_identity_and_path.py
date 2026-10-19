@@ -4,8 +4,13 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
+
 from nexus.services.local_heal.evidence_harness import EvidenceHarness, EvidenceBundle
 from nexus.services.local_heal.memory_trace import MemoryTrace, build_memory_trace_from_adapter, get_empty_trace
+
+# Real evidence recovered from the 2026-08-09 legacy-repo archive on M4 (#1926);
+# see tests/fixtures/host_evidence_1926/README.md for provenance and hashes.
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_1926"
 
 
 class TestIdentityCorrelation:
@@ -116,7 +121,7 @@ class TestArtifactExistence:
 
     def test_rrl3c_artifacts_exist(self):
         """RRL3C artifacts exist under committed path."""
-        base = Path("artifacts/runtime/rrl3_runtime_evidence_harness_integration_v0/runs/unknown")
+        base = _FIXTURES / "rrl3_runtime_evidence_harness_integration_v0/runs/unknown"
         assert base.exists()
         assert (base / "evidence_bundle.json").exists()
         assert (base / "bottleneck_classification.json").exists()
@@ -125,7 +130,7 @@ class TestArtifactExistence:
 
     def test_rrl3c_bundle_has_required_fields(self):
         """RRL3C bundle has required fields."""
-        bundle_path = Path("artifacts/runtime/rrl3_runtime_evidence_harness_integration_v0/runs/unknown/evidence_bundle.json")
+        bundle_path = _FIXTURES / "rrl3_runtime_evidence_harness_integration_v0/runs/unknown/evidence_bundle.json"
         with open(bundle_path) as f:
             data = json.load(f)
 
@@ -135,7 +140,7 @@ class TestArtifactExistence:
 
     def test_memory_path_matrix_exists(self):
         """memory_path_matrix.json exists."""
-        matrix_path = Path("artifacts/runtime/memory_eval_0_path_audit_v0/memory_path_matrix.json")
+        matrix_path = _FIXTURES / "memory_eval_0_path_audit_v0/memory_path_matrix.json"
         assert matrix_path.exists()
         with open(matrix_path) as f:
             data = json.load(f)

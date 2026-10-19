@@ -1,0 +1,11 @@
+{
+  "task_id": "C_12481",
+  "arm": "nexus_memory_off",
+  "solved": false,
+  "verifier_status": "FAIL",
+  "repair_attempt_id": "C_12481",
+  "artifact_source": "live_runtime",
+  "created_during_run": true,
+  "source_component": "orchestrator._finalize_run",
+  "source_timestamp": "2026-06-22T12:33:41"
+}
