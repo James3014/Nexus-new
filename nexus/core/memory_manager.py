@@ -1,4 +1,6 @@
+import shutil
 import sqlite3
+import tempfile
 import json
 import random
 import time
@@ -10,6 +12,32 @@ from nexus.infrastructure.sqlite_retry import SQLiteRetryHandler, is_retryable_s
 
 SQLITE_BUSY_TIMEOUT_MS = 5000
 SQLITE_WRITE_RETRIES = 4
+
+class _TempCopyConnection(sqlite3.Connection):
+    """Connection on a temp copy; closing it (also via ``with``) removes the copy."""
+
+    _tmpdir: str | None = None
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            tmpdir, self._tmpdir = self._tmpdir, None
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+    def __del__(self) -> None:  # pragma: no cover - finalizer safety net
+        try:
+            self.close()
+        except Exception:
+            pass
+
 
 def state_read_only() -> bool:
     from nexus.core.state_root import state_read_only as _state_read_only
@@ -134,19 +162,37 @@ class ProjectMemoryManager:
             )
             return cursor.fetchall()
 
-    def _connect(self):
-        if state_read_only():  # #2721: read-only open, no WAL pragma
-            # A WAL-mode DB at rest has no -wal file; a plain mode=ro open would create
-            # (and, being read-only, never delete) -wal/-shm.  With no -wal there is no
-            # log to replay, so open it immutable (no locking, no side files).  With a
-            # live -wal present a normal read-only open is required to see its content.
-            wal = Path(str(self.db_path) + "-wal")
-            flags = "mode=ro" if wal.exists() else "mode=ro&immutable=1"
+    def _connect_temp_copy(self):
+        """Open a throwaway copy of the DB (+ any -wal/-shm) from the system temp dir.
+
+        Copying the WAL files too makes WAL-only rows visible; recovery/checkpointing
+        happens only in the copy, which is deleted when the connection closes.
+        """
+        tmpdir = tempfile.mkdtemp(prefix="nexus-ro-sqlite-")
+        try:
+            name = self.db_path.name
+            shutil.copy2(self.db_path, Path(tmpdir) / name)
+            for suffix in ("-wal", "-shm"):
+                src = Path(str(self.db_path) + suffix)
+                if src.exists():
+                    try:
+                        shutil.copy2(src, Path(tmpdir) / (name + suffix))
+                    except FileNotFoundError:  # checkpointed away between exists() and copy
+                        pass
             conn = sqlite3.connect(
-                f"file:{self.db_path}?{flags}", uri=True, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000
+                str(Path(tmpdir) / name),
+                timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+                factory=_TempCopyConnection,
             )
-            conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
-            return conn
+        except BaseException:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            raise
+        conn._tmpdir = tmpdir
+        return conn
+
+    def _connect(self):
+        if state_read_only():  # #2721: query a private temp copy, never touch the state root
+            return self._connect_temp_copy()
         conn = sqlite3.connect(self.db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")

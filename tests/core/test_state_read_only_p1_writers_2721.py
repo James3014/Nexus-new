@@ -56,26 +56,69 @@ def test_memory_manager_fresh_root_creates_nothing(tmp_path, monkeypatch):
     assert names(tmp_path) == []
 
 
-def test_memory_manager_existing_store_reads_without_wal(tmp_path, monkeypatch):
+def _populated_with_live_wal(tmp_path: Path, *, keep_shm: bool):
+    """A DB whose newest row lives only in a live -wal (writer connection left open)."""
     mgr = ProjectMemoryManager(tmp_path)
-    mgr.add_insight("topic", "hello world")
-    # Fold the WAL into the main file so the tree is stable, then drop side files.
+    mgr.add_insight("topic", "in main file")
     with sqlite3.connect(mgr.db_path) as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    for suffix in ("-wal", "-shm"):
-        Path(str(mgr.db_path) + suffix).unlink(missing_ok=True)
+    writer = sqlite3.connect(mgr.db_path)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("PRAGMA wal_autocheckpoint=0")
+    writer.execute(
+        "INSERT INTO insights (topic, content, type) VALUES ('t', 'wal only row', 'RCA')"
+    )
+    writer.commit()
+    wal = Path(str(mgr.db_path) + "-wal")
+    shm = Path(str(mgr.db_path) + "-shm")
+    assert wal.exists() and wal.stat().st_size > 0
+    # Snapshot the files as a crashed/frozen writer would leave them, then close the writer.
+    frozen = tmp_path.parent / (tmp_path.name + "-frozen")
+    frozen.mkdir()
+    for src in (mgr.db_path, wal, shm):
+        if src.exists() and (keep_shm or src != shm):
+            (frozen / src.name).write_bytes(src.read_bytes())
+    writer.close()
+    for src in (mgr.db_path, wal, shm):
+        src.unlink(missing_ok=True)
+    for src in frozen.iterdir():
+        (mgr.db_path.parent / src.name).write_bytes(src.read_bytes())
+    return mgr
+
+
+@pytest.mark.parametrize("keep_shm", [False, True])
+def test_memory_manager_live_wal_rows_visible_and_tree_unchanged(tmp_path, monkeypatch, keep_shm):
+    mgr = _populated_with_live_wal(tmp_path, keep_shm=keep_shm)
+    wal = Path(str(mgr.db_path) + "-wal")
+    assert wal.exists()
     before = tree_hash(tmp_path)
+    before_names = names(tmp_path)
 
     monkeypatch.setenv(RO, "1")
     ro = ProjectMemoryManager(tmp_path)
-    assert [row[1] for row in ro.search("hello")] == ["hello world"]
+    found = sorted(row[1] for row in ro.search(""))
+    assert found == ["in main file", "wal only row"]
     ro.add_insight("topic", "must not land")
     ro.add_insight_guarded("topic", "must not land")
     assert tree_hash(tmp_path) == before
-    assert not list(tmp_path.rglob("*-wal")) and not list(tmp_path.rglob("*-shm"))
+    assert names(tmp_path) == before_names
 
-    monkeypatch.delenv(RO)
-    assert [row[1] for row in ProjectMemoryManager(tmp_path).search("")] == ["hello world"]
+
+def test_memory_manager_temp_copy_removed_on_close(tmp_path, monkeypatch):
+    import glob
+    import tempfile
+
+    ProjectMemoryManager(tmp_path).add_insight("t", "x")
+    monkeypatch.setenv(RO, "1")
+    ro = ProjectMemoryManager(tmp_path)
+    tree_before = tree_hash(tmp_path)
+    pattern = str(Path(tempfile.gettempdir()) / "nexus-ro-sqlite-*")
+    before = set(glob.glob(pattern))
+    with ro._connect() as conn:
+        assert conn.execute("select count(*) from insights").fetchone()[0] == 1
+        assert len(set(glob.glob(pattern)) - before) == 1
+    assert set(glob.glob(pattern)) == before
+    assert tree_hash(tmp_path) == tree_before
 
 
 def test_memory_manager_switch_not_cached_at_construction(tmp_path, monkeypatch):
@@ -197,3 +240,130 @@ def test_repository_unset_creates_store(tmp_path):
     repo = MemoryRepository(root)
     repo.add_rows("policy", [{"id": "1", "content": "c"}])
     assert root.exists() and repo.list_tables() == ["policy"]
+
+
+def test_repository_ensure_new_table_on_populated_store_unchanged(tmp_path, monkeypatch):
+    pytest.importorskip("lancedb")
+    root = tmp_path / "lancedb"
+    MemoryRepository(root).add_rows("policy", [{"id": "1", "content": "alpha"}])
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    repo = MemoryRepository(root)
+    repo.ensure_table("brand_new", initial_data=[{"id": "9", "content": "z"}])
+    assert repo.list_tables() == ["policy"]
+    assert tree_hash(tmp_path) == before
+
+
+def test_repository_built_before_switch_writes_nothing_after(tmp_path, monkeypatch):
+    pytest.importorskip("lancedb")
+    root = tmp_path / "lancedb"
+    repo = MemoryRepository(root)
+    repo.add_rows("policy", [{"id": "1", "content": "alpha"}])  # connects, caches _db
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    repo.add_rows("policy", [{"id": "2", "content": "beta"}])
+    repo.add_rows("other", [{"id": "3", "content": "gamma"}])
+    repo.update_table("policy", [{"id": "4", "content": "delta"}])
+    assert repo.semantic_dedup_ingest("policy", {"id": "5", "content": "e"}) == "SKIPPED_READ_ONLY"
+    assert tree_hash(tmp_path) == before
+    monkeypatch.delenv(RO)
+    repo.add_rows("policy", [{"id": "6", "content": "zeta"}])
+    assert len(repo.get_all_rows("policy")) == 2
+
+
+# ---- 4. MemoryService / MemoryCoordinator / findings sync ---------------------------------
+
+
+def _lesson():
+    from nexus.services.memory import FaultLesson
+
+    return FaultLesson("h1", "E", "k", "lesson", "patch", 0.9)
+
+
+def _service(root: Path):
+    from nexus.services.memory import MemoryService
+
+    return MemoryService(str(root), redis_client=_NoRedis())
+
+
+class _NoRedis:
+    def ping(self):
+        return True
+
+    def set(self, *a, **k):
+        return True
+
+    def get(self, *a, **k):
+        return None
+
+
+def test_memory_service_writers_noop_under_switch_fresh_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_MEMORY_AUTO_INIT", "0")
+    svc = _service(tmp_path)
+    monkeypatch.setenv(RO, "1")  # set AFTER construction: re-read per call
+    result = svc.aggregate_memory("anything")
+    assert set(result) >= {"reminders", "total_sources", "timestamp"}
+    assert svc.record_fault_lesson(_lesson()) is None
+    assert svc.sync_route_phase_weights({"P": 10.0}, "c", "h") is None
+    assert names(tmp_path) == []
+
+
+def test_memory_service_existing_store_unchanged_under_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_MEMORY_AUTO_INIT", "0")
+    svc = _service(tmp_path)
+    svc.record_fault_lesson(_lesson())
+    svc.sync_route_phase_weights({"P": 10.0}, "c", "h")
+    svc.aggregate_memory("q")
+    for lock in tmp_path.rglob("*.lock"):
+        lock.unlink()
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    svc.record_fault_lesson(_lesson())
+    svc.sync_route_phase_weights({"P": -50.0}, "c2", "h2")
+    svc.aggregate_memory("q")
+    assert tree_hash(tmp_path) == before
+
+
+def test_memory_service_unset_still_writes(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_MEMORY_AUTO_INIT", "0")
+    svc = _service(tmp_path)
+    svc.aggregate_memory("q")
+    svc.record_fault_lesson(_lesson())
+    svc.sync_route_phase_weights({"P": 10.0}, "c", "h")
+    assert (tmp_path / "reminders.json").exists()
+    assert (tmp_path / ".nexus" / "knowledge" / "fault_lessons.jsonl").exists()
+    assert (tmp_path / ".nexus" / "knowledge" / "policy_memory.jsonl").exists()
+
+
+def test_memory_coordinator_lock_creates_no_file_under_switch(tmp_path, monkeypatch):
+    from nexus.core.memory_coordinator import MemoryCoordinator
+
+    coord = MemoryCoordinator()
+    target = tmp_path / "sub" / "x.jsonl"
+    monkeypatch.setenv(RO, "1")
+    with coord.lock(target):
+        pass
+    with coord.lock(target, read_only=True):
+        pass
+    assert names(tmp_path) == []
+    monkeypatch.delenv(RO)
+    with coord.lock(target):
+        pass
+    assert (tmp_path / "sub" / "x.jsonl.lock").exists()
+
+
+def test_findings_vector_sync_returns_false_when_skipped(tmp_path, monkeypatch):
+    from nexus.research.findings_vector_sync import MemoryRepositoryFindingsVectorSync
+
+    class _Repo:
+        def semantic_dedup_ingest(self, table, payload):
+            return MemoryRepository(tmp_path / "db").semantic_dedup_ingest(table, dict(payload))
+
+    class _Registry:
+        def repository_for(self, **kwargs):
+            return _Repo()
+
+    sync = MemoryRepositoryFindingsVectorSync(tmp_path, registry=_Registry())
+    monkeypatch.setenv(RO, "1")
+    assert sync.sync({"content": "c"}) is False
+    assert names(tmp_path) == []

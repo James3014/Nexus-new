@@ -554,6 +554,9 @@
 | tests/test_v18_legacy_delivery.py | No direct import of core/services/engine found |
 | tests/test_llm_token_regex.py | No direct import of core/services/engine found |
 | tests/services/test_findings_embedding.py | tests/services/test_findings_embedding.py | active | medium | test_contract |
+| nexus/core/memory_coordinator.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/research/findings_vector_sync.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
+| nexus/services/memory.py | tests/core/test_state_read_only_p1_writers_2721.py | active | high | state_read_only_p1_writers |
 | nexus/services/memory_repository.py | tests/core/test_state_read_only_p1_writers_2721.py, tests/services/test_memory_repository_schema.py | active | high | state_read_only_p1_writers |
 | tests/core/test_state_read_only_p1_writers_2721.py | tests/core/test_state_read_only_p1_writers_2721.py | active | medium | test_contract |
 | tests/services/test_memory_repository_schema.py | tests/services/test_memory_repository_schema.py | active | medium | test_contract |

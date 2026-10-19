@@ -48,7 +48,8 @@ class MemoryRepositoryFindingsVectorSync:
         if not payload.get("content") and payload.get("body"):
             payload = dict(payload)
             payload["content"] = payload["body"]
-        repo.semantic_dedup_ingest("findings_cards", payload)
+        if repo.semantic_dedup_ingest("findings_cards", payload) == "SKIPPED_READ_ONLY":
+            return False  # #2721: nothing was synced
         return True
 
 
