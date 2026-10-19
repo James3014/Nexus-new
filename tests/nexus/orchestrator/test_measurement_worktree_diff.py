@@ -54,7 +54,25 @@ def _index_bytes(worktree) -> bytes:
 
 def _is_snapshot_git(args) -> bool:
     safe = list(mwd._GIT_SAFE_CONFIG)
-    return list(args[1 : 1 + len(safe)]) == safe
+    return str(args[1]).startswith("--attr-source=") and list(args[2 : 2 + len(safe)]) == safe
+
+
+def _shared_rule_diff(worktree, base) -> bytes:
+    """Reference for the shared rule: base attributes, no global/system config."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(
+            GIT_INDEX_FILE=str(Path(tmp) / "index"),
+            GIT_CONFIG_NOSYSTEM="1",
+            GIT_CONFIG_GLOBAL="/dev/null",
+        )
+        attr = f"--attr-source={base}"
+        _git(worktree, attr, "read-tree", base, env=env)
+        _git(worktree, attr, "add", "-A", "--", ".", env=env)
+        return _git(
+            worktree, attr, "diff", "--cached", "--binary", "--no-color", "--no-ext-diff",
+            "--no-textconv", base, env=env,
+        )  # fmt: skip
 
 
 def _controller(h) -> str:
@@ -248,24 +266,74 @@ def test_raising_worker_still_records_diff_and_reraises(harness, monkeypatch):
     assert "new_file.py" in state["measurement_worktree_diff"]
 
 
-def test_resume_does_not_overwrite_existing_snapshot(harness, monkeypatch):
+def test_reinvoked_worker_overwrites_snapshot(harness, monkeypatch):
     monkeypatch.setattr(mwd, "MEASUREMENT_WORKTREE_DIFF_AT_START", True)
     monkeypatch.setattr(harness.service.worker_registry, "invoke", _invoke_editing())
     assert harness.run() == {"finalized": True}
-    first = harness.seen["state"]["measurement_worktree_diff"]
-    assert "+worker edit" in first  # the first run did take the snapshot
-    assert harness.seen["state"]["measurement_worktree_diff_attempt_id"] == harness.attempt_id
+    first = harness.seen["state"]
+    assert "+worker edit" in first["measurement_worktree_diff"]
+    assert "second_run.py" not in first["measurement_worktree_diff"]
 
-    # The same invocation re-runs (resume): the worker changes more, the
-    # snapshot of that invocation stays as first recorded.
+    # A resume that really re-invokes the worker (same invocation number):
+    # the worker edits more, and the snapshot is the diff after that run.
     def invoke_again(provider, contract, lease, **kwargs):
         Path(lease.target_worktree, "second_run.py").write_text("x = 2\n")
         return _m3c_receipt(contract.task_id, lease.target_worktree)
 
     monkeypatch.setattr(harness.service.worker_registry, "invoke", invoke_again)
     assert harness.run() == {"finalized": True}
-    assert harness.seen["state"]["measurement_worktree_diff"] == first
-    assert "second_run.py" not in harness.seen["state"]["measurement_worktree_diff"]
+    second = harness.seen["state"]
+    assert (
+        second["measurement_worktree_diff_invocation"]
+        == first["measurement_worktree_diff_invocation"]
+    )
+    assert "second_run.py" in second["measurement_worktree_diff"]
+    assert "+worker edit" in second["measurement_worktree_diff"]
+    assert second["measurement_worktree_diff_sha256"] != first["measurement_worktree_diff_sha256"]
+    assert (
+        second["measurement_worktree_diff"]
+        == _shared_rule_diff(harness.lease.target_worktree, harness.lease.initial_head).decode()
+    )
+
+
+def test_earlier_persist_failed_does_not_block_later_capture(harness, monkeypatch):
+    monkeypatch.setattr(mwd, "MEASUREMENT_WORKTREE_DIFF_AT_START", True)
+    state = harness.service._read_state(harness.contract.task_id)
+    assert state is not None
+    state.update(
+        measurement_worktree_diff_error="persist_failed",
+        measurement_worktree_diff_attempt_id=harness.attempt_id,
+        measurement_worktree_diff_invocation=0,
+    )
+    harness.service._write_state(harness.contract.task_id, state)
+    monkeypatch.setattr(harness.service.worker_registry, "invoke", _invoke_editing())
+    assert harness.run() == {"finalized": True}
+    seen = harness.seen["state"]
+    assert "+worker edit" in seen["measurement_worktree_diff"]
+    assert "measurement_worktree_diff_error" not in seen
+
+
+def test_failed_later_invocation_clears_earlier_diff(harness, monkeypatch):
+    monkeypatch.setattr(mwd, "MEASUREMENT_WORKTREE_DIFF_AT_START", True)
+    _edit_target(harness.lease.target_worktree)
+    _record(harness, invocation=0)
+    state = harness.service._read_state(harness.contract.task_id)
+    assert state is not None and "+worker edit" in state["measurement_worktree_diff"]
+    real_run = subprocess.run
+
+    def failing_git(args, **kwargs):
+        if _is_snapshot_git(args):
+            return subprocess.CompletedProcess(args, 128)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(mwd.subprocess, "run", failing_git)
+    _record(harness, invocation=1)
+    state = harness.service._read_state(harness.contract.task_id)
+    assert state is not None
+    assert state["measurement_worktree_diff_error"] == "git_failed:read_tree"
+    assert state["measurement_worktree_diff_invocation"] == 1
+    for key in ("", "_sha256", "_bytes", "_truncated", "_lossy"):
+        assert "measurement_worktree_diff" + key not in state
 
 
 def test_git_failure_records_error_and_outcome_is_unchanged(harness, monkeypatch, tmp_path):
@@ -351,13 +419,13 @@ def test_git_runs_hardened(harness, monkeypatch):
     values = _capture(harness)
     assert values["measurement_worktree_diff"] == ""
     safe = list(mwd._GIT_SAFE_CONFIG)
-    assert safe[0] == "--attr-source=4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-    assert [args[1 + len(safe)] for args, _ in calls] == ["read-tree", "add", "diff"]
+    assert all(args[1] == f"--attr-source={harness.lease.initial_head}" for args, _ in calls)
+    assert [args[2 + len(safe)] for args, _ in calls] == ["read-tree", "add", "diff"]
     assert "--no-textconv" in calls[2][0] and "--no-ext-diff" in calls[2][0]
     worktree = Path(harness.lease.target_worktree).resolve()
     common = Path(harness.contract.controller_repo_root).resolve() / ".git"
     for args, kwargs in calls:
-        assert args[1 : 1 + len(safe)] == safe
+        assert args[2 : 2 + len(safe)] == safe
         env = kwargs["env"]
         assert sorted(k for k in env if k.startswith("GIT_")) == [
             "GIT_ATTR_NOSYSTEM",
@@ -533,7 +601,7 @@ def _record(harness, invocation=0):
     )
 
 
-def test_escalated_worker_replaces_snapshot_but_same_invocation_does_not(monkeypatch):
+def test_every_worker_return_rewrites_snapshot(monkeypatch):
     monkeypatch.setattr(mwd, "MEASUREMENT_WORKTREE_DIFF_AT_START", True)
     store: dict[str, dict] = {"t": {"attempt_id": "a", "measurement_worktree_diff": "first",
                    "measurement_worktree_diff_invocation": 0,
@@ -562,9 +630,10 @@ def test_escalated_worker_replaces_snapshot_but_same_invocation_does_not(monkeyp
             invocation=invocation,
         )
 
-    record(0)
-    assert store["t"]["measurement_worktree_diff"] == "first" and captured == []
-    record(1)
+    record(0)  # a re-invoke under the same invocation number rewrites
+    assert store["t"]["measurement_worktree_diff"] == "second" and len(captured) == 1
+    store["t"]["measurement_worktree_diff"] = "first"
+    record(1)  # an escalated worker rewrites
     assert store["t"]["measurement_worktree_diff"] == "second"
     assert store["t"]["measurement_worktree_diff_invocation"] == 1
     # Another attempt's state is never written.
@@ -665,9 +734,79 @@ def test_persist_failed_fallback_never_lands_on_another_attempt(monkeypatch):
     mwd.record_after_worker(attempt_id="mine", **kwargs)  # pyright: ignore[reportArgumentType]
     assert store["t"]["measurement_worktree_diff_error"] == "persist_failed"
     assert store["t"]["measurement_worktree_diff_attempt_id"] == "mine"
-    # A recorded snapshot of this attempt is not replaced by a later fallback.
-    store["t"].update(measurement_worktree_diff="kept")
+    # A later failed write clears a stale diff of this attempt, never keeps it.
+    store["t"].update(measurement_worktree_diff="stale", measurement_worktree_diff_sha256="x")
     store["t"].pop("measurement_worktree_diff_error")
     mwd.record_after_worker(attempt_id="mine", **kwargs)  # pyright: ignore[reportArgumentType]
-    assert store["t"]["measurement_worktree_diff"] == "kept"
-    assert "measurement_worktree_diff_error" not in store["t"]
+    assert store["t"]["measurement_worktree_diff_error"] == "persist_failed"
+    assert "measurement_worktree_diff" not in store["t"]
+    assert "measurement_worktree_diff_sha256" not in store["t"]
+
+
+def _registration(harness) -> Path:
+    dotgit = Path(harness.lease.target_worktree) / ".git"
+    gitdir = Path(dotgit.read_text().split(":", 1)[1].strip())
+    return gitdir if gitdir.is_absolute() else (dotgit.parent / gitdir).resolve()
+
+
+def test_registration_commondir_elsewhere_is_refused(harness, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    commondir = _registration(harness) / "commondir"
+    original = commondir.read_text()
+    commondir.write_text(str(other / ".git") + "\n")
+    with pytest.raises(mwd.MeasurementDiffError, match="gitdir_untrusted"):
+        _capture(harness)
+    commondir.write_text(original)
+    assert _capture(harness)["measurement_worktree_diff"] == ""
+
+
+def test_registration_back_pointer_elsewhere_is_refused(harness, tmp_path):
+    back = _registration(harness) / "gitdir"
+    original = back.read_text()
+    back.write_text(str(tmp_path / "elsewhere" / ".git") + "\n")
+    with pytest.raises(mwd.MeasurementDiffError, match="gitdir_untrusted"):
+        _capture(harness)
+    back.write_text(original)
+    assert _capture(harness)["measurement_worktree_diff"] == ""
+
+
+def _commit_base_attributes(harness, text: str) -> str:
+    """A base commit (on the Target branch) whose tree carries ``.gitattributes``."""
+    worktree = harness.lease.target_worktree
+    Path(worktree, ".gitattributes").write_text(text)
+    _git(worktree, "-c", "core.hooksPath=/dev/null", "add", ".gitattributes")
+    _git(
+        worktree, "-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c",
+        "user.email=t@example.test", "commit", "-q", "-m", "attributes",
+    )  # fmt: skip
+    return _git(worktree, "rev-parse", "HEAD").decode().strip()
+
+
+def test_base_attributes_match_shared_rule_for_eol_and_binary(harness):
+    worktree = harness.lease.target_worktree
+    base = _commit_base_attributes(harness, "* text=auto eol=lf\n*.bin -diff\n")
+    Path(worktree, "crlf.txt").write_bytes(b"one\r\ntwo\r\n")
+    Path(worktree, "blob.bin").write_bytes(b"plain text marked binary\n")
+    reference = _shared_rule_diff(worktree, base)
+    assert b"\r" not in reference  # text=auto normalized CRLF
+    assert b"GIT binary patch" in reference  # -diff emitted a binary patch
+    values = mwd.capture_worktree_diff(worktree, base, controller_root=_controller(harness))
+    assert values["measurement_worktree_diff"].encode() == reference
+    assert values["measurement_worktree_diff_sha256"] == hashlib.sha256(reference).hexdigest()
+
+
+def test_worker_gitattributes_cannot_name_controller_filter(harness, tmp_path):
+    worktree = harness.lease.target_worktree
+    base = _commit_base_attributes(harness, "*.md text\n")
+    marker = tmp_path / "filter-ran"
+    _git(worktree, "config", "filter.ctl.clean", f"touch {marker}; cat")  # Controller config
+    Path(worktree, ".gitattributes").write_text("*.txt filter=ctl\n")  # worker-written
+    Path(worktree, "payload.txt").write_text("payload\n")
+    values = mwd.capture_worktree_diff(worktree, base, controller_root=_controller(harness))
+    assert not marker.exists()
+    assert "+payload" in values["measurement_worktree_diff"]
+    # Control: with the worktree's attributes (plain git), the filter runs.
+    _bare_arm_diff(worktree, base)
+    assert marker.exists()

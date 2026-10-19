@@ -11,16 +11,19 @@ Gateway never sets it, so for live nothing here runs: no git command, no new
 task-state key.  A worker child process inherits the start-time value, never a
 value set later in the parent (``align_child_env``).
 
-The diff is computed exactly like the bare arm's ``capture_diff``
-(``scripts/bench/measure_2721/common.py``): a throwaway ``GIT_INDEX_FILE`` in a
-temporary directory, ``read-tree <base>``, ``add -A -- .``, then
-``diff --cached --binary --no-color --no-ext-diff <base>``.  The worktree's own
+The diff follows the shared measurement rule (base attributes, no global
+config), which workspace-b6 is adopting for the bare arm: a throwaway
+``GIT_INDEX_FILE`` in a temporary directory, ``read-tree <base>``,
+``add -A -- .``, then ``diff --cached --binary --no-color --no-ext-diff
+--no-textconv <base>``, every call with ``--attr-source=<base>``.  The worktree's own
 index and files are untouched.  Before any git call the Target is checked in
 Python: its ``.git`` file must point at ``<Controller common dir>/worktrees/
 <name>`` (Controller from the task contract), else ``gitdir_untrusted``.  git
 then runs with ``GIT_DIR``/``GIT_WORK_TREE`` pinned to those trusted paths and
-hardened: no worktree attributes (``--attr-source`` is the empty tree, so no
-filter, textconv or eol conversion; ``--no-textconv``), no fsmonitor, hooks or
+hardened: attributes come only from the trusted base tree
+(``--attr-source=<base>``; a worker-written ``.gitattributes`` is ignored, and
+filter definitions come only from the Controller config), no textconv, no
+attributes file or system attributes, no fsmonitor, hooks or
 transports, no other inherited ``GIT_*``, no system or global config, no
 prompt, stdin closed.  One 30 s budget covers every git call; the diff streams
 through a pipe, hashed as it arrives, and git is killed (by its PID) beyond
@@ -46,6 +49,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import selectors
 import subprocess
 import tempfile
@@ -65,12 +69,12 @@ MAX_DIFF_BYTES = 8 * 1024 * 1024
 # snapshot is recorded as ``too_large`` (the stored text is capped separately).
 MAX_TOTAL_DIFF_BYTES = 256 * 1024 * 1024
 GIT_TIME_BUDGET_SECONDS = 30.0
-_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-# ``--attr-source=<empty tree>`` makes git ignore every worktree
-# ``.gitattributes``, so no worker-written clean/smudge/process filter,
-# textconv or eol conversion can run while we capture (#2761 review).
+_REVISION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+# Every git call also gets ``--attr-source=<base>`` (the trusted base commit):
+# attributes come from the base tree, never from a worker-written
+# ``.gitattributes``, so the worker cannot name a filter or textconv while we
+# capture (#2761 review), and eol/binary handling matches the shared rule.
 _GIT_SAFE_CONFIG = (
-    f"--attr-source={_EMPTY_TREE}",
     "-c", "core.fsmonitor=false",
     "-c", "core.hooksPath=/dev/null",
     "-c", "protocol.allow=never",
@@ -212,17 +216,16 @@ def verify_target(worktree: str, controller_root: str) -> TrustedTarget:
     if dotgit.is_symlink() or not dotgit.is_file():
         raise MeasurementDiffError("gitdir_untrusted")
     gitdir = _read_gitdir_pointer(dotgit)
-    if (
-        gitdir is None
-        or gitdir.parent != common / "worktrees"
-        or not gitdir.is_dir()
-        or _common_dir(gitdir) != common
-    ):
+    if gitdir is None or gitdir.parent != common / "worktrees" or not gitdir.is_dir():
+        raise MeasurementDiffError("gitdir_untrusted")
+    # The registration's commondir must be the Controller's own.
+    if _common_dir(gitdir) != common:
         raise MeasurementDiffError("gitdir_untrusted")
     try:
         back = Path((gitdir / "gitdir").read_text(encoding="utf-8").strip())
     except (OSError, UnicodeDecodeError) as exc:
         raise MeasurementDiffError("gitdir_untrusted") from exc
+    # The registration must point back at this Target.
     if (gitdir / back).resolve() != dotgit:
         raise MeasurementDiffError("gitdir_untrusted")
     for directory in (gitdir, common):
@@ -236,6 +239,7 @@ def verify_target(worktree: str, controller_root: str) -> TrustedTarget:
 
 def _run_git(
     worktree: str,
+    attr_source: str,
     args: list[str],
     env: Mapping[str, str],
     deadline: float,
@@ -246,7 +250,7 @@ def _run_git(
         raise MeasurementDiffError("git_timeout")
     try:
         result = subprocess.run(
-            ["git", *_GIT_SAFE_CONFIG, *args],
+            ["git", f"--attr-source={attr_source}", *_GIT_SAFE_CONFIG, *args],
             cwd=worktree,
             env=dict(env),
             stdin=subprocess.DEVNULL,
@@ -265,6 +269,7 @@ def _run_git(
 
 def _stream_git(
     worktree: str,
+    attr_source: str,
     args: list[str],
     env: Mapping[str, str],
     deadline: float,
@@ -279,7 +284,7 @@ def _stream_git(
     """
     try:
         proc = subprocess.Popen(
-            ["git", *_GIT_SAFE_CONFIG, *args],
+            ["git", f"--attr-source={attr_source}", *_GIT_SAFE_CONFIG, *args],
             cwd=worktree,
             env=dict(env),
             stdin=subprocess.DEVNULL,
@@ -359,15 +364,18 @@ def capture_worktree_diff(
         time_budget_seconds = GIT_TIME_BUDGET_SECONDS
     if not base:
         raise MeasurementDiffError("base_missing")
+    if not _REVISION.match(base):
+        raise MeasurementDiffError("base_invalid")
     trusted = verify_target(worktree, controller_root)
     target = str(trusted.worktree)
     deadline = time.monotonic() + time_budget_seconds
     with tempfile.TemporaryDirectory(prefix="nexus-m2721-index-") as tmp:
         env = _git_env(str(Path(tmp) / "index"), trusted)
-        _run_git(target, ["read-tree", base], env, deadline, "read_tree")
-        _run_git(target, ["add", "-A", "--", "."], env, deadline, "add")
+        _run_git(target, base, ["read-tree", base], env, deadline, "read_tree")
+        _run_git(target, base, ["add", "-A", "--", "."], env, deadline, "add")
         head, sha256, total = _stream_git(
             target,
+            base,
             [
                 "diff", "--cached", "--binary", "--no-color", "--no-ext-diff",
                 "--no-textconv", base,
@@ -406,21 +414,20 @@ def record_after_worker(
 ) -> None:
     """Persist the snapshot for one worker invocation; never raises.
 
-    Write-once per attempt and invocation: a resumed run of the same
-    invocation keeps the first snapshot (or the first error).  ``invocation``
-    counts the execution receipts recorded before this worker ran, so a later
-    escalated worker (a fresh Target, the one P1 finalizes) replaces the
-    earlier snapshot.  A snapshot of another attempt never suppresses capture,
-    and nothing is ever written into another attempt's state.
+    Every return of ``WorkerRegistry.invoke`` is a real worker run, so each
+    call (re)writes the snapshot of the matching attempt, replacing every
+    earlier ``measurement_worktree_diff*`` field (an earlier diff, error or
+    ``persist_failed``).  A resume that does not re-invoke the worker never
+    reaches this function.  ``invocation`` (execution receipts recorded before
+    this worker ran) and the attempt id are kept as metadata.  Nothing is ever
+    written into another attempt's state.
     """
     if not MEASUREMENT_WORKTREE_DIFF_AT_START or not task_id:
         return
     attempt = str(attempt_id or "")
 
     def writable(current: Mapping[str, Any]) -> bool:
-        if str(current.get("attempt_id") or "") != attempt:
-            return False
-        return not _already_recorded(current, attempt, invocation)
+        return str(current.get("attempt_id") or "") == attempt
 
     def write(current: dict[str, Any], values: Mapping[str, Any]) -> None:
         if not writable(current):
@@ -465,14 +472,3 @@ def record_after_worker(
             )
         except Exception:  # noqa: BLE001
             pass
-
-
-def _already_recorded(state: Mapping[str, Any], attempt_id: str, invocation: int) -> bool:
-    """A snapshot (or error) of this attempt at this or a later invocation exists."""
-    if DIFF_KEY not in state and ERROR_KEY not in state:
-        return False
-    if str(state.get(ATTEMPT_KEY) or "") != attempt_id:
-        return False
-    recorded = state.get(INVOCATION_KEY)
-    recorded = recorded if isinstance(recorded, int) and not isinstance(recorded, bool) else 0
-    return recorded >= invocation
