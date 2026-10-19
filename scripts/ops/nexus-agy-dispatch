@@ -1866,6 +1866,7 @@ def run_agy(
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
     write_boundary: Any = None,
+    lease_fd: int | None = None,
 ):
     expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
     if mode == "accept-edits":
@@ -1943,6 +1944,9 @@ def run_agy(
             text=True,
             bufsize=1,
             start_new_session=True,
+            # #2717: the provider inherits the per-account lease lock, so the
+            # account stays locked while any provider outlives this dispatcher.
+            pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd > 2 else (),
         )
     except BaseException:
         if log_relay is not None:
@@ -5154,6 +5158,12 @@ def dispatch_run(
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary
+                lease_lock_obj = getattr(claim, "lock_file_obj", None)
+                if lease_lock_obj is not None and _runner_accepts(runner, "lease_fd"):
+                    try:
+                        runner_kwargs["lease_fd"] = int(lease_lock_obj.fileno())
+                    except (OSError, ValueError, TypeError):
+                        pass
                 try:
                     code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
                 except Exception as runner_exc:
@@ -6448,6 +6458,63 @@ def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
 
 
+class _ForegroundSignalExit(BaseException):
+    """Raised by the foreground signal handler so ``finally`` cleanup runs (#2717)."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signum)
+
+
+_FOREGROUND_CLEANUP_SIGNALS = tuple(
+    sig for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if sig
+)
+
+
+def _run_foreground_with_signal_cleanup(func: Any, **kwargs: Any) -> int:
+    """Run a foreground dispatch so SIGTERM/SIGHUP unwind through cleanup.
+
+    Python's default SIGTERM/SIGHUP action kills the interpreter without running
+    ``finally`` blocks, which orphaned the provider (own session) and left the
+    lease receipt behind (#2717).  Converting the signal into an exception lets
+    ``run_agy`` stop the provider group and ``dispatch_run`` release the claim.
+    Only installed on the main thread; prior handlers are restored afterwards.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return func(**kwargs)
+
+    def _handler(signum: int, _frame: Any) -> None:
+        # One-shot: a repeated signal must not interrupt the cleanup itself.
+        for sig in _FOREGROUND_CLEANUP_SIGNALS:
+            try:
+                signal.signal(sig, signal.SIG_IGN)
+            except (OSError, ValueError):
+                pass
+        raise _ForegroundSignalExit(signum)
+
+    prior: dict[int, Any] = {}
+    try:
+        for sig in _FOREGROUND_CLEANUP_SIGNALS:
+            prior[sig] = signal.getsignal(sig)
+            signal.signal(sig, _handler)
+        return func(**kwargs)
+    except _ForegroundSignalExit as exc:
+        try:
+            emit_meta({
+                "status": "failed",
+                "failure_kind": f"FOREGROUND_SIGNAL:{signal.Signals(exc.signum).name}",
+            })
+        except Exception:
+            pass
+        return 128 + int(exc.signum)
+    finally:
+        for sig, handler in prior.items():
+            try:
+                signal.signal(sig, handler)
+            except (OSError, ValueError, TypeError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Quota-aware direct Agy dispatcher using the existing Nexus account pool."
@@ -6667,7 +6734,8 @@ def main(argv: list[str] | None = None) -> int:
         _print_operation(record)
         return 0
 
-    return dispatch_run(
+    return _run_foreground_with_signal_cleanup(
+        dispatch_run,
         prompt=prompt,
         cwd=cwd,
         mode=args.mode,

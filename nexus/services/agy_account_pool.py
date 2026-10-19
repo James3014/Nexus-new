@@ -1304,7 +1304,19 @@ class CrossProcessLeaseCoordinator:
                             # held the inherited lock, then the child exited
                             # later.  Never overwrite that unresolved receipt;
                             # explicit reconciliation must remove it first.
-                            if receipt_path.exists():
+                            #
+                            # #2717 exception: receipts written by
+                            # nexus-agy-dispatch (``desktop-`` consumer; the
+                            # foreground path has no operation journal, so
+                            # nothing else would ever remove them).  Its
+                            # provider inherits the per-account lock, so a
+                            # free lock plus a dead owner PID with a matching
+                            # identity proves nothing still runs on the
+                            # account; remove that receipt and claim normally.
+                            # Journal reconcilers accept ALREADY_ABSENT.
+                            if receipt_path.exists() and not _reclaim_orphaned_desktop_receipt(
+                                receipt_path, candidate.alias_hash
+                            ):
                                 try:
                                     lock_obj.close()
                                 except OSError:
@@ -1464,6 +1476,58 @@ class CrossProcessLeaseCoordinator:
 
 
 _GLOBAL_POOL_MANAGER: Optional[AgyAccountPoolManager] = None
+
+
+DESKTOP_DISPATCH_CONSUMER_PREFIX = "desktop-"
+
+
+def _pid_is_dead(pid: int) -> bool:
+    """True only when ``pid`` provably no longer exists (fail closed otherwise)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _reclaim_orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: str) -> bool:
+    """Remove an orphaned foreground-desktop receipt; caller holds the account flock.
+
+    Returns True only when the receipt was removed.  Any ambiguity (unreadable
+    receipt, identity mismatch, non-desktop consumer, live or unprovable owner
+    PID) preserves the receipt so the account stays fail-closed (#2717).
+    """
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(receipt, dict):
+        return False
+    pid = receipt.get("pid")
+    consumer_id = receipt.get("consumer_id")
+    if (
+        receipt.get("account_alias_hash") != account_alias_hash
+        or not isinstance(consumer_id, str)
+        or not consumer_id.startswith(DESKTOP_DISPATCH_CONSUMER_PREFIX)
+        or not isinstance(pid, int)
+        or isinstance(pid, bool)
+        or pid <= 0
+        or pid == os.getpid()
+        or not _pid_is_dead(pid)
+    ):
+        return False
+    try:
+        receipt_path.unlink()
+    except OSError:
+        return False
+    _LOG.warning(
+        "AGY_ORPHANED_DESKTOP_RECEIPT_RECLAIMED account=%s lease=%s",
+        account_alias_hash,
+        receipt.get("lease_id_hash"),
+    )
+    return True
 
 
 def get_account_pool_manager() -> AgyAccountPoolManager:
