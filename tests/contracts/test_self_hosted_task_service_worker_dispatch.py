@@ -1372,6 +1372,14 @@ def test_materialization_fresh_submission_exact_flow(ctx, stubs) -> None:
             "controller_revision": "c" * 40,
         },
         "codeintel": PLANNER["context"]["codeintel"],
+        # #2734: the pre-execution gates are recorded, never shown to the worker.
+        "receipt_only_capabilities": (
+            "pregate",
+            "plan_quality_gate",
+            "mempalace_gate",
+            "harness_preflight_sensor",
+            "mempalace",
+        ),
     }
     assert list(materialize["capability_context"]) == [
         "task_id",
