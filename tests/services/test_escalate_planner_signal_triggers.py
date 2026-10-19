@@ -224,3 +224,41 @@ def test_forwarded_route_signals_pass_the_canonical_planning_seam() -> None:
 
     assert snapshot["doc_scout_hits"] == 2
     assert snapshot["risk_score_0_100"] == 72
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "signal"),
+    [({"xray_signal": True}, "xray_signal"), ({"cross_module": True, "risk_score": 60}, "cross_module")],
+)
+def test_xray_fires_on_the_planners_deep_scan_selection(snapshot, signal) -> None:
+    """#2688: xray was selected on high-risk cross-module tasks but always skipped."""
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
+
+    receipt = invoker(_context("xray", reasons=["deep_scan_or_dependency_signal"], snapshot=snapshot))
+
+    assert calls == ["sprint-abc-s0-a1"]
+    assert receipt["trigger_source"] == f"{PLANNER_SIGNAL_TRIGGER_SOURCE}:{signal}"
+
+
+def test_xray_needs_the_planners_deep_scan_reason() -> None:
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("xray", real_invoker=_real(calls))
+
+    receipt = invoker(
+        _context("xray", reasons=["available_but_not_selected"], snapshot={"cross_module": True})
+    )
+
+    assert calls == [] and receipt["skip_reason"] == SKIP_POLICY_NOT_TRIGGERED
+
+
+def test_hyper_sprint_flow_name_triggers_the_gate() -> None:
+    """route_decider/planner emit "hyper_sprint"; the gate only accepted "hyper" (#2688)."""
+    calls: list[str] = []
+    invoker = build_escalate_gated_invoker("hyper", real_invoker=_real(calls))
+    context = _context("hyper", reasons=[], snapshot={}, selected=False)
+    context["route"]["recommended_flow"] = "hyper_sprint"
+
+    invoker(context)
+
+    assert calls == ["sprint-abc-s0-a1"]
