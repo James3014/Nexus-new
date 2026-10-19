@@ -31,10 +31,12 @@ from scripts.bench.measure_2721.common import (
     sha256_text,
     write_json,
 )
+from scripts.bench.measure_2721.leakage import FLAG_TIMEOUT, lookup_signals
 from scripts.bench.measure_2721.materialize import checkout_base
 from scripts.bench.measure_2721.providers import (
     STATUS_INFRA,
     STATUS_OK,
+    STATUS_TIMEOUT,
     Provider,
     ProviderResult,
     build_provider,
@@ -79,7 +81,21 @@ def input_capture(arm: str, task: Mapping[str, Any], repeat: int, run_id: str, *
         "base_prompt": prompt,
         "base_prompt_sha256": sha256_text(prompt) if prompt is not None else None,
         "timeout_seconds": timeout_seconds,
+        "agy_run_settings": agy_run_settings_in_effect(),
     }
+
+
+def agy_run_settings_in_effect() -> Any:
+    """The Agy run settings this host's Nexus code writes for an implementation run.
+
+    Both arms must run under the same settings (e.g. the web-fetch deny rules);
+    the NEXUS value is authoritative only when the driver runs on the Gateway host.
+    """
+    try:
+        from nexus.executors.agy_write_admission import agy_run_settings
+    except Exception:  # pragma: no cover - outside a Nexus venv
+        return None
+    return agy_run_settings(read_only=False)
 
 
 def candidate_facts(diff: str, task: Mapping[str, Any]) -> dict[str, Any]:
@@ -113,9 +129,15 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     diff_path = run_root / "diffs" / f"{run_id}.diff"
     diff_path.parent.mkdir(parents=True, exist_ok=True)
     diff_path.write_text(diff, encoding="utf-8")
+    extra = result.extra or {}
+    lookup = lookup_signals([extra.get("response_text") or "", extra.get("stderr_tail") or ""],
+                            repo=task.get("repo", ""), denied_actions=extra.get("denied_actions") or ())
+    flags = [flag for flag in (FLAG_TIMEOUT if result.status == STATUS_TIMEOUT else None, lookup["flag"]) if flag]
     row = {
         "schema": ROW_SCHEMA,
         "arm": ARM_BARE,
+        "flags": flags,
+        "lookup": lookup,
         "run_id": run_id,
         "task_id": task["task_id"],
         "repeat": repeat,
@@ -150,6 +172,7 @@ def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, 
     row = {
         "schema": ROW_SCHEMA,
         "arm": ARM_NOOP,
+        "flags": [],
         "run_id": run_id,
         "task_id": task["task_id"],
         "repeat": repeat,

@@ -44,6 +44,7 @@ from scripts.bench.measure_2721.arms import (
     task_prompt,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_json
+from scripts.bench.measure_2721.leakage import FLAG_TIMEOUT, lookup_signals
 
 LIVE_GATEWAY_PORT = 8766
 NEXUS_REPO = "James3014/Nexus-new"
@@ -261,7 +262,8 @@ class NexusArmDriver:
             final = self._wait(gw_task, started + timeout_seconds + 600.0, transcript)
             status = self.client.call("nexus_task_status", {"task_id": gw_task})
             transcript.append({"tool": "nexus_task_status", "result": status})
-            row.update(self._collect(gw_task, status, final, self._controller_for(task, external)))
+            row.update(self._collect(gw_task, status, final, self._controller_for(task, external),
+                                     repo=str(task.get("repo") or "")))
             diff = row.pop("_diff", "")
         except GatewayToolError as exc:
             message = json.dumps(exc.payload)
@@ -328,7 +330,7 @@ class NexusArmDriver:
         return self._external_repo_root(task) if external else self.controller_git
 
     def _collect(self, gw_task: str, status: Mapping[str, Any], final: Mapping[str, Any],
-                 controller: Optional[Path]) -> dict[str, Any]:
+                 controller: Optional[Path], *, repo: str = "") -> dict[str, Any]:
         state = {**status, **self._read_state(gw_task)}
         materialization = state.get("worker_model_context_materialization") or {}
         error = json.dumps(state.get("error") or state.get("blocker") or "")
@@ -339,7 +341,16 @@ class NexusArmDriver:
             diff = git(controller, "diff", "--binary", "--no-color", "--no-ext-diff", base, candidate)
         telemetry = state.get("telemetry") or {}
         infra = _is_infra(error) and not candidate
+        # Only the worker's own execution evidence is scanned (the redacted
+        # stdout/stderr tails the Gateway keeps); a lower bound on web use.
+        worker_texts = [json.dumps(state.get(key), default=str) for key in
+                        ("execution", "executions", "execution_outcome", "error") if state.get(key) is not None]
+        lookup = lookup_signals(worker_texts, repo=repo)
+        timed_out = bool((final.get("wait") or {}).get("timed_out")) or "timed_out\": true" in " ".join(worker_texts)
+        flags = [flag for flag in (FLAG_TIMEOUT if timed_out else None, lookup["flag"]) if flag]
         return {
+            "flags": flags,
+            "lookup": lookup,
             "_diff": diff,
             "outcome": OUTCOME_INFRA if infra else OUTCOME_DONE,
             "infra": infra,

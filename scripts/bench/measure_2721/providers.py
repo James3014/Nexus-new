@@ -67,16 +67,20 @@ class FakeProvider:
 
     name = "fake"
 
-    def __init__(self, edit: Optional[Callable[[Path, str], None]] = None, model: str = "fake-no-model"):
+    def __init__(self, edit: Optional[Callable[[Path, str], None]] = None, model: str = "fake-no-model",
+                 status: str = STATUS_OK, extra: Optional[dict[str, Any]] = None):
         self.edit = edit
         self.model = model
+        self.status = status
+        self.extra = dict(extra or {})
         self.prompts: list[dict[str, str]] = []
 
     def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
         self.prompts.append({"run_id": run_id, "prompt": prompt, "workdir": str(workdir)})
         if self.edit is not None:
             self.edit(Path(workdir), prompt)
-        return ProviderResult(status=STATUS_OK, provider=self.name, model=self.model, model_calls=0)
+        return ProviderResult(status=self.status, provider=self.name, model=self.model, model_calls=0,
+                              timed_out=self.status == STATUS_TIMEOUT, extra=dict(self.extra))
 
 
 class AgyPoolProvider:
@@ -141,8 +145,9 @@ class AgyPoolProvider:
         final = next((r for r in observed if r.stdout_sha256 == receipt.stdout_sha256), None)
         stdout = final.stdout.decode("utf-8", errors="replace") if final is not None else ""
         stderr = final.stderr.decode("utf-8", errors="replace") if final is not None else ""
-        tokens, token_status, _ = _agy_envelope_tokens(stdout)
+        tokens, token_status, response = _agy_envelope_tokens(stdout)
         common = dict(
+            extra=run_evidence(stdout, stderr, response),
             model_calls=int(receipt.provider_attempt_count or 0),
             total_tokens=tokens,
             token_status=token_status,
@@ -169,6 +174,21 @@ class AgyPoolProvider:
                                       failure_reason=str(receipt.failure_reason or ""), **common)
             return ProviderResult(status=STATUS_MODEL_FAILED, failure_reason=str(receipt.failure_reason or ""), **common)
         return ProviderResult(status=STATUS_OK, **common)
+
+
+def run_evidence(stdout: str, stderr: str, response: str) -> dict[str, Any]:
+    """What the run shows of its tool use (the json envelope has no full trace)."""
+    denied: list[dict[str, Any]] = []
+    try:
+        from nexus.executors.agy_write_admission import top_level_json_objects
+
+        for item in top_level_json_objects(stdout):
+            for action in item.get("denied_actions") or []:
+                if isinstance(action, dict):
+                    denied.append({"action": action.get("action"), "display_name": action.get("display_name")})
+    except Exception:  # pragma: no cover - evidence is best effort, never a failure
+        pass
+    return {"response_text": response[-20000:], "denied_actions": denied, "stderr_tail": stderr[-4000:]}
 
 
 def build_provider(name: str) -> Provider:

@@ -314,3 +314,93 @@ def test_agy_provider_fails_closed_without_the_pool(monkeypatch, tmp_path):
     result = AgyPoolProvider().run(prompt="p", workdir=tmp_path, timeout_seconds=1, run_id="r")
     assert result.status == STATUS_INFRA and result.model_calls == 0
     assert result.model == "gemini-3.8-flash-medium"
+
+
+# -- prereg v0.2 §8: test-hunk stripping, timeout flag, UPSTREAM_LOOKUP -----------
+
+from scripts.bench.measure_2721 import leakage  # noqa: E402
+
+_MIXED_DIFF = (
+    "diff --git a/sympy/core/add.py b/sympy/core/add.py\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n"
+    "@@ -1 +1 @@\n-a\n+b\n"
+    "diff --git a/sympy/core/tests/test_add.py b/sympy/core/tests/test_add.py\nnew file mode 100644\n"
+    "--- /dev/null\n+++ b/sympy/core/tests/test_add.py\n@@ -0,0 +1 @@\n+x\n"
+    "diff --git a/sympy/conftest.py b/sympy/conftest.py\n--- a/sympy/conftest.py\n+++ b/sympy/conftest.py\n"
+    "@@ -1 +1 @@\n-c\n+d\n"
+)
+
+
+def test_strip_test_hunks_keeps_only_source_blocks():
+    kept, removed = leakage.strip_test_hunks(_MIXED_DIFF)
+    assert removed == ["sympy/core/tests/test_add.py", "sympy/conftest.py"]
+    assert "sympy/core/add.py" in kept and "test_add" not in kept and "conftest" not in kept
+    assert kept.startswith("diff --git a/sympy/core/add.py") and kept.endswith("+b\n")
+    assert leakage.strip_test_hunks("") == ("", [])
+
+
+def test_strip_test_hunks_catches_a_rename_out_of_a_test_dir():
+    diff = ("diff --git a/pkg/tests/helper.py b/pkg/helper.py\nsimilarity index 100%\n"
+            "rename from pkg/tests/helper.py\nrename to pkg/helper.py\n")
+    assert leakage.strip_test_hunks(diff) == ("", ["pkg/helper.py"])
+
+
+def test_lookup_signals_flags_web_tools_denials_and_upstream_urls():
+    clean = leakage.lookup_signals(["I edited sympy/core/add.py."], repo="sympy/sympy")
+    assert clean["flag"] is None
+    used = leakage.lookup_signals(["| `search_web` | Succeeded |"], repo="sympy/sympy")
+    assert used["flag"] == leakage.FLAG_UPSTREAM_LOOKUP and used["web_tools_seen"] == ["search_web"]
+    denied = leakage.lookup_signals([""], denied_actions=[{"action": "read_url", "display_name": "ReadUrlContent"}])
+    assert denied["flag"] == leakage.FLAG_UPSTREAM_LOOKUP and denied["web_actions_denied"] == ["read_url"]
+    url = leakage.lookup_signals(["see https://github.com/sympy/sympy/pull/30748"], repo="sympy/sympy")
+    assert url["flag"] and url["upstream_urls_seen"] == ["github.com/sympy/sympy/pull/30748"]
+
+
+def test_task_text_tells_both_arms_not_to_touch_tests():
+    assert "Do not add or modify test files" in task_text.INSTRUCTION
+    assert not leakage.lookup_signals([task_text.INSTRUCTION])["flag"]
+
+
+def test_bare_row_flags_timeout_and_lookup_and_keeps_the_diff(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    provider = FakeProvider(edit=_edit, status="TIMEOUT",
+                            extra={"response_text": "used search_web", "denied_actions": [], "stderr_tail": ""})
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5)
+    assert row["outcome"] == "TIMEOUT" and not row["empty"]  # the worktree diff at the cap is kept
+    assert row["flags"] == [leakage.FLAG_TIMEOUT, leakage.FLAG_UPSTREAM_LOOKUP]
+
+
+def test_nexus_row_scans_worker_evidence_for_lookup(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name == "nexus_task_status":
+            payload["execution"] = {"stdout_tail": "tool read_url_content denied"}
+        return payload
+
+    gateway._answer = answer
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert leakage.FLAG_UPSTREAM_LOOKUP in row["flags"]
+
+
+def test_blinding_strips_test_blocks_and_records_it_only_in_the_arm_map(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+
+    def edit_with_test(workdir: Path, prompt: str) -> None:
+        _edit(workdir, prompt)
+        (workdir / "sympy/core/tests/test_mine.py").write_text("def test_mine():\n    assert True\n")
+
+    run = tmp_path / "run"
+    arms.run_bare(task, 1, run, FakeProvider(edit=edit_with_test), timeout_seconds=5)
+    out, arm_map = tmp_path / "blind", tmp_path / "b6" / "arm_map.json"
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(arm_map)])
+    (item,) = list(read_jsonl(out / "candidates.jsonl"))
+    scored = (out / "candidates" / f"{item['opaque_id']}.diff").read_text()
+    assert "test_mine" not in scored and "+    return a + b" in scored
+    entry = json.loads(arm_map.read_text())["map"][item["opaque_id"]]
+    assert entry["stripped_test_paths"] == ["sympy/core/tests/test_mine.py"]
+    assert leakage.FLAG_TEST_HUNKS_STRIPPED in entry["flags"]
+    assert entry["scored_diff_sha256"] == item["diff_sha256"] != entry["raw_diff_sha256"]
+    assert "TEST_HUNKS" not in (out / "candidates.jsonl").read_text()

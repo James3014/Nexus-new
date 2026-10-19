@@ -34,7 +34,7 @@ from scripts.bench.measure_2721.providers import FakeProvider
 from scripts.bench.measure_2721.task_text import render_worker_prompt
 
 SHARED_FIELDS = ("what", "why", "allowed_files", "verifier_commands", "base_commit", "base_tree_sha",
-                 "text_sha256", "base_prompt", "base_prompt_sha256", "task_id", "repeat")
+                 "text_sha256", "base_prompt", "base_prompt_sha256", "task_id", "repeat", "agy_run_settings")
 
 
 def real_gateway_prompt_template():
