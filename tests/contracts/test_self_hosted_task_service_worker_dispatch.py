@@ -1674,10 +1674,10 @@ def test_materialization_passes_allowed_files_as_xray_targets(ctx, stubs) -> Non
     assert "target_files" not in context  # other executors keep their inputs
 
 
-def test_materialization_omits_xray_targets_when_no_allowed_file_exists(ctx, stubs) -> None:
+def test_materialization_passes_empty_xray_targets_when_no_allowed_file_exists(ctx, stubs) -> None:
     ctx.request["allowed_files"] = ["nexus/new.py"]
     ctx.run()
-    assert "xray_targets" not in stubs.log[2][1]["capability_context"]
+    assert stubs.log[2][1]["capability_context"]["xray_targets"] == []
 
 
 def test_materialization_resume_without_journal_is_unknown(ctx, stubs) -> None:

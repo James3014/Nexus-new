@@ -395,3 +395,24 @@ def test_xray_scans_the_worker_supplied_targets(tmp_path, monkeypatch) -> None:
 
     targets = receipt.outcome["scan_targets"] if isinstance(receipt.outcome, dict) else []
     assert [Path(t).name for t in targets] == ["task.py"]
+
+
+def test_xray_never_scans_the_default_when_no_task_file_exists(tmp_path, monkeypatch) -> None:
+    """#2700 Codex: an empty xray_targets fell back to an unrelated default target."""
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import _exec_xray
+
+    workspace = tmp_path / "ws"
+    (workspace / "nexus" / "services").mkdir(parents=True)
+    (workspace / "nexus" / "services" / "capability_registry.py").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+    plan = CapabilityExecutionPlan(
+        plan_id="p-xray",
+        task_id="t-xray",
+        constraints={"workspace_root": str(workspace), "xray_targets": []},
+    )
+
+    receipt = _exec_xray(plan, "deep scan")
+
+    assert receipt.gate_passed is False
+    assert "no_existing_task_files" in repr(receipt)

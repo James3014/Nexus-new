@@ -512,9 +512,12 @@ class _WorkerDispatchMixin:
 
 
 def _xray_targets_context(allowed_files: Any, target_worktree: Any) -> dict[str, Any]:
-    """``{"xray_targets": [...]}`` for the allowed files that already exist (#2688)."""
-    if not isinstance(allowed_files, (list, tuple)) or not target_worktree:
+    """``{"xray_targets": [...]}``: the allowed paths that already exist (#2688).
+
+    Always present when the task names allowed files, possibly empty: xray then reports
+    that no task file exists yet instead of scanning an unrelated default target.
+    """
+    if not isinstance(allowed_files, (list, tuple)) or not allowed_files or not target_worktree:
         return {}
     root = Path(str(target_worktree))
-    existing = [str(path) for path in allowed_files if (root / str(path)).is_file()]
-    return {"xray_targets": existing} if existing else {}
+    return {"xray_targets": [str(path) for path in allowed_files if (root / str(path)).exists()]}
