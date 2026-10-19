@@ -66,6 +66,56 @@ def _pytest_targets(args: List[str]) -> Optional[List[str]]:
     return targets
 
 
+# Options that narrow which tests run (#2685): passing them does not show the suite passes.
+_SELECTION_LONG_FLAGS = frozenset({
+    "--deselect", "--lf", "--last-failed", "--ff", "--failed-first", "--sw", "--stepwise",
+    "--ignore", "--ignore-glob",
+})
+_SELECTION_SHORT_FLAGS = frozenset("km")
+# Short flags whose value follows in the same cluster (stop scanning the cluster there).
+_SHORT_VALUE_FLAGS = frozenset("kmrp")
+
+
+def _selection_flags_in(args: List[str]) -> List[str]:
+    found: List[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg.startswith("--"):
+            name = arg.partition("=")[0]
+            if name in _SELECTION_LONG_FLAGS and name not in found:
+                found.append(name)
+            if "=" not in arg and name in _PYTEST_VALUE_OPTIONS:
+                index += 1
+            continue
+        if not arg.startswith("-") or arg == "-":
+            continue
+        cluster = arg[1:]
+        for pos, ch in enumerate(cluster):
+            if ch in _SELECTION_SHORT_FLAGS and f"-{ch}" not in found:
+                found.append(f"-{ch}")
+            if ch in _SHORT_VALUE_FLAGS:
+                if pos == len(cluster) - 1:
+                    index += 1  # value is the next argv item
+                break
+    return found
+
+
+def _is_test_path(path: str) -> bool:
+    parts = Path(path).parts
+    name = parts[-1] if parts else ""
+    if not name.endswith(".py"):
+        return "tests" in parts[:-1] or "test" in parts[:-1]
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or name == "conftest.py"
+        or "tests" in parts[:-1]
+        or "test" in parts[:-1]
+    )
+
+
 def _parse_collected_ids(stdout: str) -> List[str]:
     return sorted({
         line.strip() for line in stdout.splitlines() if "::" in line and not line.startswith(" ")
@@ -253,25 +303,37 @@ class EvidenceVerifier:
                 else:
                     reject_reasons.append("test_execution_fraud_detected")
 
-            # A declared non-zero exit may pass, but it never counts toward HIGH (#2685).
+            # The claim says the tests pass: check that it covers what the base had (#2685).
+            # Each finding below caps trust at MEDIUM; none of them is a rejection.
             tests_report = results["test_commands_verified"]
-            if test_ok and not tests_report.get("all_exit_zero", False):
-                reject_reasons.append("declared_nonzero_exit")
-
-            # Base-vs-candidate test-set comparison (#2685): the claim says the tests pass,
-            # so base test ids that vanished on the candidate are a finding.
+            executed_items = tests_report.get("executed", [])
+            high_caps: List[str] = []
             test_set: Dict[str, Any] = {"status": "NOT_APPLICABLE"}
             if test_ok:
-                test_set = self._compare_test_sets(tests_report.get("executed", []))
+                # Base-vs-candidate test-set comparison: base ids that vanished.
+                test_set = self._compare_test_sets(executed_items)
+                if test_set["status"] == "TESTS_REMOVED":
+                    high_caps.append("tests_removed")
+                elif test_set["status"] == "UNKNOWN":
+                    high_caps.append("test_set_comparison_unknown")
+                elif test_set["status"] == "NOT_APPLICABLE":
+                    # Only --version / --collect-only: nothing ran a test.
+                    high_caps.append("no_test_running_command")
+                # Selection flags narrow what "the tests pass" means.
+                selection = self._selection_flags(executed_items)
+                results["test_selection"] = selection
+                if selection["flags"]:
+                    high_caps.append("test_selection_narrowed")
+                # Test files deleted or renamed away since base, whatever the claim names.
+                deleted = self._deleted_test_files()
+                results["deleted_test_files"] = deleted
+                if deleted["status"] == "TEST_FILES_DELETED":
+                    high_caps.append("test_files_deleted")
+                elif deleted["status"] == "UNKNOWN":
+                    high_caps.append("deleted_test_files_unknown")
             results["test_set_comparison"] = test_set
-            if test_set["status"] == "TESTS_REMOVED":
-                reject_reasons.append("tests_removed")
-            elif test_set["status"] == "UNKNOWN":
-                reject_reasons.append("test_set_comparison_unknown")
-            high_blocked = (
-                "declared_nonzero_exit" in reject_reasons
-                or test_set["status"] in {"TESTS_REMOVED", "UNKNOWN"}
-            )
+            reject_reasons.extend(high_caps)
+            high_blocked = bool(high_caps)
 
             if code_ok and diff_ok and test_ok:
                 results["overall_trust"] = "HIGH"
@@ -358,15 +420,96 @@ class EvidenceVerifier:
         )
         return result.stdout.strip()[:500]
     
+    def _resolve_base(self) -> Tuple[Optional[str], str]:
+        """Resolve ``base_ref`` to a commit SHA; refuse option-looking refs (fail closed)."""
+        ref = self.base_ref
+        if not isinstance(ref, str) or not ref or ref.startswith("-") or "\x00" in ref:
+            return None, "invalid_base_ref"
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            return None, f"base_ref_error: {exc}"
+        sha = result.stdout.strip()
+        if result.returncode != 0 or len(sha) not in (40, 64) or not all(
+            c in "0123456789abcdef" for c in sha
+        ):
+            return None, "base_ref_unresolved"
+        return sha, ""
+
+    def _deleted_test_files(self) -> Dict[str, Any]:
+        """Test files deleted (or renamed away) between base and the working tree."""
+        base_sha, error = self._resolve_base()
+        if base_sha is None:
+            return {"status": "UNKNOWN", "reason": error}
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-status", "--no-renames", base_sha, "--"],
+                cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            return {"status": "UNKNOWN", "reason": f"diff_error: {exc}"}
+        if result.returncode != 0:
+            return {"status": "UNKNOWN", "reason": f"diff_exit_{result.returncode}"}
+        deleted = sorted(
+            path
+            for status, _, path in (line.partition("\t") for line in result.stdout.splitlines())
+            if status.startswith("D") and _is_test_path(path)
+        )
+        report: Dict[str, Any] = {
+            "status": "TEST_FILES_DELETED" if deleted else "OK",
+            "base_ref": self.base_ref,
+            "paths": deleted[:TEST_SET_MAX_REPORTED_IDS],
+            "count": len(deleted),
+        }
+        if deleted:
+            report["finding"] = (
+                f"{len(deleted)} test file(s) present on {self.base_ref} are deleted or renamed "
+                "away on the candidate: " + ", ".join(deleted[:TEST_SET_MAX_REPORTED_IDS])
+            )
+        return report
+
+    @staticmethod
+    def _selection_flags(executed: list) -> Dict[str, Any]:
+        """pytest selection/deselection flags in the claimed (passed) commands."""
+        flags: List[str] = []
+        for item in executed:
+            if not item.get("passed") or not isinstance(item.get("command"), str):
+                continue
+            try:
+                argv = split_command(item["command"])
+            except ValueError:
+                continue
+            prefix = _allowlisted_prefix(argv)
+            if prefix is None:
+                continue
+            for flag in _selection_flags_in(argv[len(prefix):]):
+                if flag not in flags:
+                    flags.append(flag)
+        report: Dict[str, Any] = {"flags": flags}
+        if flags:
+            report["finding"] = (
+                "the claimed test command narrows the selection with " + ", ".join(flags)
+                + "; passing it does not show that the whole suite passes"
+            )
+        return report
+
     def _base_tree(self, dest: Path) -> Optional[str]:
         """Materialize ``base_ref`` into ``dest`` without touching the repository.
 
         Uses ``git archive`` (no worktree, index or ref changes).  Returns an error
         reason, or None on success.
         """
+        base_sha, error = self._resolve_base()
+        if base_sha is None:
+            return error
         try:
             archive = subprocess.run(
-                ["git", "archive", "--format=tar", self.base_ref],
+                ["git", "archive", "--format=tar", base_sha],
                 cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
                 timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
             )
@@ -476,21 +619,11 @@ class EvidenceVerifier:
                     argv, cwd=self.project_root, stdin=subprocess.DEVNULL,
                     capture_output=True, text=True, timeout=TEST_COMMAND_TIMEOUT_SECONDS,
                 )
-                # Passed only on a real exit 0, or on an explicitly declared non-zero
-                # exit (``expected_exit_code``); a recorded exit code is not a declaration.
-                declared = cmd_info.get("expected_exit_code") if isinstance(cmd_info, dict) else None
-                declared_ok = (
-                    isinstance(declared, int)
-                    and not isinstance(declared, bool)
-                    and declared != 0
-                    and result.returncode == declared
-                )
+                # Passed only on a real exit 0; a recorded non-zero exit never passes (#2685).
                 executed.append({
                     "command": cmd,
                     "exit_code": result.returncode,
-                    "exit_zero": result.returncode == 0,
-                    "declared_expected_exit_code": declared,
-                    "passed": result.returncode == 0 or declared_ok,
+                    "passed": result.returncode == 0,
                 })
             except subprocess.TimeoutExpired:
                 not_executed.append({"command": cmd, "reason": "timeout"})
@@ -506,7 +639,6 @@ class EvidenceVerifier:
                 and not uncovered
                 and all(item["passed"] for item in executed)
             ),
-            "all_exit_zero": bool(executed) and all(item["exit_zero"] for item in executed),
             "executed": executed,
             "not_executed": not_executed,
             "uncovered": uncovered,

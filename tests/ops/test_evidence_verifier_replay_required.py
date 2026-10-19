@@ -64,8 +64,17 @@ def test_notes_only_allowed_only_with_explicit_flag_and_is_labelled(tmp_path):
     assert "waived" in data["message"]
 
 
+# A command that really runs a test: `pytest --version` alone proves nothing about tests
+# and is UNVERIFIED on the CLI since #2685.
+REAL_TEST_CMD = {
+    "command": "python3 -m pytest -q -p no:cacheprovider "
+    "tests/ops/test_governance_manifest_sync.py::test_manifest_covers_exactly_the_immutable_files",
+    "exit_code": 0,
+}
+
+
 def test_allowlisted_passing_command_is_verified(tmp_path):
-    code, data = _run(tmp_path, [REPLAY_CMD])
+    code, data = _run(tmp_path, [REAL_TEST_CMD])
     assert code == 0
     assert data["status"] == "VERIFIED"
     assert data["overall_trust"] == "HIGH"

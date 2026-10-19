@@ -43,6 +43,11 @@ def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
         analysis["score"] = 10.0
 
     replay_verified = replay_data.get("status") == "PASS"
+    # A replay that ran no tests (only `pytest --version` / `--collect-only` / `ruff check`)
+    # proves nothing about tests passing: never VERIFIED/HIGH on that alone (#2685).
+    runs_no_tests = replay_verified and not replay_data.get("test_running_count", 0)
+    if runs_no_tests:
+        replay_verified = False
     replay_waived = False
     reason = None
     if status == "VERIFIED" and not replay_verified:
@@ -51,7 +56,12 @@ def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
         else:
             # Notes-only evidence (nothing replayed) must never be VERIFIED.
             status = "UNVERIFIED"
-            reason = "NO_REPLAYABLE_COMMANDS" if replay_data.get("status") == "UNVERIFIED" else "REPLAY_NOT_PASSED"
+            if runs_no_tests:
+                reason = "NO_TEST_RUNNING_COMMAND"
+            elif replay_data.get("status") == "UNVERIFIED":
+                reason = "NO_REPLAYABLE_COMMANDS"
+            else:
+                reason = "REPLAY_NOT_PASSED"
 
     if status == "VERIFIED":
         trust = "MEDIUM" if replay_waived else "HIGH"
@@ -72,6 +82,11 @@ def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
             "No allowlisted test command was replayed; evidence is not verified. "
             "Provide a replayable test_artifacts command or pass --allow-no-replay explicitly."
         )
+        if reason == "NO_TEST_RUNNING_COMMAND":
+            result["message"] = (
+                "The replayed commands run no tests (e.g. pytest --version / --collect-only); "
+                "evidence is not verified. Provide a command that runs the tests."
+            )
     if replay_waived:
         result["message"] = "Replay explicitly waived via --allow-no-replay; evidence was NOT replay-verified."
     return result

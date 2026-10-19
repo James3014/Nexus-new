@@ -576,7 +576,7 @@
 | tests/engine/test_metrics_and_belief_score.py | tests/engine/test_metrics_and_belief_score.py | active | medium | test_contract |
 | nexus/orchestrator/metrics.py | tests/engine/test_metrics_and_belief_score.py, tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_metrics_contract |
 | scripts/ops/replay_runner.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/ops/test_evidence_verifier_holes_2685.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
-| scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
+| scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py, tests/ops/test_governance_manifest_sync.py, tests/ops/test_no_shell_model_text_2634.py, tests/ops/test_evidence_verifier_holes_2685.py | active | high | replay_runner_allowlist |
 | scripts/ops/autonomous_repair_loop.py | tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |
 | nexus/engine/cli_pregate.py | tests/engine/test_cli_pregate.py, tests/engine/test_cli_pregate_isolation.py, tests/ops/test_no_shell_model_text_2634.py | active | high | no_shell_model_text |

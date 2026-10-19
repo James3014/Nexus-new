@@ -43,6 +43,7 @@ def run_replay(evidence_path: str, allow_no_replay: bool = False):
     report = ReplayRunner(REPO_ROOT).run_replay(bundle)
     summary = {
         "replay_count": report.get("replay_count", 0),
+        "test_running_count": report.get("test_running_count", 0),
         "rejected_count": report.get("rejected_count", 0),
         "non_replayable_count": report.get("non_replayable_count", 0),
         "replay_results": report.get("replay_results", []),

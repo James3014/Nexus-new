@@ -132,27 +132,188 @@ def test_verifier_failing_test_rerun_is_not_high_even_if_replay_passed(tmp_path)
     assert "test_commands_failed" in res["reject_reasons"]
 
 
-def test_declared_nonzero_exit_matches_but_is_capped_below_high(tmp_path):
+@pytest.mark.parametrize("declared", [1, 4])
+def test_declared_expected_exit_code_never_passes(tmp_path, declared):
+    # The agent writes the receipt: an `expected_exit_code` key must not turn a failing
+    # command into a pass (review B1).  It is ignored; the recorded default is exit 0.
     root = _project(tmp_path, manifest=True)
     _break_code(root)
-    spec = {"command": OK_CMD, "expected_exit_code": 1}
+    cmd = OK_CMD if declared == 1 else "python -m pytest -q -p no:cacheprovider tests/test_nope.py"
+    spec = {"command": cmd, "expected_exit_code": declared}
     report = ReplayRunner(root).run_replay({"test_artifacts": [spec]})
-    assert report["passed"] is True
-    assert report["replay_results"][0]["declared_expected_exit_code"] == 1
+    assert report["passed"] is False
+    assert report["replay_results"][0]["actual_exit_code"] == declared
     res = EvidenceVerifier(root).verify(_bundle([spec]))
+    assert res["overall_trust"] == "LOW"
+
+
+def _cli_verify(tmp_path: Path, test_artifacts: list) -> tuple[int, dict]:
+    """Run scripts/ops/evidence_verifier.py (the `nexus delivery-gate` verifier) from the repo root."""
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps({
+            "final_response": "The task is ready for review.",
+            "evidence_bundle": {"code_artifacts": ["app.py"], "test_artifacts": test_artifacts},
+        })
+    )
+    env = dict(os.environ)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/ops/evidence_verifier.py"), str(evidence)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=180,
+        env=env,
+    )
+    return proc.returncode, json.loads(proc.stdout[proc.stdout.index("{\n") :])
+
+
+def test_delivery_gate_cli_declared_nonzero_exit_is_not_verified(tmp_path):
+    code, data = _cli_verify(
+        tmp_path,
+        [
+            {
+                "command": "python3 -m pytest -q -p no:cacheprovider tests/does_not_exist_2685.py",
+                "expected_exit_code": 4,
+            }
+        ],
+    )
+    assert data["status"] != "VERIFIED"
+    assert data["overall_trust"] != "HIGH"
+    assert data["replay"]["status"] == "FAIL"
+    assert code != 0
+
+
+def test_delivery_gate_cli_recorded_nonzero_exit_is_not_verified(tmp_path):
+    code, data = _cli_verify(
+        tmp_path,
+        [
+            {
+                "command": "python3 -m pytest -q -p no:cacheprovider tests/does_not_exist_2685.py",
+                "exit_code": 4,
+            }
+        ],
+    )
+    assert data["status"] == "REJECTED"
+    assert code != 0
+
+
+@pytest.mark.parametrize("flag", ["--version", "--collect-only", "--co"])
+def test_delivery_gate_cli_non_test_running_claim_is_not_verified(tmp_path, flag):
+    code, data = _cli_verify(tmp_path, [{"command": f"python3 -m pytest {flag}", "exit_code": 0}])
+    assert data["status"] == "UNVERIFIED"
+    assert data["overall_trust"] != "HIGH"
+    assert data["reason"] == "NO_TEST_RUNNING_COMMAND"
+    assert data["replay"]["test_running_count"] == 0
+    assert code != 0
+
+
+@pytest.mark.parametrize("flag", ["--version", "--co", "--collect-only"])
+def test_verifier_non_test_running_claim_is_capped_at_medium(tmp_path, flag):
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    res = EvidenceVerifier(root).verify(
+        _bundle([{"command": f"python -m pytest {flag}", "exit_code": 0}])
+    )
     assert res["overall_trust"] == "MEDIUM"
-    assert "declared_nonzero_exit" in res["reject_reasons"]
+    assert "no_test_running_command" in res["reject_reasons"]
 
 
-@pytest.mark.parametrize("declared", [0, True, "1", 1.0])
-def test_invalid_declared_exit_code_is_rejected_not_executed(tmp_path, declared):
+def test_replay_counts_only_test_running_commands(tmp_path):
     root = _project(tmp_path)
     report = ReplayRunner(root).run_replay({
-        "test_artifacts": [{"command": OK_CMD, "expected_exit_code": declared}]
+        "test_artifacts": [
+            {"command": "python -m pytest --version", "exit_code": 0},
+            {"command": OK_CMD, "exit_code": 0},
+        ]
     })
-    assert report["status"] == "REJECTED"
-    assert report["passed"] is False
-    assert report["replay_count"] == 0
+    assert report["passed"] is True
+    assert [r["runs_tests"] for r in report["replay_results"]] == [False, True]
+    assert report["test_running_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "flag"),
+    [
+        ("-k add tests", "-k"),
+        ("-qk add tests", "-k"),
+        ("-m 'not slow' tests", "-m"),
+        ("--deselect tests/test_edge.py::test_neg tests", "--deselect"),
+        ("--deselect=tests/test_edge.py::test_neg tests", "--deselect"),
+        ("--lf tests", "--lf"),
+        ("--ff tests", "--ff"),
+        ("--sw tests", "--sw"),
+    ],
+)
+def test_selection_flags_cap_at_medium_with_finding(tmp_path, args, flag):
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    # --lf/--ff/--sw need the cache plugin, so no `-p no:cacheprovider` here.
+    cmd = f"python -m pytest -q {args}"
+    res = EvidenceVerifier(root).verify(_bundle([{"command": cmd, "exit_code": 0}]))
+    assert res["overall_trust"] == "MEDIUM", res
+    assert "test_selection_narrowed" in res["reject_reasons"]
+    assert flag in res["test_selection"]["flags"]
+    assert flag in res["test_selection"]["finding"]
+
+
+def test_non_selection_flags_do_not_cap(tmp_path):
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    cmd = "python -m pytest -q -x -p no:cacheprovider --tb short -rA tests"
+    res = EvidenceVerifier(root).verify(_bundle([{"command": cmd, "exit_code": 0}]))
+    assert res["overall_trust"] == "HIGH", res
+    assert res["test_selection"]["flags"] == []
+
+
+def test_narrow_claim_after_deleting_tests_is_flagged(tmp_path):
+    # The claim names only a new file, so the test-set comparison sees nothing removed;
+    # the deleted test files are flagged regardless of what the claim names.
+    root = _project(tmp_path, manifest=True)
+    _break_code(root)
+    (root / "tests/test_ok.py").unlink()
+    (root / "tests/test_edge.py").unlink()
+    (root / "tests/test_trivial.py").write_text("def test_nothing():\n    assert True\n")
+    cmd = "python -m pytest -q -p no:cacheprovider tests/test_trivial.py"
+    res = EvidenceVerifier(root).verify(_bundle([{"command": cmd, "exit_code": 0}]))
+    assert res["overall_trust"] == "MEDIUM", res
+    assert "test_files_deleted" in res["reject_reasons"]
+    assert res["deleted_test_files"]["paths"] == ["tests/test_edge.py", "tests/test_ok.py"]
+    assert "tests/test_ok.py" in res["deleted_test_files"]["finding"]
+
+
+def test_renamed_away_test_file_is_flagged(tmp_path):
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    (root / "tests/test_edge.py").rename(root / "edge_helpers.py")
+    cmd = "python -m pytest -q -p no:cacheprovider tests/test_ok.py"
+    res = EvidenceVerifier(root).verify(_bundle([{"command": cmd, "exit_code": 0}]))
+    assert res["overall_trust"] == "MEDIUM"
+    assert res["deleted_test_files"]["paths"] == ["tests/test_edge.py"]
+
+
+@pytest.mark.parametrize("ref", ["--output=/tmp/x", "-p", ""])
+def test_option_like_base_ref_fails_closed(tmp_path, ref, monkeypatch):
+    import nexus.delivery.evidence_verifier as ev
+
+    root = _project(tmp_path, manifest=True)
+    _touch_code(root)
+    seen: list = []
+    real_run = subprocess.run
+
+    def spy(argv, *args, **kwargs):
+        seen.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(ev.subprocess, "run", spy)
+    res = EvidenceVerifier(root, base_ref=ref).verify(
+        _bundle([{"command": OK_CMD, "exit_code": 0}])
+    )
+    assert res["overall_trust"] == "MEDIUM"
+    assert res["test_set_comparison"] == {"status": "UNKNOWN", "reason": "invalid_base_ref"}
+    assert res["deleted_test_files"]["status"] == "UNKNOWN"
+    assert not any(ref and ref in argv for argv in seen if argv and argv[0] == "git")
 
 
 def test_honest_passing_receipt_is_still_high(tmp_path):

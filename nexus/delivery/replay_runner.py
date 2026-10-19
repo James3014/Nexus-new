@@ -192,6 +192,26 @@ def check_pytest_args(args: List[str], project_root: Path) -> None:
     )
 
 
+# pytest options that make the run execute no tests (#2685).
+_PYTEST_NON_RUNNING_FLAGS = frozenset({"--version", "--co", "--collect-only"})
+
+
+def command_runs_tests(argv: List[str]) -> bool:
+    """True when an allowlisted argv really runs pytest tests.
+
+    ``ruff check`` and pytest with ``--version`` / ``--collect-only`` replay fine but prove
+    nothing about tests passing.
+    """
+    head, rest = argv[0], argv[1:]
+    if head == "uv" and rest[:1] == ["run"]:
+        head, rest = (rest[1] if len(rest) > 1 else "uv"), rest[2:]
+    if head in _PYTHON_BINARIES and rest[:2] == ["-m", "pytest"]:
+        rest = rest[2:]
+    elif head != "pytest":
+        return False
+    return not any(arg in _PYTEST_NON_RUNNING_FLAGS for arg in rest)
+
+
 def split_command(cmd: Any) -> List[str]:
     """shlex-split a command string after refusing shell metacharacters; raise ValueError."""
     if not isinstance(cmd, str) or not cmd.strip():
@@ -233,6 +253,7 @@ class ReplayRunner:
         rejected = 0
         notes = 0
         executed = 0
+        test_running = 0
 
         test_artifacts = bundle.get("test_artifacts", [])
         if not test_artifacts:
@@ -262,26 +283,10 @@ class ReplayRunner:
                 })
                 continue
             cmd = spec.get("command")
-            # ``exit_code`` is what the receipt RECORDED; ``expected_exit_code`` is an explicit
-            # declaration that a non-zero exit is the intended outcome (#2685).
+            # ``exit_code`` is what the receipt RECORDED.  There is no way to declare a
+            # non-zero exit as the intended outcome: the agent writes the receipt (#2685).
             expected_rc = spec.get("exit_code", 0)
-            declared_rc = spec.get("expected_exit_code")
             expected_hash = spec.get("output_hash")
-            if declared_rc is not None and (
-                isinstance(declared_rc, bool) or not isinstance(declared_rc, int) or declared_rc == 0
-            ):
-                overall_passed = False
-                rejected += 1
-                reason = "invalid_expected_exit_code: must be a non-zero integer"
-                replay_results.append({
-                    "command": cmd if isinstance(cmd, str) else repr(cmd),
-                    "status": "REJECTED",
-                    "error": reason,
-                    "reason": reason,
-                    "executed": False,
-                    "passed": False
-                })
-                continue
 
             start_time = time.time()
             try:
@@ -310,21 +315,16 @@ class ReplayRunner:
                 actual_hash = hashlib.sha256(result.stdout.encode()).hexdigest()
                 
                 actual_rc = result.returncode
-                if declared_rc is not None:
-                    # Explicitly declared non-zero outcome: must match it (and any recorded
-                    # exit code).  Never counts as a plain pass (verifier caps it below HIGH).
-                    match_rc = actual_rc == declared_rc and (
-                        "exit_code" not in spec or actual_rc == expected_rc
-                    )
-                    exit_ok = match_rc
-                else:
-                    match_rc = (actual_rc == expected_rc)
-                    # A recorded non-zero exit reproduced honestly is still a failing
-                    # verification, never a pass (#2685).
-                    exit_ok = actual_rc == 0
+                match_rc = (actual_rc == expected_rc)
+                # A recorded non-zero exit reproduced honestly is still a failing
+                # verification, never a pass (#2685).
+                exit_ok = actual_rc == 0
+                runs_tests = command_runs_tests(argv)
                 match_hash = (actual_hash == expected_hash) if expected_hash else True
 
                 item_passed = match_rc and exit_ok and match_hash
+                if item_passed and runs_tests:
+                    test_running += 1
                 if not item_passed:
                     overall_passed = False
                     
@@ -334,8 +334,8 @@ class ReplayRunner:
                     "executed": True,
                     "actual_exit_code": result.returncode,
                     "expected_exit_code": expected_rc,
-                    "declared_expected_exit_code": declared_rc,
                     "exit_ok": exit_ok,
+                    "runs_tests": runs_tests,
                     "actual_hash": actual_hash,
                     "expected_hash": expected_hash,
                     "match_rc": match_rc,
@@ -370,6 +370,8 @@ class ReplayRunner:
             "passed": overall_passed,
             "replay_results": replay_results,
             "replay_count": executed,
+            # Replayed commands that really run tests (not --version / --collect-only / ruff).
+            "test_running_count": test_running,
             "rejected_count": rejected,
             "non_replayable_count": notes,
             "env_info": {
