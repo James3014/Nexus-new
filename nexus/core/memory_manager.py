@@ -1,3 +1,5 @@
+import logging
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -10,8 +12,26 @@ from datetime import datetime
 from nexus.contracts.sqlite_write_guard import build_sqlite_write_guard_receipt
 from nexus.infrastructure.sqlite_retry import SQLiteRetryHandler, is_retryable_sqlite_busy
 
+logger = logging.getLogger(__name__)
+
 SQLITE_BUSY_TIMEOUT_MS = 5000
 SQLITE_WRITE_RETRIES = 4
+
+SNAPSHOT_ATTEMPTS = 3
+
+
+class StateReadOnlySnapshotError(RuntimeError):
+    """No consistent read-only snapshot of the SQLite files could be taken."""
+
+
+def _remove_tmpdir(path: str) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("could not remove read-only sqlite temp copy %s: %s", path, exc)
+
 
 class _TempCopyConnection(sqlite3.Connection):
     """Connection on a temp copy; closing it (also via ``with``) removes the copy."""
@@ -24,7 +44,7 @@ class _TempCopyConnection(sqlite3.Connection):
         finally:
             tmpdir, self._tmpdir = self._tmpdir, None
             if tmpdir:
-                shutil.rmtree(tmpdir, ignore_errors=True)
+                _remove_tmpdir(tmpdir)
 
     def __exit__(self, exc_type, exc, tb):
         try:
@@ -162,33 +182,66 @@ class ProjectMemoryManager:
             )
             return cursor.fetchall()
 
+    def _source_signature(self) -> tuple:
+        """(size, mtime_ns) of the DB and its -wal/-shm, or None for a missing file."""
+        sig = []
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                st = os.stat(str(self.db_path) + suffix)
+                sig.append((st.st_size, st.st_mtime_ns))
+            except FileNotFoundError:
+                sig.append(None)
+        return tuple(sig)
+
+    def _copy_snapshot(self, tmpdir: str) -> None:
+        name = self.db_path.name
+        shutil.copy2(self.db_path, Path(tmpdir) / name)
+        for suffix in ("-wal", "-shm"):
+            src = Path(str(self.db_path) + suffix)
+            if src.exists():
+                try:
+                    shutil.copy2(src, Path(tmpdir) / (name + suffix))
+                except FileNotFoundError:  # checkpointed away: caught by the re-stat
+                    pass
+
     def _connect_temp_copy(self):
         """Open a throwaway copy of the DB (+ any -wal/-shm) from the system temp dir.
 
         Copying the WAL files too makes WAL-only rows visible; recovery/checkpointing
-        happens only in the copy, which is deleted when the connection closes.
+        happens only in the copy, which is deleted when the connection closes.  The
+        source files are stat-ed before and after the copy; if a writer changed them
+        (or a -wal appeared/disappeared) the copy is discarded and retried, and after
+        SNAPSHOT_ATTEMPTS failures ``StateReadOnlySnapshotError`` is raised rather than
+        opening a possibly inconsistent copy.
         """
-        tmpdir = tempfile.mkdtemp(prefix="nexus-ro-sqlite-")
-        try:
-            name = self.db_path.name
-            shutil.copy2(self.db_path, Path(tmpdir) / name)
-            for suffix in ("-wal", "-shm"):
-                src = Path(str(self.db_path) + suffix)
-                if src.exists():
-                    try:
-                        shutil.copy2(src, Path(tmpdir) / (name + suffix))
-                    except FileNotFoundError:  # checkpointed away between exists() and copy
-                        pass
-            conn = sqlite3.connect(
-                str(Path(tmpdir) / name),
-                timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
-                factory=_TempCopyConnection,
+        for attempt in range(1, SNAPSHOT_ATTEMPTS + 1):
+            tmpdir = tempfile.mkdtemp(prefix="nexus-ro-sqlite-")
+            try:
+                before = self._source_signature()
+                self._copy_snapshot(tmpdir)
+                after = self._source_signature()
+                if before == after and before[0] is not None:
+                    conn = sqlite3.connect(
+                        str(Path(tmpdir) / self.db_path.name),
+                        timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+                        factory=_TempCopyConnection,
+                    )
+                    conn._tmpdir = tmpdir
+                    return conn
+            except FileNotFoundError:
+                pass  # source vanished mid-copy: treat as a changed snapshot
+            except BaseException:
+                _remove_tmpdir(tmpdir)
+                raise
+            _remove_tmpdir(tmpdir)
+            logger.warning(
+                "read-only sqlite snapshot of %s changed during copy (attempt %d/%d)",
+                self.db_path, attempt, SNAPSHOT_ATTEMPTS,
             )
-        except BaseException:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            raise
-        conn._tmpdir = tmpdir
-        return conn
+        raise StateReadOnlySnapshotError(
+            f"could not take a consistent read-only snapshot of {self.db_path} "
+            f"after {SNAPSHOT_ATTEMPTS} attempts (concurrent writer)"
+        )
 
     def _connect(self):
         if state_read_only():  # #2721: query a private temp copy, never touch the state root

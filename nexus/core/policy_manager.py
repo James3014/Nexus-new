@@ -7,6 +7,7 @@ from .episode_repository import EpisodeRepository
 from .learning_evidence import LearningEvidenceBuilder
 from .learning_scorer import LearningScorer
 from .policy_metabolizer import PolicyMetabolizer
+from .state_root import state_read_only
 from .state_contracts import NexusState
 
 class PolicyManager:
@@ -107,6 +108,9 @@ class PolicyManager:
 
     def _run_metabolizer(self, state: NexusState) -> None:
         metadata = state.metadata
+        if state_read_only():  # #2721: report a skip, never fake metabolizer numbers
+            metadata["metabolizer_status"] = "skipped_read_only"
+            return
         if bool(metadata.get("sir_veto_metabolizer", False)):
             metadata["metabolizer_status"] = "vetoed"
             return

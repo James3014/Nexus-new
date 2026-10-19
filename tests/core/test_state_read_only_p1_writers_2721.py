@@ -367,3 +367,135 @@ def test_findings_vector_sync_returns_false_when_skipped(tmp_path, monkeypatch):
     monkeypatch.setenv(RO, "1")
     assert sync.sync({"content": "c"}) is False
     assert names(tmp_path) == []
+
+
+# ---- 5. SQLite snapshot consistency ----------------------------------------------------------
+
+
+def test_snapshot_retries_when_source_changes_during_copy(tmp_path, monkeypatch):
+    from nexus.core.memory_manager import ProjectMemoryManager as PMM
+
+    mgr = ProjectMemoryManager(tmp_path)
+    mgr.add_insight("t", "row")
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    ro = ProjectMemoryManager(tmp_path)
+    real_copy = PMM._copy_snapshot
+    calls = {"n": 0}
+
+    def flaky_copy(self, tmpdir):
+        real_copy(self, tmpdir)
+        calls["n"] += 1
+        if calls["n"] == 1:  # simulate a writer touching the source mid-copy
+            import os
+
+            st = os.stat(self.db_path)
+            os.utime(self.db_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+
+    monkeypatch.setattr(PMM, "_copy_snapshot", flaky_copy)
+    assert [r[1] for r in ro.search("")] == ["row"]
+    assert calls["n"] == 2
+    # Only the mtime we nudged differs; content is unchanged.
+    monkeypatch.undo()
+    assert tree_hash(tmp_path) == before
+
+
+def test_snapshot_persistent_change_raises_and_leaves_tree(tmp_path, monkeypatch):
+    import glob
+    import os
+    import tempfile
+
+    from nexus.core.memory_manager import ProjectMemoryManager as PMM
+    from nexus.core.memory_manager import StateReadOnlySnapshotError
+
+    ProjectMemoryManager(tmp_path).add_insight("t", "row")
+    ro_env = monkeypatch
+    ro_env.setenv(RO, "1")
+    ro = ProjectMemoryManager(tmp_path)
+    names_before = names(tmp_path)
+    pattern = str(Path(tempfile.gettempdir()) / "nexus-ro-sqlite-*")
+    temp_before = set(glob.glob(pattern))
+    real_copy = PMM._copy_snapshot
+    state = {"bump": 0}
+
+    def always_changing(self, tmpdir):
+        real_copy(self, tmpdir)
+        state["bump"] += 1
+        st = os.stat(self.db_path)
+        os.utime(self.db_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000 * state["bump"]))
+
+    monkeypatch.setattr(PMM, "_copy_snapshot", always_changing)
+    with pytest.raises(StateReadOnlySnapshotError):
+        ro.search("")
+    assert state["bump"] == 3
+    assert set(glob.glob(pattern)) == temp_before
+    monkeypatch.undo()
+    assert names(tmp_path) == names_before
+
+
+# ---- 6. EpisodeRepository / PolicyMetabolizer / PolicyManager -----------------------------------
+
+
+def _policy_rows():
+    return [
+        {"rule_id": "R1", "condition": "c", "action": "a", "confidence": 0.9},
+        {
+            "rule_id": "R2",
+            "condition": "c2",
+            "action": "a2",
+            "confidence": 0.1,
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "last_used_at": "2000-01-01T00:00:00+00:00",
+        },
+    ]
+
+
+def test_episode_repository_noop_under_switch(tmp_path, monkeypatch):
+    from nexus.core.episode_repository import EpisodeRepository
+
+    repo = EpisodeRepository(str(tmp_path))
+    monkeypatch.setenv(RO, "1")
+    assert repo.append({"a": 1}) == repo.episode_file
+    assert names(tmp_path) == []
+    monkeypatch.delenv(RO)
+    repo.append({"a": 1})
+    for lock in tmp_path.rglob("*.lock"):
+        lock.unlink()
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    repo.append({"a": 2})
+    assert tree_hash(tmp_path) == before
+    assert repo.episode_file.read_text().count("\n") == 1
+
+
+def test_policy_metabolizer_noop_under_switch_and_unset_rewrites(tmp_path, monkeypatch):
+    import json
+
+    from nexus.core.policy_metabolizer import PolicyMetabolizer
+
+    policy = tmp_path / ".nexus" / "knowledge" / "policy_memory.jsonl"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("".join(json.dumps(r) + "\n" for r in _policy_rows()))
+    before = tree_hash(tmp_path)
+    monkeypatch.setenv(RO, "1")
+    result = PolicyMetabolizer(str(tmp_path)).metabolize(force=True)
+    assert result.scanned == 0 and result.snapshot_path is None
+    assert tree_hash(tmp_path) == before
+    monkeypatch.delenv(RO)
+    result = PolicyMetabolizer(str(tmp_path)).metabolize(force=True)
+    assert result.scanned == 2
+    assert (tmp_path / ".nexus" / "knowledge" / "snapshots").exists()
+
+
+def test_policy_manager_record_episode_writes_nothing_under_switch(tmp_path, monkeypatch):
+    from nexus.core.policy_manager import PolicyManager
+    from nexus.core.state_contracts import NexusState
+
+    monkeypatch.setenv("NEXUS_MEMORY_AUTO_INIT", "0")
+    manager = PolicyManager(str(tmp_path))
+    state = NexusState(task_id="t1", task_description="t", project_root=str(tmp_path))
+    state.metadata["episode_count"] = 5
+    monkeypatch.setenv(RO, "1")
+    manager.record_episode(state)
+    assert state.metadata["metabolizer_status"] == "skipped_read_only"
+    assert names(tmp_path) == []
