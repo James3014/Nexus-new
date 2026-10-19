@@ -236,10 +236,13 @@ class ReplayRunner:
 
         test_artifacts = bundle.get("test_artifacts", [])
         if not test_artifacts:
+            # Nothing to replay is not a success (#2685): passed is False and the verdict
+            # is UNVERIFIED.  Callers that treat missing coverage as advisory read status.
             return {
                 "status": "SKIPPED",
+                "verdict": "UNVERIFIED",
                 "reason": "no_test_artifacts_to_replay",
-                "passed": True,
+                "passed": False,
                 "replay_count": 0
             }
         if not isinstance(test_artifacts, list):
@@ -259,8 +262,26 @@ class ReplayRunner:
                 })
                 continue
             cmd = spec.get("command")
+            # ``exit_code`` is what the receipt RECORDED; ``expected_exit_code`` is an explicit
+            # declaration that a non-zero exit is the intended outcome (#2685).
             expected_rc = spec.get("exit_code", 0)
+            declared_rc = spec.get("expected_exit_code")
             expected_hash = spec.get("output_hash")
+            if declared_rc is not None and (
+                isinstance(declared_rc, bool) or not isinstance(declared_rc, int) or declared_rc == 0
+            ):
+                overall_passed = False
+                rejected += 1
+                reason = "invalid_expected_exit_code: must be a non-zero integer"
+                replay_results.append({
+                    "command": cmd if isinstance(cmd, str) else repr(cmd),
+                    "status": "REJECTED",
+                    "error": reason,
+                    "reason": reason,
+                    "executed": False,
+                    "passed": False
+                })
+                continue
 
             start_time = time.time()
             try:
@@ -288,10 +309,22 @@ class ReplayRunner:
                 # 計算輸出 hash (簡化版：只針對 stdout)
                 actual_hash = hashlib.sha256(result.stdout.encode()).hexdigest()
                 
-                match_rc = (result.returncode == expected_rc)
+                actual_rc = result.returncode
+                if declared_rc is not None:
+                    # Explicitly declared non-zero outcome: must match it (and any recorded
+                    # exit code).  Never counts as a plain pass (verifier caps it below HIGH).
+                    match_rc = actual_rc == declared_rc and (
+                        "exit_code" not in spec or actual_rc == expected_rc
+                    )
+                    exit_ok = match_rc
+                else:
+                    match_rc = (actual_rc == expected_rc)
+                    # A recorded non-zero exit reproduced honestly is still a failing
+                    # verification, never a pass (#2685).
+                    exit_ok = actual_rc == 0
                 match_hash = (actual_hash == expected_hash) if expected_hash else True
-                
-                item_passed = match_rc and match_hash
+
+                item_passed = match_rc and exit_ok and match_hash
                 if not item_passed:
                     overall_passed = False
                     
@@ -301,6 +334,8 @@ class ReplayRunner:
                     "executed": True,
                     "actual_exit_code": result.returncode,
                     "expected_exit_code": expected_rc,
+                    "declared_expected_exit_code": declared_rc,
+                    "exit_ok": exit_ok,
                     "actual_hash": actual_hash,
                     "expected_hash": expected_hash,
                     "match_rc": match_rc,
@@ -318,16 +353,19 @@ class ReplayRunner:
                     "passed": False
                 })
 
+        verdict = None
         if rejected:
             status = "REJECTED"
         elif not overall_passed:
             status = "FAILED"
         elif executed == 0:
-            # Nothing was actually replayed: do not claim COMPLETED.
+            # Nothing was actually replayed: do not claim COMPLETED, and never passed (#2685).
             status = "NOT_REPLAYED"
+            verdict = "UNVERIFIED"
+            overall_passed = False
         else:
             status = "COMPLETED"
-        return {
+        report: Dict[str, Any] = {
             "status": status,
             "passed": overall_passed,
             "replay_results": replay_results,
@@ -340,3 +378,6 @@ class ReplayRunner:
                 "cwd": os.getcwd()
             }
         }
+        if verdict:
+            report["verdict"] = verdict
+        return report

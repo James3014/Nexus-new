@@ -47,6 +47,10 @@ def run_replay(evidence_path: str, allow_no_replay: bool = False):
         "non_replayable_count": report.get("non_replayable_count", 0),
         "replay_results": report.get("replay_results", []),
     }
+    # Nothing replayed (notes only): passed is False since #2685, but it is UNVERIFIED,
+    # not a failed replay.
+    if report.get("status") in {"SKIPPED", "NOT_REPLAYED"}:
+        return {"status": "UNVERIFIED", "reason": "NO_REPLAYABLE_COMMANDS", **summary}
     if not report.get("passed"):
         return {"status": "FAIL", "reason": "REPLAY_" + str(report.get("status")), **summary}
     if summary["replay_count"] == 0:

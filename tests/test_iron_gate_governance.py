@@ -110,8 +110,12 @@ def test_evidence_verifier_high_trust(mock_run):
     verifier = EvidenceVerifier(Path("."))
     
     # Mock exists
+    # subprocess.run is fully mocked, so the base-vs-candidate test-set comparison (#2685)
+    # cannot collect anything; stub it like the drift check (it has its own tests in
+    # tests/ops/test_evidence_verifier_holes_2685.py).
     with patch("pathlib.Path.exists", return_value=True), \
-         patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})):
+         patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})), \
+         patch.object(EvidenceVerifier, "_compare_test_sets", return_value={"status": "OK"}):
         res = verifier.verify({"version": "1.1.0", "code_artifacts": ["a.py"], "test_artifacts": [{"command": "pytest", "exit_code": 0}]})
         assert res["overall_trust"] == "HIGH"
 
