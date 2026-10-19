@@ -521,6 +521,20 @@ def test_fake_gitdir_inside_worktree_runs_no_worker_command(harness, tmp_path):
     assert not clean_marker.exists() and not textconv_marker.exists()
 
 
+def test_base_with_trailing_newline_is_base_invalid(harness):
+    """``$`` matched before a final newline, so this reached git as ``read_tree``."""
+    with pytest.raises(mwd.MeasurementDiffError, match="^base_invalid$"):
+        mwd.capture_worktree_diff(
+            harness.lease.target_worktree,
+            harness.lease.initial_head + "\n",
+            controller_root=_controller(harness),
+        )
+    with pytest.raises(mwd.MeasurementDiffError, match="^base_invalid$"):
+        mwd.capture_worktree_diff(
+            harness.lease.target_worktree, "a" * 40 + "\n", controller_root=_controller(harness)
+        )
+
+
 def test_symlinked_target_is_refused(harness, tmp_path):
     link = tmp_path / "link-target"
     link.symlink_to(harness.lease.target_worktree)

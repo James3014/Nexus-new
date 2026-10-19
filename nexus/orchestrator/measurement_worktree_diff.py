@@ -364,7 +364,7 @@ def capture_worktree_diff(
         time_budget_seconds = GIT_TIME_BUDGET_SECONDS
     if not base:
         raise MeasurementDiffError("base_missing")
-    if not _REVISION.match(base):
+    if not _REVISION.fullmatch(base):
         raise MeasurementDiffError("base_invalid")
     trusted = verify_target(worktree, controller_root)
     target = str(trusted.worktree)
