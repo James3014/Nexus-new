@@ -199,10 +199,16 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
 
         if not os_sandbox_available():
             # PR tests run only behind an OS sandbox (macOS sandbox-exec); elsewhere the
-            # review fails closed and the online-native canary must not be green.
+            # review cannot run them. Since #2732 the review is record-only: that is recorded
+            # (review_status BLOCKED + review_error) and the canary is not blocked by it.
             result = _run_family_canary(capability, positive=True)
-            assert result["final_status"] == "FAIL", result
-            assert result["gate_passed"] is not True
+            assert result["final_status"] == "OK", result
+            assert result["gate_passed"] is True
+            assert _find_key_2732(result, "advisory_only") is True
+            assert _find_key_2732(result, "review_status") == "BLOCKED"
+            assert _find_key_2732(result, "review_error") == (
+                "ghost_regression_not_executed:no_os_barrier"
+            )
             return
     task = _online_task(capability, tmp_path / "workspace")
     row = run_closure_task(
@@ -242,3 +248,22 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
     elif task.expected_effect["consumer_effect"] == "POSTFLIGHT_GATE":
         assert consumer["gate_receipt"] is True
     assert row["public_claim_allowed"] is False
+
+
+def _find_key_2732(value, key, depth=0):
+    """First value of ``key`` anywhere in a nested receipt (bounded; #2732)."""
+    if depth > 8:
+        return None
+    if isinstance(value, dict):
+        if key in value:
+            return value[key]
+        items = list(value.values())
+    elif isinstance(value, list):
+        items = value
+    else:
+        return None
+    for item in items:
+        found = _find_key_2732(item, key, depth + 1)
+        if found is not None:
+            return found
+    return None

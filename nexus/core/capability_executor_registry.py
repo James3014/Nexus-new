@@ -237,6 +237,9 @@ NON_CLAIM_EXECUTION_HEALTH_RECEIPTS: frozenset[str] = frozenset(
         "semantic_searcher",
         "semantic_failure_sensor",
         "prompt_compression",
+        # #2732: record-only review (retired as a completion gate, #2701 pilot); its verdict
+        # is review_status / review_passed, never gate_passed.
+        "ultra_review",
     }
 )
 BOUND_CLAIM_GATE_RECEIPTS: frozenset[str] = frozenset({"artifact_gate"})
