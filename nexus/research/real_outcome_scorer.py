@@ -1505,8 +1505,8 @@ class PytestRunner:
         # A11 ("os"): host free bytes at the pre-run check of this scoring's first
         # candidate run (before any candidate code ran); None until then.
         self.free_start: int | None = None
-        # A11 ("os"): survivors reaped after this scoring's candidate runs (diagnostic);
-        # any reaped one makes a later host-disk shortfall the candidate's.
+        self._candidate_ran = False
+        # A11 ("os"): survivors reaped at a host-disk shortfall (diagnostic).
         self.reaped_pids: list[int] = []
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
@@ -1593,6 +1593,7 @@ class PytestRunner:
         self.task_dir = None  # the next task scoring gets a fresh parent
         self._cand_tree_base.clear()
         self.free_start = None
+        self._candidate_ran = False
         self.reaped_pids = []
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
@@ -1790,6 +1791,7 @@ class PytestRunner:
         self.task_dir = None
         self._cand_tree_base.clear()
         self.free_start = None
+        self._candidate_ran = False
         self.reaped_pids = []
 
     def retire_runs(self) -> list[Path]:
@@ -1856,23 +1858,16 @@ class PytestRunner:
             self.log(f"  reaped sandbox survivors: {sorted(hits)}")
         return sorted(hits)
 
-    def _reap_candidate_scope(self, run_dir: Path) -> None:
-        """A11: after a candidate run, before its post-run disk check: reap holders of a
-        cwd or open file (deleted ones included) under this scoring's candidate run dirs
-        and candidate trees. A reaped one releases its unlinked files' blocks now, and
-        makes any later host-disk shortfall of this scoring the candidate's."""
-        prefixes: list[Path] = [run_dir, *(Path(t) for t in self._cand_tree_base)]
-        parent = run_dir.parent
-        if parent.is_dir() and not parent.is_symlink():
+    def _reap_candidate_scope(self) -> None:
+        """A11: reap holders of a cwd or open file (deleted ones included) under this
+        scoring's candidate run dirs and candidate trees, so blocks they hold in unlinked
+        files are released (#2740). Called on a host-disk shortfall."""
+        prefixes: list[Path] = [Path(t) for t in self._cand_tree_base]
+        parent = self.task_dir
+        if parent is not None and parent.is_dir() and not parent.is_symlink():
             cand = _role_slug(CAND_ROLE) + "-"
             prefixes += [d for d in parent.iterdir() if d.name.startswith(cand)]
-        reaped = self.reap_survivors(prefixes)
-        self.reaped_pids += reaped
-
-    def _disk_shortfall(self) -> int:
-        """Bytes missing to the host free-space floor (<= 0: enough)."""
-        probe = self.scratch if self.scratch.exists() else self.scratch.parent
-        return self.min_free_disk_bytes - _disk_usage(probe).free
+        self.reaped_pids += self.reap_survivors(prefixes)
 
     def _candidate_bytes(self, current: Path | None) -> int:
         """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
@@ -1892,24 +1887,34 @@ class PytestRunner:
         *,
         pre: bool,
     ) -> None:
-        """A11: the host-disk check around an "os" run. Below the floor it is charged to
-        the candidate (HOST_DISK_LOW, NOT_RUNNABLE) only when the candidate explains the
-        drop: a candidate survivor was reaped in this scoring, or the candidate's bytes
-        alone exceed the headroom it started with (free_start - floor), so the floor
-        would have been crossed without anyone else. Otherwise an infra abort."""
+        """A11: the host-disk check around an "os" run; one rule below the floor.
+
+        No candidate run has run yet in this scoring: infra abort. Otherwise reap this
+        scoring's candidate scope (survivors holding cwd or files, deleted ones included,
+        under its candidate run dirs and trees), measure free space again, and charge the
+        candidate (HOST_DISK_LOW, NOT_RUNNABLE) only if free_start (at its first run) was
+        at or above the floor and free_after_reap + candidate_visible_bytes >= floor: the
+        candidate's held and visible bytes explain the shortfall. Otherwise infra abort
+        (external disk use, a harmless daemon that held no space, a disk already low)."""
         probe = self.scratch if self.scratch.exists() else self.scratch.parent
         free = _disk_usage(probe).free
         if pre and role == CAND_ROLE and self.free_start is None:
             self.free_start = free  # before any candidate code of this scoring ran
         floor = self.min_free_disk_bytes
-        shortfall = floor - free
-        if shortfall <= 0:
+        if free >= floor:
             return
+        if not self._candidate_ran:
+            raise ScratchInfraAbort(
+                f"host_disk_low:free={free}B floor={floor}B (no candidate run yet)"
+            )
+        self._reap_candidate_scope()
+        free = _disk_usage(probe).free
+        shortfall = floor - free
         # A candidate run's own run dir is the candidate's: measure it as one (current
         # None makes it count under its candt- name).
         cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
-        headroom = None if self.free_start is None else self.free_start - floor
-        if self.reaped_pids or (headroom is not None and headroom >= 0 and cand > headroom):
+        started_ok = self.free_start is not None and self.free_start >= floor
+        if started_ok and free + cand >= floor:
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
             raise ScratchTmpCapExceeded(
                 tree.name,
@@ -1918,11 +1923,11 @@ class PytestRunner:
                 role,
                 res,
                 SCRATCH_HOST_DISK_LOW,
-                shortfall,
+                max(shortfall, 0),
                 attributed_role=CAND_ROLE,
             )
         raise ScratchInfraAbort(
-            f"host_disk_low:shortfall={shortfall}B candidate_bytes={cand}B"
+            f"host_disk_low:free_after_reap={free}B candidate_bytes={cand}B"
             f" free_start={self.free_start} floor={floor}B"
         )
 
@@ -2015,6 +2020,8 @@ class PytestRunner:
         own_before, foreign_before = usage_before.own_candidate, usage_before.foreign
         start = time.monotonic()
         timed_out = False
+        if run_dir is not None and role == CAND_ROLE:
+            self._candidate_ran = True  # A11: candidate code runs from here on
         # Own process group, so whatever the tests spawned is killed with the run and
         # cannot keep writing into scratch/tmp while the next tree is measured (A6).
         proc = subprocess.Popen(
@@ -2040,10 +2047,7 @@ class PytestRunner:
             # A11: also right after the run, before its result is read or cached: a disk
             # that filled up during the run (e.g. an unlinked file a survivor holds open,
             # #2740) makes any failure of this run an infra abort, never a refusal (or the
-            # candidate's, when it explains the drop). A candidate run's survivors are
-            # reaped first, so blocks they hold in unlinked files are released (#2740).
-            if role == CAND_ROLE:
-                self._reap_candidate_scope(run_dir)
+            # candidate's, when it explains the drop).
             self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=False)
         # A6: what this run left in scratch (its own junit report excluded).
         junit_bytes = (

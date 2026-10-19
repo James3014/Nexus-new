@@ -3827,8 +3827,6 @@ def test_sandbox_os_survivor_cannot_recreate_its_dir_after_the_task_parent_is_go
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
-    # Path confinement on its own: the post-run reaper (tested separately) is off here.
-    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda run_dir: None)
     cand = work / "trees" / "a" / "cand"
     log = cand / "attempts.log"
     _survivor_tree(cand, _survivor_script(5000, log))
@@ -4172,8 +4170,6 @@ def test_sandbox_os_survivor_in_a_tight_loop_cannot_outrace_clean_tmp(tmp_path, 
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
-    # Path confinement on its own: the post-run reaper (tested separately) is off here.
-    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda run_dir: None)
     cand = work / "trees" / "a" / "candt"
     _write(cand, {"tests/test_spawn.py": TIGHT_SURVIVOR_TEST})
     nxt = work / "trees" / "b" / "base"
@@ -4353,20 +4349,21 @@ def _disk_by_phase(monkeypatch, runner: ros.PytestRunner, before: int, after: in
 
 
 @pytest.mark.parametrize(
-    ("headroom", "charged"),
-    [(100_000, True), (1024**3, False)],  # the candidate alone used it up / it did not
+    ("short", "charged"),
+    [(200_000, True), (1024**2, False)],  # its 300 kB explain the shortfall / they do not
 )
-def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, headroom, charged):
-    """layer1-rie N1/R2 / review C: free_start is taken at the first candidate run. The
-    candidate then writes 300 kB into its tree and the disk ends 200 kB below the floor.
-    Charged (HOST_DISK_LOW, NOT_RUNNABLE) only if the candidate's bytes alone exceed the
-    headroom it started with; else another process shared the drop: infra abort."""
+def test_host_disk_low_after_a_candidate_filled_its_tree(tmp_path, monkeypatch, short, charged):
+    """A11 single rule: free_start (first candidate run) is above the floor; the
+    candidate then writes 300 kB into its tree and the disk ends ``short`` below the
+    floor. Charged (HOST_DISK_LOW, NOT_RUNNABLE) iff free_after_reap + its visible bytes
+    >= floor; else infra abort."""
+    headroom = 100_000
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
     cand = _tree_writer(tmp_path / "cand", 300_000)
     base = _leak_tree(tmp_path, 0)
     env = LocalEnv().get("fixture-repo", cand)
     floor = runner.min_free_disk_bytes
-    _disk_by_phase(monkeypatch, runner, floor + headroom, floor - 200_000)
+    _disk_by_phase(monkeypatch, runner, floor + headroom, floor - short)
     assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
     assert runner.free_start == floor + headroom
     if charged:
@@ -4401,14 +4398,14 @@ def test_host_disk_low_right_after_the_candidate_run_that_filled_it(tmp_path, mo
 
 
 def test_another_process_taking_disk_between_candidate_runs_is_infra(tmp_path, monkeypatch):
-    """layer1-rie R2: 1 GiB headroom at free_start; another process takes nearly all of
-    it between candidate runs; the honest candidate grows 300 kB, which is more than the
-    final 200 kB shortfall but explains almost none of the drop: infra abort."""
+    """layer1-rie R2: 1 GiB headroom at free_start; another process takes all of it and
+    more between candidate runs; the honest candidate grows 300 kB, which does not
+    explain the 1 MiB shortfall (free_after_reap + 300 kB < floor): infra abort."""
     runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
     cand = _tree_writer(tmp_path / "cand", 300_000)
     env = LocalEnv().get("fixture-repo", cand)
     floor = runner.min_free_disk_bytes
-    _disk_by_phase(monkeypatch, runner, floor + 1024**3, floor - 200_000)
+    _disk_by_phase(monkeypatch, runner, floor + 1024**3, floor - 1024**2)
     assert runner.run(env, cand, "c1", "tests", (), 0, ros.CAND_ROLE).outcomes is not None
     with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
         runner.run(env, cand, "c2", "tests", (), 0, ros.CAND_ROLE)
@@ -4432,11 +4429,10 @@ def test_host_disk_low_charged_to_the_candidate_is_a_not_runnable_receipt(
 
 
 def test_candidate_runs_reap_their_survivors_before_the_post_run_disk_check(tmp_path, monkeypatch):
-    """layer1-rie R1: a candidate's setsid child holds an unlinked file in its run dir.
-    While it lives the disk reads below the floor. The post-run reap (before the disk
-    check) kills it, so the run completes; its PID is recorded, and any later shortfall
-    of this scoring is the candidate's. Real sandbox-exec on macOS; elsewhere the
-    fail-closed refusal."""
+    """layer1-rie R1: a candidate's setsid child holds an unlinked file in its run dir;
+    while it lives the disk reads below the floor. At the post-run shortfall the
+    candidate scope is reaped, free space recovers, and the candidate is charged
+    (HOST_DISK_LOW). Real sandbox-exec on macOS; elsewhere the fail-closed refusal."""
     work = tmp_path / "work"
     runner = _os_runner(work / "scratch")
     if runner is None:
@@ -4480,8 +4476,12 @@ def test_candidate_runs_reap_their_survivors_before_the_post_run_disk_check(tmp_
     env = LocalEnv().get("fixture-repo", cand)
     runner.begin_task("James3014/a#1")
     try:
-        res = runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
-        assert res.outcomes == {"tests.test_hold::test_hold": ros.PASS}
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+        assert (exc.value.kind, exc.value.attributed_role) == (
+            ros.SCRATCH_HOST_DISK_LOW,
+            ros.CAND_ROLE,
+        )
         pid = int(pidfile.read_text())
         assert runner.reaped_pids == [pid] and not holder_alive()
     finally:
@@ -4508,3 +4508,135 @@ def test_reaper_fails_closed_when_a_process_survives_sigkill(tmp_path, monkeypat
         with contextlib.suppress(OSError):
             holder.kill()
         holder.wait()
+
+
+def _late_holder_tree(root: Path, ready: Path, *, hold_space: bool) -> Path:
+    """A candidate test whose setsid child holds NOTHING when the run ends (cwd /, no
+    fds). After 1 s it either opens a file in the candidate tree, writes 100 kB, unlinks
+    it and keeps it open (``hold_space``), or just chdirs into the tree and idles (a
+    harmless daemon). It then touches ``ready``."""
+    if hold_space:
+        act = (
+            "f = open(os.path.join(tree, 'late.bin'), 'wb'); f.write(b'x' * 100000);"
+            " f.flush(); os.unlink(os.path.join(tree, 'late.bin'))\n"
+        )
+    else:
+        act = "os.chdir(tree)\n"
+    child = (
+        "import os, sys, time\n"
+        "os.setsid(); os.chdir('/')\n"
+        "for fd in range(3, 256):\n"
+        "    try:\n"
+        "        os.close(fd)\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "tree = sys.argv[1]; time.sleep(1)\n" + act + "open(sys.argv[2], 'w').close()\n"
+        "time.sleep(60)\n"
+    )
+    _write(
+        root,
+        {
+            "tests/test_late.py": (
+                "import subprocess, sys\nfrom pathlib import Path\n\n\n"
+                "def test_late():\n"
+                "    tree = str(Path(__file__).resolve().parents[1])\n"
+                f"    child = subprocess.Popen([sys.executable, '-c', {child!r}, tree, {str(ready)!r}],"
+                " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+                " stderr=subprocess.DEVNULL, close_fds=True)\n"
+                f"    Path({str(ready)!r} + '.pid').write_text(str(child.pid))\n"
+            )
+        },
+    )
+    return root
+
+
+def _late_holder_scenario(tmp_path, monkeypatch, *, hold_space: bool):
+    """Shared driver for the R1b / harmless-daemon tests (real sandbox-exec on macOS;
+    returns None after asserting the fail-closed refusal elsewhere)."""
+    work = tmp_path / "work"
+    runner = _os_runner(work / "scratch")
+    if runner is None:
+        return None
+    cand = work / "trees" / "a" / "candt"
+    ready = cand / "late.ready"
+    _late_holder_tree(cand, ready, hold_space=hold_space)
+    base = work / "trees" / "a" / "baset"
+    _write(base, {"tests/test_b.py": "def test_b():\n    pass\n"})
+    pidfile = Path(str(ready) + ".pid")
+    floor = runner.min_free_disk_bytes
+
+    def holder_alive() -> bool:
+        try:
+            os.kill(int(pidfile.read_text()), 0)
+        except (OSError, ValueError):
+            return False
+        return True
+
+    external = {"taken": False}
+
+    def disk(path):
+        if hold_space and ready.exists() and holder_alive():
+            return _usage(floor - 1)  # the held unlinked file filled the disk
+        if external["taken"]:
+            return _usage(floor - 10 * 1024**2)  # another process took 10 MiB
+        return _usage(9 * 1024**4)
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    env = LocalEnv().get("fixture-repo", cand)
+    runner.begin_task("James3014/a#1")
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not ready.exists():
+        time.sleep(0.1)
+    assert ready.exists() and holder_alive()
+    return runner, env, base, pidfile, holder_alive, external
+
+
+def test_r1b_late_holder_is_reaped_at_the_shortfall_and_charged(tmp_path, monkeypatch):
+    """layer1-rie R1b: the survivor holds nothing when the candidate run ends, then opens
+    a deleted file in the candidate tree and fills the disk. The next run's shortfall
+    reaps the candidate scope, free space recovers, and the candidate is charged."""
+    got = _late_holder_scenario(tmp_path, monkeypatch, hold_space=True)
+    if got is None:
+        return
+    runner, env, base, pidfile, holder_alive, _external = got
+    try:
+        with pytest.raises(ros.ScratchTmpCapExceeded) as exc:
+            runner.run(env, base, "b", "tests", (), 0)
+        assert (exc.value.kind, exc.value.role, exc.value.attributed_role) == (
+            ros.SCRATCH_HOST_DISK_LOW,
+            "",
+            ros.CAND_ROLE,
+        )
+        assert runner.reaped_pids == [int(pidfile.read_text())] and not holder_alive()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            os.kill(int(pidfile.read_text()), 9)
+
+
+def test_harmless_daemon_plus_external_disk_use_is_infra_not_charged(tmp_path, monkeypatch):
+    """layer1-rie / Gemini: an honest candidate leaves a daemon that holds no space; an
+    external process takes the disk. The reap kills the daemon but frees nothing, the
+    candidate's visible bytes do not explain the shortfall: infra abort, no charge."""
+    got = _late_holder_scenario(tmp_path, monkeypatch, hold_space=False)
+    if got is None:
+        return
+    runner, env, base, pidfile, holder_alive, external = got
+    try:
+        external["taken"] = True
+        with pytest.raises(ros.ScratchInfraAbort, match="host_disk_low"):
+            runner.run(env, base, "b", "tests", (), 0)
+        assert runner.reaped_pids == [int(pidfile.read_text())] and not holder_alive()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            os.kill(int(pidfile.read_text()), 9)
+
+
+def test_a_shortfall_before_any_candidate_run_is_infra_without_reaping(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    base = _leak_tree(tmp_path, 0)
+    env = LocalEnv().get("fixture-repo", base)
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(1))
+    with pytest.raises(ros.ScratchInfraAbort, match="no candidate run yet"):
+        runner.run(env, base, "b", "tests", (), 0)
+    assert runner.reaped_prefixes == []
