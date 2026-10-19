@@ -105,10 +105,14 @@ def test_memory_manager_live_wal_rows_visible_and_tree_unchanged(tmp_path, monke
 
 
 def test_memory_manager_temp_copy_removed_on_close(tmp_path, monkeypatch):
+    import gc
     import glob
     import tempfile
 
     ProjectMemoryManager(tmp_path).add_insight("t", "x")
+    # The writer's sqlite connection is closed only when collected; closing it checkpoints the
+    # WAL and changes the tree. Collect it before the baseline so only the read-only open counts.
+    gc.collect()
     monkeypatch.setenv(RO, "1")
     ro = ProjectMemoryManager(tmp_path)
     tree_before = tree_hash(tmp_path)
@@ -373,10 +377,14 @@ def test_findings_vector_sync_returns_false_when_skipped(tmp_path, monkeypatch):
 
 
 def test_snapshot_retries_when_source_changes_during_copy(tmp_path, monkeypatch):
+    import gc
+
     from nexus.core.memory_manager import ProjectMemoryManager as PMM
 
     mgr = ProjectMemoryManager(tmp_path)
     mgr.add_insight("t", "row")
+    del mgr
+    gc.collect()  # close the writer's connection (and checkpoint) before the baseline
     before = tree_hash(tmp_path)
     monkeypatch.setenv(RO, "1")
     ro = ProjectMemoryManager(tmp_path)
@@ -401,6 +409,7 @@ def test_snapshot_retries_when_source_changes_during_copy(tmp_path, monkeypatch)
 
 
 def test_snapshot_persistent_change_raises_and_leaves_tree(tmp_path, monkeypatch):
+    import gc
     import glob
     import os
     import tempfile
@@ -409,6 +418,7 @@ def test_snapshot_persistent_change_raises_and_leaves_tree(tmp_path, monkeypatch
     from nexus.core.memory_manager import StateReadOnlySnapshotError
 
     ProjectMemoryManager(tmp_path).add_insight("t", "row")
+    gc.collect()  # close the writer's connection (and checkpoint) before the baseline
     ro_env = monkeypatch
     ro_env.setenv(RO, "1")
     ro = ProjectMemoryManager(tmp_path)
