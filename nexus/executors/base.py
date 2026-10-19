@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
-
 from .protocol import ExecutorInput, ExecutorOutput
-
 
 class BaseExecutor(ABC):
     """
