@@ -205,6 +205,7 @@ def test_2665_junit_failure_texts_use_the_outcome_ids():
     texts = UltraReviewService._junit_failure_texts(junit)
     outcomes = UltraReviewService._junit_outcomes_from_bytes(junit)
 
+    assert outcomes is not None
     assert set(texts) == {k for k, v in outcomes.items() if v == "failed"}
     assert "fatal: bad object abcdef1" in texts["tests/test_a.py::test_x"]
     assert "trace" in texts["tests/test_a.py::TestK::test_y[p]"]
