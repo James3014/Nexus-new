@@ -7,6 +7,8 @@ refuse a component whose casefold equals ``.git``; ordinary paths behave as befo
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nexus.contracts import autonomy_goal, lifecycle_action
@@ -105,3 +107,20 @@ def test_github_keeps_its_current_classification(tmp_path):
         gateway._safe_relative_path(".github/x", root=tmp_path)
         == (tmp_path / ".github/x").resolve()
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/state/acceptance-artifacts/t/.git/x", True),
+        ("/state/acceptance-artifacts/t/.GIT/x", True),
+        ("/state/acceptance-artifacts/t/a/.Git", True),
+        ("/state/acceptance-artifacts/t/.gitignore", False),
+        ("/state/acceptance-artifacts/t/report.json", False),
+    ],
+)
+def test_acceptance_artifact_guard_refuses_git_metadata_in_any_case(path, expected):
+    """Codex r1 on #2790: the external-acceptance artifact guard was case-sensitive."""
+    from nexus.orchestrator.self_hosted_task_service import _names_git_metadata
+
+    assert _names_git_metadata(Path(path)) is expected
