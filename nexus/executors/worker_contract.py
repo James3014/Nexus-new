@@ -17,6 +17,20 @@ SUPPORTED_WORKER_PROVIDERS = (
     "grok",
     "cline",
 )
+# Providers that exist only on a measurement Gateway (#2721).  They are never
+# part of ``SUPPORTED_WORKER_PROVIDERS`` (so no "auto" order, competition or
+# managed-agent list ever contains them) and are admitted only while their
+# switch is on; see ``nexus.executors.claude_measurement_worker``.
+MEASUREMENT_WORKER_PROVIDERS = ("claude",)
+
+
+def admitted_worker_providers() -> tuple[str, ...]:
+    """Providers a contract may name: the supported set plus enabled measurement ones."""
+    from nexus.executors.claude_measurement_worker import measurement_claude_enabled
+
+    if measurement_claude_enabled():
+        return (*SUPPORTED_WORKER_PROVIDERS, *MEASUREMENT_WORKER_PROVIDERS)
+    return SUPPORTED_WORKER_PROVIDERS
 
 
 class WorkerOutcome(str, Enum):
