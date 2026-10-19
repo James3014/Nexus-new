@@ -28,6 +28,7 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
+from nexus.contracts.measure_dir_scope import dir_scope_enabled
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
     build_canonical_dispatch_envelope,
@@ -224,6 +225,9 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
         allowed = [str(path).strip() for path in arguments.get("allowed_files") or [] if str(path).strip()]
         if not 1 <= len(allowed) <= 4:
             raise _gateway().GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        if external_root is None and any(path.endswith("/") for path in allowed) and dir_scope_enabled():
+            # #2786: a directory scope only for a measurement copy, never Nexus-new itself.
+            raise _gateway().GatewayInputError("DIR_SCOPE_REQUIRES_EXTERNAL_TARGET")
         for path in allowed:
             if external_root is None:
                 _gateway()._safe_relative_path(path, "allowed_files")

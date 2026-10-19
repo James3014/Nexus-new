@@ -23,7 +23,12 @@ from nexus.contracts.lifecycle_action import (
     validate_owner_inline_contract,
 )
 from nexus.contracts.measure_dir_scope import dir_scope_enabled, split_dir_scope
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT, LOADED_SOURCE_ROOT
+from nexus.orchestrator.measure_external_target import (
+    ExternalTargetError,
+    accepted_external_controller,
+)
+from nexus.orchestrator.task_card_scope import protected_path_reason
 
 _TRUSTED_TOOL_MANIFEST_HASH: Optional[str] = None
 
@@ -434,9 +439,58 @@ def _bounded_path(path: str, *, root: Path) -> str:
     unchanged.
     """
     bounded = str(_repo_relative(path, root=root).relative_to(root.resolve()))
-    if dir_scope_enabled() and split_dir_scope(path) is not None and bounded != ".":
+    if dir_scope_enabled() and split_dir_scope(path) is not None:
+        if bounded == ".":
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_INVALID",
+                "directory scope covers the repository root",
+                details={"path": str(path)},
+            )
+        # A directory covers everything below it: never a protected path or an
+        # ancestor of one (``docs/`` covers ``docs/governance``), #2786 review.
+        reason = protected_path_reason(path) or protected_path_reason(bounded)
+        if reason is not None:
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_PROTECTED",
+                "directory scope covers a protected path",
+                details={"path": str(path), "reason": reason},
+            )
         return bounded + "/"
     return bounded
+
+
+def _require_external_dir_scope(
+    action: LifecycleActionEnvelope,
+    request: Optional[Mapping[str, Any]],
+    *,
+    root: Path,
+) -> None:
+    """A ``dir/`` scope exists only for a validated measurement external target (#2786).
+
+    Every entry point that carries an action envelope runs ``pre_action_guard``,
+    so this is the one place that confines directory scopes to a
+    ``nexus_worker_candidate`` request whose Controller is re-validated here as
+    an external measurement copy (never the Nexus-new checkout itself).
+    """
+    if not any(split_dir_scope(path) is not None for path in action.allowed_paths):
+        return
+    refused = LifecycleGuardError(
+        "DIR_SCOPE_REQUIRES_EXTERNAL_TARGET",
+        "a directory scope requires a measurement external target",
+    )
+    if not isinstance(request, Mapping) or request.get("worker_candidate_ingress") is not True:
+        raise refused
+    try:
+        external = accepted_external_controller(
+            request.get("controller_repo_root"),
+            action.expected_head,
+            nexus_root=root,
+            forbidden_roots=(LOADED_SOURCE_ROOT,),
+        )
+    except ExternalTargetError as exc:
+        raise LifecycleGuardError(str(exc), "external target re-validation failed") from exc
+    if external is None:
+        raise refused
 
 
 def _head(root: Path) -> str:
@@ -499,6 +553,8 @@ def pre_action_guard(
         raise LifecycleGuardError("APPROVAL_REJECTED", "approval scope explicitly rejects this action")
 
     bounded_paths = {_bounded_path(path, root=canonical_root) for path in action.allowed_paths}
+    if dir_scope_enabled():
+        _require_external_dir_scope(action, request, root=canonical_root)
     if request is not None:
         requested_paths = {str(path).strip() for path in request.get("allowed_files", ()) if str(path).strip()}
         unknown = sorted(requested_paths - bounded_paths)

@@ -340,7 +340,12 @@ def _allowed_path(value: str, field: str) -> str:
         stripped = split_dir_scope(value)
         if stripped is not None:
             _repo_path(stripped, field)
+            if stripped == ".":
+                # ``./`` would cover the whole repository (#2786 review).
+                raise ValueError(f"{field} directory scope must not be the repository root")
             return value
+        if value == ".":
+            raise ValueError(f"{field} directory scope must not be the repository root")
     return _repo_path(value, field)
 
 
