@@ -95,7 +95,8 @@ def evaluate(
         blockers.append("PR_HEAD_SHA_MISMATCH")
     # --no-renames: a rename lists both its source and its destination, so a file
     # renamed from outside the scope into it is still checked (#2765); -z: names are
-    # NUL-separated and never C-quoted; --no-relative: names stay repository-rooted.
+    # NUL-separated and never C-quoted; --no-relative / --ignore-submodules=none:
+    # diff.relative or a submodule "ignore" setting cannot hide a changed path.
     changed = [
         name
         for name in _git(
@@ -104,6 +105,7 @@ def evaluate(
             "--name-only",
             "--no-renames",
             "--no-relative",
+            "--ignore-submodules=none",
             "-z",
             f"{base_sha}...{head_sha}",
             "--",

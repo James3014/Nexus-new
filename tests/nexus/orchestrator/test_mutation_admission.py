@@ -551,3 +551,87 @@ def test_integration_gate_reads_non_ascii_names_unquoted(
 
     assert report["status"] == "PASS"
     assert report["changed_paths"] == ["allowed/設定.md"]
+
+
+@pytest.mark.parametrize(
+    "name", ["\tallowed/x.py", "\nallowed/x.py", " allowed/x.py", "allowed/x.py "]
+)
+def test_integration_gate_blocks_whitespace_wrapped_names(
+    tmp_path: Path, git_repo: tuple[Path, str, str], name: str
+) -> None:
+    # -z hands names over unquoted; a name must not be stripped into scope (#2765 review)
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/seed.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:whitespace",
+        allowed_paths=["allowed/**"],
+    )
+    target = repo / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "--", name)
+    _git(repo, "commit", "-m", "whitespace name")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == [name]
+
+
+def test_integration_gate_ignores_diff_relative_config(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "outside/x.py", "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:diff-relative",
+        allowed_paths=["allowed/**"],
+    )
+    (repo / "outside" / "x.py").write_text("changed\n", encoding="utf-8")
+    _git(repo, "add", "outside/x.py")
+    _git(repo, "commit", "-m", "outside change")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "config", "diff.relative", "true")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/x.py"]
+
+
+@pytest.mark.parametrize(
+    "path, allowed",
+    [
+        ("allowed/x.py", True),
+        (" allowed/x.py", False),
+        ("allowed/x.py\n", False),
+        ("\tallowed/x.py", False),
+        ("allowed/x\x7f.py", False),
+        ("allowed/設定.md", True),
+    ],
+)
+def test_path_is_allowed_checks_the_exact_name(path: str, allowed: bool) -> None:
+    from nexus.orchestrator.mutation_admission import path_is_allowed
+
+    assert path_is_allowed(path, ["allowed/**"]) is allowed
