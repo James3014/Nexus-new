@@ -696,12 +696,12 @@ def test_spend_ledger_stops_before_the_cap(tmp_path):
 @needs_sandbox
 def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path, monkeypatch):
     """8d witness item 3, zero-model: the task venv works under the adapter's sandbox."""
-    from scripts.bench.measure_2721.fake_claude import write_fake_claude
-    from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
-
     import site
     import subprocess as sp
     import sys
+
+    from scripts.bench.measure_2721.fake_claude import write_fake_claude
+    from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
 
     (task,) = arms.load_manifest(manifest)
     # A real venv (the fixture's /usr/bin/python3 link is an xcrun shim on macOS):
