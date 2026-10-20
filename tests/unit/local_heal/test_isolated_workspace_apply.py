@@ -335,3 +335,13 @@ def test_apply_hash_still_binds_nonblank_context_and_changed_payload() -> None:
     )
     multi_change_tamper = multi_change.replace("middle_anchor = 10", "middle_anchor = 11")
     assert _canonical_candidate_hash(multi_change) != _canonical_candidate_hash(multi_change_tamper)
+
+
+def test_blank_context_next_to_the_change_does_not_move_the_anchor() -> None:
+    """#2769: git may render a blank context line next to the change; the selected
+    and the applied diff of the same edit must canonicalize (and hash) alike."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    selected = "@@ -2,3 +2,3 @@\n \n-X\n+Y\n c\n"
+    applied = "@@ -1,4 +1,4 @@\n a\n \n-X\n+Y\n c\n"
+    assert _canonicalize_effective_diff(selected) == _canonicalize_effective_diff(applied)
