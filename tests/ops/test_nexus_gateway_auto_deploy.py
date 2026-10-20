@@ -846,6 +846,75 @@ def test_backoff_grows_with_failures(cfg: ad.Config) -> None:
     assert result["status"] == "BACKOFF" and result["retry_in_seconds"] == cfg.min_interval_seconds
 
 
+def test_deployed_status_names_the_new_live_deployment_at_once(cfg: ad.Config) -> None:
+    # #2770: the status written by the switching cycle itself must name the new tree,
+    # not the one the plist ran before the attempt.
+    old_root = cfg.deployments / f"r1-{OLD}"
+    new_root = cfg.deployments / f"a1-{NEW}"
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["status"] == "DEPLOYED"
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["status"] == "DEPLOYED"
+    assert status["live_commit"] == NEW == status["receipt"]["candidate_commit"]
+    assert status["live_root"] == str(new_root) == status["receipt"]["deployment_root"]
+    assert status["previous_commit"] == OLD
+    assert status["previous_root"] == str(old_root)
+
+
+def test_rolled_back_status_keeps_the_previous_live_deployment(cfg: ad.Config) -> None:
+    old_root = cfg.deployments / f"r1-{OLD}"
+    result = cycle(cfg, FakeHost(), FakeProber({(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "ROLLED_BACK"
+    status = json.loads((cfg.state_dir / "status.json").read_text())
+    assert status["live_commit"] == OLD and status["live_root"] == str(old_root)
+    assert "previous_commit" not in status and "previous_root" not in status
+
+
+def test_unreadable_plist_after_attempt_keeps_status_and_warns(cfg: ad.Config, monkeypatch) -> None:
+    old_root = cfg.deployments / f"r1-{OLD}"
+    real = ad._Cycle.record_switched_live
+
+    def unreadable(self, status, previous_root, previous_commit):
+        cfg.plist.unlink()
+        return real(self, status, previous_root, previous_commit)
+
+    monkeypatch.setattr(ad._Cycle, "record_switched_live", unreadable)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["live_commit"] == OLD and result["live_root"] == str(old_root)
+    assert "LIVE_ROOT_UNREADABLE_AFTER_ATTEMPT:FileNotFoundError" in result["warnings"]
+
+
+def test_unfinished_switch_journal_keeps_status(cfg: ad.Config, monkeypatch) -> None:
+    old_root = cfg.deployments / f"r1-{OLD}"
+    real = ad._Cycle.record_switched_live
+
+    def journal_left(self, status, previous_root, previous_commit):
+        cfg.journal.write_text("{}")
+        try:
+            return real(self, status, previous_root, previous_commit)
+        finally:
+            cfg.journal.unlink()
+
+    monkeypatch.setattr(ad._Cycle, "record_switched_live", journal_left)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["live_commit"] == OLD and result["live_root"] == str(old_root)
+    assert "previous_commit" not in result
+
+
+def test_switched_status_records_a_missing_previous_root_as_null(
+    cfg: ad.Config, monkeypatch
+) -> None:
+    real = ad._Cycle.record_switched_live
+
+    def no_previous(self, status, previous_root, previous_commit):
+        return real(self, status, None, None)
+
+    monkeypatch.setattr(ad._Cycle, "record_switched_live", no_previous)
+    result = cycle(cfg, FakeHost(), FakeProber())
+    assert result["live_commit"] == NEW
+    assert result["previous_root"] is None and result["previous_commit"] is None
+
+
 def test_post_switch_failure_rolls_back_to_exact_previous_plist(cfg: ad.Config) -> None:
     host = FakeHost()
     prober = FakeProber({(ad.LIVE_PORT, NEW): False})
@@ -7567,6 +7636,7 @@ def test_measurement_env_list_is_one_constant_of_valid_names() -> None:
         "NEXUS_LEARNING_WRITEBACK",
         "NEXUS_STATE_READ_ONLY",
         "NEXUS_MEASUREMENT_WORKTREE_DIFF",  # #2761
+        "NEXUS_MEASURE_DIR_SCOPE",  # #2721 dir/ scope
     } <= set(names)
     guard = ad.measurement_env_guard()
     for name in names:

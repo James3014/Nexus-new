@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
-SCORER_VERSION = "1.3.0"
+SCORER_VERSION = "1.3.1"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -136,10 +136,14 @@ class ScratchTmpCapExceeded(Exception):
         result: Any,
         kind: str = SCRATCH_TMP_CAP_EXCEEDED,
         left_bytes: int = 0,
+        attributed_role: str | None = None,
     ):
         super().__init__(f"{kind}:{tree}:{target}:run{run_idx}")
         self.tree, self.target, self.run_idx, self.role = tree, target, run_idx, role
         self.result, self.kind, self.left_bytes = result, kind, left_bytes
+        # A11: the role the cap trip is charged to (the run's own role unless growth in a
+        # leftover candidate-role run dir alone pushed it over the cap).
+        self.attributed_role = role if attributed_role is None else attributed_role
 
 
 class ScratchUnsafe(RuntimeError):
@@ -148,6 +152,31 @@ class ScratchUnsafe(RuntimeError):
 
 class ScorerBusy(RuntimeError):
     """Another scorer process holds the lock on the same --work directory."""
+
+
+class ScratchInfraAbort(RuntimeError):
+    """A11 (``--sandbox os``): an infrastructure condition, never a label: the host disk
+    under the scratch dir is low and this scoring's candidate bytes do not cover the
+    shortfall, bytes left under another scoring's run parent would push a cap, or the
+    survivor reaper has no lsof. Neither may yield a receipt; the CLI exits
+    ``INFRA_ABORT_EXIT_CODE`` so the driver reruns the task."""
+
+
+# A11: the CLI's exit code for ScratchInfraAbort (2-7 are already used).
+INFRA_ABORT_EXIT_CODE = 8
+# A11: free space the scratch filesystem must keep before every "os" pytest run: at least
+# two per-run caps, so one run that fills its cap still leaves room for the next.
+SCRATCH_MIN_FREE_BYTES = 2 * SCRATCH_TMP_CAP_BYTES
+_disk_usage = shutil.disk_usage  # indirection so tests can simulate a full disk
+# A11: sub-reason when the host disk fell below the floor and this scoring's candidate
+# bytes (its leftover run dirs plus its trees' growth) cover the shortfall: NOT_RUNNABLE.
+SCRATCH_HOST_DISK_LOW = "HOST_DISK_LOW"
+# A11: fixed lsof locations for the survivor reaper (never looked up on PATH).
+LSOF_CANDIDATES = ("/usr/sbin/lsof", "/usr/bin/lsof")
+PS = "/bin/ps"
+# Seconds to wait for reaped PIDs to disappear after SIGKILL.
+REAP_WAIT_SECONDS = 5.0
+TRASH_PREFIX = ".trash-"
 
 
 # --------------------------------------------------------------------------- utils
@@ -850,7 +879,8 @@ def _valid_version(version: object) -> TypeGuard[str]:
         return bool(_STUB_VERSION.fullmatch(version.lower()))
     try:
         Version(version)
-    except InvalidVersion:
+    except (InvalidVersion, ValueError):
+        # ValueError: e.g. a release segment over Python's int digit limit (A11).
         return False
     return True
 
@@ -1197,11 +1227,19 @@ class RunResult:
     diagnostic: str | None = None
 
 
-def tree_bytes(root: Path) -> int:
-    """Total size of the regular files under ``root``; symlinks are never followed."""
-    total = 0
+def allocated_bytes(st: os.stat_result) -> int:
+    """A11: disk space a file really uses (``st_blocks * 512``), so a sparse file counts
+    what it occupies, not its apparent ``st_size``; ``st_size`` where ``st_blocks`` is
+    unavailable."""
+    blocks = getattr(st, "st_blocks", None)
+    return int(blocks) * 512 if blocks is not None else st.st_size
+
+
+def _regular_files(root: Path) -> Iterator[os.stat_result]:
+    """lstat of every regular file under ``root``; symlinks are never followed, and a
+    file that vanishes during the walk is skipped."""
     if not root.is_dir() or root.is_symlink():
-        return 0
+        return
     for dirpath, _dirs, files in os.walk(root, followlinks=False):
         for name in files:
             try:
@@ -1209,8 +1247,35 @@ def tree_bytes(root: Path) -> int:
             except OSError:
                 continue
             if stat.S_ISREG(st.st_mode):
-                total += st.st_size
-    return total
+                yield st
+
+
+def tree_bytes(root: Path) -> int:
+    """Allocated size (A11) of the regular files under ``root``, each inode counted once
+    (hard links are not double-counted); symlinks are never followed."""
+    seen: dict[tuple[int, int], int] = {}
+    for st in _regular_files(root):
+        seen[(st.st_dev, st.st_ino)] = allocated_bytes(st)
+    return sum(seen.values())
+
+
+@dataclass(frozen=True)
+class ScratchUsage:
+    """A11: one walk of scratch (shared HOME/TMPDIR and runs/), partitioned.
+
+    ``own_candidate``: candidate-role run dirs of the current task scoring other than the
+    current run's (re-created by a session-escaping child of a candidate run).
+    ``foreign``: anything under runs/ outside the current task's parent (cannot be
+    re-created by a confined process once that parent is gone; an infra condition).
+    ``cand_tree``: bytes in the candidate trees passed to ``measure`` (not part of
+    ``total``; their growth is the candidate's).
+    Each inode is counted once, charged in favour of the candidate: own_candidate, then
+    cand_tree, then foreign, then the rest."""
+
+    total: int
+    own_candidate: int
+    foreign: int
+    cand_tree: int = 0
 
 
 def clean_scratch_tmp(tmp: Path, keep: Iterable[str] = ()) -> list[str]:
@@ -1403,12 +1468,18 @@ class PytestRunner:
         log: Callable[[str], None] = print,
         sandbox: str = SANDBOX_NONE,
         store: Path | None = None,
+        min_free_disk_bytes: int = SCRATCH_MIN_FREE_BYTES,
     ):
         if sandbox not in RUNNER_SANDBOX_MODES:
             raise ValueError(f"sandbox must be one of {RUNNER_SANDBOX_MODES}, got {sandbox!r}")
-        # A9: "os" refuses at once (fail closed) when no OS barrier exists.
+        # A9: "os" refuses at once (fail closed) when no OS barrier exists. A11: it also
+        # needs the store, which every confined run must be denied (no store, no deny).
         self.sandbox = sandbox
         if sandbox == SANDBOX_OS:
+            if store is None or not str(store).strip() or not Path(store).is_dir():
+                from nexus.engine.sandboxed_lane import SandboxError
+
+                raise SandboxError("store_required")
             _require_os_sandbox()
         self.scratch = Path(scratch)
         self.cache = self.scratch / "pytest-cache"
@@ -1422,6 +1493,22 @@ class PytestRunner:
         # A9 ("os" only): the experiment store; never readable by a confined run.
         self.store = Path(store) if store is not None else None
         self._profile_sha256: str | None = None
+        # A11 ("os"): the per-task-scoring parent of the run dirs, runs/<uuid12>, created
+        # at the first run and removed by clean_tmp. A confined process may write only its
+        # own run dir, so once this parent is gone it can re-create nothing under runs/.
+        self.task_dir: Path | None = None
+        # A11 ("os"): free bytes the scratch filesystem must keep before every run.
+        self.min_free_disk_bytes = min_free_disk_bytes
+        # A11 ("os"): candidate trees of this scoring -> their allocated size before their
+        # first candidate run; growth beyond it is the candidate's.
+        self._cand_tree_base: dict[str, int] = {}
+        # A11 ("os"): host free bytes at the pre-run check of this scoring's first
+        # candidate run (before any candidate code ran); None until then.
+        self.free_start: int | None = None
+        self._candidate_ran = False
+        # A11 ("os"): survivors reaped at a host-disk shortfall (diagnostic).
+        self.reaped_pids: list[int] = []
+        self.reclaimed_bytes = 0  # A11 diagnostic: space shortfall reaps gave back
         # junit report names of runs in flight; the only files cleanup may keep.
         self._live_junits: set[str] = set()
 
@@ -1438,7 +1525,51 @@ class PytestRunner:
     def scratch_bytes(self) -> int:
         # A9 "os": everything under runs/ counts too (a session-escaping child may re-create
         # its deleted run dir and keep writing). Absent in "none" mode, so 0 there.
-        return tree_bytes(self.tmp) + tree_bytes(self.home) + tree_bytes(self.runs)
+        return self.measure(None).total
+
+    def measure(self, current: Path | None, cand_trees: Iterable[Path | str] = ()) -> ScratchUsage:
+        """A11: ONE walk of scratch/tmp, scratch/home, scratch/runs and the given
+        candidate trees, partitioned by top-level entry, so the total and the candidate
+        share come from the same files (no window between two scans in which a survivor
+        could move bytes). Trees are walked whole (``.git`` included: in a worktree it is
+        a small pointer file, the same in every measurement)."""
+        rank = {"other": 0, "foreign": 1, "cand_tree": 2, "own_candidate": 3}
+        inodes: dict[tuple[int, int], list[Any]] = {}
+
+        def add(root: Path, part: str) -> None:
+            for st in _regular_files(root):
+                entry = inodes.setdefault((st.st_dev, st.st_ino), [allocated_bytes(st), part])
+                if rank[part] > rank[entry[1]]:
+                    entry[1] = part
+
+        add(self.tmp, "other")
+        add(self.home, "other")
+        if self.runs.is_dir() and not self.runs.is_symlink():
+            cand = _role_slug(CAND_ROLE) + "-"
+            for parent in sorted(self.runs.iterdir()):
+                if parent.is_symlink() or not parent.is_dir():
+                    continue
+                if self.task_dir is None or parent.name != self.task_dir.name:
+                    add(parent, "foreign")
+                    continue
+                for run in sorted(parent.iterdir()):
+                    if current is not None and run.name == current.name:
+                        add(run, "other")  # the current run's own bytes: its role's
+                    elif run.name.startswith(cand):
+                        add(run, "own_candidate")
+                    else:
+                        add(run, "other")
+        for tree in cand_trees:
+            add(Path(tree), "cand_tree")
+        total = own = foreign = cand_tree = 0
+        for size, part in inodes.values():
+            if part == "cand_tree":
+                cand_tree += size
+                continue
+            total += size
+            own += size if part == "own_candidate" else 0
+            foreign += size if part == "foreign" else 0
+        return ScratchUsage(total, own, foreign, cand_tree)
 
     def clean_tmp(self) -> tuple[int, int, list[str]]:
         """A6: empty scratch/tmp and scratch/home after a task.
@@ -1458,7 +1589,14 @@ class PytestRunner:
         if os.path.lexists(self.runs):  # A9 "os": dirs a crash or an escaped child left
             if self.runs.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use or clean it")
+            self.retire_runs()  # A11: rename first (atomic), so no survivor can re-create
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
+        self.task_dir = None  # the next task scoring gets a fresh parent
+        self._cand_tree_base.clear()
+        self.free_start = None
+        self._candidate_ran = False
+        self.reaped_pids = []
+        self.reclaimed_bytes = 0
         for err in errors:
             self.log(f"  scratch cleanup: {err}")
         return sizes[0], sizes[1], errors
@@ -1532,8 +1670,9 @@ class PytestRunner:
         from nexus.engine import sandboxed_lane as lane
 
         _require_os_sandbox()
+        store = self._required_store()
         work = self.scratch.parent.resolve()
-        denied = [work / "repos", *([self.store.resolve()] if self.store else [])]
+        denied = [work / "repos", store]
         interpreter = Path(os.path.realpath(env.python))
         env_dir = Path(env.python).parent.parent
         # Every read root besides the tree and the run dir (env dir, interpreter prefix,
@@ -1558,9 +1697,17 @@ class PytestRunner:
             "developer_dir": lane.developer_toolchain_read_roots(),
             "toolchain": [p for p in fixed["toolchain"] if os.path.exists(p)],
             "repos": [work / "repos"],
-            "store": [self.store.resolve()] if self.store else [],
+            "store": [store],
         })
         return [lane.SANDBOX_EXEC, "-p", profile]
+
+    def _required_store(self) -> Path:
+        """A11: the resolved store, or SandboxError: an "os" profile always denies it."""
+        if self.store is None or not str(self.store).strip():
+            from nexus.engine.sandboxed_lane import SandboxError
+
+            raise SandboxError("store_required")
+        return self.store.resolve()
 
     @property
     def sandbox_profile_sha256(self) -> str | None:
@@ -1587,7 +1734,8 @@ class PytestRunner:
                 elif kind == "repos":
                     values[kind] = ["/__WORK__/repos"]
                 elif kind == "store":
-                    values[kind] = ["/__STORE__"] if self.store else []
+                    self._required_store()  # A11: "os" never runs without the store deny
+                    values[kind] = ["/__STORE__"]
                 else:
                     values[kind] = [f"/__{kind.upper()}__"]
             profile = _profile_from_roots(values, all_system_subpaths=True)
@@ -1627,11 +1775,222 @@ class PytestRunner:
             return self._execute(env, tree, target, ignores, run_idx, role, key, None)
         # A9 "os": a fresh HOME/TMPDIR/junit dir for this run only, removed afterwards on
         # every path (result, timeout, cap refusal, error).
-        run_dir = self.runs / f"{key[:16]}-{uuid.uuid4().hex[:12]}"
+        # A11: the dir name starts with the run's role, so growth a session-escaping child
+        # leaves in it later is attributed to that role (runs/ is not writable by any run,
+        # so a confined process can only re-create its own dir, never rename one).
+        if self.task_dir is None:
+            self.task_dir = self.runs / uuid.uuid4().hex[:12]
+        run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
         try:
             return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
         finally:
             self._remove_run_dir(run_dir)
+
+    def begin_task(self, task_key: str) -> None:
+        """A11: start a task scoring: its run dirs go under a fresh runs/<uuid12> parent
+        (a rescore of the same task gets a new one too)."""
+        del task_key  # the parent is random; the task key is not needed
+        self.task_dir = None
+        self._cand_tree_base.clear()
+        self.free_start = None
+        self._candidate_ran = False
+        self.reaped_pids = []
+        self.reclaimed_bytes = 0
+
+    def retire_runs(self) -> list[Path]:
+        """A11: rename every run parent under runs/ to ``.trash-<uuid>`` (one atomic step
+        each) and return the trash paths. A survivor's write rule names its own run dir
+        under the old parent path; once that parent is renamed away the path has no
+        parent, so even a survivor in a tight mkdir loop can re-create nothing (rmtree
+        alone works bottom-up and loses that race)."""
+        trash: list[Path] = []
+        if not self.runs.is_dir() or self.runs.is_symlink():
+            return trash
+        for entry in sorted(self.runs.iterdir()):
+            if entry.name.startswith(TRASH_PREFIX):
+                trash.append(entry)
+                continue
+            moved = _retire_dir(entry)
+            if moved is not None:
+                trash.append(moved)
+        self.task_dir = None
+        return trash
+
+    def reap_survivors(
+        self, prefixes: Iterable[Path], name_prefixes: Iterable[str] = ()
+    ) -> list[int]:
+        """A11 ("os"): SIGKILL, by PID, every process of this user that still has its cwd
+        or an open file (deleted ones included) under ``prefixes`` (this scoring's trees,
+        run dirs and their trash: the path itself or below it) or whose lsof name starts
+        with one of ``name_prefixes`` (plain string match, for paths whose directory may
+        no longer exist). Returns the reaped PIDs. Fails closed (ScratchInfraAbort) when
+        no lsof exists at a fixed location."""
+        lsof = next((p for p in LSOF_CANDIDATES if os.path.isfile(p)), None)
+        if lsof is None:
+            raise ScratchInfraAbort("lsof_unavailable: cannot reap sandbox survivors")
+        roots = sorted({str(Path(p).resolve()) for p in prefixes if str(p)})
+        raw = sorted({p for p in name_prefixes if p})
+        if not roots and not raw:
+            return []
+        try:
+            out = subprocess.run(  # noqa: S603 - fixed binary, argv list
+                [lsof, "-nP", "-w", "-Fpfn", "-u", str(os.getuid())],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            ).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ScratchInfraAbort(f"lsof_failed: {exc}") from exc
+        own = {os.getpid(), os.getppid()}
+        hits: set[int] = set()
+        pid = 0
+        for line in out.splitlines():
+            if line.startswith("p"):
+                pid = int(line[1:]) if line[1:].isdigit() else 0
+            elif line.startswith("n") and pid and pid not in own:
+                name = line[1:].removesuffix(" (deleted)")
+                if any(name == r or name.startswith(r + "/") for r in roots) or any(
+                    name.startswith(r) for r in raw
+                ):
+                    hits.add(pid)
+        for victim in sorted(hits):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(victim, signal.SIGKILL)
+        deadline = time.monotonic() + REAP_WAIT_SECONDS
+        alive = [p for p in sorted(hits) if _pid_alive(p)]
+        while alive and time.monotonic() < deadline:
+            time.sleep(0.05)
+            alive = [p for p in alive if _pid_alive(p)]
+        if alive:
+            raise ScratchInfraAbort(f"reap_failed: still alive after SIGKILL: {alive}")
+        if hits:
+            self.log(f"  reaped sandbox survivors: {sorted(hits)}")
+        return sorted(hits)
+
+    def _reap_candidate_scope(self) -> list[int]:
+        """A11: reap holders of a cwd or open file (deleted ones included) under this
+        scoring's candidate run dirs and candidate trees, so blocks they hold in unlinked
+        files are released (#2740). Called on a host-disk shortfall."""
+        # Candidate run dirs by name prefix (<task_dir>/candt-), not by listing the dirs
+        # that exist now: a survivor may have removed its own run dir after unlinking a
+        # file it keeps open, and the scorer removes finished run dirs itself.
+        names = []
+        if self.task_dir is not None:
+            names.append(f"{Path(self.task_dir).resolve()}/{_role_slug(CAND_ROLE)}-")
+        trees = [Path(t) for t in self._cand_tree_base]
+        reaped = self.reap_survivors(trees, name_prefixes=names)
+        self.reaped_pids += reaped
+        return reaped
+
+    def _candidate_bytes(self, current: Path | None) -> int:
+        """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
+        (``current`` counts as candidate when given as None by a candidate run) plus its
+        trees' growth since their first candidate run. One walk."""
+        usage = self.measure(current, list(self._cand_tree_base))
+        growth = max(0, usage.cand_tree - sum(self._cand_tree_base.values()))
+        return usage.own_candidate + growth
+
+    def _check_disk_for_run(
+        self,
+        tree: Path,
+        target: str,
+        run_idx: int,
+        role: str,
+        run_dir: Path,
+        *,
+        pre: bool,
+    ) -> None:
+        """A11: the host-disk check around an "os" run, below the floor.
+
+        No candidate run yet in this scoring: infra abort. Otherwise reap this scoring's
+        candidate scope (survivors holding cwd or files, deleted ones included, under its
+        candidate run dirs and trees) and measure free space again. ``reclaimed`` is the
+        space that came back, counted only if the reap killed something.
+
+        * Recovered (free >= floor), pre-run check: continue (no charge, no abort).
+        * Recovered, post-run check: the run may have run on an exhausted disk. Charged
+          (HOST_DISK_LOW) iff reclaimed >= the shortfall before the reap; else infra.
+        * Still below: charged iff free_start >= floor, the candidate's visible bytes
+          >= the shortfall, and visible bytes + reclaimed >= half of the drop since
+          free_start. Otherwise infra abort (external use as the majority, a harmless
+          daemon that held no space, a disk already low)."""
+        probe = self.scratch if self.scratch.exists() else self.scratch.parent
+        free = _disk_usage(probe).free
+        if pre and role == CAND_ROLE and self.free_start is None:
+            self.free_start = free  # before any candidate code of this scoring ran
+        floor = self.min_free_disk_bytes
+        if free >= floor:
+            return
+        if not self._candidate_ran:
+            raise ScratchInfraAbort(
+                f"host_disk_low:free={free}B floor={floor}B (no candidate run yet)"
+            )
+        free_before = free
+        shortfall_before = floor - free_before
+        killed = self._reap_candidate_scope()
+        free = _disk_usage(probe).free
+        shortfall = floor - free
+        # Space this reap gave back: only when it killed something; a recovery without
+        # a reaped survivor came back for some other reason.
+        reclaimed = max(0, free - free_before) if killed else 0
+        self.reclaimed_bytes += reclaimed
+        # A candidate run's own run dir is the candidate's: measure it as one (current
+        # None makes it count under its candt- name).
+        cand = self._candidate_bytes(None if role == CAND_ROLE else run_dir)
+        if free >= floor:
+            if pre:
+                return  # H2: the reap recovered the disk before the run: just go on
+            # Post-run: the run may have run on an exhausted disk, so its result is not
+            # used. The candidate's survivor caused it iff its reaped space covers the
+            # shortfall that was there; otherwise the space came back for another reason.
+            if reclaimed >= shortfall_before:
+                self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
+            raise ScratchInfraAbort(
+                f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
+                f" reclaimed={reclaimed}B floor={floor}B"
+            )
+        # Still below the floor: charged iff the scoring started above the floor, the
+        # candidate's visible bytes cover the shortfall, and they (plus reclaimed, for
+        # this majority term only) account for at least half of the drop since
+        # free_start (so a candidate that filled the disk to just above the floor is
+        # still charged when an oracle run's small writes cross it).
+        if (
+            self.free_start is not None
+            and self.free_start >= floor
+            and cand >= floor - free
+            and 2 * (cand + reclaimed) >= self.free_start - free
+        ):
+            self._charge_host_disk(tree, target, run_idx, role, shortfall)
+        raise ScratchInfraAbort(
+            f"host_disk_low:free_after_reap={free}B candidate_bytes={cand}B"
+            f" reclaimed={reclaimed}B"
+            f" free_start={self.free_start} floor={floor}B"
+        )
+
+    def _charge_host_disk(
+        self, tree: Path, target: str, run_idx: int, role: str, shortfall: int
+    ) -> None:
+        """A11: raise the HOST_DISK_LOW cap refusal charged to the candidate."""
+        res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, False, 0.0, SCRATCH_HOST_DISK_LOW)
+        raise ScratchTmpCapExceeded(
+            tree.name,
+            target,
+            run_idx,
+            role,
+            res,
+            SCRATCH_HOST_DISK_LOW,
+            max(shortfall, 0),
+            attributed_role=CAND_ROLE,
+        )
+
+    def check_host_disk(self) -> None:
+        """A11: raise ScratchInfraAbort when the scratch filesystem has fewer than
+        ``min_free_disk_bytes`` free bytes (default SCRATCH_MIN_FREE_BYTES)."""
+        probe = self.scratch if self.scratch.exists() else self.scratch.parent
+        free = _disk_usage(probe).free
+        if free < self.min_free_disk_bytes:
+            raise ScratchInfraAbort(f"host_disk_low:free={free}B < {self.min_free_disk_bytes}B")
 
     def _remove_run_dir(self, run_dir: Path) -> None:
         """Delete one A9 per-run dir without following links; log what could not go."""
@@ -1647,6 +2006,10 @@ class PytestRunner:
             errors.append(f"rmdir:{type(exc).__name__}")
         for err in errors:
             self.log(f"  run dir cleanup {run_dir.name}: {err}")
+        # A11: drop the task parent while it is empty (the next run re-creates it with
+        # the same name); while it is gone a survivor cannot re-create its own dir.
+        with contextlib.suppress(OSError):
+            run_dir.parent.rmdir()
 
     def _execute(
         self,
@@ -1667,9 +2030,11 @@ class PytestRunner:
             junit.parent.mkdir(parents=True, exist_ok=True)
             junit.unlink(missing_ok=True)
         else:
-            if self.runs.is_symlink():
+            # A11: before every "os" run (charged to the candidate or infra if low).
+            self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=True)
+            if self.runs.is_symlink() or run_dir.parent.is_symlink():
                 raise ScratchUnsafe(f"{self.runs} is a symlink; refusing to use it")
-            self.runs.mkdir(parents=True, exist_ok=True)
+            run_dir.parent.mkdir(parents=True, exist_ok=True)
             run_dir.mkdir()
             (run_dir / "home").mkdir()
             (run_dir / "tmp").mkdir()
@@ -1698,9 +2063,18 @@ class PytestRunner:
             # runs anything unconfined.
             run_env = self._env(env, tree, run_dir / "home", run_dir / "tmp")
             launch = self._confine(env, tree, run_dir) + cmd
-        before = self.scratch_bytes()
+        # A11: one walk per measurement point (total and candidate share together). A
+        # candidate run's tree is measured too: its growth is that run's growth.
+        if run_dir is not None and role == CAND_ROLE:
+            self._cand_tree_base.setdefault(str(Path(tree).resolve()), tree_bytes(tree))
+        cand_trees = list(self._cand_tree_base) if run_dir is not None else []
+        usage_before = self.measure(run_dir, cand_trees)
+        before = usage_before.total
+        own_before, foreign_before = usage_before.own_candidate, usage_before.foreign
         start = time.monotonic()
         timed_out = False
+        if run_dir is not None and role == CAND_ROLE:
+            self._candidate_ran = True  # A11: candidate code runs from here on
         # Own process group, so whatever the tests spawned is killed with the run and
         # cannot keep writing into scratch/tmp while the next tree is measured (A6).
         proc = subprocess.Popen(
@@ -1722,27 +2096,60 @@ class PytestRunner:
             self._kill_group(proc.pid)
         seconds = time.monotonic() - start
         self.total_seconds += seconds
+        if run_dir is not None:
+            # A11: also right after the run, before its result is read or cached: a disk
+            # that filled up during the run (e.g. an unlinked file a survivor holds open,
+            # #2740) makes any failure of this run an infra abort, never a refusal (or the
+            # candidate's, when it explains the drop).
+            self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=False)
         # A6: what this run left in scratch (its own junit report excluded).
-        junit_bytes = junit.stat().st_size if junit.is_file() and not junit.is_symlink() else 0
-        after = self.scratch_bytes() - junit_bytes
-        left = after - before
+        junit_bytes = (
+            allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0
+        )
+        usage_after = self.measure(run_dir, cand_trees)
+        after = usage_after.total - junit_bytes
+        tree_growth = max(0, usage_after.cand_tree - usage_before.cand_tree)
+        left = after - before + tree_growth
         outcomes = {} if timed_out else parse_junit(junit)
         junit.unlink(missing_ok=True)
         self._live_junits.discard(junit.name)
         kind = None
+        # A11 ("os" only, 0 under "none"): bytes in leftover candidate-role run dirs of
+        # this task scoring (chargeable to its candidate) and anything left under other
+        # task parents (an infra condition).
+        own_after, foreign_after = usage_after.own_candidate, usage_after.foreign
+        attributed = role
+        infra = False
         if left > SCRATCH_TMP_CAP_BYTES:
             kind = SCRATCH_TMP_CAP_EXCEEDED
+            attributed, infra = _charge_cap(
+                role,
+                left,
+                SCRATCH_TMP_CAP_BYTES,
+                own=max(0, own_after - own_before) + tree_growth,
+                foreign=max(0, foreign_after - foreign_before),
+            )
         elif after > SCRATCH_TMP_TASK_CAP_BYTES:
             kind = SCRATCH_TMP_TASK_CAP_EXCEEDED
+            attributed, infra = _charge_cap(
+                role, after, SCRATCH_TMP_TASK_CAP_BYTES, own=own_after, foreign=foreign_after
+            )
         self.log(
             f"  pytest {target} run={run_idx}{' role=' + role if role else ''} exit={exit_code}"
             f"{' TIMEOUT' if timed_out else ''}{' ' + kind if kind else ''}"
             f" nodes={len(outcomes)} {seconds:.0f}s"
         )
+        if kind and infra:
+            # A11: bytes outside this task scoring's run parent pushed the cap: no receipt.
+            raise ScratchInfraAbort(
+                f"foreign_run_dir_leftover:{kind}:{tree.name}:{target}:run{run_idx}"
+            )
         if kind:
             # Not cached: an infrastructure refusal, never test results.
             res = RunResult({}, SCRATCH_TMP_CAP_EXIT_CODE, timed_out, seconds, kind)
-            raise ScratchTmpCapExceeded(tree.name, target, run_idx, role, res, kind, left)
+            raise ScratchTmpCapExceeded(
+                tree.name, target, run_idx, role, res, kind, left, attributed_role=attributed
+            )
         cached.write_text(
             json.dumps(
                 {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
@@ -1909,6 +2316,62 @@ class Oracle:
 
 
 CAND_ROLE = "CAND+T"
+
+
+def _charge_cap(role: str, level: int, cap: int, *, own: int, foreign: int) -> tuple[str, bool]:
+    """A11: who a cap trip at ``level`` (> ``cap``) is charged to: (role, infra).
+
+    For every role: if the trip needs bytes from another scoring's run parent
+    (``foreign``), alone or together with this scoring's candidate bytes (``own``), it is
+    an infra abort. Otherwise a candidate run's trip, or one that needs ``own``, is the
+    candidate's (NOT_RUNNABLE); anything else stays with the run's role."""
+    if level - foreign <= cap:
+        return role, True
+    if role == CAND_ROLE or level - own <= cap:
+        return CAND_ROLE, False
+    if level - own - foreign <= cap:
+        return role, True
+    return role, False
+
+
+def _pid_alive(pid: int) -> bool:
+    """True while ``pid`` exists and is not a zombie (a zombie holds no files)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        stat_out = subprocess.run(  # noqa: S603 - fixed binary
+            [PS, "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return bool(stat_out) and not stat_out.startswith("Z")
+
+
+def _retire_dir(path: Path) -> Path | None:
+    """A11: atomically rename ``path`` to a ``.trash-<uuid>`` sibling; None if absent."""
+    if not os.path.lexists(path):
+        return None
+    trash = path.parent / f"{TRASH_PREFIX}{uuid.uuid4().hex[:12]}"
+    try:
+        os.rename(path, trash)
+    except FileNotFoundError:
+        return None
+    return trash
+
+
+def _role_slug(role: str) -> str:
+    """A11: a run role as a run-dir name prefix ("CAND+T" -> "candt", "" -> "oracle")."""
+    return re.sub(r"[^a-z0-9]", "", role.lower()) or "oracle"
+
+
 # Worktree directory name -> tree name used in receipts.
 _TREE_NAMES = {
     "base": "BASE",
@@ -1999,6 +2462,9 @@ def _score_task(
         inputs.candidate = Candidate(b"", [], override="empty")
     receipt = _base_receipt(inputs, ctx)
     timing: dict[str, Any] = {"task_key": inputs.task_key}
+    begin_task = getattr(ctx.runner, "begin_task", None)
+    if begin_task is not None:
+        begin_task(inputs.task_key)  # A11: run dirs carry this task's hash
     gt = load_ground_truth(inputs)  # §4 step 2
     if gt is None:
         receipt["label"] = PENDING_GROUND_TRUTH
@@ -2105,6 +2571,8 @@ def _score_task(
         try:
             env = ctx.env_provider.get(inputs.repo, wts["base"])
         except EnvBuildError as exc:
+            if getattr(ctx.runner, "sandbox", SANDBOX_NONE) == SANDBOX_OS:
+                ctx.runner.check_host_disk()  # A11: a full disk is infra, not ENV_FAILED
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = "ENV_FAILED"
             timing["env_error"] = str(exc)[-800:]
@@ -2365,9 +2833,12 @@ def _score_task(
         tree = _TREE_NAMES.get(cap.tree, cap.tree)
         # A candidate-role run that trips either cap stays in the denominator
         # (NOT_RUNNABLE); a leaky candidate must never be dropped as not scorable.
-        if cap.role == CAND_ROLE:
+        if cap.attributed_role == CAND_ROLE:
             receipt["label"] = NOT_RUNNABLE
             receipt["sub_reason"] = cap.kind
+            if cap.role != CAND_ROLE:
+                # A11: a candidate survivor's leftover run dir caused the trip.
+                receipt["cap_attributed_role"] = CAND_ROLE
         elif cap.kind == SCRATCH_TMP_TASK_CAP_EXCEEDED:
             receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
             receipt["sub_reason"] = SCRATCH_TMP_TASK_CAP_EXCEEDED
@@ -2381,7 +2852,9 @@ def _score_task(
         receipt.pop("shadow_label", None)
         return _finish(receipt, timing, t0, ctx)
     finally:
-        if not ctx.keep_trees:
+        if getattr(ctx.runner, "sandbox", SANDBOX_NONE) == SANDBOX_OS:
+            _retire_os_scoring(ctx, repo, trees_dir, timing)
+        elif not ctx.keep_trees:
             for wt in wts.values():
                 repo.remove_worktree(wt)
             shutil.rmtree(trees_dir, ignore_errors=True)
@@ -2391,6 +2864,30 @@ def _score_task(
         timing["scratch_tmp_bytes"] = tmp_bytes
         timing["scratch_home_bytes"] = home_bytes
         timing["scratch_tmp_cleanup_errors"] = errors[:20]
+
+
+def _retire_os_scoring(
+    ctx: ScoreContext, repo: GitRepo, trees_dir: Path, timing: dict[str, Any]
+) -> None:
+    """A11 (``--sandbox os``) end of a scoring: rename this scoring's trees parent (unless
+    --keep-trees) and run parents to trash names first, each one atomic step, so no
+    survivor can re-create a path under them; then SIGKILL every process of this user
+    that still holds a cwd or an open file under them (``reaped_pids`` diagnostic); then
+    delete the trash. The A6 cleanup that follows empties the rest."""
+    runner = ctx.runner
+    prefixes: list[Path] = [trees_dir, runner.runs]
+    trees_trash = None if ctx.keep_trees else _retire_dir(trees_dir)
+    if trees_trash is not None:
+        prefixes.append(trees_trash)
+    prefixes += runner.retire_runs()
+    timing["reaped_pids"] = [*runner.reaped_pids, *runner.reap_survivors(prefixes)]
+    timing["reap_reclaimed_bytes"] = runner.reclaimed_bytes
+    if trees_trash is not None:
+        shutil.rmtree(trees_trash, ignore_errors=True)
+        if os.path.lexists(trees_trash):
+            _make_tree_writable(trees_trash)
+            shutil.rmtree(trees_trash, ignore_errors=True)
+        repo.git("worktree", "prune", check=False)
 
 
 def _broken_candidate(

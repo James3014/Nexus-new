@@ -3066,11 +3066,12 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "skipped": False,
             "status": status,
             "gate_passed": gate_passed,
-            # #2772: a record-only review contributes only when the review itself passed.
+            # #2772: a record-only review contributes only when the review itself passed
+            # completely: PASS status, the executor's review_passed, and no lane shortfall.
             "outcome_contributed": gate_passed
             and (
-                not _is_advisory_only_outcome(name, outcome_map)
-                or outcome_map.get("review_status") == "PASS"
+                not _is_record_only_capability(name, registry_key)
+                or _advisory_review_passed(outcome_map, advisory_contract_violations)
             ),
             "evidence_refs": evidence_refs,
             "evidence_ids": list(evidence_refs),
@@ -3101,6 +3102,35 @@ def _is_advisory_only_outcome(name: str, outcome: Mapping[str, Any]) -> bool:
     from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
 
     return name in ADVISORY_ONLY_CAPABILITIES and outcome.get("advisory_only") is True
+
+
+def _is_record_only_capability(name: str, registry_key: str) -> bool:
+    """#2772: whether ``outcome_contributed`` must follow the review verdict.
+
+    True when the capability name or its registry key is record-only, even if the receipt
+    omits or clears ``advisory_only``. So a record-only review can never count a failed
+    review as a contribution. The ``advisory_only`` flag alone never decides: a
+    non-advisory capability whose receipt merely carries it keeps
+    ``outcome_contributed == gate_passed`` (#2772 item 1). The non-blocking contract split
+    still requires both name and flag, so this only makes contribution stricter.
+    """
+    from nexus.core.capability_executor_registry import ADVISORY_ONLY_CAPABILITIES
+
+    return name in ADVISORY_ONLY_CAPABILITIES or registry_key in ADVISORY_ONLY_CAPABILITIES
+
+
+def _advisory_review_passed(outcome: Mapping[str, Any], contract_violations: list[str]) -> bool:
+    """#2772: a record-only review counts as passed only when it fully ran and passed.
+
+    ``review_status == "PASS"`` alone is not enough: the executor's own verdict
+    (``review_passed = payload.gate_passed and status == "PASS"``) must agree, and a review
+    with ``advisory_contract_violations`` (a lane could not run) is incomplete, not a pass.
+    """
+    return (
+        outcome.get("review_status") == "PASS"
+        and outcome.get("review_passed") is True
+        and not contract_violations
+    )
 
 
 PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE = "planner_mainchain_gate_policy"

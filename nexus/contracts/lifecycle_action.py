@@ -15,6 +15,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from nexus.contracts.measure_dir_scope import dir_scope_enabled, split_dir_scope
+
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -322,9 +324,33 @@ def _repo_path(value: str, field: str) -> str:
     if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
         raise ValueError(f"{field} must be a repository-relative path")
     path = PurePosixPath(value)
-    if ".." in path.parts or ".git" in path.parts or path.as_posix() != value:
+    if (
+        ".." in path.parts
+        or any(part.casefold() == ".git" for part in path.parts)
+        or path.as_posix() != value
+    ):
         raise ValueError(f"{field} must be a normalized repository-relative path")
     return value
+
+
+def _allowed_path(value: str, field: str) -> str:
+    """``_repo_path``, plus a ``dir/`` scope on a measurement Gateway only (#2721).
+
+    With ``NEXUS_MEASURE_DIR_SCOPE=1`` at Gateway start, one trailing ``/`` is
+    accepted when the part before it is itself a normalized repository path.
+    Otherwise this is exactly ``_repo_path`` (same result, same error).
+    """
+    if dir_scope_enabled():
+        stripped = split_dir_scope(value)
+        if stripped is not None:
+            _repo_path(stripped, field)
+            if stripped == ".":
+                # ``./`` would cover the whole repository (#2786 review).
+                raise ValueError(f"{field} directory scope must not be the repository root")
+            return value
+        if value == ".":
+            raise ValueError(f"{field} directory scope must not be the repository root")
+    return _repo_path(value, field)
 
 
 class LifecycleActionEnvelope(BaseModel):
@@ -387,7 +413,7 @@ class LifecycleActionEnvelope(BaseModel):
     @field_validator("allowed_paths")
     @classmethod
     def validate_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(_repo_path(value, "allowed_paths") for value in values)
+        return tuple(_allowed_path(value, "allowed_paths") for value in values)
 
     @model_validator(mode="after")
     def validate_mutation_preconditions(self) -> "LifecycleActionEnvelope":

@@ -103,7 +103,11 @@ def _repo_path(value: str, field: str) -> str:
     ):
         raise ValueError(f"{field.upper()}_INVALID")
     path = PurePosixPath(value)
-    if ".." in path.parts or ".git" in path.parts or path.as_posix() != value:
+    if (
+        ".." in path.parts
+        or any(part.casefold() == ".git" for part in path.parts)
+        or path.as_posix() != value
+    ):
         raise ValueError(f"{field.upper()}_INVALID")
     return value
 

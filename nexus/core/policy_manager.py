@@ -58,6 +58,11 @@ class PolicyManager:
         self._run_metabolizer(state)
 
     def _ingest_episode(self, state: NexusState, episode: dict[str, Any], status: str) -> None:
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: nothing is ingested; never report that it was
+            state.metadata["learning_ingest_status"] = "skipped_read_only"
+            return
         try:
             self.memory_service.ingest_episode(episode)
             state.metadata["learning_ingest_status"] = status
@@ -106,7 +111,12 @@ class PolicyManager:
             state.policy_applied = True
 
     def _run_metabolizer(self, state: NexusState) -> None:
+        from .state_root import state_read_only
+
         metadata = state.metadata
+        if state_read_only():  # #2721: report a skip, never fake metabolizer numbers
+            metadata["metabolizer_status"] = "skipped_read_only"
+            return
         if bool(metadata.get("sir_veto_metabolizer", False)):
             metadata["metabolizer_status"] = "vetoed"
             return
