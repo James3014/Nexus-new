@@ -884,3 +884,42 @@ def test_arm_map_without_the_noop_check_is_refused(env):
     with pytest.raises(sa.Refused, match="NOOP_CHECK_MISSING"):
         sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata,
                    primary_set="M", expect_manifest_sha=_msha(env))
+
+
+# -- L-B state contrast (lb_contrast.py, PREREG v0.9.9) ---------------------------------
+
+def _state_run(env, name, nexus_solved):
+    """One L-B state's run root (BARE + NEXUS), scored; ``nexus_solved(task, repeat)``."""
+    tasks = env["tasks"][:3]
+    blind_dir, arm_map, amap = make_blind(env["tmp"] / name, tasks, arms=("BARE", "NEXUS"))
+    outcome = lambda a, t, r, n: "RESOLVED" if a == "NEXUS" and nexus_solved(t, r) else "UNRESOLVED"  # noqa: E731
+    arch = env["tmp"] / name / "arch"
+    sa.run_scoring(arch, blind_dir, env["cfg"], arms_per_group=2, runner=FakeRunner(amap, outcome),
+                   identity=env["identity"], require_lab=False)
+    return arch, arm_map, (arch / "MANIFEST.sha256.sha256").read_text().strip()
+
+
+def test_lb_contrast_pairs_task_repeat_and_bootstraps_the_per_task_difference(env):
+    from scripts.bench.measure_2721 import lb_contrast
+
+    strata = {t["id"]: t["set"] for t in env["tasks"]}
+    primary = env["tasks"][0]["set"]
+    learn_arch, learn_map, learn_sha = _state_run(env, "learn", lambda t, r: True)
+    cold_arch, cold_map, cold_sha = _state_run(env, "cold", lambda t, r: r == 1)
+    learn = lb_contrast.state_rows(learn_arch, learn_map, strata=strata, primary_set=primary,
+                                   expect_manifest_sha=learn_sha)
+    cold = lb_contrast.state_rows(cold_arch, cold_map, strata=strata, primary_set=primary,
+                                  expect_manifest_sha=cold_sha)
+    assert len(learn) == len(cold) == 9  # NEXUS rows only: 3 tasks x 3 repeats
+    result = lb_contrast.contrast(learn, cold)
+    assert result["tasks"] == 3 and result["pairs"] == 9 and result["unpaired"] == 0
+    assert result["label"] == "cards-only"
+    assert abs(result["ci95"]["mean"] - 2 / 3) < 1e-9 and result["ci95"]["n"] == 3
+    # A repeat missing on one side is dropped from both (same task, same repeat).
+    partial = lb_contrast.contrast(learn, [r for r in cold if r["repeat"] != 3])
+    assert partial["pairs"] == 6 and partial["unpaired"] == 3
+    assert abs(partial["ci95"]["mean"] - 0.5) < 1e-9
+    # The wrong manifest sha refuses (the state's own analysis must pass first).
+    with pytest.raises(sa.Refused):
+        lb_contrast.state_rows(cold_arch, cold_map, strata=strata, primary_set=primary,
+                               expect_manifest_sha="0" * 64)
