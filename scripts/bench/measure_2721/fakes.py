@@ -52,8 +52,11 @@ class FakeGateway:
                 return self.worker_error
             return {"status": "SUBMITTED", "task_id": task}
         if name in ("nexus_task_wait", "nexus_task_status"):
+            # Shaped like P1 with NEXUS_MEASUREMENT_WORKTREE_DIFF=1 (#2761): an empty
+            # raw diff snapshot for the current attempt.
             return {"task_id": task, "status": "FINAL_BLOCK", "blocker": "fake_no_worker",
-                    "wait": {"timed_out": False}}
+                    "wait": {"timed_out": False}, "attempt_id": "fake-attempt",
+                    "measurement_worktree_diff": "", "measurement_worktree_diff_attempt_id": "fake-attempt"}
         if name == "nexus_task_cancel":
             return {"task_id": task, "status": "CANCELLED"}
         return {}

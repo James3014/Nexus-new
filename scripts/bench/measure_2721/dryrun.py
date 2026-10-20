@@ -165,6 +165,8 @@ def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str,
         spec_path.write_text(json.dumps(spec), encoding="utf-8")
         env = {key: value for key, value in os.environ.items() if not key.startswith("NEXUS_")}
         env.update(provider.environ())
+        # The local chain's fresh Controller lives under the dry-run dir (H2').
+        env["NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"] = str(out)
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[3])
         subprocess.run([sys.executable, str(Path(__file__).with_name("nexus_local_chain.py")), str(spec_path)],
                        env=env, check=True, timeout=900)

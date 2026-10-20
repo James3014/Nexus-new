@@ -34,6 +34,7 @@ from scripts.bench.measure_2721.common import (
 )
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
 from scripts.bench.measure_2721.materialize import checkout_base, link_venv
+from scripts.bench.measure_2721.portable import to_portable_row
 from scripts.bench.measure_2721.providers import (
     STATUS_INFRA,
     STATUS_OK,
@@ -132,6 +133,14 @@ def redact_diff(diff: str, key_file: Optional[str] = None) -> tuple[str, bool]:
     return cleaned.decode("utf-8", errors="surrogateescape"), cleaned != raw
 
 
+def expected_cli_timeout(timeout_seconds: float) -> float:
+    """The CLI limit the measurement adapter derives for this cap (M2'): both arms'
+    recorded ``cli_timeout_seconds`` must equal it, or the row is INFRA."""
+    from nexus.executors.claude_measurement_worker import measurement_cli_timeout
+
+    return measurement_cli_timeout(timeout_seconds)
+
+
 def served_model_flag(served: Any) -> Optional[str]:
     """Both arms must show exactly the measurement model serving the run (driver item 6)."""
     if served is None:
@@ -194,6 +203,12 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         FLAG_GIT_TAMPERED if tampered else None,
         FLAG_SECRET_IN_DIFF if redacted else None,
     ) if flag]
+    timeout_mismatch = (
+        extra.get("cli_timeout_seconds") is not None
+        and extra.get("cli_timeout_seconds") != expected_cli_timeout(timeout_seconds)
+    )
+    if timeout_mismatch:
+        flags.append("CLI_TIMEOUT_MISMATCH")
     row = {
         "schema": ROW_SCHEMA,
         "arm": ARM_BARE,
@@ -205,8 +220,9 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         "repeat": repeat,
         "started_at": started_at,
         "wall_seconds": round(wall, 3),
-        "outcome": "TAMPERED" if tampered else (STATUS_INFRA if infra_event else result.status),
-        "infra": result.status == STATUS_INFRA or infra_event is not None,
+        "outcome": "TAMPERED" if tampered else (
+            STATUS_INFRA if infra_event or timeout_mismatch else result.status),
+        "infra": result.status == STATUS_INFRA or infra_event is not None or timeout_mismatch,
         "watchdog_event": infra_event,
         "provider": result.as_dict(),
         "model_calls": result.model_calls,
@@ -216,6 +232,7 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         **candidate_facts(diff, task),
     }
     append_jsonl(run_root / "rows.jsonl", row)
+    append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
     watchdog.end_row(run_root)
     if not keep_workdir:
         shutil.rmtree(run_root / "work" / run_id, ignore_errors=True)

@@ -281,7 +281,7 @@ class ClaudeProvider:
         self.key_file = key_file
         self.identity = identity if identity is not None else claude_identity(executable, key_file)
 
-    def environ(self) -> dict[str, str]:
+    def environ(self, measurement_root: Optional[Path] = None) -> dict[str, str]:
         from nexus.executors.claude_measurement_worker import (
             MEASUREMENT_ANTHROPIC_ENV_FILE_ENV,
             MEASUREMENT_CLAUDE_BIN_ENV,
@@ -291,6 +291,12 @@ class ClaudeProvider:
         )
 
         env = {key: value for key, value in os.environ.items() if key in ("USER", "LOGNAME", "LANG")}
+        for passthrough in ("NEXUS_MEASUREMENT_CLAUDE_TIMEOUT_SECONDS", "NEXUS_MEASUREMENT_KEY_LABEL"):
+            if os.environ.get(passthrough):
+                env[passthrough] = os.environ[passthrough]
+        if measurement_root is not None:
+            # The BARE run's own fresh Controller is its measurement root (H2').
+            env["NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"] = str(Path(measurement_root).resolve())
         env.update({MEASUREMENT_CLAUDE_ENV: "1", MEASUREMENT_CLAUDE_BIN_ENV: self.executable,
                     MEASUREMENT_TRACE_DIR_ENV: str(self.trace_dir)})
         if self.key_file:
@@ -320,7 +326,9 @@ class ClaudeProvider:
         base = dict(provider=self.name, model=CLAUDE_MEASUREMENT_MODEL)
         started = time.monotonic()
         try:
-            receipt = ClaudeMeasurementWorkerAdapter(environ=self.environ()).invoke(
+            receipt = ClaudeMeasurementWorkerAdapter(
+                environ=self.environ(Path(controller).parent if controller else None)
+            ).invoke(
                 contract, lease, prompt=prompt, timeout_seconds=float(timeout_seconds), model=CLAUDE_MEASUREMENT_MODEL
             )
         except WorkerProviderUnavailable as exc:

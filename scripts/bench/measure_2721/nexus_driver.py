@@ -39,6 +39,7 @@ from scripts.bench.measure_2721.arms import (
     FLAG_SECRET_IN_DIFF,
     ROW_SCHEMA,
     candidate_facts,
+    expected_cli_timeout,
     input_capture,
     load_manifest,
     new_run_id,
@@ -48,6 +49,7 @@ from scripts.bench.measure_2721.arms import (
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
+from scripts.bench.measure_2721.portable import to_portable_row
 
 LIVE_GATEWAY_PORT = 8766
 NEXUS_REPO = "James3014/Nexus-new"
@@ -371,9 +373,14 @@ class NexusArmDriver:
 
     # -- one run -------------------------------------------------------------
     def run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float) -> dict[str, Any]:
+        if task.get("repo") == NEXUS_REPO:
+            # b6 ruling: #2721 measures external tasks only.  A Nexus-new task would
+            # run on the shared Gateway Controller, whose history holds later fixes.
+            raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
         run_id = new_run_id(self.arm_label, task["task_id"], repeat)
         gw_task = gateway_task_id(run_id)
-        external = task.get("repo") != NEXUS_REPO
+        external = True
+        self.expected_cli_timeout = expected_cli_timeout(timeout_seconds)
         prompt = task_prompt(task)
         tree_sha = git(Path(task["base_checkout"]), "rev-parse", "HEAD^{tree}").strip()
         capture = input_capture(self.arm_label, task, repeat, run_id, prompt=prompt, tree_sha=tree_sha,
@@ -471,6 +478,7 @@ class NexusArmDriver:
             row["diff_path"] = str(diff_path)
             row.update(candidate_facts(diff, task))
             append_jsonl(run_root / "rows.jsonl", row)
+            append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
             watchdog.end_row(run_root)
         if stuck is not None:
             raise GatewayStuck(f"{gw_task}: {stuck}")
@@ -539,7 +547,6 @@ class NexusArmDriver:
         worktree, then the candidate commit; ``candidate_source`` says which.
         """
         from scripts.bench.measure_2721.arms import claude_row_fields
-        from scripts.bench.measure_2721.common import capture_diff
         from scripts.bench.measure_2721.providers import claude_usage_fields, read_claude_trace
 
         state = {**status, **self._read_state(gw_task)}
@@ -547,16 +554,15 @@ class NexusArmDriver:
         error = json.dumps(state.get("error") or state.get("blocker") or "")
         initial = state.get("target_initial_revision") or base
         candidate = state.get("candidate_commit_sha") or ""
-        target = Path(str(state.get("target_worktree") or ""))
         diff, source = "", "none"
+        # Scored ONLY from P1's measurement_worktree_diff (#2761): never from the
+        # final task state, whose Candidate Core may have refused (SCOPE_ESCAPE).
         snapshot = measurement_snapshot(state)
         if snapshot["present"]:
             diff, source = snapshot["diff"], "gateway_snapshot"
-        elif initial and str(target) not in ("", ".") and target.is_dir():
-            diff, source = capture_diff(target, initial), "target_worktree"
-        elif initial and candidate and controller is not None:
-            diff = git(controller, "diff", "--binary", "--no-color", "--no-ext-diff", initial, candidate)
-            source = "candidate_commit"
+        elif not snapshot["invalid_reason"]:
+            snapshot["invalid_reason"] = "SNAPSHOT_MISSING"
+        del controller
         claude: dict[str, Any] = {}
         trace_text = ""
         runs = sorted((self.trace_dir / gw_task).glob("*.run.json"), key=lambda p: p.stat().st_mtime) \
@@ -593,6 +599,11 @@ class NexusArmDriver:
                                    FLAG_NETWORK_ATTEMPT if network else None) if flag]
         if snapshot["invalid_reason"]:
             flags.append("SNAPSHOT_INVALID")
+        expected_limit = getattr(self, "expected_cli_timeout", None)
+        if expected_limit is not None and claude and claude.get("cli_timeout_seconds") != expected_limit:
+            # M2': both arms must have had the same CLI time limit.
+            snapshot["invalid_reason"] = snapshot["invalid_reason"] or "CLI_TIMEOUT_MISMATCH"
+            flags.append("CLI_TIMEOUT_MISMATCH")
         served_flag = served_model_flag(claude.get("served_models"))
         if served_flag:
             flags.append(served_flag)

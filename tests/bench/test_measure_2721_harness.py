@@ -612,3 +612,48 @@ def test_driver_uses_a_fresh_controller_under_the_targets_root(manifest, tmp_pat
     repo_root = Path(worker["external_target"]["repo_root"])
     assert repo_root.parent.parent == (tmp_path / "targets").resolve()
     assert repo_root.parent.name.startswith(f"{task['task_id']}-r1-")
+
+
+def test_driver_refuses_nexus_new_tasks(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    with pytest.raises(ValueError, match="NEXUS_NEW_TASKS_NOT_MEASURED"):
+        _driver(gateway).run(dict(task, repo="James3014/Nexus-new"), 1, tmp_path / "run", timeout_seconds=5)
+    assert gateway.calls == []
+
+
+def test_nexus_row_without_a_snapshot_is_void(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        for key in ("measurement_worktree_diff", "measurement_worktree_diff_attempt_id"):
+            payload.pop(key, None)
+        return payload
+
+    gateway._answer = answer
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] is True and row["void_reason"] == "SNAPSHOT_MISSING"
+
+
+def test_cli_timeout_mismatch_makes_the_bare_row_infra(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    provider = FakeProvider(extra={"cli_timeout_seconds": 123.0})
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=900)
+    assert row["infra"] is True and "CLI_TIMEOUT_MISMATCH" in row["flags"]
+    assert arms.expected_cli_timeout(900) == 870
+
+
+def test_portable_rows_are_written_for_every_row(manifest, tmp_path):
+    from scripts.bench.measure_2721.portable import PORTABLE_ROW_SCHEMA
+
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    arms.run_bare(task, 1, run, FakeProvider(), timeout_seconds=5)
+    _driver(FakeGateway()).run(task, 1, run, timeout_seconds=5)
+    rows = list(read_jsonl(run / "rows.portable.jsonl"))
+    assert [r["arm"] for r in rows] == ["BARE", "NEXUS"] and all(r["schema"] == PORTABLE_ROW_SCHEMA for r in rows)
+    assert set(rows[0]) >= {"task_id", "arm", "attempt_id", "candidate_commit", "outcome", "cost_tokens",
+                            "wall_seconds", "verdict"}
