@@ -184,3 +184,171 @@ def test_a_file_with_a_null_byte_is_skipped_not_fatal(tmp_path: Path) -> None:
     )
 
     assert found["search_paths"] == ["pkg/config.py"]
+
+
+# --- directory scopes (#2721, #2786) -------------------------------------------
+
+_NAMES = ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel")
+
+
+def test_directory_scope_with_nested_packages_yields_the_matching_symbol(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(
+        tmp_path,
+        "pkg/net.py",
+        "class HttpClient:\n    def fetch_url(self, url):\n        return url\n",
+    )
+    _write(tmp_path, "pkg/sub/__init__.py", "")
+    _write(tmp_path, "pkg/sub/deep/config.py", "def parse_config(text):\n    return {}\n")
+
+    found = derive_codeintel_lookup("parse_config drops keys with comments", ["pkg/"], tmp_path)
+
+    assert found["target_symbol"] == "pkg.sub.deep.config.parse_config"
+    assert found["search_paths"][0] == "pkg/sub/deep/config.py"
+    assert lookup_implementation(
+        tmp_path, found["target_symbol"], search_paths=found["search_paths"]
+    ).found
+
+
+def test_directory_scope_skips_tests_hidden_dirs_and_pycache(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/core.py", "def unrelated_helper():\n    return 1\n")
+    for rel in (
+        "pkg/tests/helpers.py",
+        "pkg/test/helpers.py",
+        "pkg/testing/helpers.py",
+        "pkg/.hidden/helpers.py",
+        "pkg/__pycache__/helpers.py",
+        "pkg/test_parser.py",
+        "pkg/parser_test.py",
+        "pkg/conftest.py",
+        "pkg/.secret.py",
+    ):
+        _write(tmp_path, rel, "def secret_parser():\n    return 1\n")
+
+    assert derive_codeintel_lookup("secret parser", ["pkg/"], tmp_path) == {}
+    assert derive_codeintel_lookup("unrelated helper secret parser", ["pkg/"], tmp_path) == {
+        "target_symbol": "pkg.core.unrelated_helper",
+        "search_paths": ["pkg/core.py"],
+    }
+    # A directory entry that itself names a test or hidden directory is ignored.
+    for scope in ("pkg/tests/", "pkg/.hidden/", "pkg/__pycache__/", "tests/"):
+        assert derive_codeintel_lookup("secret parser", [scope], tmp_path) == {}
+
+
+def test_directory_scope_never_reads_through_test_dirs(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    _write(tmp_path, "pkg/core.py", "def parse_config():\n    return 1\n")
+    _write(tmp_path, "pkg/tests/test_core.py", "def parse_config_test():\n    return 1\n")
+    read: list[tuple[str, ...]] = []
+    real = lookup_target._read_inside
+    monkeypatch.setattr(
+        lookup_target, "_read_inside", lambda root, parts: read.append(parts) or real(root, parts)
+    )
+
+    found = lookup_target.derive_codeintel_lookup("parse config", ["pkg/"], tmp_path)
+
+    assert found["search_paths"] == ["pkg/core.py"]
+    assert read == [("pkg", "core.py")]
+
+
+def test_directory_scope_does_not_follow_symlinks(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    _write(root, "pkg/core.py", "def unrelated_helper():\n    return 1\n")
+    _write(tmp_path, "outside/secret.py", "def secret_parser():\n    return 1\n")
+    (root / "pkg" / "linked_dir").symlink_to(tmp_path / "outside")
+    (root / "pkg" / "linked.py").symlink_to(tmp_path / "outside" / "secret.py")
+
+    assert derive_codeintel_lookup("secret parser", ["pkg/"], root) == {}
+    assert derive_codeintel_lookup("unrelated helper secret parser", ["pkg/"], root) == {
+        "target_symbol": "pkg.core.unrelated_helper",
+        "search_paths": ["pkg/core.py"],
+    }
+    # The scope directory itself as a symlink is not followed either.
+    (root / "scope").symlink_to(tmp_path / "outside")
+    assert derive_codeintel_lookup("secret parser", ["scope/"], root) == {}
+
+
+def test_directory_scope_walk_stops_at_the_file_cap(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    monkeypatch.setattr(lookup_target, "MAX_WALK_FILES", 3)
+    for i, name in enumerate(_NAMES[:6]):
+        _write(tmp_path, f"pkg/m{i}.py", f"def {name}_handler():\n    return {i}\n")
+
+    # Sorted walk: m0..m2 are read, m5 is beyond the cap.
+    assert lookup_target.derive_codeintel_lookup("foxtrot crashes", ["pkg/"], tmp_path) == {}
+    found = lookup_target.derive_codeintel_lookup("charlie crashes", ["pkg/"], tmp_path)
+    assert found["target_symbol"] == "pkg.m2.charlie_handler"
+
+
+def test_directory_scope_walk_stops_at_the_directory_cap(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    monkeypatch.setattr(lookup_target, "MAX_WALK_DIRS", 2)
+    _write(tmp_path, "pkg/a/one.py", "def alpha_handler():\n    return 1\n")
+    _write(tmp_path, "pkg/b/two.py", "def bravo_handler():\n    return 2\n")
+
+    # Breadth-first over sorted names: pkg, pkg/a visited; pkg/b is beyond the cap.
+    assert lookup_target.derive_codeintel_lookup("bravo fails", ["pkg/"], tmp_path) == {}
+    assert lookup_target.derive_codeintel_lookup("alpha fails", ["pkg/"], tmp_path)
+
+
+def test_directory_scope_without_a_bm25_match_is_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/a.py", "def alpha():\n    return 1\n")
+
+    assert derive_codeintel_lookup("unrelated words entirely", ["pkg/"], tmp_path) == {}
+    assert derive_codeintel_lookup("alpha", ["pkg/"], tmp_path)["target_symbol"] == "pkg.a.alpha"
+    assert derive_codeintel_lookup("alpha", ["missing/"], tmp_path) == {}
+
+
+def test_malformed_directory_entries_are_ignored(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/a.py", "def alpha():\n    return 1\n")
+    for scope in ("pkg//", "/pkg/", "../pkg/", "pkg/../pkg/", "./pkg/", "pkg\\", "/"):
+        assert derive_codeintel_lookup("alpha", [scope], tmp_path) == {}
+    assert derive_codeintel_lookup("alpha", ["pkg/"], tmp_path)["target_symbol"] == "pkg.a.alpha"
+
+
+def test_mixed_file_and_directory_scope(tmp_path: Path) -> None:
+    _write(tmp_path, "cli.py", "def run_cli():\n    return 1\n")
+    _write(tmp_path, "pkg/config.py", "def parse_config(text):\n    return {}\n")
+    _write(tmp_path, "pkg/net.py", "def fetch_url(url):\n    return url\n")
+
+    found = derive_codeintel_lookup(
+        "parse_config breaks on cli url input", ["cli.py", "pkg/"], tmp_path
+    )
+
+    assert found["target_symbol"] == "pkg.config.parse_config"
+    assert found["search_paths"][0] == "pkg/config.py"
+    assert set(found["search_paths"]) == {"pkg/config.py", "cli.py", "pkg/net.py"}
+    assert derive_codeintel_lookup("run cli", ["cli.py", "pkg/"], tmp_path) == {
+        "target_symbol": "cli.run_cli",
+        "search_paths": ["cli.py"],
+    }
+
+
+def test_directory_scope_search_paths_are_bounded_and_winner_first(tmp_path: Path) -> None:
+    for i, name in enumerate(_NAMES):
+        _write(tmp_path, f"pkg/m{i}.py", f"def {name}_handler():\n    return {i}\n")
+
+    found = derive_codeintel_lookup("golf handler crashes", ["pkg/"], tmp_path)
+
+    assert found["target_symbol"] == "pkg.m6.golf_handler"
+    assert found["search_paths"][0] == "pkg/m6.py"
+    assert len(found["search_paths"]) == 4
+
+
+def test_file_scope_behaviour_is_unchanged_next_to_a_directory(tmp_path: Path) -> None:
+    """A file-only scope keeps the first-four-files rule and its order."""
+    for i, name in enumerate(_NAMES[:6]):
+        _write(tmp_path, f"pkg/m{i}.py", f"def {name}_handler():\n    return {i}\n")
+
+    files = [f"pkg/m{i}.py" for i in range(6)]
+    assert derive_codeintel_lookup("foxtrot crashes", files, tmp_path) == {}
+    assert derive_codeintel_lookup("bravo crashes", files, tmp_path) == {
+        "target_symbol": "pkg.m1.bravo_handler",
+        "search_paths": files[:4],
+    }
+    assert derive_codeintel_lookup("foxtrot crashes", ["pkg/"], tmp_path)["target_symbol"] == (
+        "pkg.m5.foxtrot_handler"
+    )

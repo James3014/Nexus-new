@@ -1810,6 +1810,37 @@ def test_materialization_derives_a_codeintel_lookup_from_the_task(ctx, stubs) ->
     assert list(context["search_paths"]) == ["mod.py"]
 
 
+def test_materialization_derives_a_lookup_from_a_directory_scope_and_codeintel_runs(
+    ctx, stubs
+) -> None:
+    """#2721/#2786: a directory scope (``pkg/``) derived nothing, so codeintel refused."""
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+
+    (ctx.target / "pkg" / "sub").mkdir(parents=True)
+    (ctx.target / "pkg" / "sub" / "worker.py").write_text(
+        "def bounded_worker_context():\n    return 1\n", encoding="utf-8"
+    )
+    (ctx.target / "pkg" / "tests").mkdir()
+    (ctx.target / "pkg" / "tests" / "helpers.py").write_text(
+        "def bounded_worker_context_check():\n    return 1\n", encoding="utf-8"
+    )
+    ctx.request["allowed_files"] = ["pkg/"]
+    ctx.run()
+    context = stubs.log[2][1]["capability_context"]
+    assert context["target_symbol"] == "pkg.sub.worker.bounded_worker_context"
+    assert list(context["search_paths"]) == ["pkg/sub/worker.py"]
+
+    plan = CapabilityExecutionPlan(
+        plan_id="p-2721", task_id="t-2721", phases=["X"], constraints=dict(context)
+    )
+    outcome = EXECUTOR_REGISTRY["codeintel"](plan, "bounded worker context").outcome
+    assert outcome.get("error") != "TARGET_SYMBOL_REQUIRED"
+    assert outcome["lookup_performed"] is True
+    assert outcome["found"] is True
+    assert outcome["result"]["files"] == ["pkg/sub/worker.py"]
+
+
 def test_materialization_keeps_an_explicit_codeintel_lookup(ctx, stubs) -> None:
     (ctx.target / "mod.py").write_text(
         "x = 1\ndef bounded_worker_context():\n    return 1\n", encoding="utf-8"
