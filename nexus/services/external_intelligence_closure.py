@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Collection, Mapping, Sequence
+from typing import Any, Callable, Collection, Mapping, Sequence
 
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
@@ -1453,7 +1453,7 @@ VERIFIER_BASE_RUN_FAILED = "VERIFIER_BASE_RUN_FAILED"
 # Options with which a card itself narrows the selection; without one of them a node
 # that was collected but not selected is a candidate-made deselection.
 _DESELECT_OPTIONS = frozenset({"-k", "-m", "--deselect"})
-_XML_INVALID_CHARS = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
+_XML_INVALID_CHARS = re.compile("[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 _INTERPRETER_PROBE = "import sys; print(sys.prefix); print(sys.base_prefix); print(sys.executable)"
 
 
@@ -1537,15 +1537,77 @@ def _empty_witness_summary() -> dict[str, Any]:
     }
 
 
-def _witness_passed(witness: Mapping[str, Any] | None, root: Path) -> bool:
-    if not witness:
+def _expected_test_code(
+    root: Path, nodeid: str, cache: dict[str, Any]
+) -> tuple[str, str, int] | None:
+    """(file, qualname, first line) of the test function ``nodeid`` names, read with
+    ``ast`` from the checked-out test file (never from the verifier process).
+
+    A method not defined in the named class is looked up in base classes defined in
+    the same file.  ``None`` (not passed) when the definition cannot be found, e.g. a
+    test assembled at runtime or inherited from another module.
+    """
+    import ast
+
+    path_part = nodeid.partition("[")[0]
+    rel, *names = path_part.split("::")
+    if not names:
+        return None
+    file = (root / rel).resolve()
+    if not file.is_relative_to(root):
+        return None
+    if rel not in cache:
+        try:
+            cache[rel] = ast.parse(file.read_bytes())
+        except (OSError, SyntaxError, ValueError):
+            cache[rel] = None
+    tree = cache[rel]
+    if tree is None:
+        return None
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+
+    def find(body: Sequence[ast.stmt], chain: list[str], remaining: list[str], seen: set[str]):
+        head, rest = remaining[0], remaining[1:]
+        for node in body:
+            if rest and isinstance(node, ast.ClassDef) and node.name == head:
+                found = find(node.body, [*chain, head], rest, seen)
+                if found:
+                    return found
+                for base in node.bases:
+                    if isinstance(base, ast.Name) and base.id in classes and base.id not in seen:
+                        cls = classes[base.id]
+                        found = find(cls.body, [cls.name], rest, seen | {base.id})
+                        if found:
+                            return found
+            if (
+                not rest
+                and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == head
+            ):
+                lines = [node.lineno, *(d.lineno for d in node.decorator_list)]
+                return ".".join([*chain, head]), min(lines)
+        return None
+
+    found = find(tree.body, [], names, set())
+    if not found:
+        return None
+    return str(file), found[0], found[1]
+
+
+def _witness_passed(
+    witness: Mapping[str, Any] | None, expected: tuple[str, str, int] | None
+) -> bool:
+    """The witness saw the test's OWN code object (file, qualname, first line as the
+    test file defines it) start and return, with no exception unwinding out of it."""
+    if not witness or expected is None:
         return False
     try:
-        in_tree = Path(str(witness.get("code_file") or "")).resolve().is_relative_to(root)
+        code_file = str(Path(str(witness.get("code_file") or "")).resolve())
     except (OSError, ValueError):
-        in_tree = False
+        return False
     return (
-        in_tree
+        (code_file, str(witness.get("code_qualname") or ""), witness.get("code_firstlineno"))
+        == expected
         and int(witness.get("starts") or 0) >= 1
         and int(witness.get("returns") or 0) >= 1
         and int(witness.get("unwinds") or 0) == 0
@@ -1553,11 +1615,18 @@ def _witness_passed(witness: Mapping[str, Any] | None, root: Path) -> bool:
     )
 
 
-def _plugin_is_trusted(path_text: str, *, root: Path, trusted_dirs: Sequence[Path]) -> bool:
-    """A plugin may come from the trusted interpreter, the witness dir, or be a
+def _plugin_is_trusted(
+    path_text: str,
+    *,
+    root: Path,
+    trusted_dirs: Sequence[Path],
+    in_tree_trusted: Callable[[str], bool] = lambda _rel: False,
+) -> bool:
+    """A plugin may come from the trusted interpreter or the witness dir, be a
     ``conftest.py`` in the tree (a changed one is refused or explicitly authorized
-    before the run).  Anything else, e.g. a module the candidate names in a test
-    module's ``pytest_plugins`` or registers itself, is foreign."""
+    before the run), or be an in-tree module that ``in_tree_trusted`` accepts (tracked
+    at the base commit and not changed by the candidate).  Anything else, e.g. a module
+    the candidate added or changed and names in ``pytest_plugins``, is foreign."""
     if not path_text:
         return False
     try:
@@ -1565,8 +1634,45 @@ def _plugin_is_trusted(path_text: str, *, root: Path, trusted_dirs: Sequence[Pat
     except (OSError, ValueError):
         return False
     if path.is_relative_to(root):
-        return path.name.casefold() == "conftest.py"
+        if path.name.casefold() == "conftest.py":
+            return True
+        return in_tree_trusted(path.relative_to(root).as_posix())
     return any(path.is_relative_to(directory) for directory in trusted_dirs)
+
+
+def _base_unchanged_predicate(
+    root: Path, base_sha: str, changed_paths: Sequence[str]
+) -> Callable[[str], bool]:
+    """``rel`` is tracked at ``base_sha`` (no ``refs/replace``) and the candidate diff
+    does not change it: an in-tree helper plugin the candidate did not write."""
+    changed = {PurePosixPath(p).as_posix() for p in changed_paths}
+    cache: dict[str, bool] = {}
+
+    def trusted(rel: str) -> bool:
+        if rel in changed:
+            return False
+        if rel not in cache:
+            try:
+                proc = subprocess.run(
+                    ["git", "cat-file", "-e", f"{base_sha}:{rel}"],
+                    cwd=root,
+                    capture_output=True,
+                    timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
+                    check=False,
+                    env=_git_no_replace_env(),
+                )
+                cache[rel] = proc.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                cache[rel] = False
+        return cache[rel]
+
+    return trusted
+
+
+def _declared_match(nodeid: str, declared: Sequence[str]) -> bool:
+    return any(
+        nodeid == d or nodeid.startswith(d + "::") or nodeid.startswith(d + "[") for d in declared
+    )
 
 
 def _witness_outcomes(
@@ -1575,6 +1681,8 @@ def _witness_outcomes(
     root: Path,
     trusted_plugin_dirs: Sequence[Path],
     deselect_allowed: bool,
+    declared_node_ids: Sequence[str] = (),
+    in_tree_trusted: Callable[[str], bool] = lambda _rel: False,
 ) -> tuple[str, list[tuple[str, str, str]] | None, dict[str, Any]]:
     """Derive per-test outcomes from verified witness records.
 
@@ -1600,7 +1708,10 @@ def _witness_outcomes(
         nodeid = str(record.get("nodeid") or "")
         if kind == "plugin":
             if not _plugin_is_trusted(
-                str(record.get("file") or ""), root=root, trusted_dirs=trusted_plugin_dirs
+                str(record.get("file") or ""),
+                root=root,
+                trusted_dirs=trusted_plugin_dirs,
+                in_tree_trusted=in_tree_trusted,
             ):
                 foreign.append(f"{record.get('name')}:{record.get('file') or '<no file>'}")
         elif kind == "item":
@@ -1626,6 +1737,7 @@ def _witness_outcomes(
     cases: list[tuple[str, str, str]] = list(collect_cases)
     forged: list[str] = []
     not_run: list[str] = []
+    ast_cache: dict[str, Any] = {}
     for nodeid in dict.fromkeys(selected):
         phases = reports.get(nodeid, {})
         outcome = {when: str(rep.get("outcome")) for when, rep in phases.items()}
@@ -1644,7 +1756,7 @@ def _witness_outcomes(
             )
             cases.append((nodeid, "skipped", text))
         elif all(outcome.get(when) == "passed" for when in ("setup", "call", "teardown")):
-            if _witness_passed(witnesses.get(nodeid), root):
+            if _witness_passed(witnesses.get(nodeid), _expected_test_code(root, nodeid, ast_cache)):
                 cases.append((nodeid, "passed", ""))
             else:
                 forged.append(nodeid)
@@ -1666,7 +1778,12 @@ def _witness_outcomes(
         error = VERIFIER_PYTEST_INTERNALS_PATCHED
     elif forged:
         error = VERIFIER_OUTCOME_FORGED
-    elif deselected and not (deselect_allowed and set(deselected) <= deselected_by_hook):
+    elif any(_declared_match(n, declared_node_ids) for n in deselected) and not (
+        deselect_allowed and set(deselected) <= deselected_by_hook
+    ):
+        # A declared node dropped from the selection without a card option is refused;
+        # other deselections (e.g. an unchanged in-tree plugin's
+        # ``pytest_collection_modifyitems``) are only recorded (#2808 review).
         error = VERIFIER_TESTS_DESELECTED
     return error, cases, summary
 
@@ -2070,6 +2187,12 @@ def _run_pytest_verifier(
         root=root,
         trusted_plugin_dirs=[trusted_dir.resolve(), *interpreter_dirs],
         deselect_allowed=bool(pytest_args & _DESELECT_OPTIONS),
+        declared_node_ids=invocation.declared_node_ids,
+        in_tree_trusted=(
+            _base_unchanged_predicate(root, base_sha, changed_paths)
+            if root_writable
+            else (lambda _rel: True)  # the base run's tree IS the base commit
+        ),
     )
     witness["error"] = witness_error
     if cases is None:

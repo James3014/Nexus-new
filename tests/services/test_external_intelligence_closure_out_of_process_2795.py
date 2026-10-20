@@ -36,6 +36,7 @@ import pytest
 from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services import external_intelligence_verifier_witness as witness_plugin
 from nexus.services.external_intelligence_closure import (
+    _XML_INVALID_CHARS,
     UNIT_VERIFICATION_SCHEMA,
     VERIFIER_ENV_ALLOWLIST,
     VERIFIER_EVIDENCE_TAMPERED,
@@ -464,6 +465,8 @@ def test_witness_stream_rejects_bad_mac_gaps_and_partial_lines():
 
 def test_witness_outcomes_need_begin_end_and_a_witnessed_return(tmp_path):
     root = tmp_path.resolve()
+    (root / "tests").mkdir()
+    (root / "tests/test_a.py").write_text("def test_a():\n    pass\n", encoding="utf-8")
     common = {"root": root, "trusted_plugin_dirs": [], "deselect_allowed": False}
     assert _witness_outcomes([{"t": "begin"}], **common)[0] == VERIFIER_JUNIT_MISSING
     node = "tests/test_a.py::test_a"
@@ -479,6 +482,8 @@ def test_witness_outcomes_need_begin_end_and_a_witnessed_return(tmp_path):
         "unwinds": 0,
         "depth": 0,
         "code_file": str(root / "tests/test_a.py"),
+        "code_qualname": "test_a",
+        "code_firstlineno": 1,
     }
     records = [
         {"t": "begin"},
@@ -488,13 +493,184 @@ def test_witness_outcomes_need_begin_end_and_a_witnessed_return(tmp_path):
     ]
     error, cases, _ = _witness_outcomes([*records, witnessed, {"t": "end"}], **common)
     assert (error, cases) == ("", [(node, "passed", "")])
-    for bad in ({"unwinds": 1}, {"returns": 0}, {"starts": 0}, {"code_file": "/elsewhere.py"}):
+    for bad in (
+        {"unwinds": 1},
+        {"returns": 0},
+        {"starts": 0},
+        {"code_file": "/elsewhere.py"},
+        {"code_qualname": "<lambda>"},
+        {"code_firstlineno": 2},
+    ):
         error, cases, summary = _witness_outcomes(
             [*records, {**witnessed, **bad}, {"t": "end"}], **common
         )
         assert error == VERIFIER_OUTCOME_FORGED, bad
         assert summary["forged_node_ids"] == [node]
-    error, _cases, _ = _witness_outcomes(
-        [*records[:2], {"t": "selected", "nodeids": []}, {"t": "end"}], **common
-    )
+    dropped = [*records[:2], {"t": "selected", "nodeids": []}, {"t": "end"}]
+    # A dropped declared node is refused; a dropped undeclared one is only recorded.
+    error, _cases, summary = _witness_outcomes(dropped, **common, declared_node_ids=[node])
     assert error == VERIFIER_TESTS_DESELECTED
+    error, _cases, summary = _witness_outcomes(dropped, **common)
+    assert error == ""
+    assert summary["deselected_node_ids"] == [node]
+
+
+# --- #2808 review round 2 -------------------------------------------------------
+
+# Routes that swap the object pytest calls for a no-op the candidate defines.  The
+# witness then sees *some* in-tree code return; only the test file's own definition
+# (path, qualname, first line, read with ``ast`` by the parent) may count as a pass.
+_SWAP_GETOBJ = (
+    "import _pytest.python as _pp\n"
+    "_noop = lambda: None\n"
+    "_orig = _pp.Function._getobj\n"
+    "def _getobj(self):\n"
+    "    return _noop if self.name == 'test_value' else _orig(self)\n"
+    "_pp.Function._getobj = _getobj\n"
+    "VALUE = 3\n"
+)
+_SWAP_OBJ_PROPERTY = (
+    "import _pytest.python as _pp\n"
+    "def _noop():\n    return None\n"
+    "_orig = _pp.PyobjMixin.obj\n"
+    "def _obj(self):\n"
+    "    return _noop if self.name == 'test_value' else _orig.fget(self)\n"
+    "_pp.PyobjMixin.obj = property(_obj, _orig.fset)\n"
+    "VALUE = 3\n"
+)
+# ``Function.__init__`` is not snapshotted: only the code-identity check refuses this.
+_SWAP_OBJ_CACHE = (
+    "import _pytest.python as _pp\n"
+    "def _noop():\n    return None\n"
+    "_orig = _pp.Function.__init__\n"
+    "def _init(self, *args, **kwargs):\n"
+    "    _orig(self, *args, **kwargs)\n"
+    "    if self.name == 'test_value':\n"
+    "        self._obj = _noop\n"
+    "_pp.Function.__init__ = _init\n"
+    "VALUE = 3\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (_SWAP_GETOBJ, VERIFIER_PYTEST_INTERNALS_PATCHED),
+        (_SWAP_OBJ_PROPERTY, VERIFIER_PYTEST_INTERNALS_PATCHED),
+        (_SWAP_OBJ_CACHE, VERIFIER_OUTCOME_FORGED),
+    ],
+    ids=["function_getobj", "pyobjmixin_obj", "obj_cache_unsnapshotted"],
+)
+def test_route2_swapping_the_test_object_for_an_in_tree_noop_is_not_passed(
+    tmp_path, source, expected
+):
+    root, base, cand = _repo(tmp_path, {"src_mod.py": source})
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["returncode"] == 0
+    assert row["passed"] is False
+    assert row["error"] == expected, row
+    assert row["witness"]["forged_node_ids"] == ["tests/test_mod.py::test_value"]
+
+
+# The #2808 reviewer's payload: rewrite the witness's emitter by attribute, then exit 0.
+_EMIT_PATCH = (
+    "import atexit, os, sys\n"
+    "_m = sys.modules.get('_nexus_eia_verifier_witness')\n"
+    "_w = getattr(_m, '_WITNESS', None)\n"
+    "_ch = getattr(_w, '_channel', None)\n"
+    "if _ch is not None:\n"
+    "    _orig = _ch.emit\n"
+    "    def _emit(rec):\n"
+    "        rec = dict(rec)\n"
+    "        if rec.get('t') == 'report': rec['outcome'] = 'passed'\n"
+    "        if rec.get('t') == 'witness': rec.update(starts=1, returns=1, unwinds=0, depth=0)\n"
+    "        _orig(rec)\n"
+    "    _ch.emit = _emit\n"
+    "    atexit.register(lambda: os._exit(0))\n"
+    "PATCHABLE = _ch is not None\n"
+    "VALUE = 3\n"
+)
+
+
+def test_simple_emitter_attribute_patch_no_longer_reaches_the_witness(tmp_path):
+    probe = (
+        "from src_mod import PATCHABLE, VALUE\n\n\n"
+        "def test_value():\n    assert VALUE == 2\n\n\n"
+        "def test_witness_not_reachable_by_name():\n    assert PATCHABLE is False\n"
+    )
+    root, base, cand = _repo(tmp_path, {"src_mod.py": _EMIT_PATCH, "tests/test_mod.py": probe})
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py", "tests"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_JUNIT_FAILURES, row
+    # Exactly the genuinely failing test failed: the probe test passed, i.e. the
+    # module (and its emitter) was no longer importable by name.
+    assert row["junit"]["failures"] == 1
+    assert row["junit"]["tests"] == 2
+
+
+_HELPER_PLUGIN = "import pytest\n\n\n@pytest.fixture\ndef helper_value():\n    return 2\n"
+_TEST_USES_HELPER = (
+    "pytest_plugins = ['helpers.fixtures_plugin']\n\n\n"
+    "def test_helper(helper_value):\n    assert helper_value == 2\n"
+)
+
+
+def test_in_tree_helper_plugin_unchanged_since_base_is_allowed(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={
+            "helpers/__init__.py": "",
+            "helpers/fixtures_plugin.py": _HELPER_PLUGIN,
+            "tests/test_helper.py": _TEST_USES_HELPER,
+        },
+    )
+    row = _row(root, base, cand, _spec("tests/test_helper.py"), ["src_mod.py"])
+    assert row["passed"] is True, row
+    assert row["witness"]["foreign_plugins"] == []
+
+
+def test_in_tree_helper_plugin_changed_by_the_candidate_is_foreign(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"helpers/fixtures_plugin.py": _HELPER_PLUGIN + _MAKEREPORT_PLUGIN.split("\n\n\n", 1)[1]},
+        base={
+            "helpers/__init__.py": "",
+            "helpers/fixtures_plugin.py": _HELPER_PLUGIN,
+            "tests/test_helper.py": _TEST_USES_HELPER,
+        },
+    )
+    row = _row(root, base, cand, _spec("tests/test_helper.py"), ["helpers"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_FOREIGN_PLUGIN, row
+
+
+def test_deselection_by_an_unchanged_in_tree_plugin_is_recorded_unless_declared(tmp_path):
+    deselecting = "def pytest_collection_modifyitems(items):\n" + (
+        "    items[:] = [i for i in items if i.name != 'test_slow']\n"
+    )
+    tests = (
+        "pytest_plugins = ['helpers.select_plugin']\n\n\n"
+        "def test_fast():\n    assert True\n\n\ndef test_slow():\n    assert True\n"
+    )
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={
+            "helpers/__init__.py": "",
+            "helpers/select_plugin.py": deselecting,
+            "tests/test_sel.py": tests,
+        },
+    )
+    row = _row(root, base, cand, _spec("tests/test_sel.py"), ["src_mod.py"])
+    assert row["passed"] is True, row
+    assert row["witness"]["deselected_node_ids"] == ["tests/test_sel.py::test_slow"]
+    declared = _row(root, base, cand, _spec("tests/test_sel.py::test_slow"), ["src_mod.py"])
+    assert declared["passed"] is False
+    assert declared["error"] == VERIFIER_TESTS_DESELECTED
+
+
+def test_junit_names_keep_ordinary_node_names_unchanged():
+    for text in ("test_value", "tests.test_mod", "test_param[1-a b]", "test_\u00e9t\u00e9[\u4e2d]"):
+        assert _XML_INVALID_CHARS.sub("?", text) == text
+    assert _XML_INVALID_CHARS.sub("?", "a\x00b\x1fc\ufffe") == "a?b?c?"

@@ -23,9 +23,20 @@ The channel:
   rejected as tampering;
 * records are numbered; a gap, a bad MAC or a missing final ``end`` record fails closed.
 
-Residual (documented in the PR): code that targets this witness specifically, e.g. by
-extracting the key from interpreter memory, is not stopped here; the candidate diff
-review and independent acceptance remain the backstop.
+A pass also needs the observed code object to be the test file's own definition: the
+parent compares file, qualname and first line with what ``ast`` reads from the checked-out
+test file, so swapping the test object (``Function._getobj``, ``obj``, the ``_obj`` cache)
+for an in-tree no-op is refused.
+
+The emitter, key and fd are closure cells captured at import, and the module removes
+itself from ``sys.modules`` once its plugin is registered, so ``import``-by-name and
+attribute patches no longer reach them (#2808 review).
+
+Residual (documented in the PR): this is not a security boundary against a candidate that
+knows about the witness.  The plugin and its closure cells stay reachable through the
+plugin manager and ``gc``, and closure cells are writable, so a short targeted
+monkeypatch can still rewrite the records.  Witness-targeted routes are out of scope for
+P1 of #2795; the candidate diff review and the claim ceiling are the backstop.
 """
 
 from __future__ import annotations
@@ -61,6 +72,10 @@ PYTEST_INTERNALS = (
     ("_pytest.runner", "pytest_runtest_makereport"),
     ("_pytest.runner", "pytest_runtest_call"),
     ("_pytest.python", "Function.runtest"),
+    ("_pytest.python", "Function._getobj"),
+    ("_pytest.python", "Function.function"),
+    ("_pytest.python", "PyobjMixin.obj"),
+    ("_pytest.python", "PyobjMixin._getobj"),
     ("_pytest.python", "pytest_pyfunc_call"),
     ("_pytest.unittest", "TestCaseFunction.runtest"),
     ("_pytest.main", "pytest_runtestloop"),
@@ -112,30 +127,26 @@ def _skip_text(report: Any) -> str:
     return str(longrepr or "")[:2000]
 
 
-class _Channel:
-    """Numbered, MAC'd JSON lines on the inherited witness fd."""
+def _make_emit(fd: int, key: bytes) -> Any:
+    """Return the numbered, MAC'd JSON-lines writer for the inherited witness fd.
 
-    def __init__(self, fd: int, key: bytes) -> None:
-        # Bound now: later patches of these module attributes do not reach the channel.
-        self._fd = fd
-        self._key = key
-        self._seq = 0
-        self._new = hmac.new
-        self._digest = hashlib.sha256
-        self._dumps = json.dumps
-        self._write = os.write
+    The fd, the key and the library functions it uses are closure cells captured now,
+    before any candidate code runs, not attributes a later monkeypatch could swap.
+    """
+    new, digest, dumps, write = hmac.new, hashlib.sha256, json.dumps, os.write
+    seq = [0]
 
-    def emit(self, record: dict[str, Any]) -> None:
+    def emit(record: dict[str, Any]) -> None:
         record = dict(record)
-        record["seq"] = self._seq
-        self._seq += 1
-        payload = self._dumps(record, sort_keys=True, separators=(",", ":"), default=str)
-        body = payload.encode("utf-8")
-        mac = self._new(self._key, body, self._digest).hexdigest().encode("ascii")
+        record["seq"] = seq[0]
+        seq[0] += 1
+        body = dumps(record, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        mac = new(key, body, digest).hexdigest().encode("ascii")
         view = memoryview(mac + b" " + body + b"\n")
         while view:
-            written = self._write(self._fd, view)
-            view = view[written:]
+            view = view[write(fd, view) :]
+
+    return emit
 
 
 class _CodeWatch:
@@ -210,63 +221,73 @@ class _CodeWatch:
         return dict(self._state)
 
 
-class VerifierWitness:
-    """The pytest plugin object (registered by ``pytest_configure`` below)."""
+def _code_identity(code: types.CodeType | None) -> dict[str, Any]:
+    if code is None:
+        return {"code_file": "", "code_qualname": "", "code_firstlineno": 0}
+    return {
+        "code_file": str(Path(code.co_filename).resolve()),
+        "code_qualname": str(getattr(code, "co_qualname", code.co_name)),
+        "code_firstlineno": int(code.co_firstlineno),
+    }
 
-    def __init__(self, channel: _Channel) -> None:
-        self._channel = channel
-        self._watch = _CodeWatch()
-        self._internals: list[tuple[str, str, Any]] = []
+
+class _PluginHolder:
+    """Hashable holder for the hook functions (pluggy and pytest index plugins)."""
+
+
+def _build_plugin(emit: Any) -> Any:
+    """The pytest plugin: plain functions closing over ``emit`` and the watch.
+
+    pluggy keeps references to these function objects when the plugin is registered, so
+    replacing attributes of the returned namespace afterwards changes nothing.
+    """
+    watch = _CodeWatch()
+    internals: list[tuple[str, str, Any]] = []
 
     @pytest.hookimpl(tryfirst=True)
-    def pytest_configure(self, config: pytest.Config) -> None:
-        self._internals = [(m, d, _resolve(m, d)) for m, d in PYTEST_INTERNALS]
-        self._channel.emit({
+    def pytest_configure(config: pytest.Config) -> None:
+        internals[:] = [(m, d, _resolve(m, d)) for m, d in PYTEST_INTERNALS]
+        emit({
             "t": "begin",
             "pytest": pytest.__version__,
             "python": sys.version.split()[0],
             "rootpath": str(config.rootpath),
         })
 
-    def pytest_plugin_registered(self, plugin: Any, manager: Any) -> None:
+    def pytest_plugin_registered(plugin: Any, manager: Any) -> None:
         try:
             name = manager.get_name(plugin)
         except Exception:  # noqa: BLE001 - a hostile plugin must not stop the record
             name = None
-        self._channel.emit({"t": "plugin", "name": str(name), "file": _plugin_file(plugin)})
+        emit({"t": "plugin", "name": str(name), "file": _plugin_file(plugin)})
 
-    def pytest_itemcollected(self, item: Any) -> None:
-        self._channel.emit({"t": "item", "nodeid": item.nodeid})
+    def pytest_itemcollected(item: Any) -> None:
+        emit({"t": "item", "nodeid": item.nodeid})
 
-    def pytest_collectreport(self, report: Any) -> None:
+    def pytest_collectreport(report: Any) -> None:
         if report.skipped:
-            self._channel.emit({
-                "t": "collect_skip",
-                "nodeid": report.nodeid,
-                "text": _skip_text(report),
-            })
+            emit({"t": "collect_skip", "nodeid": report.nodeid, "text": _skip_text(report)})
         elif report.failed:
-            self._channel.emit({"t": "collect_error", "nodeid": report.nodeid})
+            emit({"t": "collect_error", "nodeid": report.nodeid})
 
-    def pytest_collection_finish(self, session: Any) -> None:
-        self._channel.emit({"t": "selected", "nodeids": [i.nodeid for i in session.items]})
+    def pytest_collection_finish(session: Any) -> None:
+        emit({"t": "selected", "nodeids": [i.nodeid for i in session.items]})
 
-    def pytest_deselected(self, items: Any) -> None:
-        self._channel.emit({"t": "deselected", "nodeids": [i.nodeid for i in items]})
+    def pytest_deselected(items: Any) -> None:
+        emit({"t": "deselected", "nodeids": [i.nodeid for i in items]})
 
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
-    def pytest_runtest_protocol(self, item: Any, nextitem: Any) -> Any:
+    def pytest_runtest_protocol(item: Any, nextitem: Any) -> Any:
         code = _test_code(item)
-        self._watch.begin(code)
+        watch.begin(code)
         try:
             yield
         finally:
-            state = self._watch.end()
-            state["code_file"] = str(Path(code.co_filename).resolve()) if code else ""
-            self._channel.emit({"t": "witness", "nodeid": item.nodeid, **state})
+            state = watch.end()
+            emit({"t": "witness", "nodeid": item.nodeid, **state, **_code_identity(code)})
 
-    def pytest_runtest_logreport(self, report: Any) -> None:
-        self._channel.emit({
+    def pytest_runtest_logreport(report: Any) -> None:
+        emit({
             "t": "report",
             "nodeid": report.nodeid,
             "when": report.when,
@@ -276,14 +297,27 @@ class VerifierWitness:
         })
 
     @pytest.hookimpl(trylast=True)
-    def pytest_sessionfinish(self, session: Any, exitstatus: Any) -> None:
-        patched = [
-            f"{m}:{d}" for m, d, original in self._internals if _resolve(m, d) is not original
-        ]
-        self._channel.emit({"t": "end", "exitstatus": int(exitstatus), "patched": patched})
+    def pytest_sessionfinish(session: Any, exitstatus: Any) -> None:
+        patched = [f"{m}:{d}" for m, d, original in internals if _resolve(m, d) is not original]
+        emit({"t": "end", "exitstatus": int(exitstatus), "patched": patched})
+
+    plugin = _PluginHolder()
+    for name, function in dict(
+        pytest_configure=pytest_configure,
+        pytest_plugin_registered=pytest_plugin_registered,
+        pytest_itemcollected=pytest_itemcollected,
+        pytest_collectreport=pytest_collectreport,
+        pytest_collection_finish=pytest_collection_finish,
+        pytest_deselected=pytest_deselected,
+        pytest_runtest_protocol=pytest_runtest_protocol,
+        pytest_runtest_logreport=pytest_runtest_logreport,
+        pytest_sessionfinish=pytest_sessionfinish,
+    ).items():
+        setattr(plugin, name, function)
+    return plugin
 
 
-def _open_channel() -> _Channel:
+def _open_channel() -> Any:
     try:
         fd = int(os.environ.pop(WITNESS_FD_ENV))
         key_fd = int(os.environ.pop(WITNESS_KEY_FD_ENV))
@@ -302,16 +336,22 @@ def _open_channel() -> _Channel:
     if len(key) != WITNESS_KEY_BYTES:
         raise RuntimeError("verifier witness key incomplete")
     os.set_inheritable(fd, False)
-    return _Channel(fd, key)
+    return _make_emit(fd, key)
 
 
 # Opened at import, i.e. while pytest pre-parses ``-p``: before any test module, and so
 # before any candidate code, is imported.  Importing this module elsewhere (no channel in
 # the environment) leaves it inert.
-_WITNESS = VerifierWitness(_open_channel()) if WITNESS_FD_ENV in os.environ else None
+_WITNESS = _build_plugin(_open_channel()) if WITNESS_FD_ENV in os.environ else None
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    if _WITNESS is None:
+    global _WITNESS
+    plugin, _WITNESS = _WITNESS, None
+    if plugin is None:
         raise pytest.UsageError("verifier witness loaded without its channel")
-    config.pluginmanager.register(_WITNESS, "nexus-eia-verifier-witness")
+    config.pluginmanager.register(plugin, "nexus-eia-verifier-witness")
+    # Nothing importable by name points at the witness any more (#2808 review).  A
+    # candidate that targets the witness can still reach it through the plugin manager
+    # or closure cells: that is the documented residual, not a P1 route.
+    sys.modules.pop(__name__, None)
