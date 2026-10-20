@@ -4050,6 +4050,7 @@ def _recovery_wrapper_command(root: str) -> str:
         raise _gateway_error("R1 recovery wrapper state root contains shell metacharacter")
     return (
         f'cd "{root_path}" ; source "{ENV_PATH}" ; {_r1_measurement_env_guard()}'
+        f"{_r1_cairnwork_env_export()}"
         f"export PYTHONDONTWRITEBYTECODE=1 ; "
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
         f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state_dir}" ; '
@@ -4084,6 +4085,27 @@ def _r1_measurement_env_guard() -> str:
             f'echo "{R1_MEASUREMENT_ENV_REFUSED}:{name}" >&2 ; '
             f"exit {R1_MEASUREMENT_ENV_REFUSED_EXIT} ; fi ; "
         )
+    return "".join(parts)
+
+
+# Must equal nexus_gateway_auto_deploy.CAIRNWORK_ENV_VARS and the live (non
+# spare) cairnwork_env_export() (Cairnwork F clause; asserted by tests, kept
+# here so R1's manager hash covers them).  Live configuration, not
+# measurement-only: an R1-restored Gateway keeps the operator's route switch.
+R1_CAIRNWORK_ENV_VARS = (
+    "NEXUS_CAIRNWORK_ROUTE",
+    "NEXUS_CAIRNWORK_ROUTE_BIN",
+    "NEXUS_CAIRNWORK_STATE",
+)
+
+
+def _r1_cairnwork_env_export() -> str:
+    """Export the Cairnwork route variables the env file set; unset stays unset."""
+    parts = []
+    for name in R1_CAIRNWORK_ENV_VARS:
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+            raise _gateway_error("R1 cairnwork env name invalid")
+        parts.append(f'if [ -n "${{{name}+x}}" ] ; then export {name} ; fi ; ')
     return "".join(parts)
 
 

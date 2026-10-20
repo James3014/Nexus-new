@@ -45,6 +45,12 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
 )
 from nexus.orchestrator.task_contract import parse_task_card_expected_evidence
+from nexus.orchestrator.unified_mcp_gateway_parts.cairnwork_route import (
+    CAIRNWORK_WORKER,
+    cairnwork_payload,
+    route_mode,
+    small_fix_shape,
+)
 from nexus.services.model_capability_lineage import CHANGE_KIND_VALUES, LineageResolutionError
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -136,6 +142,11 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
     if TYPE_CHECKING:  # provided by UnifiedMCPGateway
         _workforce_loader: Any  # WorkforcePolicyLoader; pyright cannot resolve that import symbol
         _calibration_planner: CalibrationPlanner
+
+        # from _CairnworkRouteMixin (council F)
+        def _cairnwork_owns(self, task_id: str) -> bool: ...
+        def _cairnwork_submit(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+        def _cairnwork_shadow(self, arguments: Mapping[str, Any], payload: dict[str, Any]) -> None: ...
 
         @staticmethod
         def _canonical_request(
@@ -346,6 +357,31 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             if card_universe is not None
             else {}
         )
+        # Council F (cairnwork docs/GATEWAY_ROUTE.md), after every Task Card check:
+        # off by default; see cairnwork_route.py.
+        cairnwork_mode = route_mode()
+        wants_cairnwork = str(arguments.get("worker") or "").strip().lower() == CAIRNWORK_WORKER
+        if self._cairnwork_owns(task_id) and not (cairnwork_mode == "route" and wants_cairnwork):
+            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
+        if cairnwork_mode != "off":
+            # A card that names expected evidence needs the Core envelope path; an
+            # external target is a measurement copy. Neither is a pilot small fix.
+            small_fix = (
+                external_root is None
+                and card_universe is None
+                and small_fix_shape(arguments, verifiers)
+            )
+            if cairnwork_mode == "route" and wants_cairnwork and not small_fix:
+                raise _gateway().GatewayInputError("CAIRNWORK_TASK_SHAPE_UNSUPPORTED")
+            if small_fix and (cairnwork_mode == "shadow" or wants_cairnwork):
+                payload_for_cairnwork = cairnwork_payload(
+                    task_id=task_id, task_card_hash=task_card_hash, what=what, why=why,
+                    repo=Path(_gateway().CANONICAL_SOURCE_ROOT), base=head, allowed=allowed,
+                    verifiers=verifiers,
+                )
+                if cairnwork_mode == "route":
+                    return self._cairnwork_submit(payload_for_cairnwork)
+                self._cairnwork_shadow(arguments, payload_for_cairnwork)
         try:
             internal = _gateway().build_canonical_planner_admission(
                 task_id=task_id,
@@ -541,6 +577,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             if current_target_head != target_head:
                 raise _gateway().GatewayInputError("EXTERNAL_TARGET_HEAD_DRIFT")
         _gateway().pre_action_guard(action, request=request, current_head=current_target_head, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION)
+        if self._cairnwork_owns(task_id):  # a concurrent route call may have taken the id
+            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
         result = self.service.submit_task(request)
         payload = dict(result or {})
         payload.update({"schema": "nexus.worker_candidate.v1", "worker_id": worker_id,

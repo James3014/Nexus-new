@@ -188,8 +188,16 @@ def _validate_scope(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
 
 
 def path_is_allowed(path: str, allowed_paths: tuple[str, ...] | list[str]) -> bool:
-    candidate = str(path).strip()
-    if not candidate or candidate.startswith("/") or "\\" in candidate:
+    candidate = str(path)
+    # A name is checked exactly as git reports it (#2765): surrounding whitespace or a
+    # control character would otherwise be stripped/ignored and let "\tallowed/x" match.
+    if (
+        not candidate
+        or candidate != candidate.strip()
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate)
+        or candidate.startswith("/")
+        or "\\" in candidate
+    ):
         return False
     pure = PurePosixPath(candidate)
     if (
@@ -206,6 +214,74 @@ def path_is_allowed(path: str, allowed_paths: tuple[str, ...] | list[str]) -> bo
         elif candidate == pattern:
             return True
     return False
+
+
+_CARD_PATH_BULLET = re.compile(r"- `([^`]+)`")
+
+
+def task_card_allowed_files(source: str) -> tuple[str, ...]:
+    """Return the exact allowed-file entries of one Task Card (#2766).
+
+    Reads the single ``## Allowed files`` section (heading compared
+    case-insensitively, as ``github_orchestration`` does) and keeps only bullets of
+    the exact form ``- `path``` whose path is already a normalized repository path
+    (the same rule as ``_validate_scope``). Any other line in the section, prose
+    bullet or unnormalized entry is ignored, which can only narrow the result.
+    A missing or repeated section is unresolvable and raises, so a GOVERNED
+    admission can never be bound to an ambiguous card.
+    """
+    lines = str(source).splitlines()
+    starts = [
+        index for index, line in enumerate(lines) if line.strip().lower() == "## allowed files"
+    ]
+    if len(starts) != 1:
+        raise MutationAdmissionError("TASK_CARD_ALLOWED_FILES_UNRESOLVABLE")
+    entries: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if line.lstrip().startswith("#"):
+            break
+        match = _CARD_PATH_BULLET.fullmatch(line.strip())
+        if not match:
+            continue
+        try:
+            (entry,) = _validate_scope([match.group(1)])
+        except MutationAdmissionError:
+            continue
+        if entry == match.group(1) and entry not in entries:
+            entries.append(entry)
+    if not entries:
+        raise MutationAdmissionError("TASK_CARD_ALLOWED_FILES_UNRESOLVABLE")
+    return tuple(entries)
+
+
+def governed_scope_excess(
+    requested: list[str] | tuple[str, ...],
+    card_allowed: tuple[str, ...] | list[str],
+) -> list[str]:
+    """Return every requested admission path that is not inside the card (#2766).
+
+    A plain requested path is inside when it equals a card entry, or lies below a
+    card ``dir/**`` entry. A requested ``dir/**`` is inside only when a card
+    ``root/**`` entry covers ``dir`` (equal or below). Comparison is exact on
+    normalized paths: case folding would let ``Docs/A.md`` match ``docs/a.md``,
+    which could only widen the check, never narrow it. Unnormalized, absolute,
+    ``..``, ``.git``, glob or empty requests are never inside.
+    """
+    card_files = {entry for entry in card_allowed if not entry.endswith("/**")}
+    card_dirs = tuple(entry for entry in card_allowed if entry.endswith("/**"))
+    excess: list[str] = []
+    for raw in requested:
+        path = str(raw)
+        base = path[:-3] if path.endswith("/**") else path
+        if any(char in base for char in "*?[]"):
+            inside = False
+        elif base != path:
+            inside = path_is_allowed(base, card_dirs)
+        else:
+            inside = path in card_files or path_is_allowed(path, card_dirs)
+        if not inside and path not in excess:
+            excess.append(path)
+    return excess
 
 
 def _atomic_json_write(path: Path, payload: Mapping[str, Any]) -> None:
