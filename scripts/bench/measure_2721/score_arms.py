@@ -39,8 +39,14 @@ Label rules (S0 + amendment 8.3, applied before unblinding, identically in all a
 * ``NOT_SCORABLE_*`` / ``PENDING_GROUND_TRUTH``: a scratch-cap trip or ORACLE_RUN_FAILED
   once the candidate tree was built -> that candidate's failure (S4.1); anything else ->
   infra (listed when it happened after the candidate tree was built).
-* ``HARNESS_TAMPER`` or ``OUT_OF_SCOPE_STRIPPED`` in ``scoring_flags`` -> not solved,
-  kept in the denominator; the stripped remainder is still scored, for diagnostics only.
+* ``HARNESS_TAMPER``, ``OUT_OF_SCOPE_STRIPPED``, ``PATCH_DOES_NOT_APPLY`` or
+  ``RUN_INVALID_NOT_SOLVED`` (a non-infra invalid run: TAMPERED, a non-infra Gateway error,
+  STATE_LEAK, a void reason) in ``scoring_flags`` -> not solved, kept in the denominator;
+  the remainder is still scored, for diagnostics only. Only true infra leaves the
+  candidate set (blind.py), and that task/repeat is then dropped from all arms.
+
+Scheduling: ``--concurrency`` defaults to 1; above 1, workers take whole tasks, so rows
+of the same task (any arm, any repeat) are never scored at the same time.
 
 This file is stdlib-only except ``analyze`` (numpy), so ``run`` works under the same
 ``python3.12 -I`` interpreter as S1.
@@ -51,10 +57,11 @@ Usage on the Mac mini (paths default to the S1 archive, export, bank venvs and s
     lab run --profile m5 --name score2721-<phase> --kind cpu --mem-gb 12 --wall 43200 \\
         --holder layer1-rie -- $PY -I <worktree>/scripts/bench/measure_2721/score_arms.py run \\
         --blind-dir <blind.py --out> --archive ~/workspace/.scratch/score2721/<phase>-<UTC> \\
-        --arms-per-group 3 --concurrency 4
+        --arms-per-group 3 --concurrency 1
     # post MANIFEST.sha256.sha256 from the archive, then the custodian runs:
     <python with numpy> score_arms.py analyze --archive <archive> --arm-map <arm_map.json> \\
-        --treatment NEXUS --control BARE --noop NOOP --expect-manifest-sha256 <posted sha> --out <report>
+        --treatment NEXUS --control BARE --noop NOOP --primary-set M --expect-manifest-sha256 <posted sha> \\
+        --out <report>
 """
 
 from __future__ import annotations
@@ -110,6 +117,7 @@ DEFAULTS = {
     "synth_root": S1_WORK / "synth",
     "task_index": S1_ARCHIVE / "inputs/stores/index.json",
     "s1_result": S1_ARCHIVE / "S1_RESULT.json",
+    "s1_receipts": S1_ARCHIVE / "receipts",
     "python": "/Users/james/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12",
     "work_root": HOME / "workspace/.scratch/score2721-work",
 }
@@ -127,8 +135,10 @@ SOLVED, NOT_SOLVED, INFRA = "SOLVED", "NOT_SOLVED", "INFRA"
 FLAG_HARNESS_TAMPER = "HARNESS_TAMPER"
 FLAG_OUT_OF_SCOPE = "OUT_OF_SCOPE_STRIPPED"
 FLAG_PATCH_DOES_NOT_APPLY = "PATCH_DOES_NOT_APPLY"
-NOT_SOLVED_FLAGS = frozenset({FLAG_HARNESS_TAMPER, FLAG_OUT_OF_SCOPE})  # amendment 8.3
-SCORING_FLAGS = NOT_SOLVED_FLAGS | {FLAG_PATCH_DOES_NOT_APPLY}
+FLAG_RUN_INVALID = "RUN_INVALID_NOT_SOLVED"  # blind.py: a non-infra invalid run (arm-neutral)
+# amendment 8.3, plus a scored diff that does not apply and a non-infra invalid run
+NOT_SOLVED_FLAGS = frozenset({FLAG_HARNESS_TAMPER, FLAG_OUT_OF_SCOPE, FLAG_PATCH_DOES_NOT_APPLY, FLAG_RUN_INVALID})
+SCORING_FLAGS = NOT_SOLVED_FLAGS
 
 # -- blind input schema ------------------------------------------------------------------
 CANDIDATE_KEYS = frozenset({"opaque_id", "task_id", "repeat", "diff_sha256", "scoring_flags"})
@@ -211,10 +221,26 @@ def verify_identity(driver: Path, s1_archive: Path, export: Path, *,
     return {"driver_sha256": got_driver, "s1_manifest_sha256": got_manifest, "scorer_blobs": blobs}
 
 
-def check_receipt_identity(receipt: Mapping[str, Any], key: str) -> None:
-    """Every scored row must carry exactly the pinned scorer, sandbox and profile."""
+def s1_reference(receipts_root: Path, key: str) -> dict[str, str]:
+    """The task's venv identity (``env_key``) and spec hash from its S1 self-check
+    receipts; every S1 receipt of the task that has them must agree."""
+    seen = set()
+    for path in sorted(Path(receipts_root).glob(f"*/tasks/{key}/real_outcome.json")):
+        r = json.loads(path.read_text())
+        if r.get("env_key") and r.get("spec_sha256"):
+            seen.add((r["env_key"], r["spec_sha256"]))
+    if len(seen) != 1:
+        raise Refused(f"S1_REFERENCE_{'MISSING' if not seen else 'AMBIGUOUS'} {key}: {len(seen)} identities")
+    env_key, spec = seen.pop()
+    return {"env_key": env_key, "spec_sha256": spec}
+
+
+def check_receipt_identity(receipt: Mapping[str, Any], key: str, ref: Mapping[str, str]) -> None:
+    """Every scored row must carry exactly the pinned scorer, sandbox and profile, and
+    the same venv identity and spec as the task's S1 receipts."""
     want = {"scorer_version": SCORER_VERSION, "runner_sandbox": SANDBOX,
-            "runner_sandbox_profile_sha256": PROFILE_SHA256, "task_key": key}
+            "runner_sandbox_profile_sha256": PROFILE_SHA256, "task_key": key,
+            "env_key": ref["env_key"], "spec_sha256": ref["spec_sha256"]}
     bad = {k: receipt.get(k) for k, v in want.items() if receipt.get(k) != v}
     if bad:
         raise Refused(f"RECEIPT_IDENTITY_MISMATCH {key}: {bad}")
@@ -363,13 +389,21 @@ def _ps_rows() -> list[tuple[int, int, int, int, str, str]] | None:
     return rows
 
 
+class ReapError(RuntimeError):
+    """The straggler check could not run: the row is infra, never silently clean."""
+
+
 def _cwd_holders(root: Path) -> list[int]:
-    """PIDs of this user's processes whose cwd is under ``root`` (fixed lsof path)."""
+    """PIDs of this user's processes whose cwd is under ``root`` (fixed lsof path).
+    Fails closed (ReapError) when lsof cannot run or returns nothing usable."""
     try:
-        out = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fpn"],
-                             capture_output=True, text=True, timeout=60).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
+        res = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fpn"],
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReapError(f"lsof_failed: {type(exc).__name__}: {exc}") from exc
+    out = res.stdout
+    if not out.strip():  # our own process always has a cwd: empty output is a failure
+        raise ReapError(f"lsof_no_output: rc={res.returncode} {res.stderr.strip()[-200:]}")
     pids, pid, prefix = [], None, str(Path(root).resolve())
     for line in out.splitlines():
         if line.startswith("p"):
@@ -423,7 +457,18 @@ def run_tracked(cmd: Sequence[str], log_path: Path, work: Path, *, poll: float =
         killed.append({"pgid": proc.pid, "how": "session_group"})
     except (ProcessLookupError, PermissionError):
         pass
-    alive = {r[0]: r for r in (_ps_rows() or [])}
+    try:
+        rows = _ps_rows()
+        if rows is None:
+            raise ReapError("ps_failed")
+        alive = {r[0]: r for r in rows}
+        _reap_after(tracked, alive, work, me, killed)
+    except ReapError as exc:
+        return {"rc": rc, "stragglers_killed": killed, "descendants_seen": len(tracked), "reap_error": str(exc)}
+    return {"rc": rc, "stragglers_killed": killed, "descendants_seen": len(tracked)}
+
+
+def _reap_after(tracked, alive, work, me, killed) -> None:
     for pid, (start, command) in sorted(tracked.items()):
         row = alive.get(pid)
         if row is not None and row[4] == start:
@@ -441,7 +486,6 @@ def run_tracked(cmd: Sequence[str], log_path: Path, work: Path, *, poll: float =
             killed.append({"pid": pid, "cmd": row[5][:120] if row else None, "how": "cwd_under_work"})
         except (ProcessLookupError, PermissionError):
             pass
-    return {"rc": rc, "stragglers_killed": killed, "descendants_seen": len(tracked)}
 
 
 def assert_outside_repos(path: Path) -> None:
@@ -465,6 +509,13 @@ class Scorer:
                                                               Path(cfg["export"])))
         self.run_id = self.arch.name
         self.lock = threading.Lock()
+        self._refs: dict[str, dict[str, str]] = {}
+
+    def reference(self, key: str) -> dict[str, str]:
+        with self.lock:
+            if key not in self._refs:
+                self._refs[key] = s1_reference(Path(self.cfg["s1_receipts"]), key)
+            return self._refs[key]
 
     # One scoring attempt of one candidate in one round.
     def score_one(self, cand: Mapping[str, Any], task: Mapping[str, Any], rnd: int) -> dict[str, Any]:
@@ -475,8 +526,11 @@ class Scorer:
         while (base_dir / f"r{rnd}-a{k}").exists():
             done = base_dir / f"r{rnd}-a{k}" / "attempt.json"
             if done.exists():
-                return json.loads(done.read_text())  # resume: this attempt already finished
-            k += 1  # an interrupted attempt stays as it is (create-only); take a new slot
+                prev = json.loads(done.read_text())
+                if "cls" in prev:
+                    return prev  # resume: this attempt already finished
+            # an interrupted or fatal attempt stays as it is (create-only); take a new slot
+            k += 1
         adir = base_dir / f"r{rnd}-a{k}"
         adir.mkdir(parents=True)
         work = Path(self.cfg["work_root"]) / self.run_id / f"{opaque}-r{rnd}-a{k}-{uuid.uuid4().hex[:8]}"
@@ -491,6 +545,7 @@ class Scorer:
                "--store", str(store), "--out", str(out), "--work", str(work), "--task", key,
                "--sandbox", SANDBOX, "--min-free-disk-gib", MIN_FREE_DISK_GIB,
                "--repo-source", f"{task['venv']}={Path(self.cfg['synth_root']) / task['venv']}"]
+        ref = self.reference(key)  # S1 venv identity, before the run
         t0 = time.time()
         res = self.runner(cmd, adir / "driver.log", work)
         seconds = round(time.time() - t0, 1)
@@ -500,13 +555,14 @@ class Scorer:
         att: dict[str, Any] = {"opaque_id": opaque, "round": rnd, "slot": k, "rc": rc, "seconds": seconds,
                                "work": str(work), "cmd": cmd, "identity": ident,
                                "stragglers_killed": res.get("stragglers_killed", []),
-                               "descendants_seen": res.get("descendants_seen")}
+                               "descendants_seen": res.get("descendants_seen"),
+                               "concurrency": int(self.cfg.get("concurrency", 1))}
         if rc in FATAL_EXITS:
             write_new(adir / "attempt.json", canon({**att, "fatal": FATAL_EXITS[rc]}))
             raise Refused(f"SCORER_FATAL rc={rc} ({FATAL_EXITS[rc]}) on {opaque}")
         if rc == 0 and receipt_path.exists():
             receipt = json.loads(receipt_path.read_text())
-            check_receipt_identity(receipt, key)
+            check_receipt_identity(receipt, key, ref)
             c = classify_receipt(receipt)
             att.update(receipt_sha256=sha256_file(receipt_path), label=receipt.get("label"),
                        sub_reason=receipt.get("sub_reason"), cls=c["cls"], why=c["why"],
@@ -517,17 +573,32 @@ class Scorer:
             reason = infra_reason_from_log(log) if rc == INFRA_EXIT else f"SCORER_RC_{rc}_NO_RECEIPT"
             att.update(cls=INFRA, why=f"EXIT_{rc}:{reason}", label=None, infra_reason=reason,
                        host_disk_low_post_candidate=rc == INFRA_EXIT and is_post_candidate_host_disk(reason))
+        if res.get("reap_error"):
+            # S2.1(c) fails closed: without a straggler check the row is infra (re-run in all
+            # arms); the receipt's label stays recorded as a diagnostic.
+            att.update(cls=INFRA, why=f"REAP_FAILED:{res['reap_error']}", reap_error=res["reap_error"],
+                       post_candidate=False)
         write_new(adir / "attempt.json", canon(att))
         return att
 
     def score_round(self, items: list[tuple[dict[str, Any], dict[str, Any]]], rnd: int) -> dict[str, dict]:
+        """Task-disjoint batches: all rows of one task (every arm and repeat) are scored
+        one after another by a single worker, so rows of the same task/repeat are never
+        co-scheduled; with concurrency > 1 only different tasks run side by side."""
         self.identity()  # before each batch
-        conc = int(self.cfg.get("concurrency", 1))
+        conc = max(1, int(self.cfg.get("concurrency", 1)))
+        by_task: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+        for c, t in items:
+            by_task.setdefault(c["task_id"], []).append((c, t))
         results: dict[str, dict] = {}
-        with ThreadPoolExecutor(max(1, conc)) as ex:
-            futs = {ex.submit(self.score_one, c, t, rnd): c["opaque_id"] for c, t in items}
-            for f, opaque in futs.items():
-                results[opaque] = f.result()
+
+        def one_task(batch):
+            return [(c["opaque_id"], self.score_one(c, t, rnd)) for c, t in batch]
+
+        with ThreadPoolExecutor(conc) as ex:
+            futs = [ex.submit(one_task, batch) for _, batch in sorted(by_task.items())]
+            for f in futs:
+                results.update(f.result())
         return results
 
 
@@ -586,6 +657,7 @@ def run_scoring(arch: Path, blind_dir: Path, cfg: Mapping[str, Any], *, arms_per
             "flags": ["--sandbox", SANDBOX, "--store", "--min-free-disk-gib", MIN_FREE_DISK_GIB],
             "score_arms_sha256": sha256_file(Path(__file__)), "max_reruns": MAX_RERUNS,
             "lab_rid": os.environ.get("LAB_RID"),
+            "concurrency": int(cfg.get("concurrency", 1)), "scheduling": "task-disjoint",
             "config": {k: str(v) for k, v in cfg.items()}}))
         for c in cands:
             t = index[c["task_id"]]
@@ -596,7 +668,12 @@ def run_scoring(arch: Path, blind_dir: Path, cfg: Mapping[str, Any], *, arms_per
         if recorded != sha256_bytes(cand_jsonl):
             raise Refused("RESUME_INPUT_CHANGED: candidates.jsonl differs from the archived one")
 
-    history: dict[tuple[str, int], list[dict[str, dict]]] = {g: [] for g in complete}
+    history: dict[tuple[str, int], list[dict[str, dict]]] = {g: [] for g in [*complete, *incomplete]}
+    if incomplete:
+        # Never counted, but scored once so the NOOP void (S3) sees every NOOP row.
+        res = scorer.score_round([(by_id[o], index[g[0]]) for g in sorted(incomplete) for o in incomplete[g]], 0)
+        for g in incomplete:
+            history[g].append({o: res[o] for o in incomplete[g]})
     pending = sorted(complete)
     for rnd in range(MAX_RERUNS + 1):
         if not pending:
@@ -639,6 +716,7 @@ def finalize(arch: Path, by_id: Mapping[str, Mapping[str, Any]], complete, incom
         for o in ids:
             row = final_row(by_id[o], last[o], status)
             row["attempts"] = [atts[o].get("receipt_sha256") or atts[o]["why"] for atts in rounds]
+            row["round_labels"] = [atts[o].get("label") for atts in rounds]
             row["stragglers_killed"] = sum(len(atts[o].get("stragglers_killed") or []) for atts in rounds)
             row["identity"] = last[o].get("identity")
             if last[o].get("receipt_sha256"):
@@ -648,10 +726,13 @@ def finalize(arch: Path, by_id: Mapping[str, Mapping[str, Any]], complete, incom
                 row["receipt_sha256"] = last[o]["receipt_sha256"]
             rows.append(row)
     for g, ids in sorted(incomplete.items()):
-        groups.append({"task_id": g[0], "repeat": g[1], "opaque_ids": ids, "rounds": 0,
+        rounds = history.get(g) or []
+        groups.append({"task_id": g[0], "repeat": g[1], "opaque_ids": ids, "rounds": len(rounds),
                        "status": "DROPPED_INCOMPLETE_GROUP", "possible_evasion_opaque_ids": [], "infra_whys": []})
         for o in ids:
-            rows.append(final_row(by_id[o], None, "DROPPED_INCOMPLETE_GROUP"))
+            row = final_row(by_id[o], rounds[-1][o] if rounds else None, "DROPPED_INCOMPLETE_GROUP")
+            row["round_labels"] = [atts[o].get("label") for atts in rounds]
+            rows.append(row)
     for row in rows:
         write_new(arch / "rows" / f"{row['opaque_id']}.json", canon(row))
     kept = [r for r in rows if r["counted"]]
@@ -781,6 +862,11 @@ def compare(rows: Sequence[Mapping[str, Any]], treatment: str, control: str, tas
         return sum(r["broke_existing"] for r in rs) / len(rs) if rs else float("nan")
 
     def solve_rate(arm: str) -> float:
+        """Macro mean: the mean over tasks of the per-task repeat mean (what the CI is on)."""
+        rates = [sum(r["solved"] for r in per[tid][arm]) / len(per[tid][arm]) for tid in tasks_used]
+        return sum(rates) / len(rates) if rates else float("nan")
+
+    def pooled(arm: str) -> float:
         rs = [r for tid in tasks_used for r in per[tid].get(arm, [])]
         return sum(r["solved"] for r in rs) / len(rs) if rs else float("nan")
 
@@ -789,6 +875,7 @@ def compare(rows: Sequence[Mapping[str, Any]], treatment: str, control: str, tas
     mde_n = min(MDE_REGISTERED, key=lambda k: abs(k - n)) if n else None
     return {"treatment": treatment, "control": control, "tasks": n, "ci95": ci,
             "solve_rate": {treatment: solve_rate(treatment), control: solve_rate(control)},
+            "solve_rate_pooled_rows": {treatment: pooled(treatment), control: pooled(control)},
             "mcnemar_majority_of_3": {"treatment_only": b, "control_only": c, "p_exact": mcnemar_exact(b, c)},
             "broke_existing_rate": {treatment: broke(treatment), control: broke(control), "delta": bd},
             "band": decision_band(ci, bd),
@@ -796,7 +883,9 @@ def compare(rows: Sequence[Mapping[str, Any]], treatment: str, control: str, tas
 
 
 def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noop: str | None,
-            strata: Mapping[str, str], expect_manifest_sha: str | None = None) -> dict[str, Any]:
+            strata: Mapping[str, str], primary_set: str, expect_manifest_sha: str) -> dict[str, Any]:
+    if not expect_manifest_sha:
+        raise Refused("EXPECT_MANIFEST_SHA_REQUIRED: pass the manifest sha256 posted before unblinding")
     arch = Path(arch)
     msha = verify_archive(arch, expect_manifest_sha)
     run = json.loads((arch / "run.json").read_text())
@@ -810,11 +899,45 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
         if m is None or m["task_id"] != r["task_id"] or int(m["repeat"]) != r["repeat"]:
             raise Refused(f"ARM_MAP_ROW_MISMATCH {r['opaque_id']}")
         rows.append({**r, "arm": m["arm"]})
+    excluded = amap.get("excluded") or []
     arms = sorted({r["arm"] for r in rows})
+    all_arms = sorted(set(arms) | {e["arm"] for e in excluded})
     for a in (treatment, control, *([noop] if noop else [])):
         if a not in arms:
             raise Refused(f"ARM_NOT_IN_MAP {a}: {arms}")
+    noop_arms = [a for a in all_arms if "NOOP" in str(a).upper()]
+    if noop_arms and not noop:
+        raise Refused(f"NOOP_REQUIRED: the arm map has {noop_arms}; pass --noop")
+    unknown = sorted({r["task_id"] for r in rows if r["task_id"] not in strata})
+    if unknown:
+        raise Refused(f"TASK_SET_UNKNOWN: {unknown[:5]}")
+    if primary_set not in set(strata.values()):
+        raise Refused(f"PRIMARY_SET_UNKNOWN {primary_set!r}: {sorted(set(strata.values()))}")
     groups = json.loads((arch / "groups.json").read_text())
+
+    # Incomplete groups: every missing arm must be a true-infra exclusion in the arm map.
+    exclusions_by_arm: dict[str, dict[str, int]] = {}
+    for e in excluded:
+        if e.get("infra") is not True:
+            raise Refused(f"NON_INFRA_EXCLUSION {e.get('arm')} {e.get('task_id')}#{e.get('repeat')}: "
+                          f"{e.get('reason') or e.get('outcome')} (only infra may leave the candidate set)")
+        reason = str(e.get("reason") or e.get("outcome"))
+        exclusions_by_arm.setdefault(e["arm"], {}).setdefault(reason, 0)
+        exclusions_by_arm[e["arm"]][reason] += 1
+    incomplete_report = []
+    for g in groups:
+        if g["status"] != "DROPPED_INCOMPLETE_GROUP":
+            continue
+        present = {amap["map"][o]["arm"] for o in g["opaque_ids"]}
+        why = {e["arm"]: str(e.get("reason") or e.get("outcome")) for e in excluded
+               if e["task_id"] == g["task_id"] and int(e["repeat"]) == g["repeat"]}
+        missing = sorted(set(all_arms) - present)
+        unexplained = [a for a in missing if a not in why]
+        if unexplained:
+            raise Refused(f"INCOMPLETE_GROUP_UNEXPLAINED {g['task_id']}#{g['repeat']}: {unexplained}")
+        incomplete_report.append({"task_id": g["task_id"], "repeat": g["repeat"],
+                                  "excluded_by_arm": {a: why[a] for a in missing}})
+
     per_arm = {}
     for a in arms:
         rs = [r for r in rows if r["arm"] == a]
@@ -823,17 +946,20 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
                       "scorer_resolved": sum(r["scorer_label"] == RESOLVED for r in kept),
                       "broke_existing": sum(r["broke_existing"] for r in kept),
                       "flag_override_not_solved": sum(r["flag_override"] for r in kept),
+                      "run_invalid_not_solved": sum(FLAG_RUN_INVALID in r["scoring_flags"] for r in kept),
                       "flagged_but_stripped_remainder_resolved": sum(r["diagnostic_stripped_resolved"] for r in kept),
                       "dropped": sum(not r["counted"] for r in rs)}
     void = []
     if noop:
-        noop_resolved = [r["opaque_id"] for r in rows if r["arm"] == noop and r["scorer_label"] == RESOLVED]
+        # S3: any RESOLVED in any round of any NOOP row (counted, dropped or incomplete).
+        noop_resolved = [r["opaque_id"] for r in rows if r["arm"] == noop and (
+            RESOLVED in (r.get("round_labels") or []) or r["scorer_label"] == RESOLVED)]
         if noop_resolved:
             void.append({"reason": "NOOP_RESOLVED (S3): the run is void; stop and investigate",
                          "opaque_ids": noop_resolved})
-    primary = compare(rows, treatment, control)
-    by_stratum = {s: compare(rows, treatment, control, {t for t, v in strata.items() if v == s})
-                  for s in sorted(set(strata.values()))}
+    sets = {s: {t for t, v in strata.items() if v == s} for s in sorted(set(strata.values()))}
+    primary = compare(rows, treatment, control, sets[primary_set])
+    other_sets = {s: compare(rows, treatment, control, tasks) for s, tasks in sets.items() if s != primary_set}
     # S4.2: possible-evasion drops, per arm; if they fall on one arm only, report the
     # primary result with those groups too (their suspect rows counted as not solved).
     evasion = [g for g in groups if g["possible_evasion_opaque_ids"]]
@@ -853,14 +979,17 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
                     set(r["scoring_flags"]) & NOT_SOLVED_FLAGS)
                 r = {**r, "counted": True, "solved": solved, "broke_existing": r["scorer_label"] == BROKE_EXISTING}
             alt.append(r)
-        with_evasion = compare(alt, treatment, control)
+        with_evasion = compare(alt, treatment, control, sets[primary_set])
     return {"schema": SCHEMA + ".analysis", "archive_manifest_sha256": msha, "arms": per_arm,
-            "primary": primary, "by_stratum": by_stratum, "void": void,
+            "primary_set": primary_set, "primary": primary, "other_sets": other_sets, "void": void,
             "verdict": "VOID" if void else primary["band"],
             "drops": {"infra": sum(g["status"] == "DROPPED_INFRA" for g in groups),
                       "incomplete_group": sum(g["status"] == "DROPPED_INCOMPLETE_GROUP" for g in groups),
+                      "incomplete_groups_by_arm": incomplete_report,
+                      "exclusions_by_arm": exclusions_by_arm,
                       "possible_evasion_by_arm": ev_by_arm},
             "primary_with_possible_evasion_groups": with_evasion,
+            "concurrency": run.get("concurrency"),
             "seed": BOOTSTRAP_SEED, "resamples": BOOTSTRAP_RESAMPLES}
 
 
@@ -877,7 +1006,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     r.add_argument("--blind-dir", required=True, type=Path, help="blind.py --out (candidates.jsonl + candidates/)")
     r.add_argument("--archive", required=True, type=Path, help="new create-only archive dir")
     r.add_argument("--arms-per-group", required=True, type=int, help="number of arms (rows per task x repeat)")
-    r.add_argument("--concurrency", type=int, default=4)
+    r.add_argument("--concurrency", type=int, default=1,
+                   help="task-disjoint workers (rows of one task always run one after another)")
     r.add_argument("--resume", action="store_true", help="continue an unsealed archive (finished attempts kept)")
     r.add_argument("--allow-outside-lab", action="store_true", help="smoke/tests only")
     for k, v in DEFAULTS.items():
@@ -889,7 +1019,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     a.add_argument("--control", required=True)
     a.add_argument("--noop")
     a.add_argument("--s1-result", type=Path, default=DEFAULTS["s1_result"], help="for strata (row 'set')")
-    a.add_argument("--expect-manifest-sha256")
+    a.add_argument("--primary-set", required=True, help="the S1 set the verdict is on (M for Q1)")
+    a.add_argument("--expect-manifest-sha256", required=True)
     a.add_argument("--out", type=Path, help="write the report here (create-only)")
     v = sub.add_parser("verify-identity", help="check the driver and scorer pins only")
     for k in ("driver", "s1_archive", "export"):
@@ -907,7 +1038,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         s1 = json.loads(Path(args.s1_result).read_text())
         strata = {row["id"]: row["set"] for row in s1["rows"] if row.get("survives")}
         rep = analyze(args.archive, args.arm_map, treatment=args.treatment, control=args.control,
-                      noop=args.noop, strata=strata, expect_manifest_sha=args.expect_manifest_sha256)
+                      noop=args.noop, strata=strata, primary_set=args.primary_set,
+                      expect_manifest_sha=args.expect_manifest_sha256)
         text = json.dumps(rep, indent=1, sort_keys=True)
         if args.out:
             write_new(args.out, (text + "\n").encode())

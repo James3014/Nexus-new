@@ -13,6 +13,7 @@ import pytest
 from scripts.bench.measure_2721 import score_arms as sa
 
 ARMS = ("BARE", "NEXUS", "NOOP")
+ENV_KEY, SPEC = "e" * 64, "5" * 64
 
 
 # -- fixtures --------------------------------------------------------------------------
@@ -40,7 +41,12 @@ def env(tmp_path):
         (export / rel).write_text(f"# {rel}\n")
     pins = {"driver_sha": sa.sha256_file(driver), "s1_manifest_sha": sa.sha256_file(s1 / "MANIFEST.sha256"),
             "scorer_files": {rel: sa.git_blob_sha(export / rel) for rel in sa.SCORER_FILES}}
-    cfg = {"s1_archive": s1, "driver": driver, "export": export, "venvs": tmp_path / "venvs",
+    for t in tasks:  # S1 self-check receipts: the venv identity reference
+        rdir = s1 / "receipts" / "gold_a" / "tasks" / t["key"]
+        rdir.mkdir(parents=True)
+        (rdir / "real_outcome.json").write_text(json.dumps({"env_key": ENV_KEY, "spec_sha256": SPEC}))
+    cfg = {"s1_archive": s1, "s1_receipts": s1 / "receipts", "driver": driver, "export": export,
+           "venvs": tmp_path / "venvs",
            "synth_root": tmp_path / "synth", "task_index": tmp_path / "index.json",
            "s1_result": tmp_path / "s1.json", "python": "python3", "work_root": tmp_path / "work",
            "concurrency": 2}
@@ -48,7 +54,7 @@ def env(tmp_path):
             "identity": lambda: sa.verify_identity(driver, s1, export, **pins)}
 
 
-def make_blind(tmp, tasks, *, repeats=3, arms=ARMS, flags=None, drop=(), extra=None):
+def make_blind(tmp, tasks, *, repeats=3, arms=ARMS, flags=None, drop=(), extra=None, excluded=()):
     """Blind dir + the custodian's arm map. ``flags``: {(task, repeat, arm): [..]};
     ``drop``: (task, repeat, arm) rows that blind.py excluded (harness infra)."""
     blind_dir = tmp / "blind"
@@ -72,7 +78,10 @@ def make_blind(tmp, tasks, *, repeats=3, arms=ARMS, flags=None, drop=(), extra=N
     (blind_dir / "candidates.jsonl").write_text(text)
     arm_map = tmp / "custodian" / "arm_map.json"
     arm_map.parent.mkdir()
-    arm_map.write_text(json.dumps({"candidates_jsonl_sha256": sa.sha256_bytes(text.encode()), "map": amap}))
+    exc = [{"arm": a, "task_id": t, "repeat": r, "run_id": f"run-{a}", "outcome": "INFRA", "infra": infra,
+            "reason": "INFRA_TEST"} for t, r, a, infra in excluded]
+    arm_map.write_text(json.dumps({"candidates_jsonl_sha256": sa.sha256_bytes(text.encode()), "map": amap,
+                                   "excluded": exc}))
     return blind_dir, arm_map, amap
 
 
@@ -95,11 +104,22 @@ class FakeRunner:
         if self.on_call:
             self.on_call(len(self.calls))
         res = self.outcome(m["arm"], m["task_id"], m["repeat"], n)
+        if isinstance(res, tuple) and res[0] == "reap_error":
+            Path(log_path).write_text("ok\n")
+            out_rec = out / "tasks" / key
+            out_rec.mkdir(parents=True)
+            (out_rec / "real_outcome.json").write_text(json.dumps({
+                "scorer_version": sa.SCORER_VERSION, "runner_sandbox": "os", "env_key": ENV_KEY, "spec_sha256": SPEC,
+                "runner_sandbox_profile_sha256": sa.PROFILE_SHA256, "task_key": key, "label": "RESOLVED"}))
+            return {"rc": 0, "stragglers_killed": [], "reap_error": res[1]}
+        if isinstance(res, tuple) and res[0] == "rc7":
+            Path(log_path).write_text("no sandbox\n")
+            return {"rc": 7}
         if isinstance(res, tuple) and res[0] == "rc8":
             Path(log_path).write_text(f"{key}: INFRA_ABORT {res[1]}; stopping, no receipt written\n")
             return {"rc": 8, "stragglers_killed": [{"pid": 4242, "how": "descendant"}]}
         rec = {"label": res} if isinstance(res, str) else dict(res)
-        rec = {"scorer_version": sa.SCORER_VERSION, "runner_sandbox": "os",
+        rec = {"scorer_version": sa.SCORER_VERSION, "runner_sandbox": "os", "env_key": ENV_KEY, "spec_sha256": SPEC,
                "runner_sandbox_profile_sha256": sa.PROFILE_SHA256, "task_key": key,
                "trees": {"BASE": "1" * 40, "CAND+T": "2" * 40}, **rec}
         (out / "tasks" / key).mkdir(parents=True)
@@ -378,10 +398,11 @@ def test_existing_unsealed_archive_needs_resume_and_resume_reuses_finished_attem
     with pytest.raises(Crash):
         run(env, blind_dir, first)
     crashed = first.calls[1]
-    assert len(first.calls) == 3  # the executor finished the other two
+    assert len(first.calls) == 2  # one task's rows run in sequence: the crash stops that batch
     second = FakeRunner(amap, simple)
     res = run(env, blind_dir, second, resume=True)
-    assert second.calls == [crashed] and res["rows_counted"] == 3  # finished attempts reused
+    assert second.calls[0] == crashed and first.calls[0] not in second.calls  # finished attempt reused
+    assert len(second.calls) == 2 and res["rows_counted"] == 3
     adir = env["tmp"] / "arch" / "attempts" / crashed
     assert sorted(p.name for p in adir.iterdir()) == ["r0-a0", "r0-a1"]  # interrupted slot kept as is
     assert not (adir / "r0-a0" / "attempt.json").exists()
@@ -423,20 +444,26 @@ def test_decision_bands(ci, bd, band):
     assert sa.decision_band(ci, bd) == band
 
 
-def _analyze(env, outcome, n_tasks=4, **kw):
+def _msha(env):
+    return (env["tmp"] / "arch" / "MANIFEST.sha256.sha256").read_text().strip()
+
+
+def _analyze(env, outcome, n_tasks=4, primary_set="M", **kw):
     blind_dir, arm_map, amap = make_blind(env["tmp"], env["tasks"][:n_tasks], **kw)
     run(env, blind_dir, FakeRunner(amap, outcome))
     strata = {t["id"]: t["set"] for t in env["tasks"]}
-    return sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata)
+    return sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata,
+                      primary_set=primary_set,
+                      expect_manifest_sha=_msha(env))
 
 
 def test_analyze_end_to_end_works_band_per_stratum(env):
     rep = _analyze(env, simple)
     p = rep["primary"]
-    assert p["tasks"] == 4 and p["ci95"]["lo"] == p["ci95"]["hi"] == 1.0 and p["band"] == "WORKS"
-    assert p["mcnemar_majority_of_3"] == {"treatment_only": 4, "control_only": 0, "p_exact": 0.125}
-    assert rep["verdict"] == "WORKS" and rep["void"] == []
-    assert set(rep["by_stratum"]) == {"M", "LA"} and rep["by_stratum"]["M"]["tasks"] == 2
+    assert p["tasks"] == 2 and p["ci95"]["lo"] == p["ci95"]["hi"] == 1.0 and p["band"] == "WORKS"
+    assert p["mcnemar_majority_of_3"] == {"treatment_only": 2, "control_only": 0, "p_exact": 0.5}
+    assert rep["verdict"] == "WORKS" and rep["void"] == [] and rep["primary_set"] == "M"
+    assert set(rep["other_sets"]) == {"LA"} and rep["other_sets"]["LA"]["tasks"] == 2
     assert rep["arms"]["NOOP"]["scorer_resolved"] == 0
 
 
@@ -468,7 +495,8 @@ def test_analyze_refuses_a_foreign_arm_map(env):
     data["candidates_jsonl_sha256"] = "0" * 64
     arm_map.write_text(json.dumps(data))
     with pytest.raises(sa.Refused, match="ARM_MAP_NOT_FOR_THIS_CANDIDATE_SET"):
-        sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata={})
+        sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP",
+                   strata={t["id"]: t["set"] for t in env["tasks"]}, primary_set="M", expect_manifest_sha=_msha(env))
 
 
 def test_possible_evasion_on_one_arm_is_reported_with_and_without(env):
@@ -482,7 +510,7 @@ def test_possible_evasion_on_one_arm_is_reported_with_and_without(env):
     rep = _analyze(env, outcome)
     assert rep["drops"]["possible_evasion_by_arm"] == {"NEXUS": 1}
     alt = rep["primary_with_possible_evasion_groups"]
-    assert alt is not None and alt["tasks"] == 4
+    assert alt is not None and alt["tasks"] == 2
     assert alt["solve_rate"]["NEXUS"] < rep["primary"]["solve_rate"]["NEXUS"]
 
 
@@ -498,7 +526,7 @@ def test_majority_uses_kept_repeats_only(env):
     rep = _analyze(env, outcome)
     assert rep["drops"]["infra"] == 1
     assert rep["primary"]["mcnemar_majority_of_3"]["treatment_only"] == 0
-    assert rep["primary"]["ci95"]["mean"] == pytest.approx(0.5 / 4)
+    assert rep["primary"]["ci95"]["mean"] == pytest.approx(0.5 / 2)
 
 
 # -- S2.1(c): per-run straggler reaping (real processes, no scorer) ---------------------
@@ -533,3 +561,270 @@ def test_run_tracked_kills_and_records_a_setsid_straggler(tmp_path):
         time.sleep(0.1)
     else:
         pytest.fail("straggler still alive")
+
+
+
+# -- review round 2 (REJECT of fa10d9f15) ---------------------------------------------------
+
+def test_run_invalid_and_patch_does_not_apply_are_not_solved_but_kept(env):
+    t = env["tasks"][0]["id"]
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=2,
+                                    flags={(t, 1, "NEXUS"): [sa.FLAG_RUN_INVALID],
+                                           (t, 2, "NEXUS"): [sa.FLAG_PATCH_DOES_NOT_APPLY]})
+    res = run(env, blind_dir, FakeRunner(amap, simple))
+    assert res["groups_kept"] == 2 and res["groups_dropped_incomplete"] == 0
+    nexus = [r for o, r in rows_of(env["tmp"] / "arch").items() if amap[o]["arm"] == "NEXUS"]
+    assert len(nexus) == 2 and all(r["counted"] and r["solved"] is False and r["flag_override"] for r in nexus)
+
+
+def test_blind_keeps_non_infra_invalid_rows_as_flagged_candidates(tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import blind
+
+    monkeypatch.setattr(blind, "applies_to_base", lambda diff, task: True)
+    task = {"task_id": "pkg-100", "scope": ["x.py"]}
+    diff = tmp_path / "d.diff"
+    diff.write_text("")
+    base = {"task_id": "pkg-100", "repeat": 1, "diff_path": str(diff), "diff_sha256": sa.sha256_bytes(b"")}
+    rows = [{**base, "arm": "BARE", "run_id": "b", "outcome": "TAMPERED"},
+            {**base, "arm": "NEXUS", "run_id": "n", "outcome": "GATEWAY_ERROR"},
+            {**base, "arm": "NEXUS", "run_id": "n2", "outcome": "OK", "flags": ["STATE_LEAK"], "repeat": 2},
+            {**base, "arm": "BARE", "run_id": "b2", "outcome": "OK", "void_reason": "X", "repeat": 2},
+            {**base, "arm": "NOOP", "run_id": "z", "outcome": "INFRA", "infra": True, "void_reason": "agy"}]
+    out, amap_path = tmp_path / "o", tmp_path / "c" / "m.json"
+    blind.blind(rows, out, amap_path, {"pkg-100": task})
+    cands = [json.loads(line) for line in (out / "candidates.jsonl").read_text().splitlines()]
+    assert len(cands) == 4 and all(c["scoring_flags"] == ["RUN_INVALID_NOT_SOLVED"] for c in cands)
+    amap = json.loads(amap_path.read_text())
+    assert amap["excluded"] == [{"arm": "NOOP", "run_id": "z", "task_id": "pkg-100", "repeat": 1,
+                                 "outcome": "INFRA", "infra": True, "reason": "agy"}]
+    assert "STATE_LEAK" not in (out / "candidates.jsonl").read_text()
+
+
+def test_blind_writes_diff_files_after_the_shuffle(tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import blind
+
+    class Reverse:
+        def shuffle(self, items):
+            items.reverse()
+
+    written = []
+    monkeypatch.setattr(blind, "applies_to_base", lambda diff, task: True)
+    monkeypatch.setattr(blind.secrets, "SystemRandom", Reverse)
+    monkeypatch.setattr(blind, "write_diff", lambda path, diff: written.append(Path(path).stem))
+    task = {"task_id": "pkg-100", "scope": ["x.py"]}
+    rows = []
+    for i in range(4):
+        d = tmp_path / f"{i}.diff"
+        d.write_text("")
+        rows.append({"task_id": "pkg-100", "repeat": i + 1, "arm": ARMS[i % 3], "run_id": str(i), "outcome": "OK",
+                     "diff_path": str(d), "diff_sha256": sa.sha256_bytes(b"")})
+    blind.blind(rows, tmp_path / "o", tmp_path / "c" / "m.json", {"pkg-100": task})
+    order = [json.loads(line)["opaque_id"] for line in (tmp_path / "o" / "candidates.jsonl").read_text().splitlines()]
+    processing = list(reversed(order))
+    assert written == order != processing  # created in the shuffled order, not arm/processing order
+
+
+def test_rows_of_one_task_are_never_co_scheduled(env):
+    import threading
+    import time as _t
+
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"], repeats=2)
+    env["cfg"]["concurrency"] = 4
+    live: dict[str, int] = {}
+    lock = threading.Lock()
+    clash, peak = [], [0]
+
+    class Slow(FakeRunner):
+        def __call__(self, cmd, log_path, work):
+            task = self.amap[Path(cmd[cmd.index("--store") + 1]).name]["task_id"]
+            with lock:
+                live[task] = live.get(task, 0) + 1
+                if live[task] > 1:
+                    clash.append(task)
+                peak[0] = max(peak[0], sum(live.values()))
+            _t.sleep(0.02)
+            try:
+                return super().__call__(cmd, log_path, work)
+            finally:
+                with lock:
+                    live[task] -= 1
+
+    run(env, blind_dir, Slow(amap, simple))
+    assert clash == [] and peak[0] > 1  # parallel across tasks, never within one
+    assert json.loads((env["tmp"] / "arch" / "run.json").read_text())["concurrency"] == 4
+
+
+def test_cli_concurrency_defaults_to_one():
+    seen = {}
+    orig = sa.run_scoring
+    try:
+        sa.run_scoring = lambda *a, **k: seen.update(cfg=a[2]) or {}
+        sa.main(["run", "--blind-dir", "b", "--archive", "a", "--arms-per-group", "3", "--allow-outside-lab"])
+    finally:
+        sa.run_scoring = orig
+    assert seen["cfg"]["concurrency"] == 1
+
+
+def test_primary_verdict_is_on_the_declared_set_only(env):
+    # M tasks (pkg-100, pkg-102): no difference; LA tasks: NEXUS solves everything
+    def outcome(arm, task, repeat, n):
+        if arm == "NOOP":
+            return "NO_CANDIDATE"
+        if task in ("pkg-101", "pkg-103") and arm == "NEXUS":
+            return "RESOLVED"
+        return "UNRESOLVED"
+
+    rep = _analyze(env, outcome)
+    assert rep["primary"]["tasks"] == 2 and rep["verdict"] == "NO_DETECTABLE_DIFFERENCE"
+    assert rep["other_sets"]["LA"]["band"] == "WORKS"
+
+
+def test_analyze_refuses_unknown_task_set_or_primary_set(env):
+    blind_dir, arm_map, amap = make_blind(env["tmp"], env["tasks"][:2], repeats=1)
+    run(env, blind_dir, FakeRunner(amap, simple))
+    kw = dict(treatment="NEXUS", control="BARE", noop="NOOP", expect_manifest_sha=_msha(env))
+    with pytest.raises(sa.Refused, match="TASK_SET_UNKNOWN"):
+        sa.analyze(env["tmp"] / "arch", arm_map, strata={"pkg-100": "M"}, primary_set="M", **kw)
+    with pytest.raises(sa.Refused, match="PRIMARY_SET_UNKNOWN"):
+        sa.analyze(env["tmp"] / "arch", arm_map, strata={"pkg-100": "M", "pkg-101": "LA"}, primary_set="LB", **kw)
+
+
+def test_analyze_custody_requires_manifest_sha_and_noop(env):
+    blind_dir, arm_map, amap = make_blind(env["tmp"], env["tasks"][:2], repeats=1)
+    run(env, blind_dir, FakeRunner(amap, simple))
+    strata = {"pkg-100": "M", "pkg-101": "LA"}
+    with pytest.raises(sa.Refused, match="EXPECT_MANIFEST_SHA_REQUIRED"):
+        sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata,
+                   primary_set="M", expect_manifest_sha="")
+    with pytest.raises(sa.Refused, match="NOOP_REQUIRED"):
+        sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop=None, strata=strata,
+                   primary_set="M", expect_manifest_sha=_msha(env))
+    with pytest.raises(SystemExit):
+        sa.main(["analyze", "--archive", "a", "--arm-map", "m", "--treatment", "NEXUS", "--control", "BARE",
+                 "--primary-set", "M"])
+
+
+def test_noop_resolved_in_an_earlier_round_voids(env):
+    def outcome(arm, task, repeat, n):
+        if task == "pkg-100" and repeat == 1:
+            if arm == "BARE" and n == 0:
+                return ("rc8", "lsof_failed: x")  # forces a second round of the group
+            if arm == "NOOP":
+                return "RESOLVED" if n == 0 else "NO_CANDIDATE"
+        return simple(arm, task, repeat, n)
+
+    rep = _analyze(env, outcome, n_tasks=1)
+    assert rep["verdict"] == "VOID"
+
+
+def test_noop_resolved_in_an_incomplete_group_voids(env):
+    rep = _analyze(env, lambda a, t, r, n: "RESOLVED" if a == "NOOP" and r == 2 else simple(a, t, r, n), n_tasks=1,
+                   drop={("pkg-100", 2, "BARE")}, excluded=[("pkg-100", 2, "BARE", True)])
+    assert rep["drops"]["incomplete_group"] == 1 and rep["verdict"] == "VOID"
+
+
+def test_incomplete_groups_are_cross_checked_against_the_arm_map(env):
+    rep = _analyze(env, simple, n_tasks=1, drop={("pkg-100", 2, "BARE")}, excluded=[("pkg-100", 2, "BARE", True)])
+    assert rep["drops"]["incomplete_groups_by_arm"] == [
+        {"task_id": "pkg-100", "repeat": 2, "excluded_by_arm": {"BARE": "INFRA_TEST"}}]
+    assert rep["drops"]["exclusions_by_arm"] == {"BARE": {"INFRA_TEST": 1}}
+
+
+@pytest.mark.parametrize("excluded,match", [([], "INCOMPLETE_GROUP_UNEXPLAINED"),
+                                            ([("pkg-100", 2, "BARE", False)], "NON_INFRA_EXCLUSION")])
+def test_incomplete_group_without_an_infra_exclusion_refuses(env, excluded, match):
+    with pytest.raises(sa.Refused, match=match):
+        _analyze(env, simple, n_tasks=1, drop={("pkg-100", 2, "BARE")}, excluded=excluded)
+
+
+def test_env_key_or_spec_mismatch_with_s1_stops(env):
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=1)
+    with pytest.raises(sa.Refused, match="RECEIPT_IDENTITY_MISMATCH.*env_key"):
+        run(env, blind_dir, FakeRunner(amap, lambda *a: {"label": "RESOLVED", "env_key": "f" * 64}))
+
+
+def test_missing_s1_reference_stops(env):
+    import shutil
+
+    shutil.rmtree(Path(env["cfg"]["s1_receipts"]))
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=1)
+    with pytest.raises(sa.Refused, match="S1_REFERENCE_MISSING"):
+        run(env, blind_dir, FakeRunner(amap, simple))
+
+
+def test_resume_after_a_fatal_exit(env):
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=1)
+    env["cfg"]["concurrency"] = 1
+    first = FakeRunner(amap, lambda a, *r: ("rc7",) if a == "NEXUS" else simple(a, *r))
+    with pytest.raises(sa.Refused, match="SCORER_FATAL"):
+        run(env, blind_dir, first)
+    res = run(env, blind_dir, FakeRunner(amap, simple), resume=True)
+    assert res["rows_counted"] == 3
+
+
+def test_macro_solve_rate_matches_the_ci_and_pooled_is_labelled(env):
+    # pkg-100: NEXUS 3/3 kept; pkg-102: only repeat 1 kept (2 and 3 dropped), NEXUS 0/1
+    def outcome(arm, task, repeat, n):
+        if task == "pkg-102" and repeat > 1:
+            return ("rc8", "lsof_failed: x")
+        if arm == "NEXUS":
+            return "RESOLVED" if task == "pkg-100" else "UNRESOLVED"
+        return "UNRESOLVED" if arm == "BARE" else "NO_CANDIDATE"
+
+    rep = _analyze(env, outcome, n_tasks=3)
+    p = rep["primary"]
+    assert p["solve_rate"]["NEXUS"] == pytest.approx(0.5) == p["ci95"]["mean"]
+    assert p["solve_rate_pooled_rows"]["NEXUS"] == pytest.approx(0.75)
+
+
+def test_reap_error_is_infra_and_recorded(env):
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=1)
+    res = run(env, blind_dir, FakeRunner(amap, lambda a, *r: ("reap_error", "lsof_failed: boom") if a == "BARE"
+                                         else simple(a, *r)))
+    assert res["groups_dropped_infra"] == 1
+    (bare,) = [r for o, r in rows_of(env["tmp"] / "arch").items() if amap[o]["arm"] == "BARE"]
+    assert bare["why"].startswith("REAP_FAILED:lsof_failed") and bare["scorer_label"] == "RESOLVED"
+
+
+def test_cwd_holders_fails_closed(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise OSError("no lsof")
+
+    monkeypatch.setattr(sa.subprocess, "run", boom)
+    with pytest.raises(sa.ReapError, match="lsof_failed"):
+        sa._cwd_holders(tmp_path)
+
+    class Empty:
+        stdout, stderr, returncode = "", "denied", 1
+
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: Empty())
+    with pytest.raises(sa.ReapError, match="lsof_no_output"):
+        sa._cwd_holders(tmp_path)
+
+
+def test_final_label_is_from_the_last_round(env):
+    def outcome(arm, task, repeat, n):
+        if arm == "BARE" and n == 0:
+            return ("rc8", "lsof_failed: x")
+        if arm == "NEXUS":
+            return "RESOLVED" if n == 0 else "UNRESOLVED"
+        return simple(arm, task, repeat, n)
+
+    blind_dir, _, amap = make_blind(env["tmp"], env["tasks"][:1], repeats=1)
+    run(env, blind_dir, FakeRunner(amap, outcome))
+    (nexus,) = [r for o, r in rows_of(env["tmp"] / "arch").items() if amap[o]["arm"] == "NEXUS"]
+    assert nexus["scorer_label"] == "UNRESOLVED" and nexus["solved"] is False
+    assert nexus["round_labels"] == ["RESOLVED", "UNRESOLVED"]
+
+
+def test_two_sided_possible_evasion_gives_no_with_report(env):
+    reason = "host_disk_low:post_run_recovered_without_reap:free_before=1B reclaimed=0B floor=2B"
+
+    def outcome(arm, task, repeat, n):
+        if (arm, task, repeat) in (("NEXUS", "pkg-100", 1), ("BARE", "pkg-102", 1)):
+            return ("rc8", reason)
+        return simple(arm, task, repeat, n)
+
+    rep = _analyze(env, outcome)
+    assert rep["drops"]["possible_evasion_by_arm"] == {"NEXUS": 1, "BARE": 1}
+    assert rep["primary_with_possible_evasion_groups"] is None

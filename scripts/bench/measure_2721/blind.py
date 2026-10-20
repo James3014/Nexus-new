@@ -9,8 +9,11 @@ Reads ``rows.jsonl`` from one or more run roots and writes:
   opaque id -> arm, run id, repeat, plus the sha256 of candidates.jsonl so
   the mapping is bound to exactly that candidate set.
 
-Infra rows and blocked rows are not candidates; they are listed in the arm
-map under ``excluded`` with their reason, so the S4 re-run rule can act.
+Only infra rows are not candidates; they are listed in the arm map under
+``excluded`` (``infra: true``, reason), so the S4 rule drops that task/repeat
+from all arms. Every other invalid row (TAMPERED, a non-infra Gateway error,
+STATE_LEAK, a void reason) stays a candidate with the arm-neutral flag
+``RUN_INVALID_NOT_SOLVED``: not solved, kept in the denominator.
 """
 
 from __future__ import annotations
@@ -39,7 +42,20 @@ from scripts.bench.measure_2721.leakage import FLAG_PATCH_DOES_NOT_APPLY, filter
 BLIND_SCHEMA = "nexus.measure_2721.blinded_candidates.v1"
 SCORABLE_OUTCOMES = frozenset({"OK", "TIMEOUT", "MODEL_FAILED"})
 # Flags the scorer may see (identical filter in every arm, so they reveal no arm).
-SCORER_VISIBLE_FLAGS = frozenset({"HARNESS_TAMPER", "OUT_OF_SCOPE_STRIPPED", "PATCH_DOES_NOT_APPLY"})
+FLAG_RUN_INVALID_NOT_SOLVED = "RUN_INVALID_NOT_SOLVED"
+SCORER_VISIBLE_FLAGS = frozenset({"HARNESS_TAMPER", "OUT_OF_SCOPE_STRIPPED", "PATCH_DOES_NOT_APPLY",
+                                  FLAG_RUN_INVALID_NOT_SOLVED})
+
+
+def run_invalid_reason(row: Mapping[str, Any]) -> str | None:
+    """Why a non-infra row cannot count as a solve (None: a normal candidate)."""
+    if row.get("void_reason"):
+        return f"VOID:{row['void_reason']}"
+    if "STATE_LEAK" in (row.get("flags") or []):
+        return "STATE_LEAK"
+    if row.get("outcome") not in SCORABLE_OUTCOMES:
+        return f"OUTCOME:{row.get('outcome')}"
+    return None
 
 
 def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
@@ -71,18 +87,20 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
     if len(hashes) > 1:
         # Every arm must have run with the Gateway's own READ_ROOTS (L2).
         raise RuntimeError(f"READ_ROOTS_DIFFER_ACROSS_ARMS: {sorted(hashes)}")
+    pending: list[tuple[str, str]] = []  # (opaque id, scored diff), written after the shuffle
     for row in rows:
-        if (
-            row.get("infra")
-            or row.get("void_reason")
-            or "STATE_LEAK" in (row.get("flags") or [])
-            or row.get("outcome") not in SCORABLE_OUTCOMES
-        ):
-            excluded.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")})
+        if row.get("infra"):
+            # Only true infra (after the harness's both-arm model re-runs) leaves the
+            # candidate set; score_arms.py drops that task/repeat from all arms.
+            excluded.append({**{key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")},
+                             "infra": True, "reason": row.get("void_reason") or row.get("outcome")})
             continue
-        diff = read_diff(Path(row["diff_path"]))
-        if sha256_text(diff) != row["diff_sha256"]:
-            raise RuntimeError(f"{row['run_id']}: diff changed after the run")
+        invalid = run_invalid_reason(row)
+        diff = ""
+        if row.get("diff_path") and (invalid is None or Path(row["diff_path"]).is_file()):
+            diff = read_diff(Path(row["diff_path"]))
+            if sha256_text(diff) != row["diff_sha256"]:
+                raise RuntimeError(f"{row['run_id']}: diff changed after the run")
         opaque = secrets.token_hex(8)
         while opaque in used:
             opaque = secrets.token_hex(8)
@@ -95,9 +113,11 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
         flags = [*(row.get("flags") or []), *filtered["flags"]]
         if not applies_to_base(scored, task):
             flags.append(FLAG_PATCH_DOES_NOT_APPLY)
-        target = out / "candidates" / f"{opaque}.diff"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_diff(target, scored)
+        if invalid is not None:
+            # A non-infra invalid run (TAMPERED, a non-infra Gateway error, a state
+            # leak, a void reason) stays a candidate: not solved, in the denominator.
+            flags.append(FLAG_RUN_INVALID_NOT_SOLVED)
+        pending.append((opaque, scored))
         # Scorer-visible: the repeat (S4 re-runs a task/repeat in all arms) and only the
         # pre-registered scoring flags (amendment 8.3, applied blind by score_arms.py).
         # Arm-specific harness flags stay in the arm map.
@@ -106,13 +126,17 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
                            "scoring_flags": sorted(set(flags) & SCORER_VISIBLE_FLAGS)})
         mapping[opaque] = {
             "arm": row["arm"], "run_id": row["run_id"], "repeat": row["repeat"], "task_id": row["task_id"],
-            "flags": flags,
+            "flags": flags, "outcome": row.get("outcome"), "run_invalid_reason": invalid,
             "tamper_paths": filtered["tamper_paths"],
             "stripped_test_paths": filtered["stripped_test_paths"],
             "stripped_out_of_scope_paths": filtered["stripped_out_of_scope_paths"],
-            "raw_diff_sha256": row["diff_sha256"], "scored_diff_sha256": sha256_text(scored),
+            "raw_diff_sha256": row.get("diff_sha256"), "scored_diff_sha256": sha256_text(scored),
         }
-    secrets.SystemRandom().shuffle(candidates)
+    rng = secrets.SystemRandom()
+    rng.shuffle(candidates)
+    rng.shuffle(pending)  # file creation order (mtime, inode) must not cluster by arm
+    for opaque, scored in pending:
+        write_diff(out / "candidates" / f"{opaque}.diff", scored)
     write_jsonl(out / "candidates.jsonl", candidates)
     candidates_sha = hashlib.sha256((out / "candidates.jsonl").read_bytes()).hexdigest()
     write_json(arm_map_path, {"schema": BLIND_SCHEMA, "candidates_jsonl_sha256": candidates_sha,
