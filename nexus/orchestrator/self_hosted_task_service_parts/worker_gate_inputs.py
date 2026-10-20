@@ -223,14 +223,21 @@ def honest_gate_record(
 ) -> dict[str, Any]:
     """The gate's record, with refusals and evaluated failures stated as what they are.
 
-    * A missing-input refusal becomes an explicit ``NOT_APPLICABLE`` skip naming the inputs.
+    * A missing-input refusal (the gate was invoked and returned the code) becomes an
+      explicit ``NOT_APPLICABLE`` skip naming the inputs.
     * A gate that evaluated its inputs and failed gets ``blockers`` naming why, so the
       runtime records ``EVALUATED_REJECTED`` instead of an opaque ``INVOKED_NOT_SUCCESS``.
     """
     out = dict(record)
     outcome = _executor_outcome(out)
     error = str(outcome.get("error") or "")
-    if error in _MISSING_INPUT_CODES and str(out.get("status") or "") != "SUCCEEDED":
+    # Only a gate that actually ran and refused is a missing-input refusal; a crash whose
+    # message happens to equal a refusal code (``invoked`` not True) keeps its failure record.
+    if (
+        out.get("invoked") is True
+        and error in _MISSING_INPUT_CODES
+        and str(out.get("status") or "") != "SUCCEEDED"
+    ):
         missing = _str_list(outcome.get("missing_inputs")) or list(_MISSING_INPUT_CODES[error])
         if not missing and context is not None:
             missing = [
