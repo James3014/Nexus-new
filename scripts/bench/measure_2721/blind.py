@@ -140,12 +140,36 @@ def noop_nonempty_diff(row: Mapping[str, Any], run_root: Path | str | None = Non
     if row.get("arm") not in NOOP_ARMS:
         return None
     diff_path = row.get("diff_path")
-    text = read_diff(Path(diff_path)) if diff_path and Path(diff_path).is_file() else ""
-    if not text.strip() and row.get("empty") is not False:
-        return None
+    if diff_path and Path(diff_path).is_file():
+        text = read_diff(Path(diff_path))
+        if not text.strip():
+            return None
+    else:
+        # Fail closed (1d): no diff file counts as clean only when the row itself says
+        # so, with the hash of the empty diff.
+        text = ""
+        if row.get("empty") is True and row.get("diff_sha256") == sha256_text(""):
+            return None
     return {"arm": row.get("arm"), "run_id": row.get("run_id"), "task_id": row.get("task_id"),
             "repeat": row.get("repeat"), "diff_sha256": sha256_text(text) if text else row.get("diff_sha256"),
             "run_root": str(run_root) if run_root is not None else None}
+
+
+def noop_orphan_diffs(run_root: Path, rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Non-empty NOOP / NEXUS_NOOP diffs with no row (the runner was killed between
+    writing the diff and appending the row): the same void as a row with that diff."""
+    known = {row.get("run_id") for row in rows}
+    hits = []
+    for path in sorted((Path(run_root) / "diffs").glob("*.diff")):
+        run_id = path.name[:-len(".diff")]
+        arm = next((a for a in NOOP_ARMS if run_id.startswith(f"m2721-{a.lower()}-")), None)
+        if arm is None or run_id in known:
+            continue
+        text = read_diff(path)
+        if text.strip():
+            hits.append({"arm": arm, "run_id": run_id, "task_id": None, "repeat": None,
+                         "diff_sha256": sha256_text(text), "run_root": str(run_root), "orphan": True})
+    return hits
 
 
 def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
@@ -249,6 +273,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         root_rows = list(read_jsonl(Path(root) / "rows.jsonl"))
         # Every NOOP / NEXUS_NOOP row of the run root, whether it counts or not.
         noop_nonempty += [hit for hit in (noop_nonempty_diff(r, root) for r in root_rows) if hit]
+        noop_nonempty += noop_orphan_diffs(Path(root), root_rows)
         for block in (outcome or {}).get("excluded_blocks", ()):
             # Every arm of an excluded block, with a row or without one (an arm that
             # crashed): the scorer must see why the task/repeat is missing.

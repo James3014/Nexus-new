@@ -2352,6 +2352,7 @@ def test_runner_reruns_an_infra_block_twice_then_excludes_it(manifest, tmp_path,
                 "--manifest", str(manifest)])
     amap = json.loads(amap_path.read_text())
     assert len(amap["map"]) == 3 and amap["excluded"] == []
+    assert amap["noop_nonempty_diff"] == []  # real NOOP rows, superseded ones too: no false hit
     assert sorted(d["reason"] for d in amap["dropped"]) == ["RERUN_SUPERSEDED"] * 3
     # Infra in all three attempts: the block is excluded after two re-runs.
     _fake_build(monkeypatch, {"NEXUS": Flaky(3)})
@@ -2783,7 +2784,7 @@ def _excluded_block_run(run: Path, *, crashed: str | None = None) -> None:
                 continue
             run_id = f"{arm}-a{attempt}"
             rows.append({"arm": arm, "run_id": run_id, "task_id": "pkg-100", "repeat": 1, "infra": False,
-                         "outcome": "OK"})
+                         "outcome": "OK", "empty": True, "diff_sha256": blind.sha256_text("")})
             progress.append({"block": 0, "attempt": attempt, "arm": arm, "slot": 0, "run_id": run_id,
                              "infra": False})
     late = {arm: "WATCHDOG_EVENT" for arm in arms_ if arm != crashed} | ({crashed: "CRASHED"} if crashed else {})
@@ -2852,7 +2853,12 @@ def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
     rows.append({"arm": arm, "run_id": f"{arm}-extra", "task_id": "pkg-100", "repeat": 1, "infra": False,
                  "diff_path": str(diff)})
     rows.append({"arm": arm, "run_id": f"{arm}-clean", "task_id": "pkg-100", "repeat": 1, "infra": False,
-                 "empty": True})
+                 "empty": True, "diff_sha256": blind.sha256_text("")})
+    # No diff file and no proof of an empty diff: counted as a hit (fail closed).
+    rows.append({"arm": arm, "run_id": f"{arm}-unproven", "task_id": "pkg-100", "repeat": 1, "infra": False})
+    # A diff with no row (killed between the diff and the row), and an empty orphan.
+    (run / "diffs" / f"m2721-{arm.lower()}-pkg-100-r1-orphan.diff").write_text("+x\n")
+    (run / "diffs" / f"m2721-{arm.lower()}-pkg-100-r1-blank.diff").write_text("")
     (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     manifest = tmp_path / "manifest.jsonl"
     manifest.write_text("")
@@ -2860,5 +2866,7 @@ def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
     blind.main(["--run-roots", str(run), "--out", str(tmp_path / "blind"), "--arm-map", str(amap_path),
                 "--manifest", str(manifest)])
     hits = json.loads(amap_path.read_text())["noop_nonempty_diff"]
-    assert [(h["arm"], h["run_id"]) for h in hits] == [(arm, f"{arm}-extra")]
+    assert [(h["arm"], h["run_id"]) for h in hits] == [
+        (arm, f"{arm}-extra"), (arm, f"{arm}-unproven"), (arm, f"m2721-{arm.lower()}-pkg-100-r1-orphan")]
     assert hits[0]["diff_sha256"] == blind.sha256_text("diff --git a/x.py b/x.py\n+edit\n")
+    assert hits[2]["orphan"] is True

@@ -953,6 +953,9 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
     if "noop_nonempty_diff" not in amap:
         # Fail closed: an arm map from a blind.py without the check must not skip it.
         raise Refused("NOOP_CHECK_MISSING: the arm map has no noop_nonempty_diff (re-run blind.py)")
+    if not isinstance(amap["noop_nonempty_diff"], list):
+        raise Refused(f"NOOP_CHECK_MALFORMED: noop_nonempty_diff is {type(amap['noop_nonempty_diff']).__name__}, "
+                      "not a list")
     if amap["noop_nonempty_diff"]:
         # PREREG v0.9.7: a non-empty diff in any NOOP / NEXUS_NOOP row (any attempt, any
         # block) voids the run without scoring.

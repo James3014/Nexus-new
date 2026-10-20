@@ -859,6 +859,19 @@ def test_noop_nonempty_diff_in_the_arm_map_voids_the_run(env):
     assert rep["void"][0]["rows"] == [{"arm": "NEXUS_NOOP", "run_id": "run-x", "diff_sha256": "ab" * 32}]
 
 
+@pytest.mark.parametrize("value", [None, False, {}, "x"])
+def test_arm_map_with_a_malformed_noop_check_is_refused(env, value):
+    blind_dir, arm_map, amap = make_blind(env["tmp"], env["tasks"][:4])
+    data = json.loads(arm_map.read_text())
+    data["noop_nonempty_diff"] = value
+    arm_map.write_text(json.dumps(data))
+    run(env, blind_dir, FakeRunner(amap, simple))
+    strata = {t["id"]: t["set"] for t in env["tasks"]}
+    with pytest.raises(sa.Refused, match="NOOP_CHECK_MALFORMED"):
+        sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata,
+                   primary_set="M", expect_manifest_sha=_msha(env))
+
+
 def test_arm_map_without_the_noop_check_is_refused(env):
     """Fail closed (layer1-rie): an arm map from an older blind.py has no
     noop_nonempty_diff key, and analyze refuses it instead of skipping the check."""
