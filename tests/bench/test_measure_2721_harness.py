@@ -2499,3 +2499,67 @@ def test_started_at_is_written_once_in_utc_for_every_arm(manifest, tmp_path, mon
     assert json.loads(current.read_text())["started_at"] == noop["started_at"]
     for row in read_jsonl(run / "rows.jsonl"):
         assert utc.match(row["started_at"]), row["arm"]
+
+
+def test_non_json_gateway_reply_after_acceptance_is_not_solved_and_never_rerun(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import runner
+
+    class TextReply(FakeGateway):
+        """After acceptance the first wait answers with plain text (not JSON)."""
+
+        def __init__(self):
+            super().__init__()
+            self.waits = 0
+
+        def __call__(self, method, path, body):
+            if body and body.get("params", {}).get("name") == "nexus_task_wait":
+                self.waits += 1
+                if self.waits == 1:
+                    return {"result": {"content": [{"type": "text", "text": "Error executing tool: boom"}],
+                                       "isError": True}}
+            return super().__call__(method, path, body)
+
+    gateway = TextReply()
+    _fake_build(monkeypatch, {"NEXUS": gateway})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 0
+    (block,) = list(read_jsonl(run / "blocks.jsonl"))
+    assert (block["attempt"], block["status"]) == (0, "COMPLETE")  # NEXUS is not re-run
+    (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert row["worker_accepted"] and row["outcome"] == "GATEWAY_ERROR" and not row["infra"]
+    assert "malformed_reply" in row["error"]
+    out, amap_path = tmp_path / "blind", tmp_path / "custody" / "map.json"
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(amap_path),
+                "--manifest", str(manifest)])
+    amap = json.loads(amap_path.read_text())
+    nexus = [o for o, m in amap["map"].items() if m["arm"] == "NEXUS"]
+    flags = {c["opaque_id"]: c["scoring_flags"] for c in read_jsonl(out / "candidates.jsonl")}
+    assert len(nexus) == 1 and "RUN_INVALID_NOT_SOLVED" in flags[nexus[0]] and amap["excluded"] == []
+    # Any other driver failure after acceptance (here: parsing the final state) is a
+    # GATEWAY_ERROR row too, never a crash.
+    (task,) = arms.load_manifest(manifest)
+    driver = _driver(FakeGateway())
+    monkeypatch.setattr(driver, "_collect", lambda *a, **k: (_ for _ in ()).throw(KeyError("status")))
+    row = driver.run(task, 2, tmp_path / "run2", timeout_seconds=5)
+    assert row["worker_accepted"] and row["outcome"] == "GATEWAY_ERROR" and not row["infra"]
+    assert row["void_reason"] == "GATEWAY_ERROR_AFTER_ACCEPTANCE"
+    # The runner dies after the row was written but before its completion record: the
+    # resume takes the row from rows.jsonl instead of calling it CRASHED.
+    run3 = tmp_path / "run3"
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    real_append = runner._append
+
+    def dies_on_nexus_done(path, record):
+        if record.get("arm") == "NEXUS" and "event" not in record:
+            raise KeyboardInterrupt("killed")
+        real_append(path, record)
+
+    monkeypatch.setattr(runner, "_append", dies_on_nexus_done)
+    with pytest.raises(KeyboardInterrupt):
+        _runner_main(manifest, tmp_path, run3, ledger="spend3.json")
+    monkeypatch.setattr(runner, "_append", real_append)
+    (first,) = [r for r in read_jsonl(run3 / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert _runner_main(manifest, tmp_path, run3, ledger="spend3.json") == 0
+    (block,) = list(read_jsonl(run3 / "blocks.jsonl"))
+    assert (block["attempt"], block["status"]) == (0, "COMPLETE") and block["run_ids"]["NEXUS"] == first["run_id"]
+    assert len([r for r in read_jsonl(run3 / "rows.jsonl") if r["arm"] == "NEXUS"]) == 1

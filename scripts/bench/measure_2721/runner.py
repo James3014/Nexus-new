@@ -374,6 +374,33 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from scripts.bench.measure_2721 import watchdog
 
+    def recover(block: Mapping[str, Any], attempt: int) -> None:
+        """A started arm without a completion record whose row IS in rows.jsonl (written
+        by the row's own ``finally`` before the runner died) is completed from that row
+        (re-review #4): only an arm with no row at all is CRASHED."""
+        done_arms = {p["arm"] for p in done_progress if int(p["block"]) == block["block"]
+                     and int(p["attempt"]) == attempt}
+        rows_file = run_root / "rows.jsonl"
+        for start in [p for p in started if int(p["block"]) == block["block"] and int(p["attempt"]) == attempt
+                      and p["arm"] not in done_arms]:
+            if not rows_file.is_file():
+                continue
+            with rows_file.open("rb") as handle:
+                handle.seek(int(start.get("rows_offset") or 0))
+                tail = handle.read().decode("utf-8", errors="replace")
+            for line in tail.split("\n")[:-1]:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("arm") == start["arm"] and row.get("task_id") == block["task_id"] \
+                        and row.get("repeat") == block["repeat"] and row.get("run_id"):
+                    entry = {"block": block["block"], "attempt": attempt, "slot": start["slot"], "arm": start["arm"],
+                             "run_id": row["run_id"], "infra": bool(row.get("infra")), "recovered_from_rows": True}
+                    _append(progress, entry)
+                    done_progress.append(entry)
+                    break
+
     def evaluate(block: Mapping[str, Any], attempt: int) -> tuple[list[str], dict[str, Any]]:
         """Arms of this attempt that are infra: an infra row, a row missing from progress
         or rows.jsonl (a crash, a lost Gateway), or one the watchdog listed (re-review B2).
@@ -422,6 +449,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         attempt = int(state["attempt"]) + 1 if state is not None else 0
         begun = {p["arm"] for p in started if int(p["block"]) == block["block"] and int(p["attempt"]) == attempt}
         if begun:
+            recover(block, attempt)
             # Resume of an interrupted attempt.  An arm that started and never finished
             # (a crash), an infra row or a watchdog event re-runs the WHOLE block, every
             # arm.  Arms never started (the runner stopped on purpose after a non-infra
@@ -445,7 +473,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             admitted = ledger.admitted()
             for arm in remaining:
                 slot = block["slots"][block["arms"].index(arm)]
-                start = {"event": "start", "block": block["block"], "attempt": attempt, "arm": arm, "slot": slot}
+                rows_file = run_root / "rows.jsonl"
+                start = {"event": "start", "block": block["block"], "attempt": attempt, "arm": arm, "slot": slot,
+                         "rows_offset": rows_file.stat().st_size if rows_file.is_file() else 0}
                 _append(progress, start)
                 started.append(start)
                 try:

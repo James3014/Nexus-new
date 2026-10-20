@@ -165,7 +165,10 @@ class GatewayClient:
             # never a lost connection (re-review #3).
             raise GatewayToolError(f"{method} {path}", {"http_status": exc.code,
                                                          "reason": str(exc.reason)[:200]}) from exc
-        except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
+        except json.JSONDecodeError as exc:
+            # The Gateway answered, but not with JSON: its own error, not a lost connection.
+            raise GatewayToolError(f"{method} {path}", {"malformed_reply": str(exc)[:200]}) from exc
+        except (OSError, http.client.HTTPException) as exc:
             # URLError, ConnectionResetError, socket timeouts, RemoteDisconnected, ...
             raise GatewayConnectionLost(f"{method} {path}: {type(exc).__name__}: {str(exc)[:200]}") from exc
 
@@ -183,15 +186,23 @@ class GatewayClient:
 
     def call(self, tool: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         reply = self._rpc("tools/call", {"name": tool, "arguments": dict(arguments)})
+        if not isinstance(reply, Mapping):
+            raise GatewayToolError(tool, {"malformed_reply": str(reply)[:500]})
         if "error" in reply:
             raise GatewayToolError(tool, reply["error"])
         result = reply.get("result") or {}
-        payload = result.get("structuredContent")
-        if payload is None:
-            content = result.get("content") or [{}]
-            payload = json.loads(content[0].get("text") or "{}")
-        if result.get("isError"):
-            raise GatewayToolError(tool, payload)
+        try:
+            payload = result.get("structuredContent")
+            if payload is None:
+                content = result.get("content") or [{}]
+                payload = json.loads(content[0].get("text") or "{}")
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            # A non-JSON or ill-shaped reply (e.g. "Error executing tool: boom") is the
+            # Gateway's own answer: a tool error, never a driver crash (re-review #4).
+            raise GatewayToolError(tool, {"malformed_reply": json.dumps(result, default=str)[:500]}) from None
+        if result.get("isError") or not isinstance(payload, Mapping):
+            raise GatewayToolError(tool, payload if isinstance(payload, Mapping) else
+                                   {"malformed_reply": str(payload)[:500]})
         return payload
 
 
@@ -728,6 +739,17 @@ class NexusArmDriver:
             row.update(outcome=OUTCOME_GATEWAY_ERROR if self._worker_accepted else OUTCOME_INFRA,
                        infra=not self._worker_accepted, void_reason="GATEWAY_CONNECTION_LOST",
                        gateway_connection_lost=True, error=str(exc)[:2000])
+        except Exception as exc:  # noqa: BLE001 - re-review #4: a row is always written, never a crash
+            # After acceptance any other failure (half-written state JSON, a corrupt
+            # snapshot, a malformed status) comes from Gateway output: a Nexus failure,
+            # not solved.  Before acceptance it is the harness's own failure: infra.
+            message = f"{type(exc).__name__}: {str(exc)[:1000]}"
+            if self._worker_accepted:
+                row.update(outcome=OUTCOME_GATEWAY_ERROR, infra=False, void_reason="GATEWAY_ERROR_AFTER_ACCEPTANCE",
+                           error=message)
+            else:
+                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"HARNESS_ERROR:{type(exc).__name__}",
+                           error=message)
         finally:
             stuck = None
             if created:
