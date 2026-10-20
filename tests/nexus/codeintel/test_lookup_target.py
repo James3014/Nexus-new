@@ -243,7 +243,9 @@ def test_directory_scope_never_reads_through_test_dirs(tmp_path: Path, monkeypat
     read: list[tuple[str, ...]] = []
     real = lookup_target._read_inside
     monkeypatch.setattr(
-        lookup_target, "_read_inside", lambda root, parts: read.append(parts) or real(root, parts)
+        lookup_target,
+        "_read_inside",
+        lambda root, parts, **kw: read.append(parts) or real(root, parts, **kw),
     )
 
     found = lookup_target.derive_codeintel_lookup("parse config", ["pkg/"], tmp_path)
@@ -352,3 +354,88 @@ def test_file_scope_behaviour_is_unchanged_next_to_a_directory(tmp_path: Path) -
     assert derive_codeintel_lookup("foxtrot crashes", ["pkg/"], tmp_path)["target_symbol"] == (
         "pkg.m5.foxtrot_handler"
     )
+
+
+# --- Codex r1 on #2818 ---------------------------------------------------------
+
+
+def test_directory_scope_test_exclusion_ignores_case(tmp_path: Path) -> None:
+    """On APFS ``Tests/`` and ``Conftest.py`` are the real test files."""
+    _write(tmp_path, "pkg/core.py", "def unrelated_helper():\n    return 1\n")
+    for rel in (
+        "pkg/Tests/x.py",
+        "pkg/TEST/core.py",
+        "pkg/Testing/y.py",
+        "pkg/__PYCACHE__/z.py",
+        "pkg/Conftest.py",
+        "pkg/Test_foo.py",
+        "pkg/foo_TEST.py",
+    ):
+        _write(tmp_path, rel, "def secret_parser():\n    return 1\n")
+
+    assert derive_codeintel_lookup("secret parser", ["pkg/"], tmp_path) == {}
+    for scope in ("pkg/Tests/", "pkg/TEST/", "pkg/Testing/"):
+        assert derive_codeintel_lookup("secret parser", [scope], tmp_path) == {}
+    assert derive_codeintel_lookup("unrelated helper", ["pkg/"], tmp_path)["search_paths"] == [
+        "pkg/core.py"
+    ]
+
+
+def test_directory_scope_skips_hard_linked_files(tmp_path: Path) -> None:
+    import os
+
+    root = tmp_path / "ws"
+    _write(root, "pkg/core.py", "def unrelated_helper():\n    return 1\n")
+    _write(tmp_path, "outside.py", "def secret_parser():\n    return 1\n")
+    os.link(tmp_path / "outside.py", root / "pkg" / "linked.py")
+
+    assert derive_codeintel_lookup("secret parser", ["pkg/"], root) == {}
+    assert derive_codeintel_lookup("secret parser", ["pkg/linked.py", "pkg/"], root) == {}
+    assert derive_codeintel_lookup("unrelated helper", ["pkg/"], root)["search_paths"] == [
+        "pkg/core.py"
+    ]
+
+
+def test_directory_walk_queue_never_exceeds_the_directory_cap(tmp_path: Path, monkeypatch) -> None:
+    from collections import deque
+
+    from nexus.services.codeintel import lookup_target
+
+    longest: list[int] = [0]
+
+    class _Recording(deque):
+        def append(self, item):
+            super().append(item)
+            longest[0] = max(longest[0], len(self))
+
+        def extend(self, items):
+            super().extend(items)
+            longest[0] = max(longest[0], len(self))
+
+    monkeypatch.setattr(lookup_target, "deque", _Recording)
+    monkeypatch.setattr(lookup_target, "MAX_WALK_DIRS", 3)
+    for i in range(10):
+        _write(tmp_path, f"pkg/d{i}/m.py", f"def handler_{i}():\n    return {i}\n")
+
+    found = lookup_target.derive_codeintel_lookup("handler", ["pkg/"], tmp_path)
+
+    assert found["search_paths"] == ["pkg/d0/m.py", "pkg/d1/m.py"]
+    assert longest[0] <= 3
+
+
+def test_directory_walk_byte_budget_is_checked_before_reading(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    _write(tmp_path, "pkg/a.py", "def alpha_handler():\n    return 1\n")
+    _write(tmp_path, "pkg/b.py", "def bravo_handler():\n    return 2\n" + "#" * 500 + "\n")
+    _write(tmp_path, "pkg/c.py", "def charlie_handler():\n    return 3\n")
+    small = (tmp_path / "pkg/a.py").stat().st_size + (tmp_path / "pkg/c.py").stat().st_size
+    monkeypatch.setattr(lookup_target, "MAX_WALK_BYTES", small + 10)
+    read: list[int] = []
+    real = lookup_target.os.read
+    monkeypatch.setattr(lookup_target.os, "read", lambda fd, n: read.append(n) or real(fd, n))
+
+    assert lookup_target.derive_codeintel_lookup("bravo", ["pkg/"], tmp_path) == {}
+    found = lookup_target.derive_codeintel_lookup("charlie", ["pkg/"], tmp_path)
+    assert found["target_symbol"] == "pkg.c.charlie_handler"
+    assert max(read) <= small + 11

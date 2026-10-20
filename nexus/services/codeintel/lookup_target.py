@@ -17,14 +17,20 @@ Directory scopes (#2721, #2786).  An allowed entry ending in exactly one ``/``
 * the walk is breadth-first over sorted names, so it is deterministic; each
   directory is opened component by component with ``O_NOFOLLOW`` relative to the
   worktree, and symlinked directories or files met during the walk are skipped;
-* hidden names (``.*``), ``__pycache__`` and test code are never entered or read.
+* hidden names (``.*``), ``__pycache__`` and test code are never entered or read
+  (names compared case-insensitively, since APFS is case-insensitive).
   Test code is a directory named ``tests``, ``test`` or ``testing`` and a file
   named ``test_*.py``, ``*_test.py`` or ``conftest.py``; a directory entry that
   itself names such a directory is ignored.  Tests are not the lookup target,
   and hidden tests must never be read even when present;
-* the walk stops at ``MAX_WALK_FILES`` candidate files, ``MAX_WALK_DIRS``
-  directories, ``MAX_WALK_BYTES`` read in total, and skips a directory with more
-  than ``MAX_DIR_ENTRIES`` entries; the per-file limits are unchanged.
+* the walk stops at ``MAX_WALK_FILES`` candidate files and ``MAX_WALK_DIRS``
+  directories (visited plus queued, so the queue never exceeds it either), skips a
+  directory with more than ``MAX_DIR_ENTRIES`` entries, and skips a file whose
+  size (from ``fstat``, before reading) would take the total past
+  ``MAX_WALK_BYTES``; the per-file limits are unchanged;
+* a regular file with more than one hard link is skipped: a hard link can pull a
+  file from outside the worktree in without any symlink.  Files checked out by git
+  have one link, so this is conservative and costs nothing in practice.
 
 For such a scope ``search_paths`` lists the file defining the chosen symbol first,
 then the files of the next best-scoring (score > 0) symbols, at most
@@ -92,16 +98,19 @@ def _relative_parts(rel: Any) -> tuple[str, ...] | None:
 
 
 def _skipped_dir(name: str) -> bool:
-    return name.startswith(".") or name == "__pycache__" or name in _TEST_DIRS
+    """Case-insensitive: on APFS ``Tests/`` is the same directory as ``tests/``."""
+    folded = name.casefold()
+    return folded.startswith(".") or folded == "__pycache__" or folded in _TEST_DIRS
 
 
 def _skipped_file(name: str) -> bool:
+    folded = name.casefold()
     return (
-        name.startswith(".")
+        folded.startswith(".")
         or not name.endswith(".py")
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-        or name == "conftest.py"
+        or folded.startswith("test_")
+        or folded.endswith("_test.py")
+        or folded == "conftest.py"
     )
 
 
@@ -162,11 +171,24 @@ def _walk(root: Path, start: tuple[str, ...], budget: dict[str, int]) -> Iterato
         dirs, files = listing
         for name in files:
             yield (*current, name)
-        queue.extend((*current, name) for name in dirs)
+        for name in dirs:
+            if budget["dirs"] + len(queue) >= MAX_WALK_DIRS:
+                break  # the queue itself stays within the directory cap
+            queue.append((*current, name))
 
 
-def _read_inside(root: Path, parts: tuple[str, ...]) -> bytes | None:
-    """Bytes of ``root/parts`` opened without following any symlink, or ``None``."""
+def _read_inside(
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    max_bytes: int = MAX_FILE_BYTES,
+    single_link: bool = False,
+) -> bytes | None:
+    """Bytes of ``root/parts`` opened without following any symlink, or ``None``.
+
+    ``max_bytes`` is checked against ``fstat`` before reading; ``single_link``
+    refuses a file with more than one hard link (directory scopes only).
+    """
     fds: list[int] = []
     try:
         fds.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
@@ -175,9 +197,11 @@ def _read_inside(root: Path, parts: tuple[str, ...]) -> bytes | None:
         fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fds[-1])
         fds.append(fd)
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
             return None
-        return os.read(fd, MAX_FILE_BYTES + 1)[: MAX_FILE_BYTES + 1]
+        if single_link and info.st_nlink > 1:
+            return None
+        return os.read(fd, max_bytes + 1)[: max_bytes + 1]
     except OSError:
         return None
     finally:
@@ -250,12 +274,11 @@ def _derive_scoped(task_text: str, entries: list[str], root: Path) -> dict[str, 
     for parts in candidates:
         if len(docs) >= MAX_SYMBOLS:
             break
-        source = _read_inside(root, parts)
-        if source is None or len(source) > MAX_FILE_BYTES:
-            continue
+        limit = min(MAX_FILE_BYTES, MAX_WALK_BYTES - read_bytes)
+        source = _read_inside(root, parts, max_bytes=limit, single_link=True)
+        if source is None or len(source) > limit:
+            continue  # too big for what is left of the total: skipped before reading
         read_bytes += len(source)
-        if read_bytes > MAX_WALK_BYTES:
-            break
         try:
             symbols = _symbols(_module_name(parts), source, MAX_SYMBOLS - len(docs))
         except (SyntaxError, ValueError, RecursionError):
