@@ -40,6 +40,8 @@ class SkillsRouter:
     def __init__(self, project_root: str, run_dir: Optional[str] = None, mem_palace: Any = None, **kwargs):
         self.project_root = project_root
         self.run_dir = run_dir or project_root
+        # #2721: without an explicit run_dir the decision log lands in the project root.
+        self._run_dir_defaulted = not run_dir
         self.mem_palace = mem_palace
         self.firewall = DomainFirewall()
         from nexus.core.p_loop_manager import PLoopManager
@@ -453,6 +455,15 @@ class SkillsRouter:
             fallback_used = bool(candidates)
 
         # 記錄 decision log
+        # #2721 L-B: with NEXUS_STATE_READ_ONLY=1 and no explicit run_dir the log would be
+        # appended to the project root, so it is skipped.  An explicit run_dir belongs to
+        # the run and is still written; with the switch unset nothing changes.
+        if getattr(self, "_run_dir_defaulted", False) and state_read_only():
+            logger.info(
+                "[SkillsRouter] NEXUS_STATE_READ_ONLY=1 and no run_dir: skipped "
+                "router_decisions.jsonl in the project root"
+            )
+            return candidates
         run_dir = __import__("pathlib").Path(self.run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "router_decisions.jsonl"

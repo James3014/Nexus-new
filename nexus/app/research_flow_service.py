@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import concurrent.futures
 import importlib.util
@@ -2161,47 +2162,25 @@ def run_auto_flow(
         "model_training": apply_autodata_quality_gate(project_model_training(learning_experience), autodata_quality_row),
         "dual_learning_decision": asdict(learning_decision),
     }
-    from nexus.core.state_root import persistent_state_root, rebase_state_path
-
-    if learning_decision.nexus_action == "PROMOTE_NEXUS":
-        promoted_policy = save_promoted_learning_policy(
-            rebase_state_path(repo_root / DEFAULT_PROMOTED_POLICY_PATH),  # #2688
-            [learning_experience],
-        )
-        nexus_usage_trace["learning_projection"]["promoted_policy"] = promoted_policy
-        nexus_usage_trace["learning_projection"]["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
-    else:
-        nexus_usage_trace["learning_projection"]["promoted_policy"] = {"status": "not_promoted"}
-    model_training_export = write_auto_flow_model_training_export(
+    _persist_auto_flow_learning_projection(
         repo_root=repo_root,
+        learning_projection=nexus_usage_trace["learning_projection"],
+        learning_decision=learning_decision,
+        learning_experience=learning_experience,
         receipt_slug=receipt_slug,
         s2t_trace=s2t_trace,
-        experiences=[learning_experience],
-        quality_rows=[autodata_quality_row],
+        autodata_quality_row=autodata_quality_row,
+        outcome_record_factory=lambda: EpisodeOutcomeRecord.from_task(
+            task_id=task_id or receipt_slug,
+            task_type=task_type,
+            task_desc=task_desc,
+            solved=learning_experience.outcome == "verified_success",
+            wall_duration_sec=float(result.get("elapsed_sec", 0.0) or 0.0),
+            total_tokens_used=int(result_report.get("total_tokens", 0) or 0),
+            trust_mismatch=bool(nexus_usage_trace.get("trust_mismatch", False)),
+            receipts=nexus_usage_trace["capability_receipts"],
+        ),
     )
-    if model_training_export:
-        nexus_usage_trace["learning_projection"]["model_training_export"] = model_training_export
-    try:
-        outcome_memory = OutcomeMemoryManager.save_episode_and_tune_sync(
-            EpisodeOutcomeRecord.from_task(
-                task_id=task_id or receipt_slug,
-                task_type=task_type,
-                task_desc=task_desc,
-                solved=learning_experience.outcome == "verified_success",
-                wall_duration_sec=float(result.get("elapsed_sec", 0.0) or 0.0),
-                total_tokens_used=int(result_report.get("total_tokens", 0) or 0),
-                trust_mismatch=bool(nexus_usage_trace.get("trust_mismatch", False)),
-                receipts=nexus_usage_trace["capability_receipts"],
-            ),
-            project_root=persistent_state_root(repo_root),
-        )
-    except (OSError, ValueError, TypeError) as exc:
-        outcome_memory = {
-            "schema_version": "nexus_outcome_memory_write.v1",
-            "status": "RETURN",
-            "reason": str(exc),
-        }
-    nexus_usage_trace["learning_projection"]["outcome_memory"] = outcome_memory
 
     payload = build_auto_flow_payload(
         AutoFlowPayloadParts(
@@ -2327,3 +2306,66 @@ def run_auto_flow(
     if payload["io"].get("output_path"):
         Path(str(payload["io"]["output_path"])).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload, out_path
+
+
+def _persist_auto_flow_learning_projection(
+    *,
+    repo_root: Path,
+    learning_projection: dict[str, Any],
+    learning_decision: Any,
+    learning_experience: Any,
+    receipt_slug: str,
+    s2t_trace: Any,
+    autodata_quality_row: dict[str, Any],
+    outcome_record_factory: Any,
+) -> None:
+    """Write the auto-flow learning projection: promoted policy, training export, outcome memory.
+
+    #2721 L-B: with ``NEXUS_STATE_READ_ONLY=1`` (re-read at call time) all three writes are
+    skipped, an info line says so, nothing raises and no write is reported as a success.
+    With the switch unset the behaviour is the old one.
+    """
+    from nexus.core.state_root import persistent_state_root, rebase_state_path, state_read_only
+
+    if state_read_only():
+        logging.getLogger(__name__).info(
+            "[AutoFlow] NEXUS_STATE_READ_ONLY=1: skipped promoted policy, model training "
+            "export and outcome-memory writes; not a learning success"
+        )
+        learning_projection["promoted_policy"] = {"status": "SKIPPED_READ_ONLY"}
+        learning_projection["outcome_memory"] = {
+            "schema_version": "nexus_outcome_memory_write.v1",
+            "status": "SKIPPED_READ_ONLY",
+            "reason": "NEXUS_STATE_READ_ONLY",
+        }
+        return
+    if learning_decision.nexus_action == "PROMOTE_NEXUS":
+        promoted_policy = save_promoted_learning_policy(
+            rebase_state_path(repo_root / DEFAULT_PROMOTED_POLICY_PATH),  # #2688
+            [learning_experience],
+        )
+        learning_projection["promoted_policy"] = promoted_policy
+        learning_projection["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
+    else:
+        learning_projection["promoted_policy"] = {"status": "not_promoted"}
+    model_training_export = write_auto_flow_model_training_export(
+        repo_root=repo_root,
+        receipt_slug=receipt_slug,
+        s2t_trace=s2t_trace,
+        experiences=[learning_experience],
+        quality_rows=[autodata_quality_row],
+    )
+    if model_training_export:
+        learning_projection["model_training_export"] = model_training_export
+    try:
+        outcome_memory = OutcomeMemoryManager.save_episode_and_tune_sync(
+            outcome_record_factory(),
+            project_root=persistent_state_root(repo_root),
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        outcome_memory = {
+            "schema_version": "nexus_outcome_memory_write.v1",
+            "status": "RETURN",
+            "reason": str(exc),
+        }
+    learning_projection["outcome_memory"] = outcome_memory

@@ -4295,6 +4295,30 @@ def _exec_meta_opt(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
                     physical_callable="nexus.learning.outcome_memory.OutcomeMemoryManager.save_episode_and_tune_sync",
                 ),
             )
+        from nexus.core.state_root import state_read_only
+
+        if state_read_only():  # #2721 L-B: frozen learning state, no episode or policy write
+            logger.info(
+                "[meta_opt] NEXUS_STATE_READ_ONLY=1: skipped outcome-memory episode and "
+                "policy tuning; not a learning success"
+            )
+            return _make_receipt(
+                "meta_opt",
+                plan,
+                invoked=False,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="save_episode_and_tune",
+                    semantic_status="SKIPPED",
+                    error="STATE_READ_ONLY",
+                    skip_reason="NEXUS_STATE_READ_ONLY",
+                    evidence_refs=[f"ev_meta_opt_skip_read_only_{plan.task_id}"],
+                    episode_persisted=False,
+                    policy_persisted=False,
+                    physical_callable="nexus.learning.outcome_memory.OutcomeMemoryManager.save_episode_and_tune_sync",
+                ),
+            )
         record = EpisodeOutcomeRecord.from_task(
             task_id=str(episode.get("task_id") or plan.task_id),
             task_type=str(episode.get("task_type") or "codeintel"),

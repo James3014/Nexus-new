@@ -994,6 +994,19 @@ def persist_learning_episode(
     This is deliberately best-effort for legacy callers, but never reports
     learning success when normalization or append fails.
     """
+    from nexus.core.state_root import state_read_only
+
+    if state_read_only():  # #2721 L-B: frozen learning state; re-read at call time
+        logging.getLogger(__name__).info(
+            "[ContinuousLearning] NEXUS_STATE_READ_ONLY=1: skipped learning episode write "
+            "for task %s; not a learning success",
+            task_id,
+        )
+        return {
+            "status": "SKIPPED_READ_ONLY",
+            "learning_write_succeeded": False,
+            "skip_reason": "NEXUS_STATE_READ_ONLY",
+        }
     try:
         from nexus.learning.learning_closure_effectiveness import (
             append_learning_episode,
