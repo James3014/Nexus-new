@@ -737,6 +737,44 @@ class Host:
             return {"verdict": "UNKNOWN", "reason": f"CLASSIFIER_FAILED:{type(exc).__name__}"}
         return classify_task_report(result.returncode, result.stdout or "", result.stderr or "")
 
+    def cairnwork_in_flight(self, cfg: Config) -> Dict[str, Any]:
+        """Cairnwork tasks in flight, when the live Gateway routes to Cairnwork (F clause).
+
+        Skipped (``CAIRNWORK_SKIPPED``) unless the env file sets
+        ``NEXUS_CAIRNWORK_ROUTE`` to shadow or route.  Then runs the read-only,
+        lock-free ``$NEXUS_CAIRNWORK_ROUTE_BIN --state $NEXUS_CAIRNWORK_STATE
+        in-flight`` with a short timeout.  Fail closed: an invalid route value,
+        a missing or relative path, a non-zero exit, a timeout or unexpected
+        output all count as in flight.
+        """
+        config = cairnwork_route_config(cfg.env_file)
+        if "error" in config:
+            return {"verdict": "IN_FLIGHT", "reason": config["error"]}
+        route = config.get(CAIRNWORK_ROUTE_ENV, "")
+        if route in CAIRNWORK_OFF_ROUTES:
+            return dict(CAIRNWORK_SKIPPED)
+        if route not in CAIRNWORK_ACTIVE_ROUTES:
+            return {"verdict": "IN_FLIGHT", "reason": "CAIRNWORK_ROUTE_VALUE_INVALID"}
+        binary = config.get(CAIRNWORK_ROUTE_BIN_ENV, "")
+        state = config.get(CAIRNWORK_STATE_ENV, "")
+        if not binary or not os.path.isabs(binary) or not state or not os.path.isabs(state):
+            return {"verdict": "IN_FLIGHT", "route": route, "reason": "CAIRNWORK_PATHS_INVALID"}
+        try:
+            result = self.run(
+                [binary, "--state", state, "in-flight"],
+                env={"PYTHONDONTWRITEBYTECODE": "1"},
+                timeout=CAIRNWORK_PROBE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return {"verdict": "IN_FLIGHT", "route": route, "reason": "CAIRNWORK_PROBE_TIMEOUT"}
+        except Exception as exc:  # noqa: BLE001 - unknown is in flight
+            return {
+                "verdict": "IN_FLIGHT",
+                "route": route,
+                "reason": f"CAIRNWORK_PROBE_FAILED:{type(exc).__name__}",
+            }
+        return {"route": route, **cairnwork_probe_report(result.returncode, result.stdout or "")}
+
     def controller_problem(
         self, python: Path, root: Path, controller: Path, code_root: Optional[Path] = None
     ) -> Optional[str]:
@@ -1862,6 +1900,147 @@ def measurement_env_guard() -> str:
     return "".join(parts)
 
 
+# Cairnwork gradual cutover (F clause, knowledge nexus/decisions/
+# 2026-10-19-cairnwork-owner-decision.md).  The Gateway-side routing switch
+# reads these from its process environment; the operator sets them in the env
+# file.  They are live configuration, not measurement-only switches.
+CAIRNWORK_ROUTE_ENV = "NEXUS_CAIRNWORK_ROUTE"
+CAIRNWORK_ROUTE_BIN_ENV = "NEXUS_CAIRNWORK_ROUTE_BIN"
+CAIRNWORK_STATE_ENV = "NEXUS_CAIRNWORK_STATE"
+CAIRNWORK_ENV_VARS: Tuple[str, ...] = (
+    CAIRNWORK_ROUTE_ENV,
+    CAIRNWORK_ROUTE_BIN_ENV,
+    CAIRNWORK_STATE_ENV,
+)
+# Route values that make the live Gateway hand tasks to Cairnwork; only then
+# is the Cairnwork in-flight probe part of quiescence.  Unset, empty or "off"
+# skips it, so deploys are not blocked while Cairnwork is not installed.
+CAIRNWORK_ACTIVE_ROUTES = ("shadow", "route")
+CAIRNWORK_OFF_ROUTES = ("", "off")
+CAIRNWORK_PROBE_TIMEOUT_SECONDS = 20
+CAIRNWORK_SKIPPED = {"verdict": "SKIPPED", "reason": "route off"}
+_CAIRNWORK_LISTED_IDS = 50
+
+
+def cairnwork_env_export(spare: bool = False) -> str:
+    """Shell fragment carrying the Cairnwork switch from the env file to the Gateway.
+
+    Placed right after ``source <env file>``.  A variable the env file (or
+    launchd) set is exported, so a plain ``NAME=value`` line reaches the
+    process exactly as the deployer's own reading of the env file
+    (``cairnwork_route_config``) sees it; an unset variable stays unset, so a
+    launch without any of them has the same process environment as before.
+
+    The spare-port probe Gateway never routes to Cairnwork: it unsets all
+    three, as it never sees the live self-hosted state either.
+    """
+    for name in CAIRNWORK_ENV_VARS:
+        if not _ENV_NAME.match(name):
+            raise DeployError(f"CAIRNWORK_ENV_NAME_INVALID:{name}")
+    if spare:
+        return f"unset {' '.join(CAIRNWORK_ENV_VARS)} ; "
+    return "".join(
+        f'if [ -n "${{{name}+x}}" ] ; then export {name} ; fi ; ' for name in CAIRNWORK_ENV_VARS
+    )
+
+
+def cairnwork_route_config(env_file: Path) -> Dict[str, Any]:
+    """The three Cairnwork variables as the env file sets them (last line wins).
+
+    Parsed as text like ``read_env_token`` (never sourced, nothing else is
+    read out): ``[export ]NAME=value`` with shell quoting.  A missing env file
+    sets nothing.  ``{"error": ...}`` when the file cannot be read or a
+    Cairnwork line cannot be parsed or uses shell expansion; the caller then
+    fails closed.
+    """
+    try:
+        text = env_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        return {"error": f"CAIRNWORK_ENV_FILE_UNREADABLE:{type(exc).__name__}"}
+    found: Dict[str, Any] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or key not in CAIRNWORK_ENV_VARS:
+            continue
+        try:
+            parts = shlex.split(value, comments=True)
+        except ValueError:
+            return {"error": f"CAIRNWORK_ENV_LINE_UNPARSEABLE:{key}"}
+        if len(parts) > 1 or any(ch in value for ch in ("$", "`")):
+            return {"error": f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"}
+        found[key] = parts[0] if parts else ""
+    return found
+
+
+def cairnwork_probe_report(returncode: int, stdout: str) -> Dict[str, Any]:
+    """Classify ``cairnwork-route in-flight`` output; anything unexpected is in flight.
+
+    Valid only on exit 0 with exactly one JSON object
+    ``{"accepting": bool, "count": int, "task_ids": [str]}``.  Task contents
+    are never kept: only safe ids (bounded) and the count.
+    """
+    if returncode != 0:
+        return {"verdict": "IN_FLIGHT", "reason": f"CAIRNWORK_PROBE_EXIT_{returncode}"}
+    try:
+        report = json.loads(stdout)
+    except ValueError:
+        report = None
+    malformed = {"verdict": "IN_FLIGHT", "reason": "CAIRNWORK_PROBE_OUTPUT_MALFORMED"}
+    if not isinstance(report, dict):
+        return malformed
+    accepting, count, ids = report.get("accepting"), report.get("count"), report.get("task_ids")
+    if (
+        not isinstance(accepting, bool)
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 0
+        or not isinstance(ids, list)
+        or not all(isinstance(i, str) for i in ids)
+        or (count == 0 and ids)
+    ):
+        return malformed
+    if count == 0:
+        return {"verdict": "CLEAR", "count": 0, "accepting": accepting}
+    names = [i if _TASK_ID_SAFE.match(i) else "<unprintable-task-id>" for i in ids]
+    return {
+        "verdict": "IN_FLIGHT",
+        "reason": "CAIRNWORK_TASKS_IN_FLIGHT",
+        "count": count,
+        "accepting": accepting,
+        "task_ids": sorted(names)[:_CAIRNWORK_LISTED_IDS],
+    }
+
+
+def merge_cairnwork_quiescence(tasks: Dict[str, Any], cairnwork: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold the Cairnwork probe into the governed-task verdict (#2227 shape kept).
+
+    The Cairnwork result is recorded under ``cairnwork``; when it is not
+    CLEAR or SKIPPED, a CLEAR verdict becomes IN_FLIGHT and its blocking
+    names (``cairnwork:<id>`` or ``cairnwork:<reason>``) join ``task_ids``.
+    An UNKNOWN verdict stays UNKNOWN (it already defers).
+    """
+    merged = {**tasks, "cairnwork": cairnwork}
+    if cairnwork.get("verdict") in ("CLEAR", "SKIPPED"):
+        return merged
+    ids = cairnwork.get("task_ids") or []
+    blocking = [f"cairnwork:{i}" for i in ids] or [
+        f"cairnwork:{_safe_reason(str(cairnwork.get('reason') or 'UNKNOWN'))}"
+    ]
+    verdict = tasks.get("verdict")
+    if verdict == "CLEAR":
+        merged["verdict"] = "IN_FLIGHT"
+        merged["task_ids"] = sorted(blocking)
+    elif verdict == "IN_FLIGHT":
+        merged["task_ids"] = sorted([*(tasks.get("task_ids") or []), *blocking])
+    return merged
+
+
 def wrapper_command(
     cfg: Config,
     root: Path,
@@ -1899,6 +2078,10 @@ def wrapper_command(
     file (Owner approval in #2318), so ``nexus_worker_candidate`` can dispatch
     its default Agy route.  It never exports the broader
     ``NEXUS_EXTERNAL_RUNTIME_AUTHORIZED``.
+
+    After the guard, ``cairnwork_env_export()`` exports the Cairnwork route
+    variables the env file set (F clause); the spare-port probe unsets them
+    so a probe Gateway never routes to Cairnwork.
 
     ``rie`` is ``(engine_root, python)`` of a verified RIE checkout (#1579),
     exported after the env file; without one both variables are unset, so a
@@ -1953,6 +2136,7 @@ def wrapper_command(
         )
     return (
         f'cd "{controller}" ; source "{cfg.env_file}" ; {measurement_env_guard()}'
+        f"{cairnwork_env_export(spare=port is not None or state_dir is not None)}"
         f"export PYTHONDONTWRITEBYTECODE=1 ; "
         f"{AGY_RUNTIME_AUTHORIZATION_EXPORT}"
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{controller}" ; '
@@ -3255,7 +3439,12 @@ class _Cycle:
 
     def quiescence(self, live_plist: bytes, candidate: str) -> Dict[str, Any]:
         """Classify live tasks and track the deferral episode; never switches anything."""
-        return self.track_deferral(candidate, self.host.tasks_in_flight(self.cfg, live_plist))
+        return self.track_deferral(candidate, self.in_flight(live_plist))
+
+    def in_flight(self, live_plist: bytes) -> Dict[str, Any]:
+        """Governed tasks (#2227) plus Cairnwork tasks when routed (F clause)."""
+        tasks = self.host.tasks_in_flight(self.cfg, live_plist)
+        return merge_cairnwork_quiescence(tasks, self.host.cairnwork_in_flight(self.cfg))
 
     def track_deferral(self, candidate: str, verdict: Dict[str, Any]) -> Dict[str, Any]:
         """CLEAR ends the episode; anything else extends it (#2227).
@@ -4058,7 +4247,7 @@ class _Cycle:
                     "outcome": f"PIN_BUMP_{pins['verdict']}",
                     "reason": "pin bump before switch",
                 }
-            quiet = self.host.tasks_in_flight(cfg, previous_plist)
+            quiet = self.in_flight(previous_plist)
             receipt["quiescence_before_switch"] = quiet
             if quiet.get("verdict") != "CLEAR":
                 if not self.allow_in_flight:
