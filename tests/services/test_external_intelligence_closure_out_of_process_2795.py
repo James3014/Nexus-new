@@ -53,6 +53,7 @@ from nexus.services.external_intelligence_closure import (
     VERIFIER_WITNESS_FD_ENV,
     VERIFIER_WITNESS_KEY_FD_ENV,
     VERIFIER_WITNESS_TAMPERED,
+    _interpreter_dirs,
     _parse_witness,
     _run_verifier_specs,
     _witness_outcomes,
@@ -764,3 +765,16 @@ def test_test_whose_identity_cannot_be_derived_is_unresolved_not_passed(tmp_path
     assert row["error"] == VERIFIER_TEST_IDENTITY_UNRESOLVED, row
     assert row["witness"]["identity_unresolved_node_ids"] == [node]
     assert row["witness"]["forged_node_ids"] == []
+
+
+def test_interpreter_dirs_include_the_import_roots_of_pytest_and_its_plugins(tmp_path):
+    """#2808 trusted impact executor: the runtime is linked into a bare venv through
+    ``.pth`` path lines, so pytest lives outside both prefixes.  Its import root must
+    still be readable under the sandbox and trusted as a plugin location."""
+    import _pytest
+    import pluggy
+
+    dirs = _interpreter_dirs(sys.executable, tmp_path)
+    for module in (pytest, _pytest, pluggy):
+        root = Path(str(module.__file__)).resolve().parent.parent
+        assert root in dirs, (module.__name__, dirs)

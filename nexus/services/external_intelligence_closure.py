@@ -1455,7 +1455,19 @@ VERIFIER_BASE_RUN_FAILED = "VERIFIER_BASE_RUN_FAILED"
 # that was collected but not selected is a candidate-made deselection.
 _DESELECT_OPTIONS = frozenset({"-k", "-m", "--deselect"})
 _XML_INVALID_CHARS = re.compile("[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
-_INTERPRETER_PROBE = "import sys; print(sys.prefix); print(sys.base_prefix); print(sys.executable)"
+# Prefixes, executable, then the import roots of pytest and the plugins closure loads.
+# The roots matter when the runtime is linked into the venv through ``.pth`` path lines
+# (the trusted impact executor's offline runtime, #2808): they are neither prefix.
+_INTERPRETER_PROBE = (
+    "import importlib.util, os, sys\n"
+    "print(sys.prefix); print(sys.base_prefix); print(sys.executable)\n"
+    "for name in ('pytest', '_pytest', 'pluggy', 'pytest_asyncio'):\n"
+    "    spec = importlib.util.find_spec(name)\n"
+    "    if spec is None or not spec.origin:\n"
+    "        continue\n"
+    "    path = os.path.dirname(spec.origin)\n"
+    "    print(os.path.dirname(path) if spec.submodule_search_locations else path)\n"
+)
 
 
 def _junit_names(nodeid: str) -> tuple[str, str]:
@@ -1824,7 +1836,8 @@ def _located_interpreter(interpreter: str, path_env: str) -> str:
 
 
 def _interpreter_dirs(located: str, scratch: Path) -> list[Path]:
-    """Directories the verifier interpreter needs to read (its prefixes and bin dir).
+    """Directories the verifier interpreter needs to read and whose plugins are trusted:
+    its prefixes, bin dir and the import roots of pytest and the plugins it loads.
 
     The probe runs the trusted interpreter with ``-I`` and an empty environment from a
     scratch cwd: no candidate code is on its path.
@@ -1843,6 +1856,7 @@ def _interpreter_dirs(located: str, scratch: Path) -> list[Path]:
         raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
     dirs = [Path(lines[0]), Path(lines[1]), Path(lines[2]).parent, Path(located).parent]
     dirs.append(Path(located).resolve().parent)
+    dirs.extend(Path(line) for line in lines[3:])
     return list(dict.fromkeys(p.resolve() for p in dirs))
 
 
