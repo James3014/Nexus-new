@@ -257,10 +257,13 @@ def _append(path: Path, record: Mapping[str, Any]) -> None:
 def block_outcomes(run_root: Path) -> Optional[dict[str, Any]]:
     """Which rows of a runner run root count (None: not a runner run root).
 
-    Only the final attempt of a resolved block counts (``COMPLETE`` or
-    ``EXCLUDED_AFTER_RERUNS``); rows of earlier attempts are ``RERUN_SUPERSEDED``,
-    rows of a block that never finished are ``INCOMPLETE_BLOCK`` (blind.py
-    drops both, so only complete blocks reach the scorer).
+    Only the final attempt of a ``COMPLETE`` block counts; rows of earlier
+    attempts are ``RERUN_SUPERSEDED``, rows of a block that never finished are
+    ``INCOMPLETE_BLOCK`` (blind.py drops both, so only complete blocks reach the
+    scorer).  The final attempt of an ``EXCLUDED_AFTER_RERUNS`` block never counts,
+    even when every row says ``infra: false`` (a late watchdog event): its rows are
+    in ``excluded`` and the block, with every arm, in ``excluded_blocks``, so blind.py
+    writes an infra exclusion for each arm, a row or not (an arm that crashed).
     """
     run_root = Path(run_root)
     progress = [p for p in _records(run_root / PROGRESS_FILE) if "event" not in p]  # done rows only
@@ -271,15 +274,25 @@ def block_outcomes(run_root: Path) -> Optional[dict[str, Any]]:
         final[int(record["block"])] = record
     counted: set[str] = set()
     dropped: dict[str, str] = {}
+    excluded: dict[str, str] = {}
+    excluded_blocks = [
+        {"task_id": b["task_id"], "repeat": b["repeat"], "arms": list(b.get("arm_order") or ()),
+         "reason": "EXCLUDED_AFTER_RERUNS:" + ",".join(f"{arm}={why}" for arm, why in
+                                                       sorted((b.get("late_infra") or b.get("infra_why") or {}).items()))}
+        for b in final.values() if b["status"] == "EXCLUDED_AFTER_RERUNS"]
     for entry in progress:
         block = final.get(int(entry["block"]))
-        if block is not None and block["status"] in RESOLVED and int(entry["attempt"]) == int(block["attempt"]):
+        final_attempt = block is not None and int(entry["attempt"]) == int(block["attempt"])
+        if final_attempt and block["status"] == "COMPLETE":
             counted.add(entry["run_id"])
+        elif final_attempt and block["status"] == "EXCLUDED_AFTER_RERUNS":
+            excluded[entry["run_id"]] = next(b["reason"] for b in excluded_blocks
+                                             if b["task_id"] == block["task_id"] and b["repeat"] == block["repeat"])
         elif block is not None and int(entry["attempt"]) <= int(block["attempt"]):
             dropped[entry["run_id"]] = "RERUN_SUPERSEDED"
         else:
             dropped[entry["run_id"]] = "INCOMPLETE_BLOCK"
-    return {"counted": counted, "dropped": dropped}
+    return {"counted": counted, "dropped": dropped, "excluded": excluded, "excluded_blocks": excluded_blocks}
 
 
 def _noop_driver(args: argparse.Namespace, nexus_driver: Any) -> Any:

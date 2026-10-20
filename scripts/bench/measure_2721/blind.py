@@ -128,10 +128,12 @@ def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
 
 
 def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
-          tasks: Mapping[str, Mapping[str, Any]], dropped: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+          tasks: Mapping[str, Mapping[str, Any]], dropped: Sequence[Mapping[str, Any]] = (),
+          block_excluded: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     mapping: dict[str, Any] = {}
-    excluded: list[dict[str, Any]] = []
+    # Exclusions the runner decided per block (EXCLUDED_AFTER_RERUNS, a late watchdog event).
+    excluded: list[dict[str, Any]] = [dict(entry) for entry in block_excluded]
     used: set[str] = set()
     rows = list(rows)
     hashes = {row["read_roots_sha256"] for row in rows if row.get("read_roots_sha256")}
@@ -214,12 +216,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     out, arm_map = Path(args.out).resolve(), Path(args.arm_map).resolve()
     if out in arm_map.parents or arm_map == out:
         parser.error("--arm-map must live outside --out (the scorer must not see it)")
+    from scripts.bench.measure_2721 import watchdog
     from scripts.bench.measure_2721.runner import block_outcomes
 
-    rows, dropped = [], []
+    rows, dropped, block_excluded = [], [], []
     for root in args.run_roots:
         outcome = block_outcomes(Path(root))
-        for row in read_jsonl(Path(root) / "rows.jsonl"):
+        root_rows = list(read_jsonl(Path(root) / "rows.jsonl"))
+        for block in (outcome or {}).get("excluded_blocks", ()):
+            # Every arm of an excluded block, with a row or without one (an arm that
+            # crashed): the scorer must see why the task/repeat is missing.
+            for arm in block["arms"]:
+                row = next((r for r in root_rows if r.get("run_id") in outcome["excluded"] and r.get("arm") == arm
+                            and r.get("task_id") == block["task_id"] and r.get("repeat") == block["repeat"]), {})
+                block_excluded.append({"arm": arm, "run_id": row.get("run_id"), "task_id": block["task_id"],
+                                       "repeat": block["repeat"], "outcome": row.get("outcome"), "infra": True,
+                                       "reason": block["reason"], "rule": "EXCLUDED_AFTER_RERUNS"})
+        for row in root_rows:
+            if outcome is not None and row.get("run_id") in outcome["excluded"]:
+                continue  # written above, with the block
+            if outcome is not None and row.get("run_id") in outcome["counted"] \
+                    and watchdog.infra_event_for(Path(root), row["run_id"]) is not None:
+                # A watchdog event that arrived after the runner last looked: infra, and
+                # the scorer drops the task/repeat from every arm.
+                block_excluded.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")}
+                                      | {"infra": True, "reason": "WATCHDOG_EVENT_LATE", "rule": "WATCHDOG_EVENT_LATE"})
+                continue
             if outcome is not None and row.get("run_id") not in outcome["counted"]:
                 # Only the final attempt of a resolved block counts (runner.py).
                 dropped.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "infra")} |
@@ -227,7 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             rows.append(row)
     tasks = {task["task_id"]: task for task in read_jsonl(args.manifest)}
-    print(json.dumps(blind(rows, out, arm_map, tasks, dropped)))
+    print(json.dumps(blind(rows, out, arm_map, tasks, dropped, block_excluded)))
     return 0
 
 

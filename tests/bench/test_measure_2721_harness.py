@@ -2768,3 +2768,72 @@ def test_interrupt_with_an_lb_state_change_reruns_the_whole_block(manifest, tmp_
     blocks = list(read_jsonl(run / "blocks.jsonl"))
     assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
     assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED"
+
+
+def _excluded_block_run(run: Path, *, crashed: str | None = None) -> None:
+    """A block excluded after re-runs whose final rows all say ``infra: false``
+    (the exclusion came from a late watchdog event); ``crashed`` left no row."""
+    arms_ = ["BARE", "NEXUS", "NOOP"]
+    run.mkdir(parents=True)
+    rows, progress = [], []
+    for attempt in range(3):
+        for arm in arms_:
+            if attempt == 2 and arm == crashed:
+                progress.append({"event": "start", "block": 0, "attempt": attempt, "arm": arm, "slot": 0})
+                continue
+            run_id = f"{arm}-a{attempt}"
+            rows.append({"arm": arm, "run_id": run_id, "task_id": "pkg-100", "repeat": 1, "infra": False,
+                         "outcome": "OK"})
+            progress.append({"block": 0, "attempt": attempt, "arm": arm, "slot": 0, "run_id": run_id,
+                             "infra": False})
+    late = {arm: "WATCHDOG_EVENT" for arm in arms_ if arm != crashed} | ({crashed: "CRASHED"} if crashed else {})
+    blocks = [{"block": 0, "task_id": "pkg-100", "repeat": 1, "attempt": a, "status": s, "arm_order": arms_,
+               "infra_arms": ["NEXUS"], "infra_why": {"NEXUS": "WATCHDOG_EVENT"}}
+              for a, s in ((0, "RERUN"), (1, "RERUN"), (2, "COMPLETE"))]
+    blocks.append(dict(blocks[-1], status="EXCLUDED_AFTER_RERUNS", late_infra=late))
+    for name, records in (("rows.jsonl", rows), ("progress.jsonl", progress), ("blocks.jsonl", blocks)):
+        (run / name).write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+@pytest.mark.parametrize("crashed", [None, "NEXUS"])
+def test_excluded_block_never_reaches_the_scorer(tmp_path, crashed):
+    """Gemini F2a/F2b (1d, 2026-10-20): the final attempt of an EXCLUDED_AFTER_RERUNS
+    block is not counted even with ``infra: false`` rows, and every arm of it -- one
+    that crashed without a row too -- gets an infra exclusion the scorer can explain."""
+    from scripts.bench.measure_2721 import runner
+
+    run = tmp_path / "run"
+    _excluded_block_run(run, crashed=crashed)
+    outcome = runner.block_outcomes(run)
+    assert outcome["counted"] == set()
+    assert len(outcome["excluded_blocks"]) == 1
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text("")
+    out, amap_path = tmp_path / "blind", tmp_path / "custody" / "map.json"
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(amap_path),
+                "--manifest", str(manifest)])
+    amap = json.loads(amap_path.read_text())
+    assert amap["map"] == {}
+    assert sorted(e["arm"] for e in amap["excluded"]) == ["BARE", "NEXUS", "NOOP"]
+    assert all(e["infra"] is True and e["reason"].startswith("EXCLUDED_AFTER_RERUNS:") for e in amap["excluded"])
+    assert sorted(d["reason"] for d in amap["dropped"]) == ["RERUN_SUPERSEDED"] * 6
+
+
+def test_late_watchdog_event_on_a_counted_row_excludes_it(manifest, tmp_path, monkeypatch):
+    """A watchdog event written after the runner last looked still makes the row infra."""
+    from scripts.bench.measure_2721 import runner, watchdog
+
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 0
+    nexus_row = next(r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS")
+    assert nexus_row["run_id"] in runner.block_outcomes(run)["counted"]
+    events = watchdog._run_dir(run) / "infra_events.jsonl"
+    events.parent.mkdir(parents=True, exist_ok=True)
+    events.write_text(json.dumps({"row_id": nexus_row["run_id"], "reason": "GATEWAY_KILLED"}) + "\n")
+    out, amap_path = tmp_path / "blind", tmp_path / "custody" / "map.json"
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(amap_path),
+                "--manifest", str(manifest)])
+    amap = json.loads(amap_path.read_text())
+    assert [(e["arm"], e["reason"]) for e in amap["excluded"]] == [("NEXUS", "WATCHDOG_EVENT_LATE")]
+    assert sorted(m["arm"] for m in amap["map"].values()) == ["BARE", "NOOP"]
