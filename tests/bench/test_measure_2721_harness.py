@@ -491,7 +491,9 @@ def test_driver_stops_the_batch_when_a_task_does_not_terminate(manifest, tmp_pat
     with pytest.raises(nexus_driver.GatewayStuck):
         _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
     (row,) = list(read_jsonl(tmp_path / "run" / "rows.jsonl"))
-    assert row["infra"] is True and row["gateway_stuck"] == "PENDING_HUMAN_APPROVAL"
+    # Amendment 10: accepted, then stuck on the Gateway side -> a not-solved candidate.
+    assert row["infra"] is False and row["gateway_stuck"] == "PENDING_HUMAN_APPROVAL"
+    assert row["nexus_failure_after_acceptance"] and blind.run_invalid_reason(row) == "OUTCOME:INFRA"
 
 
 @needs_sandbox
@@ -655,7 +657,7 @@ def test_nexus_row_without_a_snapshot_is_void(manifest, tmp_path):
 
     gateway._answer = answer
     row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
-    assert row["infra"] is True and row["void_reason"] == "SNAPSHOT_MISSING"
+    assert row["infra"] is False and row["void_reason"] == "SNAPSHOT_MISSING"  # amendment 10: not solved
 
 
 def test_cli_timeout_mismatch_makes_the_bare_row_infra(manifest, tmp_path):
@@ -893,7 +895,7 @@ def test_a_model_probe_the_driver_triggers_is_charged(manifest, tmp_path):
 def test_nexus_row_without_a_trace_is_void(manifest, tmp_path):
     (task,) = arms.load_manifest(manifest)
     row = _tracing_driver(FakeGateway(), tmp_path / "traces", []).run(task, 1, tmp_path / "run", timeout_seconds=5)
-    assert row["infra"] is True and row["void_reason"] == "TRACE_MISSING"
+    assert row["infra"] is False and row["void_reason"] == "TRACE_MISSING"  # amendment 10: not solved
 
 
 def test_a_stuck_nexus_row_is_still_charged(manifest, tmp_path):
@@ -1315,7 +1317,8 @@ def test_lb_restores_every_row_keeps_the_probe_cache_and_detects_writes(manifest
     rows = [driver.run(task, r, tmp_path / "run", timeout_seconds=5) for r in (1, 2)]
     assert all(r["state_restore"]["ok"] and r["state_restore_policy"] == "per_row" for r in rows)
     # Q2: a learning write in the read-only phase voids the row.
-    assert all(r["infra"] and r["void_reason"] == "LB_STATE_CHANGED" for r in rows), rows
+    # Amendment 10: after acceptance this is Nexus-side, so not infra but not solved.
+    assert all(not r["infra"] and r["void_reason"] == "LB_STATE_CHANGED" for r in rows), rows
     probe = tmp_path / "state" / "assisted_provider_jobs" / "probe_evidence"
     assert len(list(probe.iterdir())) == 2  # never restored away
 
@@ -1412,9 +1415,10 @@ def test_failures_before_submit_are_infra_and_after_submit_are_not_solved(manife
     assert row["void_reason"] == "PRE_SUBMIT_FAILURE:nexus_task_card_commit"
     row = _driver(FakeGateway(worker_error={"error": "WORKER_REFUSED_SCOPE"})).run(
         task, 2, tmp_path / "run", timeout_seconds=5)
-    assert row["outcome"] == "GATEWAY_ERROR" and not row["infra"] and row["submitted"] is True
-    # The scorer gets it as a candidate that cannot count as solved.
-    assert blind.run_invalid_reason(row) == "OUTCOME:GATEWAY_ERROR"
+    # Amendment 10: the Gateway refused the worker request -> infra, never a candidate.
+    assert row["infra"] is True and row["worker_accepted"] is False and row["submitted"] is True
+    assert row["void_reason"] == "WORKER_NOT_ACCEPTED:nexus_worker_candidate"
+    assert blind.exclusion_reason(row)[0] == "NEXUS_NOT_ACCEPTED"
 
 
 def test_a_hung_run_is_labelled_the_same_in_both_arms(manifest, tmp_path, monkeypatch):
@@ -1877,3 +1881,147 @@ def test_every_nexus_row_records_submitted_and_worker_accepted(manifest, tmp_pat
     assert refused["submitted"] is True and refused["worker_accepted"] is False
     rows = list(read_jsonl(tmp_path / "run" / "rows.jsonl"))
     assert len(rows) == 3 and all("submitted" in r and "worker_accepted" in r for r in rows)
+
+
+# -- amendment 10 split (layer1-rie clarification, #2721 2026-10-20) ---------------
+
+
+def _blind_rows(rows, tmp_path, task):
+    out, arm_map = tmp_path / "blind-a10", tmp_path / "custody" / "arm_map.json"
+    blind.blind(rows, out, arm_map, {task["task_id"]: task})
+    return list(read_jsonl(out / "candidates.jsonl")), json.loads(arm_map.read_text())
+
+
+def _nexus_row(repeat, **fields):
+    return {"arm": "NEXUS", "run_id": f"n-r{repeat}", "task_id": "", "repeat": repeat, "submitted": True,
+            "worker_accepted": True, "infra": False, "outcome": "OK", "flags": [], **fields}
+
+
+def test_a10_nexus_rejected_before_acceptance_is_excluded_infra(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+
+    class CommitFails(FakeGateway):
+        def _is_error(self, name):
+            return name == "nexus_task_card_commit"
+
+        def _answer(self, name, args):
+            if name == "nexus_task_card_commit":
+                return {"error": "TASK_CARD_COMMIT_HEAD_MISMATCH"}
+            return super()._answer(name, args)
+
+    card = _driver(CommitFails()).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    refused = _driver(FakeGateway(worker_error={"error": "WORKER_REFUSED_SCOPE"})).run(
+        task, 2, tmp_path / "run", timeout_seconds=5)
+    assert card["worker_accepted"] is False and refused["worker_accepted"] is False
+    assert refused["infra"] is True and refused["infra_rule"] == "NEXUS_NOT_ACCEPTED"
+    candidates, amap = _blind_rows([card, refused], tmp_path, task)
+    assert candidates == []
+    assert [(e["repeat"], e["infra"], e["rule"], e["nexus_reliability"]) for e in amap["excluded"]] == [
+        (1, True, "NEXUS_NOT_ACCEPTED", True), (2, True, "NEXUS_NOT_ACCEPTED", True)]
+
+
+@pytest.mark.parametrize("fields, reason", [
+    ({"outcome": "GATEWAY_ERROR", "error": "TASK_STATUS_UNREADABLE"}, "OUTCOME:GATEWAY_ERROR"),
+    ({"flags": ["STATE_LEAK"]}, "STATE_LEAK"),
+    ({"outcome": "INFRA", "infra": True, "void_reason": "LB_STATE_CHANGED", "flags": ["LB_STATE_CHANGED"]},
+     "VOID:LB_STATE_CHANGED"),
+    ({"outcome": "INFRA", "infra": True, "void_reason": "TRACE_MISSING", "flags": ["SNAPSHOT_INVALID"]},
+     "VOID:TRACE_MISSING"),
+    ({"outcome": "INFRA", "infra": True, "gateway_stuck": "IN_PROGRESS"}, "OUTCOME:INFRA"),
+])
+def test_a10_nexus_failure_after_acceptance_is_a_not_solved_candidate(manifest, tmp_path, fields, reason):
+    (task,) = arms.load_manifest(manifest)
+    row = {**_nexus_row(1, task_id=task["task_id"]), **fields}
+    assert blind.exclusion_reason(row) is None
+    (candidate,), amap = _blind_rows([row], tmp_path, task)
+    assert candidate["scoring_flags"] == ["RUN_INVALID_NOT_SOLVED"] and amap["excluded"] == []
+    assert amap["map"][candidate["opaque_id"]]["run_invalid_reason"] == reason
+
+
+def test_a10_nexus_rate_limit_after_acceptance_stays_infra_like_bare(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.providers import ProviderResult
+
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name in ("nexus_task_wait", "nexus_task_status"):
+            payload["measurement_worktree_diff"] = "diff --git a/x.py b/x.py\n"
+        return payload
+
+    gateway._answer = answer
+    nexus = _tracing_driver(gateway, tmp_path / "traces", [
+        dict(cost=None, venv=venv, limit=limit, output=0, infra="rate_limited")])
+    nexus_row = nexus.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    monkeypatch.setattr(arms, "_claude_provider_type", lambda: _StubClaude)
+    bare_row = arms.run_bare(task, 1, tmp_path / "run", _StubClaude(lambda: ProviderResult(
+        status="INFRA", provider="claude", model="claude-haiku-5-5", infra_reason="RATE_LIMITED",
+        extra={"venv": venv, "cli_timeout_seconds": limit, "served_models": []})), timeout_seconds=5)
+    assert nexus_row["worker_accepted"] is True and nexus_row["symmetric_infra_reasons"] == ["MODEL_ATTEMPT_INFRA"]
+    assert blind.exclusion_reason(nexus_row) == ("SYMMETRIC_INFRA", "MODEL_ATTEMPT_INFRA")
+    assert blind.exclusion_reason(bare_row) == ("ROW_INFRA", "INFRA")
+    # The other symmetric causes, each one alone.
+    for extra in ({"error": "claude_infra:provider_unavailable"}, {"watchdog_event": {"kind": "host"}},
+                  {"flags": ["CLI_TIMEOUT_MISMATCH"]}, {"flags": ["VENV_NOT_USABLE"]}):
+        assert blind.exclusion_reason({**_nexus_row(1), "infra": True, "outcome": "INFRA", **extra})[0] == \
+            "SYMMETRIC_INFRA", extra
+
+
+def test_a10_bare_and_noop_rows_are_unchanged(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    ok = arms.run_bare(task, 1, run, FakeProvider(edit=_edit), timeout_seconds=5)
+    noop = arms.run_noop(task, 1, run)
+    assert "worker_accepted" not in ok and "worker_accepted" not in noop
+    infra = dict(ok, run_id="b-infra", repeat=2, infra=True, outcome="INFRA", void_reason="NO_TASK_VENV")
+    gateway_like = dict(ok, run_id="b-gw", repeat=3, outcome="GATEWAY_ERROR", diff_path=None)
+    candidates, amap = _blind_rows([ok, noop, infra, gateway_like], tmp_path, task)
+    # The BARE excluded entry keeps its exact previous shape.
+    assert amap["excluded"] == [{"arm": "BARE", "run_id": "b-infra", "task_id": task["task_id"], "repeat": 2,
+                                 "outcome": "INFRA", "infra": True, "reason": "NO_TASK_VENV"}]
+    flags = {amap["map"][c["opaque_id"]]["run_id"]: c["scoring_flags"] for c in candidates}
+    assert "RUN_INVALID_NOT_SOLVED" not in flags[ok["run_id"]] + flags[noop["run_id"]]
+    assert "RUN_INVALID_NOT_SOLVED" in flags["b-gw"]
+
+
+def test_a10_duplicate_task_counts_as_not_accepted(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        if name == "nexus_worker_candidate":
+            return {"status": "SUBMITTED", "duplicate": {"code": "DUPLICATE_LOGICAL_TASK", "existing_task_id": "x"}}
+        return original(name, args)
+
+    gateway._answer = answer
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["submitted"] is True and row["worker_accepted"] is False
+    assert blind.exclusion_reason(row)[0] == "NEXUS_NOT_ACCEPTED"
+
+
+def test_a10_driver_infra_follows_acceptance(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    refused = _driver(FakeGateway(worker_error={"error": "WORKER_REFUSED_SCOPE"})).run(
+        task, 1, tmp_path / "run", timeout_seconds=5)
+    assert refused["infra"] is True and refused["worker_accepted"] is False
+    class WaitFails(FakeGateway):
+        def _is_error(self, name):
+            return name == "nexus_task_wait"
+
+        def _answer(self, name, args):
+            if name == "nexus_task_wait":
+                return {"error": "TASK_WAIT_FAILED"}
+            return super()._answer(name, args)
+
+    accepted = _driver(WaitFails()).run(task, 2, tmp_path / "run", timeout_seconds=5)
+    assert accepted["worker_accepted"] is True and accepted["infra"] is False
+    assert accepted["outcome"] == "GATEWAY_ERROR"
+    candidates, amap = _blind_rows([refused, accepted], tmp_path, task)
+    assert [e["run_id"] for e in amap["excluded"]] == [refused["run_id"]]
+    (candidate,) = candidates
+    assert "RUN_INVALID_NOT_SOLVED" in candidate["scoring_flags"]

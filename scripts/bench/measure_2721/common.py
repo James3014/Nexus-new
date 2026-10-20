@@ -10,6 +10,13 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
+# Provider/model-side infra markers in a worker error (pool busy, credentials,
+# the adapter's ``claude_infra:*`` such as a 429, the measurement CLI missing).
+# Shared by the NEXUS driver and blind.py's symmetric-infra rule.
+INFRA_ERROR_MARKERS = ("agy_pool_busy", "AGY_POOL_BUSY", "POOL_EXHAUSTED", "agy_pool_exhausted",
+                       "credentials_unavailable", "MODEL_PROBE_REQUIRED", "claude_infra:",
+                       "MEASUREMENT_CLAUDE_PROBE_FAILED", "MEASUREMENT_CLAUDE_BINARY_UNAVAILABLE")
+
 _GIT_ENV = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_TERMINAL_PROMPT": "0",

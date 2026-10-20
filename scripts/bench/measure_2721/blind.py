@@ -11,9 +11,29 @@ Reads ``rows.jsonl`` from one or more run roots and writes:
 
 Only infra rows are not candidates; they are listed in the arm map under
 ``excluded`` (``infra: true``, reason), so the S4 rule drops that task/repeat
-from all arms. Every other invalid row (TAMPERED, a non-infra Gateway error,
-STATE_LEAK, a void reason) stays a candidate with the arm-neutral flag
-``RUN_INVALID_NOT_SOLVED``: not solved, kept in the denominator.
+from all arms. Every other invalid row stays a candidate with the arm-neutral
+flag ``RUN_INVALID_NOT_SOLVED``: not solved, kept in the denominator.
+
+Which rows are infra (``exclusion_reason``; PREREG amendment 10 as clarified
+by the scoring owner on #2721, 2026-10-20):
+
+* BARE and NOOP rows (no ``worker_accepted`` field): the row's own ``infra``
+  boolean, unchanged.
+* NEXUS rows with ``worker_accepted: false`` (card create/commit, model probe,
+  the Gateway refusing the worker request, a duplicate task): the model never
+  ran for this row -> infra (``rule: NEXUS_NOT_ACCEPTED``), re-run in all arms,
+  then dropped, and reported per arm as Nexus reliability
+  (``nexus_reliability: true`` in ``excluded``).
+* NEXUS rows with ``worker_accepted: true``: infra ONLY for the model-side
+  causes that make a BARE row infra too (``symmetric_infra_reasons``): the
+  Claude attempt ended as infra (``claude_infra:*``, e.g. a 429 with a
+  partial diff, provider unavailable), a provider infra marker in the worker
+  error, a watchdog (host) event, a CLI time-limit mismatch or an unusable
+  task venv (``rule: SYMMETRIC_INFRA``).  Any other failure after acceptance
+  is Gateway/Nexus-side -- GATEWAY_ERROR, STATE_LEAK, a void such as
+  SNAPSHOT_MISSING, TRACE_MISSING or LB_STATE_CHANGED, a task that never
+  terminated -- and is NOT infra: the row stays a candidate with
+  ``RUN_INVALID_NOT_SOLVED``.
 """
 
 from __future__ import annotations
@@ -30,6 +50,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scripts.bench.measure_2721.common import (
+    INFRA_ERROR_MARKERS,
     read_diff,
     read_jsonl,
     sha256_text,
@@ -58,6 +79,34 @@ def run_invalid_reason(row: Mapping[str, Any]) -> str | None:
     if row.get("outcome") not in SCORABLE_OUTCOMES:
         return f"OUTCOME:{row.get('outcome')}"
     return None
+
+
+# Model-side infra causes a BARE row also has (arms.run_bare), checked on NEXUS rows.
+SYMMETRIC_INFRA_FLAGS = ("CLI_TIMEOUT_MISMATCH", "VENV_NOT_USABLE")
+
+
+def symmetric_infra_reasons(row: Mapping[str, Any]) -> list[str]:
+    """Model/host-side infra causes in a NEXUS row that BARE treats as infra as well."""
+    reasons = []
+    if row.get("attempt_status") == "INFRA":
+        reasons.append("MODEL_ATTEMPT_INFRA")
+    if any(marker in str(row.get("error") or "") for marker in INFRA_ERROR_MARKERS):
+        reasons.append("PROVIDER_INFRA_MARKER")
+    if row.get("watchdog_event") is not None:
+        reasons.append("WATCHDOG_EVENT")
+    reasons.extend(flag for flag in SYMMETRIC_INFRA_FLAGS if flag in (row.get("flags") or []))
+    return reasons
+
+
+def exclusion_reason(row: Mapping[str, Any]) -> tuple[str, str] | None:
+    """(rule, reason) when the row is infra and leaves the candidate set, else None."""
+    reason = str(row.get("void_reason") or row.get("outcome"))
+    if "worker_accepted" not in row:  # BARE / NOOP: unchanged
+        return ("ROW_INFRA", reason) if row.get("infra") else None
+    if not row["worker_accepted"]:
+        return "NEXUS_NOT_ACCEPTED", reason
+    symmetric = symmetric_infra_reasons(row)
+    return ("SYMMETRIC_INFRA", ",".join(symmetric)) if symmetric else None
 
 
 def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
@@ -91,11 +140,18 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
         raise RuntimeError(f"READ_ROOTS_DIFFER_ACROSS_ARMS: {sorted(hashes)}")
     pending: list[tuple[str, str]] = []  # (opaque id, scored diff), written after the shuffle
     for row in rows:
-        if row.get("infra"):
-            # Only true infra (after the harness's both-arm model re-runs) leaves the
-            # candidate set; score_arms.py drops that task/repeat from all arms.
-            excluded.append({**{key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")},
-                             "infra": True, "reason": row.get("void_reason") or row.get("outcome")})
+        excluded_by = exclusion_reason(row)
+        if excluded_by is not None:
+            # Only infra (amendment 10 split, module docstring) leaves the candidate
+            # set; score_arms.py drops that task/repeat from all arms.
+            rule, reason = excluded_by
+            entry = {**{key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")},
+                     "infra": True, "reason": row.get("void_reason") or row.get("outcome")}
+            if rule != "ROW_INFRA":
+                entry.update(rule=rule, nexus_reliability=rule == "NEXUS_NOT_ACCEPTED")
+                if rule == "SYMMETRIC_INFRA":
+                    entry["symmetric_infra_reasons"] = reason.split(",")
+            excluded.append(entry)
             continue
         invalid = run_invalid_reason(row)
         diff = ""

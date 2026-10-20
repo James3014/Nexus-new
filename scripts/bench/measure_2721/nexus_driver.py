@@ -36,7 +36,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from nexus.executors.claude_measurement_worker import CLAUDE_MEASUREMENT_MODEL
-from scripts.bench.measure_2721 import controller_guard, state_phase
+from scripts.bench.measure_2721 import blind, controller_guard, state_phase
 from scripts.bench.measure_2721.arms import (
     ARM_NEXUS,
     FLAG_NON_MODEL_SOLVE,
@@ -53,7 +53,13 @@ from scripts.bench.measure_2721.arms import (
     task_prompt,
     venv_problem,
 )
-from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
+from scripts.bench.measure_2721.common import (
+    INFRA_ERROR_MARKERS,
+    append_jsonl,
+    git,
+    write_diff,
+    write_json,
+)
 from scripts.bench.measure_2721.gateway_env import measurement_env, read_roots_sha256
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, lookup_signals
 from scripts.bench.measure_2721.portable import to_portable_row
@@ -65,9 +71,7 @@ OUTCOME_BLOCKED_EXTERNAL = "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED"
 OUTCOME_GATEWAY_ERROR = "GATEWAY_ERROR"
 OUTCOME_INFRA = "INFRA"
 OUTCOME_DONE = "OK"
-_INFRA_MARKERS = ("agy_pool_busy", "AGY_POOL_BUSY", "POOL_EXHAUSTED", "agy_pool_exhausted",
-                  "credentials_unavailable", "MODEL_PROBE_REQUIRED", "claude_infra:",
-                  "MEASUREMENT_CLAUDE_PROBE_FAILED", "MEASUREMENT_CLAUDE_BINARY_UNAVAILABLE")
+_INFRA_MARKERS = INFRA_ERROR_MARKERS
 CANCEL_RETRY_STATUSES = frozenset({"PENDING_HUMAN_APPROVAL"})
 CANCEL_REFUSED_MARKERS = ("CANDIDATE_REF_PROTECTED", "PENDING_HUMAN_APPROVAL")
 
@@ -645,6 +649,8 @@ class NexusArmDriver:
             duplicate = submitted.get("duplicate") if isinstance(submitted, Mapping) else None
             if duplicate or "DUPLICATE_LOGICAL_TASK" in json.dumps(submitted, default=str):
                 # P1 joined another row's task: this row did not run its own worker.
+                # Amendment 10: this row's model never ran, so it counts as not accepted.
+                self._worker_accepted = False
                 row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="DUPLICATE_TASK",
                            duplicate=duplicate if duplicate is not True else True)
                 return row
@@ -662,6 +668,11 @@ class NexusArmDriver:
                 # TASK_CARD_COMMIT_HEAD_MISMATCH): the model never ran -> infra,
                 # re-run in both arms.
                 row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"PRE_SUBMIT_FAILURE:{exc.tool}",
+                           error=message[:2000])
+            elif not self._worker_accepted:
+                # Amendment 10: the Gateway refused the worker request, so the model
+                # never ran -> infra (Nexus reliability), re-run in all arms.
+                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"WORKER_NOT_ACCEPTED:{exc.tool}",
                            error=message[:2000])
             else:
                 row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
@@ -719,6 +730,17 @@ class NexusArmDriver:
             row["non_model_solve_path"] = non_model_solve(diff, row)
             if row["non_model_solve_path"]:
                 row.setdefault("flags", []).append(FLAG_NON_MODEL_SOLVE)
+            # Amendment 10 (blind.exclusion_reason applies the same rule): not accepted
+            # -> infra; accepted -> infra only for the model-side causes BARE shares,
+            # any other failure is Nexus-side and a not-solved candidate.
+            row["symmetric_infra_reasons"] = blind.symmetric_infra_reasons(row)
+            rule = blind.exclusion_reason(row)
+            if rule is None and row.get("infra"):
+                row.update(infra=False, nexus_failure_after_acceptance=True)
+            elif rule is not None:
+                row.update(infra=True, infra_rule=rule[0])
+                if not row.get("void_reason"):
+                    row["void_reason"] = f"WORKER_NOT_ACCEPTED:{row.get('outcome')}"
             append_jsonl(run_root / "rows.jsonl", row)
             append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
             watchdog.end_row(run_root)
