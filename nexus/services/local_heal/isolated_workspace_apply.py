@@ -72,6 +72,9 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
             if end + 1 < len(hunk_lines) and hunk_lines[end + 1].startswith(" "):
                 end += 1
             hunk_lines[:] = hunk_lines[start : end + 1]
+        hunk_lines[:] = [
+            line for line in hunk_lines if not (line.startswith(" ") and not line[1:].rstrip())
+        ]
         old_count = sum(1 for line in hunk_lines if not line.startswith("+"))
         new_count = sum(1 for line in hunk_lines if not line.startswith("-"))
         output.append(f"@@ -0,{old_count} +0,{new_count} @@")
@@ -85,13 +88,14 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
             flush_hunk()
             in_hunk = True
             continue
-        if not in_hunk or not raw_line.startswith(("-", "+", " ")):
+        if not in_hunk:
             continue
-        operation = raw_line[0]
-        content = raw_line[1:].rstrip()
-        if operation == " " and not content:
-            continue
-        hunk_lines.append(f"{operation}{content}")
+        if raw_line.startswith(("-", "+", " ")):
+            operation = raw_line[0]
+            content = raw_line[1:].rstrip()
+            hunk_lines.append(f"{operation}{content}")
+        elif raw_line == "":
+            hunk_lines.append(" ")
     flush_hunk()
     return "\n".join(output).strip()
 
