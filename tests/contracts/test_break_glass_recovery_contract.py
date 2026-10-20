@@ -408,8 +408,11 @@ def github_integration_readback(
         "merge_commit_sha": merge_sha,
         "head": {"sha": head_sha},
         "base": {"ref": "main"},
+        # Real GitHub readbacks always carry these (#2796): a merge after issued_at,
+        # and a true two-parent merge commit on main.
+        "merged_at": "2026-09-06T07:10:00+08:00",
     }
-    main_branch = {"commit": {"sha": main_sha}}
+    main_branch = {"commit": {"sha": main_sha, "parents": [{"sha": "6" * 40}, {"sha": head_sha}]}}
     return pull_request, main_branch
 
 
@@ -488,6 +491,54 @@ def test_github_integration_readback_g05_g06_positive_control() -> None:
         "8" * 40,
         808,
     )
+
+
+@pytest.mark.parametrize("merged_at", [None, "", "not-a-time", 1757113500, "2026-09-06T07:10:00"])
+def test_github_integration_readback_fails_closed_without_parseable_merged_at(merged_at: object) -> None:
+    """#2796: a missing, null, non-string, unparseable or naive merged_at must not skip G05."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    if merged_at is None:
+        del pull_request["merged_at"]
+    else:
+        pull_request["merged_at"] = merged_at
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_fails_closed_on_null_merged_at() -> None:
+    """#2796: an explicit JSON null merged_at is malformed for a merged PR."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    pull_request["merged_at"] = None
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize("parents", ["missing", None, "abc", {"sha": "1" * 40}])
+def test_github_integration_readback_fails_closed_without_merge_parents(parents: object) -> None:
+    """#2796: G06 cannot prove a merge commit without the parent list, so it must not be skipped."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    if parents == "missing":
+        del commit["parents"]
+    else:
+        commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_rejects_three_parent_merge() -> None:
+    """#2796: an octopus merge is not the authorized two-parent merge commit."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = [{"sha": "4" * 40}, {"sha": "5" * 40}, {"sha": "6" * 40}]
+    with pytest.raises(BreakGlassContractError, match="MERGE_METHOD_SUBSTITUTION_NOT_MERGE_COMMIT"):
+        integration_readback_from_github(integration, pull_request, main_branch)
 
 
 def test_owner_terminal_comment_binds_global_consumption() -> None:
