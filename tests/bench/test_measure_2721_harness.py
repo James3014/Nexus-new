@@ -2909,3 +2909,29 @@ def test_blind_refuses_a_non_empty_out_dir(tmp_path):
         blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(tmp_path / "c" / "m.json"),
                     "--manifest", str(manifest)])
     assert not (tmp_path / "c" / "m.json").exists()
+
+
+def test_venv_asymmetry_between_bare_and_nexus_is_caught(tmp_path):
+    """v0.9.8 (layer1-rie): the same task's BARE and NEXUS Claude rows must report the
+    same task venv; a None on one side (35 gate 1: BARE VENV_MISMATCH) is a mismatch."""
+    from scripts.bench.measure_2721 import runner
+
+    run = tmp_path / "run"
+    run.mkdir()
+    entries = [{"arm": "BARE", "run_id": "b"}, {"arm": "NEXUS", "run_id": "n"}, {"arm": "NOOP", "run_id": "o"}]
+
+    def write(bare_venv, nexus_venv, *, claude=True):
+        extra = {"claude_version": "2.0"} if claude else {}
+        rows = [{"run_id": "b", "arm": "BARE", "venv": bare_venv, **extra},
+                {"run_id": "n", "arm": "NEXUS", "venv": nexus_venv, **extra},
+                {"run_id": "o", "arm": "NOOP"}]
+        (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    write("/m/venvs/t", "/m/venvs/t")
+    assert runner.venv_asymmetry(run, entries) is None
+    write(None, "/m/venvs/t")
+    assert runner.venv_asymmetry(run, entries) == {"BARE": None, "NEXUS": "/m/venvs/t"}
+    write("/m/venvs/a", "/m/venvs/b")
+    assert runner.venv_asymmetry(run, entries) == {"BARE": "/m/venvs/a", "NEXUS": "/m/venvs/b"}
+    write(None, "/m/venvs/t", claude=False)  # no Claude run on either side (fake provider): nothing to compare
+    assert runner.venv_asymmetry(run, entries) is None

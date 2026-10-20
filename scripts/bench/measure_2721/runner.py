@@ -254,6 +254,18 @@ def _append(path: Path, record: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def venv_asymmetry(run_root: Path, entries: Sequence[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """{arm: venv} when the attempt's BARE and NEXUS Claude rows ran in different task
+    venvs (one of them None included), else None.  Only rows that ran the Claude
+    adapter (``claude_version``) are compared."""
+    by_run = {entry.get("run_id"): entry["arm"] for entry in entries if entry["arm"] in ("BARE", "NEXUS")}
+    venvs = {by_run[row["run_id"]]: row.get("venv") for row in _records(Path(run_root) / "rows.jsonl")
+             if row.get("run_id") in by_run and "claude_version" in row}
+    if len(venvs) == 2 and venvs["BARE"] != venvs["NEXUS"]:
+        return venvs
+    return None
+
+
 def block_outcomes(run_root: Path) -> Optional[dict[str, Any]]:
     """Which rows of a runner run root count (None: not a runner run root).
 
@@ -535,6 +547,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     # Busy to the end: stop (resumable) instead of spending on the other arms.
                     return stop(75, "INSTANCE_BUSY", detail=row.get("void_reason"), block=block["block"])
                 rows.append({"slot": slot, "arm": arm, "run_id": row.get("run_id"), "attempt": attempt})
+            asymmetry = venv_asymmetry(run_root, [p for p in done_progress if int(p["block"]) == block["block"]
+                                                  and int(p["attempt"]) == attempt])
+            if asymmetry:
+                # v0.9.8 (layer1-rie): BARE and NEXUS must run in the same task venv; refuse
+                # to go on (not resumable) rather than measure two environments.
+                return stop(2, "VENV_ASYMMETRY", block=block["block"], attempt=attempt, venvs=asymmetry)
             if record_attempt(block, attempt) != "RERUN":
                 break
             attempt += 1  # an infra row in any arm: the whole block again, same arm order
