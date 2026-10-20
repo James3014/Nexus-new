@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nexus.core.state_root import persistent_state_root
+from nexus.core.state_root import persistent_state_root, state_read_only
 from nexus.learning.learning_closure_effectiveness import (
     append_learning_episode,
     canonical_learning_episode_path,
@@ -17,6 +17,11 @@ from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 logger = logging.getLogger(__name__)
 
 from nexus.core.domain_firewall import DomainFirewall
+
+
+class _LearningWriteSkipped(Exception):
+    """Internal: the learning_closure projection write is skipped (#2721 read-only state)."""
+
 
 class SkillsRouter:
 
@@ -354,10 +359,21 @@ class SkillsRouter:
             learning_write_succeeded=True,
             idempotency_key=str(context.get("idempotency_key") or ""),
         )
-        episode_written = append_learning_episode(learning_log, episode)
-        if not episode_written:
-            logger.warning("[OutcomeMemory] canonical learning episode write failed; not a learning success")
+        # #2721 L-B: NEXUS_STATE_READ_ONLY=1 freezes the learning state.  Re-read at call time,
+        # skip all three learning writes below and never report them as a learning success.
+        learning_read_only = state_read_only()
+        if learning_read_only:
+            logger.info(
+                "[OutcomeMemory] NEXUS_STATE_READ_ONLY=1: skipped learning episode, projection "
+                "and outcome-memory writeback; not a learning success"
+            )
+        else:
+            episode_written = append_learning_episode(learning_log, episode)
+            if not episode_written:
+                logger.warning("[OutcomeMemory] canonical learning episode write failed; not a learning success")
         try:
+            if learning_read_only or state_read_only():  # #2721: re-read before the projection write
+                raise _LearningWriteSkipped()
             projection_log = state_root / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
             projection_log.parent.mkdir(parents=True, exist_ok=True)
             with open(projection_log, "a", encoding="utf-8") as handle:
@@ -375,11 +391,17 @@ class SkillsRouter:
                         "timestamp": cap_receipt.timestamp,
                     }
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except _LearningWriteSkipped:
+            pass
         except Exception as e:
             logger.warning("[OutcomeMemory] learning_closure projection writeback failed: %s", e)
 
         # M1: Learning loop write endpoint — sync OutcomeMemoryManager after learning_closure
-        if os.environ.get("NEXUS_LEARNING_LOOP_WRITE_ENABLED", "1") == "1":
+        if (
+            os.environ.get("NEXUS_LEARNING_LOOP_WRITE_ENABLED", "1") == "1"
+            and not learning_read_only
+            and not state_read_only()  # #2721: re-read before the outcome-memory write
+        ):
             try:
                 from nexus.learning.outcome_memory import OutcomeMemoryManager, build_episode_from_receipts
                 ep_task_id = raw_task_id
