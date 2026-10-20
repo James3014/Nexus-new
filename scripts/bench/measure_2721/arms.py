@@ -139,16 +139,29 @@ def served_model_flag(served: Any) -> Optional[str]:
     return None if list(served) == [MEASUREMENT_MODEL] else FLAG_SERVED_MODEL_MISMATCH
 
 
+def bare_worktree(task: Mapping[str, Any], root: Path, run_id: str) -> tuple[Path, Path]:
+    """The same layout P1 leases (gap review H2): a fresh base-only Controller
+    clone and a detached ``git worktree`` of it as the target, venv beside the
+    Controller.  Returns (controller, target)."""
+    controller = root / "controller"
+    checkout_base(Path(task["base_checkout"]), task["base_commit"], controller)
+    link_venv(task, controller)
+    target = root / "targets" / run_id
+    target.parent.mkdir(parents=True)
+    git(controller, "worktree", "add", "-q", "--detach", str(target), task["base_commit"])
+    if git(target, "rev-parse", "HEAD").strip() != task["base_commit"]:
+        raise RuntimeError("BARE target is not at the base commit")
+    return controller, target
+
+
 def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
              timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, keep_workdir: bool = False) -> dict[str, Any]:
     from scripts.bench.measure_2721 import watchdog
     from scripts.bench.measure_2721.common import git_meta_fingerprint, write_diff
 
     run_id = new_run_id(ARM_BARE, task["task_id"], repeat)
-    workdir = run_root / "work" / run_id / "repo"
-    checkout_base(Path(task["base_checkout"]), task["base_commit"], workdir)
-    link_venv(task, workdir)
-    git_meta = git_meta_fingerprint(workdir)
+    controller, workdir = bare_worktree(task, run_root / "work" / run_id, run_id)
+    git_meta = git_meta_fingerprint(controller, workdir)
     tree_sha = git(workdir, "rev-parse", "HEAD^{tree}").strip()
     prompt = task_prompt(task)
     write_json(run_root / "inputs" / f"{run_id}.json",
@@ -158,9 +171,9 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     result: ProviderResult = provider.run(prompt=prompt, workdir=workdir, timeout_seconds=timeout_seconds,
-                                          run_id=run_id)
+                                          run_id=run_id, controller=controller)
     wall = time.monotonic() - started
-    tampered = git_meta_fingerprint(workdir) != git_meta
+    tampered = git_meta_fingerprint(controller, workdir) != git_meta
     # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
     diff = "" if tampered else capture_diff(workdir, task["base_commit"])
     diff, redacted = redact_diff(diff, getattr(provider, "key_file", None))
@@ -205,7 +218,7 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     append_jsonl(run_root / "rows.jsonl", row)
     watchdog.end_row(run_root)
     if not keep_workdir:
-        shutil.rmtree(workdir.parent, ignore_errors=True)
+        shutil.rmtree(run_root / "work" / run_id, ignore_errors=True)
     return row
 
 

@@ -30,10 +30,18 @@ if args == ["--version"]:
     print("__VERSION__")
     sys.exit(0)
 env = {k: ("<set>" if k in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN") else v) for k, v in os.environ.items()}
+import subprocess
+try:
+    status = subprocess.run(["/usr/bin/git", "status", "--porcelain", "--untracked-files=no"],
+                            capture_output=True, text=True, timeout=20)
+    git_status = {"rc": status.returncode, "out": status.stdout}
+except Exception as exc:
+    git_status = {"rc": None, "out": type(exc).__name__}
 print(json.dumps({"type": "system", "subtype": "init", "model": "claude-haiku-5-5", "session_id": "fake",
                   "tools": ["Bash", "Edit", "Read", "Write"], "mcp_servers": [], "permissionMode": "acceptEdits",
                   "claude_code_version": "0.0.0",
-                  "fake_observed": {"mode": MODE, "argv": args, "cwd": os.getcwd(), "env": env}}))
+                  "fake_observed": {"mode": MODE, "argv": args, "cwd": os.getcwd(), "env": env,
+                                    "git_status": git_status}}))
 if MODE == "edit" and not args[-1].startswith("Reply with exactly"):
     readme = Path("README.md")
     if readme.exists():

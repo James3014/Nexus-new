@@ -65,7 +65,12 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
     excluded: list[dict[str, Any]] = []
     used: set[str] = set()
     for row in rows:
-        if row.get("infra") or row.get("outcome") not in SCORABLE_OUTCOMES:
+        if (
+            row.get("infra")
+            or row.get("void_reason")
+            or "STATE_LEAK" in (row.get("flags") or [])
+            or row.get("outcome") not in SCORABLE_OUTCOMES
+        ):
             excluded.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "outcome")})
             continue
         diff = read_diff(Path(row["diff_path"]))

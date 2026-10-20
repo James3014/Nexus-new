@@ -102,13 +102,17 @@ def read_diff(path: Path) -> str:
 _GIT_META = ("config", "info", "hooks")
 
 
-def git_meta_fingerprint(repo: Path | str) -> str:
-    """sha256 over ``.git/config``, ``.git/info/*`` and ``.git/hooks/*`` (#2749).
+def git_meta_fingerprint(repo: Path | str, worktree: Path | str | None = None) -> str:
+    """sha256 over ``.git/config``, ``.git/info/*`` and ``.git/hooks/*`` of the
+    repository (and the worktree's ``.git`` file, when given) (#2749).
 
     Taken at materialize time and again before capture: a mismatch means the
-    repository's git configuration was changed, and no git command is run."""
+    git configuration was changed, and no git command is run."""
     root = Path(repo) / ".git"
     digest = hashlib.sha256()
+    if worktree is not None:
+        dot_git = Path(worktree) / ".git"
+        digest.update(b"W " + (dot_git.read_bytes() if dot_git.is_file() else b"<not a file>") + b"\n")
     for name in _GIT_META:
         entry = root / name
         paths = sorted(p for p in entry.rglob("*") if p.is_file() or p.is_symlink()) if entry.is_dir() else [entry]

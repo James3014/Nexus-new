@@ -59,7 +59,8 @@ class ProviderResult:
 class Provider(Protocol):
     name: str
 
-    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult: ...
+    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str,
+            controller: Optional[Path] = None) -> ProviderResult: ...
 
 
 class FakeProvider:
@@ -75,7 +76,8 @@ class FakeProvider:
         self.extra = dict(extra or {})
         self.prompts: list[dict[str, str]] = []
 
-    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
+    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str,
+            controller: Optional[Path] = None) -> ProviderResult:
         self.prompts.append({"run_id": run_id, "prompt": prompt, "workdir": str(workdir)})
         if self.edit is not None:
             self.edit(Path(workdir), prompt)
@@ -89,7 +91,8 @@ class AgyPoolProvider:
     def __init__(self, model_env: str = "NEXUS_AGY_WORKER_MODEL"):
         self.model_env = model_env
 
-    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
+    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str,
+            controller: Optional[Path] = None) -> ProviderResult:
         from types import SimpleNamespace
 
         from nexus.executors.agy_write_admission import paths_overlap
@@ -296,7 +299,8 @@ class ClaudeProvider:
             env[MEASUREMENT_READ_ROOTS_ENV] = os.environ[MEASUREMENT_READ_ROOTS_ENV]
         return env
 
-    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str) -> ProviderResult:
+    def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str,
+            controller: Optional[Path] = None) -> ProviderResult:
         from types import SimpleNamespace
 
         from nexus.executors.claude_measurement_worker import (
@@ -307,8 +311,11 @@ class ClaudeProvider:
 
         workdir = Path(workdir).resolve()
         # Same contract shape as P1: controller root -> ../venv is the task venv.
+        # Same contract shape as P1: target is a worktree of the Controller,
+        # and <controller>/../venv is the task venv.
         contract = SimpleNamespace(task_id=run_id, target_worktree_root=str(workdir.parent),
-                                   target_repo_root=str(workdir), controller_repo_root=str(workdir))
+                                   target_repo_root=str(workdir),
+                                   controller_repo_root=str(controller or workdir))
         lease = SimpleNamespace(task_id=run_id, target_worktree=str(workdir))
         base = dict(provider=self.name, model=CLAUDE_MEASUREMENT_MODEL)
         started = time.monotonic()

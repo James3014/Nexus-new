@@ -95,6 +95,11 @@ def compare_invocations(bare: Mapping[str, Any], nexus: Mapping[str, Any], bare_
             failures.append("CLAUDE_CONFIG_DIR is not inside the per-run HOME")
         if "nexus-claude-run-" not in env.get("HOME", ""):
             failures.append("HOME is not a fresh per-run directory")
+    # git must behave the same in both arms (review H2): same exit code and output.
+    if b_obs.get("git_status") != n_obs.get("git_status"):
+        failures.append(f"git status differs: BARE {b_obs.get('git_status')} vs NEXUS {n_obs.get('git_status')}")
+    elif (b_obs.get("git_status") or {}).get("rc") != 0:
+        failures.append(f"git status fails in both arms: {b_obs.get('git_status')}")
     if (bare.get("init") or {}) != (nexus.get("init") or {}):
         failures.append("system/init shell fields differ")
     b_prof = (bare.get("sidecar") or {}).get("seatbelt_profile_normalized")

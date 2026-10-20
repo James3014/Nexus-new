@@ -316,7 +316,7 @@ def test_claude_dry_run_proves_identical_invocations(manifest, tmp_path):
     env_tamper["observed"]["env"]["LANG"] = "xx"
     assert "env LANG differs" in dryrun.compare_invocations(bare, env_tamper, prompt, prompt)
     flag_tamper = json.loads(json.dumps(nexus))
-    flag_tamper["observed"]["argv"][1] = "--bare"
+    flag_tamper["observed"]["argv"][1] = "--safe-mode"
     assert "argv flags differ between arms" in dryrun.compare_invocations(bare, flag_tamper, prompt, prompt)
     hint = json.loads(json.dumps(bare))
     hint["observed"]["argv"][-1] = prompt + " hint"
@@ -502,3 +502,113 @@ def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path, monk
     assert all(b"NOT-A-REAL-KEY" not in f.read_bytes() for f in trace.rglob("*") if f.is_file())
     assert "README.md" in row["changed_paths"]
     del task_root
+
+
+# -- coordinator round 3: snapshot, state restore, leaks, watchdog, tamper ---------
+
+
+def test_snapshot_is_accepted_only_for_the_current_attempt():
+    good = {"attempt_id": "a1", "measurement_worktree_diff": "diff --git a/x b/x\n",
+            "measurement_worktree_diff_attempt_id": "a1"}
+    assert nexus_driver.measurement_snapshot(good)["present"] is True
+    stale = dict(good, measurement_worktree_diff_attempt_id="a0")
+    assert nexus_driver.measurement_snapshot(stale)["invalid_reason"] == "SNAPSHOT_ATTEMPT_MISMATCH"
+    truncated = dict(good, measurement_worktree_diff_truncated=True)
+    assert nexus_driver.measurement_snapshot(truncated)["invalid_reason"] == "SNAPSHOT_TRUNCATED"
+    errored = {"attempt_id": "a1", "measurement_worktree_diff_error": "git_timeout",
+               "measurement_worktree_diff_attempt_id": "a1"}
+    assert nexus_driver.measurement_snapshot(errored)["invalid_reason"] == "SNAPSHOT_ERROR:git_timeout"
+    import base64
+
+    raw = b"diff --git a/b b/b\n+\xff\n"
+    lossy = dict(good, measurement_worktree_diff="lossy text", measurement_worktree_diff_lossy=True,
+                 measurement_worktree_diff_b64=base64.b64encode(raw).decode())
+    snap = nexus_driver.measurement_snapshot(lossy)
+    assert snap["present"] and snap["diff"].encode("utf-8", errors="surrogateescape") == raw
+    assert nexus_driver.measurement_snapshot({"attempt_id": "a1"})["present"] is False
+
+
+def test_state_root_is_restored_and_verified(tmp_path):
+    snap = tmp_path / "snap"
+    (snap / ".nexus" / "memory").mkdir(parents=True)
+    (snap / ".nexus" / "memory" / "m.json").write_text("{}")
+    state = tmp_path / "state"
+    (state / ".nexus").mkdir(parents=True)
+    (state / ".nexus" / "learned.json").write_text("leftover from a previous row")
+    (state / "gateway.lock").write_text("held")
+    result = nexus_driver.restore_state_root(state, snap)
+    assert result["ok"] and not (state / ".nexus" / "learned.json").exists()
+    assert (state / "gateway.lock").exists()  # lock files are left alone and not hashed
+    assert nexus_driver.dir_sha256(state) == nexus_driver.dir_sha256(snap)
+
+
+def test_new_candidate_refs_stash_or_worktrees_are_leaks(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f").write_text("x")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "c")
+    before = nexus_driver.leak_surfaces(repo)
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "update-ref", "refs/nexus-candidates/other-task/1", head)
+    _git(repo, "update-ref", "refs/nexus-candidates/own-task/1", head)
+    leaks = nexus_driver.new_leaks(before, nexus_driver.leak_surfaces(repo), "own-task")
+    assert list(leaks) == ["candidate_refs"] and "other-task" in leaks["candidate_refs"][0]
+
+
+def test_watchdog_files_and_infra_events(manifest, tmp_path):
+    from scripts.bench.measure_2721 import watchdog
+
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    row = arms.run_bare(task, 1, run, FakeProvider(), timeout_seconds=5)
+    current = json.loads((run / "run" / "current_row.json").read_text())
+    assert current["row_id"] == row["run_id"] and current["snapshot_taken"] is True
+    assert (run / "run" / "rows_done").read_text().strip() == "1"
+    (run / "run" / "infra_events.jsonl").write_text(json.dumps({"row_id": "next-row", "reason": "oom"}) + "\n")
+    assert watchdog.infra_event_for(run, "next-row")["reason"] == "oom"
+    assert watchdog.infra_event_for(run, row["run_id"]) is None
+
+
+def test_bare_git_metadata_tamper_skips_capture(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+
+    def tamper(workdir: Path, _prompt: str) -> None:
+        _edit(workdir, _prompt)
+        controller = Path(_git(workdir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        (controller / "config").write_text((controller / "config").read_text() + "[core]\n\tfsmonitor = evil\n")
+
+    row = arms.run_bare(task, 1, tmp_path / "run", FakeProvider(edit=tamper), timeout_seconds=5)
+    assert row["outcome"] == "TAMPERED" and arms.FLAG_GIT_TAMPERED in row["flags"] and row["empty"]
+
+
+def test_bare_target_is_a_p1_shaped_worktree(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    controller, target = arms.bare_worktree(task, tmp_path / "w", "rid")
+    assert (target / ".git").is_file()
+    assert _git(target, "rev-parse", "HEAD").strip() == task["base_commit"]
+    assert _git(controller, "for-each-ref").strip() == ""
+
+
+def test_served_model_flag_and_diff_redaction(tmp_path):
+    assert arms.served_model_flag(["claude-haiku-5-5"]) is None
+    assert arms.served_model_flag(["claude-haiku-5-5", "claude-x"]) == arms.FLAG_SERVED_MODEL_MISMATCH
+    assert arms.served_model_flag([]) == arms.FLAG_SERVED_MODEL_MISMATCH
+    shaped = "-".join(("sk", "ant", "api03", "SOMETHINGLONGENOUGH1234"))
+    diff = f"diff --git a/e b/e\n+KEY={shaped}\n"
+    cleaned, redacted = arms.redact_diff(diff)
+    assert redacted and shaped not in cleaned
+
+
+def test_driver_uses_a_fresh_controller_under_the_targets_root(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                         sleep=lambda _s: None, targets_root=tmp_path / "targets")
+    driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    worker = next(c for c in gateway.calls if c["tool"] == "nexus_worker_candidate")["arguments"]
+    repo_root = Path(worker["external_target"]["repo_root"])
+    assert repo_root.parent.parent == (tmp_path / "targets").resolve()
+    assert repo_root.parent.name.startswith(f"{task['task_id']}-r1-")

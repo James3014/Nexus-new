@@ -36,11 +36,14 @@ if __package__ in (None, ""):
 
 from scripts.bench.measure_2721.arms import (
     ARM_NEXUS,
+    FLAG_SECRET_IN_DIFF,
     ROW_SCHEMA,
     candidate_facts,
     input_capture,
     load_manifest,
     new_run_id,
+    redact_diff,
+    served_model_flag,
     task_prompt,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
@@ -168,12 +171,115 @@ def _is_infra(error: str) -> bool:
     return any(marker in error for marker in _INFRA_MARKERS)
 
 
+_SNAP = "measurement_worktree_diff"
+
+
+def measurement_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
+    """P1's raw worktree diff snapshot (#2761), validated for this attempt.
+
+    Accepted only when its attempt id is the task's current attempt; a
+    truncated snapshot makes the row invalid; a lossy (non-UTF-8) diff is
+    taken byte-exact from the base64 copy; a capture error is recorded."""
+    import base64
+
+    present = _SNAP in state or f"{_SNAP}_error" in state
+    out: dict[str, Any] = {
+        "present": False, "diff": "", "invalid_reason": None,
+        "error": state.get(f"{_SNAP}_error"),
+        "attempt_id": state.get(f"{_SNAP}_attempt_id"),
+        "sha256": state.get(f"{_SNAP}_sha256"),
+        "bytes": state.get(f"{_SNAP}_bytes"),
+        "lossy": bool(state.get(f"{_SNAP}_lossy")),
+        "truncated": bool(state.get(f"{_SNAP}_truncated")),
+        "elapsed_ms": state.get(f"{_SNAP}_elapsed_ms"),
+    }
+    if not present:
+        return out
+    if out["attempt_id"] != state.get("attempt_id"):
+        out["invalid_reason"] = "SNAPSHOT_ATTEMPT_MISMATCH"
+        return out
+    if out["error"]:
+        out["invalid_reason"] = f"SNAPSHOT_ERROR:{out['error']}"
+        return out
+    if out["truncated"]:
+        out["invalid_reason"] = "SNAPSHOT_TRUNCATED"
+        return out
+    if out["lossy"]:
+        raw_b64 = state.get(f"{_SNAP}_b64")
+        if not isinstance(raw_b64, str):
+            out["invalid_reason"] = "SNAPSHOT_LOSSY_WITHOUT_BYTES"
+            return out
+        out["diff"] = base64.b64decode(raw_b64).decode("utf-8", errors="surrogateescape")
+    else:
+        out["diff"] = str(state.get(_SNAP) or "")
+    if out["sha256"]:
+        from scripts.bench.measure_2721.common import sha256_text
+
+        if sha256_text(out["diff"]) != out["sha256"]:
+            out["diff"] = ""
+            out["invalid_reason"] = "SNAPSHOT_SHA256_MISMATCH"
+            return out
+    out["present"] = True
+    return out
+
+
+def dir_sha256(root: Path) -> str:
+    """sha256 over every file under ``root`` (relative path + content), ``.lock`` files excluded."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for path in sorted(p for p in Path(root).rglob("*") if p.is_file() and not p.name.endswith(".lock")):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def restore_state_root(state_root: Path, snapshot: Path) -> dict[str, Any]:
+    """Make ``state_root`` an exact copy of ``snapshot`` and prove it by hash (driver item 9)."""
+    import shutil
+
+    expected = dir_sha256(snapshot)
+    for child in list(Path(state_root).iterdir()) if Path(state_root).exists() else []:
+        if child.name.endswith(".lock"):
+            continue
+        shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
+    Path(state_root).mkdir(parents=True, exist_ok=True)
+    shutil.copytree(snapshot, state_root, dirs_exist_ok=True, symlinks=True)
+    actual = dir_sha256(state_root)
+    return {"expected_sha256": expected, "restored_sha256": actual, "ok": expected == actual}
+
+
+def leak_surfaces(repo: Path) -> dict[str, list[str]]:
+    """What a later row could inherit from a shared repository (driver item 4)."""
+    refs = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/nexus-candidates/",
+               check=False).splitlines()
+    return {
+        "candidate_refs": sorted(refs),
+        "stash": git(repo, "stash", "list", check=False).splitlines(),
+        "worktrees": sorted(line for line in git(repo, "worktree", "list", "--porcelain", check=False).splitlines()
+                            if line.startswith("worktree ")),
+    }
+
+
+def new_leaks(before: Mapping[str, list[str]], after: Mapping[str, list[str]], own: str) -> dict[str, list[str]]:
+    """Entries present after the row and not before it, except the row's own ones."""
+    leaks = {}
+    for key in before:
+        added = [entry for entry in after.get(key, []) if entry not in before[key] and own not in entry]
+        if added:
+            leaks[key] = added
+    return leaks
+
+
 class NexusArmDriver:
     def __init__(self, client: GatewayClient, *, campaign_id: str, goal_id: str, scope_id: str,
                  controller_git: Optional[Path] = None, state_dir: Optional[Path] = None,
                  external_target_root: Optional[Path] = None, probe_model: str = "claude-haiku-5-5",
                  probe_provider: str = "claude", trace_dir: Optional[Path] = None, arm_label: str = ARM_NEXUS,
-                 poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep):
+                 poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep,
+                 targets_root: Optional[Path] = None, state_root: Optional[Path] = None,
+                 state_snapshot: Optional[Path] = None, learning_phase: Optional[str] = None,
+                 key_file: Optional[str] = None):
         self.client = client
         self.campaign_id = campaign_id
         self.goal_id = goal_id
@@ -189,6 +295,17 @@ class NexusArmDriver:
         self.arm_label = arm_label
         self.poll_seconds = poll_seconds
         self.sleep = sleep
+        # #2742: per (task, repeat) Controller clones live under the measurement
+        # root (M4: ~/Workspace/nexus-measure-2721/targets/<task>-<repeat>/).
+        self.targets_root = targets_root
+        # Driver item 9: NEXUS_STATE_ROOT is restored from the snapshot before
+        # every row and verified by a whole-dir sha256 (``.lock`` files excluded).
+        self.state_root = state_root
+        self.state_snapshot = state_snapshot
+        # Recorded on every row; the Gateway's NEXUS_LEARNING_WRITEBACK /
+        # NEXUS_STATE_READ_ONLY (#2736) are set per phase by the instance owner.
+        self.learning_phase = learning_phase
+        self.key_file = key_file
 
     # -- argument builders (pure; the dry run captures them) -------------------
     def card_args(self, task: Mapping[str, Any], gw_task: str) -> dict[str, Any]:
@@ -242,7 +359,11 @@ class NexusArmDriver:
             verify_base_checkout,
         )
 
-        controller = run_root / "controllers" / run_id / "base"
+        root = (self.targets_root / f"{task['task_id']}-r{run_id.rsplit('-r', 1)[-1]}"
+                if self.targets_root is not None else run_root / "controllers" / run_id)
+        if root.exists():
+            raise RuntimeError(f"Controller dir already exists (never reused): {root}")
+        controller = root / "repo"
         checkout_base(Path(task["base_checkout"]), task["base_commit"], controller)
         link_venv(task, controller)
         verify_base_checkout(controller, task["base_commit"])
@@ -263,11 +384,23 @@ class NexusArmDriver:
             "repeat": repeat, "gateway_task_id": gw_task, "gateway_url": self.client.url,
             "non_model_solve_path": False,
         }
+        from scripts.bench.measure_2721 import watchdog
+
         started = time.monotonic()
         created = False
         diff = ""
         controller: Optional[Path] = None
+        row["learning_phase"] = self.learning_phase
+        watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=self.arm_label,
+                           cap_s=timeout_seconds)
+        leak_before = leak_surfaces(self.controller_git) if self.controller_git is not None else None
         try:
+            if self.state_root is not None and self.state_snapshot is not None:
+                restore = restore_state_root(self.state_root, self.state_snapshot)
+                row["state_restore"] = restore
+                if not restore["ok"]:
+                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="STATE_ROOT_RESTORE_MISMATCH")
+                    return row
             health = self.client.health()
             row["gateway_health"] = {key: health.get(key) for key in (
                 "git_head", "repo_head_current", "server_instance_id", "core_provenance", "controller_binding")}
@@ -315,6 +448,20 @@ class NexusArmDriver:
                 stuck = self._await_terminal(gw_task, transcript)
                 if stuck is not None:
                     row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
+            if leak_before is not None and self.controller_git is not None:
+                leaks = new_leaks(leak_before, leak_surfaces(self.controller_git), gw_task)
+                if leaks:
+                    row["leaks"] = leaks
+                    row.setdefault("flags", []).append("STATE_LEAK")
+            if self.state_root is not None and self.state_snapshot is not None and row.get("state_restore"):
+                row["state_after_sha256"] = dir_sha256(self.state_root)
+            event = watchdog.infra_event_for(run_root, run_id)
+            if event is not None:
+                row.update(outcome=OUTCOME_INFRA, infra=True, watchdog_event=event)
+            diff, redacted = redact_diff(diff, self.key_file)
+            if redacted:
+                row.setdefault("flags", []).append(FLAG_SECRET_IN_DIFF)
+            watchdog.mark_snapshot(run_root)
             row["wall_seconds"] = round(time.monotonic() - started, 3)
             write_json(run_root / "inputs" / f"{run_id}.json", capture)
             write_json(run_root / "transcripts" / f"{run_id}.json", self.client.redact(transcript))
@@ -324,6 +471,7 @@ class NexusArmDriver:
             row["diff_path"] = str(diff_path)
             row.update(candidate_facts(diff, task))
             append_jsonl(run_root / "rows.jsonl", row)
+            watchdog.end_row(run_root)
         if stuck is not None:
             raise GatewayStuck(f"{gw_task}: {stuck}")
         return row
@@ -401,8 +549,9 @@ class NexusArmDriver:
         candidate = state.get("candidate_commit_sha") or ""
         target = Path(str(state.get("target_worktree") or ""))
         diff, source = "", "none"
-        if isinstance(state.get("measurement_worktree_diff"), str):
-            diff, source = state["measurement_worktree_diff"], "gateway_snapshot"
+        snapshot = measurement_snapshot(state)
+        if snapshot["present"]:
+            diff, source = snapshot["diff"], "gateway_snapshot"
         elif initial and str(target) not in ("", ".") and target.is_dir():
             diff, source = capture_diff(target, initial), "target_worktree"
         elif initial and candidate and controller is not None:
@@ -424,6 +573,10 @@ class NexusArmDriver:
                 "seatbelt_sha256": trace["sidecar"].get("seatbelt_sha256"),
                 "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
                 "worker_span_ms": trace["sidecar"].get("wall_time_ms"),
+                "served_models": list(summary.served_models),
+                "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
+                "key_label": trace["sidecar"].get("key_label"),
+                "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
             })
             claude["claude_trace_path"] = trace["trace_path"]
             claude["claude_attempts"] = len(runs)
@@ -438,13 +591,21 @@ class NexusArmDriver:
         network = [a for a in claude.get("proxy_denied") or []]
         flags = [flag for flag in (FLAG_TIMEOUT if timed_out else None, lookup["flag"],
                                    FLAG_NETWORK_ATTEMPT if network else None) if flag]
+        if snapshot["invalid_reason"]:
+            flags.append("SNAPSHOT_INVALID")
+        served_flag = served_model_flag(claude.get("served_models"))
+        if served_flag:
+            flags.append(served_flag)
         return {
             "flags": flags,
             "lookup": lookup,
             "_diff": diff,
             "candidate_source": source,
-            "outcome": OUTCOME_INFRA if infra else OUTCOME_DONE,
-            "infra": infra,
+            "snapshot": {key: value for key, value in snapshot.items() if key != "diff"},
+            "void_reason": snapshot["invalid_reason"],
+            # An unusable snapshot voids the row: re-run in every arm (S4).
+            "outcome": OUTCOME_INFRA if infra or snapshot["invalid_reason"] else OUTCOME_DONE,
+            "infra": infra or bool(snapshot["invalid_reason"]),
             "gateway_status": state.get("status"),
             "verification_verdict": state.get("verification_verdict"),
             "candidate_commit_sha": candidate or None,
@@ -477,6 +638,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--state-dir", help="the instance's self-hosted state dir (read only)")
     parser.add_argument("--external-target-root", help="root the Gateway allows external targets under")
     parser.add_argument("--trace-dir", help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only)")
+    parser.add_argument("--targets-root", help="measurement root for per-row Controller clones (#2742)")
+    parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored before each row)")
+    parser.add_argument("--state-snapshot", help="directory snapshot to restore NEXUS_STATE_ROOT from")
+    parser.add_argument("--learning-phase", help="recorded on every row (LA / LB / COLD / IRRELEVANT / M)")
+    parser.add_argument("--key-file", default=str(Path("~/.config/nexus-measure-2721/anthropic.env").expanduser()),
+                        help="the measurement key file, used only to redact candidate diffs")
     parser.add_argument("--arm-label", choices=[ARM_NEXUS, "NEXUS_NOOP"], default=ARM_NEXUS,
                         help="NEXUS_NOOP when the Gateway runs the no-model fake claude binary")
     parser.add_argument("--repeats", type=int, nargs="+", default=[1])
@@ -491,6 +658,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         external_target_root=Path(args.external_target_root) if args.external_target_root else None,
         trace_dir=Path(args.trace_dir) if args.trace_dir else None,
         arm_label=args.arm_label,
+        targets_root=Path(args.targets_root) if args.targets_root else None,
+        state_root=Path(args.state_root) if args.state_root else None,
+        state_snapshot=Path(args.state_snapshot) if args.state_snapshot else None,
+        learning_phase=args.learning_phase,
+        key_file=args.key_file,
     )
     rows = []
     try:
