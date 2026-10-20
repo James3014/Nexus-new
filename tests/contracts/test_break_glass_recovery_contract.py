@@ -412,7 +412,9 @@ def github_integration_readback(
         # and a true two-parent merge commit on main.
         "merged_at": "2026-09-06T07:10:00+08:00",
     }
-    main_branch = {"commit": {"sha": main_sha, "parents": [{"sha": "6" * 40}, {"sha": head_sha}]}}
+    main_branch: dict[str, object] = {
+        "commit": {"sha": main_sha, "parents": [{"sha": "6" * 40}, {"sha": head_sha}]}
+    }
     return pull_request, main_branch
 
 
@@ -494,7 +496,9 @@ def test_github_integration_readback_g05_g06_positive_control() -> None:
 
 
 @pytest.mark.parametrize("merged_at", [None, "", "not-a-time", 1757113500, "2026-09-06T07:10:00"])
-def test_github_integration_readback_fails_closed_without_parseable_merged_at(merged_at: object) -> None:
+def test_github_integration_readback_fails_closed_without_parseable_merged_at(
+    merged_at: object,
+) -> None:
     """#2796: a missing, null, non-string, unparseable or naive merged_at must not skip G05."""
     integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
     pull_request, main_branch = github_integration_readback()
