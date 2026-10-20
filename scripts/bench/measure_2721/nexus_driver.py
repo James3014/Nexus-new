@@ -28,6 +28,7 @@ import re
 import stat
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -159,6 +160,11 @@ class GatewayClient:
     def _send(self, method: str, path: str, body: Optional[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._transport(method, path, body)
+        except urllib.error.HTTPError as exc:
+            # The Gateway answered (e.g. 400 when its handler raised): a Nexus error,
+            # never a lost connection (re-review #3).
+            raise GatewayToolError(f"{method} {path}", {"http_status": exc.code,
+                                                         "reason": str(exc.reason)[:200]}) from exc
         except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
             # URLError, ConnectionResetError, socket timeouts, RemoteDisconnected, ...
             raise GatewayConnectionLost(f"{method} {path}: {type(exc).__name__}: {str(exc)[:200]}") from exc
@@ -715,9 +721,12 @@ class NexusArmDriver:
                 row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
                            infra=_is_infra(message), error=message[:2000])
         except GatewayConnectionLost as exc:
-            # Re-review B2: a Gateway lost at the connection layer (the watchdog kills
-            # it) is INFRA in every case; the row is written and the block re-runs.
-            row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="GATEWAY_CONNECTION_LOST",
+            # The row is always written.  Before acceptance: infra (Nexus reliability).
+            # After acceptance: a Nexus failure (GATEWAY_ERROR, not solved) unless the
+            # watchdog recorded an event for this row (it killed the Gateway) -> INFRA,
+            # set in ``finally`` from the watchdog event (re-review #3).
+            row.update(outcome=OUTCOME_GATEWAY_ERROR if self._worker_accepted else OUTCOME_INFRA,
+                       infra=not self._worker_accepted, void_reason="GATEWAY_CONNECTION_LOST",
                        gateway_connection_lost=True, error=str(exc)[:2000])
         finally:
             stuck = None

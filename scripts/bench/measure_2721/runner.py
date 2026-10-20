@@ -250,7 +250,7 @@ def block_outcomes(run_root: Path) -> Optional[dict[str, Any]]:
     drops both, so only complete blocks reach the scorer).
     """
     run_root = Path(run_root)
-    progress = _records(run_root / PROGRESS_FILE)
+    progress = [p for p in _records(run_root / PROGRESS_FILE) if "event" not in p]  # done rows only
     if not progress and not (run_root / BLOCKS_FILE).is_file():
         return None
     final: dict[int, dict[str, Any]] = {}
@@ -357,7 +357,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     progress, blocks_path = run_root / PROGRESS_FILE, run_root / BLOCKS_FILE
     for path in (progress, blocks_path):
         _drop_torn_tail(path)
-    done_progress = _records(progress)
+    started = [p for p in _records(progress) if p.get("event") == "start"]
+    done_progress = [p for p in _records(progress) if "event" not in p]
     last_status = {int(r["block"]): r for r in _records(blocks_path)}
     rows: list[dict[str, Any]] = []
     last_completed = max((b for b, r in last_status.items() if r["status"] in RESOLVED), default=None)
@@ -381,9 +382,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                    and int(p["attempt"]) == attempt}
         written = {r.get("run_id") for r in _records(run_root / "rows.jsonl")}
         why: dict[str, str] = {}
+        begun = {p["arm"] for p in started if int(p["block"]) == block["block"] and int(p["attempt"]) == attempt}
         for arm in block["arms"]:
             entry = entries.get(arm)
-            if entry is None or entry.get("run_id") not in written:
+            if entry is None and arm in begun:
+                why[arm] = "CRASHED"  # started, never finished: infra
+            elif entry is None or entry.get("run_id") not in written:
                 why[arm] = "MISSING"
             elif entry["infra"]:
                 why[arm] = "INFRA"
@@ -406,29 +410,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     for block in _blocks(schedule):
         state = last_status.get(block["block"])
         if state is not None and state["status"] == "COMPLETE" and evaluate(block, int(state["attempt"]))[0]:
-            # A late watchdog event (or a lost row) on a block recorded COMPLETE: re-run it whole.
-            state = dict(state, status="RERUN")
-            _append(blocks_path, {**state, "late_infra": evaluate(block, int(state["attempt"]))[1]["why"]})
+            # A late watchdog event (or a lost row) on a block recorded COMPLETE: re-run it
+            # whole -- or, with no re-run left, exclude it (re-review #3: max 2 re-runs).
+            late = evaluate(block, int(state["attempt"]))[1]["why"]
+            state = dict(state, status="RERUN" if int(state["attempt"]) < MAX_INFRA_RERUNS
+                         else "EXCLUDED_AFTER_RERUNS", late_infra=late)
+            _append(blocks_path, state)
+            last_status[block["block"]] = state
         if state is not None and state["status"] in RESOLVED:
             continue  # resumed: completed rows are never re-run
         attempt = int(state["attempt"]) + 1 if state is not None else 0
-        if any(int(p["block"]) == block["block"] and int(p["attempt"]) == attempt for p in done_progress):
-            # Resume of an interrupted attempt (crash, stuck or lost Gateway, busy): its
-            # missing rows count as infra and the WHOLE block re-runs, every arm.
-            if record_attempt(block, attempt) != "RERUN":
-                last_completed = block["block"]
-                continue
-            attempt += 1
+        begun = {p["arm"] for p in started if int(p["block"]) == block["block"] and int(p["attempt"]) == attempt}
+        if begun:
+            # Resume of an interrupted attempt.  An arm that started and never finished
+            # (a crash), an infra row or a watchdog event re-runs the WHOLE block, every
+            # arm.  Arms never started (the runner stopped on purpose after a non-infra
+            # row, e.g. a lost Gateway without a watchdog event) simply run now.
+            infra_now = [arm for arm in evaluate(block, attempt)[0] if arm in begun]
+            if infra_now:
+                if record_attempt(block, attempt) != "RERUN":
+                    last_completed = block["block"]
+                    continue
+                attempt += 1
         task = by_id[block["task_id"]]
         while True:
+            done_arms = {p["arm"] for p in done_progress if int(p["block"]) == block["block"]
+                         and int(p["attempt"]) == attempt}
+            remaining = [arm for arm in block["arms"] if arm not in done_arms]
             try:
-                # PREREG v0.9: admit the whole block or start nothing.
-                ledger.begin_block(sum(arm in CHARGED_ARMS for arm in block["arms"]))
+                # PREREG v0.9: admit the whole (rest of the) block or start nothing.
+                ledger.begin_block(sum(arm in CHARGED_ARMS for arm in remaining))
             except BudgetExhausted as exc:
                 return stop(75, "BUDGET_CAP", detail=str(exc), next_block=block["block"])
             admitted = ledger.admitted()
-            for arm in block["arms"]:
+            for arm in remaining:
                 slot = block["slots"][block["arms"].index(arm)]
+                start = {"event": "start", "block": block["block"], "attempt": attempt, "arm": arm, "slot": slot}
+                _append(progress, start)
+                started.append(start)
                 try:
                     if arm == "BARE":
                         row = arms_module.run_bare(task, block["repeat"], run_root, provider,

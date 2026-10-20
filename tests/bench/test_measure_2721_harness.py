@@ -2171,43 +2171,125 @@ def test_runner_reruns_the_whole_block_after_a_lost_gateway_or_a_crash(manifest,
     import urllib.error
 
     class Dies(FakeGateway):
-        """The Gateway is killed after accepting the worker (the watchdog kills it)."""
+        """The Gateway stops answering after accepting the worker; with ``watchdog`` the
+        watchdog killed it and recorded an event for the current row."""
+
+        def __init__(self, run_root=None):
+            super().__init__()
+            self.run_root = run_root
 
         def __call__(self, method, path, body):
             if body and body.get("params", {}).get("name") in ("nexus_task_wait", "nexus_task_status",
                                                                   "nexus_task_cancel"):
+                if self.run_root is not None:
+                    current = json.loads((self.run_root / "run" / "current_row.json").read_text())
+                    with (self.run_root / "run" / "infra_events.jsonl").open("a") as handle:
+                        handle.write(json.dumps({"row_id": current["row_id"], "kind": "killed"}) + "\n")
+                    self.run_root = None
                 raise ConnectionResetError(54, "Connection reset by peer")
             return super().__call__(method, path, body)
 
-    _fake_build(monkeypatch, {"NEXUS": Dies()})
+    # (a) Lost after acceptance, no watchdog event: a Nexus failure, not infra (re-review #3).
     run = tmp_path / "run"
+    _fake_build(monkeypatch, {"NEXUS": Dies()})
     assert _runner_main(manifest, tmp_path, run) == 75
     (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
-    assert row["infra"] and row["void_reason"] == "GATEWAY_CONNECTION_LOST" and row["worker_accepted"]
-    assert blind.exclusion_reason(row)[0] == "SYMMETRIC_INFRA"
-    # The reviewer's case: a row crashes outright (no row written for it).
+    assert row["void_reason"] == "GATEWAY_CONNECTION_LOST" and row["worker_accepted"] and not row["infra"]
+    assert blind.exclusion_reason(row) is None and blind.run_invalid_reason(row) == "VOID:GATEWAY_CONNECTION_LOST"
     _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run) == 0
+    (block,) = list(read_jsonl(run / "blocks.jsonl"))  # the same attempt finished: no second NEXUS try
+    assert block["status"] == "COMPLETE" and block["run_ids"]["NEXUS"] == row["run_id"]
+    # (b) The watchdog killed the Gateway (an event for the row): INFRA, the whole block re-runs.
+    run_w = tmp_path / "run-w"
+    _fake_build(monkeypatch, {"NEXUS": Dies(run_w)})
+    assert _runner_main(manifest, tmp_path, run_w, ledger="spend-w.json") == 75
+    (row,) = [r for r in read_jsonl(run_w / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert row["infra"] and row["watchdog_event"] and blind.exclusion_reason(row)[0] == "SYMMETRIC_INFRA"
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run_w, ledger="spend-w.json") == 0
+    assert [(b["attempt"], b["status"]) for b in read_jsonl(run_w / "blocks.jsonl")] == [
+        (0, "RERUN"), (1, "COMPLETE")]
+    # (c) A row crashes outright (no row written): the whole block re-runs, every arm.
+    run_c = tmp_path / "run-c"
     real_noop = arms.run_noop
     monkeypatch.setattr(arms, "run_noop", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
-    assert _runner_main(manifest, tmp_path, run) == 75
-    assert json.loads((run / "stop.json").read_text())["reason"] == "ROW_EXCEPTION"
+    assert _runner_main(manifest, tmp_path, run_c, ledger="spend-c.json") == 75
+    assert json.loads((run_c / "stop.json").read_text())["reason"] == "ROW_EXCEPTION"
     monkeypatch.setattr(arms, "run_noop", real_noop)
-    with (run / "progress.jsonl").open("a") as handle:
+    with (run_c / "progress.jsonl").open("a") as handle:
         handle.write('{"block": 0, "torn')  # a crash mid-write
-    assert _runner_main(manifest, tmp_path, run) == 0
-    blocks = list(read_jsonl(run / "blocks.jsonl"))
-    assert [b["status"] for b in blocks][-1] == "COMPLETE" and blocks[-1]["attempt"] == 2
-    assert all(b["status"] == "RERUN" for b in blocks[:-1])
-    final = blocks[-1]["run_ids"]
-    earlier = {rid for b in blocks[:-1] for rid in b["run_ids"].values()}
+    assert _runner_main(manifest, tmp_path, run_c, ledger="spend-c.json") == 0
+    blocks = list(read_jsonl(run_c / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[0]["infra_why"]["NOOP"] == "CRASHED"
+    final, earlier = blocks[-1]["run_ids"], set(blocks[0]["run_ids"].values())
     assert set(final) == {"BARE", "NEXUS", "NOOP"} and not set(final.values()) & earlier  # every arm re-ran
-    # The client turns every connection-layer error into GatewayConnectionLost.
+    # The client: connection-layer errors -> GatewayConnectionLost; an HTTP error answer is the
+    # Gateway's own error (GatewayToolError), never a lost connection.
     for exc in (urllib.error.URLError("refused"), TimeoutError("timed out"), ConnectionResetError()):
         def broken(*_a, exc=exc):
             raise exc
         client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=broken)
         with pytest.raises(nexus_driver.GatewayConnectionLost):
             client.health()
+
+
+def test_gateway_http_errors_after_acceptance_are_not_infra(manifest, tmp_path):
+    import urllib.error
+
+    (task,) = arms.load_manifest(manifest)
+
+    class Answers400(FakeGateway):
+        def __call__(self, method, path, body):
+            if body and body.get("params", {}).get("name") == "nexus_task_wait":
+                raise urllib.error.HTTPError("http://127.0.0.1:18766/mcp", 400, "Bad Request", {}, None)
+            return super().__call__(method, path, body)
+
+    row = _driver(Answers400()).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["worker_accepted"] and row["outcome"] == "GATEWAY_ERROR" and not row["infra"]
+    assert "http_status" in row["error"] and blind.exclusion_reason(row) is None
+    (candidate,), amap = _blind_rows([row], tmp_path, task)
+    assert "RUN_INVALID_NOT_SOLVED" in candidate["scoring_flags"] and amap["excluded"] == []
+
+    class Refuses500(FakeGateway):
+        def __call__(self, method, path, body):
+            if body and body.get("params", {}).get("name") == "nexus_worker_candidate":
+                raise urllib.error.HTTPError("http://127.0.0.1:18766/mcp", 500, "Error", {}, None)
+            return super().__call__(method, path, body)
+
+    row = _driver(Refuses500()).run(task, 2, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] and not row["worker_accepted"] and blind.exclusion_reason(row)[0] == "NEXUS_NOT_ACCEPTED"
+
+
+def test_reopened_complete_block_never_exceeds_two_reruns(manifest, tmp_path, monkeypatch):
+    class Flaky(FakeGateway):
+        def __init__(self, refusals):
+            super().__init__()
+            self.refusals, self.refused_last = refusals, False
+
+        def _is_error(self, name):
+            return name == "nexus_worker_candidate" and self.refused_last
+
+        def _answer(self, name, args):
+            self.refused_last = name == "nexus_worker_candidate" and self.refusals > 0
+            if self.refused_last:
+                self.refusals -= 1
+                return {"error": "WORKER_REFUSED"}
+            return super()._answer(name, args)
+
+    _fake_build(monkeypatch, {"NEXUS": Flaky(2)})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 0
+    last = list(read_jsonl(run / "blocks.jsonl"))[-1]
+    assert (last["attempt"], last["status"]) == (2, "COMPLETE")
+    with (run / "run" / "infra_events.jsonl").open("a") as handle:
+        handle.write(json.dumps({"row_id": last["run_ids"]["BARE"], "kind": "late"}) + "\n")
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks][-1] == (2, "EXCLUDED_AFTER_RERUNS")
+    assert max(b["attempt"] for b in blocks) == 2
 
 
 def test_runner_reruns_a_complete_block_with_a_late_watchdog_event(manifest, tmp_path, monkeypatch):

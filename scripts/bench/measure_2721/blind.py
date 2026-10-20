@@ -30,7 +30,10 @@ by the scoring owner on #2721, 2026-10-20):
   Claude attempt ended as infra (``claude_infra:*``, e.g. a 429 with a
   partial diff, provider unavailable), a provider infra marker in the worker
   error, a watchdog (host) event, a CLI time-limit mismatch or an unusable
-  task venv, plus a stuck Gateway (PREREG §3.3) (``rule: SYMMETRIC_INFRA``).
+  task venv, plus a task the harness's own polling found stuck (PREREG §3.3)
+  (``rule: SYMMETRIC_INFRA``).  A lost connection or an HTTP error answer of
+  the Gateway after acceptance is infra only with a watchdog event for the
+  row (the watchdog killed the Gateway); otherwise it is a Nexus failure.
   Any other failure after acceptance is Gateway/Nexus-side -- GATEWAY_ERROR,
   STATE_LEAK, a void such as SNAPSHOT_MISSING, TRACE_MISSING or
   LB_STATE_CHANGED -- and is NOT infra: the row stays a candidate with
@@ -90,7 +93,10 @@ def run_invalid_reason(row: Mapping[str, Any]) -> str | None:
 # refused (an error answer to card create/commit, probe or the worker request, or a
 # duplicate task); a failure of the harness's own pre-checks (venv, Controller reset,
 # state restore, a busy instance) is HARNESS_NOT_SUBMITTED.
-NEXUS_REFUSAL_PREFIXES = ("PRE_SUBMIT_FAILURE:", "WORKER_NOT_ACCEPTED:", "DUPLICATE_TASK")
+NEXUS_REFUSAL_PREFIXES = ("PRE_SUBMIT_FAILURE:", "WORKER_NOT_ACCEPTED:", "DUPLICATE_TASK", "GATEWAY_CONNECTION_LOST")
+# ``gateway_stuck`` values the driver sets when the Gateway stopped answering or answered
+# with an error while the task was being cancelled (not a harness-timeout stuck).
+GATEWAY_ANSWER_STUCK_PREFIXES = ("connection_lost:", "status_error:")
 # Model-side infra causes a BARE row also has (arms.run_bare), checked on NEXUS rows.
 SYMMETRIC_INFRA_FLAGS = ("CLI_TIMEOUT_MISMATCH", "VENV_NOT_USABLE")
 
@@ -104,13 +110,16 @@ def symmetric_infra_reasons(row: Mapping[str, Any]) -> list[str]:
         reasons.append("PROVIDER_INFRA_MARKER")
     if row.get("watchdog_event") is not None:
         reasons.append("WATCHDOG_EVENT")
-    if row.get("gateway_connection_lost"):
-        # The Gateway died at the connection layer (e.g. the watchdog killed it): INFRA.
-        reasons.append("GATEWAY_CONNECTION_LOST")
-    if row.get("gateway_stuck"):
-        # PREREG §3.3: a stuck Gateway is INFRA (both arms re-run), whether or not
-        # the watchdog fired first.
+    stuck = str(row.get("gateway_stuck") or "")
+    if stuck and not stuck.startswith(GATEWAY_ANSWER_STUCK_PREFIXES):
+        # PREREG §3.3 / v0.9.2: a task the harness's own bounded polling found never
+        # terminal is INFRA (both arms re-run), whether or not the watchdog fired first.
+        # A "stuck" that is really a lost connection or an error answer of the Gateway
+        # follows the rule below instead.
         reasons.append("GATEWAY_STUCK")
+    # A lost connection (GATEWAY_CONNECTION_LOST) or an HTTP error answer after
+    # acceptance is a Nexus failure, not infra -- unless the watchdog recorded an event
+    # for the row (WATCHDOG_EVENT above): then the watchdog killed the Gateway.
     reasons.extend(flag for flag in SYMMETRIC_INFRA_FLAGS if flag in (row.get("flags") or []))
     return reasons
 
