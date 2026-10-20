@@ -66,7 +66,12 @@ in `issues.json`), an Issue gets `eia:escalate` and is no longer scheduled.
 
 ## Deployment prerequisite: `python3` under the daemon PATH
 
-Cards use plain `python3`. Closure runs verifiers with the daemon's environment, so the
+Cards use plain `python3`. Closure runs verifiers with an allow-listed environment: the
+daemon's `PATH`, `LANG` and `LC_ALL`, a fresh temporary `HOME` and `TMPDIR`, and the base and
+candidate SHAs; nothing else (no tokens, `GH_*`, `NEXUS_*` or `PYTHONPATH`) is forwarded (#2793).
+A pytest verifier runs as `python3 -P -m pytest` with closure's own ini (keys copied from the
+bound base commit's `pytest.ini`, never the candidate's), plugin autoload disabled, and passes
+only with a JUnit report showing at least one test and no failures, errors or skips. So the
 operator must put the Nexus venv `bin` first on `PATH` in
 `~/Library/LaunchAgents/com.nexus.external-intelligence.plist`. `start` checks this by running
 `env -i PATH=<plist PATH> python3 -c 'import nexus, pytest, pydantic'` in the daemon

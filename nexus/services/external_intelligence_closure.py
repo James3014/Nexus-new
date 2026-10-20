@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -205,6 +206,12 @@ def _raw_diff_patch(root: Path, base: str, head: str) -> str:
     return result.stdout
 
 
+def _git_no_replace_env() -> dict[str, str]:
+    """Environment for closure-owned git reads: ``refs/replace`` must not change what
+    closure sees as the base config or the base..candidate diff."""
+    return {**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"}
+
+
 def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | None, str, str]:
     argv = ["git", *args]
     try:
@@ -215,6 +222,7 @@ def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | No
             text=True,
             timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
             check=False,
+            env=_git_no_replace_env(),
         )
     except subprocess.TimeoutExpired as exc:
         return argv, None, str(exc.stdout or ""), str(exc.stderr or "")
@@ -887,6 +895,482 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# --- Verifier hardening (#2793) -------------------------------------------------
+# Pytest verifiers must leave positive JUnit evidence; every verifier runs with an
+# allow-listed environment; candidate diffs that add or change root-level files able
+# to shadow the interpreter or pytest configuration are refused unless authorized.
+VERIFIER_EVIDENCE_PYTEST_JUNIT = "PYTEST_JUNIT"
+VERIFIER_EVIDENCE_EXIT_CODE_ONLY = "EXIT_CODE_ONLY"
+VERIFIER_JUNIT_MISSING = "VERIFIER_JUNIT_MISSING"
+VERIFIER_JUNIT_INVALID = "VERIFIER_JUNIT_INVALID"
+VERIFIER_JUNIT_NO_TESTS = "VERIFIER_JUNIT_NO_TESTS"
+VERIFIER_JUNIT_FAILURES = "VERIFIER_JUNIT_FAILURES"
+VERIFIER_JUNIT_SKIPPED = "VERIFIER_JUNIT_SKIPPED"
+VERIFIER_DECLARED_TESTS_NOT_PASSED = "VERIFIER_DECLARED_TESTS_NOT_PASSED"
+VERIFIER_PYTEST_INTERPRETER_UNRESOLVED = "VERIFIER_PYTEST_INTERPRETER_UNRESOLVED"
+VERIFIER_ROOT_SHADOWING_REFUSED = "VERIFIER_ROOT_SHADOWING_REFUSED"
+VERIFIER_ROOT_SHADOW_CHECK_ERROR = "VERIFIER_ROOT_SHADOW_CHECK_ERROR"
+# Root-level paths (compared case-insensitively) that can shadow ``python -m pytest``
+# or a plugin closure loads explicitly, inject code at interpreter start-up, or carry
+# pytest configuration.
+VERIFIER_ROOT_SHADOW_NAMES = frozenset({
+    "pytest.py",
+    "pytest_asyncio.py",
+    "conftest.py",
+    "sitecustomize.py",
+    "usercustomize.py",
+    "setup.cfg",
+    "tox.ini",
+    "pytest.ini",
+    ".pytest.ini",
+})
+# Root-level package directories that shadow pytest (or the explicitly loaded
+# ``pytest_asyncio`` plugin: the candidate root is on ``pythonpath``) like ``pytest.py``.
+VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio"})
+# Basenames refused at ANY depth: a nested ``conftest.py`` below ``--confcutdir`` is
+# loaded too and can rewrite outcomes (e.g. a ``pytest_runtest_makereport`` hookwrapper).
+VERIFIER_ANY_DEPTH_SHADOW_NAMES = frozenset({"conftest.py"})
+# The complete verifier environment.  Nothing else from the daemon environment is
+# forwarded (no tokens, keys, ``GH_*``, ``NEXUS_*``, ``PYTHONPATH``, ``GIT_*`` ...).
+# ``PATH`` is needed because task cards name ``python3``/``sh``/``git`` by name and the
+# deployment puts the Nexus venv ``bin`` first on PATH (docs/ops/eia_nightly.md); a venv
+# interpreter locates its site-packages from ``pyvenv.cfg``, so ``VIRTUAL_ENV`` and
+# ``UV_*`` are not needed.  ``HOME`` and ``TMPDIR`` are fresh per-verifier temp dirs.
+VERIFIER_ENV_FORWARDED = ("PATH", "LANG", "LC_ALL")
+VERIFIER_ENV_ALLOWLIST = frozenset({
+    *VERIFIER_ENV_FORWARDED,
+    "HOME",
+    "TMPDIR",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+    VERIFIER_ENV_BASE_SHA,
+    VERIFIER_ENV_CANDIDATE_SHA,
+})
+# Keys copied from the BASE commit's pytest configuration into the verifier's own ini
+# (the candidate tree's configuration is never read).  ``addopts`` is not copied; only its
+# ``--import-mode=`` token is kept.
+_PYTEST_BASE_INI_KEYS = (
+    "python_files",
+    "python_classes",
+    "python_functions",
+    "norecursedirs",
+    "testpaths",
+    "filterwarnings",
+    "markers",
+    "xfail_strict",
+    "asyncio_mode",
+    "asyncio_default_fixture_loop_scope",
+    "asyncio_default_test_loop_scope",
+)
+_PYTEST_VALUE_OPTIONS = frozenset({
+    "-k",
+    "-m",
+    "-p",
+    "-o",
+    "-c",
+    "-W",
+    "-r",
+    "--deselect",
+    "--ignore",
+    "--ignore-glob",
+    "--rootdir",
+    "--confcutdir",
+    "--basetemp",
+    "--junitxml",
+    "--junit-xml",
+    "--maxfail",
+    "--tb",
+    "--override-ini",
+    "--config-file",
+    "--import-mode",
+})
+_PYTHON_VALUE_OPTIONS = frozenset({"-X", "-W", "-Q"})
+_PYTHON_NAME_RE = re.compile(r"^python(?:[0-9]+(?:\.[0-9]+)*)?$")
+_JUNIT_MAX_BYTES = 10 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class _PytestInvocation:
+    interpreter: str
+    interpreter_args: tuple[str, ...]
+    pytest_args: tuple[str, ...]
+    declared_node_ids: tuple[str, ...]
+
+
+def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation | None | str:
+    """Classify ``argv``: a pytest invocation, ``None`` (not pytest) or an error code."""
+    if not argv:
+        return None
+    name = PurePosixPath(argv[0]).name
+    if name in {"pytest", "py.test"}:
+        located = argv[0] if "/" in argv[0] else shutil.which(argv[0], path=path_env)
+        if not located:
+            return VERIFIER_PYTEST_INTERPRETER_UNRESOLVED
+        directory = Path(located).parent
+        interpreter = next(
+            (str(directory / c) for c in ("python3", "python") if (directory / c).is_file()),
+            "",
+        )
+        if not interpreter:
+            return VERIFIER_PYTEST_INTERPRETER_UNRESOLVED
+        interpreter_args: tuple[str, ...] = ()
+        pytest_args = tuple(argv[1:])
+    elif _PYTHON_NAME_RE.match(name):
+        index = 1
+        while index < len(argv) and argv[index] != "-m":
+            token = argv[index]
+            if not token.startswith("-") or token.startswith("-c"):
+                return None
+            index += 2 if token in _PYTHON_VALUE_OPTIONS else 1
+        if index + 1 >= len(argv) or argv[index + 1] != "pytest":
+            return None
+        interpreter = argv[0]
+        interpreter_args = tuple(argv[1:index])
+        pytest_args = tuple(argv[index + 2 :])
+    else:
+        return None
+    declared: list[str] = []
+    skip_next = False
+    for token in pytest_args:
+        if skip_next:
+            skip_next = False
+            continue
+        if token in _PYTEST_VALUE_OPTIONS:
+            skip_next = True
+            continue
+        if token.startswith("-") or "::" not in token:
+            continue
+        path_part, _, rest = token.partition("::")
+        declared.append(f"{PurePosixPath(path_part).as_posix()}::{rest}")
+    return _PytestInvocation(
+        interpreter=interpreter,
+        interpreter_args=interpreter_args,
+        pytest_args=pytest_args,
+        declared_node_ids=tuple(declared),
+    )
+
+
+def _git_show_bytes(root: Path, rev: str, path: str) -> bytes | None:
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"{rev}:{path}"],
+            cwd=root,
+            capture_output=True,
+            timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
+            check=False,
+            env=_git_no_replace_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _base_pytest_config(root: Path, base_sha: str) -> tuple[dict[str, Any], str]:
+    """Read pytest configuration from ``base_sha`` (never the candidate tree).
+
+    Returns the raw key/value mapping and the source path ("" when there is none).
+    Discovery order follows pytest: ``pytest.ini``, ``.pytest.ini``, ``pyproject.toml``
+    ``[tool.pytest.ini_options]``, ``tox.ini`` ``[pytest]``, ``setup.cfg`` ``[tool:pytest]``.
+    """
+    import configparser
+    import tomllib
+
+    def ini_section(raw: bytes, section: str) -> dict[str, Any] | None:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read_string(raw.decode("utf-8"))
+        except (configparser.Error, UnicodeDecodeError):
+            return None
+        if not parser.has_section(section):
+            return None
+        return dict(parser.items(section))
+
+    for path, section in (("pytest.ini", "pytest"), (".pytest.ini", "pytest")):
+        raw = _git_show_bytes(root, base_sha, path)
+        if raw is not None:
+            return ini_section(raw, section) or {}, path
+    raw = _git_show_bytes(root, base_sha, "pyproject.toml")
+    if raw is not None:
+        try:
+            data = tomllib.loads(raw.decode("utf-8"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            data = {}
+        options = data.get("tool", {}).get("pytest", {}).get("ini_options")
+        if isinstance(options, Mapping):
+            return dict(options), "pyproject.toml"
+    for path, section in (("tox.ini", "pytest"), ("setup.cfg", "tool:pytest")):
+        raw = _git_show_bytes(root, base_sha, path)
+        if raw is not None:
+            values = ini_section(raw, section)
+            if values is not None:
+                return values, path
+    return {}, ""
+
+
+def _ini_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "".join(f"\n    {item}" for item in value)
+    text = str(value)
+    if "\n" in text:
+        return "".join(f"\n    {line.strip()}" for line in text.splitlines() if line.strip())
+    return text
+
+
+def _verifier_pytest_ini(root: Path, base_config: Mapping[str, Any]) -> tuple[str, list[str]]:
+    """Render the verifier's own ini and the extra pytest args derived from the base config."""
+    lines = ["[pytest]"]
+    for key in _PYTEST_BASE_INI_KEYS:
+        if key in base_config:
+            lines.append(f"{key} = {_ini_value(base_config[key])}")
+    # ``-P`` removes the cwd from sys.path; pytest re-adds the candidate root (and any
+    # base-declared pythonpath entries) once pytest itself is imported, so a root
+    # ``pytest.py`` can no longer replace pytest while candidate packages stay importable.
+    raw_paths = base_config.get("pythonpath") or []
+    if isinstance(raw_paths, str):
+        raw_paths = shlex.split(raw_paths)
+    paths = [str(root)]
+    for entry in raw_paths:
+        candidate = (root / str(entry)).resolve()
+        if candidate.is_relative_to(root) and str(candidate) not in paths:
+            paths.append(str(candidate))
+    lines.append("pythonpath = " + " ".join(shlex.quote(p) for p in paths))
+    lines.append("junit_family = xunit2")
+    extra: list[str] = []
+    addopts = base_config.get("addopts") or []
+    if isinstance(addopts, str):
+        try:
+            addopts = shlex.split(addopts)
+        except ValueError:
+            addopts = []
+    tokens = [str(token) for token in addopts]
+    for index, token in enumerate(tokens):
+        if token.startswith("--import-mode="):
+            extra.append(token)
+        elif token == "--import-mode" and index + 1 < len(tokens):
+            extra.append(f"--import-mode={tokens[index + 1]}")
+    # Plugin autoload is disabled; load pytest-asyncio explicitly when the base config
+    # declares it (otherwise async tests fail, which is fail-closed).
+    if any(str(key).startswith("asyncio_") for key in base_config):
+        extra.extend(["-p", "pytest_asyncio.plugin"])
+    return "\n".join(lines) + "\n", extra
+
+
+_SKIP_LOCATION_RES = (
+    re.compile(r"^\('(?P<path>[^']+)', [0-9]+,"),
+    re.compile(r"^(?P<path>[^\n:]+):[0-9]+: "),
+)
+
+
+def _dotted_module(path: str) -> str:
+    return re.sub(r"\.py$", "", PurePosixPath(path).as_posix().replace("/", "."))
+
+
+def _junit_evidence(
+    junit_path: Path,
+    declared_node_ids: Sequence[str],
+    *,
+    root: Path | None = None,
+    touched_paths: Sequence[str] = (),
+) -> tuple[str, dict[str, Any]]:
+    """Positive evidence from a pytest JUnit file: (error code or "", summary).
+
+    Skip policy: a skipped (or xfailed) test fails the verifier when it belongs to a
+    test module the candidate diff touched, or when the skip was raised from a touched
+    file; skips in untouched modules (e.g. ``importorskip`` of an optional dependency)
+    are tolerated and listed in ``skipped_untouched``.  At least one test must pass and
+    every declared node id must pass.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    touched_modules = {_dotted_module(p) for p in touched_paths if p.endswith(".py")}
+    touched_set = {PurePosixPath(p).as_posix() for p in touched_paths}
+
+    def skip_is_touched(owner: str, text: str) -> bool:
+        if any(owner == m or owner.startswith(m + ".") for m in touched_modules):
+            return True
+        for pattern in _SKIP_LOCATION_RES:
+            match = pattern.match(text.strip())
+            if not match:
+                continue
+            location = Path(match.group("path"))
+            if root is not None and location.is_absolute():
+                try:
+                    location = location.resolve().relative_to(root)
+                except (OSError, ValueError):
+                    return False
+            return location.as_posix() in touched_set
+        return False
+
+    summary: dict[str, Any] = {
+        "present": False,
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "declared_node_ids": list(declared_node_ids),
+        "declared_node_ids_not_passed": [],
+        "skipped_touched": [],
+        "skipped_untouched": [],
+    }
+    try:
+        if not junit_path.is_file() or junit_path.is_symlink():
+            return VERIFIER_JUNIT_MISSING, summary
+        if junit_path.stat().st_size > _JUNIT_MAX_BYTES:
+            return VERIFIER_JUNIT_INVALID, summary
+        with junit_path.open("rb") as stream:
+            raw = stream.read(_JUNIT_MAX_BYTES + 1)
+    except OSError:
+        return VERIFIER_JUNIT_MISSING, summary
+    summary["present"] = True
+    summary["junit_sha256"] = _sha256(raw)
+    # The JUnit file is untrusted (candidate code can write it): refuse oversized
+    # files, NUL bytes (UTF-16/32 would hide the markers below) and any DTD/entity
+    # declaration, the XML feature that makes the stdlib parser unsafe, before parsing.
+    upper = raw.upper()
+    if (
+        len(raw) > _JUNIT_MAX_BYTES
+        or b"\x00" in raw
+        or b"<!DOCTYPE" in upper
+        or b"<!ENTITY" in upper
+    ):
+        return VERIFIER_JUNIT_INVALID, summary
+    try:
+        tree = ElementTree.fromstring(raw)  # noqa: S314  # nosec B314 - DTD/entities rejected above
+    except ElementTree.ParseError:
+        return VERIFIER_JUNIT_INVALID, summary
+    suites = list(tree.iter("testsuite"))
+    if tree.tag not in {"testsuite", "testsuites"} or not suites:
+        return VERIFIER_JUNIT_INVALID, summary
+    attr_counts = {"failures": 0, "errors": 0, "skipped": 0}
+    case_counts = {"failures": 0, "errors": 0, "skipped": 0}
+    passed_names: list[str] = []
+    for suite in suites:
+        try:
+            for key in attr_counts:
+                attr_counts[key] += int(suite.get(key) or 0)
+        except ValueError:
+            return VERIFIER_JUNIT_INVALID, summary
+        for case in suite.iter("testcase"):
+            summary["tests"] += 1
+            outcomes = {child.tag for child in case}
+            case_counts["failures"] += int("failure" in outcomes)
+            case_counts["errors"] += int("error" in outcomes)
+            case_counts["skipped"] += int("skipped" in outcomes)
+            classname = str(case.get("classname") or "")
+            name = str(case.get("name") or "")
+            full = f"{classname}.{name}" if classname else name
+            if "skipped" in outcomes and not outcomes & {"failure", "error"}:
+                skipped = case.find("skipped")
+                text = (skipped.text or "") if skipped is not None else ""
+                bucket = (
+                    "skipped_touched"
+                    if skip_is_touched(classname or name, text)
+                    else "skipped_untouched"
+                )
+                summary[bucket].append(full)
+            if outcomes & {"failure", "error", "skipped"}:
+                continue
+            passed_names.append(full)
+    for key in attr_counts:
+        summary[key] = max(attr_counts[key], case_counts[key])
+    if summary["errors"] or summary["failures"]:
+        return VERIFIER_JUNIT_FAILURES, summary
+    # A skip count in the suite attributes without matching testcases cannot be
+    # attributed to a module, so it is treated as touched.
+    unattributed = summary["skipped"] - case_counts["skipped"]
+    summary["skipped_touched"] = summary["skipped_touched"][:_INTEGRITY_FINDINGS_LIMIT]
+    summary["skipped_untouched"] = summary["skipped_untouched"][:_INTEGRITY_FINDINGS_LIMIT]
+    if summary["skipped_touched"] or unattributed > 0:
+        return VERIFIER_JUNIT_SKIPPED, summary
+    if summary["tests"] < 1 or not passed_names:
+        return VERIFIER_JUNIT_NO_TESTS, summary
+    missing: list[str] = []
+    for node_id in declared_node_ids:
+        path_part, open_bracket, params = node_id.partition("[")
+        names = path_part.split("::")
+        names[0] = re.sub(r"\.py$", "", names[0].replace("/", "."))
+        names[-1] += open_bracket + params
+        dotted = ".".join(names)
+        if not any(
+            full == dotted
+            or full.startswith(dotted + ".")
+            or (not open_bracket and full.startswith(dotted + "["))
+            for full in passed_names
+        ):
+            missing.append(node_id)
+    summary["declared_node_ids_not_passed"] = missing
+    if missing:
+        return VERIFIER_DECLARED_TESTS_NOT_PASSED, summary
+    return "", summary
+
+
+def _candidate_changed_paths(root: Path, base_sha: str, candidate_commit: str) -> list[str] | None:
+    """Paths changed in ``base_sha..candidate_commit`` (``None`` when git fails)."""
+    _argv, rc, out, _err = _integrity_git(
+        root,
+        [
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            base_sha,
+            candidate_commit,
+            "--",
+        ],
+    )
+    if rc != 0:
+        return None
+    return sorted(set(_nul_paths(out)))
+
+
+def _shadowing_paths(changed_paths: Sequence[str]) -> list[str]:
+    found: list[str] = []
+    for path in changed_paths:
+        parts = PurePosixPath(path).parts
+        if not parts:
+            continue
+        head = parts[0].casefold()
+        name = PurePosixPath(path).name.casefold()
+        if (
+            (len(parts) == 1 and head in VERIFIER_ROOT_SHADOW_NAMES)
+            or (len(parts) > 1 and head in VERIFIER_ROOT_SHADOW_DIRS)
+            or name in VERIFIER_ANY_DEPTH_SHADOW_NAMES
+        ):
+            found.append(path)
+    return sorted(set(found))
+
+
+def _root_shadowing_paths(
+    root: Path, base_sha: str, candidate_commit: str
+) -> tuple[list[str] | None, str]:
+    """Shadowing paths changed in ``base_sha..candidate_commit``: root-level
+    interpreter/pytest shadows and config files, and ``conftest.py`` at any depth.
+
+    Returns ``(None, code)`` when git fails (fail closed).
+    """
+    changed = _candidate_changed_paths(root, base_sha, candidate_commit)
+    if changed is None:
+        return None, VERIFIER_ROOT_SHADOW_CHECK_ERROR
+    return _shadowing_paths(changed), ""
+
+
+def _verifier_env(
+    *, home: Path, tmpdir: Path, base_sha: str, candidate_commit: str
+) -> dict[str, str]:
+    env = {key: os.environ[key] for key in VERIFIER_ENV_FORWARDED if key in os.environ}
+    env.setdefault("PATH", os.defpath)
+    env["HOME"] = str(home)
+    env["TMPDIR"] = str(tmpdir)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    env[VERIFIER_ENV_BASE_SHA] = base_sha
+    env[VERIFIER_ENV_CANDIDATE_SHA] = candidate_commit
+    return env
+
+
 def _run_verifier_specs(
     *,
     task_id: str,
@@ -899,6 +1383,7 @@ def _run_verifier_specs(
     base_sha: str,
     authorized_paths: Sequence[str],
     deletable_paths: Sequence[str],
+    shadow_authorized_paths: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     root = Path(workspace_path).expanduser().resolve()
     if _run_git(root, "rev-parse", "HEAD") != candidate_commit:
@@ -916,37 +1401,119 @@ def _run_verifier_specs(
         deletable_paths=deletable_paths,
     )
     results: list[dict[str, Any]] = []
-    env = dict(os.environ)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env[VERIFIER_ENV_BASE_SHA] = base_sha
-    env[VERIFIER_ENV_CANDIDATE_SHA] = candidate_commit
+    # Shadowing: a root-level pytest.py/sitecustomize.py/... or pytest config file, or a
+    # conftest.py at any depth, changed by the candidate is refused unless it is explicitly (exactly)
+    # authorized; an authorized one is still flagged on every row.
+    explicit = {
+        str(path).strip().rstrip("/")
+        for path in (
+            authorized_paths if shadow_authorized_paths is None else shadow_authorized_paths
+        )
+    }
+    changed_paths = _candidate_changed_paths(root, base_sha, candidate_commit)
+    if changed_paths is None:
+        shadow_paths, shadow_error = None, VERIFIER_ROOT_SHADOW_CHECK_ERROR
+    else:
+        shadow_paths, shadow_error = _shadowing_paths(changed_paths), ""
+    refused_shadow = sorted(p for p in shadow_paths or [] if p not in explicit)
+    authorized_shadow = sorted(p for p in shadow_paths or [] if p in explicit)
+    if not shadow_error and refused_shadow:
+        shadow_error = VERIFIER_ROOT_SHADOWING_REFUSED
+    base_pytest_config: tuple[dict[str, Any], str] | None = None
     for spec in parsed:
         started = time.monotonic()
+        sandbox = Path(tempfile.mkdtemp(prefix="nexus-verifier-")).resolve()
         try:
-            proc = subprocess.run(
-                list(spec.argv),
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=spec.timeout,
-                check=False,
-                env=env,
-                shell=False,
+            if sandbox.is_relative_to(root):
+                raise ClosureError("VERIFIER_SANDBOX_INSIDE_WORKSPACE")
+            home = sandbox / "home"
+            tmpdir = sandbox / "tmp"
+            config_dir = sandbox / "config"
+            for directory in (home, tmpdir, config_dir):
+                directory.mkdir(mode=0o700)
+            env = _verifier_env(
+                home=home, tmpdir=tmpdir, base_sha=base_sha, candidate_commit=candidate_commit
             )
-            returncode: int | None = int(proc.returncode)
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-            error = ""
-        except subprocess.TimeoutExpired as exc:
-            returncode = None
-            stdout = str(exc.stdout or "")
-            stderr = str(exc.stderr or "")
-            error = "VERIFIER_TIMEOUT"
+            invocation = _pytest_invocation(spec.argv, env["PATH"])
+            evidence = (
+                VERIFIER_EVIDENCE_EXIT_CODE_ONLY
+                if invocation is None
+                else VERIFIER_EVIDENCE_PYTEST_JUNIT
+            )
+            junit_path = sandbox / "junit.xml"
+            executed_argv = list(spec.argv)
+            junit_summary: dict[str, Any] | None = None
+            returncode: int | None = None
+            stdout = stderr = error = ""
+            if shadow_error:
+                error = shadow_error
+            elif isinstance(invocation, str):
+                error = invocation
+            else:
+                if isinstance(invocation, _PytestInvocation):
+                    if base_pytest_config is None:
+                        base_pytest_config = _base_pytest_config(root, base_sha)
+                    ini_text, extra_args = _verifier_pytest_ini(root, base_pytest_config[0])
+                    ini_path = config_dir / "pytest.ini"
+                    ini_path.write_text(ini_text, encoding="utf-8")
+                    executed_argv = [
+                        invocation.interpreter,
+                        "-P",
+                        *invocation.interpreter_args,
+                        "-m",
+                        "pytest",
+                        *invocation.pytest_args,
+                        # Appended last so they override any earlier value.
+                        *extra_args,
+                        "-c",
+                        str(ini_path),
+                        "--rootdir",
+                        str(root),
+                        "--confcutdir",
+                        str(root),
+                        "-p",
+                        "no:cacheprovider",
+                        f"--junitxml={junit_path}",
+                    ]
+                try:
+                    proc = subprocess.run(
+                        executed_argv,
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                        timeout=spec.timeout,
+                        check=False,
+                        env=env,
+                        shell=False,
+                    )
+                    returncode = int(proc.returncode)
+                    stdout = proc.stdout or ""
+                    stderr = proc.stderr or ""
+                except subprocess.TimeoutExpired as exc:
+                    stdout = str(exc.stdout or "")
+                    stderr = str(exc.stderr or "")
+                    error = "VERIFIER_TIMEOUT"
+                if isinstance(invocation, _PytestInvocation):
+                    junit_error, junit_summary = _junit_evidence(
+                        junit_path,
+                        invocation.declared_node_ids,
+                        root=root,
+                        touched_paths=changed_paths or (),
+                    )
+                    if not error and returncode == 0:
+                        error = junit_error
+        finally:
+            shutil.rmtree(sandbox, ignore_errors=True)
         wall_ms = max(0, int((time.monotonic() - started) * 1000))
+        sandbox_text = str(sandbox)
         row = {
             "verifier_id": spec.verifier_id,
             "argv": list(spec.argv),
             "argv_sha256": _sha256(_canonical_json(list(spec.argv))),
+            # Per-run temp paths are replaced so the row stays comparable across runs.
+            "executed_argv": [
+                part.replace(sandbox_text, "<verifier-sandbox>") for part in executed_argv
+            ],
             "cwd_sha256": _sha256(str(root)),
             "owner_unit": spec.owner_unit,
             "returncode": returncode,
@@ -954,6 +1521,11 @@ def _run_verifier_specs(
             "stderr_sha256": _sha256(stderr),
             "wall_time_ms": wall_ms,
             "error": error,
+            "evidence": evidence,
+            "junit": junit_summary,
+            "env_keys": sorted(env),
+            "root_shadowing_refused_paths": refused_shadow,
+            "root_shadowing_authorized_paths": authorized_shadow,
             "passed": returncode == 0 and not error,
         }
         results.append(row)
@@ -1382,6 +1954,9 @@ def verify_whole_task_candidate(
         base_sha=str(task_candidate.get("base_sha") or ""),
         authorized_paths=list(authorized_paths) if authorized_paths is not None else changed,
         deletable_paths=deleted,
+        # The composed-path fallback is a scope boundary, not an explicit authorization
+        # of root-level shadowing files.
+        shadow_authorized_paths=list(authorized_paths) if authorized_paths is not None else (),
     )
     result.update({
         "base_sha": task_candidate.get("base_sha"),
