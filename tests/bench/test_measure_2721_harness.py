@@ -1586,3 +1586,294 @@ def test_noop_rows_carry_the_fake_label_and_real_rows_the_measured_model(manifes
     assert arms.outcome_flags("OK", []) == [arms.FLAG_SERVED_MODEL_MISMATCH]
     assert arms.outcome_flags("OK", ["claude-haiku-5-5"]) == []
     assert arms.fake_model_flag([]) == arms.FLAG_SERVED_MODEL_MISMATCH
+
+
+# -- 33 review of 84ae047ba: M1 schedule, M2 quiescence, M3 L-A marker, state paths --
+
+
+def test_schedule_is_block_randomized_and_balanced_for_the_default_seed(tmp_path):
+    from scripts.bench.measure_2721 import runner
+
+    ids = [f"t{i}" for i in range(12)]
+    schedule = runner.build_schedule(ids, [1, 2, 3])
+    assert schedule == runner.build_schedule(ids, [1, 2, 3])
+    size = len(runner.ARMS)
+    assert len(schedule) == 12 * 3 * size
+    orders = set()
+    for start in range(0, len(schedule), size):
+        block = schedule[start : start + size]
+        # One (task, repeat) per block, every arm exactly once, back to back.
+        assert (
+            len({(e["task_id"], e["repeat"]) for e in block}) == 1
+            and len({e["block"] for e in block}) == 1
+        )
+        assert sorted(e["arm"] for e in block) == sorted(runner.ARMS)
+        orders.add(tuple(e["arm"] for e in block))
+    assert len(orders) > 1  # the arm order inside a block varies
+    stats = runner.schedule_stats(schedule)
+    means = stats["mean_slot"].values()
+    assert max(means) - min(means) < size  # within one block length
+    assert set(stats["first_third"].values()) == {12}
+    record = runner.write_schedule(tmp_path, schedule, runner.DEFAULT_SEED)
+    saved = json.loads((tmp_path / "schedule.json").read_text())
+    assert saved["scheme"] == "block_randomized_v1" and saved["block_size"] == size
+    assert saved["order_sha256"] == record["order_sha256"] and saved["stats"] == stats
+    # A subset of arms keeps the block structure.
+    two = runner.build_schedule(ids, [1], ["BARE", "NEXUS"])
+    assert all(
+        {two[i]["arm"], two[i + 1]["arm"]} == {"BARE", "NEXUS"} for i in range(0, len(two), 2)
+    )
+
+
+def test_single_arm_entrypoints_refuse_a_paid_run(manifest, tmp_path, capsys):
+    import argparse
+
+    from scripts.bench.measure_2721 import runner
+
+    env_file = tmp_path / "g.env"
+    env_file.write_text(f"NEXUS_MEASUREMENT_READ_ROOTS={os.path.realpath(tmp_path)}\n")
+    rc = arms.main([
+        "bare",
+        "--manifest",
+        str(manifest),
+        "--run-root",
+        str(tmp_path / "run-b"),
+        "--provider",
+        "claude",
+        "--spend-ledger",
+        str(tmp_path / "spend.json"),
+        "--gateway-env",
+        str(env_file),
+    ])
+    assert rc == 2 and runner.SINGLE_ARM_REFUSED in capsys.readouterr().out
+    assert not (tmp_path / "run-b").exists()  # refused before anything ran
+    token = tmp_path / "tok"
+    token.write_text("NEXUS_MCP_GATEWAY_TOKEN=t\n")
+    token.chmod(0o600)
+    rc = nexus_driver.main([
+        "--manifest",
+        str(manifest),
+        "--run-root",
+        str(tmp_path / "run-n"),
+        "--gateway-url",
+        "http://127.0.0.1:18766",
+        "--token-file",
+        str(token),
+        "--scope-id",
+        "s",
+        "--trace-dir",
+        str(tmp_path / "t"),
+        "--spend-ledger",
+        str(tmp_path / "spend.json"),
+        "--gateway-env",
+        str(env_file),
+    ])
+    assert rc == 2 and runner.SINGLE_ARM_REFUSED in capsys.readouterr().out
+    assert not (tmp_path / "run-n" / "rows.jsonl").exists()
+    # The fake provider and the explicit debug flag still run (with a warning).
+    assert runner.single_arm_refusal(argparse.Namespace(single_arm_debug=False), paid=False) is None
+    assert runner.single_arm_refusal(argparse.Namespace(single_arm_debug=True), paid=True) is None
+    assert "WARNING" in capsys.readouterr().err
+
+
+def test_controller_is_not_reset_while_the_instance_is_busy(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    layout = _measure_layout(tmp_path)
+    repo = layout["controller"]
+    state_dir = tmp_path / "self-hosted"
+    state_dir.mkdir()
+    (state_dir / "previous.json").write_text(json.dumps({"status": "IN_PROGRESS"}))
+    # What a live previous task has in the Controller: a commit and untracked work.
+    (repo / "tasks" / "live.md").write_text("card\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "live card")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    (repo / "in-use.txt").write_text("worker output\n")
+    gateway = FakeGateway()
+    driver = _controller_driver(gateway, layout, state_dir=state_dir)  # no state restore configured
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] and row["void_reason"].startswith("INSTANCE_BUSY:TASK_IN_FLIGHT"), row
+    assert row["controller_reset_skipped"] and "controller_reset" not in row and not gateway.calls
+    assert row["submitted"] is False and row["worker_accepted"] is False
+    assert (repo / "in-use.txt").read_text() == "worker output\n"
+    assert _git(repo, "rev-parse", "HEAD").strip() == head != layout["pin"]
+    # Once the previous task is terminal the reset runs.
+    (state_dir / "previous.json").write_text(json.dumps({"status": "CANCELLED"}))
+    row = driver.run(task, 2, tmp_path / "run", timeout_seconds=5)
+    assert row["controller_reset"]["ok"] and not (repo / "in-use.txt").exists()
+    assert _git(repo, "rev-parse", "HEAD").strip() == layout["pin"]
+
+
+def test_la_phase_marker_survives_a_resume_and_refuses_other_snapshots(manifest, tmp_path):
+    from scripts.bench.measure_2721 import state_phase
+
+    (task,) = arms.load_manifest(manifest)
+    run_root = tmp_path / "run"
+    first = _state_driver(_LearningGateway(tmp_path / "state"), tmp_path, "LA")
+    row = first.run(task, 1, run_root, timeout_seconds=5)
+    marker = run_root / "state_phase_LA.restored.json"
+    assert (
+        row["state_restore"]["ok"] and row["state_phase_marker"] == marker.name and marker.is_file()
+    )
+    saved = json.loads(marker.read_text())
+    assert saved["snapshot_sha256"] == {
+        "state_root": state_phase.state_sha256(tmp_path / "snapshot")
+    }
+    assert saved["restored_at"]
+    learned = (tmp_path / "state" / "learning" / "episodes.jsonl").read_text()
+    assert learned.startswith("learned from")
+    # Resume after exit 75: a NEW driver (new process) must not restore the phase start again.
+    client = nexus_driver.GatewayClient(
+        "http://127.0.0.1:18766", "tok-123", transport=FakeGateway()
+    )
+    resumed = nexus_driver.NexusArmDriver(
+        client,
+        campaign_id="c",
+        goal_id="g",
+        scope_id="s",
+        sleep=lambda _s: None,
+        state_root=tmp_path / "state",
+        state_snapshot=tmp_path / "snapshot",
+        state_dir=tmp_path / "state" / "tasks",
+        learning_phase="LA",
+    )
+    row = resumed.run(task, 2, run_root, timeout_seconds=5)
+    assert "state_restore" not in row and row["state_phase_marker"] == "resumed", row
+    assert (tmp_path / "state" / "learning" / "episodes.jsonl").read_text() == learned
+    # A marker written for another phase start refuses before any row.
+    (tmp_path / "snapshot" / "learning" / "episodes.jsonl").write_text("another phase start\n")
+    other = nexus_driver.NexusArmDriver(
+        client,
+        campaign_id="c",
+        goal_id="g",
+        scope_id="s",
+        sleep=lambda _s: None,
+        state_root=tmp_path / "state",
+        state_snapshot=tmp_path / "snapshot",
+        state_dir=tmp_path / "state" / "tasks",
+        learning_phase="LA",
+    )
+    rows_before = len(list(read_jsonl(run_root / "rows.jsonl")))
+    with pytest.raises(state_phase.PhaseMarkerMismatch, match="STATE_PHASE_MARKER_MISMATCH"):
+        other.run(task, 3, run_root, timeout_seconds=5)
+    assert len(list(read_jsonl(run_root / "rows.jsonl"))) == rows_before
+    assert (tmp_path / "state" / "learning" / "episodes.jsonl").read_text() == learned
+
+
+def test_state_inside_the_controller_refuses_to_start(tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import controller_guard, gateway_env
+
+    layout = _measure_layout(tmp_path)
+    inside = layout["controller"] / ".nexus" / "state"
+    env_file = tmp_path / "start.sh"
+    env_file.write_text(
+        f'export NEXUS_STATE_ROOT="{inside}"\nexport OTHER=1\nexec python gateway.py\n'
+        "export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR=/after/exec\n"
+    )
+    paths = gateway_env.gateway_state_paths(env_file)
+    assert paths == {"NEXUS_STATE_ROOT": str(inside)}  # nothing after exec, nothing else
+    with pytest.raises(
+        controller_guard.ControllerGuardError, match="STATE_INSIDE_CONTROLLER: NEXUS_STATE_ROOT"
+    ):
+        _controller_driver(FakeGateway(), layout, gateway_state_paths=paths)
+    with pytest.raises(
+        controller_guard.ControllerGuardError, match="STATE_INSIDE_CONTROLLER: --state-dir"
+    ):
+        _controller_driver(FakeGateway(), layout, state_dir=layout["controller"] / "tasks")
+    outside = tmp_path / "state"
+    with pytest.raises(
+        controller_guard.ControllerGuardError, match="STATE_PATH_DISAGREES_WITH_GATEWAY"
+    ):
+        _controller_driver(
+            FakeGateway(),
+            layout,
+            state_root=tmp_path / "elsewhere",
+            gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)},
+        )
+    _controller_driver(
+        FakeGateway(),
+        layout,
+        state_root=outside,
+        gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)},
+    )
+
+
+def test_self_hosted_state_dir_is_restored_per_row_and_keeps_probe_evidence(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    state_root, snapshot = tmp_path / "state", tmp_path / "snapshot"
+    (snapshot / "learning").mkdir(parents=True)
+    (snapshot / "learning" / "episodes.jsonl").write_text("phase start\n")
+    state_root.mkdir()
+    hosted, hosted_snap = tmp_path / "self-hosted", tmp_path / "self-hosted-snap"
+    (hosted_snap / "assisted_provider_jobs").mkdir(parents=True)
+    (hosted_snap / "memory.json").write_text('{"phase": "start"}')
+    (hosted_snap / "assisted_provider_jobs" / "old-job.json").write_text("{}")
+    hosted.mkdir()
+
+    class Writes(FakeGateway):
+        def _answer(self, name, args):
+            if name == "nexus_worker_candidate":
+                (hosted / "memory.json").write_text(f'{{"learned": "{args["task_id"]}"}}')
+                (hosted / "assisted_provider_jobs").mkdir(exist_ok=True)
+                (hosted / "assisted_provider_jobs" / f"{args['task_id']}.json").write_text("{}")
+                probe = hosted / "assisted_provider_jobs" / "probe_evidence"
+                probe.mkdir(exist_ok=True)
+                (probe / f"{args['task_id']}.json").write_text("{}")
+            return super()._answer(name, args)
+
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=Writes())
+    with pytest.raises(ValueError, match="SELF_HOSTED_STATE_NOT_RESTORED"):
+        nexus_driver.NexusArmDriver(
+            client,
+            campaign_id="c",
+            goal_id="g",
+            scope_id="s",
+            state_root=state_root,
+            state_snapshot=snapshot,
+            state_dir=hosted,
+            learning_phase="M",
+        )
+    driver = nexus_driver.NexusArmDriver(
+        client,
+        campaign_id="c",
+        goal_id="g",
+        scope_id="s",
+        sleep=lambda _s: None,
+        state_root=state_root,
+        state_snapshot=snapshot,
+        state_dir=hosted,
+        state_dir_snapshot=hosted_snap,
+        learning_phase="M",
+    )
+    rows = [driver.run(task, r, tmp_path / "run", timeout_seconds=5) for r in (1, 2)]
+    assert all(r["self_hosted_state_restore"]["ok"] and r["state_restore"]["ok"] for r in rows), (
+        rows
+    )
+    # Row 2 started from the phase start: row 1's learning and assist job were restored away ...
+    assert (hosted / "memory.json").read_text().endswith(f'{rows[1]["gateway_task_id"]}"}}')
+    jobs = sorted(p.name for p in (hosted / "assisted_provider_jobs").glob("*.json"))
+    assert jobs == sorted(["old-job.json", f"{rows[1]['gateway_task_id']}.json"])
+    # ... but the probe evidence of both rows is kept and never hashed.
+    assert len(list((hosted / "assisted_provider_jobs" / "probe_evidence").iterdir())) == 2
+    from scripts.bench.measure_2721 import state_phase
+
+    assert (
+        state_phase.state_sha256(hosted_snap)
+        == rows[0]["self_hosted_state_restore"]["restored_sha256"]
+    )
+
+
+def test_every_nexus_row_records_submitted_and_worker_accepted(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    blocked = _driver(FakeGateway(external_target=False)).run(
+        task, 1, tmp_path / "run", timeout_seconds=5
+    )
+    assert blocked["submitted"] is False and blocked["worker_accepted"] is False
+    ok = _driver(FakeGateway()).run(task, 2, tmp_path / "run", timeout_seconds=5)
+    assert ok["submitted"] is True and ok["worker_accepted"] is True
+    refused = _driver(FakeGateway(worker_error={"error": "WORKER_REFUSED_SCOPE"})).run(
+        task, 3, tmp_path / "run", timeout_seconds=5
+    )
+    assert refused["submitted"] is True and refused["worker_accepted"] is False
+    rows = list(read_jsonl(tmp_path / "run" / "rows.jsonl"))
+    assert len(rows) == 3 and all("submitted" in r and "worker_accepted" in r for r in rows)

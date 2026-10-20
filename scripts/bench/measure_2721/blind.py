@@ -5,7 +5,7 @@ Reads ``rows.jsonl`` from one or more run roots and writes:
   prereg v0.2 §8) and ``<out>/candidates.jsonl``
   (``opaque_id``, ``task_id``, ``repeat``, ``diff_sha256``, ``scoring_flags``)
   in a random order: the scorer's only input (``score_arms.py run``);
-* ``--arm-map`` (mode 0600, kept by workspace-b6, not by the scorer):
+* ``--arm-map`` (mode 0600, kept by the custodian named in PREREG, not by the scorer):
   opaque id -> arm, run id, repeat, plus the sha256 of candidates.jsonl so
   the mapping is bound to exactly that candidate set.
 

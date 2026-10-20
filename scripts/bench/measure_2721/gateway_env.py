@@ -44,8 +44,8 @@ def _expand(value: str, known: Mapping[str, str], base: Mapping[str, str]) -> st
     return _VAR.sub(lambda m: known.get(m.group(1) or m.group(2), base.get(m.group(1) or m.group(2), "")), value)
 
 
-def load_gateway_env(path: Path | str, base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """The whitelisted assignments of ``path`` (never executed)."""
+def _assignments(path: Path | str, base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """Every variable assignment of ``path`` up to the first ``exec`` (never executed)."""
     base = dict(os.environ if base is None else base)
     values: dict[str, str] = {}
     for raw in Path(path).read_text(encoding="utf-8").splitlines():
@@ -67,12 +67,39 @@ def load_gateway_env(path: Path | str, base: Optional[Mapping[str, str]] = None)
         for token in tokens:
             name, value = token.split("=", 1)
             values[name] = _expand(value, values, base)
+    return values
+
+
+def load_gateway_env(path: Path | str, base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """The whitelisted assignments of ``path`` (never executed)."""
+    values = _assignments(path, base)
     kept = {name: value for name, value in values.items() if whitelisted(name)}
     for name, value in kept.items():
         if "${" in value or "$(" in value or "`" in value:
             # ${VAR:-default}, command substitution etc. are not expanded here:
             # fail closed instead of passing a literal through (use a fully
             # expanded env file, e.g. 35's run/make_env.sh output).
+            raise GatewayEnvError(f"{name}: unexpanded shell expression in {Path(path).name}")
+    return kept
+
+
+STATE_PATH_NAMES = ("NEXUS_STATE_ROOT", "NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR")
+
+
+def gateway_state_paths(
+    path: Path | str, base: Optional[Mapping[str, str]] = None
+) -> dict[str, str]:
+    """The Gateway's state locations (``NEXUS_STATE_ROOT``, the self-hosted state
+    dir) from ``path``, read like ``load_gateway_env`` (never executed).
+
+    Only these two path names are taken; they are not held for the process.
+    The driver refuses to start when one of them lies inside the Controller
+    worktree (its per-row ``clean -fdx`` would wipe the state).
+    """
+    values = _assignments(path, base)
+    kept = {name: values[name] for name in STATE_PATH_NAMES if values.get(name, "").strip()}
+    for name, value in kept.items():
+        if "${" in value or "$(" in value or "`" in value:
             raise GatewayEnvError(f"{name}: unexpanded shell expression in {Path(path).name}")
     return kept
 

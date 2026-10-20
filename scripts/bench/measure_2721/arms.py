@@ -449,16 +449,30 @@ def load_manifest(path: Path | str, ids: Optional[Sequence[str]] = None) -> list
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    from scripts.bench.measure_2721.runner import PrepareStop, add_common_args, prepare
+    from scripts.bench.measure_2721.runner import (
+        PrepareStop,
+        add_common_args,
+        add_single_arm_flag,
+        prepare,
+        single_arm_refusal,
+    )
 
-    parser = argparse.ArgumentParser(description="Run the BARE or NOOP arm of #2721")
+    parser = argparse.ArgumentParser(
+        description="Run the BARE or NOOP arm of #2721 on its own (debug; formal "
+        "runs go through runner.py)"
+    )
     parser.add_argument("arm", choices=[ARM_BARE.lower(), ARM_NOOP.lower()])
     add_common_args(parser)
     parser.add_argument("--provider", choices=["claude", "agy", "fake"], default="fake",
                         help="'fake' makes no model call (default); 'claude' (prereg v0.4) and 'agy' are paid")
     parser.add_argument("--claude-bin", help="absolute, non-symlink claude CLI (same file as the Gateway's)")
     parser.add_argument("--keep-workdir", action="store_true")
+    add_single_arm_flag(parser)
     args = parser.parse_args(argv)
+    refused = single_arm_refusal(args, paid=args.arm == "bare" and args.provider != "fake")
+    if refused is not None:
+        print(json.dumps(refused))
+        return 2
     try:
         # Same READ_ROOTS as the Gateway, or every Claude row would be void.
         tasks = prepare(args, need_read_roots=args.arm == "bare" and args.provider == "claude")

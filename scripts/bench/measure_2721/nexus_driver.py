@@ -273,16 +273,35 @@ def new_leaks(before: Mapping[str, list[str]], after: Mapping[str, list[str]], o
 
 
 class NexusArmDriver:
-    def __init__(self, client: GatewayClient, *, campaign_id: str, goal_id: str, scope_id: str,
-                 controller_git: Optional[Path] = None, state_dir: Optional[Path] = None,
-                 external_target_root: Optional[Path] = None, probe_model: str = CLAUDE_MEASUREMENT_MODEL,
-                 probe_provider: str = "claude", trace_dir: Optional[Path] = None, arm_label: str = ARM_NEXUS,
-                 poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep,
-                 targets_root: Optional[Path] = None, state_root: Optional[Path] = None,
-                 state_snapshot: Optional[Path] = None, learning_phase: Optional[str] = None,
-                 key_file: Optional[str] = None, controller_repo: Optional[Path] = None,
-                 controller_pin: Optional[str] = None, cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0),
-                 measurement_root: Optional[Path] = None, live_configs: Optional[Sequence[Path]] = None):
+    def __init__(
+        self,
+        client: GatewayClient,
+        *,
+        campaign_id: str,
+        goal_id: str,
+        scope_id: str,
+        controller_git: Optional[Path] = None,
+        state_dir: Optional[Path] = None,
+        external_target_root: Optional[Path] = None,
+        probe_model: str = CLAUDE_MEASUREMENT_MODEL,
+        probe_provider: str = "claude",
+        trace_dir: Optional[Path] = None,
+        arm_label: str = ARM_NEXUS,
+        poll_seconds: float = 60.0,
+        sleep: Callable[[float], None] = time.sleep,
+        targets_root: Optional[Path] = None,
+        state_root: Optional[Path] = None,
+        state_snapshot: Optional[Path] = None,
+        learning_phase: Optional[str] = None,
+        key_file: Optional[str] = None,
+        controller_repo: Optional[Path] = None,
+        controller_pin: Optional[str] = None,
+        cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0),
+        measurement_root: Optional[Path] = None,
+        live_configs: Optional[Sequence[Path]] = None,
+        state_dir_snapshot: Optional[Path] = None,
+        gateway_state_paths: Optional[Mapping[str, str]] = None,
+    ):
         self.client = client
         if (controller_repo is None) != (controller_pin is None):
             raise ValueError("controller_repo and controller_pin go together (M3)")
@@ -303,6 +322,32 @@ class NexusArmDriver:
             # The router writes router_decisions.jsonl under its project root (the
             # Controller or the repository's main worktree): restored every row.
             router_roots = [controller_repo, guarded["common_dir"].parent]
+            # The per-row ``clean -fdx`` would wipe any state kept inside the
+            # Controller worktree: refuse to start (gap found in the 84ae047ba review).
+            for name, path in (
+                ("--state-root", state_root),
+                ("--state-dir", state_dir),
+                ("--state-snapshot", state_snapshot),
+                ("--state-dir-snapshot", state_dir_snapshot),
+                *sorted((gateway_state_paths or {}).items()),
+            ):
+                if path and controller_guard.is_within(path, controller_repo):
+                    raise controller_guard.ControllerGuardError(f"STATE_INSIDE_CONTROLLER: {name}")
+        # The Gateway env names the state the instance really uses: the driver
+        # must restore (and watch) the same directories.
+        for name, given in (
+            ("NEXUS_STATE_ROOT", state_root),
+            ("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", state_dir),
+        ):
+            configured = (gateway_state_paths or {}).get(name)
+            if (
+                configured
+                and given is not None
+                and not controller_guard.same_path(configured, given)
+            ):
+                raise controller_guard.ControllerGuardError(
+                    f"STATE_PATH_DISAGREES_WITH_GATEWAY: {name}"
+                )
         self._extra_state = state_phase.ExtraStateFiles.router_logs(router_roots)
         # The Gateway's own Controller checkout: reset to its pin before every
         # row (each row adds a card commit), and the source of expected_head.
@@ -336,6 +381,34 @@ class NexusArmDriver:
         self.learning_phase = learning_phase
         self.key_file = key_file
         self._phase_restored = False
+        self._phase_resumed = False
+        # The self-hosted state dir (NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR = --state-dir)
+        # is restored under the same phase policy from its own snapshot, unless it
+        # lies inside the state root (then the state-root restore covers it).
+        self.state_dir_snapshot = state_dir_snapshot
+        inside_root = bool(
+            state_root is not None
+            and state_dir is not None
+            and controller_guard.is_within(state_dir, state_root)
+        )
+        if state_dir_snapshot is not None and (state_dir is None or inside_root):
+            raise ValueError("--state-dir-snapshot needs a --state-dir outside --state-root")
+        if (
+            state_snapshot is not None
+            and state_dir is not None
+            and not inside_root
+            and state_dir_snapshot is None
+        ):
+            raise ValueError(
+                "SELF_HOSTED_STATE_NOT_RESTORED: --state-dir lies outside --state-root; "
+                "give --state-dir-snapshot"
+            )
+        self._restore_targets: list[tuple[str, Path, Path]] = []
+        if state_root is not None and state_snapshot is not None:
+            self._restore_targets.append(("state_root", Path(state_root), Path(state_snapshot)))
+        if state_dir is not None and state_dir_snapshot is not None:
+            self._restore_targets.append(("self_hosted", Path(state_dir), Path(state_dir_snapshot)))
+        self._snapshot_hashes: Optional[dict[str, str]] = None
         # The task states themselves (P1 writes one per row) are not learning state:
         # left out of the L-B read-only hash when they live inside the state root.
         self._state_hash_exclude: list[str] = []
@@ -424,6 +497,7 @@ class NexusArmDriver:
             raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
         token = ledger.begin_row() if ledger is not None else None
         self._submitted = False
+        self._worker_accepted = False
         self._probes: list[Any] = []
         try:
             return self._run(task, repeat, run_root, timeout_seconds=timeout_seconds)
@@ -440,6 +514,9 @@ class NexusArmDriver:
             # b6 ruling: #2721 measures external tasks only.  A Nexus-new task would
             # run on the shared Gateway Controller, whose history holds later fixes.
             raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
+        # M3: L-A's "phase start already restored" survives a resume (exit 75);
+        # a marker for other snapshots raises PhaseMarkerMismatch before any row.
+        self._load_phase_marker(run_root)
         run_id = new_run_id(self.arm_label, task["task_id"], repeat)
         self._run_id = run_id
         gw_task = gateway_task_id(run_id)
@@ -466,11 +543,24 @@ class NexusArmDriver:
         watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=self.arm_label,
                            cap_s=timeout_seconds)
         leak_repo = self.controller_repo or self.controller_git
+        # M2 (84ae047ba review): the instance must be quiet BEFORE anything is
+        # reset -- on a resume a previous Gateway task may still be in flight in
+        # the Controller, and ``clean -fdx`` would wipe it.  Checked on every row.
+        busy = state_phase.quiescence_problem(self.state_dir)
         # The reset reports (and this row flags) whatever the previous row left (M1).
-        reset = self.reset_controller()
+        reset = None if busy else self.reset_controller()
         leak_before = leak_surfaces(leak_repo) if leak_repo is not None else None
         row["read_roots_sha256"] = read_roots_sha256()
         try:
+            if busy:
+                prefix = "STATE_RESTORE_BUSY" if self._restore_targets else "INSTANCE_BUSY"
+                row.update(
+                    outcome=OUTCOME_INFRA,
+                    infra=True,
+                    void_reason=f"{prefix}:{busy}",
+                    controller_reset_skipped=True,
+                )
+                return row
             if reset is not None:
                 row["controller_reset"] = reset
                 if not reset["ok"]:
@@ -481,7 +571,7 @@ class NexusArmDriver:
             if not extra["ok"]:
                 row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="EXTRA_STATE_RESTORE_MISMATCH")
                 return row
-            if self.state_root is not None and self.state_snapshot is not None:
+            if self._restore_targets:
                 policy = state_phase.restore_policy(self.learning_phase)
                 row["state_restore_policy"] = policy
                 if policy == "per_row" or not self._phase_restored:
@@ -491,12 +581,33 @@ class NexusArmDriver:
                     if busy:
                         row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"STATE_RESTORE_BUSY:{busy}")
                         return row
-                    restore = restore_state_root(self.state_root, self.state_snapshot)
-                    row["state_restore"] = restore
-                    if not restore["ok"]:
-                        row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="STATE_ROOT_RESTORE_MISMATCH")
-                        return row
+                    restored: dict[str, str] = {}
+                    for label, root, snapshot in self._restore_targets:
+                        restore = restore_state_root(root, snapshot)
+                        row[
+                            "state_restore" if label == "state_root" else f"{label}_state_restore"
+                        ] = restore
+                        if not restore["ok"]:
+                            row.update(
+                                outcome=OUTCOME_INFRA,
+                                infra=True,
+                                void_reason=(
+                                    "STATE_ROOT_RESTORE_MISMATCH"
+                                    if label == "state_root"
+                                    else "SELF_HOSTED_STATE_RESTORE_MISMATCH"
+                                ),
+                            )
+                            return row
+                        restored[label] = restore["restored_sha256"]
                     self._phase_restored = True
+                    if policy == "per_phase":
+                        marker = state_phase.write_phase_marker(
+                            run_root, self.learning_phase, self.snapshot_hashes(), restored
+                        )
+                        row["state_phase_marker"] = marker.name
+                elif self._phase_resumed:
+                    row["state_phase_marker"] = "resumed"
+            if self.state_root is not None and self.state_snapshot is not None:
                 row["state_before_sha256"] = state_phase.state_sha256(self.state_root,
                                                                      exclude=self._state_hash_exclude)
             health = self.client.health()
@@ -529,6 +640,7 @@ class NexusArmDriver:
             capture["gateway_worker_args"] = worker_args
             self._submitted = True  # from here on the worker may spend money
             submitted = self._submit_worker(worker_args, transcript)
+            self._worker_accepted = True  # the Gateway took the worker call without an error
             transcript.append({"tool": "nexus_worker_candidate", "result": submitted})
             duplicate = submitted.get("duplicate") if isinstance(submitted, Mapping) else None
             if duplicate or "DUPLICATE_LOGICAL_TASK" in json.dumps(submitted, default=str):
@@ -575,7 +687,11 @@ class NexusArmDriver:
                 if leaks:
                     row["leaks"] = leaks
                     row.setdefault("flags", []).append("STATE_LEAK")
+            # ``submitted``: the worker call was sent (the model may have spent money;
+            # scored as a candidate).  ``worker_accepted``: the Gateway answered it
+            # without an error.  Both false on every pre-submit path.
             row["submitted"] = bool(self._submitted)
+            row["worker_accepted"] = bool(self._worker_accepted)
             if self.state_root is not None and row.get("state_before_sha256"):
                 row["state_after_sha256"] = state_phase.state_sha256(self.state_root,
                                                                     exclude=self._state_hash_exclude)
@@ -682,6 +798,26 @@ class NexusArmDriver:
             return {}
         path = self.state_dir / f"{gw_task}.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def snapshot_hashes(self) -> dict[str, str]:
+        if self._snapshot_hashes is None:
+            self._snapshot_hashes = {
+                label: state_phase.state_sha256(snapshot)
+                for label, _root, snapshot in self._restore_targets
+            }
+        return self._snapshot_hashes
+
+    def _load_phase_marker(self, run_root: Path) -> None:
+        """Honour a persisted L-A marker once per process (M3)."""
+        if (
+            self._phase_restored
+            or not self._restore_targets
+            or state_phase.restore_policy(self.learning_phase) != "per_phase"
+        ):
+            return
+        if state_phase.read_phase_marker(run_root, self.learning_phase, self.snapshot_hashes()):
+            self._phase_restored = True
+            self._phase_resumed = True
 
     def reset_controller(self) -> Optional[dict[str, Any]]:
         """Reset the Controller worktree to its pin (B1): its own worktree and the
@@ -881,13 +1017,24 @@ def add_gateway_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--goal-id", default="issue-2721-measurement")
     parser.add_argument("--scope-id", required=True, help="e.g. <session>-i2721-runK")
     parser.add_argument("--controller-git", help="git dir holding candidate commits (for the diff)")
-    parser.add_argument("--state-dir", help="the instance's self-hosted state dir (read only)")
+    parser.add_argument(
+        "--state-dir",
+        help="the instance's self-hosted state dir "
+        "(NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR); read for quiescence, restored with "
+        "--state-dir-snapshot",
+    )
     parser.add_argument("--external-target-root", help="root the Gateway allows external targets under")
     parser.add_argument("--trace-dir", required=True,
                         help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only; cost and checks come from it)")
     parser.add_argument("--targets-root", help="measurement root for per-row Controller clones (#2742)")
     parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored per the phase's policy)")
     parser.add_argument("--state-snapshot", help="phase-start snapshot NEXUS_STATE_ROOT is restored from")
+    parser.add_argument(
+        "--state-dir-snapshot",
+        help="phase-start snapshot the self-hosted state dir (--state-dir, "
+        "NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR) is restored from; required when it lies "
+        "outside --state-root",
+    )
     parser.add_argument("--learning-phase", help="M / LA / LB (also COLD / IRRELEVANT); sets the restore policy")
     parser.add_argument("--arm-label", choices=[ARM_NEXUS, "NEXUS_NOOP"], default=ARM_NEXUS,
                         help="NEXUS_NOOP when the Gateway runs the no-model fake claude binary")
@@ -905,16 +1052,32 @@ def build_driver(args: argparse.Namespace, parser: argparse.ArgumentParser) -> "
         parser.error("--controller-repo and --controller-pin go together (M3)")
     if args.state_snapshot and not args.state_dir:
         parser.error("--state-snapshot needs --state-dir (a restore waits for a quiet instance)")
+    if args.controller_repo and not args.state_dir:
+        # M2: the Controller reset waits for a quiet instance, read from the state dir.
+        parser.error("--controller-repo needs --state-dir (the reset waits for a quiet instance)")
     bad = state_phase.invalid_states(Path(args.state_dir) if args.state_dir else None)
     if bad:
         raise DriverStartRefused(f"STATE_INVALID_RECORDS: {bad[:5]}")
+    from scripts.bench.measure_2721.gateway_env import GatewayEnvError, gateway_state_paths
+
+    try:
+        state_paths = (
+            gateway_state_paths(args.gateway_env) if getattr(args, "gateway_env", None) else {}
+        )
+    except (OSError, GatewayEnvError) as exc:
+        raise DriverStartRefused(f"GATEWAY_STATE_PATHS_UNREADABLE: {exc}") from exc
     client = GatewayClient(args.gateway_url, read_token(args.token_file))
     try:
         return NexusArmDriver(
-            client, campaign_id=args.campaign_id, goal_id=args.goal_id, scope_id=args.scope_id,
+            client,
+            campaign_id=args.campaign_id,
+            goal_id=args.goal_id,
+            scope_id=args.scope_id,
             controller_git=Path(args.controller_git) if args.controller_git else None,
             state_dir=Path(args.state_dir) if args.state_dir else None,
-            external_target_root=Path(args.external_target_root) if args.external_target_root else None,
+            external_target_root=Path(args.external_target_root)
+            if args.external_target_root
+            else None,
             trace_dir=Path(args.trace_dir),
             arm_label=args.arm_label,
             targets_root=Path(args.targets_root) if args.targets_root else None,
@@ -926,17 +1089,29 @@ def build_driver(args: argparse.Namespace, parser: argparse.ArgumentParser) -> "
             controller_pin=args.controller_pin,
             measurement_root=Path(args.measurement_root) if args.measurement_root else None,
             live_configs=[Path(p) for p in args.live_config] if args.live_config else None,
+            state_dir_snapshot=Path(args.state_dir_snapshot) if args.state_dir_snapshot else None,
+            gateway_state_paths=state_paths,
         )
-    except controller_guard.ControllerGuardError as exc:
+    except (controller_guard.ControllerGuardError, ValueError) as exc:
         raise DriverStartRefused(str(exc)) from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    from scripts.bench.measure_2721.runner import PrepareStop, add_common_args, prepare
+    from scripts.bench.measure_2721.runner import (
+        PrepareStop,
+        add_common_args,
+        add_single_arm_flag,
+        prepare,
+        single_arm_refusal,
+    )
 
-    parser = argparse.ArgumentParser(description="Drive the NEXUS arm of #2721 on a measurement Gateway")
+    parser = argparse.ArgumentParser(
+        description="Drive the NEXUS arm of #2721 on its own (debug; formal runs "
+        "go through runner.py)"
+    )
     add_common_args(parser)
     add_gateway_args(parser)
+    add_single_arm_flag(parser)
     args = parser.parse_args(argv)
     try:
         tasks = prepare(args, need_read_roots=True)
@@ -946,6 +1121,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return stop.code
     except DriverStartRefused as exc:
         print(json.dumps({"stopped": "DRIVER_REFUSED", "detail": str(exc)}))
+        return 2
+    # Checked after the start checks (their refusals stay the first answer) and
+    # before any row: a real-model NEXUS arm on its own is not a formal run.
+    refused = single_arm_refusal(args, paid=args.arm_label == ARM_NEXUS)
+    if refused is not None:
+        print(json.dumps(refused))
         return 2
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
@@ -962,6 +1143,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     except GatewayStuck as exc:
         print(json.dumps({"stopped": "GATEWAY_STUCK", "detail": str(exc), "rows": len(rows)}))
         return 75
+    except state_phase.PhaseMarkerMismatch as exc:
+        print(
+            json.dumps({
+                "stopped": "STATE_PHASE_MARKER_MISMATCH",
+                "detail": str(exc),
+                "rows": len(rows),
+            })
+        )
+        return 2
     print(json.dumps({"rows": len(rows), "outcomes": sorted({row["outcome"] for row in rows})}))
     return 0
 
