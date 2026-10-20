@@ -14,8 +14,10 @@ writers that had no read-only check:
 
 With the switch set the whole state-root tree and the whole project-root tree hash the
 same before and after, nothing raises and no write is reported as a success.  With the
-switch unset the writes still happen.  Every test runs the real writer: a deploy-style
-project root (``NEXUS_CANONICAL_SOURCE_ROOT``) whose state moves to ``NEXUS_STATE_ROOT``.
+switch unset the writes still happen.  The tests use a deploy-style project root
+(``NEXUS_CANONICAL_SOURCE_ROOT``) whose state moves to ``NEXUS_STATE_ROOT``.  The real
+writers run, except the auto-flow promoted-policy and training-export writers, which are
+replaced by file-writing spies (their own behaviour is tested elsewhere).
 """
 
 from __future__ import annotations
@@ -406,7 +408,7 @@ def test_router_decision_log_unset_writes_project_root(roots: SimpleNamespace) -
 def test_router_decision_log_unset_still_feeds_skills_autotune(tmp_path: Path) -> None:
     """skills_autotune reads <root>/scripts/core/router_decisions.jsonl and .nexus/runs/**;
     with the switch unset the router still writes both locations it reads."""
-    from scripts.ops.skills_autotune import _discover_decision_logs, run_autotune
+    from scripts.ops.skills_autotune import _discover_decision_logs, _load_jsonl, run_autotune
 
     project = tmp_path / "autotune-project"
     legacy_root = project / "scripts" / "core"
@@ -417,6 +419,11 @@ def test_router_decision_log_unset_still_feeds_skills_autotune(tmp_path: Path) -
     logs = _discover_decision_logs(project)
     assert legacy_root / "router_decisions.jsonl" in logs
     assert run_dir / "router_decisions.jsonl" in logs
+    for log in (legacy_root / "router_decisions.jsonl", run_dir / "router_decisions.jsonl"):
+        rows = _load_jsonl(log)  # autotune's own reader parses what the router wrote
+        assert len(rows) == 1
+        assert rows[0]["decision_id"] and rows[0]["phase"] == "R"
+        assert rows[0]["task_id"] == "t-2721-dl"
     rc = run_autotune(
         project_root=project,
         apply=False,
