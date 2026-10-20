@@ -14,6 +14,7 @@ apply a scripted edit) for zero-model dry runs and tests.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -339,6 +340,24 @@ def claude_usage_fields(summary: Any) -> dict[str, Any]:
     return fields
 
 
+@contextlib.contextmanager
+def _process_read_roots(value: Optional[str]):
+    """``NEXUS_MEASUREMENT_READ_ROOTS`` in os.environ for one adapter call, then restored."""
+    name = "NEXUS_MEASUREMENT_READ_ROOTS"
+    before = os.environ.get(name)
+    if value:
+        os.environ[name] = value
+    else:
+        os.environ.pop(name, None)
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = before
+
+
 class ClaudeProvider:
     """BARE arm on ``claude-haiku-5-5`` through the Nexus measurement adapter itself.
 
@@ -369,7 +388,7 @@ class ClaudeProvider:
         )
         from scripts.bench.measure_2721.gateway_env import measurement_env
 
-        measured = measurement_env()  # the Gateway's whitelisted settings (os.environ is never edited)
+        measured = measurement_env()  # the Gateway's whitelisted settings (os.environ: only READ_ROOTS, per call)
         env = {key: value for key, value in os.environ.items() if key in ("USER", "LOGNAME", "LANG")}
         for passthrough in ("NEXUS_MEASUREMENT_CLAUDE_TIMEOUT_SECONDS", "NEXUS_MEASUREMENT_KEY_LABEL"):
             if measured.get(passthrough):
@@ -391,6 +410,7 @@ class ClaudeProvider:
 
         from nexus.executors.claude_measurement_worker import (
             CLAUDE_MEASUREMENT_MODEL,
+            MEASUREMENT_READ_ROOTS_ENV,
             ClaudeMeasurementWorkerAdapter,
         )
         from nexus.executors.worker_contract import WorkerOutcome, WorkerProviderUnavailable
@@ -405,12 +425,16 @@ class ClaudeProvider:
         lease = SimpleNamespace(task_id=run_id, target_worktree=str(workdir))
         base = dict(provider=self.name, model=CLAUDE_MEASUREMENT_MODEL)
         started = time.monotonic()
+        environ = self.environ(Path(controller).parent if controller else None)
         try:
-            receipt = ClaudeMeasurementWorkerAdapter(
-                environ=self.environ(Path(controller).parent if controller else None)
-            ).invoke(
-                contract, lease, prompt=prompt, timeout_seconds=float(timeout_seconds), model=CLAUDE_MEASUREMENT_MODEL
-            )
+            # The adapter's venv lookup (task_venv_for) reads NEXUS_MEASUREMENT_READ_ROOTS from
+            # os.environ, as it does inside the Gateway process; give it the Gateway's value for
+            # this call only (35 gate 1, 2026-10-20: BARE rows were VENV_MISMATCH without it).
+            with _process_read_roots(environ.get(MEASUREMENT_READ_ROOTS_ENV)):
+                receipt = ClaudeMeasurementWorkerAdapter(environ=environ).invoke(
+                    contract, lease, prompt=prompt, timeout_seconds=float(timeout_seconds),
+                    model=CLAUDE_MEASUREMENT_MODEL
+                )
         except WorkerProviderUnavailable as exc:
             return ProviderResult(status=STATUS_INFRA, infra_reason="CLAUDE_UNAVAILABLE", failure_reason=str(exc),
                                   wall_seconds=time.monotonic() - started, extra=dict(self.identity), **base)

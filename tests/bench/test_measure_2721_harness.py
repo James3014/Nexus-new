@@ -942,12 +942,17 @@ def test_runners_require_one_shared_ledger_and_stop_with_75(manifest, tmp_path, 
 
 
 @needs_sandbox
-def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path, monkeypatch):
-    """8d witness item 3, zero-model: the task venv works under the adapter's sandbox."""
+@pytest.mark.parametrize("roots_from", ["process", "gateway_env"])
+def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path, monkeypatch, roots_from):
+    """8d witness item 3, zero-model: the task venv works under the adapter's sandbox.
+
+    ``gateway_env``: READ_ROOTS only in the loaded Gateway env, never in the runner's
+    os.environ -- the formal runner's case (35 gate 1, 2026-10-20: BARE was VENV_MISMATCH)."""
     import site
     import subprocess as sp
     import sys
 
+    from scripts.bench.measure_2721 import gateway_env
     from scripts.bench.measure_2721.fake_claude import write_fake_claude
     from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
 
@@ -971,7 +976,15 @@ def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path
         elif source.is_file():
             shutil.copy(source, venv_site / name)
     base_prefix = Path(os.path.realpath(sys.base_prefix))
-    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", ":".join((str(venv.parent), str(base_prefix))))
+    roots = ":".join((str(venv.parent), str(base_prefix)))
+    if roots_from == "process":
+        monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", roots)
+    else:
+        monkeypatch.delenv("NEXUS_MEASUREMENT_READ_ROOTS", raising=False)
+        env_file = tmp_path / "gateway.env"
+        env_file.write_text(f"NEXUS_MEASUREMENT_READ_ROOTS={roots}\n")
+        gateway_env.use_gateway_env(env_file)
+        monkeypatch.setattr(gateway_env, "_LOADED", dict(gateway_env._LOADED))
     fake = write_fake_claude(tmp_path / "bin" / "claude", "venvprobe")
     key = tmp_path / "anthropic.env"
     key.write_text("ANTHROPIC_API_KEY=" + "-".join(("sk", "ant", "test", "NOTAREALKEY000000000000")) + "\n")
@@ -986,6 +999,8 @@ def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path
     # The interpreter that ran is the task venv itself (review L2).
     assert probe["import_encodings"]["tail"].strip().splitlines()[-1] == str(venv), probe
     assert probe["pytest_collect"]["rc"] == 0, probe
+    # The runner's own environment is left as it was.
+    assert ("NEXUS_MEASUREMENT_READ_ROOTS" in os.environ) == (roots_from == "process")
 
 
 # -- 35 smoke findings: Controller pin, cancel retry, Gateway env ----------------
