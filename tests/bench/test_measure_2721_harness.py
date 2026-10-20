@@ -2124,21 +2124,120 @@ def test_runner_admits_whole_blocks_and_stops_at_the_cap_with_75(manifest, tmp_p
     assert ledger.state()["spent_usd"] == pytest.approx(3.0)
 
 
+class _StuckOnWorker(FakeGateway):
+    """The n-th worker's task never terminates (cancel refused, PENDING_HUMAN_APPROVAL)."""
+
+    def __init__(self, nth: int):
+        super().__init__()
+        self.nth, self.workers, self.stuck = nth, 0, None
+
+    def _answer(self, name, args):
+        if name == "nexus_worker_candidate":
+            self.workers += 1
+            if self.workers == self.nth:
+                self.stuck = args["task_id"]
+        payload = super()._answer(name, args)
+        if name == "nexus_task_status" and args.get("task_id") == self.stuck:
+            payload["status"] = "PENDING_HUMAN_APPROVAL"
+        return payload
+
+
 def test_runner_resumes_without_rerunning_completed_rows(manifest, tmp_path, monkeypatch):
+    _fake_build(monkeypatch, {"NEXUS": _StuckOnWorker(2)})
+    run = tmp_path / "run"
+    repeats = tuple(str(r) for r in range(1, 4))
+    assert _runner_main(manifest, tmp_path, run, repeats=repeats) == 75  # stuck in block 1
+    assert json.loads((run / "stop.json").read_text())["reason"] == "GATEWAY_STUCK"
+    first = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["block"], b["status"]) for b in first] == [(0, "COMPLETE")]
+    schedule = (run / "schedule.json").read_text()
+    # A resume with a new (or missing) ledger would reset the spend: refused.
+    assert _runner_main(manifest, tmp_path, run, repeats=repeats, ledger="spend2.json") == 2
+    # Same seed, schedule and ledger: block 0 is not re-run, block 1 re-runs WHOLE.
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run, repeats=repeats) == 0
+    assert (run / "schedule.json").read_text() == schedule
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["block"], b["attempt"], b["status"]) for b in blocks] == [
+        (0, 0, "COMPLETE"), (1, 0, "RERUN"), (1, 1, "COMPLETE"), (2, 0, "COMPLETE")]
+    assert blocks[0]["run_ids"] == first[0]["run_ids"]
+    assert blocks[1]["infra_why"]["NEXUS"] == "INFRA" and set(blocks[2]["run_ids"]) == {"BARE", "NEXUS", "NOOP"}
+    assert not set(blocks[2]["run_ids"].values()) & set((blocks[1]["run_ids"] or {}).values())
+    # Another seed (or task set) on the same run root is refused.
+    assert _runner_main(manifest, tmp_path, run, "--seed", "1", repeats=repeats) == 2
+
+
+def test_runner_reruns_the_whole_block_after_a_lost_gateway_or_a_crash(manifest, tmp_path, monkeypatch):
+    import urllib.error
+
+    class Dies(FakeGateway):
+        """The Gateway is killed after accepting the worker (the watchdog kills it)."""
+
+        def __call__(self, method, path, body):
+            if body and body.get("params", {}).get("name") in ("nexus_task_wait", "nexus_task_status",
+                                                                  "nexus_task_cancel"):
+                raise ConnectionResetError(54, "Connection reset by peer")
+            return super().__call__(method, path, body)
+
+    _fake_build(monkeypatch, {"NEXUS": Dies()})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 75
+    (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert row["infra"] and row["void_reason"] == "GATEWAY_CONNECTION_LOST" and row["worker_accepted"]
+    assert blind.exclusion_reason(row)[0] == "SYMMETRIC_INFRA"
+    # The reviewer's case: a row crashes outright (no row written for it).
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    real_noop = arms.run_noop
+    monkeypatch.setattr(arms, "run_noop", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
+    assert _runner_main(manifest, tmp_path, run) == 75
+    assert json.loads((run / "stop.json").read_text())["reason"] == "ROW_EXCEPTION"
+    monkeypatch.setattr(arms, "run_noop", real_noop)
+    with (run / "progress.jsonl").open("a") as handle:
+        handle.write('{"block": 0, "torn')  # a crash mid-write
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [b["status"] for b in blocks][-1] == "COMPLETE" and blocks[-1]["attempt"] == 2
+    assert all(b["status"] == "RERUN" for b in blocks[:-1])
+    final = blocks[-1]["run_ids"]
+    earlier = {rid for b in blocks[:-1] for rid in b["run_ids"].values()}
+    assert set(final) == {"BARE", "NEXUS", "NOOP"} and not set(final.values()) & earlier  # every arm re-ran
+    # The client turns every connection-layer error into GatewayConnectionLost.
+    for exc in (urllib.error.URLError("refused"), TimeoutError("timed out"), ConnectionResetError()):
+        def broken(*_a, exc=exc):
+            raise exc
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=broken)
+        with pytest.raises(nexus_driver.GatewayConnectionLost):
+            client.health()
+
+
+def test_runner_reruns_a_complete_block_with_a_late_watchdog_event(manifest, tmp_path, monkeypatch):
     _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
     run = tmp_path / "run"
-    repeats = tuple(str(r) for r in range(1, 5))
-    assert _runner_main(manifest, tmp_path, run, repeats=repeats, cap="5", max_row="1.0") == 75
-    before = [r["run_id"] for r in read_jsonl(run / "rows.jsonl")]
-    schedule = (run / "schedule.json").read_text()
-    # Same seed and schedule, a bigger budget (a new ledger): continue with the next block only.
-    rc = _runner_main(manifest, tmp_path, run, repeats=repeats, cap="100", max_row="1.0", ledger="spend2.json")
-    assert rc == 0 and (run / "schedule.json").read_text() == schedule
-    after = [r["run_id"] for r in read_jsonl(run / "rows.jsonl")]
-    assert after[:len(before)] == before and len(after) == 4 * 3
-    assert [b["block"] for b in read_jsonl(run / "blocks.jsonl")] == [0, 1, 2, 3]
-    # Another seed (or task set) on the same run root is refused.
-    assert _runner_main(manifest, tmp_path, run, "--seed", "1", repeats=repeats, ledger="spend2.json") == 2
+    assert _runner_main(manifest, tmp_path, run) == 0
+    (block,) = list(read_jsonl(run / "blocks.jsonl"))
+    with (run / "run" / "infra_events.jsonl").open("a") as handle:
+        handle.write(json.dumps({"row_id": block["run_ids"]["BARE"], "kind": "late"}) + "\n")
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "COMPLETE"), (0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[1]["late_infra"] == {"BARE": "WATCHDOG_EVENT"}
+
+
+def test_probe_cache_is_kept_when_the_self_hosted_dir_is_inside_the_state_root(tmp_path):
+    from scripts.bench.measure_2721 import state_phase
+
+    root, snap = tmp_path / "state", tmp_path / "snap"
+    (snap / "tasks").mkdir(parents=True)
+    (snap / "tasks" / "memory.json").write_text("start")
+    jobs = root / "tasks" / "assisted_provider_jobs"
+    (jobs / "probe_evidence").mkdir(parents=True)
+    (jobs / "probe-1.json").write_text("{}")
+    (jobs / "probe_evidence" / "e.json").write_text("{}")
+    (root / "tasks" / "memory.json").write_text("learned")
+    result = state_phase.restore_state(root, snap)
+    assert result["ok"] and (jobs / "probe-1.json").is_file() and (jobs / "probe_evidence" / "e.json").is_file()
+    assert (root / "tasks" / "memory.json").read_text() == "start"
+    assert state_phase.state_sha256(root) == state_phase.state_sha256(snap)
 
 
 def test_runner_reruns_an_infra_block_twice_then_excludes_it(manifest, tmp_path, monkeypatch):

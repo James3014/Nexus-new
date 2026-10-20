@@ -21,6 +21,7 @@ Safety rails:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -92,6 +93,11 @@ class LiveGatewayRefused(RuntimeError):
     pass
 
 
+class GatewayConnectionLost(RuntimeError):
+    """The Gateway did not answer at the connection layer (e.g. killed by the watchdog):
+    reset, refused, timed out, a truncated or HTTP-error reply.  The row is INFRA."""
+
+
 class GatewayToolError(RuntimeError):
     def __init__(self, tool: str, payload: Any):
         super().__init__(f"{tool}: {json.dumps(payload)[:500]}")
@@ -150,13 +156,20 @@ class GatewayClient:
         with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310 (fixed scheme)
             return json.loads(response.read().decode("utf-8"))
 
+    def _send(self, method: str, path: str, body: Optional[dict[str, Any]]) -> dict[str, Any]:
+        try:
+            return self._transport(method, path, body)
+        except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
+            # URLError, ConnectionResetError, socket timeouts, RemoteDisconnected, ...
+            raise GatewayConnectionLost(f"{method} {path}: {type(exc).__name__}: {str(exc)[:200]}") from exc
+
     def health(self) -> dict[str, Any]:
-        return self.redact(self._transport("GET", "/health", None))
+        return self.redact(self._send("GET", "/health", None))
 
     def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self._next_id += 1
-        reply = self._transport("POST", "/mcp", {"jsonrpc": "2.0", "id": self._next_id, "method": method,
-                                                  "params": params})
+        reply = self._send("POST", "/mcp", {"jsonrpc": "2.0", "id": self._next_id, "method": method,
+                                             "params": params})
         return self.redact(reply)
 
     def tools(self) -> list[dict[str, Any]]:
@@ -701,6 +714,11 @@ class NexusArmDriver:
             else:
                 row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
                            infra=_is_infra(message), error=message[:2000])
+        except GatewayConnectionLost as exc:
+            # Re-review B2: a Gateway lost at the connection layer (the watchdog kills
+            # it) is INFRA in every case; the row is written and the block re-runs.
+            row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="GATEWAY_CONNECTION_LOST",
+                       gateway_connection_lost=True, error=str(exc)[:2000])
         finally:
             stuck = None
             if created:
@@ -711,6 +729,9 @@ class NexusArmDriver:
                 except GatewayToolError as exc:
                     transcript.append({"tool": "nexus_task_cancel", "error": exc.payload})
                     refused = _cancel_refused(exc.payload)
+                except GatewayConnectionLost as exc:
+                    transcript.append({"tool": "nexus_task_cancel", "connection_lost": str(exc)[:300]})
+                    refused = False
                 stuck = self._await_terminal(gw_task, transcript, cancel_refused=refused)
                 if stuck is not None:
                     row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
@@ -787,6 +808,8 @@ class NexusArmDriver:
                 snapshot = self.client.call("nexus_task_status", {"task_id": gw_task})
             except GatewayToolError as exc:
                 return f"status_error:{json.dumps(exc.payload)[:200]}"
+            except GatewayConnectionLost as exc:
+                return f"connection_lost:{str(exc)[:200]}"
             status = str(snapshot.get("status") or "")
             if status in TERMINAL_STATUSES:
                 return None
@@ -801,6 +824,8 @@ class NexusArmDriver:
                 except GatewayToolError as exc:
                     transcript.append({"tool": "nexus_task_cancel", "retry": retries, "error": exc.payload})
                     cancel_refused = _cancel_refused(exc.payload)
+                except GatewayConnectionLost as exc:
+                    return f"connection_lost:{str(exc)[:200]}"
         transcript.append({"tool": "nexus_task_status", "stuck_status": status, "cancel_retries": retries})
         return status or "unknown"
 

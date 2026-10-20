@@ -50,6 +50,7 @@ RESOLVED = frozenset({"COMPLETE", "EXCLUDED_AFTER_RERUNS"})
 PROGRESS_FILE = "progress.jsonl"
 BLOCKS_FILE = "blocks.jsonl"
 STOP_FILE = "stop.json"
+LEDGER_BINDING_FILE = "ledger_binding.json"
 SINGLE_ARM_FLAG = "--single-arm-debug"
 SINGLE_ARM_REFUSED = "SINGLE_ARM_FORMAL_RUN_REFUSED"
 
@@ -215,9 +216,21 @@ def _blocks(schedule: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
+    """Complete JSON lines.  A torn last line (no newline: a crash mid-write) is ignored --
+    that row then counts as missing and its block re-runs whole; a bad complete line
+    fails closed."""
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    complete = path.read_text(encoding="utf-8").split("\n")[:-1]
+    return [json.loads(line) for line in complete if line.strip()]
+
+
+def _drop_torn_tail(path: Path) -> None:
+    """Cut a torn last line before appending again (so it never ends up mid-file)."""
+    if path.is_file():
+        data = path.read_bytes()
+        if data and not data.endswith(b"\n"):
+            path.write_bytes(data[: data.rfind(b"\n") + 1])
 
 
 def _append(path: Path, record: Mapping[str, Any]) -> None:
@@ -305,15 +318,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     by_id = {task["task_id"]: task for task in tasks}
     schedule = build_schedule(list(by_id), args.repeats, args.arms, args.seed)
     previous = run_root / "schedule.json"
+    resume = previous.is_file()
+    binding_path = run_root / LEDGER_BINDING_FILE
+    if resume:
+        # The spend ledger is bound to the run: a resume with a new (or missing) ledger
+        # would start the US$100 cap from 0 again.
+        binding = json.loads(binding_path.read_text(encoding="utf-8")) if binding_path.is_file() else {}
+        if not Path(args.spend_ledger).is_file() or \
+                binding.get("path") != os.path.realpath(args.spend_ledger):
+            print(json.dumps({"stopped": "LEDGER_CHANGED_ON_RESUME", "bound": binding.get("path")}))
+            return 2
     if previous.is_file():
         # Exit 75 is resumable only with the same seed, arms and task set (same order).
         old = json.loads(previous.read_text(encoding="utf-8"))
         if old.get("seed") != args.seed or old.get("order_sha256") != hashlib.sha256(json.dumps(schedule, sort_keys=True).encode()).hexdigest():
             print(json.dumps({"stopped": "SCHEDULE_CHANGED_ON_RESUME", "seed": args.seed}))
             return 2
+    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
+    if resume:
+        if binding.get("ledger_id") != ledger.identity():
+            print(json.dumps({"stopped": "LEDGER_CHANGED_ON_RESUME", "bound": binding.get("path")}))
+            return 2
     else:
         write_schedule(run_root, schedule, args.seed)
-    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
+        write_json(binding_path, {"path": os.path.realpath(args.spend_ledger), "ledger_id": ledger.identity()})
     provider = arms_module.build_provider(args.provider, claude_bin=args.claude_bin,
                                           trace_dir=run_root / "traces", key_file=args.key_file) \
         if "BARE" in args.arms else None
@@ -327,6 +355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"stopped": "DRIVER_REFUSED", "detail": str(exc)}))
         return 2
     progress, blocks_path = run_root / PROGRESS_FILE, run_root / BLOCKS_FILE
+    for path in (progress, blocks_path):
+        _drop_torn_tail(path)
     done_progress = _records(progress)
     last_status = {int(r["block"]): r for r in _records(blocks_path)}
     rows: list[dict[str, Any]] = []
@@ -341,24 +371,63 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"stopped": reason, **{k: v for k, v in record.items() if k != "ledger"}}))
         return code
 
+    from scripts.bench.measure_2721 import watchdog
+
+    def evaluate(block: Mapping[str, Any], attempt: int) -> tuple[list[str], dict[str, Any]]:
+        """Arms of this attempt that are infra: an infra row, a row missing from progress
+        or rows.jsonl (a crash, a lost Gateway), or one the watchdog listed (re-review B2).
+        A block is COMPLETE only when every arm has a written, non-infra row."""
+        entries = {p["arm"]: p for p in done_progress if int(p["block"]) == block["block"]
+                   and int(p["attempt"]) == attempt}
+        written = {r.get("run_id") for r in _records(run_root / "rows.jsonl")}
+        why: dict[str, str] = {}
+        for arm in block["arms"]:
+            entry = entries.get(arm)
+            if entry is None or entry.get("run_id") not in written:
+                why[arm] = "MISSING"
+            elif entry["infra"]:
+                why[arm] = "INFRA"
+            elif watchdog.infra_event_for(run_root, entry["run_id"]) is not None:
+                why[arm] = "WATCHDOG_EVENT"
+        run_ids = {arm: entries[arm]["run_id"] for arm in block["arms"] if arm in entries}
+        return sorted(why), {"why": why, "run_ids": run_ids}
+
+    def record_attempt(block: Mapping[str, Any], attempt: int) -> str:
+        infra_arms, detail = evaluate(block, attempt)
+        status = "COMPLETE" if not infra_arms else (
+            "RERUN" if attempt < MAX_INFRA_RERUNS else "EXCLUDED_AFTER_RERUNS")
+        record = {"block": block["block"], "task_id": block["task_id"], "repeat": block["repeat"],
+                  "attempt": attempt, "status": status, "arm_order": block["arms"], "infra_arms": infra_arms,
+                  "infra_why": detail["why"], "run_ids": detail["run_ids"]}
+        _append(blocks_path, record)
+        last_status[block["block"]] = record
+        return status
+
     for block in _blocks(schedule):
         state = last_status.get(block["block"])
+        if state is not None and state["status"] == "COMPLETE" and evaluate(block, int(state["attempt"]))[0]:
+            # A late watchdog event (or a lost row) on a block recorded COMPLETE: re-run it whole.
+            state = dict(state, status="RERUN")
+            _append(blocks_path, {**state, "late_infra": evaluate(block, int(state["attempt"]))[1]["why"]})
         if state is not None and state["status"] in RESOLVED:
             continue  # resumed: completed rows are never re-run
         attempt = int(state["attempt"]) + 1 if state is not None else 0
+        if any(int(p["block"]) == block["block"] and int(p["attempt"]) == attempt for p in done_progress):
+            # Resume of an interrupted attempt (crash, stuck or lost Gateway, busy): its
+            # missing rows count as infra and the WHOLE block re-runs, every arm.
+            if record_attempt(block, attempt) != "RERUN":
+                last_completed = block["block"]
+                continue
+            attempt += 1
         task = by_id[block["task_id"]]
         while True:
-            done = {p["arm"]: p for p in done_progress if int(p["block"]) == block["block"]
-                    and int(p["attempt"]) == attempt}
-            remaining = [arm for arm in block["arms"] if arm not in done]
-            if remaining:
-                try:
-                    # PREREG v0.9: admit the whole (rest of the) block or start nothing.
-                    ledger.begin_block(sum(arm in CHARGED_ARMS for arm in remaining))
-                except BudgetExhausted as exc:
-                    return stop(75, "BUDGET_CAP", detail=str(exc), next_block=block["block"])
+            try:
+                # PREREG v0.9: admit the whole block or start nothing.
+                ledger.begin_block(sum(arm in CHARGED_ARMS for arm in block["arms"]))
+            except BudgetExhausted as exc:
+                return stop(75, "BUDGET_CAP", detail=str(exc), next_block=block["block"])
             admitted = ledger.admitted()
-            for arm in remaining:
+            for arm in block["arms"]:
                 slot = block["slots"][block["arms"].index(arm)]
                 try:
                     if arm == "BARE":
@@ -378,6 +447,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return stop(75, "GATEWAY_STUCK", detail=str(exc), block=block["block"])
                 except nexus_driver.state_phase.PhaseMarkerMismatch as exc:
                     return stop(2, "STATE_PHASE_MARKER_MISMATCH", detail=str(exc))
+                except Exception as exc:  # noqa: BLE001 - any row crash: stop resumable, block re-runs whole
+                    return stop(75, "ROW_EXCEPTION", detail=f"{type(exc).__name__}: {str(exc)[:300]}",
+                                block=block["block"], arm=arm)
                 entry = {"block": block["block"], "attempt": attempt, "slot": slot, "arm": arm,
                          "run_id": row.get("run_id"), "infra": bool(row.get("infra"))}
                 _append(progress, entry)
@@ -385,23 +457,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if arm in drivers and nexus_driver.instance_busy(row):
                     # Busy to the end: stop (resumable) instead of spending on the other arms.
                     return stop(75, "INSTANCE_BUSY", detail=row.get("void_reason"), block=block["block"])
-                done[arm] = entry
                 rows.append({"slot": slot, "arm": arm, "run_id": row.get("run_id"), "attempt": attempt})
-            infra_arms = sorted(arm for arm, entry in done.items() if entry["infra"])
-            status = "COMPLETE" if not infra_arms else (
-                "RERUN" if attempt < MAX_INFRA_RERUNS else "EXCLUDED_AFTER_RERUNS")
-            record = {"block": block["block"], "task_id": block["task_id"], "repeat": block["repeat"],
-                      "attempt": attempt, "status": status, "arm_order": block["arms"], "infra_arms": infra_arms,
-                      "run_ids": {arm: done[arm]["run_id"] for arm in block["arms"]}}
-            _append(blocks_path, record)
-            last_status[block["block"]] = record
-            if status != "RERUN":
+            if record_attempt(block, attempt) != "RERUN":
                 break
             attempt += 1  # an infra row in any arm: the whole block again, same arm order
         last_completed = block["block"]
     write_json(run_root / "schedule_done.json", {"seed": args.seed, "rows": rows})
     stop(0, "DONE")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

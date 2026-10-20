@@ -34,7 +34,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
-# Relative paths kept as they are by a restore and left out of every hash.
+# Directory names kept as they are by a restore and left out of every hash, AT ANY
+# DEPTH (re-review B1: the Gateway writes ``<self-hosted state dir>/assisted_provider_jobs``,
+# and the self-hosted dir may lie inside the state root, restored with it).
 # PREREG §5: the whole probe cache (``assisted_provider_jobs/``: probe jobs, their
 # stdout/stderr and ``probe_evidence/``) is never restored, or every row re-probes.
 PRESERVED_STATE_PATHS = ("assisted_provider_jobs",)
@@ -49,14 +51,12 @@ ROUTER_LOG_NAMES = ("router_decisions.jsonl", "scripts/core/router_decisions.jso
 
 
 def _preserved(relative: Path | str) -> bool:
-    rel = Path(relative).as_posix()
-    return any(rel == p or rel.startswith(p + "/") for p in PRESERVED_STATE_PATHS)
+    return any(part in PRESERVED_STATE_PATHS for part in Path(relative).parts)
 
 
-def _holds_preserved(relative: Path | str) -> bool:
-    """``relative`` is a directory above a preserved path (walk into it, never remove it whole)."""
-    rel = Path(relative).as_posix()
-    return any(p.startswith(rel + "/") for p in PRESERVED_STATE_PATHS)
+def _holds_preserved(directory: Path) -> bool:
+    """``directory`` holds a preserved directory somewhere below (walk into it, never remove it whole)."""
+    return any(True for name in PRESERVED_STATE_PATHS for _ in Path(directory).rglob(name))
 
 
 def _clear(root: Path, relative: Path) -> None:
@@ -65,7 +65,7 @@ def _clear(root: Path, relative: Path) -> None:
         if child.name.endswith(".lock") or _preserved(rel):
             continue
         if child.is_dir() and not child.is_symlink():
-            if _holds_preserved(rel):
+            if _holds_preserved(child):
                 _clear(root, rel)
                 continue
             shutil.rmtree(child)
@@ -80,7 +80,7 @@ def _copy(snapshot: Path, root: Path, relative: Path) -> None:
             continue
         target = root / rel
         if child.is_dir() and not child.is_symlink():
-            if _holds_preserved(rel):
+            if _holds_preserved(child) or target.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 _copy(snapshot, root, rel)
             else:

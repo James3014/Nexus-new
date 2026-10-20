@@ -71,6 +71,11 @@ class SpendLedger:
     def state(self) -> dict[str, Any]:
         return self._locked()
 
+    def identity(self) -> str:
+        """A random id stored in the ledger file (created once): a resume must use the
+        same ledger, or a fresh file would reset the spend (re-review)."""
+        return str(self._locked(lambda data: data.setdefault("ledger_id", uuid.uuid4().hex))["ledger_id"])
+
     def begin_row(self, *, admitted: bool = False) -> str:
         """Admit one row and reserve its expected cost, atomically; raise when over the cap
         (not for a row of an already admitted block)."""

@@ -104,6 +104,9 @@ def symmetric_infra_reasons(row: Mapping[str, Any]) -> list[str]:
         reasons.append("PROVIDER_INFRA_MARKER")
     if row.get("watchdog_event") is not None:
         reasons.append("WATCHDOG_EVENT")
+    if row.get("gateway_connection_lost"):
+        # The Gateway died at the connection layer (e.g. the watchdog killed it): INFRA.
+        reasons.append("GATEWAY_CONNECTION_LOST")
     if row.get("gateway_stuck"):
         # PREREG §3.3: a stuck Gateway is INFRA (both arms re-run), whether or not
         # the watchdog fired first.
