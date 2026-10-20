@@ -32,6 +32,7 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
@@ -45,20 +46,23 @@ ROUTE_STATE_AT_START = os.environ.get("NEXUS_CAIRNWORK_STATE", "").strip()
 CAIRNWORK_WORKER = "cairnwork"
 TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}")
-# Requests that carry any of these are not "a small bug fix" for the pilot.
-_NOT_SMALL_FIX = (
-    "authority_change_candidate_confirmation",
-    "fail_to_pass_required",
-    "rie_knowledge_identity",
-    "codeintel_lookup",
-    "planner_output",
-    "workforce_demands",
-    "workforce_admission",
-    "external_target",
-    "provider",
-    "model",
-)
+# The only fields a pilot small fix may carry (booleans only when false).
+_SMALL_FIX_FIELDS = frozenset({
+    "task_id",
+    "what",
+    "why",
+    "worker",
+    "allowed_files",
+    "verifier_commands",
+    "owner_confirmation",
+    "task_card_path",
+    "task_card_hash",
+})
+_FALSE_ALLOWED = frozenset({"authority_change_candidate_confirmation", "fail_to_pass_required"})
+_PYTEST_FLAGS = frozenset({"-q", "-x", "-v"})
+_TEST_PATH = re.compile(r"tests/(?:[A-Za-z0-9_\-]+/)*[A-Za-z0-9_\-]+\.py(?:::[A-Za-z0-9_\[\]\-]+)*")
 _CALL_TIMEOUT_SECONDS = 60
+_SHADOW_TIMEOUT_SECONDS = 10
 
 
 def _gateway() -> Any:
@@ -70,17 +74,26 @@ def route_mode() -> str:
 
 
 def small_fix_shape(arguments: Mapping[str, Any], verifiers: list[str]) -> bool:
-    """No extra powers or inputs, and every verifier is ``python3 -m pytest tests/...``."""
-    for key in _NOT_SMALL_FIX:
-        value = arguments.get(key)
-        if value not in (None, False, ""):
+    """Only the listed fields, and every verifier ``python3 -m pytest [-q|-x|-v] tests/...``
+    (Cairnwork checks the same again; this decides only what is offered to it)."""
+    for key, value in arguments.items():
+        if key in _FALSE_ALLOWED and value is False:
+            continue
+        if key not in _SMALL_FIX_FIELDS:
             return False
+    if not verifiers:
+        return False
     for command in verifiers:
         try:
             argv = shlex.split(command)
         except ValueError:
             return False
-        if argv[:3] != ["python3", "-m", "pytest"] or not any(a.startswith("tests/") for a in argv):
+        rest = argv[3:]
+        if argv[:3] != ["python3", "-m", "pytest"] or not rest:
+            return False
+        if not all(a in _PYTEST_FLAGS or _TEST_PATH.fullmatch(a) for a in rest):
+            return False
+        if not any(_TEST_PATH.fullmatch(a) for a in rest):
             return False
     return True
 
@@ -109,7 +122,9 @@ def cairnwork_payload(
 
 
 def call_cairnwork(
-    *args: str, payload: Optional[dict[str, Any]] = None
+    *args: str,
+    payload: Optional[dict[str, Any]] = None,
+    timeout: float = _CALL_TIMEOUT_SECONDS,
 ) -> tuple[int, dict[str, Any]]:
     """Run cairnwork-route; (exit code, JSON). A timeout kills the command and waits for it."""
     if not ROUTE_BIN_AT_START or not ROUTE_STATE_AT_START:
@@ -120,7 +135,7 @@ def call_cairnwork(
             input=json.dumps(payload) if payload is not None else "",
             capture_output=True,
             text=True,
-            timeout=_CALL_TIMEOUT_SECONDS,
+            timeout=max(1.0, timeout),
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -140,62 +155,42 @@ class _CairnworkRouteMixin:
     if TYPE_CHECKING:
         service: SelfHostedTaskService
 
-    def _cairnwork_root(self) -> Path:
+    def _cairnwork_root(self) -> Optional[Path]:
+        """The SelfHosted state directory; never a shared /tmp fallback."""
         configured = getattr(self.service, "state_dir", None)
-        base = (
-            Path(configured).expanduser().resolve()
-            if configured
-            else Path("/tmp/nexus-mcp-gateway-assist-jobs")
-        )
-        return base
+        return Path(configured).expanduser().resolve() if configured else None
 
     def _cairnwork_job_path(self, task_id: str) -> Optional[Path]:
-        if not _SLUG.fullmatch(str(task_id)):
+        root = self._cairnwork_root()
+        if root is None or not _SLUG.fullmatch(str(task_id)):
             return None
-        return self._cairnwork_root() / "cairnwork_jobs" / f"{task_id}.json"
+        return root / "cairnwork_jobs" / f"{task_id}.json"
 
     def _cairnwork_owns(self, task_id: str) -> bool:
         path = self._cairnwork_job_path(task_id)
-        return path is not None and path.is_file()
+        return path is not None and path.is_file() and not path.is_symlink()
 
     def _cairnwork_shadow(self, arguments: Mapping[str, Any], payload: dict[str, Any]) -> None:
-        """Log what route mode would do. Never raises, never changes the response."""
-        try:
-            code, body = call_cairnwork("check", payload=payload)
-            line = {
-                "at": time.time(),
-                "task_id": payload["idempotency_key"],
-                "worker": str(arguments.get("worker") or ""),
-                "exit": code,
-                "answer": body,
-            }
-            root = self._cairnwork_root()
-            root.mkdir(parents=True, exist_ok=True)
-            with open(root / "cairnwork_shadow.jsonl", "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(line, sort_keys=True) + "\n")
-        except Exception:  # noqa: BLE001 - shadow mode must never affect the live path
+        """Log what route mode would do, in the background: never raises, never
+        delays or changes the response."""
+        root = self._cairnwork_root()
+        if root is None:
             return
+        worker = str(arguments.get("worker") or "")
+        threading.Thread(target=_shadow_check, args=(root, worker, payload), daemon=True).start()
 
     def _cairnwork_submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         task_id = payload["idempotency_key"]
         path = self._cairnwork_job_path(task_id)
         if path is None:
-            raise _gateway().GatewayInputError("task_id must be a stable bounded slug")
+            raise _gateway().GatewayInputError("CAIRNWORK_NO_STATE_DIR")
         if not path.exists() and self.service.get_task_snapshot(task_id) is not None:
             raise _gateway().GatewayInputError("CAIRNWORK_TASK_ID_OWNED_BY_NEXUS")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            record = {
-                "schema": "nexus.cairnwork_job.v1",
-                "task_id": task_id,
-                "owner": "cairnwork",
-                "task_card_hash": payload["card_hash"],
-                "created_at": time.time(),
-            }
-            path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+        created = _create_record(path, task_id, payload["card_hash"])
         code, body = call_cairnwork("submit", payload=payload)
         if code == 2 and body.get("error") == "NOT_ACCEPTING":
-            path.unlink(missing_ok=True)  # nothing was bound: the task is not Cairnwork's
+            if created:  # only the call that made the record may take it back
+                path.unlink(missing_ok=True)
             raise _gateway().GatewayInputError("CAIRNWORK_NOT_ACCEPTING")
         if code != 0:
             raise _gateway().GatewayInputError(f"CAIRNWORK_{body.get('error') or 'ERROR'}")
@@ -209,8 +204,10 @@ class _CairnworkRouteMixin:
             "candidate_only": True,
         }
 
-    def _cairnwork_status(self, task_id: str) -> dict[str, Any]:
-        code, body = call_cairnwork("status", "--key", task_id)
+    def _cairnwork_status(
+        self, task_id: str, *, timeout: float = _CALL_TIMEOUT_SECONDS
+    ) -> dict[str, Any]:
+        code, body = call_cairnwork("status", "--key", task_id, timeout=timeout)
         base = {"schema": "nexus.cairnwork_task.v1", "task_id": task_id, "owner": "cairnwork"}
         if code != 0:
             return {
@@ -234,12 +231,13 @@ class _CairnworkRouteMixin:
     def _cairnwork_wait(
         self, task_id: str, *, timeout_seconds: float, poll_interval_seconds: float
     ) -> dict[str, Any]:
+        """Bounded by timeout_seconds; an unreadable status returns at once."""
         deadline = time.monotonic() + timeout_seconds
         while True:
-            status = self._cairnwork_status(task_id)
-            if status["terminal"] or time.monotonic() >= deadline:
+            status = self._cairnwork_status(task_id, timeout=deadline - time.monotonic())
+            if status["terminal"] or "error" in status or time.monotonic() >= deadline:
                 return status
-            time.sleep(poll_interval_seconds)
+            time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
     def _cairnwork_cancel(self, task_id: str) -> dict[str, Any]:
         status = self._cairnwork_status(task_id)
@@ -254,3 +252,46 @@ class _CairnworkRouteMixin:
                 "detail": body.get("detail"),
             }
         return {**status, "status": body.get("status"), "terminal": True, "cancelled": True}
+
+
+def _create_record(path: Path, task_id: str, card_hash: str) -> bool:
+    """Create the ownership record atomically; False if it already existed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": "nexus.cairnwork_job.v1",
+        "task_id": task_id,
+        "owner": "cairnwork",
+        "task_card_hash": card_hash,
+        "created_at": time.time(),
+    }
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, sort_keys=True)
+    return True
+
+
+def _shadow_check(root: Path, worker: str, payload: dict[str, Any]) -> None:
+    try:
+        code, body = call_cairnwork("check", payload=payload, timeout=_SHADOW_TIMEOUT_SECONDS)
+        line = {
+            "at": time.time(),
+            "task_id": payload["idempotency_key"],
+            "worker": worker,
+            "exit": code,
+            "answer": body,
+        }
+        data = (json.dumps(line, sort_keys=True) + "\n").encode("utf-8")
+        fd = os.open(
+            root / "cairnwork_shadow.jsonl",
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            os.write(fd, data)  # one append per line: lines from parallel checks never mix
+        finally:
+            os.close(fd)
+    except Exception:  # noqa: BLE001 - shadow mode must never affect the live path
+        return

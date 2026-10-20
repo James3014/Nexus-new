@@ -348,24 +348,6 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             raise _gateway().GatewayInputError(f"TASK_CARD_BINDING_INVALID:{exc}") from exc
         if hashlib.sha256(card_bytes).hexdigest() != task_card_hash:
             raise _gateway().GatewayInputError("TASK_CARD_BINDING_MISMATCH")
-        # Council F (cairnwork docs/GATEWAY_ROUTE.md): off by default; see cairnwork_route.py.
-        cairnwork_mode = route_mode()
-        wants_cairnwork = str(arguments.get("worker") or "").strip().lower() == CAIRNWORK_WORKER
-        if self._cairnwork_owns(task_id) and not (cairnwork_mode == "route" and wants_cairnwork):
-            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
-        if cairnwork_mode != "off" and external_root is None:
-            small_fix = small_fix_shape(arguments, verifiers)
-            payload_for_cairnwork = cairnwork_payload(
-                task_id=task_id, task_card_hash=task_card_hash, what=what, why=why,
-                repo=Path(_gateway().CANONICAL_SOURCE_ROOT), base=head, allowed=allowed,
-                verifiers=verifiers,
-            )
-            if cairnwork_mode == "route" and wants_cairnwork:
-                if not small_fix:
-                    raise _gateway().GatewayInputError("CAIRNWORK_TASK_SHAPE_UNSUPPORTED")
-                return self._cairnwork_submit(payload_for_cairnwork)
-            if cairnwork_mode == "shadow" and small_fix:
-                self._cairnwork_shadow(arguments, payload_for_cairnwork)
         try:
             card_universe = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
@@ -375,6 +357,31 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             if card_universe is not None
             else {}
         )
+        # Council F (cairnwork docs/GATEWAY_ROUTE.md), after every Task Card check:
+        # off by default; see cairnwork_route.py.
+        cairnwork_mode = route_mode()
+        wants_cairnwork = str(arguments.get("worker") or "").strip().lower() == CAIRNWORK_WORKER
+        if self._cairnwork_owns(task_id) and not (cairnwork_mode == "route" and wants_cairnwork):
+            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
+        if cairnwork_mode != "off":
+            # A card that names expected evidence needs the Core envelope path; an
+            # external target is a measurement copy. Neither is a pilot small fix.
+            small_fix = (
+                external_root is None
+                and card_universe is None
+                and small_fix_shape(arguments, verifiers)
+            )
+            if cairnwork_mode == "route" and wants_cairnwork and not small_fix:
+                raise _gateway().GatewayInputError("CAIRNWORK_TASK_SHAPE_UNSUPPORTED")
+            if small_fix and (cairnwork_mode == "shadow" or wants_cairnwork):
+                payload_for_cairnwork = cairnwork_payload(
+                    task_id=task_id, task_card_hash=task_card_hash, what=what, why=why,
+                    repo=Path(_gateway().CANONICAL_SOURCE_ROOT), base=head, allowed=allowed,
+                    verifiers=verifiers,
+                )
+                if cairnwork_mode == "route":
+                    return self._cairnwork_submit(payload_for_cairnwork)
+                self._cairnwork_shadow(arguments, payload_for_cairnwork)
         try:
             internal = _gateway().build_canonical_planner_admission(
                 task_id=task_id,

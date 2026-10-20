@@ -12,6 +12,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -158,6 +160,18 @@ def _tool(ctx, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return response["result"]
 
 
+def _shadow_lines(ctx, count: int, limit: float = 10.0) -> list[dict[str, Any]]:
+    """Shadow checks run in the background: wait for `count` lines."""
+    path = ctx["state"] / "cairnwork_shadow.jsonl"
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        lines = path.read_text().splitlines() if path.exists() else []
+        if len(lines) >= count:
+            return [json.loads(line) for line in lines]
+        time.sleep(0.05)
+    raise AssertionError(f"expected {count} shadow lines")
+
+
 def _state_files(ctx) -> list[str]:
     return sorted(str(p.relative_to(ctx["state"])) for p in ctx["state"].rglob("*"))
 
@@ -198,14 +212,14 @@ def test_shadow_only_logs_and_the_response_is_the_same_as_off(ctx):
     _answer(ctx, check=[0, {"would_accept": False}])
     shadow = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "same-1"))["structuredContent"]
     assert shadow == off
+    log = _shadow_lines(ctx, 1)
     assert [c["args"] for c in _calls(ctx)] == [["check"]]
     sent = json.loads(_calls(ctx)[0]["stdin"])
     assert sent["idempotency_key"] == "same-1" and sent["base_commit"] == "a" * 40
     assert sent["verifiers"] == [
         ["pytest-0", ["python3", "-m", "pytest", "-q", "tests/test_calc.py"]]
     ]
-    log = (ctx["state"] / "cairnwork_shadow.jsonl").read_text().splitlines()
-    assert json.loads(log[0])["answer"] == {"would_accept": False}
+    assert log[0]["answer"] == {"would_accept": False}
 
 
 def test_shadow_survives_a_broken_cairnwork_and_skips_other_shapes(ctx):
@@ -215,8 +229,9 @@ def test_shadow_survives_a_broken_cairnwork_and_skips_other_shapes(ctx):
     assert result["isError"] is False and len(ctx["service"].submitted) == 1
     other = _arguments(ctx, "shape-1", verifier_commands=["git diff --check"])
     assert _tool(ctx, "nexus_worker_candidate", other)["isError"] is False
-    log = (ctx["state"] / "cairnwork_shadow.jsonl").read_text().splitlines()
-    assert [json.loads(line)["task_id"] for line in log] == ["broken-1"]
+    assert [line["task_id"] for line in _shadow_lines(ctx, 1)] == ["broken-1"]
+    time.sleep(0.3)
+    assert len(_shadow_lines(ctx, 1)) == 1  # the other shape was never offered
 
 
 def test_route_submits_to_cairnwork_and_never_to_self_hosted(ctx):
@@ -338,3 +353,123 @@ def test_mode_is_read_once_at_start():
     source = Path(cr.__file__).read_text(encoding="utf-8")
     assert source.count("os.environ") == 3  # the three *_AT_START constants only
     assert os.environ.get("NEXUS_CAIRNWORK_ROUTE") is None or cr.ROUTE_MODE_AT_START
+
+
+def test_a_slow_cairnwork_does_not_delay_the_shadow_response(ctx):
+    _mode(ctx, "shadow")
+    slow = ctx["answers"].parent / "slow-route"
+    slow.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(5)\nprint('{{}}')\n")
+    slow.chmod(0o755)
+    ctx["monkeypatch"].setattr(cr, "ROUTE_BIN_AT_START", str(slow))
+    started = time.monotonic()
+    assert _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "slow-1"))["isError"] is False
+    assert time.monotonic() - started < 3
+
+
+@pytest.mark.parametrize("mode", ["shadow", "route"])
+def test_a_malformed_task_card_never_reaches_cairnwork(ctx, mode):
+    _mode(ctx, mode)
+    _answer(ctx, submit=SUBMITTED, check=[0, {"would_accept": True}])
+    args = _arguments(ctx, f"bad-card-{mode}", worker="cairnwork")
+    card = ctx["card_root"] / args["task_card_path"]
+    card.write_text(card.read_text() + "```nexus-expected-evidence\n{\n", encoding="utf-8")
+    args["task_card_hash"] = hashlib.sha256(card.read_bytes()).hexdigest()
+    result = _tool(ctx, "nexus_worker_candidate", args)
+    assert result["structuredContent"]["error"].startswith("TASK_CARD_BINDING_INVALID")
+    time.sleep(0.3)
+    assert _calls(ctx) == [] and not (ctx["state"] / "cairnwork_jobs").exists()
+
+
+def test_a_card_that_names_expected_evidence_is_not_a_small_fix(ctx):
+    import nexus.orchestrator.unified_mcp_gateway_parts.worker_candidate as wc
+
+    ctx["monkeypatch"].setattr(wc, "parse_task_card_expected_evidence", lambda text: {"x": 1})
+    _mode(ctx, "route")
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "ev-1", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_TASK_SHAPE_UNSUPPORTED"
+    assert _calls(ctx) == []
+
+
+def test_not_accepting_keeps_a_record_another_call_made(ctx):
+    _mode(ctx, "route")
+    jobs = ctx["state"] / "cairnwork_jobs"
+    jobs.mkdir()
+    (jobs / "cw-7.json").write_text("{}", encoding="utf-8")  # a concurrent submit's record
+    _answer(ctx, submit=[2, {"error": "NOT_ACCEPTING", "detail": "drained"}])
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "cw-7", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_NOT_ACCEPTING"
+    assert (jobs / "cw-7.json").exists()
+
+
+def test_concurrent_submits_create_one_record(ctx):
+    paths = [ctx["state"] / "cairnwork_jobs" / "race.json"] * 8
+    results: list[bool] = []
+    threads = [
+        threading.Thread(target=lambda p=p: results.append(cr._create_record(p, "race", "h")))
+        for p in paths
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(results) == [False] * 7 + [True]
+
+
+def test_without_a_state_dir_route_refuses_and_nothing_is_owned(ctx):
+    _mode(ctx, "route")
+    ctx["service"].state_dir = None
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "nostate-1", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_NO_STATE_DIR"
+    assert ctx["gateway"]._cairnwork_owns("nostate-1") is False
+
+
+def test_wait_returns_at_once_when_the_status_cannot_be_read(ctx):
+    _mode(ctx, "route")
+    _answer(ctx, submit=SUBMITTED, status=[1, {"error": "INTERNAL", "detail": "x"}])
+    _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "cw-8", worker="cairnwork"))
+    started = time.monotonic()
+    out = _tool(ctx, "nexus_task_wait", {"task_id": "cw-8", "timeout_seconds": 30})[
+        "structuredContent"
+    ]
+    assert out["status"] == "UNKNOWN_REQUIRES_RECONCILE" and time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    "arguments, verifiers",
+    [
+        ({}, ["python3 -m pytest -c evil.ini tests/test_x.py"]),
+        ({}, ["python3 -m pytest -p evil tests/test_x.py"]),
+        ({}, ["python3 -m pytest tests/../x.py"]),
+        ({}, []),
+        ({"zz_new_field": 1}, ["python3 -m pytest tests/test_x.py"]),
+        ({"authority_change_candidate_confirmation": False}, ["python3 -m pytest -q"]),
+    ],
+)
+def test_small_fix_shape_is_an_allowlist(arguments, verifiers):
+    assert not cr.small_fix_shape(arguments, verifiers)
+    assert cr.small_fix_shape(
+        {"fail_to_pass_required": False}, ["python3 -m pytest -x tests/a/test_x.py::t"]
+    )
+
+
+def test_the_mode_is_fixed_when_the_gateway_process_starts():
+    code = (
+        "import os\n"
+        "from nexus.orchestrator.unified_mcp_gateway_parts import cairnwork_route as cr\n"
+        "os.environ['NEXUS_CAIRNWORK_ROUTE'] = 'route'\n"
+        "print(cr.route_mode())\n"
+    )
+    env = {**os.environ, "NEXUS_CAIRNWORK_ROUTE": "shadow"}
+    done = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
+    )
+    assert done.stdout.strip() == "shadow"
+
+
+def test_other_refusals_keep_the_record_and_never_fall_back(ctx):
+    _mode(ctx, "route")
+    _answer(ctx, submit=[2, {"error": "DuplicateLogicalTask", "detail": "card active"}])
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "cw-9", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_DuplicateLogicalTask"
+    assert (ctx["state"] / "cairnwork_jobs" / "cw-9.json").exists()
+    assert ctx["service"].submitted == []

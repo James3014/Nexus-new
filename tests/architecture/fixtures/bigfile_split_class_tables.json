@@ -825,7 +825,7 @@
    },
    "_cairnwork_root": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Optional[Path]"
    },
    "_cairnwork_shadow": {
     "kind": "function",
@@ -833,7 +833,7 @@
    },
    "_cairnwork_status": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:timeout: float = 60) -> dict[str, Any]"
    },
    "_cairnwork_submit": {
     "kind": "function",
