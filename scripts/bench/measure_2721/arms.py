@@ -304,8 +304,10 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     tampered = git_meta_fingerprint(controller, workdir) != git_meta
     # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
     diff = "" if tampered else capture_diff(workdir, task["base_commit"])
-    diff, tool_artifacts = drop_tool_artifacts(diff)
+    diff, tool_artifacts, artifact_text = drop_tool_artifacts(diff)
     diff, redacted = redact_diff(diff, getattr(provider, "key_file", None))
+    # A secret in a dropped block still flags the row (1d review of 5a6455581).
+    redacted = redacted or redact_diff(artifact_text, getattr(provider, "key_file", None))[1]
     watchdog.mark_snapshot(run_root)
     diff_path = run_root / "diffs" / f"{run_id}.diff"
     write_diff(diff_path, diff)

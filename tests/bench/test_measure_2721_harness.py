@@ -3010,13 +3010,29 @@ def test_pytest_temp_dirs_are_dropped_from_a_captured_diff_in_every_arm():
             "new file mode 100644\n--- /dev/null\n+++ b/pytest-of-someone/pytest-0/test_x0/.env\n@@ -0,0 +1 @@\n+K=v\n"
             "diff --git a/pytest-current b/pytest-current\nnew file mode 120000\n--- /dev/null\n"
             "+++ b/pytest-current\n@@ -0,0 +1 @@\n+pytest-of-someone/pytest-0\n\\ No newline at end of file\n")
-    diff, removed = drop_tool_artifacts(edit + junk)
+    diff, removed, removed_text = drop_tool_artifacts(edit + junk)
     assert diff == edit
     assert removed == ["pytest-of-someone/pytest-0/test_x0/.env", "pytest-current"]
+    assert removed_text == junk
     # Nothing else is touched: a real path that only looks alike stays.
     lookalike = edit.replace("src/pkg/mod.py", "src/pytest-of-docs.py")
-    assert drop_tool_artifacts(lookalike) == (lookalike, [])
-    assert drop_tool_artifacts("") == ("", [])
+    assert drop_tool_artifacts(lookalike) == (lookalike, [], "")
+    assert drop_tool_artifacts("") == ("", [], "")
+    # Fail closed (1d): a header this parser cannot read (a quoted, spaced path) keeps the
+    # whole diff, so no file is swallowed into a dropped block.
+    quoted = junk + 'diff --git "a/src/r z.py" "b/src/r z.py"\nnew file mode 100644\n+x\n'
+    assert drop_tool_artifacts(quoted) == (quoted, [], "")
+
+
+def test_a_secret_in_a_dropped_artifact_block_still_flags_the_row(monkeypatch):
+    """1d: the dropped pytest blocks are scanned too; a secret there keeps SECRET_IN_DIFF."""
+    from scripts.bench.measure_2721.leakage import drop_tool_artifacts
+
+    key = "-".join(("sk", "ant", "api03", "A" * 40))
+    junk = ("diff --git a/pytest-of-u/pytest-0/t/.env b/pytest-of-u/pytest-0/t/.env\nnew file mode 100644\n"
+            f"--- /dev/null\n+++ b/pytest-of-u/pytest-0/t/.env\n@@ -0,0 +1 @@\n+K={key}\n")
+    _, removed, removed_text = drop_tool_artifacts(junk)
+    assert removed and arms.redact_diff(removed_text)[1] is True
 
 
 @needs_sandbox
@@ -3039,6 +3055,18 @@ def test_worker_sandbox_temp_dir_is_the_same_in_both_arms(manifest, tmp_path):
         assert not tmp.startswith(os.path.realpath(probe["cwd"])), (arm, probe)
         assert probe["cwd_pytest_dirs"] == [], (arm, probe)
         assert probe["writable"]["TMPDIR"] is True and probe["writable"]["cwd"] is True, (arm, probe)
+        assert probe["writable"]["/tmp"] is False, (arm, probe)  # the seatbelt allows the Target and run root only
     assert probes["BARE"]["writable"] == probes["NEXUS"]["writable"], probes
     # Same shape in both arms: the adapter's per-run tmp, which tempfile actually uses.
     assert {k for k, v in probes["BARE"].items() if v} == {k for k, v in probes["NEXUS"].items() if v}
+
+
+@pytest.mark.parametrize("arm", ["NOOP", "NEXUS_NOOP"])
+def test_pytest_output_in_a_no_model_row_voids_the_run(tmp_path, arm):
+    """1d: a NOOP / NEXUS_NOOP row with tool_artifact_paths (an empty diff after the drop)
+    is a hit: no model ran, so something on that path ran pytest in the Target."""
+    row = {"arm": arm, "run_id": "r", "task_id": "t", "repeat": 1, "empty": True,
+           "diff_sha256": blind.sha256_text(""), "tool_artifact_paths": ["pytest-current"]}
+    hit = blind.noop_nonempty_diff(row, tmp_path)
+    assert hit is not None and hit["tool_artifact_paths"] == ["pytest-current"]
+    assert blind.noop_nonempty_diff({**row, "tool_artifact_paths": []}, tmp_path) is None

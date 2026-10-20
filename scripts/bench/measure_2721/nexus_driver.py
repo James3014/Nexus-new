@@ -841,9 +841,10 @@ class NexusArmDriver:
             if event is not None:
                 set_fact(row, "watchdog_event", True)
                 row["watchdog_event"] = event
-            diff, row["tool_artifact_paths"] = drop_tool_artifacts(diff)
+            diff, row["tool_artifact_paths"], artifact_text = drop_tool_artifacts(diff)
             diff, redacted = redact_diff(diff, self.key_file)
-            if redacted:
+            # A secret in a dropped block still flags the row (1d review of 5a6455581).
+            if redacted or redact_diff(artifact_text, self.key_file)[1]:
                 row.setdefault("flags", []).append(FLAG_SECRET_IN_DIFF)
             watchdog.mark_snapshot(run_root)
             row["wall_seconds"] = round(time.monotonic() - started, 3)

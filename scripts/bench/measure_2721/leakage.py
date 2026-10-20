@@ -98,21 +98,28 @@ def strip_out_of_scope(diff: str, scope: Iterable[str]) -> tuple[str, list[str]]
 _TOOL_ARTIFACT_RE = re.compile(r"^(pytest-of-[^/]+(/|$)|pytest-current(/|$))")
 
 
-def drop_tool_artifacts(diff: str) -> tuple[str, list[str]]:
+def drop_tool_artifacts(diff: str) -> tuple[str, list[str], str]:
     """Remove pytest temp-dir file blocks from a captured diff, the same in every arm
     (35, formal M-main2: a NEXUS row carried pytest-of-<user>/... with a .env file).
-    Returns the diff and the removed paths (recorded on the row, never scorer-visible)."""
+    Returns the diff, the removed paths (recorded on the row, never scorer-visible) and
+    the removed text (for the secret scan).  Fails closed: a ``diff --git`` header this
+    parser cannot read (a quoted or spaced path) leaves the diff as it is."""
+    if any(line.startswith("diff --git ") and not _FILE_BLOCK_RE.match(line.rstrip("\n"))
+           for line in diff.splitlines()):
+        return diff, [], ""
     kept: list[str] = []
     removed: list[str] = []
+    removed_text: list[str] = []
     for path, block in split_file_blocks(diff):
         old = _FILE_BLOCK_RE.match(block.splitlines()[0]).group(1)  # type: ignore[union-attr]
         if _TOOL_ARTIFACT_RE.match(path) and _TOOL_ARTIFACT_RE.match(old):
             removed.append(path)
+            removed_text.append(block)
         else:
             kept.append(block)
     if not removed:
-        return diff, []
-    return "".join(kept), removed
+        return diff, [], ""
+    return "".join(kept), removed, "".join(removed_text)
 
 
 def filter_candidate(diff: str, scope: Iterable[str]) -> dict[str, Any]:

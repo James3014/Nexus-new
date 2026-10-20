@@ -139,6 +139,13 @@ def noop_nonempty_diff(row: Mapping[str, Any], run_root: Path | str | None = Non
     """
     if row.get("arm") not in NOOP_ARMS:
         return None
+    if row.get("tool_artifact_paths"):
+        # No model ran, yet a test run left pytest output in the Target: something on the
+        # NEXUS path ran pytest there (1d review of 5a6455581).  Same void as an edit.
+        return {"arm": row.get("arm"), "run_id": row.get("run_id"), "task_id": row.get("task_id"),
+                "repeat": row.get("repeat"), "diff_sha256": row.get("diff_sha256"),
+                "run_root": str(run_root) if run_root is not None else None,
+                "tool_artifact_paths": list(row["tool_artifact_paths"])}
     diff_path = row.get("diff_path")
     if diff_path and Path(diff_path).is_file():
         text = read_diff(Path(diff_path))
