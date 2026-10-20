@@ -278,13 +278,22 @@ def test_non_pytest_verifier_is_recorded_as_exit_code_only(tmp_path):
 
 
 def test_pytest_console_script_is_rewritten_to_isolated_interpreter(tmp_path):
-    script = Path(sys.executable).parent / "pytest"
-    assert script.is_file(), "the test venv must provide the pytest console script"
+    # A self-contained bin dir: a ``pytest`` console script that must never be executed
+    # as-is, next to a ``python3`` that forwards to the test interpreter.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "pytest"
+    script.write_text("#!/bin/sh\necho console script ran unisolated\nexit 0\n", encoding="utf-8")
+    python3 = bin_dir / "python3"
+    python3.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    script.chmod(0o755)
+    python3.chmod(0o755)
     root, base, cand = _repo(tmp_path, {"src_mod.py": "VALUE = 2\n"})
     spec = {"id": "console", "argv": [str(script), "-q", "tests/test_mod.py"]}
     row = _row(_verify(root, base, cand, [spec], ["src_mod.py"]))
     assert row["passed"] is True, row
-    assert row["executed_argv"][1:4] == ["-P", "-m", "pytest"]
+    assert row["executed_argv"][:4] == [str(python3), "-P", "-m", "pytest"]
+    assert row["junit"]["tests"] == 1
 
 
 def test_base_pytest_config_is_replicated_without_addopts(tmp_path):
