@@ -373,12 +373,33 @@ class NexusArmDriver:
         return controller
 
     # -- one run -------------------------------------------------------------
-    def run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float) -> dict[str, Any]:
+    def run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float,
+            ledger: Any = None) -> dict[str, Any]:
+        """One NEXUS row.  With a ledger the row is admitted first and charged in
+        ``finally`` -- also on GatewayStuck or any exception (review M3) -- with
+        the cost of every Claude attempt (H2); an unknown cost is charged the
+        reservation (H1)."""
+        if task.get("repo") == NEXUS_REPO:
+            raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
+        token = ledger.begin_row() if ledger is not None else None
+        self._submitted = False
+        try:
+            return self._run(task, repeat, run_root, timeout_seconds=timeout_seconds)
+        finally:
+            if ledger is not None:
+                if not self._submitted:
+                    ledger.finish_row(token, 0.0)
+                else:
+                    known, unknown = self.attempt_cost(gateway_task_id(self._run_id))
+                    ledger.finish_row(token, known, unknown_attempts=unknown)
+
+    def _run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float) -> dict[str, Any]:
         if task.get("repo") == NEXUS_REPO:
             # b6 ruling: #2721 measures external tasks only.  A Nexus-new task would
             # run on the shared Gateway Controller, whose history holds later fixes.
             raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
         run_id = new_run_id(self.arm_label, task["task_id"], repeat)
+        self._run_id = run_id
         gw_task = gateway_task_id(run_id)
         external = True
         self._current_task = task
@@ -438,6 +459,7 @@ class NexusArmDriver:
             worker_args = self.worker_args(task, gw_task, card["card_path"], card["card_hash"], external,
                                            controller)
             capture["gateway_worker_args"] = worker_args
+            self._submitted = True  # from here on the worker may spend money
             submitted = self._submit_worker(worker_args, transcript)
             transcript.append({"tool": "nexus_worker_candidate", "result": submitted})
             final = self._wait(gw_task, started + timeout_seconds + 600.0, transcript)
@@ -544,6 +566,32 @@ class NexusArmDriver:
         path = self.state_dir / f"{gw_task}.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
+    def _trace_runs(self, gw_task: str) -> list[Path]:
+        if self.trace_dir is None or not (self.trace_dir / gw_task).is_dir():
+            return []
+        return sorted((self.trace_dir / gw_task).glob("*.run.json"), key=lambda p: (p.stat().st_mtime, p.name))
+
+    def attempt_cost(self, gw_task: str) -> tuple[Optional[float], int]:
+        """(known cost summed over every attempt, attempts whose cost is unknown).
+
+        Read straight from the traces so that it also works when the row
+        failed part-way (review M3).  No trace at all counts as one unknown.
+        """
+        from scripts.bench.measure_2721.providers import read_claude_trace
+
+        known, unknown = 0.0, 0
+        runs = self._trace_runs(gw_task)
+        for run in runs:
+            try:
+                cost = read_claude_trace(self.trace_dir, gw_task, run.name.split(".", 1)[0])["summary"].total_cost_usd
+            except Exception:  # noqa: BLE001 - an unreadable trace is an unknown cost
+                cost = None
+            if cost is None:
+                unknown += 1
+            else:
+                known += float(cost)
+        return round(known, 6), (unknown if runs else 1)
+
     def _collect(self, gw_task: str, status: Mapping[str, Any], final: Mapping[str, Any],
                  controller: Optional[Path], *, repo: str = "", base: str = "") -> dict[str, Any]:
         """Row fields for one P1 task.
@@ -572,21 +620,26 @@ class NexusArmDriver:
         del controller
         claude: dict[str, Any] = {}
         trace_text = ""
-        runs = sorted((self.trace_dir / gw_task).glob("*.run.json"), key=lambda p: p.stat().st_mtime) \
-            if self.trace_dir is not None and (self.trace_dir / gw_task).is_dir() else []
-        if runs:
-            stdout_sha = runs[-1].name.split(".", 1)[0]
-            trace = read_claude_trace(self.trace_dir, gw_task, stdout_sha)
+        runs = self._trace_runs(gw_task)
+        traces = [read_claude_trace(self.trace_dir, gw_task, run.name.split(".", 1)[0]) for run in runs]
+        if traces:
+            # Every attempt is billed and counted (review H2); identity fields
+            # come from the last attempt, the per-attempt checks run on all.
+            trace = traces[-1]
             summary = trace["summary"]
+            usages = [claude_usage_fields(t["summary"]) for t in traces]
+            usage = {key: sum(u[key] for u in usages) for key in usages[0]}
+            costs = [t["summary"].total_cost_usd for t in traces]
             claude = claude_row_fields({
                 "claude_version": (summary.init or {}).get("claude_code_version"),
-                "usage": claude_usage_fields(summary), "num_turns": summary.num_turns,
-                "tool_call_count": len(summary.tool_calls), "total_cost_usd": summary.total_cost_usd,
-                "models_seen": list(summary.models_seen),
+                "usage": usage, "num_turns": sum(int(t["summary"].num_turns or 0) for t in traces),
+                "tool_call_count": sum(len(t["summary"].tool_calls) for t in traces),
+                "total_cost_usd": round(sum(float(c) for c in costs if c is not None), 6),
+                "models_seen": sorted({m for t in traces for m in t["summary"].models_seen}),
                 "seatbelt_sha256": trace["sidecar"].get("seatbelt_sha256"),
                 "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
                 "worker_span_ms": trace["sidecar"].get("wall_time_ms"),
-                "served_models": list(summary.served_models),
+                "served_models": sorted({m for t in traces for m in t["summary"].served_models}),
                 "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
                 "key_label": trace["sidecar"].get("key_label"),
                 "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
@@ -594,8 +647,16 @@ class NexusArmDriver:
             })
             claude["claude_trace_path"] = trace["trace_path"]
             claude["claude_attempts"] = len(runs)
-            claude["fake_observed"] = trace["fake_observed"]
-            trace_text = "\n".join(json.dumps(call.get("input"), default=str) for call in summary.tool_calls)
+            claude["cost_unknown_attempts"] = sum(1 for c in costs if c is None)
+            claude["attempt_cli_timeouts"] = [t["sidecar"].get("cli_timeout_seconds") for t in traces]
+            claude["attempt_venvs"] = [t["sidecar"].get("venv") for t in traces]
+            claude["fake_observed"] = any(t["fake_observed"] for t in traces)
+            trace_text = "\n".join(json.dumps(call.get("input"), default=str)
+                                   for t in traces for call in t["summary"].tool_calls)
+        elif self.trace_dir is not None:
+            # The worker was submitted but left no trace: same as BARE's missing
+            # sidecar -> the row is void, never scored (review M2).
+            snapshot["invalid_reason"] = snapshot["invalid_reason"] or "TRACE_MISSING"
         telemetry = state.get("telemetry") or {}
         infra = _is_infra(error) and not diff.strip()
         worker_texts = [json.dumps(state.get(key), default=str) for key in
@@ -608,12 +669,15 @@ class NexusArmDriver:
         if snapshot["invalid_reason"]:
             flags.append("SNAPSHOT_INVALID")
         expected_limit = getattr(self, "expected_cli_timeout", None)
-        if expected_limit is not None and claude and claude.get("cli_timeout_seconds") != expected_limit:
+        if expected_limit is not None and claude and any(
+                limit != expected_limit for limit in claude.get("attempt_cli_timeouts") or [None]):
             # M2': both arms must have had the same CLI time limit.
             snapshot["invalid_reason"] = snapshot["invalid_reason"] or "CLI_TIMEOUT_MISMATCH"
             flags.append("CLI_TIMEOUT_MISMATCH")
         if claude and getattr(self, "_current_task", None) is not None:
-            issue = venv_problem(self._current_task, claude.get("venv"), check_observed=True)
+            issue = next((found for found in (
+                venv_problem(self._current_task, venv, check_observed=True)
+                for venv in claude.get("attempt_venvs") or [None]) if found), None)
             if issue:
                 flags.append("VENV_NOT_USABLE")
                 snapshot["invalid_reason"] = snapshot["invalid_reason"] or issue
@@ -661,12 +725,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--controller-git", help="git dir holding candidate commits (for the diff)")
     parser.add_argument("--state-dir", help="the instance's self-hosted state dir (read only)")
     parser.add_argument("--external-target-root", help="root the Gateway allows external targets under")
-    parser.add_argument("--trace-dir", help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only)")
+    parser.add_argument("--trace-dir", required=True,
+                        help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only; cost and checks come from it)")
     parser.add_argument("--targets-root", help="measurement root for per-row Controller clones (#2742)")
     parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored before each row)")
     parser.add_argument("--state-snapshot", help="directory snapshot to restore NEXUS_STATE_ROOT from")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
-    parser.add_argument("--spend-ledger", help="ledger shared with the BARE runner (same file for every arm)")
+    parser.add_argument("--spend-ledger", required=True,
+                        help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     parser.add_argument("--learning-phase", help="recorded on every row (LA / LB / COLD / IRRELEVANT / M)")
     parser.add_argument("--key-file", default=str(Path("~/.config/nexus-measure-2721/anthropic.env").expanduser()),
                         help="the measurement key file, used only to redact candidate diffs")
@@ -682,7 +748,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         controller_git=Path(args.controller_git) if args.controller_git else None,
         state_dir=Path(args.state_dir) if args.state_dir else None,
         external_target_root=Path(args.external_target_root) if args.external_target_root else None,
-        trace_dir=Path(args.trace_dir) if args.trace_dir else None,
+        trace_dir=Path(args.trace_dir),
         arm_label=args.arm_label,
         targets_root=Path(args.targets_root) if args.targets_root else None,
         state_root=Path(args.state_root) if args.state_root else None,
@@ -692,16 +758,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    ledger = SpendLedger(Path(args.spend_ledger) if args.spend_ledger else Path(args.run_root) / "run" / "spend.json",
-                         args.budget_usd)
+    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd)
     rows = []
     try:
         for task in load_manifest(args.manifest, args.ids):
             for repeat in args.repeats:
-                ledger.check_can_start()
-                row = driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout)
-                ledger.add(row.get("total_cost_usd"))
-                rows.append(row)
+                rows.append(driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout,
+                                       ledger=ledger))
     except BudgetExhausted as exc:
         print(json.dumps({"stopped": str(exc), "rows": len(rows)}))
         return 75

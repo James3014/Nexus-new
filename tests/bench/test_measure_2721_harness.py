@@ -684,13 +684,180 @@ def test_spend_ledger_stops_before_the_cap(tmp_path):
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
     ledger = SpendLedger(tmp_path / "spend.json", cap_usd=1.0)
-    ledger.check_can_start()
-    ledger.add(0.3)
-    ledger.check_can_start()  # 0.3 + max(0.3, 0.5) <= 1.0
-    ledger.add(0.4)
+    ledger.finish_row(ledger.begin_row(), 0.3)
+    ledger.finish_row(ledger.begin_row(), 0.4)  # 0.3 + max(0.3, 0.5) <= 1.0
     with pytest.raises(BudgetExhausted):
-        ledger.check_can_start()  # 0.7 + 0.5 > 1.0
+        ledger.begin_row()  # 0.7 + 0.5 > 1.0
     assert SpendLedger(tmp_path / "spend.json", 1.0).state()["rows"] == 2
+
+
+def test_spend_ledger_reserves_stores_the_cap_and_estimates_unknown_cost(tmp_path):
+    from scripts.bench.measure_2721.budget import BudgetConfigError, BudgetExhausted, SpendLedger
+
+    path = tmp_path / "spend.json"
+    ledger = SpendLedger(path, cap_usd=1.2)
+    first = ledger.begin_row()
+    second = ledger.begin_row()  # 0 + 0.5 reserved + 0.5 <= 1.2
+    with pytest.raises(BudgetExhausted):
+        ledger.begin_row()  # in-flight reservations count (parallel arms, review L1)
+    # A killed row (cost never reported) is charged its reservation (review H1).
+    assert ledger.finish_row(first, None) == {"charged_usd": 0.5, "estimated": True}
+    assert ledger.finish_row(second, 0.1, unknown_attempts=1)["charged_usd"] == pytest.approx(0.6)
+    state = ledger.state()
+    assert state["spent_usd"] == pytest.approx(1.1) and state["estimated_rows"] == 2 and state["cap_usd"] == 1.2
+    with pytest.raises(BudgetConfigError):
+        SpendLedger(path, cap_usd=60.0)  # one shared ledger, one cap (review H3)
+
+
+def test_bare_row_is_charged_even_when_the_run_fails(manifest, tmp_path):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    (task,) = arms.load_manifest(manifest)
+    ledger = SpendLedger(tmp_path / "spend.json", cap_usd=60.0)
+
+    def boom(_workdir: Path, _prompt: str) -> None:
+        raise RuntimeError("killed")
+
+    with pytest.raises(RuntimeError):
+        arms.run_bare(task, 1, tmp_path / "run", FakeProvider(edit=boom), timeout_seconds=5, ledger=ledger)
+    state = ledger.state()
+    assert state["rows"] == 1 and state["spent_usd"] == pytest.approx(0.5) and state["reservations"] == {}
+    arms.run_bare(task, 2, tmp_path / "run", FakeProvider(extra={"total_cost_usd": 0.02}), timeout_seconds=5,
+                  ledger=ledger)
+    assert ledger.state()["spent_usd"] == pytest.approx(0.52)
+
+
+class _StubClaude:
+    """Stands in for ClaudeProvider (no CLI needed) in the venv-check tests."""
+
+    name = "claude"
+    key_file = None
+
+    def __init__(self, result):
+        self.result = result
+
+    def run(self, **_kw):
+        return self.result()
+
+
+def test_bare_claude_row_checks_the_venv_before_spending(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    (task,) = arms.load_manifest(manifest)
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(arms, "_claude_provider_type", lambda: _StubClaude)
+    provider = _StubClaude(lambda: pytest.fail("provider must not run without a usable venv"))
+    ledger = SpendLedger(tmp_path / "spend.json")
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5, ledger=ledger)
+    assert row["infra"] is True and row["void_reason"] == "VENV_OUTSIDE_READ_ROOTS"
+    assert ledger.state()["rows"] == 0
+
+
+def test_bare_claude_row_with_another_venv_after_the_run_is_infra(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.providers import ProviderResult
+
+    (task,) = arms.load_manifest(manifest)
+    monkeypatch.setattr(arms, "_claude_provider_type", lambda: _StubClaude)
+    provider = _StubClaude(lambda: ProviderResult(
+        status="OK", provider="claude", model="claude-haiku-5-5",
+        extra={"venv": "/other/venv", "cli_timeout_seconds": arms.expected_cli_timeout(5),
+               "served_models": ["claude-haiku-5-5"], "total_cost_usd": 0.01}))
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5)
+    assert row["infra"] is True and row["venv_problem"] == "VENV_MISMATCH" and arms.FLAG_VENV in row["flags"]
+
+
+def _trace(trace_dir: Path, gw_task: str, name: str, *, cost, venv: str, limit: float, output: int) -> None:
+    base = trace_dir / gw_task
+    base.mkdir(parents=True, exist_ok=True)
+    events = [{"type": "assistant", "message": {"model": "claude-haiku-5-5", "content": []}}]
+    if cost is not None:
+        events.append({"type": "result", "total_cost_usd": cost, "num_turns": 1,
+                       "usage": {"input_tokens": 1, "output_tokens": output}})
+    (base / f"{name}.stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    (base / f"{name}.run.json").write_text(json.dumps({"cli_timeout_seconds": limit, "venv": venv}))
+
+
+def _tracing_driver(gateway: FakeGateway, trace_dir: Path, attempts) -> nexus_driver.NexusArmDriver:
+    original = gateway._answer
+
+    def answer(name, args):
+        if name == "nexus_worker_candidate":
+            for index, attempt in enumerate(attempts):
+                _trace(trace_dir, args["task_id"], f"{index:02d}{'a' * 62}", **attempt)
+        return original(name, args)
+
+    gateway._answer = answer
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                       sleep=lambda _s: None, trace_dir=trace_dir)
+
+
+def test_nexus_row_bills_every_attempt_and_checks_each(manifest, tmp_path):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+    ledger = SpendLedger(tmp_path / "spend.json")
+    driver = _tracing_driver(FakeGateway(), tmp_path / "traces", [
+        dict(cost=0.03, venv=venv, limit=limit, output=10),
+        dict(cost=0.02, venv=venv, limit=limit, output=5),
+    ])
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5, ledger=ledger)
+    assert row["claude_attempts"] == 2 and row["total_cost_usd"] == pytest.approx(0.05)
+    assert row["output_tokens"] == 15 and row["outcome"] == "OK", row
+    assert ledger.state()["spent_usd"] == pytest.approx(0.05)
+    # A killed attempt (no result event) is estimated; another venv voids the row.
+    ledger2 = SpendLedger(tmp_path / "spend2.json")
+    driver = _tracing_driver(FakeGateway(), tmp_path / "traces2", [
+        dict(cost=0.03, venv=venv, limit=limit, output=10),
+        dict(cost=None, venv="/other/venv", limit=limit, output=0),
+    ])
+    row = driver.run(task, 2, tmp_path / "run", timeout_seconds=5, ledger=ledger2)
+    assert row["infra"] is True and row["void_reason"] == "VENV_MISMATCH" and row["cost_unknown_attempts"] == 1
+    assert ledger2.state()["spent_usd"] == pytest.approx(0.53) and ledger2.state()["estimated_rows"] == 1
+
+
+def test_nexus_row_without_a_trace_is_void(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    row = _tracing_driver(FakeGateway(), tmp_path / "traces", []).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] is True and row["void_reason"] == "TRACE_MISSING"
+
+
+def test_a_stuck_nexus_row_is_still_charged(manifest, tmp_path):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    venv = os.path.realpath(task["venv"])
+    driver = _tracing_driver(gateway, tmp_path / "traces",
+                             [dict(cost=0.04, venv=venv, limit=arms.expected_cli_timeout(5), output=1)])
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name == "nexus_task_status":
+            payload["status"] = "PENDING_HUMAN_APPROVAL"
+        return payload
+
+    gateway._answer = answer
+    ledger = SpendLedger(tmp_path / "spend.json")
+    with pytest.raises(nexus_driver.GatewayStuck):
+        driver.run(task, 1, tmp_path / "run", timeout_seconds=5, ledger=ledger)
+    assert ledger.state()["spent_usd"] == pytest.approx(0.04) and ledger.state()["reservations"] == {}
+
+
+def test_runners_require_one_shared_ledger_and_stop_with_75(manifest, tmp_path, capsys):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    with pytest.raises(SystemExit):
+        arms.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"), "noop"])
+    ledger = tmp_path / "spend.json"
+    exhausted = SpendLedger(ledger, cap_usd=0.4)  # below one reservation
+    del exhausted
+    rc = arms.main(["bare", "--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
+                    "--provider", "fake", "--spend-ledger", str(ledger), "--budget-usd", "0.4"])
+    assert rc == 75 and "BUDGET_STOP" in capsys.readouterr().out
 
 
 @needs_sandbox
@@ -735,4 +902,6 @@ def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path
     trace = Path(row["provider"]["extra"]["trace_path"]).read_text().splitlines()
     probe = next(json.loads(line)["venv_probe"] for line in trace if '"venv_probe"' in line)
     assert probe["import_encodings"]["rc"] == 0, probe
-    assert probe["pytest_collect"]["rc"] in (0, 5), probe  # 5 = collected nothing (fixture repo)
+    # The interpreter that ran is the task venv itself (review L2).
+    assert probe["import_encodings"]["tail"].strip().splitlines()[-1] == str(venv), probe
+    assert probe["pytest_collect"]["rc"] == 0, probe

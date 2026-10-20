@@ -186,7 +186,32 @@ def venv_problem(task: Mapping[str, Any], observed: Any = None, *, check_observe
 
 
 def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
-             timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, keep_workdir: bool = False) -> dict[str, Any]:
+             timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, keep_workdir: bool = False,
+             ledger: Any = None) -> dict[str, Any]:
+    """One BARE row.  With a Claude provider the venv is checked before any spend
+    (review M1); with a ledger the row is admitted and always charged, also when
+    it fails part-way (M3); an unknown cost is charged its reservation (H1)."""
+    if isinstance(provider, _claude_provider_type()):
+        problem = venv_problem(task)
+        if problem:
+            row = {"schema": ROW_SCHEMA, "arm": ARM_BARE, "run_id": new_run_id(ARM_BARE, task["task_id"], repeat),
+                   "task_id": task["task_id"], "repeat": repeat, "outcome": STATUS_INFRA, "infra": True,
+                   "void_reason": problem, "venv_problem": problem, "flags": [FLAG_VENV], "empty": True,
+                   "total_cost_usd": 0.0}
+            append_jsonl(run_root / "rows.jsonl", row)
+            return row
+    token = ledger.begin_row() if ledger is not None else None
+    spend: dict[str, Any] = {"ran": False, "cost": None}
+    try:
+        return _run_bare(task, repeat, run_root, provider, timeout_seconds=timeout_seconds,
+                         keep_workdir=keep_workdir, spend=spend)
+    finally:
+        if ledger is not None:
+            ledger.finish_row(token, spend["cost"] if spend["ran"] else 0.0)
+
+
+def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
+              timeout_seconds: float, keep_workdir: bool, spend: dict[str, Any]) -> dict[str, Any]:
     from scripts.bench.measure_2721 import watchdog
     from scripts.bench.measure_2721.common import git_meta_fingerprint, write_diff
 
@@ -201,8 +226,11 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=ARM_BARE, cap_s=timeout_seconds)
     started = time.monotonic()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    spend["ran"] = True  # from here on money may have been spent
     result: ProviderResult = provider.run(prompt=prompt, workdir=workdir, timeout_seconds=timeout_seconds,
                                           run_id=run_id, controller=controller)
+    # None (timeout, kill, no result message) -> the ledger charges the reservation (H1).
+    spend["cost"] = (result.extra or {}).get("total_cost_usd")
     wall = time.monotonic() - started
     tampered = git_meta_fingerprint(controller, workdir) != git_meta
     # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
@@ -358,7 +386,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
-    parser.add_argument("--spend-ledger", help="ledger shared by every arm (default <run-root>/run/spend.json)")
+    parser.add_argument("--spend-ledger", required=True,
+                        help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     args = parser.parse_args(argv)
     run_root = Path(args.run_root)
     tasks = load_manifest(args.manifest, args.ids)
@@ -369,18 +398,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    ledger = SpendLedger(Path(args.spend_ledger) if args.spend_ledger else run_root / "run" / "spend.json",
-                         args.budget_usd)
+    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd)
     rows = []
     try:
         for task in tasks:
             for repeat in args.repeats:
                 if args.arm == "bare":
-                    ledger.check_can_start()
-                    row = run_bare(task, repeat, run_root, provider, timeout_seconds=args.timeout,
-                                   keep_workdir=args.keep_workdir)
-                    ledger.add(row.get("total_cost_usd"))
-                    rows.append(row)
+                    rows.append(run_bare(task, repeat, run_root, provider, timeout_seconds=args.timeout,
+                                         keep_workdir=args.keep_workdir, ledger=ledger))
                 else:
                     rows.append(run_noop(task, repeat, run_root))
     except BudgetExhausted as exc:
