@@ -297,7 +297,8 @@ def test_blinding_separates_the_arm_map(manifest, tmp_path):
     candidates = list(read_jsonl(out / "candidates.jsonl"))
     assert len(candidates) == 2
     for item in candidates:
-        assert set(item) == {"opaque_id", "task_id", "diff_sha256"}
+        assert set(item) == {"opaque_id", "task_id", "repeat", "diff_sha256", "scoring_flags"}
+        assert set(item["scoring_flags"]) <= blind.SCORER_VISIBLE_FLAGS and item["repeat"] == 1
         assert (out / "candidates" / f"{item['opaque_id']}.diff").is_file()
     text = (out / "candidates.jsonl").read_text()
     assert "BARE" not in text and "NOOP" not in text and "m2721-" not in text

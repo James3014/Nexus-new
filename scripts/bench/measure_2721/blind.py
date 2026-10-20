@@ -3,8 +3,8 @@
 Reads ``rows.jsonl`` from one or more run roots and writes:
 * ``<out>/candidates/<opaque_id>.diff`` (test-path file blocks stripped,
   prereg v0.2 §8) and ``<out>/candidates.jsonl``
-  (``opaque_id``, ``task_id``, ``diff_sha256``) in a random order: the
-  scorer's only input;
+  (``opaque_id``, ``task_id``, ``repeat``, ``diff_sha256``, ``scoring_flags``)
+  in a random order: the scorer's only input (``score_arms.py run``);
 * ``--arm-map`` (mode 0600, kept by workspace-b6, not by the scorer):
   opaque id -> arm, run id, repeat, plus the sha256 of candidates.jsonl so
   the mapping is bound to exactly that candidate set.
@@ -38,6 +38,8 @@ from scripts.bench.measure_2721.leakage import FLAG_PATCH_DOES_NOT_APPLY, filter
 
 BLIND_SCHEMA = "nexus.measure_2721.blinded_candidates.v1"
 SCORABLE_OUTCOMES = frozenset({"OK", "TIMEOUT", "MODEL_FAILED"})
+# Flags the scorer may see (identical filter in every arm, so they reveal no arm).
+SCORER_VISIBLE_FLAGS = frozenset({"HARNESS_TAMPER", "OUT_OF_SCOPE_STRIPPED", "PATCH_DOES_NOT_APPLY"})
 
 
 def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
@@ -96,7 +98,12 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
         target = out / "candidates" / f"{opaque}.diff"
         target.parent.mkdir(parents=True, exist_ok=True)
         write_diff(target, scored)
-        candidates.append({"opaque_id": opaque, "task_id": row["task_id"], "diff_sha256": sha256_text(scored)})
+        # Scorer-visible: the repeat (S4 re-runs a task/repeat in all arms) and only the
+        # pre-registered scoring flags (amendment 8.3, applied blind by score_arms.py).
+        # Arm-specific harness flags stay in the arm map.
+        candidates.append({"opaque_id": opaque, "task_id": row["task_id"], "repeat": row["repeat"],
+                           "diff_sha256": sha256_text(scored),
+                           "scoring_flags": sorted(set(flags) & SCORER_VISIBLE_FLAGS)})
         mapping[opaque] = {
             "arm": row["arm"], "run_id": row["run_id"], "repeat": row["repeat"], "task_id": row["task_id"],
             "flags": flags,
