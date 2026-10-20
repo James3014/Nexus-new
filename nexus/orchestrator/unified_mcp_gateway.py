@@ -176,6 +176,9 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
     _AssistResponseMixin as _AssistResponseMixin,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts.cairnwork_route import (
+    _CairnworkRouteMixin as _CairnworkRouteMixin,
+)
 from nexus.orchestrator.unified_mcp_gateway_parts.candidate_ops import (
     _CandidateOpsMixin as _CandidateOpsMixin,
 )
@@ -1031,7 +1034,7 @@ def _gateway_recovery_result(result: Any) -> dict[str, Any]:
     return dict(payload)
 
 
-class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCandidateMixin, _ModelProbeMixin, _AssistJobsMixin, _AssistResponseMixin, _AssistProbeMixin):
+class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin, _MutationAdmissionMixin, _WorkerCandidateMixin, _ModelProbeMixin, _AssistJobsMixin, _AssistResponseMixin, _AssistProbeMixin, _CairnworkRouteMixin):
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
     def __init__(
@@ -3312,6 +3315,8 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             return self._worker_candidate(arguments)
         if name == "nexus_task_status":
             task_id = _text(arguments.get("task_id"), "task_id")
+            if self._cairnwork_owns(task_id):
+                return self._cairnwork_status(task_id)
             assisted = self._assist_read(task_id)
             if assisted is not None:
                 return self._assist_response(self._assist_refresh(task_id) or assisted, operation="status")
@@ -3321,6 +3326,8 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             task_id = _text(arguments.get("task_id"), "task_id")
             timeout = min(60.0, max(0.0, float(arguments.get("timeout_seconds", 10.0))))
             poll = min(5.0, max(0.01, float(arguments.get("poll_interval_seconds", 0.25))))
+            if self._cairnwork_owns(task_id):
+                return self._cairnwork_wait(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
             if self._assist_read(task_id) is not None:
                 return self._assist_wait(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
             waited = self.service.wait_task(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
@@ -3334,6 +3341,8 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             return self._finish(arguments)
         if name == "nexus_task_cancel":
             task_id = _text(arguments.get("task_id"), "task_id")
+            if self._cairnwork_owns(task_id):
+                return self._cairnwork_cancel(task_id)
             if self._assist_read(task_id) is not None:
                 return self._assist_cancel(task_id)
             return self.service.cancel_task(task_id)
