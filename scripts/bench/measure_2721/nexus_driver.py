@@ -309,6 +309,10 @@ def new_leaks(before: Mapping[str, list[str]], after: Mapping[str, list[str]], o
     return leaks
 
 
+# nexus_task_card_create refuses an objective longer than this (Gateway ``_text``).
+CARD_OBJECTIVE_MAX = 4000
+
+
 class NexusArmDriver:
     QUIESCENCE_POLLS = 6
     QUIESCENCE_SLEEP_S = 10.0
@@ -479,8 +483,11 @@ class NexusArmDriver:
         # Every (task, repeat) gets its own task id and card content, so P1 never
         # sees two rows as one logical task (DUPLICATE_LOGICAL_TASK).  The worker
         # prompt is built from what/why only, so BARE and NEXUS prompts stay equal.
-        objective = text["what"] if repeat is None else (
-            f"{text['what']}\n\nMeasurement row {gw_task} (repeat {repeat}).")
+        # The card objective has the Gateway's 4000-character limit; ``what`` may already
+        # be 4000 long (task_text.FIELD_MAX), so the row suffix takes its room from the
+        # end of ``what`` (35, formal M block 3: PRE_SUBMIT_FAILURE on every long task).
+        suffix = "" if repeat is None else f"\n\nMeasurement row {gw_task} (repeat {repeat})."
+        objective = text["what"][:CARD_OBJECTIVE_MAX - len(suffix)] + suffix
         return {
             "owner_confirmation": True,
             "campaign_id": self.campaign_id,

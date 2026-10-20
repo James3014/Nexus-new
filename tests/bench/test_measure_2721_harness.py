@@ -2963,3 +2963,22 @@ def test_a_fatal_stop_is_never_resumed(manifest, tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert _runner_main(manifest, tmp_path, run) == 2
     assert "FATAL_STOP_NOT_RESUMABLE" in capsys.readouterr().out
+
+
+def test_card_objective_fits_the_gateway_limit_for_a_4000_character_what(tmp_path):
+    """35, formal M block 3: a ``what`` of 4000 characters plus the row suffix went over the
+    Gateway's 4000-character objective limit (PRE_SUBMIT_FAILURE on every long task)."""
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=FakeGateway())
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s")
+    task = {"text": {"what": "w" * 4000, "why": "y", "allowed_files": ["a.py"], "verifier_commands": ["true"]}}
+    gw_task = "m2721-nexus-pkg-100-r3-abcdef"
+    args = driver.card_args(task, gw_task, repeat=3)
+    assert len(args["objective"]) <= nexus_driver.CARD_OBJECTIVE_MAX == 4000
+    assert args["objective"].endswith(f"Measurement row {gw_task} (repeat 3).")
+    assert args["objective"].startswith("w" * 3900)
+    # Short tasks and the no-repeat form are unchanged.
+    short = {"text": {**task["text"], "what": "fix it"}}
+    assert driver.card_args(short, gw_task, repeat=1)["objective"] == f"fix it\n\nMeasurement row {gw_task} (repeat 1)."
+    assert driver.card_args(task, gw_task)["objective"] == "w" * 4000
+    # The worker gets the full what (the prompt is unchanged).
+    assert driver.worker_args(task, gw_task, "card.md", "h", external=False)["what"] == "w" * 4000
