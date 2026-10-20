@@ -3017,3 +3017,26 @@ def test_pytest_temp_dirs_are_dropped_from_a_captured_diff_in_every_arm():
     lookalike = edit.replace("src/pkg/mod.py", "src/pytest-of-docs.py")
     assert drop_tool_artifacts(lookalike) == (lookalike, [])
     assert drop_tool_artifacts("") == ("", [])
+
+
+@needs_sandbox
+def test_worker_sandbox_temp_dir_is_the_same_in_both_arms(manifest, tmp_path):
+    """1d, M-main2: zero-model reproduction. Inside the worker sandbox Python resolves its
+    temp dir to the run's own tmp (outside the Target) in BARE and NEXUS alike (the
+    fixture venv has no pytest, so the pytest call itself is not asserted here)."""
+    dryrun.dry_run(manifest, tmp_path / "dry", file_scope=True, fake_mode="tmpprobe")
+    probes = {}
+    for stream in (tmp_path / "dry" / "traces").glob("*/*.stream.jsonl"):
+        for line in stream.read_text().splitlines():
+            if '"tmp_probe"' in line:
+                arm = "BARE" if stream.parent.name.startswith("m2721-bare-") else "NEXUS"
+                probes[arm] = json.loads(line)["tmp_probe"]
+    assert set(probes) == {"BARE", "NEXUS"}, probes
+    for arm, probe in probes.items():
+        tmp = os.path.realpath(probe["TMPDIR"])
+        assert probe["TMPDIR"] and Path(tmp).name == "tmp", (arm, probe)
+        assert os.path.realpath(probe["gettempdir"]) == tmp, (arm, probe)
+        assert not tmp.startswith(os.path.realpath(probe["cwd"])), (arm, probe)
+        assert probe["cwd_pytest_dirs"] == [], (arm, probe)
+    # Same shape in both arms: the adapter's per-run tmp, which tempfile actually uses.
+    assert {k for k, v in probes["BARE"].items() if v} == {k for k, v in probes["NEXUS"].items() if v}

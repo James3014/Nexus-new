@@ -139,7 +139,7 @@ def file_scope_manifest(manifest: Path, out: Path) -> Path:
     return path
 
 
-def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str, Any]:
+def dry_run(manifest: Path, out: Path, *, file_scope: bool = False, fake_mode: str = "record") -> dict[str, Any]:
     """READ_ROOTS reach the arms the formal way: only through a loaded Gateway env file,
     never the runner's os.environ (1d L3: a process variable hid the BARE venv bug)."""
     from scripts.bench.measure_2721 import gateway_env
@@ -147,7 +147,7 @@ def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str,
     saved_loaded = dict(gateway_env._LOADED)
     saved_roots = os.environ.pop(gateway_env.READ_ROOTS_ENV, None)
     try:
-        return _dry_run(manifest, out, file_scope=file_scope,
+        return _dry_run(manifest, out, file_scope=file_scope, fake_mode=fake_mode,
                         read_roots=saved_loaded.get(gateway_env.READ_ROOTS_ENV) or saved_roots)
     finally:
         gateway_env._LOADED.clear()
@@ -156,14 +156,15 @@ def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str,
             os.environ[gateway_env.READ_ROOTS_ENV] = saved_roots
 
 
-def _dry_run(manifest: Path, out: Path, *, file_scope: bool, read_roots: str | None) -> dict[str, Any]:
+def _dry_run(manifest: Path, out: Path, *, file_scope: bool, read_roots: str | None,
+             fake_mode: str = "record") -> dict[str, Any]:
     from scripts.bench.measure_2721.gateway_env import READ_ROOTS_ENV, use_gateway_env
 
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     if file_scope:
         manifest = file_scope_manifest(manifest, out)
-    fake = write_fake_claude(out / "bin" / "claude", "record")
+    fake = write_fake_claude(out / "bin" / "claude", fake_mode)
     token = out / "anthropic.env"
     # Built at runtime: no key-shaped literal in the source (secret audit).
     fake_key = "-".join(("sk", "ant", "dryrun", "NOT", "A", "REAL", "KEY", "0000000000"))

@@ -18,6 +18,8 @@ Modes:
 * ``venvprobe``: runs ``python -c 'import encodings'`` and a pytest
   collection with the task venv inside the sandbox, reported as a
   ``system/venv_probe`` event;
+* ``tmpprobe``: reports the sandboxed temp dir and runs a pytest with ``tmp_path``,
+  listing any ``pytest-*`` dir left in the cwd (``system/tmp_probe``);
 * ``smoke``: edits ``README.md`` (outside the allowed scope) and creates an
   untracked file in the first allowed directory;
 * ``hang``: writes one file, then sleeps past any time cap (timeout snapshot).
@@ -69,6 +71,20 @@ if MODE == "venvprobe" and probe_run:
         except Exception as exc:
             venv_probe[name] = {"rc": None, "tail": type(exc).__name__}
     print(json.dumps({"type": "system", "subtype": "venv_probe", "venv_probe": venv_probe}))
+if MODE == "tmpprobe" and probe_run:
+    # Where a test run's temp files land inside the worker sandbox (35, M-main2): the
+    # temp dir Python resolves, and whether pytest leaves its basetemp in the cwd.
+    import tempfile
+    probe = {"TMPDIR": os.environ.get("TMPDIR"), "CLAUDE_CODE_TMPDIR": os.environ.get("CLAUDE_CODE_TMPDIR"),
+             "gettempdir": tempfile.gettempdir(), "cwd": os.getcwd()}
+    test_dir = Path(tempfile.mkdtemp(prefix="m2721-tmpprobe-"))
+    (test_dir / "test_tmpprobe.py").write_text("def test_tmp(tmp_path):\n    (tmp_path / 'f').write_text('x')\n")
+    done = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", str(test_dir)],
+                          capture_output=True, text=True, timeout=300)
+    probe["pytest_rc"] = done.returncode
+    probe["pytest_tail"] = (done.stdout + done.stderr)[-600:]
+    probe["cwd_pytest_dirs"] = sorted(p.name for p in Path.cwd().iterdir() if p.name.startswith("pytest-"))
+    print(json.dumps({"type": "system", "subtype": "tmp_probe", "tmp_probe": probe}))
 if MODE in ("edit", "smoke") and probe_run:
     readme = Path("README.md")
     if readme.exists():
@@ -93,7 +109,7 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "nu
 
 
 def write_fake_claude(path: Path, mode: str = "record") -> Path:
-    if mode not in ("record", "noop", "edit", "venvprobe", "smoke", "hang"):
+    if mode not in ("record", "noop", "edit", "venvprobe", "tmpprobe", "smoke", "hang"):
         raise ValueError(f"unknown fake mode {mode!r}")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
