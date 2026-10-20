@@ -707,6 +707,38 @@ class Host:
             )
         return lock
 
+    def run_bounded(self, argv: List[str], *, timeout: float) -> Tuple[int, str]:
+        """Run a read-only probe in its own process group; never outlive ``timeout``.
+
+        ``subprocess.run`` only kills the direct child on timeout and then
+        waits for EOF, which a grandchild holding stdout can withhold forever.
+        Here the whole group is killed and the pipes are abandoned after a
+        short grace, raising ``TimeoutExpired``.  stderr is discarded.
+        """
+        proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, _ = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.communicate(timeout=2)
+            if proc.stdout is not None:
+                with contextlib.suppress(OSError):
+                    proc.stdout.close()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=2)
+            raise
+        return proc.returncode, stdout or ""
+
     def tasks_in_flight(self, cfg: Config, live_plist: bytes) -> Dict[str, Any]:
         """Classify the live self-hosted tasks with the live deployment's own code (#2227).
 
@@ -740,6 +772,10 @@ class Host:
     def cairnwork_in_flight(self, cfg: Config) -> Dict[str, Any]:
         """Cairnwork tasks in flight, when the live Gateway routes to Cairnwork (F clause).
 
+        Reads the env file as it is now (the operator's switch), not as it was
+        when the running Gateway started: turn routing off in the file only
+        once the Gateway was restarted with it, or drain Cairnwork first.
+
         Skipped (``CAIRNWORK_SKIPPED``) unless the env file sets
         ``NEXUS_CAIRNWORK_ROUTE`` to shadow or route.  Then runs the read-only,
         lock-free ``$NEXUS_CAIRNWORK_ROUTE_BIN --state $NEXUS_CAIRNWORK_STATE
@@ -748,22 +784,26 @@ class Host:
         output all count as in flight.
         """
         config = cairnwork_route_config(cfg.env_file)
-        if "error" in config:
-            return {"verdict": "IN_FLIGHT", "reason": config["error"]}
-        route = config.get(CAIRNWORK_ROUTE_ENV, "")
-        if route in CAIRNWORK_OFF_ROUTES:
-            return dict(CAIRNWORK_SKIPPED)
+        values, errors = config["values"], config["errors"]
+        blocking_error = errors.get("*") or errors.get(CAIRNWORK_ROUTE_ENV)
+        if blocking_error:
+            return {"verdict": "IN_FLIGHT", "reason": blocking_error}
+        # The Gateway's own reading (cairnwork_route.py, #2804): strip + lower,
+        # and any value but shadow/route is off.  Same here, so both sides
+        # agree on one setting.
+        route = cairnwork_route_mode(values.get(CAIRNWORK_ROUTE_ENV))
         if route not in CAIRNWORK_ACTIVE_ROUTES:
-            return {"verdict": "IN_FLIGHT", "reason": "CAIRNWORK_ROUTE_VALUE_INVALID"}
-        binary = config.get(CAIRNWORK_ROUTE_BIN_ENV, "")
-        state = config.get(CAIRNWORK_STATE_ENV, "")
+            return dict(CAIRNWORK_SKIPPED)
+        path_error = errors.get(CAIRNWORK_ROUTE_BIN_ENV) or errors.get(CAIRNWORK_STATE_ENV)
+        if path_error:
+            return {"verdict": "IN_FLIGHT", "route": route, "reason": path_error}
+        binary = values.get(CAIRNWORK_ROUTE_BIN_ENV, "")
+        state = values.get(CAIRNWORK_STATE_ENV, "")
         if not binary or not os.path.isabs(binary) or not state or not os.path.isabs(state):
             return {"verdict": "IN_FLIGHT", "route": route, "reason": "CAIRNWORK_PATHS_INVALID"}
         try:
-            result = self.run(
-                [binary, "--state", state, "in-flight"],
-                env={"PYTHONDONTWRITEBYTECODE": "1"},
-                timeout=CAIRNWORK_PROBE_TIMEOUT_SECONDS,
+            returncode, stdout = self.run_bounded(
+                [binary, "--state", state, "in-flight"], timeout=CAIRNWORK_PROBE_TIMEOUT_SECONDS
             )
         except subprocess.TimeoutExpired:
             return {"verdict": "IN_FLIGHT", "route": route, "reason": "CAIRNWORK_PROBE_TIMEOUT"}
@@ -773,7 +813,7 @@ class Host:
                 "route": route,
                 "reason": f"CAIRNWORK_PROBE_FAILED:{type(exc).__name__}",
             }
-        return {"route": route, **cairnwork_probe_report(result.returncode, result.stdout or "")}
+        return {"route": route, **cairnwork_probe_report(returncode, stdout)}
 
     def controller_problem(
         self, python: Path, root: Path, controller: Path, code_root: Optional[Path] = None
@@ -1912,14 +1952,21 @@ CAIRNWORK_ENV_VARS: Tuple[str, ...] = (
     CAIRNWORK_ROUTE_BIN_ENV,
     CAIRNWORK_STATE_ENV,
 )
-# Route values that make the live Gateway hand tasks to Cairnwork; only then
-# is the Cairnwork in-flight probe part of quiescence.  Unset, empty or "off"
-# skips it, so deploys are not blocked while Cairnwork is not installed.
+# Route values (after strip + lower, as the Gateway reads them) that make the
+# live Gateway hand tasks to Cairnwork; only then is the Cairnwork in-flight
+# probe part of quiescence.  Anything else (unset, empty, "off", unknown) is
+# off for the Gateway too, so the probe is skipped and deploys are not blocked
+# while Cairnwork is not installed.
 CAIRNWORK_ACTIVE_ROUTES = ("shadow", "route")
-CAIRNWORK_OFF_ROUTES = ("", "off")
 CAIRNWORK_PROBE_TIMEOUT_SECONDS = 20
 CAIRNWORK_SKIPPED = {"verdict": "SKIPPED", "reason": "route off"}
 _CAIRNWORK_LISTED_IDS = 50
+
+
+def cairnwork_route_mode(value: Optional[str]) -> str:
+    """``NEXUS_CAIRNWORK_ROUTE`` normalized like the Gateway: strip + lower; else off."""
+    mode = (value or "").strip().lower()
+    return mode if mode in CAIRNWORK_ACTIVE_ROUTES else "off"
 
 
 def cairnwork_env_export(spare: bool = False) -> str:
@@ -1944,38 +1991,75 @@ def cairnwork_env_export(spare: bool = False) -> str:
     )
 
 
-def cairnwork_route_config(env_file: Path) -> Dict[str, Any]:
-    """The three Cairnwork variables as the env file sets them (last line wins).
+_CAIRNWORK_ASSIGNMENT = re.compile(
+    r"^(?:export[ \t]+)?(NEXUS_CAIRNWORK_(?:ROUTE_BIN|ROUTE|STATE))=(.*)$"
+)
+_CAIRNWORK_MENTION = re.compile(
+    r"(?<![A-Za-z0-9_])NEXUS_CAIRNWORK_(ROUTE_BIN|ROUTE|STATE)(?![A-Za-z0-9_])"
+)
+# shlex treats ``#`` inside a word as a comment, the shell does not.
+_MIDWORD_HASH = re.compile(r"(?<![ \t])#")
 
-    Parsed as text like ``read_env_token`` (never sourced, nothing else is
-    read out): ``[export ]NAME=value`` with shell quoting.  A missing env file
-    sets nothing.  ``{"error": ...}`` when the file cannot be read or a
-    Cairnwork line cannot be parsed or uses shell expansion; the caller then
-    fails closed.
+
+def cairnwork_route_config(
+    env_file: Path, environ: Optional[Mapping[str, str]] = None
+) -> Dict[str, Any]:
+    """The three Cairnwork variables as the live Gateway would see them.
+
+    Starts from ``environ`` (the inherited launchd environment, default
+    ``os.environ``), then applies the env file as text, last line wins, as
+    ``source`` would.  Only the plain ``[export ]NAME=value`` form with shell
+    quoting is understood; nothing is sourced and nothing else is read out.
+    A missing env file sets nothing.  A line that mentions a Cairnwork name
+    in any other form (``typeset -x``, several assignments, a tab after
+    ``export``...), uses ``$``/backtick expansion or cannot be unquoted puts
+    ``NAME`` in ``errors``; the caller fails closed on it when it matters
+    (always for ``NEXUS_CAIRNWORK_ROUTE``; for the paths only when routed),
+    so an unrelated stale path line never blocks a deploy while the route is
+    off.  A whole-file read error is ``errors["*"]``.
     """
+    source = os.environ if environ is None else environ
+    found: Dict[str, str] = {k: source[k] for k in CAIRNWORK_ENV_VARS if k in source}
+    errors: Dict[str, str] = {}
     try:
         text = env_file.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return {}
+        text = ""
     except (OSError, ValueError) as exc:
-        return {"error": f"CAIRNWORK_ENV_FILE_UNREADABLE:{type(exc).__name__}"}
-    found: Dict[str, Any] = {}
+        return {
+            "values": found,
+            "errors": {"*": f"CAIRNWORK_ENV_FILE_UNREADABLE:{type(exc).__name__}"},
+        }
     for raw in text.splitlines():
         line = raw.strip()
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        key, sep, value = line.partition("=")
-        key = key.strip()
-        if not sep or key not in CAIRNWORK_ENV_VARS:
+        if not line or line.startswith("#"):
+            continue
+        mentioned = {f"NEXUS_CAIRNWORK_{m}" for m in _CAIRNWORK_MENTION.findall(line)}
+        if not mentioned:
+            continue
+        match = _CAIRNWORK_ASSIGNMENT.match(line)
+        if match is None:
+            for key in mentioned:
+                errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
+            continue
+        key, value = match.group(1), match.group(2)
+        if _MIDWORD_HASH.search(value):
+            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
             continue
         try:
             parts = shlex.split(value, comments=True)
         except ValueError:
-            return {"error": f"CAIRNWORK_ENV_LINE_UNPARSEABLE:{key}"}
-        if len(parts) > 1 or any(ch in value for ch in ("$", "`")):
-            return {"error": f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"}
+            errors[key] = f"CAIRNWORK_ENV_LINE_UNPARSEABLE:{key}"
+            continue
+        if len(parts) > 1 or any(ch in "".join(parts) for ch in ("$", "`")):
+            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
+            continue
+        if _CAIRNWORK_MENTION.search(value.split("#", 1)[0]):
+            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
+            continue
         found[key] = parts[0] if parts else ""
-    return found
+        errors.pop(key, None)
+    return {"values": found, "errors": errors}
 
 
 def cairnwork_probe_report(returncode: int, stdout: str) -> Dict[str, Any]:

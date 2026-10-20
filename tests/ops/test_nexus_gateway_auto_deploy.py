@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
@@ -7693,6 +7694,12 @@ def test_live_state_root_is_the_config_default(tmp_path: Path) -> None:
 # ---------------------------------------------- Cairnwork in-flight probe (F clause)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_cairnwork_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ad.CAIRNWORK_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 def _cairnwork_bin(tmp_path: Path, body: str) -> Path:
     """A fake ``cairnwork-route`` that records its argv and runs ``body``."""
     path = tmp_path / "bin" / "cairnwork-route"
@@ -7720,7 +7727,11 @@ def _ran(tmp_path: Path) -> list[str]:
 _CLEAR_JSON = """echo '{"accepting": true, "count": 0, "task_ids": []}'"""
 
 
-@pytest.mark.parametrize("route", [None, "", "off"], ids=["unset", "empty", "off"])
+@pytest.mark.parametrize(
+    "route",
+    [None, "", "off", "OFF", "on", "routed"],
+    ids=["unset", "empty", "off", "off_upper", "unknown_on", "unknown_routed"],
+)
 def test_cairnwork_probe_skipped_when_route_off(
     cfg: ad.Config, tmp_path: Path, route: str | None
 ) -> None:
@@ -7735,14 +7746,18 @@ def test_cairnwork_probe_skipped_without_env_file(cfg: ad.Config) -> None:
     assert ad.Host().cairnwork_in_flight(cfg)["verdict"] == "SKIPPED"
 
 
-@pytest.mark.parametrize("route", ["shadow", "route"])
+@pytest.mark.parametrize(
+    ("route", "mode"),
+    [("shadow", "shadow"), ("route", "route"), ("SHADOW", "shadow"), ("' Route '", "route")],
+    ids=["shadow", "route", "shadow_upper", "route_padded_mixed"],
+)
 def test_cairnwork_probe_clear_on_exit_zero_count_zero(
-    cfg: ad.Config, tmp_path: Path, route: str
+    cfg: ad.Config, tmp_path: Path, route: str, mode: str
 ) -> None:
     binary = _cairnwork_bin(tmp_path, _CLEAR_JSON)
     _cairnwork_env(cfg, route, binary, "/cw/state")
     result = ad.Host().cairnwork_in_flight(cfg)
-    assert result == {"route": route, "verdict": "CLEAR", "count": 0, "accepting": True}
+    assert result == {"route": mode, "verdict": "CLEAR", "count": 0, "accepting": True}
     # Read-only probe, exact argv contract.
     assert _ran(tmp_path) == ["--state /cw/state in-flight"]
 
@@ -7834,15 +7849,13 @@ def test_cairnwork_probe_timeout_is_in_flight(
 @pytest.mark.parametrize(
     ("route", "binary", "state", "reason"),
     [
-        ("on", "/cw/bin", "/cw/state", "CAIRNWORK_ROUTE_VALUE_INVALID"),
-        ("Route", "/cw/bin", "/cw/state", "CAIRNWORK_ROUTE_VALUE_INVALID"),
         ("route", "", "/cw/state", "CAIRNWORK_PATHS_INVALID"),
         ("route", "cw/bin", "/cw/state", "CAIRNWORK_PATHS_INVALID"),
         ("route", "/cw/bin", "state", "CAIRNWORK_PATHS_INVALID"),
         ("route", "/no/such/cairnwork-route", "/cw/state", "CAIRNWORK_PROBE_FAILED"),
         ("route", "$HOME/cw/bin", "/cw/state", "CAIRNWORK_ENV_LINE_UNSUPPORTED"),
     ],
-    ids=["value_on", "value_case", "bin_empty", "bin_rel", "state_rel", "bin_missing", "expand"],
+    ids=["bin_empty", "bin_rel", "state_rel", "bin_missing", "expand"],
 )
 def test_cairnwork_probe_bad_config_fails_closed(
     cfg: ad.Config, route: str, binary: str, state: str, reason: str
@@ -7863,27 +7876,97 @@ def test_cairnwork_route_config_reads_the_env_file_like_the_shell(tmp_path: Path
         "NEXUS_OTHER=$SECRET\n",
         encoding="utf-8",
     )
-    assert ad.cairnwork_route_config(env) == {
-        "NEXUS_CAIRNWORK_ROUTE": "shadow",
-        "NEXUS_CAIRNWORK_STATE": "/a b/state",
+    assert ad.cairnwork_route_config(env, environ={}) == {
+        "values": {
+            "NEXUS_CAIRNWORK_ROUTE": "shadow",
+            "NEXUS_CAIRNWORK_STATE": "/a b/state",
+        },
+        "errors": {},
     }
     env.write_text("NEXUS_CAIRNWORK_ROUTE='unterminated\n", encoding="utf-8")
-    assert ad.cairnwork_route_config(env)["error"].startswith("CAIRNWORK_ENV_LINE_UNPARSEABLE")
+    errors = ad.cairnwork_route_config(env, environ={})["errors"]
+    assert errors["NEXUS_CAIRNWORK_ROUTE"].startswith("CAIRNWORK_ENV_LINE_UNPARSEABLE")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "export\tNEXUS_CAIRNWORK_ROUTE=route",
+        "typeset -x NEXUS_CAIRNWORK_ROUTE=route",
+        "export A=1 NEXUS_CAIRNWORK_ROUTE=route",
+        "NEXUS_CAIRNWORK_ROUTE=off#x",
+        "NEXUS_CAIRNWORK_ROUTE=$MODE",
+        "NEXUS_CAIRNWORK_ROUTE=off NEXUS_CAIRNWORK_STATE=/x",
+    ],
+    ids=["tab_export", "typeset", "multi_assign", "midword_hash", "expansion", "two_vars"],
+)
+def test_cairnwork_route_line_the_parser_cannot_follow_fails_closed(
+    cfg: ad.Config, line: str
+) -> None:
+    """A form ``source`` may honour but the text parser does not is never read as off."""
+    cfg.env_file.write_text('export NEXUS_MCP_GATEWAY_TOKEN="t"\n' + line + "\n")
+    result = ad.Host().cairnwork_in_flight(cfg)
+    assert result["verdict"] == "IN_FLIGHT"
+    # Either refused as unsupported, or (tab after export) read as routed.
+    assert result["reason"].startswith(("CAIRNWORK_ENV_LINE_", "CAIRNWORK_PATHS_INVALID"))
+
+
+def test_cairnwork_route_off_ignores_bad_path_lines(cfg: ad.Config) -> None:
+    """A stale or unparseable path line never blocks deploys while the route is off."""
+    cfg.env_file.write_text(
+        'export NEXUS_MCP_GATEWAY_TOKEN="t"\n'
+        "NEXUS_CAIRNWORK_ROUTE=off  # costs $0\n"
+        "NEXUS_CAIRNWORK_STATE=$HOME/cw\n"
+        "typeset -x NEXUS_CAIRNWORK_ROUTE_BIN=/cw/bin\n"
+        "MY_NEXUS_CAIRNWORK_ROUTEX=route\n"
+    )
+    assert ad.Host().cairnwork_in_flight(cfg) == ad.CAIRNWORK_SKIPPED
+
+
+def test_cairnwork_route_inherited_from_launchd_env_is_probed(
+    cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _cairnwork_bin(tmp_path, _CLEAR_JSON)
+    monkeypatch.setenv("NEXUS_CAIRNWORK_ROUTE", "shadow")
+    monkeypatch.setenv("NEXUS_CAIRNWORK_ROUTE_BIN", str(binary))
+    monkeypatch.setenv("NEXUS_CAIRNWORK_STATE", "/cw/state")
+    assert ad.Host().cairnwork_in_flight(cfg)["verdict"] == "CLEAR"
+    assert _ran(tmp_path) == ["--state /cw/state in-flight"]
+    # The env file still wins, as ``source`` would.
+    cfg.env_file.write_text("NEXUS_CAIRNWORK_ROUTE=off\n")
+    assert ad.Host().cairnwork_in_flight(cfg) == ad.CAIRNWORK_SKIPPED
+
+
+def test_cairnwork_probe_timeout_with_grandchild_holding_stdout(
+    cfg: ad.Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """subprocess.run would wait for EOF forever; the whole group is killed."""
+    monkeypatch.setattr(ad, "CAIRNWORK_PROBE_TIMEOUT_SECONDS", 1)
+    binary = _cairnwork_bin(tmp_path, "sleep 60 &\nsleep 60")
+    _cairnwork_env(cfg, "route", binary, "/cw/state")
+    started = time.monotonic()
+    result = ad.Host().cairnwork_in_flight(cfg)
+    assert time.monotonic() - started < 15
+    assert result["reason"] == "CAIRNWORK_PROBE_TIMEOUT"
+
+
+def test_cairnwork_probe_inherits_path(cfg: ad.Config, tmp_path: Path) -> None:
+    # A real cairnwork-route may be an ``env``-shebang script that needs PATH.
+    binary = _cairnwork_bin(tmp_path, "command -v env >/dev/null || exit 9\n" + _CLEAR_JSON)
+    _cairnwork_env(cfg, "route", binary, "/cw/state")
+    assert ad.Host().cairnwork_in_flight(cfg)["verdict"] == "CLEAR"
 
 
 class _CairnworkHost(FakeHost):
-    """FakeHost that really runs the fake cairnwork-route binary."""
+    """FakeHost whose Cairnwork probe really runs the fake binary (run_bounded is real)."""
 
     def __init__(self, binary: Path) -> None:
         super().__init__()
-        self.binary = str(binary)
-        self.cairnwork_runs = 0
+        self.marker = binary.parent / "ran"
 
-    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
-        if argv[:1] == [self.binary]:
-            self.cairnwork_runs += 1
-            return ad.Host.run(self, argv, cwd=cwd, env=env, timeout=timeout)
-        return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+    @property
+    def cairnwork_runs(self) -> int:
+        return len(self.marker.read_text().splitlines()) if self.marker.exists() else 0
 
 
 def test_cairnwork_in_flight_defers_the_deploy(cfg: ad.Config, tmp_path: Path) -> None:
