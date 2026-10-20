@@ -155,3 +155,125 @@ def test_code_swap_on_a_registered_hookimpl_outside_the_internals_list_is_caught
     assert any(
         entry.startswith("hookimpl:") for entry in row["witness"]["pytest_internals_patched"]
     ), row["witness"]
+
+
+# --- #2815 review round 2: whole-module sweep, removed and reordered hookimpls ------
+
+_FIND_PM = (
+    "import gc\n"
+    "from _pytest.config import PytestPluginManager\n"
+    "_pm = next(o for o in gc.get_objects() if isinstance(o, PytestPluginManager))\n"
+)
+_ROUTES_2815 = {
+    # In-place closure-cell change on a swept function (same behaviour, other object).
+    "closure_cell": (
+        "import functools\n"
+        "import _pytest.subtests as _st\n"
+        "_cell = _st.capturing_output.__closure__[0]\n"
+        "_inner = _cell.cell_contents\n"
+        "_cell.cell_contents = functools.wraps(_inner)(lambda *a, **k: _inner(*a, **k))\n"
+        "VALUE = 3\n",
+        "_pytest.subtests",
+    ),
+    # In-place code swap on pluggy's call loop (an equal copy: behaviour unchanged).
+    "multicall_code_swap": (
+        "import pluggy._callers as _c\n"
+        "_c._multicall.__code__ = _c._multicall.__code__.replace()\n"
+        "VALUE = 3\n",
+        "pluggy._callers:_multicall",
+    ),
+    # A rebound module global in _pytest.runner (not in the hot list).
+    "runner_global_rebound": (
+        "import _pytest.runner as _r\n"
+        "_orig = _r.show_test_item\n"
+        "_r.show_test_item = lambda item: _orig(item)\n"
+        "VALUE = 3\n",
+        "show_test_item",
+    ),
+    # A whole plugin's hookimpls removed after the snapshot.
+    "hookimpl_removed": (
+        _FIND_PM + "_pm.unregister(_pm.get_plugin('skipping'))\nVALUE = 3\n",
+        "hookimpl_removed:",
+    ),
+    # The order of an existing caller's hookimpls changed.
+    "hookimpl_reordered": (
+        _FIND_PM + "_pm.hook.pytest_runtest_setup._hookimpls.reverse()\nVALUE = 3\n",
+        "hookimpl_reordered:pytest_runtest_setup",
+    ),
+}
+
+
+@pytest.mark.parametrize("route", sorted(_ROUTES_2815))
+def test_swept_and_hook_state_changes_are_patched(tmp_path, route):
+    source, marker = _ROUTES_2815[route]
+    root, base, cand = _repo(tmp_path, {"src_mod.py": source})
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert any(marker in entry for entry in row["witness"]["pytest_internals_patched"]), row[
+        "witness"
+    ]
+
+
+# Swapped at import, put back by candidate code the test itself calls: the end-of-session
+# sweep sees the original again, so only the hot check before the test catches it.
+_MULTICALL_RESTORED = (
+    "import pluggy._callers as _c\n"
+    "_saved = _c._multicall.__code__\n"
+    "_c._multicall.__code__ = _saved.replace()\n"
+    "def check():\n"
+    "    _c._multicall.__code__ = _saved\n"
+)
+
+
+def test_pluggy_hot_path_swap_restored_by_the_test_is_caught_around_the_test(tmp_path):
+    keep = "from src_mod import check\n\n\ndef test_keep():\n    check()\n"
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": _MULTICALL_RESTORED},
+        base={"src_mod.py": "def check():\n    return None\n", "tests/test_keep.py": keep},
+    )
+    row = _row(root, base, cand, _spec("tests/test_keep.py"), ["src_mod.py"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert "pluggy._callers:_multicall" in row["witness"]["pytest_internals_patched"]
+
+
+def test_classmethod_entries_are_compared_raw_and_never_flag_an_honest_run(tmp_path):
+    from _pytest.reports import TestReport
+
+    from nexus.services.external_intelligence_verifier_witness import (
+        _fingerprint,
+        _resolve,
+        _same,
+    )
+
+    raw = _fingerprint(_resolve("_pytest.reports", "TestReport.from_item_and_call"))
+    assert _same(raw, _fingerprint(_resolve("_pytest.reports", "TestReport.from_item_and_call")))
+    # Through getattr each access binds a new method object, which is why the witness
+    # reads class ``__dict__`` entries raw and never compares bound methods.
+    assert not _same(
+        _fingerprint(TestReport.from_item_and_call), _fingerprint(TestReport.from_item_and_call)
+    )
+    root, base, cand = _repo(tmp_path, {"src_mod.py": "VALUE = 2\n"})
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["passed"] is True, row
+    assert not any("from_item_and_call" in e for e in row["witness"]["pytest_internals_patched"])
+
+
+def test_base_unchanged_subdirectory_conftest_with_hooks_is_trusted(tmp_path):
+    conftest = (
+        "import pytest\n\n\n"
+        "def pytest_runtest_setup(item):\n    item.user_properties.append(('seen', 1))\n\n\n"
+        "@pytest.fixture\ndef sub_value():\n    return 2\n"
+    )
+    sub_test = "def test_sub(sub_value):\n    assert sub_value == 2\n"
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={"tests/sub/conftest.py": conftest, "tests/sub/test_sub.py": sub_test},
+    )
+    row = _row(root, base, cand, _spec("tests/sub/test_sub.py"), ["src_mod.py"])
+    assert row["passed"] is True, row
+    assert row["witness"]["pytest_internals_patched"] == []
+    assert row["witness"]["foreign_plugins"] == []

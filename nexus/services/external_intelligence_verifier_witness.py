@@ -28,13 +28,17 @@ parent compares file, qualname and first line with what ``ast`` reads from the c
 test file, so swapping the test object (``Function._getobj``, ``obj``, the ``_obj`` cache)
 for an in-tree no-op is refused.
 
-pytest's own call path is fingerprinted by content, not only identity (#2812): for the
-``PYTEST_INTERNALS`` entries and for every hookimpl registered when the witness
-configures, the code object, defaults, keyword defaults and closure cell contents are
-recorded and re-checked around every test and at session end, so swapping
-``__code__`` or ``__defaults__`` in place is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
-Hookimpls that appear later are reported with their file and judged by the parent like
-plugins.
+pytest's and pluggy's code is fingerprinted by content, not only identity (#2812,
+#2815).  When collection starts (every plugin has configured; no test module, so no
+candidate code, has been imported) the witness sweeps every loaded ``pytest``,
+``_pytest.*`` and ``pluggy.*`` module: every module-level and class attribute (read raw
+from ``__dict__``, so descriptors are not bound) by identity, and every function behind
+them by code object, defaults, keyword defaults and closure cell contents.  It also
+records every hook caller, its ``_hookexec``, the order of its hookimpls and each
+hookimpl's function fingerprint.  A hot subset (the call/report internals, pluggy's call
+path, the hook callers and hookimpls) is re-checked around every test; the full sweep at
+session end.  Any change, a removed or reordered hookimpl, or a later hookimpl from an
+untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
 
 The emitter, key and fd are closure cells captured at import, and the module removes
 itself from ``sys.modules`` once its plugin is registered, so ``import``-by-name and
@@ -47,7 +51,10 @@ monkeypatch can still rewrite the records.  The same holds for other in-process
 candidate code: ``CodeType.replace`` on the test function's ``__code__`` keeping its
 filename, qualname and first line; jumping ``frame.f_lineno`` from candidate code the
 test calls; and plugin trust, which relies on a self-reported module path and on the git
-state rather than on the content actually loaded.  Witness-targeted and these
+state rather than on the content actually loaded.  So do plugin-instance state (``self``
+attributes of a registered plugin object), the fixture manager's internal data, and
+mutation inside containers (a dict or list held in a module global or closure cell keeps
+its identity).  Witness-targeted and these
 in-process routes are out of scope for P1 of #2795; the candidate diff review and the
 claim ceiling are the backstop.
 """
@@ -158,20 +165,75 @@ def _same(left: Any, right: Any) -> bool:
     return left is right
 
 
-def _hookimpls(manager: Any) -> list[Any]:
-    impls: list[Any] = []
-    for caller in list(vars(manager.hook).values()):
-        get = getattr(caller, "get_hookimpls", None)
-        if callable(get):
-            found: Any = get()
-            impls.extend(found)
-    return impls
-
-
 def _hookimpl_file(impl: Any) -> str:
     function = getattr(impl.function, "__func__", impl.function)
     code = getattr(function, "__code__", None)
     return str(Path(code.co_filename).resolve()) if code is not None else ""
+
+
+# Packages whose whole loaded code is swept at configure (#2815 review): every function
+# (raw from module and class ``__dict__``) by content, and every module-level and class
+# attribute by identity.
+SWEEP_PACKAGES = ("pytest", "_pytest", "pluggy")
+# The hot subset re-checked around every test (the full sweep runs at session end).
+PLUGGY_HOT = (
+    ("pluggy._callers", "_multicall"),
+    ("pluggy._hooks", "HookCaller.__call__"),
+    ("pluggy._hooks", "HookCaller._hookexec"),
+    ("pluggy._hooks", "HookCaller.call_historic"),
+    ("pluggy._hooks", "HookImpl.__init__"),
+    ("pluggy._manager", "PluginManager._hookexec"),
+    ("pluggy._result", "Result.get_result"),
+    ("pluggy._result", "Result.force_result"),
+)
+_MISSING = object()
+
+
+def _in_sweep(module_name: str) -> bool:
+    return any(module_name == p or module_name.startswith(p + ".") for p in SWEEP_PACKAGES)
+
+
+def _sweep() -> list[tuple[Any, str, tuple[Any, ...]]]:
+    """(container, attribute, fingerprint) for every attribute of every loaded sweep
+    module, and of every class those modules define (recursively for nested classes)."""
+    entries: list[tuple[Any, str, tuple[Any, ...]]] = []
+    seen: set[int] = set()
+
+    def walk(container: Any, owner_module: str) -> None:
+        if id(container) in seen:
+            return
+        seen.add(id(container))
+        for attr, value in list(vars(container).items()):
+            entries.append((container, attr, _fingerprint(value)))
+            if isinstance(value, type) and getattr(value, "__module__", None) == owner_module:
+                walk(value, owner_module)
+
+    for name, module in list(sys.modules.items()):
+        if module is not None and _in_sweep(name):
+            walk(module, name)
+    return entries
+
+
+def _swept_changes(entries: list[tuple[Any, str, tuple[Any, ...]]]) -> list[str]:
+    changed: list[str] = []
+    for container, attr, original in entries:
+        current = vars(container).get(attr, _MISSING)
+        if current is _MISSING or not _same(_fingerprint(current), original):
+            owner = getattr(container, "__qualname__", None) or getattr(container, "__name__", "?")
+            module = getattr(container, "__module__", "") if isinstance(container, type) else ""
+            changed.append(f"{module + ':' if module else ''}{owner}.{attr}")
+    return changed
+
+
+def _hook_state(manager: Any) -> dict[str, tuple[Any, Any, list[Any]]]:
+    """hook name -> (HookCaller, its ``_hookexec``, ordered hookimpls)."""
+    state: dict[str, tuple[Any, Any, list[Any]]] = {}
+    for name, caller in list(vars(manager.hook).items()):
+        get = getattr(caller, "get_hookimpls", None)
+        if callable(get):
+            found: Any = get()
+            state[name] = (caller, getattr(caller, "_hookexec", None), list(found))
+    return state
 
 
 def _plugin_file(plugin: Any) -> str:
@@ -319,39 +381,87 @@ def _build_plugin(emit: Any) -> Any:
     """
     watch = _CodeWatch()
     internals: list[tuple[str, str, Any]] = []
-    # id(HookImpl) -> (HookImpl, fingerprint of its function) for every hookimpl
-    # registered when the witness configures; ``patched`` is sticky.
-    hook_snapshot: dict[int, tuple[Any, Any, tuple[Any, ...]]] = {}
-    managers: list[Any] = []
+    sweep: list[tuple[Any, str, tuple[Any, ...]]] = []
+    # hook name -> (caller, its _hookexec, ordered impls, {id: (impl, function, print)})
+    hooks: dict[str, tuple[Any, Any, list[Any], dict[int, tuple[Any, Any, Any]]]] = {}
+    managers: list[tuple[Any, Any]] = []
     patched: dict[str, None] = {}
     added: dict[tuple[str, str], None] = {}
 
-    def check() -> None:
+    def check_hooks() -> None:
+        if not managers:
+            return
+        manager, inner = managers[0]
+        if getattr(manager, "_inner_hookexec", None) is not inner:
+            patched["pluggy:PluginManager._inner_hookexec"] = None
+        current = _hook_state(manager)
+        for name, (caller, hookexec, impls, known) in hooks.items():
+            now = current.get(name)
+            if now is None or now[0] is not caller:
+                patched[f"hookcaller_replaced:{name}"] = None
+                continue
+            if now[1] is not hookexec:
+                patched[f"hookcaller_hookexec:{name}"] = None
+            ids = {id(impl) for impl in now[2]}
+            for impl in impls:
+                if id(impl) not in ids:
+                    patched[f"hookimpl_removed:{name}:{impl.plugin_name}"] = None
+            if [i for i in now[2] if id(i) in known] != [i for i in impls if id(i) in ids]:
+                patched[f"hookimpl_reordered:{name}"] = None
+            for impl in now[2]:
+                entry = known.get(id(impl))
+                if entry is None or entry[0] is not impl:
+                    added[(str(getattr(impl, "plugin_name", "")), _hookimpl_file(impl))] = None
+                elif entry[1] is not impl.function or not _same(
+                    _function_print(impl.function), entry[2]
+                ):
+                    patched[f"hookimpl:{name}:{impl.plugin_name}"] = None
+        for name, (_caller, _hookexec, impls) in current.items():
+            if name not in hooks:
+                for impl in impls:
+                    added[(str(getattr(impl, "plugin_name", "")), _hookimpl_file(impl))] = None
+
+    def check_hot() -> None:
         for m, d, original in internals:
             if not _same(_fingerprint(_resolve(m, d)), original):
                 patched[f"{m}:{d}"] = None
+        check_hooks()
+
+    def check_all() -> None:
         if not managers:
-            return
-        for impl in _hookimpls(managers[0]):
-            known = hook_snapshot.get(id(impl))
-            if known is None or known[0] is not impl:
-                # A hookimpl registered after configure (conftest, plugin, or one
-                # injected into an existing caller): the parent judges its file.
-                added[(str(getattr(impl, "plugin_name", "")), _hookimpl_file(impl))] = None
-            elif known[1] is not impl.function or not _same(
-                _function_print(impl.function), known[2]
-            ):
-                patched[
-                    f"hookimpl:{impl.plugin_name}:{getattr(impl.function, '__name__', '?')}"
-                ] = None
+            # The snapshot is taken when collection starts; without it nothing was
+            # compared, so the run proves nothing (fail closed).
+            patched["witness:snapshot_not_taken"] = None
+        check_hot()
+        for change in _swept_changes(sweep):
+            patched[change] = None
+
+    def snapshot(config: Any) -> None:
+        internals[:] = [
+            (m, d, _fingerprint(_resolve(m, d))) for m, d in (*PYTEST_INTERNALS, *PLUGGY_HOT)
+        ]
+        sweep[:] = _sweep()
+        manager = config.pluginmanager
+        managers[:] = [(manager, getattr(manager, "_inner_hookexec", None))]
+        hooks.clear()
+        for name, (caller, hookexec, impls) in _hook_state(manager).items():
+            hooks[name] = (
+                caller,
+                hookexec,
+                impls,
+                {id(i): (i, i.function, _function_print(i.function)) for i in impls},
+            )
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_collection(session: Any) -> Any:
+        # Taken when collection starts: every plugin has configured (they legitimately
+        # set state in pytest_configure) and no test module, so no candidate code, has
+        # been imported yet.  Changed conftest files were refused before the run.
+        snapshot(session.config)
+        yield
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_configure(config: pytest.Config) -> None:
-        internals[:] = [(m, d, _fingerprint(_resolve(m, d))) for m, d in PYTEST_INTERNALS]
-        managers[:] = [config.pluginmanager]
-        hook_snapshot.clear()
-        for impl in _hookimpls(config.pluginmanager):
-            hook_snapshot[id(impl)] = (impl, impl.function, _function_print(impl.function))
         emit({
             "t": "begin",
             "pytest": pytest.__version__,
@@ -384,13 +494,13 @@ def _build_plugin(emit: Any) -> Any:
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
     def pytest_runtest_protocol(item: Any, nextitem: Any) -> Any:
         code = _test_code(item)
-        check()
+        check_hot()
         watch.begin(code)
         try:
             yield
         finally:
             state = watch.end()
-            check()
+            check_hot()
             emit({"t": "witness", "nodeid": item.nodeid, **state, **_code_identity(code)})
 
     def pytest_runtest_logreport(report: Any) -> None:
@@ -405,7 +515,7 @@ def _build_plugin(emit: Any) -> Any:
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(session: Any, exitstatus: Any) -> None:
-        check()
+        check_all()
         emit({
             "t": "end",
             "exitstatus": int(exitstatus),
@@ -416,6 +526,7 @@ def _build_plugin(emit: Any) -> Any:
     plugin = _PluginHolder()
     for name, function in dict(
         pytest_configure=pytest_configure,
+        pytest_collection=pytest_collection,
         pytest_plugin_registered=pytest_plugin_registered,
         pytest_itemcollected=pytest_itemcollected,
         pytest_collectreport=pytest_collectreport,

@@ -220,7 +220,9 @@ _PATCH_REPORT_INIT = (
     [
         (_PATCH_FROM_ITEM_AND_CALL, VERIFIER_PYTEST_INTERNALS_PATCHED),
         (_PATCH_RUNTEST_NOOP, VERIFIER_PYTEST_INTERNALS_PATCHED),
-        (_PATCH_REPORT_INIT, VERIFIER_OUTCOME_FORGED),
+        # Not in the hot list; since #2815 the full module sweep reports it too.  The
+        # code-object witness still flags the node on its own (forged_node_ids below).
+        (_PATCH_REPORT_INIT, VERIFIER_PYTEST_INTERNALS_PATCHED),
     ],
     ids=["from_item_and_call", "function_runtest_noop", "report_init_unsnapshotted"],
 )
@@ -560,7 +562,9 @@ _SWAP_OBJ_CACHE = (
     [
         (_SWAP_GETOBJ, VERIFIER_PYTEST_INTERNALS_PATCHED),
         (_SWAP_OBJ_PROPERTY, VERIFIER_PYTEST_INTERNALS_PATCHED),
-        (_SWAP_OBJ_CACHE, VERIFIER_OUTCOME_FORGED),
+        # Since #2815 the full sweep sees the rebound ``Function.__init__``; the code
+        # identity check still flags the node on its own (forged_node_ids below).
+        (_SWAP_OBJ_CACHE, VERIFIER_PYTEST_INTERNALS_PATCHED),
     ],
     ids=["function_getobj", "pyobjmixin_obj", "obj_cache_unsnapshotted"],
 )
