@@ -1904,7 +1904,8 @@ def _base_checkout(root: Path, base_sha: str, dest: Path) -> None:
     )
     try:
         with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
-            archive.extractall(dest, filter=_safe_base_member)
+            # Every member goes through tarfile.data_filter (unsafe ones are dropped).
+            archive.extractall(dest, filter=_safe_base_member)  # nosec B202
     finally:
         if proc.stdout is not None:
             proc.stdout.close()
