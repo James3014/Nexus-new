@@ -6,13 +6,15 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
+import tarfile
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
@@ -937,8 +939,17 @@ VERIFIER_ANY_DEPTH_SHADOW_NAMES = frozenset({"conftest.py"})
 # interpreter locates its site-packages from ``pyvenv.cfg``, so ``VIRTUAL_ENV`` and
 # ``UV_*`` are not needed.  ``HOME`` and ``TMPDIR`` are fresh per-verifier temp dirs.
 VERIFIER_ENV_FORWARDED = ("PATH", "LANG", "LC_ALL")
+# Set by closure itself for a pytest verifier (#2795), never forwarded: the witness
+# channel fds and ``PYTHONPATH`` = the parent-owned dir holding the witness plugin.  The
+# witness removes all three from ``os.environ`` before any test module is imported.
+VERIFIER_WITNESS_ENV_KEYS = (
+    "NEXUS_VERIFIER_WITNESS_FD",
+    "NEXUS_VERIFIER_WITNESS_KEY_FD",
+    "PYTHONPATH",
+)
 VERIFIER_ENV_ALLOWLIST = frozenset({
     *VERIFIER_ENV_FORWARDED,
+    *VERIFIER_WITNESS_ENV_KEYS,
     "HOME",
     "TMPDIR",
     "PYTHONDONTWRITEBYTECODE",
@@ -1167,20 +1178,64 @@ def _dotted_module(path: str) -> str:
     return re.sub(r"\.py$", "", PurePosixPath(path).as_posix().replace("/", "."))
 
 
+def _empty_junit_summary(declared_node_ids: Sequence[str]) -> dict[str, Any]:
+    return {
+        "present": False,
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "declared_node_ids": list(declared_node_ids),
+        "declared_node_ids_not_passed": [],
+        "skipped_touched": [],
+        "skipped_untouched": [],
+        "skipped_at_base": [],
+        "skipped_not_at_base": [],
+    }
+
+
 def _junit_evidence(
     junit_path: Path,
     declared_node_ids: Sequence[str],
     *,
     root: Path | None = None,
     touched_paths: Sequence[str] = (),
+    base_skipped: Collection[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Positive evidence from a pytest JUnit file: (error code or "", summary).
+    """Positive evidence from a JUnit file: (error code or "", summary).
 
-    Skip policy: a skipped (or xfailed) test fails the verifier when it belongs to a
-    test module the candidate diff touched, or when the skip was raised from a touched
-    file; skips in untouched modules (e.g. ``importorskip`` of an optional dependency)
-    are tolerated and listed in ``skipped_untouched``.  At least one test must pass and
-    every declared node id must pass.
+    See ``_junit_evidence_bytes``; this reads the file (no symlink, bounded size).
+    """
+    summary = _empty_junit_summary(declared_node_ids)
+    try:
+        if not junit_path.is_file() or junit_path.is_symlink():
+            return VERIFIER_JUNIT_MISSING, summary
+        if junit_path.stat().st_size > _JUNIT_MAX_BYTES:
+            return VERIFIER_JUNIT_INVALID, summary
+        with junit_path.open("rb") as stream:
+            raw = stream.read(_JUNIT_MAX_BYTES + 1)
+    except OSError:
+        return VERIFIER_JUNIT_MISSING, summary
+    return _junit_evidence_bytes(
+        raw, declared_node_ids, root=root, touched_paths=touched_paths, base_skipped=base_skipped
+    )
+
+
+def _junit_evidence_bytes(
+    raw: bytes,
+    declared_node_ids: Sequence[str],
+    *,
+    root: Path | None = None,
+    touched_paths: Sequence[str] = (),
+    base_skipped: Collection[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Positive evidence from JUnit bytes: (error code or "", summary).
+
+    Skip policy (#2795): a skipped (or xfailed) test is tolerated only when the same
+    node was also skipped when the same verifier ran at the base commit
+    (``base_skipped``, from ``_run_base_verifier``); with no base comparison every skip
+    fails.  ``skipped_touched`` / ``skipped_untouched`` (#2794) are kept as information.
+    At least one test must pass and every declared node id must pass.
     """
     import xml.etree.ElementTree as ElementTree
 
@@ -1203,26 +1258,7 @@ def _junit_evidence(
             return location.as_posix() in touched_set
         return False
 
-    summary: dict[str, Any] = {
-        "present": False,
-        "tests": 0,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0,
-        "declared_node_ids": list(declared_node_ids),
-        "declared_node_ids_not_passed": [],
-        "skipped_touched": [],
-        "skipped_untouched": [],
-    }
-    try:
-        if not junit_path.is_file() or junit_path.is_symlink():
-            return VERIFIER_JUNIT_MISSING, summary
-        if junit_path.stat().st_size > _JUNIT_MAX_BYTES:
-            return VERIFIER_JUNIT_INVALID, summary
-        with junit_path.open("rb") as stream:
-            raw = stream.read(_JUNIT_MAX_BYTES + 1)
-    except OSError:
-        return VERIFIER_JUNIT_MISSING, summary
+    summary = _empty_junit_summary(declared_node_ids)
     summary["present"] = True
     summary["junit_sha256"] = _sha256(raw)
     # The JUnit file is untrusted (candidate code can write it): refuse oversized
@@ -1246,6 +1282,7 @@ def _junit_evidence(
     attr_counts = {"failures": 0, "errors": 0, "skipped": 0}
     case_counts = {"failures": 0, "errors": 0, "skipped": 0}
     passed_names: list[str] = []
+    skipped_names: list[str] = []
     for suite in suites:
         try:
             for key in attr_counts:
@@ -1270,6 +1307,7 @@ def _junit_evidence(
                     else "skipped_untouched"
                 )
                 summary[bucket].append(full)
+                skipped_names.append(full)
             if outcomes & {"failure", "error", "skipped"}:
                 continue
             passed_names.append(full)
@@ -1282,7 +1320,13 @@ def _junit_evidence(
     unattributed = summary["skipped"] - case_counts["skipped"]
     summary["skipped_touched"] = summary["skipped_touched"][:_INTEGRITY_FINDINGS_LIMIT]
     summary["skipped_untouched"] = summary["skipped_untouched"][:_INTEGRITY_FINDINGS_LIMIT]
-    if summary["skipped_touched"] or unattributed > 0:
+    at_base = set(base_skipped or ())
+    not_at_base = [name for name in skipped_names if name not in at_base]
+    summary["skipped_at_base"] = [n for n in skipped_names if n in at_base][
+        :_INTEGRITY_FINDINGS_LIMIT
+    ]
+    summary["skipped_not_at_base"] = not_at_base[:_INTEGRITY_FINDINGS_LIMIT]
+    if not_at_base or unattributed > 0:
         return VERIFIER_JUNIT_SKIPPED, summary
     if summary["tests"] < 1 or not passed_names:
         return VERIFIER_JUNIT_NO_TESTS, summary
@@ -1371,6 +1415,878 @@ def _verifier_env(
     return env
 
 
+# --- Out-of-process verifier evidence (#2795) ----------------------------------
+# Candidate code runs inside the pytest process, so nothing that process reports about
+# itself is trusted on its own.  A pytest verifier now runs:
+#
+# * under ``sandbox-exec`` (macOS) with the ``nexus.engine.sandboxed_lane`` profile:
+#   network denied, writes confined to the work tree and a per-run scratch dir, the
+#   parent's evidence and trusted dirs and the work tree's ``.git`` denied last;
+# * with the trusted witness plugin (``external_intelligence_verifier_witness``) loaded
+#   from a parent-owned dir before any candidate code.  It streams MAC'd records over an
+#   inherited pipe; the parent rebuilds the JUnit evidence from them and writes it into a
+#   dir the child cannot write.  A test counts as passed only when pytest's report says
+#   passed AND the witness saw the test's own code object start and return without an
+#   exception unwinding out of it, so a rewritten report, a swallowed exception or a test
+#   that never ran is not passed;
+# * a skip is tolerated only when the same node is also skipped when the same verifier
+#   runs at the base commit in a read-only base checkout.
+#
+# Without an OS barrier (Linux) the verifier runs unsandboxed as in #2794, with the same
+# witness, and the row records ``sandbox.sandboxed: false``.
+VERIFIER_WITNESS_PLUGIN = "_nexus_eia_verifier_witness"
+VERIFIER_WITNESS_SOURCE = Path(__file__).with_name("external_intelligence_verifier_witness.py")
+VERIFIER_WITNESS_FD_ENV = "NEXUS_VERIFIER_WITNESS_FD"
+VERIFIER_WITNESS_KEY_FD_ENV = "NEXUS_VERIFIER_WITNESS_KEY_FD"
+VERIFIER_WITNESS_KEY_BYTES = 32
+VERIFIER_WITNESS_MAX_BYTES = 32 * 1024 * 1024
+VERIFIER_OUTPUT_MAX_BYTES = 16 * 1024 * 1024
+VERIFIER_DRAIN_GRACE_SECONDS = 2.0
+VERIFIER_WITNESS_TAMPERED = "VERIFIER_WITNESS_TAMPERED"
+VERIFIER_FOREIGN_PLUGIN = "VERIFIER_FOREIGN_PLUGIN"
+VERIFIER_PYTEST_INTERNALS_PATCHED = "VERIFIER_PYTEST_INTERNALS_PATCHED"
+VERIFIER_OUTCOME_FORGED = "VERIFIER_OUTCOME_FORGED"
+VERIFIER_TESTS_DESELECTED = "VERIFIER_TESTS_DESELECTED"
+VERIFIER_SANDBOX_SETUP_FAILED = "VERIFIER_SANDBOX_SETUP_FAILED"
+VERIFIER_EVIDENCE_TAMPERED = "VERIFIER_EVIDENCE_TAMPERED"
+VERIFIER_BASE_RUN_FAILED = "VERIFIER_BASE_RUN_FAILED"
+# Options with which a card itself narrows the selection; without one of them a node
+# that was collected but not selected is a candidate-made deselection.
+_DESELECT_OPTIONS = frozenset({"-k", "-m", "--deselect"})
+_XML_INVALID_CHARS = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
+_INTERPRETER_PROBE = "import sys; print(sys.prefix); print(sys.base_prefix); print(sys.executable)"
+
+
+def _junit_names(nodeid: str) -> tuple[str, str]:
+    """(classname, name) as pytest's junitxml derives them (``mangle_test_address``)."""
+    path, open_bracket, params = nodeid.partition("[")
+    names = path.split("::")
+    names[0] = re.sub(r"\.py$", "", names[0].replace("/", "."))
+    names[-1] += open_bracket + params
+    return ".".join(names[:-1]), names[-1]
+
+
+def _junit_full_name(nodeid: str) -> str:
+    classname, name = _junit_names(nodeid)
+    return f"{classname}.{name}" if classname else name
+
+
+def _render_junit(cases: Sequence[tuple[str, str, str]]) -> bytes:
+    """JUnit XML for ``(nodeid, kind, text)`` cases; kind is passed/failure/error/skipped."""
+    import xml.etree.ElementTree as ElementTree
+
+    counts = {kind: sum(1 for _, k, _ in cases if k == kind) for kind in ("failure", "error")}
+    skipped = sum(1 for _, k, _ in cases if k == "skipped")
+    suites = ElementTree.Element("testsuites")
+    suite = ElementTree.SubElement(
+        suites,
+        "testsuite",
+        name="nexus-eia-verifier-witness",
+        tests=str(len(cases)),
+        failures=str(counts["failure"]),
+        errors=str(counts["error"]),
+        skipped=str(skipped),
+    )
+    for nodeid, kind, text in cases:
+        classname, name = _junit_names(nodeid)
+        case = ElementTree.SubElement(
+            suite,
+            "testcase",
+            classname=_XML_INVALID_CHARS.sub("?", classname),
+            name=_XML_INVALID_CHARS.sub("?", name),
+        )
+        if kind != "passed":
+            child = ElementTree.SubElement(case, kind, message=kind)
+            child.text = _XML_INVALID_CHARS.sub("?", text)[:4000]
+    return ElementTree.tostring(suites, encoding="utf-8", xml_declaration=True)
+
+
+def _parse_witness(raw: bytes, key: bytes) -> tuple[str, list[dict[str, Any]]]:
+    """Verify and decode the witness stream: ("" or VERIFIER_WITNESS_TAMPERED, records)."""
+    import hmac
+
+    if len(raw) > VERIFIER_WITNESS_MAX_BYTES or (raw and not raw.endswith(b"\n")):
+        return VERIFIER_WITNESS_TAMPERED, []
+    records: list[dict[str, Any]] = []
+    for index, line in enumerate(raw.split(b"\n")[:-1]):
+        mac, _sep, payload = line.partition(b" ")
+        expected = hmac.new(key, payload, hashlib.sha256).hexdigest().encode("ascii")
+        if not hmac.compare_digest(mac, expected):
+            return VERIFIER_WITNESS_TAMPERED, records
+        try:
+            record = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return VERIFIER_WITNESS_TAMPERED, records
+        if not isinstance(record, dict) or record.get("seq") != index:
+            return VERIFIER_WITNESS_TAMPERED, records
+        records.append(record)
+    return "", records
+
+
+def _empty_witness_summary() -> dict[str, Any]:
+    return {
+        "present": False,
+        "records": 0,
+        "complete": False,
+        "error": "",
+        "foreign_plugins": [],
+        "pytest_internals_patched": [],
+        "forged_node_ids": [],
+        "not_run_node_ids": [],
+        "deselected_node_ids": [],
+    }
+
+
+def _witness_passed(witness: Mapping[str, Any] | None, root: Path) -> bool:
+    if not witness:
+        return False
+    try:
+        in_tree = Path(str(witness.get("code_file") or "")).resolve().is_relative_to(root)
+    except (OSError, ValueError):
+        in_tree = False
+    return (
+        in_tree
+        and int(witness.get("starts") or 0) >= 1
+        and int(witness.get("returns") or 0) >= 1
+        and int(witness.get("unwinds") or 0) == 0
+        and int(witness.get("depth") or 0) == 0
+    )
+
+
+def _plugin_is_trusted(path_text: str, *, root: Path, trusted_dirs: Sequence[Path]) -> bool:
+    """A plugin may come from the trusted interpreter, the witness dir, or be a
+    ``conftest.py`` in the tree (a changed one is refused or explicitly authorized
+    before the run).  Anything else, e.g. a module the candidate names in a test
+    module's ``pytest_plugins`` or registers itself, is foreign."""
+    if not path_text:
+        return False
+    try:
+        path = Path(path_text).resolve()
+    except (OSError, ValueError):
+        return False
+    if path.is_relative_to(root):
+        return path.name.casefold() == "conftest.py"
+    return any(path.is_relative_to(directory) for directory in trusted_dirs)
+
+
+def _witness_outcomes(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    root: Path,
+    trusted_plugin_dirs: Sequence[Path],
+    deselect_allowed: bool,
+) -> tuple[str, list[tuple[str, str, str]] | None, dict[str, Any]]:
+    """Derive per-test outcomes from verified witness records.
+
+    Returns (error code or "", JUnit cases or None when the stream is incomplete,
+    witness summary).  pytest's reports are untrusted: "passed" also needs the witness
+    observation; "failed"/"skipped" are believed because they can only lose a pass.
+    """
+    summary = _empty_witness_summary()
+    summary["present"] = bool(records)
+    summary["records"] = len(records)
+    if not records or records[0].get("t") != "begin" or records[-1].get("t") != "end":
+        return VERIFIER_JUNIT_MISSING, None, summary
+    summary["complete"] = True
+    foreign: list[str] = []
+    collected: list[str] = []
+    selected: list[str] | None = None
+    deselected_by_hook: set[str] = set()
+    collect_cases: list[tuple[str, str, str]] = []
+    reports: dict[str, dict[str, Mapping[str, Any]]] = {}
+    witnesses: dict[str, Mapping[str, Any]] = {}
+    for record in records:
+        kind = record.get("t")
+        nodeid = str(record.get("nodeid") or "")
+        if kind == "plugin":
+            if not _plugin_is_trusted(
+                str(record.get("file") or ""), root=root, trusted_dirs=trusted_plugin_dirs
+            ):
+                foreign.append(f"{record.get('name')}:{record.get('file') or '<no file>'}")
+        elif kind == "item":
+            collected.append(nodeid)
+        elif kind == "selected":
+            selected = [str(n) for n in record.get("nodeids") or []]
+        elif kind == "deselected":
+            deselected_by_hook.update(str(n) for n in record.get("nodeids") or [])
+        elif kind == "collect_skip":
+            collect_cases.append((nodeid, "skipped", str(record.get("text") or "")))
+        elif kind == "collect_error":
+            collect_cases.append((nodeid, "error", "collection error"))
+        elif kind == "report":
+            reports.setdefault(nodeid, {})[str(record.get("when"))] = record
+        elif kind == "witness":
+            witnesses[nodeid] = record
+    patched = [str(p) for p in records[-1].get("patched") or []]
+    summary["foreign_plugins"] = sorted(set(foreign))[:_INTEGRITY_FINDINGS_LIMIT]
+    summary["pytest_internals_patched"] = patched[:_INTEGRITY_FINDINGS_LIMIT]
+    selected = selected if selected is not None else []
+    selected_set = set(selected)
+    deselected = [n for n in dict.fromkeys(collected) if n not in selected_set]
+    cases: list[tuple[str, str, str]] = list(collect_cases)
+    forged: list[str] = []
+    not_run: list[str] = []
+    for nodeid in dict.fromkeys(selected):
+        phases = reports.get(nodeid, {})
+        outcome = {when: str(rep.get("outcome")) for when, rep in phases.items()}
+        if outcome.get("call") == "failed":
+            cases.append((nodeid, "failure", "failed"))
+        elif "failed" in outcome.values():
+            cases.append((nodeid, "error", "setup or teardown failed"))
+        elif "skipped" in outcome.values() or any(r.get("wasxfail") for r in phases.values()):
+            text = next(
+                (
+                    str(r.get("text") or "")
+                    for r in phases.values()
+                    if r.get("outcome") == "skipped"
+                ),
+                "",
+            )
+            cases.append((nodeid, "skipped", text))
+        elif all(outcome.get(when) == "passed" for when in ("setup", "call", "teardown")):
+            if _witness_passed(witnesses.get(nodeid), root):
+                cases.append((nodeid, "passed", ""))
+            else:
+                forged.append(nodeid)
+                cases.append((
+                    nodeid,
+                    "failure",
+                    f"{VERIFIER_OUTCOME_FORGED}: {witnesses.get(nodeid)}",
+                ))
+        else:
+            not_run.append(nodeid)
+            cases.append((nodeid, "error", "no complete report"))
+    summary["forged_node_ids"] = forged[:_INTEGRITY_FINDINGS_LIMIT]
+    summary["not_run_node_ids"] = not_run[:_INTEGRITY_FINDINGS_LIMIT]
+    summary["deselected_node_ids"] = deselected[:_INTEGRITY_FINDINGS_LIMIT]
+    error = ""
+    if foreign:
+        error = VERIFIER_FOREIGN_PLUGIN
+    elif patched:
+        error = VERIFIER_PYTEST_INTERNALS_PATCHED
+    elif forged:
+        error = VERIFIER_OUTCOME_FORGED
+    elif deselected and not (deselect_allowed and set(deselected) <= deselected_by_hook):
+        error = VERIFIER_TESTS_DESELECTED
+    return error, cases, summary
+
+
+def _located_interpreter(interpreter: str, path_env: str) -> str:
+    located = interpreter if "/" in interpreter else shutil.which(interpreter, path=path_env)
+    return str(located or "")
+
+
+def _interpreter_dirs(located: str, scratch: Path) -> list[Path]:
+    """Directories the verifier interpreter needs to read (its prefixes and bin dir).
+
+    The probe runs the trusted interpreter with ``-I`` and an empty environment from a
+    scratch cwd: no candidate code is on its path.
+    """
+    proc = subprocess.run(
+        [located, "-I", "-c", _INTERPRETER_PROBE],
+        cwd=scratch,
+        env={"PATH": os.defpath},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+    if proc.returncode != 0 or len(lines) < 3:
+        raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+    dirs = [Path(lines[0]), Path(lines[1]), Path(lines[2]).parent, Path(located).parent]
+    dirs.append(Path(located).resolve().parent)
+    return list(dict.fromkeys(p.resolve() for p in dirs))
+
+
+def _write_deny_rules(paths: Sequence[Path], literals: Sequence[Path]) -> list[str]:
+    from nexus.engine.sandboxed_lane import sbpl_path
+
+    rules = [f'(deny file-write* (subpath "{sbpl_path(p)}"))' for p in paths]
+    rules.extend(f'(deny file-write* (literal "{sbpl_path(p)}"))' for p in literals)
+    return rules
+
+
+def _verifier_sandbox_profile(
+    *,
+    root: Path,
+    root_writable: bool,
+    child_dir: Path,
+    trusted_dir: Path,
+    evidence_dir: Path,
+    interpreter_dirs: Sequence[Path],
+) -> str:
+    """The ``sandboxed_lane`` profile for one verifier run, with write denies appended last.
+
+    Writes: the work tree (candidate run only) and the per-run child dir.  The evidence
+    dir, the trusted dir (witness plugin + ini) and the tree's ``.git`` are denied by the
+    last rules, as are renames of the run dir, the child dir and the tree itself (Seatbelt
+    checks a rename against its source path, #2791).
+    """
+    from nexus.engine.sandboxed_lane import (
+        build_sandbox_profile,
+        checked_read_roots,
+        tool_read_roots,
+    )
+
+    writable = [str(child_dir)] + ([str(root)] if root_writable else [])
+    for directory in interpreter_dirs:
+        if any(directory.is_relative_to(Path(w)) for w in writable):
+            raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+    read_roots = checked_read_roots([
+        str(root),
+        str(child_dir),
+        str(trusted_dir),
+        *(str(d) for d in interpreter_dirs),
+        *tool_read_roots(),
+    ])
+    profile = build_sandbox_profile(
+        writable=writable, read_roots=read_roots, allow_signal_same_sandbox=True
+    )
+    denied = [evidence_dir, trusted_dir]
+    if (root / ".git").exists():
+        denied.append(root / ".git")
+    literals = [child_dir, root, *child_dir.parents]
+    return "\n".join([profile, *_write_deny_rules(denied, literals)])
+
+
+def _spawn_verifier(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    timeout: float,
+    profile: str | None,
+    pass_fds: list[int],
+    witness_fd: int,
+) -> dict[str, Any]:
+    """Run one verifier (wrapped in sandbox-exec when ``profile``), reading stdout,
+    stderr and the witness pipe until EOF or the deadline.  The child's process group
+    is always killed afterwards so nothing it started outlives the run."""
+    import selectors
+
+    from nexus.engine.sandboxed_lane import SANDBOX_EXEC
+
+    command = [SANDBOX_EXEC, "-p", profile, *argv] if profile else list(argv)
+    proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
+        command,
+        cwd=cwd,
+        env=dict(env),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        pass_fds=tuple(pass_fds),
+        start_new_session=True,
+    )
+    # The child holds its own copies now; closing the parent's write end lets the
+    # witness pipe reach EOF when the child exits.  The list is emptied so the caller
+    # does not close the (possibly reused) numbers again.
+    for fd in pass_fds:
+        os.close(fd)
+    pass_fds.clear()
+    out_fd = proc.stdout.fileno()  # type: ignore[union-attr]
+    err_fd = proc.stderr.fileno()  # type: ignore[union-attr]
+    caps = {
+        out_fd: VERIFIER_OUTPUT_MAX_BYTES,
+        err_fd: VERIFIER_OUTPUT_MAX_BYTES,
+        witness_fd: VERIFIER_WITNESS_MAX_BYTES + 1,
+    }
+    buffers = {fd: bytearray() for fd in caps}
+    overflow: set[int] = set()
+    selector = selectors.DefaultSelector()
+    for fd in caps:
+        os.set_blocking(fd, False)
+        selector.register(fd, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+    drain_until: float | None = None
+    timed_out = False
+    try:
+        while selector.get_map():
+            now = time.monotonic()
+            if now >= deadline:
+                timed_out = proc.poll() is None
+                break
+            if proc.poll() is not None:
+                # Exited: keep reading what is buffered, but a grandchild holding a
+                # pipe open must not keep the parent waiting.
+                if drain_until is None:
+                    drain_until = now + VERIFIER_DRAIN_GRACE_SECONDS
+                elif now >= drain_until:
+                    break
+            wait = min(0.5, deadline - now)
+            if drain_until is not None:
+                wait = max(0.0, min(wait, drain_until - now))
+            for key, _mask in selector.select(timeout=wait):
+                try:
+                    chunk = os.read(key.fd, 65536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fd)
+                    continue
+                room = caps[key.fd] - len(buffers[key.fd])
+                if room < len(chunk):
+                    overflow.add(key.fd)
+                buffers[key.fd].extend(chunk[: max(0, room)])
+        if not timed_out and proc.poll() is None:
+            try:
+                proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        selector.close()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        returncode = proc.wait()
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+    return {
+        "returncode": None if timed_out else int(returncode),
+        "timed_out": timed_out,
+        "stdout": bytes(buffers[out_fd]).decode("utf-8", "replace"),
+        "stderr": bytes(buffers[err_fd]).decode("utf-8", "replace"),
+        "witness": bytes(buffers[witness_fd]),
+        "witness_overflow": witness_fd in overflow,
+    }
+
+
+def _write_evidence_file(directory: Path, identity: tuple[int, int], data: bytes) -> bool:
+    """Write ``junit.xml`` into the parent-created evidence dir without following any
+    symlink; False when the dir was replaced or the file already exists (tampering)."""
+    try:
+        info = os.lstat(directory)
+        if (info.st_dev, info.st_ino) != identity or not os.path.isdir(directory):
+            return False
+        dir_fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        if (os.fstat(dir_fd).st_dev, os.fstat(dir_fd).st_ino) != identity:
+            return False
+        fd = os.open(
+            "junit.xml",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=dir_fd,
+        )
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(dir_fd)
+
+
+def _safe_base_member(member: tarfile.TarInfo, dest: str) -> tarfile.TarInfo | None:
+    """tarfile's ``data`` filter, but an unsafe member (e.g. a symlink to an absolute
+    path) is left out instead of aborting the whole base checkout."""
+    try:
+        return tarfile.data_filter(member, dest)
+    except tarfile.FilterError:
+        return None
+
+
+def _base_checkout(root: Path, base_sha: str, dest: Path) -> None:
+    """Extract ``base_sha`` (no ``refs/replace``) into ``dest``: a plain, read-only base
+    tree (no ``.git``) for the base comparison run."""
+
+    dest.mkdir(mode=0o700)
+    proc = subprocess.Popen(  # noqa: S603 - fixed git argv
+        ["git", "archive", "--format=tar", base_sha],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=_git_no_replace_env(),
+    )
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+            archive.extractall(dest, filter=_safe_base_member)
+    finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
+        returncode = proc.wait(timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS)
+    if returncode != 0:
+        raise ClosureError(VERIFIER_BASE_RUN_FAILED)
+
+
+@dataclass
+class _PytestRun:
+    executed_argv: list[str]
+    returncode: int | None
+    stdout: str
+    stderr: str
+    error: str
+    junit: dict[str, Any]
+    witness: dict[str, Any]
+    sandbox: dict[str, Any]
+    skipped_names: list[str]
+    env_keys: list[str]
+    junit_bytes: bytes = b""
+
+
+def _run_pytest_verifier(
+    invocation: _PytestInvocation,
+    *,
+    root: Path,
+    run_dir: Path,
+    base_config: Mapping[str, Any],
+    base_sha: str,
+    candidate_commit: str,
+    timeout: float,
+    changed_paths: Sequence[str],
+    base_skipped: Collection[str] | None,
+    root_writable: bool = True,
+) -> _PytestRun:
+    """One pytest verifier run with the witness (and the sandbox where available)."""
+    from nexus.engine.sandboxed_lane import SandboxError, os_sandbox_available
+
+    child_dir = run_dir / "child"
+    trusted_dir = run_dir / "trusted"
+    evidence_dir = run_dir / "evidence"
+    home, tmpdir = child_dir / "home", child_dir / "tmp"
+    run_dir.mkdir(mode=0o700, exist_ok=True)
+    for directory in (child_dir, trusted_dir, evidence_dir, home, tmpdir):
+        directory.mkdir(mode=0o700)
+    evidence_info = os.lstat(evidence_dir)
+    env = _verifier_env(
+        home=home, tmpdir=tmpdir, base_sha=base_sha, candidate_commit=candidate_commit
+    )
+    ini_text, extra_args = _verifier_pytest_ini(root, base_config)
+    ini_path = trusted_dir / "pytest.ini"
+    ini_path.write_text(ini_text, encoding="utf-8")
+    shutil.copyfile(VERIFIER_WITNESS_SOURCE, trusted_dir / f"{VERIFIER_WITNESS_PLUGIN}.py")
+    executed_argv = [
+        invocation.interpreter,
+        "-P",
+        *invocation.interpreter_args,
+        "-m",
+        "pytest",
+        *invocation.pytest_args,
+        # Appended last so they override any earlier value.
+        *extra_args,
+        "-c",
+        str(ini_path),
+        "--rootdir",
+        str(root),
+        "--confcutdir",
+        str(root),
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        VERIFIER_WITNESS_PLUGIN,
+    ]
+    sandbox: dict[str, Any] = {"sandboxed": False, "barrier": None, "network": "not_confined"}
+    witness = _empty_witness_summary()
+    junit = _empty_junit_summary(invocation.declared_node_ids)
+
+    def result(
+        error: str, returncode: int | None = None, out: str = "", err: str = ""
+    ) -> _PytestRun:
+        return _PytestRun(
+            executed_argv, returncode, out, err, error, junit, witness, sandbox, [], sorted(env)
+        )
+
+    located = _located_interpreter(invocation.interpreter, env["PATH"])
+    if not located or Path(located).resolve().is_relative_to(root):
+        return result(VERIFIER_PYTEST_INTERPRETER_UNRESOLVED)
+    try:
+        interpreter_dirs = _interpreter_dirs(located, child_dir)
+    except (ClosureError, OSError, subprocess.SubprocessError):
+        return result(VERIFIER_SANDBOX_SETUP_FAILED)
+    profile: str | None = None
+    if os_sandbox_available():
+        try:
+            profile = _verifier_sandbox_profile(
+                root=root,
+                root_writable=root_writable,
+                child_dir=child_dir,
+                trusted_dir=trusted_dir,
+                evidence_dir=evidence_dir,
+                interpreter_dirs=interpreter_dirs,
+            )
+        except (ClosureError, SandboxError):
+            return result(VERIFIER_SANDBOX_SETUP_FAILED)
+        sandbox = {
+            "sandboxed": True,
+            "barrier": "macos_sandbox_exec",
+            "profile": "nexus.engine.sandboxed_lane.build_sandbox_profile",
+            "profile_sha256": _sha256(profile),
+            "network": "denied",
+            "writes_confined_to": (["<work-tree>"] if root_writable else [])
+            + ["<verifier-sandbox>/child"],
+            "write_denied_last": ["<verifier-sandbox>/evidence", "<verifier-sandbox>/trusted"]
+            + (["<work-tree>/.git"] if (root / ".git").exists() else []),
+        }
+    else:
+        sandbox["reason"] = "no_os_barrier"
+    key = os.urandom(VERIFIER_WITNESS_KEY_BYTES)
+    witness_r, witness_w = os.pipe()
+    key_r, key_w = os.pipe()
+    child_fds = [witness_w, key_r]
+    try:
+        os.write(key_w, key)
+        os.close(key_w)
+        env[VERIFIER_WITNESS_FD_ENV] = str(witness_w)
+        env[VERIFIER_WITNESS_KEY_FD_ENV] = str(key_r)
+        env["PYTHONPATH"] = str(trusted_dir)
+        try:
+            spawned = _spawn_verifier(
+                executed_argv,
+                cwd=root,
+                env=env,
+                timeout=timeout,
+                profile=profile,
+                pass_fds=child_fds,
+                witness_fd=witness_r,
+            )
+        except OSError:
+            return result(VERIFIER_SANDBOX_SETUP_FAILED)
+    finally:
+        for fd in (witness_r, *child_fds):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    out, err, returncode = spawned["stdout"], spawned["stderr"], spawned["returncode"]
+    if spawned["timed_out"]:
+        return result("VERIFIER_TIMEOUT", None, out, err)
+    tamper, records = (
+        (VERIFIER_WITNESS_TAMPERED, [])
+        if spawned["witness_overflow"]
+        else _parse_witness(spawned["witness"], key)
+    )
+    if tamper:
+        witness["error"] = tamper
+        witness["records"] = len(records)
+        return result(tamper, returncode, out, err)
+    pytest_args = set(invocation.pytest_args)
+    witness_error, cases, witness = _witness_outcomes(
+        records,
+        root=root,
+        trusted_plugin_dirs=[trusted_dir.resolve(), *interpreter_dirs],
+        deselect_allowed=bool(pytest_args & _DESELECT_OPTIONS),
+    )
+    witness["error"] = witness_error
+    if cases is None:
+        return result(witness_error, returncode, out, err)
+    junit_bytes = _render_junit(cases)
+    if not _write_evidence_file(
+        evidence_dir, (evidence_info.st_dev, evidence_info.st_ino), junit_bytes
+    ):
+        return result(VERIFIER_EVIDENCE_TAMPERED, returncode, out, err)
+    junit_error, junit = _junit_evidence_bytes(
+        junit_bytes,
+        invocation.declared_node_ids,
+        root=root,
+        touched_paths=changed_paths,
+        base_skipped=base_skipped,
+    )
+    junit["evidence_source"] = "parent_witness_channel"
+    skipped_names = [_junit_full_name(nodeid) for nodeid, kind, _ in cases if kind == "skipped"]
+    run = result(witness_error or junit_error, returncode, out, err)
+    run.skipped_names = skipped_names
+    run.junit_bytes = junit_bytes
+    return run
+
+
+def _base_skipped_nodes(
+    invocation: _PytestInvocation,
+    *,
+    root: Path,
+    base_sha: str,
+    base_config: Mapping[str, Any],
+    base_tree: Path,
+    candidate_commit: str,
+    timeout: float,
+) -> tuple[set[str] | None, dict[str, Any]]:
+    """Nodes skipped when the same verifier runs at ``base_sha`` (read-only checkout).
+
+    ``None`` (no skip tolerated) when the base run produced no complete witness.
+    """
+    run_dir = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-")).resolve()
+    try:
+        run = _run_pytest_verifier(
+            invocation,
+            root=base_tree,
+            run_dir=run_dir,
+            base_config=base_config,
+            base_sha=base_sha,
+            candidate_commit=candidate_commit,
+            timeout=timeout,
+            changed_paths=(),
+            base_skipped=(),
+            root_writable=False,
+        )
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+    info = {
+        "ran": True,
+        "returncode": run.returncode,
+        "witness_complete": bool(run.witness.get("complete")),
+        "sandboxed": bool(run.sandbox.get("sandboxed")),
+        "skipped": sorted(run.skipped_names)[:_INTEGRITY_FINDINGS_LIMIT],
+    }
+    if not run.witness.get("complete") or run.witness.get("error") == VERIFIER_WITNESS_TAMPERED:
+        info["error"] = VERIFIER_BASE_RUN_FAILED
+        return None, info
+    return set(run.skipped_names), info
+
+
+def _run_one_verifier(
+    spec: VerifierSpec,
+    *,
+    root: Path,
+    base_sha: str,
+    candidate_commit: str,
+    changed_paths: Sequence[str] | None,
+    shadow_error: str,
+    refused_shadow: Sequence[str],
+    authorized_shadow: Sequence[str],
+    base_state: tuple[tuple[dict[str, Any], str] | None, Path | None, str],
+) -> dict[str, Any]:
+    """Run one verifier spec and return its result row (plus ``_base_state``)."""
+    base_pytest_config, base_tree_parent, base_tree_error = base_state
+    started = time.monotonic()
+    sandbox = Path(tempfile.mkdtemp(prefix="nexus-verifier-")).resolve()
+    executed_argv = list(spec.argv)
+    junit_summary: dict[str, Any] | None = None
+    witness_summary: dict[str, Any] | None = None
+    sandbox_info: dict[str, Any] = {"sandboxed": False, "barrier": None}
+    base_run: dict[str, Any] | None = None
+    returncode: int | None = None
+    stdout = stderr = error = ""
+    try:
+        if sandbox.is_relative_to(root):
+            raise ClosureError("VERIFIER_SANDBOX_INSIDE_WORKSPACE")
+        home = sandbox / "home"
+        tmpdir = sandbox / "tmp"
+        for directory in (home, tmpdir):
+            directory.mkdir(mode=0o700)
+        env = _verifier_env(
+            home=home, tmpdir=tmpdir, base_sha=base_sha, candidate_commit=candidate_commit
+        )
+        env_keys = sorted(env)
+        invocation = _pytest_invocation(spec.argv, env["PATH"])
+        evidence = (
+            VERIFIER_EVIDENCE_EXIT_CODE_ONLY
+            if invocation is None
+            else VERIFIER_EVIDENCE_PYTEST_JUNIT
+        )
+        if shadow_error:
+            error = shadow_error
+        elif isinstance(invocation, str):
+            error = invocation
+        elif isinstance(invocation, _PytestInvocation):
+            if base_pytest_config is None:
+                base_pytest_config = _base_pytest_config(root, base_sha)
+            run = _run_pytest_verifier(
+                invocation,
+                root=root,
+                run_dir=sandbox / "run",
+                base_config=base_pytest_config[0],
+                base_sha=base_sha,
+                candidate_commit=candidate_commit,
+                timeout=spec.timeout,
+                changed_paths=changed_paths or (),
+                base_skipped=None,
+            )
+            executed_argv = run.executed_argv
+            returncode, stdout, stderr, error = run.returncode, run.stdout, run.stderr, run.error
+            junit_summary, witness_summary, sandbox_info = run.junit, run.witness, run.sandbox
+            env_keys = run.env_keys
+            if error == VERIFIER_JUNIT_SKIPPED and returncode == 0 and run.junit_bytes:
+                # A skip passes only if the same node is also skipped at the base commit.
+                if base_tree_parent is None and not base_tree_error:
+                    base_tree_parent = Path(
+                        tempfile.mkdtemp(prefix="nexus-verifier-base-tree-")
+                    ).resolve()
+                    try:
+                        _base_checkout(root, base_sha, base_tree_parent / "tree")
+                    except (
+                        ClosureError,
+                        OSError,
+                        ValueError,
+                        tarfile.TarError,
+                        subprocess.SubprocessError,
+                    ):
+                        base_tree_error = VERIFIER_BASE_RUN_FAILED
+                if base_tree_error or base_tree_parent is None:
+                    base_run = {"ran": False, "error": base_tree_error or VERIFIER_BASE_RUN_FAILED}
+                else:
+                    base_skipped, base_run = _base_skipped_nodes(
+                        invocation,
+                        root=root,
+                        base_sha=base_sha,
+                        base_config=base_pytest_config[0],
+                        base_tree=base_tree_parent / "tree",
+                        candidate_commit=candidate_commit,
+                        timeout=spec.timeout,
+                    )
+                    if base_skipped is not None:
+                        error, junit_summary = _junit_evidence_bytes(
+                            run.junit_bytes,
+                            invocation.declared_node_ids,
+                            root=root,
+                            touched_paths=changed_paths or (),
+                            base_skipped=base_skipped,
+                        )
+                        junit_summary["evidence_source"] = "parent_witness_channel"
+        else:
+            sandbox_info["reason"] = "not_a_pytest_verifier"
+            try:
+                proc = subprocess.run(
+                    executed_argv,
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    timeout=spec.timeout,
+                    check=False,
+                    env=env,
+                    shell=False,
+                )
+                returncode = int(proc.returncode)
+                stdout = proc.stdout or ""
+                stderr = proc.stderr or ""
+            except subprocess.TimeoutExpired as exc:
+                stdout = str(exc.stdout or "")
+                stderr = str(exc.stderr or "")
+                error = "VERIFIER_TIMEOUT"
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+    wall_ms = max(0, int((time.monotonic() - started) * 1000))
+    sandbox_text = str(sandbox)
+    return {
+        "verifier_id": spec.verifier_id,
+        "argv": list(spec.argv),
+        "argv_sha256": _sha256(_canonical_json(list(spec.argv))),
+        # Per-run temp paths are replaced so the row stays comparable across runs.
+        "executed_argv": [
+            part.replace(sandbox_text, "<verifier-sandbox>") for part in executed_argv
+        ],
+        "cwd_sha256": _sha256(str(root)),
+        "owner_unit": spec.owner_unit,
+        "returncode": returncode,
+        "stdout_sha256": _sha256(stdout),
+        "stderr_sha256": _sha256(stderr),
+        "wall_time_ms": wall_ms,
+        "error": error,
+        "evidence": evidence,
+        "junit": junit_summary,
+        "witness": witness_summary,
+        "sandbox": sandbox_info,
+        "base_run": base_run,
+        "env_keys": env_keys,
+        "root_shadowing_refused_paths": list(refused_shadow),
+        "root_shadowing_authorized_paths": list(authorized_shadow),
+        "passed": returncode == 0 and not error,
+        "_base_state": (base_pytest_config, base_tree_parent, base_tree_error),
+    }
+
+
 def _run_verifier_specs(
     *,
     task_id: str,
@@ -1420,119 +2336,33 @@ def _run_verifier_specs(
     if not shadow_error and refused_shadow:
         shadow_error = VERIFIER_ROOT_SHADOWING_REFUSED
     base_pytest_config: tuple[dict[str, Any], str] | None = None
-    for spec in parsed:
-        started = time.monotonic()
-        sandbox = Path(tempfile.mkdtemp(prefix="nexus-verifier-")).resolve()
-        try:
-            if sandbox.is_relative_to(root):
-                raise ClosureError("VERIFIER_SANDBOX_INSIDE_WORKSPACE")
-            home = sandbox / "home"
-            tmpdir = sandbox / "tmp"
-            config_dir = sandbox / "config"
-            for directory in (home, tmpdir, config_dir):
-                directory.mkdir(mode=0o700)
-            env = _verifier_env(
-                home=home, tmpdir=tmpdir, base_sha=base_sha, candidate_commit=candidate_commit
+    # One read-only base checkout per call, extracted only when a skip needs the base
+    # comparison (#2795).
+    base_tree_parent: Path | None = None
+    base_tree_error = ""
+    try:
+        for spec in parsed:
+            results.append(
+                _run_one_verifier(
+                    spec,
+                    root=root,
+                    base_sha=base_sha,
+                    candidate_commit=candidate_commit,
+                    changed_paths=changed_paths,
+                    shadow_error=shadow_error,
+                    refused_shadow=refused_shadow,
+                    authorized_shadow=authorized_shadow,
+                    base_state=(base_pytest_config, base_tree_parent, base_tree_error),
+                )
             )
-            invocation = _pytest_invocation(spec.argv, env["PATH"])
-            evidence = (
-                VERIFIER_EVIDENCE_EXIT_CODE_ONLY
-                if invocation is None
-                else VERIFIER_EVIDENCE_PYTEST_JUNIT
-            )
-            junit_path = sandbox / "junit.xml"
-            executed_argv = list(spec.argv)
-            junit_summary: dict[str, Any] | None = None
-            returncode: int | None = None
-            stdout = stderr = error = ""
-            if shadow_error:
-                error = shadow_error
-            elif isinstance(invocation, str):
-                error = invocation
-            else:
-                if isinstance(invocation, _PytestInvocation):
-                    if base_pytest_config is None:
-                        base_pytest_config = _base_pytest_config(root, base_sha)
-                    ini_text, extra_args = _verifier_pytest_ini(root, base_pytest_config[0])
-                    ini_path = config_dir / "pytest.ini"
-                    ini_path.write_text(ini_text, encoding="utf-8")
-                    executed_argv = [
-                        invocation.interpreter,
-                        "-P",
-                        *invocation.interpreter_args,
-                        "-m",
-                        "pytest",
-                        *invocation.pytest_args,
-                        # Appended last so they override any earlier value.
-                        *extra_args,
-                        "-c",
-                        str(ini_path),
-                        "--rootdir",
-                        str(root),
-                        "--confcutdir",
-                        str(root),
-                        "-p",
-                        "no:cacheprovider",
-                        f"--junitxml={junit_path}",
-                    ]
-                try:
-                    proc = subprocess.run(
-                        executed_argv,
-                        cwd=root,
-                        capture_output=True,
-                        text=True,
-                        timeout=spec.timeout,
-                        check=False,
-                        env=env,
-                        shell=False,
-                    )
-                    returncode = int(proc.returncode)
-                    stdout = proc.stdout or ""
-                    stderr = proc.stderr or ""
-                except subprocess.TimeoutExpired as exc:
-                    stdout = str(exc.stdout or "")
-                    stderr = str(exc.stderr or "")
-                    error = "VERIFIER_TIMEOUT"
-                if isinstance(invocation, _PytestInvocation):
-                    junit_error, junit_summary = _junit_evidence(
-                        junit_path,
-                        invocation.declared_node_ids,
-                        root=root,
-                        touched_paths=changed_paths or (),
-                    )
-                    if not error and returncode == 0:
-                        error = junit_error
-        finally:
-            shutil.rmtree(sandbox, ignore_errors=True)
-        wall_ms = max(0, int((time.monotonic() - started) * 1000))
-        sandbox_text = str(sandbox)
-        row = {
-            "verifier_id": spec.verifier_id,
-            "argv": list(spec.argv),
-            "argv_sha256": _sha256(_canonical_json(list(spec.argv))),
-            # Per-run temp paths are replaced so the row stays comparable across runs.
-            "executed_argv": [
-                part.replace(sandbox_text, "<verifier-sandbox>") for part in executed_argv
-            ],
-            "cwd_sha256": _sha256(str(root)),
-            "owner_unit": spec.owner_unit,
-            "returncode": returncode,
-            "stdout_sha256": _sha256(stdout),
-            "stderr_sha256": _sha256(stderr),
-            "wall_time_ms": wall_ms,
-            "error": error,
-            "evidence": evidence,
-            "junit": junit_summary,
-            "env_keys": sorted(env),
-            "root_shadowing_refused_paths": refused_shadow,
-            "root_shadowing_authorized_paths": authorized_shadow,
-            "passed": returncode == 0 and not error,
-        }
-        results.append(row)
-        if _run_git(root, "rev-parse", "HEAD") != candidate_commit or _run_git(
-            root, "status", "--porcelain=v1"
-        ):
-            raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+            base_pytest_config, base_tree_parent, base_tree_error = results[-1].pop("_base_state")
+            if _run_git(root, "rev-parse", "HEAD") != candidate_commit or _run_git(
+                root, "status", "--porcelain=v1"
+            ):
+                raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+    finally:
+        if base_tree_parent is not None:
+            shutil.rmtree(base_tree_parent, ignore_errors=True)
     integrity_passed = all(row["passed"] for row in integrity_checks)
     status = "PASS" if integrity_passed and all(row["passed"] for row in results) else "FAIL"
     verification = {

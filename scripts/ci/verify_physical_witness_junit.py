@@ -82,6 +82,21 @@ SANDBOX_RUNNER_SUBJECT_FILES = {
     "verifier": "scripts/ci/verify_physical_witness_junit.py",
     "ci_workflow": ".github/workflows/pytest.yml",
 }
+EIA_CLOSURE_TEST_FILE = "tests/services/test_eia_closure_verifier_seatbelt_witness_2795.py"
+EIA_CLOSURE_TEST_CLASSNAME = "tests.services.test_eia_closure_verifier_seatbelt_witness_2795"
+EIA_CLOSURE_EXPECTED_WITNESSES = (
+    "test_sandboxed_verifier_denies_network_and_writes_outside_its_dirs",
+    "test_fake_pass_routes_stay_not_passed_under_real_sandbox_exec",
+    "test_honest_candidate_and_base_run_pass_under_real_sandbox_exec",
+)
+EIA_CLOSURE_SUBJECT_FILES = {
+    "test_file": EIA_CLOSURE_TEST_FILE,
+    "closure": "nexus/services/external_intelligence_closure.py",
+    "witness_plugin": "nexus/services/external_intelligence_verifier_witness.py",
+    "profile": "nexus/engine/sandboxed_lane.py",
+    "verifier": "scripts/ci/verify_physical_witness_junit.py",
+    "ci_workflow": ".github/workflows/pytest.yml",
+}
 # suite name -> (test file, junit classname, expected witness nodes, subject files)
 SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
     "dsh": (TEST_FILE, TEST_CLASSNAME, EXPECTED_WITNESSES, SUBJECT_FILES),
@@ -96,6 +111,12 @@ SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
         SANDBOX_RUNNER_TEST_CLASSNAME,
         SANDBOX_RUNNER_EXPECTED_WITNESSES,
         SANDBOX_RUNNER_SUBJECT_FILES,
+    ),
+    "eia-closure-verifier": (
+        EIA_CLOSURE_TEST_FILE,
+        EIA_CLOSURE_TEST_CLASSNAME,
+        EIA_CLOSURE_EXPECTED_WITNESSES,
+        EIA_CLOSURE_SUBJECT_FILES,
     ),
 }
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
