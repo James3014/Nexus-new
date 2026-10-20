@@ -77,6 +77,17 @@ if MODE == "tmpprobe" and probe_run:
     import tempfile
     probe = {"TMPDIR": os.environ.get("TMPDIR"), "CLAUDE_CODE_TMPDIR": os.environ.get("CLAUDE_CODE_TMPDIR"),
              "gettempdir": tempfile.gettempdir(), "cwd": os.getcwd()}
+    def _writable(directory):
+        try:
+            fd, path = tempfile.mkstemp(dir=directory, prefix=".m2721-w-")
+            os.close(fd)
+            os.unlink(path)
+            return True
+        except Exception:
+            return False
+    probe["writable"] = {name: _writable(path) for name, path in (
+        ("TMPDIR", os.environ.get("TMPDIR") or ""), ("/tmp", "/tmp"), ("/var/tmp", "/var/tmp"),
+        ("cwd", os.getcwd())) if path}
     test_dir = Path(tempfile.mkdtemp(prefix="m2721-tmpprobe-"))
     (test_dir / "test_tmpprobe.py").write_text("def test_tmp(tmp_path):\n    (tmp_path / 'f').write_text('x')\n")
     done = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", str(test_dir)],

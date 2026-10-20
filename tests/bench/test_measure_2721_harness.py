@@ -3038,5 +3038,7 @@ def test_worker_sandbox_temp_dir_is_the_same_in_both_arms(manifest, tmp_path):
         assert os.path.realpath(probe["gettempdir"]) == tmp, (arm, probe)
         assert not tmp.startswith(os.path.realpath(probe["cwd"])), (arm, probe)
         assert probe["cwd_pytest_dirs"] == [], (arm, probe)
+        assert probe["writable"]["TMPDIR"] is True and probe["writable"]["cwd"] is True, (arm, probe)
+    assert probes["BARE"]["writable"] == probes["NEXUS"]["writable"], probes
     # Same shape in both arms: the adapter's per-run tmp, which tempfile actually uses.
     assert {k for k, v in probes["BARE"].items() if v} == {k for k, v in probes["NEXUS"].items() if v}
