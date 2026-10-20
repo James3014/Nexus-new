@@ -592,6 +592,8 @@ def test_integration_gate_blocks_whitespace_wrapped_names(
 def test_integration_gate_ignores_diff_relative_config(
     tmp_path: Path, git_repo: tuple[Path, str, str]
 ) -> None:
+    # diff.relative only filters when git runs below the top level, so the gate is
+    # pointed at a subdirectory here; --no-relative keeps outside/x.py visible.
     repo, _base, _head = git_repo
     base = _seed(repo, "outside/x.py", "allowed/a.py")
     state_root = tmp_path / "state"
@@ -612,12 +614,61 @@ def test_integration_gate_ignores_diff_relative_config(
         base_sha=base,
         head_sha=head,
         pr_body=pr_binding_block(receipt),
-        repo_root=repo,
+        repo_root=repo / "allowed",
         state_root=state_root,
     )
 
     assert report["status"] == "BLOCK"
     assert report["scope_escape_paths"] == ["outside/x.py"]
+
+
+def test_integration_gate_sees_an_ignored_submodule_change(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    # A submodule "ignore=all" setting must not hide an out-of-scope gitlink update.
+    repo, _base, _head = git_repo
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-b", "main")
+    _git(sub, "config", "user.email", "test@example.test")
+    _git(sub, "config", "user.name", "Test User")
+    (sub / "f.txt").write_text("1\n", encoding="utf-8")
+    _git(sub, "add", "f.txt")
+    _git(sub, "commit", "-m", "one")
+    first = _git(sub, "rev-parse", "HEAD")
+    (sub / "f.txt").write_text("2\n", encoding="utf-8")
+    _git(sub, "commit", "-am", "two")
+    second = _git(sub, "rev-parse", "HEAD")
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{first},outside/sub")
+    (repo / ".gitmodules").write_text(
+        '[submodule "outside/sub"]\n\tpath = outside/sub\n\turl = ./sub\n\tignore = all\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".gitmodules")
+    _git(repo, "commit", "-m", "add ignored submodule")
+    base = _git(repo, "rev-parse", "HEAD")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:submodule",
+        allowed_paths=["allowed/**"],
+    )
+    _git(repo, "update-index", "--cacheinfo", f"160000,{second},outside/sub")
+    _git(repo, "commit", "-m", "bump ignored submodule")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/sub"]
 
 
 @pytest.mark.parametrize(
