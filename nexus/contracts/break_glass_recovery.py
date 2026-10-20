@@ -891,7 +891,7 @@ def integration_readback_from_github(
         else:
             raise TypeError("merged_at missing")
         merged_at_utc = _utc(merged_at)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise BreakGlassContractError("GITHUB_INTEGRATION_READBACK_MALFORMED") from exc
     if merged_at_utc < _utc(integration.issued_at):
         raise BreakGlassContractError("PRE_EFFECT_CHRONOLOGY_VIOLATION_MERGE_PRECEDED_AUTHORITY")
@@ -907,6 +907,12 @@ def integration_readback_from_github(
         raise BreakGlassContractError("MERGE_METHOD_SUBSTITUTION_SQUASH_DETECTED")
     if integration.merge_method == "merge" and len(parents) != 2:
         raise BreakGlassContractError("MERGE_METHOD_SUBSTITUTION_NOT_MERGE_COMMIT")
+    # The two parents must be the authorized base and the accepted head, in order.
+    parent_shas = [item.get("sha") if isinstance(item, Mapping) else None for item in parents]
+    if not all(isinstance(sha, str) and _SHA40.fullmatch(sha) for sha in parent_shas):
+        raise BreakGlassContractError("GITHUB_INTEGRATION_READBACK_MALFORMED")
+    if parent_shas != [integration.expected_base_sha, integration.accepted_head_sha]:
+        raise BreakGlassContractError("INTEGRATION_MERGE_PARENTS_MISMATCH")
 
     observed_merge_method = pull_request.get("merge_method") or pull_request.get("merged_by_method")
     if observed_merge_method and str(observed_merge_method).lower() != integration.merge_method:

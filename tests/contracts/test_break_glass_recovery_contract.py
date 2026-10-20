@@ -26,6 +26,7 @@ from nexus.contracts.break_glass_recovery import (
 )
 
 EXPECTED_PAYLOAD_SHA256 = "d2313d38c4b15d16cf42497c267bd7071195bf3f58f485eea6d659ded6e09a95"
+BASE_SHA = "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd"
 
 
 def activation_dict() -> dict[str, object]:
@@ -234,7 +235,7 @@ def integration_payload_dict() -> dict[str, object]:
         "accepted_head_sha": "1" * 40,
         "accepted_tree_sha": "2" * 40,
         "accepted_diff_sha256": "3" * 64,
-        "expected_base_sha": "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd",
+        "expected_base_sha": BASE_SHA,
         "merge_method": "merge",
         "checks": verification["checks"],
         "issued_at": "2026-09-06T07:05:00+08:00",
@@ -413,7 +414,7 @@ def github_integration_readback(
         "merged_at": "2026-09-06T07:10:00+08:00",
     }
     main_branch: dict[str, object] = {
-        "commit": {"sha": main_sha, "parents": [{"sha": "6" * 40}, {"sha": head_sha}]}
+        "commit": {"sha": main_sha, "parents": [{"sha": BASE_SHA}, {"sha": head_sha}]}
     }
     return pull_request, main_branch
 
@@ -487,7 +488,9 @@ def test_github_integration_readback_g05_g06_positive_control() -> None:
     pull_request, main_branch = github_integration_readback()
     pull_request["merged_at"] = (integration.issued_at + timedelta(minutes=5)).isoformat()
     pull_request["merge_method"] = "merge"
-    main_branch["commit"]["parents"] = [{"sha": "1" * 40}, {"sha": "2" * 40}]
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = [{"sha": BASE_SHA}, {"sha": "1" * 40}]
     assert integration_readback_from_github(integration, pull_request, main_branch) == (
         "8" * 40,
         "8" * 40,
@@ -542,6 +545,43 @@ def test_github_integration_readback_rejects_three_parent_merge() -> None:
     assert isinstance(commit, dict)
     commit["parents"] = [{"sha": "4" * 40}, {"sha": "5" * 40}, {"sha": "6" * 40}]
     with pytest.raises(BreakGlassContractError, match="MERGE_METHOD_SUBSTITUTION_NOT_MERGE_COMMIT"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize(
+    "parents",
+    [
+        [{"sha": "6" * 40}, {"sha": "1" * 40}],
+        [{"sha": BASE_SHA}, {"sha": "6" * 40}],
+        [{"sha": "1" * 40}, {"sha": BASE_SHA}],
+    ],
+)
+def test_github_integration_readback_rejects_unauthorized_merge_parents(
+    parents: list[dict[str, str]],
+) -> None:
+    """#2796: the merge commit's parents must be the authorized base and accepted head, in order."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="INTEGRATION_MERGE_PARENTS_MISMATCH"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize(
+    "parents", [["a", "b"], [{"sha": BASE_SHA}, {}], [{"sha": BASE_SHA}, {"sha": "X"}]]
+)
+def test_github_integration_readback_fails_closed_on_malformed_parent_entries(
+    parents: object,
+) -> None:
+    """#2796: parent entries without a 40-hex sha are malformed, not a mismatch to skip."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
         integration_readback_from_github(integration, pull_request, main_branch)
 
 
