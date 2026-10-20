@@ -468,13 +468,16 @@ def _runner_environment(base: Optional[Mapping[str, str]]) -> dict[str, str]:
     return environment
 
 
-def configured_driver_keys(cwd: Any) -> list[str]:
+def configured_driver_keys(cwd: Any, *, pin: Optional[Mapping[str, str]] = None) -> list[str]:
     """Config keys (local, worktree and included files) naming a content command.
 
-    Read with the hardened flags and environment, so system and global config
+    Read with the hardened flags and environment (plus ``pin``, the trusted
+    ``GIT_DIR``/``GIT_WORK_TREE`` of a Target), so system and global config
     are not consulted and reading runs nothing.  Raises ``ExternalGitRefused``
     when the config cannot be read.
     """
+    environment = _runner_environment(None)
+    environment.update(pin or {})
     try:
         result = subprocess.run(
             [
@@ -482,7 +485,7 @@ def configured_driver_keys(cwd: Any) -> list[str]:
                 "config", "--name-only", "--get-regexp", GIT_DRIVER_CONFIG_REGEX,
             ],
             cwd=cwd,
-            env=_runner_environment(None),
+            env=environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -498,6 +501,16 @@ def configured_driver_keys(cwd: Any) -> list[str]:
     return result.stdout.split()
 
 
+def _info_attributes_present(directories: Iterable[Path]) -> bool:
+    for directory in directories:
+        try:
+            if (Path(directory) / "info" / "attributes").stat().st_size > 0:
+                return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
 def run_hardened_git(
     args: Sequence[str],
     *,
@@ -505,24 +518,83 @@ def run_hardened_git(
     env: Optional[Mapping[str, str]] = None,
     attr_source: Optional[str] = None,
     text: bool = True,
+    pin: Optional[Mapping[str, str]] = None,
+    metadata_dirs: Optional[Iterable[Path]] = None,
 ) -> subprocess.CompletedProcess:
     """Run one git command on an external Controller or its Target (#2749).
 
-    Refuses (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``) when a filter or
-    textconv driver is configured, so no clean/smudge filter runs even if one
-    was planted after the lease; the returned process is never checked here.
+    Right before the command (not atomically) it refuses with
+    ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` when a filter or textconv driver
+    is configured or ``info/attributes`` is non-empty in the gitdir or common
+    dir, so no clean/smudge filter runs even if one was planted after the
+    lease.  ``pin`` (trusted ``GIT_DIR``/``GIT_WORK_TREE``/
+    ``GIT_CEILING_DIRECTORIES`` of a verified Target) is set after the
+    inherited ``GIT_*`` variables are dropped; ``metadata_dirs`` are the
+    trusted gitdir and common dir (discovered from ``cwd`` when not given).
+    The returned process is never checked here.
     """
-    if configured_driver_keys(cwd):
+    if metadata_dirs is None:
+        start = Path(cwd if cwd is not None else os.getcwd())
+        try:
+            discovered = _discovered_git_dirs(start.resolve(strict=True))
+        except (OSError, RuntimeError):
+            discovered = None
+        if discovered is None:
+            raise ExternalGitRefused("EXTERNAL_TARGET_GIT_METADATA_UNREADABLE")
+        metadata_dirs = discovered
+    if _info_attributes_present(metadata_dirs):
         raise ExternalGitRefused(FILTER_DRIVER_PRESENT)
+    if configured_driver_keys(cwd, pin=pin):
+        raise ExternalGitRefused(FILTER_DRIVER_PRESENT)
+    environment = _runner_environment(env)
+    environment.update(pin or {})
     return subprocess.run(
         hardened_git_argv(args, attr_source=attr_source),
         cwd=cwd,
-        env=_runner_environment(env),
+        env=environment,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=text,
         check=False,
     )
+
+
+def measurement_mode_at_start() -> bool:
+    """Whether the measurement root variable was set (non-blank) at start."""
+    return bool(MEASURE_EXTERNAL_TARGET_ROOT_AT_START)
+
+
+def discovered_git_dirs(path: Path) -> Optional[tuple[Path, Path]]:
+    """Public form of the Python gitdir discovery (``None`` when unknown)."""
+    try:
+        return _discovered_git_dirs(Path(path).resolve(strict=True))
+    except (OSError, RuntimeError):
+        return None
+
+
+def unscoped_git_needs_hardening(cwd: Any) -> bool:
+    """For a git call made without a trusted Controller identity (#2749 r1).
+
+    ``external_git_context``, and in measurement mode also any linked worktree
+    (a ``.git`` file, i.e. a Target): its ``.git`` is worker-writable, so where
+    it points proves nothing and the call is hardened.  ``False`` whenever the
+    measurement mode is off.
+    """
+    if not measurement_mode_at_start():
+        return False
+    if external_git_context(cwd):
+        return True
+    try:
+        start = Path(cwd if cwd is not None else os.getcwd()).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return True
+    for directory in (start, *start.parents):
+        dotgit = directory / ".git"
+        if dotgit.is_symlink() or dotgit.is_file():
+            return True
+        if dotgit.is_dir():
+            return False
+    return True
 
 
 def _hardened_output(repo_root: Path, *args: str) -> bytes:

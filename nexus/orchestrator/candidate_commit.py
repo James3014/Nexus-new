@@ -129,6 +129,17 @@ class CandidateCommitter:
         lease: TargetWorktreeLease,
         receipt: VerifiedCandidateReceipt,
     ) -> PromotionApprovalPacket:
+        # Every git call below runs bound to the contract's Controller, so an
+        # external measurement Controller's Target stays hardened (#2749).
+        with self.worktree_manager.controller_git_scope(contract):
+            return self._create_candidate_commit(contract, lease, receipt)
+
+    def _create_candidate_commit(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        receipt: VerifiedCandidateReceipt,
+    ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
         if (

@@ -1,4 +1,6 @@
+import contextvars
 import fcntl
+import functools
 import inspect
 import json
 import os
@@ -15,10 +17,16 @@ from uuid import uuid4
 
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.measure_external_target import (
+    FILTER_DRIVER_PRESENT,
+    ExternalGitRefused,
+    discovered_git_dirs,
     external_git_context,
+    measurement_mode_at_start,
     recheck_external_controller_at_lease,
     run_hardened_git,
+    unscoped_git_needs_hardening,
 )
+from nexus.orchestrator.measurement_worktree_diff import MeasurementDiffError, verify_target
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
 
@@ -974,6 +982,37 @@ def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
     return hooks_dir
 
 
+@dataclass(frozen=True)
+class _ControllerGitScope:
+    """The trusted Controller of the calls in progress (#2749 r1).
+
+    Taken from the task contract, never from a Target's worker-writable
+    ``.git``; only set in measurement mode.
+    """
+
+    external: bool
+    controller_root: Path
+    controller_dirs: Optional[tuple[Path, Path]]
+    base_revision: Optional[str]
+
+
+_GIT_SCOPE: contextvars.ContextVar[Optional[_ControllerGitScope]] = contextvars.ContextVar(
+    "nexus_worktree_git_scope", default=None
+)
+
+
+def _controller_scoped(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Run ``method`` inside the git scope of its ``contract`` argument."""
+
+    @functools.wraps(method)
+    def wrapper(self: "WorktreeManager", *args: Any, **kwargs: Any) -> Any:
+        contract = kwargs["contract"] if "contract" in kwargs else (args[0] if args else None)
+        with self.controller_git_scope(contract):
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class WorktreeManager:
     def __init__(
         self,
@@ -990,6 +1029,74 @@ class WorktreeManager:
             self.root_dir.mkdir(parents=True, exist_ok=True)
         self.process_checker = process_checker or self._path_has_process
 
+    @contextmanager
+    def controller_git_scope(self, contract: Any):
+        """Bind the git calls inside to ``contract``'s Controller (#2749 r1).
+
+        A no-op unless the measurement mode was on at start, so live calls
+        are unchanged.  For an external Controller every call inside is
+        hardened, and a call in any other directory must be a Target whose
+        ``.git`` verifies against the Controller's common dir (then
+        ``GIT_DIR``/``GIT_WORK_TREE`` are pinned to the trusted paths).
+        """
+        raw_root = getattr(contract, "controller_repo_root", None)
+        if not measurement_mode_at_start() or not raw_root:
+            yield
+            return
+        controller_root = Path(raw_root).resolve()
+        external = external_git_context(controller_root)
+        controller_dirs = discovered_git_dirs(controller_root) if external else None
+        if external and controller_dirs is None:
+            raise ExternalGitRefused("EXTERNAL_TARGET_GIT_METADATA_UNREADABLE")
+        token = _GIT_SCOPE.set(
+            _ControllerGitScope(
+                external=external,
+                controller_root=controller_root,
+                controller_dirs=controller_dirs,
+                base_revision=getattr(contract, "target_base_revision", None),
+            )
+        )
+        try:
+            yield
+        finally:
+            _GIT_SCOPE.reset(token)
+
+    @staticmethod
+    def _hardened_plan(cwd: Optional[str | Path]) -> Optional[dict[str, Any]]:
+        """``None`` for the unchanged (live) git call, else the hardened runner's inputs."""
+        scope = _GIT_SCOPE.get()
+        if scope is None:
+            return {} if unscoped_git_needs_hardening(cwd) else None
+        if not scope.external:
+            return {} if external_git_context(cwd) else None
+        start = Path(cwd) if cwd is not None else Path.cwd()
+        if start.resolve() == scope.controller_root:
+            return {
+                "pin": None,
+                "metadata_dirs": scope.controller_dirs,
+                "attr_source": scope.base_revision,
+            }
+        # A Target: trust only a ``.git`` that points at this Controller's
+        # ``worktrees/<name>`` and is pointed back at (never the legacy path).
+        try:
+            trusted = verify_target(str(start), str(scope.controller_root))
+        except MeasurementDiffError as exc:
+            code = (
+                FILTER_DRIVER_PRESENT
+                if str(exc) == "info_attributes_present"
+                else "TARGET_GITDIR_UNTRUSTED"
+            )
+            raise ExternalGitRefused(code) from exc
+        return {
+            "pin": {
+                "GIT_DIR": str(trusted.gitdir),
+                "GIT_WORK_TREE": str(trusted.worktree),
+                "GIT_CEILING_DIRECTORIES": str(trusted.worktree.parent),
+            },
+            "metadata_dirs": (trusted.gitdir, trusted.common_dir),
+            "attr_source": scope.base_revision,
+        }
+
     def _run_git(
         self,
         args: list[str],
@@ -1000,8 +1107,16 @@ class WorktreeManager:
     ) -> str:
         # An external measurement Controller (or its Target) gets the hardened
         # runner (#2749); every other call below is unchanged.
-        if external_git_context(cwd):
-            hardened = run_hardened_git(args, cwd=cwd, env=env, attr_source=attr_source)
+        plan = self._hardened_plan(cwd)
+        if plan is not None:
+            hardened = run_hardened_git(
+                args,
+                cwd=cwd,
+                env=env,
+                attr_source=attr_source or plan.get("attr_source"),
+                pin=plan.get("pin"),
+                metadata_dirs=plan.get("metadata_dirs"),
+            )
             if hardened.returncode != 0:
                 raise RuntimeError(
                     f"Git command failed: git {' '.join(args)}\nError: {hardened.stderr.strip()}"
@@ -1041,8 +1156,16 @@ class WorktreeManager:
         *,
         attr_source: Optional[str] = None,
     ) -> bytes:
-        if external_git_context(cwd):
-            hardened = run_hardened_git(args, cwd=cwd, attr_source=attr_source, text=False)
+        plan = self._hardened_plan(cwd)
+        if plan is not None:
+            hardened = run_hardened_git(
+                args,
+                cwd=cwd,
+                attr_source=attr_source or plan.get("attr_source"),
+                text=False,
+                pin=plan.get("pin"),
+                metadata_dirs=plan.get("metadata_dirs"),
+            )
             if hardened.returncode != 0:
                 stderr = hardened.stderr.decode("utf-8", errors="replace").strip()
                 raise RuntimeError(f"Git command failed: git {' '.join(args)}\nError: {stderr}")
@@ -1143,6 +1266,7 @@ class WorktreeManager:
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
+    @_controller_scoped
     def create_lease(
         self,
         contract: SelfHostedTaskContract,
@@ -1159,6 +1283,7 @@ class WorktreeManager:
                 )
             return self._create_lease_locked(contract, task_states=task_states)
 
+    @_controller_scoped
     def create_precommitted_lease(
         self,
         contract: SelfHostedTaskContract,
@@ -2163,6 +2288,7 @@ class WorktreeManager:
             inventory_complete=inventory_complete,
         )
 
+    @_controller_scoped
     def target_conflict(
         self,
         contract: SelfHostedTaskContract,
@@ -2276,6 +2402,7 @@ class WorktreeManager:
 
         return False
 
+    @_controller_scoped
     def protect_candidate(
         self,
         contract: SelfHostedTaskContract,
@@ -2339,6 +2466,7 @@ class WorktreeManager:
     def salvage_ref_for(task_id: str, attempt_id: str) -> str:
         return f"refs/nexus-salvage/worktree/{task_id}-{attempt_id}"
 
+    @_controller_scoped
     def protect_salvage_head(
         self,
         contract: SelfHostedTaskContract,
@@ -2376,6 +2504,7 @@ class WorktreeManager:
             "promotion_eligible": False,
         }
 
+    @_controller_scoped
     def create_salvage_snapshot(
         self,
         contract: SelfHostedTaskContract,
@@ -2433,6 +2562,7 @@ class WorktreeManager:
             "promotion_eligible": False,
         }
 
+    @_controller_scoped
     def cleanup_terminal_target(
         self,
         contract: SelfHostedTaskContract,
@@ -2675,6 +2805,7 @@ class WorktreeManager:
 
         return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
+    @_controller_scoped
     def restore_task_branch_for_retry(
         self,
         contract: SelfHostedTaskContract,
@@ -2888,6 +3019,7 @@ class WorktreeManager:
             f"process probe unavailable for {path}: {result.stderr.strip() or result.returncode}"
         )
 
+    @_controller_scoped
     def capture_candidate(
         self,
         contract: SelfHostedTaskContract,
@@ -3003,6 +3135,7 @@ class WorktreeManager:
             collaboration_provenance=collaboration_provenance or None,
         )
 
+    @_controller_scoped
     def validate_lease_identity(
         self,
         contract: SelfHostedTaskContract,
@@ -3041,6 +3174,7 @@ class WorktreeManager:
         elif lease.collaboration_provenance is not None:
             raise RuntimeError("local lease unexpectedly contains collaboration provenance")
 
+    @_controller_scoped
     def verify_controller_unchanged(
         self,
         contract: SelfHostedTaskContract,

@@ -221,17 +221,32 @@ def test_p1_lease_and_capture_never_run_planted_fsmonitor_hooks_or_inherited_git
         flags = [a for a in args if not a.startswith("--attr-source=")]
         assert flags[1:7] == _HARDENED, args
         environment = kwargs["env"]
-        assert sorted(k for k in environment if k.startswith("GIT_")) == [
+        base_keys = {
             "GIT_ATTR_NOSYSTEM",
             "GIT_CONFIG_GLOBAL",
             "GIT_CONFIG_NOSYSTEM",
             "GIT_TERMINAL_PROMPT",
-        ], args
+        }
+        pinned = {"GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES"}
+        keys = {k for k in environment if k.startswith("GIT_")}
+        assert keys in (base_keys, base_keys | pinned), args
+        if "GIT_DIR" in keys:
+            # A Target call: pinned to the trusted registration (#2749 r1).
+            assert (
+                Path(environment["GIT_DIR"]).parent
+                == (ext["repo"] / ".git" / "worktrees").resolve()
+            )
+            assert Path(environment["GIT_WORK_TREE"]) == target.resolve()
         assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
         assert environment["GIT_TERMINAL_PROMPT"] == "0"
         assert kwargs["stdin"] is subprocess.DEVNULL
     worktree_add = next(args for args, _ in calls if "worktree" in args and "add" in args)
     assert worktree_add[1] == f"--attr-source={ext['sha']}"
+    # Every status/diff/add of the lease and capture reads attributes from the base.
+    for args, _ in calls:
+        if any(command in args for command in ("status", "diff", "add")):
+            assert args[1] == f"--attr-source={ext['sha']}", args
+    assert any("GIT_DIR" in kwargs["env"] for _, kwargs in calls)
 
 
 def test_hardened_argv_keeps_caller_config_but_hardened_values_win():
@@ -324,7 +339,11 @@ def test_p2_filter_planted_after_validation_is_refused_at_the_lease(ext):
 
 
 def test_p2_attributes_planted_after_validation_are_refused_by_the_lease_recheck(ext):
-    """No driver yet, but ``info/attributes`` names one: the lease re-check refuses."""
+    """No driver yet, but ``info/attributes`` names one: the lease refuses.
+
+    Since #2749 r1 the per-call check of the hardened runner already refuses
+    it at the lease's first git call; the explicit re-check is the backstop.
+    """
     _validate(ext)
     info = ext["repo"] / ".git" / "info"
     info.mkdir(exist_ok=True)
@@ -333,7 +352,7 @@ def test_p2_attributes_planted_after_validation_are_refused_by_the_lease_recheck
     manager = WorktreeManager(root_dir=str(ext["target_root"]))
     with pytest.raises(RuntimeError) as caught:
         manager.create_lease(contract)
-    assert str(caught.value) == FILTER_DRIVER_PRESENT
+    assert FILTER_DRIVER_PRESENT in _chain(caught.value)
     assert not (ext["target_root"] / "ext-task").exists()
 
 
@@ -351,6 +370,61 @@ def test_p2_filter_planted_after_the_lease_never_runs_during_capture(ext):
     (target / "src" / "allowed.txt").write_text("changed\n", encoding="utf-8")
     with pytest.raises(RuntimeError) as caught:
         manager.capture_candidate(contract, lease)
+    assert FILTER_DRIVER_PRESENT in _chain(caught.value)
+    assert not marker.exists()
+
+
+# --------------------------------------------------------------------------
+# #2749 r1: a Target whose ``.git`` is rewritten after the lease
+# --------------------------------------------------------------------------
+
+
+def _repoint_target_to_hostile_clone(ext: dict[str, Any], target: Path) -> Path:
+    """Rewrite the Target's ``.git`` to a clone outside the root with a live filter."""
+    hostile = ext["tmp"] / "hostile-clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(ext["repo"]), str(hostile)],
+        check=True,
+        capture_output=True,
+        env=_clean_env(),
+    )
+    marker = ext["markers"] / "hostile-filter-ran"
+    _plant_filter_driver(hostile, ext["tmp"], marker)
+    _run(
+        "config", "core.fsmonitor", str(_script(ext["tmp"] / "hostile-fsm.sh", marker)), cwd=hostile
+    )
+    (hostile / ".git" / "info").mkdir(exist_ok=True)
+    (hostile / ".git" / "info" / "attributes").write_text("*.txt filter=ctl\n", encoding="utf-8")
+    (target / ".git").write_text(f"gitdir: {hostile / '.git'}\n", encoding="utf-8")
+    return marker
+
+
+def test_r1_rewritten_target_gitdir_is_refused_by_capture(ext):
+    _validate(ext)
+    contract = _contract(ext["repo"], ext["sha"], ext["target_root"])
+    manager = WorktreeManager(root_dir=str(ext["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    marker = _repoint_target_to_hostile_clone(ext, target)
+    (target / "src" / "allowed.txt").write_text("changed\n", encoding="utf-8")
+    (target / "data.txt").write_text("changed\n", encoding="utf-8")
+    with pytest.raises(RuntimeError) as caught:
+        manager.capture_candidate(contract, lease)
+    assert "TARGET_GITDIR_UNTRUSTED" in _chain(caught.value)
+    assert not marker.exists()
+
+
+def test_r1_unscoped_call_on_a_rewritten_target_stays_hardened(ext):
+    """A direct ``_run_git`` on the Target (as service probes do) never takes the legacy path."""
+    _validate(ext)
+    contract = _contract(ext["repo"], ext["sha"], ext["target_root"])
+    manager = WorktreeManager(root_dir=str(ext["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    marker = _repoint_target_to_hostile_clone(ext, target)
+    (target / "data.txt").write_text("changed\n", encoding="utf-8")
+    with pytest.raises(RuntimeError) as caught:
+        manager._status_bytes(target)
     assert FILTER_DRIVER_PRESENT in _chain(caught.value)
     assert not marker.exists()
 
