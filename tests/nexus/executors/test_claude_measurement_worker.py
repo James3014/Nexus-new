@@ -644,34 +644,34 @@ def test_direct_calls_without_a_leased_contract_are_refused(monkeypatch, tmp_pat
         cmw.ClaudeMeasurementWorkerAdapter().invoke(bare_contract, lease, prompt="WHAT: x")
 
 
-def test_read_roots_never_cover_home_or_user_data(tmp_path):
-    home = Path(os.path.realpath(os.path.expanduser("~")))
-    for unsafe in (
-        Path("/"),
-        Path("/Users"),
-        Path("/private/tmp"),
-        Path("/var"),
-        home,
-        home.parent,
-    ):
-        assert not cmw.is_safe_read_root(unsafe, (tmp_path,)), unsafe
+def test_read_roots_never_cover_home_or_user_data(tmp_path, monkeypatch):
+    """Hermetic on every OS: the denied user-data roots and HOME are fixtures."""
+    base = Path(os.path.realpath(tmp_path))
+    users, scratch = base / "Users", base / "private" / "tmp"
+    home = users / "me"
+    for path in (home / "Downloads", scratch / "job" / "venv", base / "usr" / "lib"):
+        path.mkdir(parents=True)
+    monkeypatch.setattr(cmw, "_READ_DENIED_ROOTS", (str(users), str(scratch)))
+    monkeypatch.setenv("HOME", str(home))
+    operator_root = scratch / "job"
+    for unsafe in (Path("/"), users, scratch, base / "private", home, home.parent):
+        assert not cmw.is_safe_read_root(unsafe, (operator_root,)), unsafe
     # Inside a denied tree only the operator-listed roots are allowed (Codex r2 #3).
     assert not cmw.is_safe_read_root(home / "Downloads")
-    # A path outside every denied root (e.g. /private/var/log) is already readable,
-    # so re-allowing it widens nothing.
-    assert not cmw.is_safe_read_root(tmp_path)
-    assert cmw.is_safe_read_root(tmp_path / "venv", (Path(os.path.realpath(tmp_path)),))
-    assert cmw.is_safe_read_root(Path("/usr/lib"))
-    venv = tmp_path / "ctl" / "venv"
+    assert not cmw.is_safe_read_root(operator_root)
+    assert cmw.is_safe_read_root(operator_root / "venv", (operator_root,))
+    # A path outside every denied root is already readable, so re-allowing it widens nothing.
+    assert cmw.is_safe_read_root(base / "usr" / "lib")
+    venv = operator_root / "ctl" / "venv"
     venv.parent.mkdir(parents=True)
     venv.symlink_to(home)  # a venv link pointing at HOME is ignored, never re-allowed
-    contract = SimpleNamespace(controller_repo_root=str(tmp_path / "ctl" / "base"))
+    contract = SimpleNamespace(controller_repo_root=str(operator_root / "ctl" / "base"))
     assert cmw.task_venv_for(contract) is None
     # An operator root that is itself broad is dropped.
     roots = cmw.configured_read_roots({
-        cmw.MEASUREMENT_READ_ROOTS_ENV: f"/Users:{home}:/:{tmp_path}"
+        cmw.MEASUREMENT_READ_ROOTS_ENV: f"{users}:{home}:/:{operator_root}"
     })
-    assert roots == (Path(os.path.realpath(tmp_path)),)
+    assert roots == (operator_root,)
 
 
 def test_infra_needs_an_api_error_signal():
