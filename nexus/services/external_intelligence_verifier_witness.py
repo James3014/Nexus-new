@@ -29,14 +29,18 @@ test file, so swapping the test object (``Function._getobj``, ``obj``, the ``_ob
 for an in-tree no-op is refused.
 
 pytest's and pluggy's code is fingerprinted by content, not only identity (#2812,
-#2815).  When collection starts (every plugin has configured; no test module, so no
-candidate code, has been imported) the witness sweeps every loaded ``pytest``,
-``_pytest.*`` and ``pluggy.*`` module: every module-level and class attribute (read raw
-from ``__dict__``, so descriptors are not bound) by identity, and every function behind
-them by code object, defaults, keyword defaults and closure cell contents.  It also
+#2815).  The baseline is taken while pytest imports and registers this module for
+``-p`` (``Config._preparse``), before ``pytest_load_initial_conftests`` imports any
+conftest and so before any candidate code: the witness sweeps every loaded ``pytest``,
+``_pytest.*``, ``pluggy.*`` and ``pytest_asyncio`` module: every module-level and class
+attribute (read raw from ``__dict__``, so descriptors are not bound) by identity, and
+every function behind them by code object, defaults, keyword defaults and closure cell
+contents.  It also
 records every hook caller, its ``_hookexec``, the order of its hookimpls and each
 hookimpl's function fingerprint.  A hot subset (the call/report internals, pluggy's call
-path, the hook callers and hookimpls) is re-checked around every test; the full sweep at
+path, the hook callers and hookimpls) is re-checked around every test; the full sweep
+when collection starts (only the exact ``CONFIGURE_TIME_WRITES`` that pytest's own
+plugins make during configure are re-based there, pinned to pytest's own values) and at
 session end.  Any change, a removed or reordered hookimpl, or a later hookimpl from an
 untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
 
