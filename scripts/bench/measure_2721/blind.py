@@ -142,7 +142,8 @@ def noop_nonempty_diff(row: Mapping[str, Any], run_root: Path | str | None = Non
     diff_path = row.get("diff_path")
     if diff_path and Path(diff_path).is_file():
         text = read_diff(Path(diff_path))
-        if not text.strip():
+        # Clean only when the row agrees: a truncated diff file must not hide an edit.
+        if not text.strip() and row.get("empty") is True and row.get("diff_sha256") == sha256_text(text):
             return None
     else:
         # Fail closed (1d): no diff file counts as clean only when the row itself says
@@ -264,6 +265,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     out, arm_map = Path(args.out).resolve(), Path(args.arm_map).resolve()
     if out in arm_map.parents or arm_map == out:
         parser.error("--arm-map must live outside --out (the scorer must not see it)")
+    if out.exists() and any(out.iterdir()):
+        # A stale candidates.jsonl / candidates/ must never be scored as this run's.
+        parser.error(f"--out {out} is not empty")
     from scripts.bench.measure_2721 import watchdog
     from scripts.bench.measure_2721.runner import block_outcomes
 

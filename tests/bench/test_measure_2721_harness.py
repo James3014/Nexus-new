@@ -2856,6 +2856,11 @@ def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
                  "empty": True, "diff_sha256": blind.sha256_text("")})
     # No diff file and no proof of an empty diff: counted as a hit (fail closed).
     rows.append({"arm": arm, "run_id": f"{arm}-unproven", "task_id": "pkg-100", "repeat": 1, "infra": False})
+    # An empty (truncated) diff file whose row says it was not empty: a hit.
+    truncated = run / "diffs" / "t.diff"
+    truncated.write_text("")
+    rows.append({"arm": arm, "run_id": f"{arm}-truncated", "task_id": "pkg-100", "repeat": 1, "infra": False,
+                 "diff_path": str(truncated), "empty": False, "diff_sha256": "cd" * 32})
     # A diff with no row (killed between the diff and the row), and an empty orphan.
     (run / "diffs" / f"m2721-{arm.lower()}-pkg-100-r1-orphan.diff").write_text("+x\n")
     (run / "diffs" / f"m2721-{arm.lower()}-pkg-100-r1-blank.diff").write_text("")
@@ -2870,6 +2875,22 @@ def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
     assert stat.S_IMODE(amap_path.stat().st_mode) == 0o600
     hits = json.loads(amap_path.read_text())["noop_nonempty_diff"]
     assert [(h["arm"], h["run_id"]) for h in hits] == [
-        (arm, f"{arm}-extra"), (arm, f"{arm}-unproven"), (arm, f"m2721-{arm.lower()}-pkg-100-r1-orphan")]
+        (arm, f"{arm}-extra"), (arm, f"{arm}-unproven"), (arm, f"{arm}-truncated"),
+        (arm, f"m2721-{arm.lower()}-pkg-100-r1-orphan")]
     assert hits[0]["diff_sha256"] == blind.sha256_text("diff --git a/x.py b/x.py\n+edit\n")
-    assert hits[2]["orphan"] is True
+    assert hits[3]["orphan"] is True
+
+
+def test_blind_refuses_a_non_empty_out_dir(tmp_path):
+    """A stale candidates.jsonl in --out must never be scored as this run's (1d)."""
+    run = tmp_path / "run"
+    _excluded_block_run(run)
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text("")
+    out = tmp_path / "blind"
+    out.mkdir()
+    (out / "candidates.jsonl").write_text("{}\n")
+    with pytest.raises(SystemExit):
+        blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(tmp_path / "c" / "m.json"),
+                    "--manifest", str(manifest)])
+    assert not (tmp_path / "c" / "m.json").exists()
