@@ -26,6 +26,7 @@ from nexus.contracts.break_glass_recovery import (
 )
 
 EXPECTED_PAYLOAD_SHA256 = "d2313d38c4b15d16cf42497c267bd7071195bf3f58f485eea6d659ded6e09a95"
+BASE_SHA = "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd"
 
 
 def activation_dict() -> dict[str, object]:
@@ -234,7 +235,7 @@ def integration_payload_dict() -> dict[str, object]:
         "accepted_head_sha": "1" * 40,
         "accepted_tree_sha": "2" * 40,
         "accepted_diff_sha256": "3" * 64,
-        "expected_base_sha": "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd",
+        "expected_base_sha": BASE_SHA,
         "merge_method": "merge",
         "checks": verification["checks"],
         "issued_at": "2026-09-06T07:05:00+08:00",
@@ -408,8 +409,13 @@ def github_integration_readback(
         "merge_commit_sha": merge_sha,
         "head": {"sha": head_sha},
         "base": {"ref": "main"},
+        # Real GitHub readbacks always carry these (#2796): a merge after issued_at,
+        # and a true two-parent merge commit on main.
+        "merged_at": "2026-09-06T07:10:00+08:00",
     }
-    main_branch = {"commit": {"sha": main_sha}}
+    main_branch: dict[str, object] = {
+        "commit": {"sha": main_sha, "parents": [{"sha": BASE_SHA}, {"sha": head_sha}]}
+    }
     return pull_request, main_branch
 
 
@@ -482,12 +488,101 @@ def test_github_integration_readback_g05_g06_positive_control() -> None:
     pull_request, main_branch = github_integration_readback()
     pull_request["merged_at"] = (integration.issued_at + timedelta(minutes=5)).isoformat()
     pull_request["merge_method"] = "merge"
-    main_branch["commit"]["parents"] = [{"sha": "1" * 40}, {"sha": "2" * 40}]
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = [{"sha": BASE_SHA}, {"sha": "1" * 40}]
     assert integration_readback_from_github(integration, pull_request, main_branch) == (
         "8" * 40,
         "8" * 40,
         808,
     )
+
+
+@pytest.mark.parametrize("merged_at", [None, "", "not-a-time", 1757113500, "2026-09-06T07:10:00"])
+def test_github_integration_readback_fails_closed_without_parseable_merged_at(
+    merged_at: object,
+) -> None:
+    """#2796: a missing, null, non-string, unparseable or naive merged_at must not skip G05."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    if merged_at is None:
+        del pull_request["merged_at"]
+    else:
+        pull_request["merged_at"] = merged_at
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_fails_closed_on_null_merged_at() -> None:
+    """#2796: an explicit JSON null merged_at is malformed for a merged PR."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    pull_request["merged_at"] = None
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize("parents", ["missing", None, "abc", {"sha": "1" * 40}])
+def test_github_integration_readback_fails_closed_without_merge_parents(parents: object) -> None:
+    """#2796: G06 cannot prove a merge commit without the parent list, so it must not be skipped."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    if parents == "missing":
+        del commit["parents"]
+    else:
+        commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_rejects_three_parent_merge() -> None:
+    """#2796: an octopus merge is not the authorized two-parent merge commit."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = [{"sha": "4" * 40}, {"sha": "5" * 40}, {"sha": "6" * 40}]
+    with pytest.raises(BreakGlassContractError, match="MERGE_METHOD_SUBSTITUTION_NOT_MERGE_COMMIT"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize(
+    "parents",
+    [
+        [{"sha": "6" * 40}, {"sha": "1" * 40}],
+        [{"sha": BASE_SHA}, {"sha": "6" * 40}],
+        [{"sha": "1" * 40}, {"sha": BASE_SHA}],
+    ],
+)
+def test_github_integration_readback_rejects_unauthorized_merge_parents(
+    parents: list[dict[str, str]],
+) -> None:
+    """#2796: the merge commit's parents must be the authorized base and accepted head, in order."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="INTEGRATION_MERGE_PARENTS_MISMATCH"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+@pytest.mark.parametrize(
+    "parents", [["a", "b"], [{"sha": BASE_SHA}, {}], [{"sha": BASE_SHA}, {"sha": "X"}]]
+)
+def test_github_integration_readback_fails_closed_on_malformed_parent_entries(
+    parents: object,
+) -> None:
+    """#2796: parent entries without a 40-hex sha are malformed, not a mismatch to skip."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    commit = main_branch["commit"]
+    assert isinstance(commit, dict)
+    commit["parents"] = parents
+    with pytest.raises(BreakGlassContractError, match="GITHUB_INTEGRATION_READBACK_MALFORMED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
 
 
 def test_owner_terminal_comment_binds_global_consumption() -> None:
