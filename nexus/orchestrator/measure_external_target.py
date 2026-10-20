@@ -28,22 +28,24 @@ Validation fails closed with a stable ``EXTERNAL_TARGET_*`` code:
 * the work tree is clean (tracked and untracked).  The Target lease refuses a
   dirty Controller anyway (``WorktreeManager._verify_controller``), so a dirty
   external repository is refused here, before any planner or provider work;
-* no git filter can run (#2749): the repository config defines no
+* no submodule (``.gitmodules``, a gitlink, or a non-empty ``modules/``)
+  and no git filter can run (#2749): the repository config defines no
   ``filter.*`` driver (nor a ``diff.*.textconv``/``command`` driver), no
   ``.gitattributes`` in the base tree declares ``filter=`` and no
   ``info/attributes`` file is non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
   This is checked before the first ``git status``, since status runs clean
   filters.
 
-Every git call ``WorktreeManager`` makes for an accepted external Controller
-(or one of its Target worktrees) goes through ``run_hardened_git`` (#2749):
+In measurement mode every git call ``WorktreeManager`` makes goes through
+``run_hardened_git`` (#2749):
 the flags above plus ``core.attributesFile=/dev/null`` and
-``commit.gpgSign=false``, the inherited ``GIT_*`` environment dropped, no
+``commit.gpgSign=false`` and ``submodule.recurse=false`` (status and diff also
+get ``--ignore-submodules=all``), the inherited ``GIT_*`` environment dropped, no
 system/global config or system attributes, no prompt, stdin closed, and a
 driver re-check before each call, so a filter planted after validation makes
-the call refuse instead of running it.  ``external_git_context`` decides which
-calls those are, from the start-time measurement root only; with the variable
-unset it is always ``False`` and the live git calls are unchanged.
+the call refuse instead of running it.  With the variable unset at start
+(the live Gateway) nothing changes; ``external_git_context`` only decides
+where the lease re-check runs.
 
 The Task Card still lives in the Nexus-new ``tasks/`` tree; only the Controller
 (the repository the Target worktree is cut from) changes.
@@ -80,11 +82,15 @@ HARDENED_GIT_CONFIG = (
     *_GIT_SAFE_CONFIG,
     "-c", "core.attributesFile=/dev/null",
     "-c", "commit.gpgSign=false",
+    "-c", "submodule.recurse=false",
 )  # fmt: skip
+# Subcommands that would otherwise look into submodules (and run their filters).
+_IGNORE_SUBMODULES_COMMANDS = frozenset({"status", "diff"})
 # Config keys that name a command git runs on file content: filter drivers
 # (clean/smudge/process) and diff textconv/external commands (#2749).
 GIT_DRIVER_CONFIG_REGEX = r"^filter\.|^diff\..*\.(textconv|command)$"
 FILTER_DRIVER_PRESENT = "EXTERNAL_TARGET_FILTER_DRIVER_PRESENT"
+SUBMODULE_PRESENT = "EXTERNAL_TARGET_SUBMODULE_PRESENT"
 _ATTRIBUTE_FILTER = re.compile(rb"(?:^|\s)filter=", re.MULTILINE)
 
 
@@ -327,7 +333,14 @@ def validate_external_target(
     finding = filter_driver_finding(repo_root, raw_revision)
     if finding is not None:
         raise ExternalTargetError(finding)
-    if _git(repo_root, "status", "--porcelain=v1", "-z", "--untracked-files=all"):
+    if _git(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignore-submodules=all",
+    ):
         raise ExternalTargetError("EXTERNAL_TARGET_DIRTY")
     return ExternalTarget(repo_root=repo_root, base_revision=raw_revision)
 
@@ -459,6 +472,8 @@ def hardened_git_argv(args: Sequence[str], *, attr_source: Optional[str] = None)
         leading.extend(rest[:2])
         rest = rest[2:]
     prefix = [f"--attr-source={attr_source}"] if attr_source else []
+    if rest and rest[0] in _IGNORE_SUBMODULES_COMMANDS:
+        rest = [rest[0], "--ignore-submodules=all", *rest[1:]]
     return ["git", *prefix, *leading, *HARDENED_GIT_CONFIG, *rest]
 
 
@@ -572,31 +587,6 @@ def discovered_git_dirs(path: Path) -> Optional[tuple[Path, Path]]:
         return None
 
 
-def unscoped_git_needs_hardening(cwd: Any) -> bool:
-    """For a git call made without a trusted Controller identity (#2749 r1).
-
-    ``external_git_context``, and in measurement mode also any linked worktree
-    (a ``.git`` file, i.e. a Target): its ``.git`` is worker-writable, so where
-    it points proves nothing and the call is hardened.  ``False`` whenever the
-    measurement mode is off.
-    """
-    if not measurement_mode_at_start():
-        return False
-    if external_git_context(cwd):
-        return True
-    try:
-        start = Path(cwd if cwd is not None else os.getcwd()).resolve(strict=True)
-    except (OSError, RuntimeError):
-        return True
-    for directory in (start, *start.parents):
-        dotgit = directory / ".git"
-        if dotgit.is_symlink() or dotgit.is_file():
-            return True
-        if dotgit.is_dir():
-            return False
-    return True
-
-
 def _hardened_output(repo_root: Path, *args: str) -> bytes:
     result = subprocess.run(
         ["git", *HARDENED_GIT_CONFIG, *args],
@@ -613,7 +603,13 @@ def _hardened_output(repo_root: Path, *args: str) -> bytes:
 
 
 def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
-    """``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` when a git filter could run, else ``None``.
+    """A refusal code when a git filter could run, else ``None``.
+
+    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a
+    ``.gitmodules`` or a gitlink, or the common dir has a non-empty
+    ``modules/`` (a submodule's own config and attributes are not checked
+    here, so a repository with submodules is refused outright).
+    ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` otherwise, as follows.
 
     The repository refuses when its config defines a ``filter.*`` (or diff
     textconv/command) driver, a ``.gitattributes`` in ``base_revision``
@@ -633,14 +629,26 @@ def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
                     return FILTER_DRIVER_PRESENT
             except FileNotFoundError:
                 pass
+        common = Path(
+            _hardened_output(repo_root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            .decode("utf-8")
+            .strip()
+        )
+        modules = common / "modules"
+        if modules.is_symlink() or (modules.is_dir() and any(modules.iterdir())):
+            return SUBMODULE_PRESENT
         listing = _hardened_output(
             repo_root, "ls-tree", "-r", "-z", "--full-tree", "--end-of-options", base_revision
         )
         for entry in listing.split(b"\0"):
             meta, _, name = entry.partition(b"\t")
+            fields = meta.split()
+            # A gitlink or a .gitmodules: git would recurse into a submodule
+            # and run that repository's filters (#2749 review B2).
+            if (len(fields) == 3 and fields[1] == b"commit") or name == b".gitmodules":
+                return SUBMODULE_PRESENT
             if name.rsplit(b"/", 1)[-1] != b".gitattributes":
                 continue
-            fields = meta.split()
             if len(fields) != 3 or fields[1] != b"blob":
                 return FILTER_DRIVER_PRESENT
             blob = _hardened_output(repo_root, "cat-file", "blob", fields[2].decode("ascii"))

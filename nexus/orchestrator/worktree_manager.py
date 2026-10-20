@@ -24,7 +24,6 @@ from nexus.orchestrator.measure_external_target import (
     measurement_mode_at_start,
     recheck_external_controller_at_lease,
     run_hardened_git,
-    unscoped_git_needs_hardening,
 )
 from nexus.orchestrator.measurement_worktree_diff import MeasurementDiffError, verify_target
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
@@ -990,9 +989,8 @@ class _ControllerGitScope:
     ``.git``; only set in measurement mode.
     """
 
-    external: bool
     controller_root: Path
-    controller_dirs: Optional[tuple[Path, Path]]
+    controller_dirs: tuple[Path, Path]
     base_revision: Optional[str]
 
 
@@ -1031,26 +1029,25 @@ class WorktreeManager:
 
     @contextmanager
     def controller_git_scope(self, contract: Any):
-        """Bind the git calls inside to ``contract``'s Controller (#2749 r1).
+        """Bind the git calls inside to ``contract``'s Controller (#2749).
 
         A no-op unless the measurement mode was on at start, so live calls
-        are unchanged.  For an external Controller every call inside is
-        hardened, and a call in any other directory must be a Target whose
-        ``.git`` verifies against the Controller's common dir (then
-        ``GIT_DIR``/``GIT_WORK_TREE`` are pinned to the trusted paths).
+        are unchanged.  Inside, a call in any directory other than the
+        Controller must be a Target whose ``.git`` verifies against the
+        Controller's common dir (``GIT_DIR``/``GIT_WORK_TREE`` are then pinned
+        to the trusted paths); the Controller comes from the contract, never
+        from a Target's worker-writable ``.git``.
         """
         raw_root = getattr(contract, "controller_repo_root", None)
         if not measurement_mode_at_start() or not raw_root:
             yield
             return
         controller_root = Path(raw_root).resolve()
-        external = external_git_context(controller_root)
-        controller_dirs = discovered_git_dirs(controller_root) if external else None
-        if external and controller_dirs is None:
+        controller_dirs = discovered_git_dirs(controller_root)
+        if controller_dirs is None:
             raise ExternalGitRefused("EXTERNAL_TARGET_GIT_METADATA_UNREADABLE")
         token = _GIT_SCOPE.set(
             _ControllerGitScope(
-                external=external,
                 controller_root=controller_root,
                 controller_dirs=controller_dirs,
                 base_revision=getattr(contract, "target_base_revision", None),
@@ -1063,12 +1060,17 @@ class WorktreeManager:
 
     @staticmethod
     def _hardened_plan(cwd: Optional[str | Path]) -> Optional[dict[str, Any]]:
-        """``None`` for the unchanged (live) git call, else the hardened runner's inputs."""
+        """``None`` for the unchanged (live) git call, else the hardened runner's inputs.
+
+        In measurement mode every call is hardened, with no external/internal
+        decision (#2749 review): a Target's ``.git`` is worker-writable, so
+        where it points proves nothing.
+        """
+        if not measurement_mode_at_start():
+            return None
         scope = _GIT_SCOPE.get()
         if scope is None:
-            return {} if unscoped_git_needs_hardening(cwd) else None
-        if not scope.external:
-            return {} if external_git_context(cwd) else None
+            return {}
         start = Path(cwd) if cwd is not None else Path.cwd()
         if start.resolve() == scope.controller_root:
             return {
@@ -1475,7 +1477,7 @@ class WorktreeManager:
 
     @staticmethod
     def _ownership_record_path(controller_root: Path, task_id: str) -> Path:
-        if external_git_context(controller_root):
+        if measurement_mode_at_start():
             hardened = run_hardened_git(["rev-parse", "--git-common-dir"], cwd=controller_root)
             if hardened.returncode != 0:
                 raise subprocess.CalledProcessError(

@@ -213,8 +213,10 @@ def test_p1_lease_and_capture_never_run_planted_fsmonitor_hooks_or_inherited_git
     assert receipt.changed_files == ["src/allowed.txt"]
     for name, marker in planted.items():
         assert not marker.exists(), name
-    commands = [args[args.index("commit.gpgSign=false") + 1 :] for args, _ in calls]
-    assert ["status", "--porcelain=v1", "-z", "--untracked-files=all"] in commands
+    commands = [args[args.index("submodule.recurse=false") + 1 :] for args, _ in calls]
+    assert [
+        "status", "--ignore-submodules=all", "--porcelain=v1", "-z", "--untracked-files=all"
+    ] in commands  # fmt: skip
     assert any(command[:2] == ["worktree", "add"] for command in commands)
     assert any(command[:1] == ["diff"] for command in commands)
     for args, kwargs in calls:
@@ -429,6 +431,42 @@ def test_r1_unscoped_call_on_a_rewritten_target_stays_hardened(ext):
     assert not marker.exists()
 
 
+def test_b2_submodule_with_a_filter_is_refused_and_never_runs(ext):
+    """A submodule's own filter runs inside a recursive status: refuse submodules."""
+    sub = ext["tmp"] / "sub-origin"
+    _repo(sub, {".gitattributes": "*.txt filter=ctl\n", "inner.txt": "inner\n"})
+    repo = ext["repo"]
+    _run("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "sub", cwd=repo)
+    _run("-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "submodule", cwd=repo)
+    ext["sha"] = _run("rev-parse", "HEAD", cwd=repo)
+    marker = ext["markers"] / "submodule-filter-ran"
+    script = _script(ext["tmp"] / "sub-filter.sh", marker, passthrough=True)
+    module = repo / ".git" / "modules" / "sub"
+    for key in ("filter.ctl.clean", "filter.ctl.smudge"):
+        subprocess.run(
+            ["git", "config", "--file", str(module / "config"), key, str(script)],
+            check=True,
+            env=_clean_env(),
+        )
+    (repo / "sub" / "inner.txt").touch()
+    with pytest.raises(ExternalTargetError) as caught:
+        _validate(ext)
+    assert str(caught.value) == "EXTERNAL_TARGET_SUBMODULE_PRESENT"
+    assert not marker.exists()
+    # Planted after validation is the same: the lease refuses before any status.
+    contract = _contract(repo, ext["sha"], ext["target_root"])
+    with pytest.raises(RuntimeError) as lease_refusal:
+        WorktreeManager(root_dir=str(ext["target_root"])).create_lease(contract)
+    assert "EXTERNAL_TARGET_SUBMODULE_PRESENT" in _chain(lease_refusal.value)
+    assert not marker.exists()
+
+
+def test_hardened_status_and_diff_ignore_submodules():
+    assert hardened_git_argv(["status", "-z"])[-3:] == ["status", "--ignore-submodules=all", "-z"]
+    assert hardened_git_argv(["diff", "HEAD"])[-3:] == ["diff", "--ignore-submodules=all", "HEAD"]
+    assert "submodule.recurse=false" in hardened_git_argv(["rev-parse", "HEAD"])
+
+
 # --------------------------------------------------------------------------
 # Live parity
 # --------------------------------------------------------------------------
@@ -464,6 +502,7 @@ def _recorded_lease_and_capture(base: Path, monkeypatch) -> list[tuple[list[str]
 
 
 def test_live_parity_non_external_controller_git_argv_and_env_unchanged(tmp_path, monkeypatch):
+    """Live (measurement root unset at start): the legacy argv/env/stdin, byte for byte."""
     monkeypatch.delenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", raising=False)
     monkeypatch.setattr(met, "MEASURE_EXTERNAL_TARGET_ROOT_AT_START", "")
     live = _recorded_lease_and_capture(tmp_path / "live", monkeypatch)
@@ -486,7 +525,11 @@ def test_live_parity_non_external_controller_git_argv_and_env_unchanged(tmp_path
         }, args
         assert not any(a.startswith("--attr-source") or a == "protocol.allow=never" for a in args)
         assert env == expected_env
-    # A Controller outside the measurement root: byte-identical argv and env.
-    assert [args for args, _, _ in other] == [args for args, _, _ in live]
-    assert [env for _, env, _ in other] == [env for _, env, _ in live]
-    assert [stdin for _, _, stdin in other] == [stdin for _, _, stdin in live]
+    # Measurement mode (never live): every call is hardened, whatever the
+    # Controller, with no external/internal decision (#2749 review B1).
+    assert other, "no git call recorded"
+    for args, env, stdin in other:
+        flags = [a for a in args if not a.startswith("--attr-source=")]
+        assert flags[1:7] == _HARDENED, args
+        assert stdin is subprocess.DEVNULL
+        assert not {"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"} & set(env)
