@@ -117,6 +117,9 @@ class NexusMission(BaseModel):
     # Wall-clock accounting: epoch seconds of the current active stretch (start/resume), None when idle.
     active_since: Optional[float] = None
 
+    budget_unknown: bool = False
+    token_budget_unknown: bool = False
+
     def persist(self, project_root: Path) -> None:
         """安全寫入到 .nexus/mission.json 中"""
         out_dir = project_root / ".nexus"
@@ -172,12 +175,53 @@ class NexusMission(BaseModel):
 
     def add_tokens_from_receipt_file(self, receipt_path: Path) -> float:
         """Add tokens recorded in a run receipt/report JSON to accumulated usage. Returns tokens added."""
+        receipt_file = Path(receipt_path)
         try:
-            payload = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            raw_text = receipt_file.read_text(encoding="utf-8")
+        except OSError:
             return 0.0
-        added = extract_receipt_tokens(payload)
+
+        try:
+            payload = json.loads(raw_text)
+        except ValueError:
+            payload = None
+
+        added = extract_receipt_tokens(payload) if payload is not None else 0.0
+
+        if isinstance(payload, dict):
+            unified_path_raw = payload.get("unified_runtime_receipt_path")
+            if isinstance(unified_path_raw, (str, Path)) and str(unified_path_raw).strip():
+                try:
+                    unified_path = Path(unified_path_raw)
+                    if not unified_path.is_file():
+                        for parent in receipt_file.parents:
+                            candidate = parent / unified_path
+                            if candidate.is_file():
+                                unified_path = candidate
+                                break
+                    if unified_path.is_file():
+                        try:
+                            is_same = unified_path.resolve() == receipt_file.resolve()
+                        except Exception:
+                            is_same = False
+                        if not is_same:
+                            unified_payload = json.loads(unified_path.read_text(encoding="utf-8"))
+                            added += extract_receipt_tokens(unified_payload)
+                except (OSError, ValueError):
+                    pass
+
         self.accumulated_usage["tokens"] = self.accumulated_usage.get("tokens", 0.0) + added
+
+        max_tokens = self.budget.get("max_tokens")
+        has_max_tokens = (
+            isinstance(max_tokens, (int, float))
+            and not isinstance(max_tokens, bool)
+            and max_tokens > 0
+        )
+        if has_max_tokens and added <= 0.0:
+            self.budget_unknown = True
+            self.token_budget_unknown = True
+
         return added
 
     def check_telemetry_budget(self) -> bool:
@@ -185,6 +229,15 @@ class NexusMission(BaseModel):
         [Gateway-level Telemetry 防禦]
         確認當前累積開銷是否超出預算。若超標，傳回 False 用於立即攔截與阻斷。
         """
+        max_tokens = self.budget.get("max_tokens")
+        has_max_tokens = (
+            isinstance(max_tokens, (int, float))
+            and not isinstance(max_tokens, bool)
+            and max_tokens > 0
+        )
+        if has_max_tokens and (self.budget_unknown or self.token_budget_unknown):
+            return False
+
         for key in ("tokens", "wall_time_sec", "retries"):
             budget_key = f"max_{key}"
             if key == "tokens":
