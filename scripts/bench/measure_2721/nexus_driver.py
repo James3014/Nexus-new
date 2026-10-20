@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import stat
 import sys
@@ -49,6 +50,7 @@ from scripts.bench.measure_2721.arms import (
     venv_problem,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
+from scripts.bench.measure_2721.gateway_env import measurement_env, read_roots_sha256
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
 from scripts.bench.measure_2721.portable import to_portable_row
 
@@ -261,6 +263,30 @@ def restore_state_root(state_root: Path, snapshot: Path) -> dict[str, Any]:
     return {"expected_sha256": expected, "restored_sha256": actual, "ok": expected == actual}
 
 
+def guard_controller_repo(repo: Path, roots: Sequence[Path]) -> Path:
+    """The Controller checkout the driver may reset every row (H1).
+
+    It must resolve under a measurement root (the external-target root or an
+    explicit measurement dir) and must never be a main clone
+    (``~/workspace/<repo>`` / ``~/Workspace/<repo>``) or the live Controller.
+    """
+    real = Path(os.path.realpath(repo))
+    home = Path(os.path.realpath(Path.home()))
+    env_root = measurement_env().get("NEXUS_MEASURE_EXTERNAL_TARGET_ROOT")
+    allowed = [Path(os.path.realpath(r)) for r in [*roots, *([env_root] if env_root else [])]]
+    for main in (home / "workspace", home / "Workspace"):
+        if real.parent == main or real == main:
+            raise ValueError(f"CONTROLLER_REPO_IS_A_MAIN_CLONE: {real}")
+    live = measurement_env().get("NEXUS_MEASUREMENT_LIVE_CONTROLLER") or os.environ.get("NEXUS_LIVE_CONTROLLER_ROOT")
+    if live and real == Path(os.path.realpath(live)):
+        raise ValueError(f"CONTROLLER_REPO_IS_THE_LIVE_CONTROLLER: {real}")
+    if not any(root != real and root in real.parents for root in allowed):
+        raise ValueError(f"CONTROLLER_REPO_OUTSIDE_MEASUREMENT_ROOT: {real}")
+    if not (real / ".git").exists():
+        raise ValueError(f"CONTROLLER_REPO_NOT_A_CHECKOUT: {real}")
+    return real
+
+
 def leak_surfaces(repo: Path) -> dict[str, list[str]]:
     """What a later row could inherit from a shared repository (driver item 4)."""
     refs = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/nexus-candidates/",
@@ -292,8 +318,14 @@ class NexusArmDriver:
                  targets_root: Optional[Path] = None, state_root: Optional[Path] = None,
                  state_snapshot: Optional[Path] = None, learning_phase: Optional[str] = None,
                  key_file: Optional[str] = None, controller_repo: Optional[Path] = None,
-                 controller_pin: Optional[str] = None, cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0)):
+                 controller_pin: Optional[str] = None, cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0),
+                 measurement_root: Optional[Path] = None):
         self.client = client
+        if (controller_repo is None) != (controller_pin is None):
+            raise ValueError("controller_repo and controller_pin go together (M3)")
+        if controller_repo is not None:
+            controller_repo = guard_controller_repo(
+                controller_repo, [r for r in (measurement_root, external_target_root) if r is not None])
         # The Gateway's own Controller checkout: reset to its pin before every
         # row (each row adds a card commit), and the source of expected_head.
         self.controller_repo = controller_repo
@@ -440,8 +472,11 @@ class NexusArmDriver:
         row["learning_phase"] = self.learning_phase
         watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=self.arm_label,
                            cap_s=timeout_seconds)
+        leak_repo = self.controller_repo or self.controller_git
+        # The reset reports (and this row flags) whatever the previous row left (M1).
         reset = self.reset_controller()
-        leak_before = leak_surfaces(self.controller_git) if self.controller_git is not None else None
+        leak_before = leak_surfaces(leak_repo) if leak_repo is not None else None
+        row["read_roots_sha256"] = read_roots_sha256()
         try:
             if reset is not None:
                 row["controller_reset"] = reset
@@ -509,8 +544,11 @@ class NexusArmDriver:
                 stuck = self._await_terminal(gw_task, transcript, cancel_refused=refused)
                 if stuck is not None:
                     row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
-            if leak_before is not None and self.controller_git is not None:
-                leaks = new_leaks(leak_before, leak_surfaces(self.controller_git), gw_task)
+            if reset is not None and reset.get("removed"):
+                row.setdefault("flags", []).append("CONTROLLER_LEFTOVERS")
+                row["controller_leftovers"] = reset["removed"]
+            if leak_before is not None and leak_repo is not None:
+                leaks = new_leaks(leak_before, leak_surfaces(leak_repo), gw_task)
                 if leaks:
                     row["leaks"] = leaks
                     row.setdefault("flags", []).append("STATE_LEAK")
@@ -612,25 +650,48 @@ class NexusArmDriver:
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
     def reset_controller(self) -> Optional[dict[str, Any]]:
-        """Reset the Gateway Controller to its pin and verify it (gap item 4).
+        """Make the Controller as clean as BARE's fresh clone, at its pin (gap item 4, M1).
 
-        Every row adds one Task Card commit to the Controller; without the
-        reset the next row's card commit fails TASK_CARD_COMMIT_HEAD_MISMATCH
-        and rows would not start from the same Controller state.
+        Every row adds one Task Card commit and may leave candidate refs,
+        worktrees or a stash.  Reset to the pin, ``clean -fdx``, drop every
+        ref except the checked-out branch (refs/nexus-candidates/* included),
+        remove extra worktrees, clear the stash, then verify all of it with
+        untracked and ignored files included.
         """
-        if self.controller_pin is None:
+        if self.controller_pin is None or self.controller_repo is None:
             return None
-        if self.controller_repo is None:
-            return {"ok": False, "error": "controller pin given without a controller repo"}
         repo = self.controller_repo
+        removed: list[str] = []
         try:
+            branch = git(repo, "symbolic-ref", "-q", "HEAD", check=False).strip()
+            for line in git(repo, "worktree", "list", "--porcelain").splitlines():
+                path = line[len("worktree "):] if line.startswith("worktree ") else None
+                if path and Path(os.path.realpath(path)) != Path(os.path.realpath(repo)):
+                    git(repo, "worktree", "remove", "--force", path, check=False)
+                    removed.append(f"worktree {path}")
+            git(repo, "worktree", "prune")
             git(repo, "reset", "-q", "--hard", self.controller_pin)
+            git(repo, "clean", "-q", "-fdx")
+            for ref in git(repo, "for-each-ref", "--format=%(refname)").splitlines():
+                if ref and ref != branch:
+                    git(repo, "update-ref", "-d", ref)
+                    removed.append(ref)
+            if git(repo, "rev-parse", "-q", "--verify", "refs/stash", check=False).strip():
+                git(repo, "update-ref", "-d", "refs/stash")
+                removed.append("refs/stash")
             head = git(repo, "rev-parse", "HEAD").strip()
             pin = git(repo, "rev-parse", f"{self.controller_pin}^{{commit}}").strip()
-            dirty = git(repo, "status", "--porcelain", "--untracked-files=no").strip()
+            dirty = git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip()
+            refs = [r for r in git(repo, "for-each-ref", "--format=%(refname)").splitlines() if r and r != branch]
+            worktrees = [line for line in git(repo, "worktree", "list", "--porcelain").splitlines()
+                         if line.startswith("worktree ")]
         except RuntimeError as exc:
-            return {"ok": False, "error": str(exc)[-300:]}
-        return {"ok": head == pin and not dirty, "head": head, "pin": pin, "dirty": bool(dirty)}
+            return {"ok": False, "error": str(exc)[-300:], "removed": removed}
+        ok = head == pin and not dirty and not refs and len(worktrees) == 1
+        # Only the checked-out branch is kept; whatever a previous row created
+        # is in ``removed`` and flagged on this row (CONTROLLER_LEFTOVERS).
+        return {"ok": ok, "head": head, "pin": pin, "dirty": bool(dirty), "extra_refs": refs,
+                "worktrees": len(worktrees), "removed": removed}
 
     def controller_head(self, health: Mapping[str, Any]) -> Optional[str]:
         """expected_head for the card commit: the Controller's own HEAD."""
@@ -832,23 +893,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--gateway-env", required=True,
                         help="the Gateway's start.sh or env file (assignments only, never executed)")
-    parser.add_argument("--controller-repo", help="the Gateway's Controller checkout (expected_head source)")
+    parser.add_argument("--controller-repo", help="the measurement Gateway's Controller checkout (reset per row; "
+                        "must lie under the measurement root)")
+    parser.add_argument("--measurement-root", help="extra root the Controller checkout may lie under "
+                        "(default: NEXUS_MEASURE_EXTERNAL_TARGET_ROOT / --external-target-root)")
     parser.add_argument("--controller-pin", help="commit the Controller is reset to before every row")
     args = parser.parse_args(argv)
     from scripts.bench.measure_2721.gateway_env import (
         GatewayEnvError,
-        apply_gateway_env,
         require_read_roots,
+        use_gateway_env,
     )
 
-    apply_gateway_env(args.gateway_env)
+    use_gateway_env(args.gateway_env)
     try:
         require_read_roots()
     except GatewayEnvError as exc:
         print(json.dumps({"stopped": "READ_ROOTS_EMPTY", "detail": str(exc)}))
         return 2
-    if args.controller_pin and not args.controller_repo:
-        parser.error("--controller-pin needs --controller-repo")
+    if bool(args.controller_pin) != bool(args.controller_repo):
+        parser.error("--controller-repo and --controller-pin go together (M3)")
     client = GatewayClient(args.gateway_url, read_token(args.token_file))
     driver = NexusArmDriver(
         client, campaign_id=args.campaign_id, goal_id=args.goal_id, scope_id=args.scope_id,
@@ -864,6 +928,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         key_file=args.key_file,
         controller_repo=Path(args.controller_repo) if args.controller_repo else None,
         controller_pin=args.controller_pin,
+        measurement_root=Path(args.measurement_root) if args.measurement_root else None,
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 

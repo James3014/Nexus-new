@@ -172,12 +172,13 @@ def venv_problem(task: Mapping[str, Any], observed: Any = None, *, check_observe
     The venv must be set, resolve inside ``NEXUS_MEASUREMENT_READ_ROOTS`` and,
     after the run, be exactly the venv the adapter granted (sidecar ``venv``)."""
     from nexus.executors.claude_measurement_worker import configured_read_roots
+    from scripts.bench.measure_2721.gateway_env import measurement_env
 
     expected = task.get("venv")
     if not expected:
         return "VENV_MISSING"
     real = Path(os.path.realpath(expected))
-    roots = configured_read_roots()
+    roots = configured_read_roots(measurement_env())
     if not any(real == root or root in real.parents for root in roots):
         return "VENV_OUTSIDE_READ_ROOTS"
     if check_observed and observed != str(real):
@@ -197,7 +198,8 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
             row = {"schema": ROW_SCHEMA, "arm": ARM_BARE, "run_id": new_run_id(ARM_BARE, task["task_id"], repeat),
                    "task_id": task["task_id"], "repeat": repeat, "outcome": STATUS_INFRA, "infra": True,
                    "void_reason": problem, "venv_problem": problem, "flags": [FLAG_VENV], "empty": True,
-                   "total_cost_usd": 0.0, "model_calls": 0, "total_tokens": None}
+                   "total_cost_usd": 0.0, "model_calls": 0, "total_tokens": None,
+                   "read_roots_sha256": _read_roots_sha256()}
             # Same row count in every arm, also for a void row (review M-a).
             append_jsonl(run_root / "rows.jsonl", row)
             append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
@@ -286,6 +288,7 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
             STATUS_INFRA if infra_event or timeout_mismatch or venv_issue else result.status),
         "infra": result.status == STATUS_INFRA or infra_event is not None or timeout_mismatch or bool(venv_issue),
         "venv_problem": venv_issue,
+        "read_roots_sha256": _read_roots_sha256(),
         "venv": extra.get("venv"),
         "watchdog_event": infra_event,
         "provider": result.as_dict(),
@@ -301,6 +304,12 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     if not keep_workdir:
         shutil.rmtree(run_root / "work" / run_id, ignore_errors=True)
     return row
+
+
+def _read_roots_sha256() -> str:
+    from scripts.bench.measure_2721.gateway_env import read_roots_sha256
+
+    return read_roots_sha256()
 
 
 def _claude_provider_type() -> type:
@@ -392,7 +401,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
-    parser.add_argument("--gateway-env",
+    parser.add_argument("--gateway-env", required=True,
                         help="the Gateway's start.sh or env file, so BARE runs with the same READ_ROOTS")
     parser.add_argument("--max-row-usd", type=float, default=3.0,
                         help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
@@ -401,12 +410,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     from scripts.bench.measure_2721.gateway_env import (
         GatewayEnvError,
-        apply_gateway_env,
         require_read_roots,
+        use_gateway_env,
     )
 
-    if args.gateway_env:
-        apply_gateway_env(args.gateway_env)
+    use_gateway_env(args.gateway_env)
     if args.arm == "bare" and args.provider == "claude":
         try:
             require_read_roots()  # same READ_ROOTS as the Gateway, or every row would be void

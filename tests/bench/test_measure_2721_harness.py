@@ -37,6 +37,15 @@ def _git(cwd: Path, *args: str) -> str:
                           capture_output=True, text=True).stdout
 
 
+@pytest.fixture(autouse=True)
+def _no_held_gateway_env():
+    from scripts.bench.measure_2721 import gateway_env
+
+    gateway_env.reset()
+    yield
+    gateway_env.reset()
+
+
 @pytest.fixture()
 def bank(tmp_path: Path) -> dict:
     """A mirror with a base commit, then a later 'fix' commit, a tag and a branch."""
@@ -906,13 +915,20 @@ def test_a_stuck_nexus_row_is_still_charged(manifest, tmp_path):
 def test_runners_require_one_shared_ledger_and_stop_with_75(manifest, tmp_path, capsys):
     from scripts.bench.measure_2721.budget import SpendLedger
 
+    env_file = tmp_path / "gateway.env"
+    env_file.write_text("NEXUS_MEASUREMENT_READ_ROOTS=/m/venvs\n")
     with pytest.raises(SystemExit):
-        arms.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"), "noop"])
+        arms.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"), "noop",
+                   "--gateway-env", str(env_file)])
+    with pytest.raises(SystemExit):  # --gateway-env is required for both arms (L2)
+        arms.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"), "noop",
+                   "--spend-ledger", str(tmp_path / "x.json")])
     ledger = tmp_path / "spend.json"
     exhausted = SpendLedger(ledger, cap_usd=0.4)  # below one reservation
     del exhausted
     rc = arms.main(["bare", "--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
-                    "--provider", "fake", "--spend-ledger", str(ledger), "--budget-usd", "0.4"])
+                    "--provider", "fake", "--spend-ledger", str(ledger), "--budget-usd", "0.4",
+                    "--gateway-env", str(env_file)])
     assert rc == 75 and "BUDGET_STOP" in capsys.readouterr().out
 
 
@@ -978,7 +994,8 @@ def _controller(tmp_path: Path) -> tuple[Path, str]:
 
 
 class _CardCommitGateway(FakeGateway):
-    """Commits a Task Card to the Controller like P1 does, and checks expected_head."""
+    """Commits a Task Card to the Controller like P1 does, checks expected_head, and
+    leaves a candidate ref, a branch, a stash-like ref and untracked files behind."""
 
     def __init__(self, repo: Path, **kw):
         super().__init__(**kw)
@@ -993,6 +1010,13 @@ class _CardCommitGateway(FakeGateway):
             (self.repo / "tasks" / f"{args['task_id']}.md").write_text("card\n")
             _git(self.repo, "add", "-A")
             _git(self.repo, "commit", "-qm", f"card {args['task_id']}")
+            _git(self.repo, "update-ref", f"refs/nexus-candidates/{args['task_id']}", "HEAD")
+            _git(self.repo, "branch", f"cand-{args['task_id']}"[:60])
+            _git(self.repo, "update-ref", "refs/stash", "HEAD")
+            (self.repo / "scratch.tmp").write_text("left behind\n")
+            (self.repo / ".gitignore").write_text("ignored/\n")
+            (self.repo / "ignored").mkdir(exist_ok=True)
+            (self.repo / "ignored" / "x").write_text("x\n")
         return super()._answer(name, args)
 
 
@@ -1002,11 +1026,19 @@ def test_controller_is_reset_to_its_pin_before_every_row(manifest, tmp_path):
     gateway = _CardCommitGateway(repo)
     client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
     driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
-                                         controller_repo=repo, controller_pin=pin)
+                                         controller_repo=repo, controller_pin=pin, measurement_root=tmp_path)
     rows = [driver.run(task, repeat, tmp_path / "run", timeout_seconds=5) for repeat in (1, 2)]
     assert gateway.expected == [pin, pin]  # read from the Controller itself, not /health
     assert all(r["controller_reset"]["ok"] and r["outcome"] == "OK" for r in rows), rows
-    assert _git(repo, "rev-list", "--count", "HEAD").strip() == "2"  # pin + this row's card only
+    # r2 inherits nothing from r1, and what r1 left is flagged on r2 (M1).
+    assert "CONTROLLER_LEFTOVERS" not in (rows[0].get("flags") or [])
+    assert "CONTROLLER_LEFTOVERS" in rows[1]["flags"]
+    assert any(ref.startswith("refs/nexus-candidates/") for ref in rows[1]["controller_leftovers"])
+    assert "refs/stash" in rows[1]["controller_leftovers"]
+    driver.reset_controller()
+    assert _git(repo, "for-each-ref", "--format=%(refname)").split() == [_git(repo, "symbolic-ref", "HEAD").strip()]
+    assert _git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip() == ""
+    assert _git(repo, "rev-parse", "HEAD").strip() == pin
 
 
 def test_controller_reset_failure_voids_the_row(manifest, tmp_path):
@@ -1015,7 +1047,7 @@ def test_controller_reset_failure_voids_the_row(manifest, tmp_path):
     gateway = FakeGateway()
     client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
     driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
-                                         controller_repo=repo, controller_pin="0" * 40)
+                                         controller_repo=repo, controller_pin="0" * 40, measurement_root=tmp_path)
     row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
     assert row["infra"] is True and row["void_reason"] == "CONTROLLER_RESET_MISMATCH" and gateway.calls == []
 
@@ -1076,10 +1108,16 @@ def test_gateway_env_is_read_without_running_start_sh(tmp_path, monkeypatch):
         f"touch {marker}\n"
         "export NEXUS_MEASUREMENT_CLAUDE_WORKER=1 NEXUS_MEASURE_DIR_SCOPE=1\n"
         "exec python -m gateway --port 18766\nexport AFTER_EXEC=1\n")
-    env: dict[str, str] = {}
-    names = gateway_env.apply_gateway_env(start, env)
+    start.write_text(start.read_text().replace(
+        "set -euo pipefail\n", "set -euo pipefail\nexport PATH=/evil/bin GIT_DIR=/evil ANTHROPIC_API_KEY=nope\n"))
+    monkeypatch.delenv("NEXUS_MEASUREMENT_READ_ROOTS", raising=False)
+    before = dict(os.environ)
+    names = gateway_env.use_gateway_env(start)
+    env = gateway_env.measurement_env()
+    assert dict(os.environ) == before  # the harness's own env (and its git) is untouched (M2)
+    assert names == ["NEXUS_MEASUREMENT_CLAUDE_WORKER", "NEXUS_MEASUREMENT_READ_ROOTS", "NEXUS_MEASURE_DIR_SCOPE"]
     assert env["NEXUS_MEASUREMENT_READ_ROOTS"] == "/m/nexus-measure-2721/venvs:/m/nexus-measure-2721/py"
-    assert env["NEXUS_MEASUREMENT_CLAUDE_WORKER"] == "1" and "AFTER_EXEC" not in names and not marker.exists()
+    assert "PATH" not in env and "GIT_DIR" not in env and "ANTHROPIC_API_KEY" not in env and not marker.exists()
     assert gateway_env.require_read_roots(env) == ["/m/nexus-measure-2721/venvs", "/m/nexus-measure-2721/py"]
     with pytest.raises(gateway_env.GatewayEnvError):
         gateway_env.require_read_roots({"NEXUS_MEASUREMENT_READ_ROOTS": ""})
@@ -1098,3 +1136,37 @@ def test_driver_refuses_to_start_without_read_roots(manifest, tmp_path, monkeypa
                             "--scope-id", "s", "--trace-dir", str(tmp_path / "t"),
                             "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
     assert rc == 2 and "READ_ROOTS_EMPTY" in capsys.readouterr().out
+
+
+def test_controller_repo_must_be_a_measurement_checkout(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    main_clone = home / "workspace" / "Nexus-new"
+    (main_clone / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    with pytest.raises(ValueError, match="MAIN_CLONE"):
+        nexus_driver.guard_controller_repo(main_clone, [home / "workspace"])
+    outside = tmp_path / "elsewhere" / "ctl"
+    (outside / ".git").mkdir(parents=True)
+    with pytest.raises(ValueError, match="OUTSIDE_MEASUREMENT_ROOT"):
+        nexus_driver.guard_controller_repo(outside, [tmp_path / "measure"])
+    inside = tmp_path / "measure" / "ctl"
+    (inside / ".git").mkdir(parents=True)
+    assert nexus_driver.guard_controller_repo(inside, [tmp_path / "measure"]) == Path(os.path.realpath(inside))
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=FakeGateway())
+    with pytest.raises(ValueError, match="go together"):
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", controller_repo=inside,
+                                    measurement_root=tmp_path / "measure")
+    with pytest.raises(nexus_driver.LiveGatewayRefused):
+        nexus_driver.GatewayClient("http://127.0.0.1:8766", "t", transport=FakeGateway())
+
+
+def test_rows_carry_the_read_roots_hash_and_arms_must_agree(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    bare = arms.run_bare(task, 1, run, FakeProvider(), timeout_seconds=5)
+    nexus = _driver(FakeGateway()).run(task, 1, run, timeout_seconds=5)
+    assert bare["read_roots_sha256"] == nexus["read_roots_sha256"]
+    tasks = {task["task_id"]: task}
+    other = dict(nexus, read_roots_sha256="0" * 16)
+    with pytest.raises(RuntimeError, match="READ_ROOTS_DIFFER_ACROSS_ARMS"):
+        blind.blind([bare, other], tmp_path / "blind", tmp_path / "map.json", tasks)

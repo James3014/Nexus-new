@@ -64,6 +64,11 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
     mapping: dict[str, Any] = {}
     excluded: list[dict[str, Any]] = []
     used: set[str] = set()
+    rows = list(rows)
+    hashes = {row["read_roots_sha256"] for row in rows if row.get("read_roots_sha256")}
+    if len(hashes) > 1:
+        # Every arm must have run with the Gateway's own READ_ROOTS (L2).
+        raise RuntimeError(f"READ_ROOTS_DIFFER_ACROSS_ARMS: {sorted(hashes)}")
     for row in rows:
         if (
             row.get("infra")

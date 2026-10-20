@@ -337,11 +337,13 @@ class ClaudeProvider:
             MEASUREMENT_READ_ROOTS_ENV,
             MEASUREMENT_TRACE_DIR_ENV,
         )
+        from scripts.bench.measure_2721.gateway_env import measurement_env
 
+        measured = measurement_env()  # the Gateway's whitelisted settings (os.environ is never edited)
         env = {key: value for key, value in os.environ.items() if key in ("USER", "LOGNAME", "LANG")}
         for passthrough in ("NEXUS_MEASUREMENT_CLAUDE_TIMEOUT_SECONDS", "NEXUS_MEASUREMENT_KEY_LABEL"):
-            if os.environ.get(passthrough):
-                env[passthrough] = os.environ[passthrough]
+            if measured.get(passthrough):
+                env[passthrough] = measured[passthrough]
         if measurement_root is not None:
             # The BARE run's own fresh Controller is its measurement root (H2').
             env["NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"] = str(Path(measurement_root).resolve())
@@ -349,8 +351,8 @@ class ClaudeProvider:
                     MEASUREMENT_TRACE_DIR_ENV: str(self.trace_dir)})
         if self.key_file:
             env[MEASUREMENT_ANTHROPIC_ENV_FILE_ENV] = self.key_file
-        if os.environ.get(MEASUREMENT_READ_ROOTS_ENV):
-            env[MEASUREMENT_READ_ROOTS_ENV] = os.environ[MEASUREMENT_READ_ROOTS_ENV]
+        if measured.get(MEASUREMENT_READ_ROOTS_ENV):
+            env[MEASUREMENT_READ_ROOTS_ENV] = measured[MEASUREMENT_READ_ROOTS_ENV]
         return env
 
     def run(self, *, prompt: str, workdir: Path, timeout_seconds: float, run_id: str,
