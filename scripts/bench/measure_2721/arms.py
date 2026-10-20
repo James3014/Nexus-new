@@ -392,11 +392,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--gateway-env",
+                        help="the Gateway's start.sh or env file, so BARE runs with the same READ_ROOTS")
     parser.add_argument("--max-row-usd", type=float, default=3.0,
                         help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
     parser.add_argument("--spend-ledger", required=True,
                         help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     args = parser.parse_args(argv)
+    from scripts.bench.measure_2721.gateway_env import (
+        GatewayEnvError,
+        apply_gateway_env,
+        require_read_roots,
+    )
+
+    if args.gateway_env:
+        apply_gateway_env(args.gateway_env)
+    if args.arm == "bare" and args.provider == "claude":
+        try:
+            require_read_roots()  # same READ_ROOTS as the Gateway, or every row would be void
+        except GatewayEnvError as exc:
+            print(json.dumps({"stopped": "READ_ROOTS_EMPTY", "detail": str(exc)}))
+            return 2
     run_root = Path(args.run_root)
     tasks = load_manifest(args.manifest, args.ids)
     provider = (

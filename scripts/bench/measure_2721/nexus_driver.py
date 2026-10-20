@@ -62,6 +62,15 @@ OUTCOME_DONE = "OK"
 _INFRA_MARKERS = ("agy_pool_busy", "AGY_POOL_BUSY", "POOL_EXHAUSTED", "agy_pool_exhausted",
                   "credentials_unavailable", "MODEL_PROBE_REQUIRED", "claude_infra:",
                   "MEASUREMENT_CLAUDE_PROBE_FAILED", "MEASUREMENT_CLAUDE_BINARY_UNAVAILABLE")
+CANCEL_RETRY_STATUSES = frozenset({"PENDING_HUMAN_APPROVAL"})
+CANCEL_REFUSED_MARKERS = ("CANDIDATE_REF_PROTECTED", "PENDING_HUMAN_APPROVAL")
+
+
+def _cancel_refused(payload: Any) -> bool:
+    text = json.dumps(payload, default=str)
+    return any(marker in text for marker in CANCEL_REFUSED_MARKERS)
+
+
 TERMINAL_STATUSES = frozenset({"CANCELLED", "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "INTEGRATED",
                                "INTEGRATION_FAILED", "RETAINED_FOR_REVIEW", "FAILED", "TERMINAL"})
 
@@ -282,8 +291,14 @@ class NexusArmDriver:
                  poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep,
                  targets_root: Optional[Path] = None, state_root: Optional[Path] = None,
                  state_snapshot: Optional[Path] = None, learning_phase: Optional[str] = None,
-                 key_file: Optional[str] = None):
+                 key_file: Optional[str] = None, controller_repo: Optional[Path] = None,
+                 controller_pin: Optional[str] = None, cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0)):
         self.client = client
+        # The Gateway's own Controller checkout: reset to its pin before every
+        # row (each row adds a card commit), and the source of expected_head.
+        self.controller_repo = controller_repo
+        self.controller_pin = controller_pin
+        self.cancel_backoff = tuple(cancel_backoff)
         self.campaign_id = campaign_id
         self.goal_id = goal_id
         self.scope_id = scope_id
@@ -425,8 +440,14 @@ class NexusArmDriver:
         row["learning_phase"] = self.learning_phase
         watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=self.arm_label,
                            cap_s=timeout_seconds)
+        reset = self.reset_controller()
         leak_before = leak_surfaces(self.controller_git) if self.controller_git is not None else None
         try:
+            if reset is not None:
+                row["controller_reset"] = reset
+                if not reset["ok"]:
+                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="CONTROLLER_RESET_MISMATCH")
+                    return row
             if self.state_root is not None and self.state_snapshot is not None:
                 restore = restore_state_root(self.state_root, self.state_snapshot)
                 row["state_restore"] = restore
@@ -453,7 +474,7 @@ class NexusArmDriver:
             transcript.append({"tool": "nexus_task_card_create", "result": card})
             commit = self.client.call("nexus_task_card_commit", {
                 "owner_confirmation": True, "campaign_id": self.campaign_id, "task_id": gw_task,
-                "expected_head": health.get("repo_head_current") or health.get("git_head"),
+                "expected_head": self.controller_head(health),
                 "card_hash": card["card_hash"], "index_hash": card["index_hash"],
                 "authority_goal_id": self.goal_id, "authority_coordination_scope_id": self.scope_id,
             })
@@ -479,11 +500,13 @@ class NexusArmDriver:
             stuck = None
             if created:
                 try:
-                    transcript.append({"tool": "nexus_task_cancel",
-                                       "result": self.client.call("nexus_task_cancel", {"task_id": gw_task})})
+                    cancelled = self.client.call("nexus_task_cancel", {"task_id": gw_task})
+                    transcript.append({"tool": "nexus_task_cancel", "result": cancelled})
+                    refused = _cancel_refused(cancelled)
                 except GatewayToolError as exc:
                     transcript.append({"tool": "nexus_task_cancel", "error": exc.payload})
-                stuck = self._await_terminal(gw_task, transcript)
+                    refused = _cancel_refused(exc.payload)
+                stuck = self._await_terminal(gw_task, transcript, cancel_refused=refused)
                 if stuck is not None:
                     row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
             if leak_before is not None and self.controller_git is not None:
@@ -515,9 +538,16 @@ class NexusArmDriver:
             raise GatewayStuck(f"{gw_task}: {stuck}")
         return row
 
-    def _await_terminal(self, gw_task: str, transcript: list[dict[str, Any]], *, attempts: int = 12) -> Optional[str]:
-        """None once the task is terminal (lease released), else the last status (gap F7)."""
+    def _await_terminal(self, gw_task: str, transcript: list[dict[str, Any]], *, attempts: int = 12,
+                        cancel_refused: bool = False) -> Optional[str]:
+        """None once the task is terminal (lease released), else the last status (gap F7).
+
+        A cancel is refused while the worker is finishing (CANDIDATE_REF_PROTECTED)
+        and the task then waits in PENDING_HUMAN_APPROVAL: the cancel is retried
+        with backoff, and the row is stuck only after ``attempts`` polls.
+        """
         status = ""
+        retries = 0
         for _ in range(attempts):
             try:
                 snapshot = self.client.call("nexus_task_status", {"task_id": gw_task})
@@ -526,8 +556,18 @@ class NexusArmDriver:
             status = str(snapshot.get("status") or "")
             if status in TERMINAL_STATUSES:
                 return None
-            self.sleep(10.0)
-        transcript.append({"tool": "nexus_task_status", "stuck_status": status})
+            backoff = self.cancel_backoff[min(retries, len(self.cancel_backoff) - 1)] if self.cancel_backoff else 10.0
+            self.sleep(backoff)
+            if cancel_refused or status in CANCEL_RETRY_STATUSES:
+                retries += 1
+                try:
+                    cancelled = self.client.call("nexus_task_cancel", {"task_id": gw_task})
+                    transcript.append({"tool": "nexus_task_cancel", "retry": retries, "result": cancelled})
+                    cancel_refused = _cancel_refused(cancelled)
+                except GatewayToolError as exc:
+                    transcript.append({"tool": "nexus_task_cancel", "retry": retries, "error": exc.payload})
+                    cancel_refused = _cancel_refused(exc.payload)
+        transcript.append({"tool": "nexus_task_status", "stuck_status": status, "cancel_retries": retries})
         return status or "unknown"
 
     def _submit_worker(self, args: Mapping[str, Any], transcript: list[dict[str, Any]]) -> dict[str, Any]:
@@ -570,6 +610,33 @@ class NexusArmDriver:
             return {}
         path = self.state_dir / f"{gw_task}.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def reset_controller(self) -> Optional[dict[str, Any]]:
+        """Reset the Gateway Controller to its pin and verify it (gap item 4).
+
+        Every row adds one Task Card commit to the Controller; without the
+        reset the next row's card commit fails TASK_CARD_COMMIT_HEAD_MISMATCH
+        and rows would not start from the same Controller state.
+        """
+        if self.controller_pin is None:
+            return None
+        if self.controller_repo is None:
+            return {"ok": False, "error": "controller pin given without a controller repo"}
+        repo = self.controller_repo
+        try:
+            git(repo, "reset", "-q", "--hard", self.controller_pin)
+            head = git(repo, "rev-parse", "HEAD").strip()
+            pin = git(repo, "rev-parse", f"{self.controller_pin}^{{commit}}").strip()
+            dirty = git(repo, "status", "--porcelain", "--untracked-files=no").strip()
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc)[-300:]}
+        return {"ok": head == pin and not dirty, "head": head, "pin": pin, "dirty": bool(dirty)}
+
+    def controller_head(self, health: Mapping[str, Any]) -> Optional[str]:
+        """expected_head for the card commit: the Controller's own HEAD."""
+        if self.controller_repo is not None:
+            return git(self.controller_repo, "rev-parse", "HEAD").strip()
+        return health.get("repo_head_current") or health.get("git_head")
 
     def _trace_runs(self, gw_task: str) -> list[Path]:
         if self.trace_dir is None or not (self.trace_dir / gw_task).is_dir():
@@ -763,7 +830,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, nargs="+", default=[1])
     parser.add_argument("--ids", nargs="*")
     parser.add_argument("--timeout", type=float, default=900.0)
+    parser.add_argument("--gateway-env", required=True,
+                        help="the Gateway's start.sh or env file (assignments only, never executed)")
+    parser.add_argument("--controller-repo", help="the Gateway's Controller checkout (expected_head source)")
+    parser.add_argument("--controller-pin", help="commit the Controller is reset to before every row")
     args = parser.parse_args(argv)
+    from scripts.bench.measure_2721.gateway_env import (
+        GatewayEnvError,
+        apply_gateway_env,
+        require_read_roots,
+    )
+
+    apply_gateway_env(args.gateway_env)
+    try:
+        require_read_roots()
+    except GatewayEnvError as exc:
+        print(json.dumps({"stopped": "READ_ROOTS_EMPTY", "detail": str(exc)}))
+        return 2
+    if args.controller_pin and not args.controller_repo:
+        parser.error("--controller-pin needs --controller-repo")
     client = GatewayClient(args.gateway_url, read_token(args.token_file))
     driver = NexusArmDriver(
         client, campaign_id=args.campaign_id, goal_id=args.goal_id, scope_id=args.scope_id,
@@ -777,6 +862,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         state_snapshot=Path(args.state_snapshot) if args.state_snapshot else None,
         learning_phase=args.learning_phase,
         key_file=args.key_file,
+        controller_repo=Path(args.controller_repo) if args.controller_repo else None,
+        controller_pin=args.controller_pin,
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 

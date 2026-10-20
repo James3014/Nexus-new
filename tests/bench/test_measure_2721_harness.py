@@ -961,3 +961,140 @@ def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path
     # The interpreter that ran is the task venv itself (review L2).
     assert probe["import_encodings"]["tail"].strip().splitlines()[-1] == str(venv), probe
     assert probe["pytest_collect"]["rc"] == 0, probe
+
+
+# -- 35 smoke findings: Controller pin, cancel retry, Gateway env ----------------
+
+
+def _controller(tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "controller"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "index.md").write_text("pin\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "pin")
+    return repo, _git(repo, "rev-parse", "HEAD").strip()
+
+
+class _CardCommitGateway(FakeGateway):
+    """Commits a Task Card to the Controller like P1 does, and checks expected_head."""
+
+    def __init__(self, repo: Path, **kw):
+        super().__init__(**kw)
+        self.repo = repo
+        self.expected: list[str] = []
+
+    def _answer(self, name, args):
+        if name == "nexus_task_card_commit":
+            self.expected.append(args["expected_head"])
+            if args["expected_head"] != _git(self.repo, "rev-parse", "HEAD").strip():
+                return {"status": "BLOCKED", "error": "TASK_CARD_COMMIT_HEAD_MISMATCH"}
+            (self.repo / "tasks" / f"{args['task_id']}.md").write_text("card\n")
+            _git(self.repo, "add", "-A")
+            _git(self.repo, "commit", "-qm", f"card {args['task_id']}")
+        return super()._answer(name, args)
+
+
+def test_controller_is_reset_to_its_pin_before_every_row(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    repo, pin = _controller(tmp_path)
+    gateway = _CardCommitGateway(repo)
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                         controller_repo=repo, controller_pin=pin)
+    rows = [driver.run(task, repeat, tmp_path / "run", timeout_seconds=5) for repeat in (1, 2)]
+    assert gateway.expected == [pin, pin]  # read from the Controller itself, not /health
+    assert all(r["controller_reset"]["ok"] and r["outcome"] == "OK" for r in rows), rows
+    assert _git(repo, "rev-list", "--count", "HEAD").strip() == "2"  # pin + this row's card only
+
+
+def test_controller_reset_failure_voids_the_row(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    repo, _pin = _controller(tmp_path)
+    gateway = FakeGateway()
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                         controller_repo=repo, controller_pin="0" * 40)
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] is True and row["void_reason"] == "CONTROLLER_RESET_MISMATCH" and gateway.calls == []
+
+
+class _FinishingGateway(FakeGateway):
+    """Refuses cancel while the worker finishes; the task waits for approval meanwhile."""
+
+    def __init__(self, refusals: int, **kw):
+        super().__init__(**kw)
+        self.refusals = refusals
+        self.cancelled = False
+
+    def _is_error(self, name: str) -> bool:
+        if name == "nexus_task_cancel" and self.refusals > 0:
+            return True
+        return super()._is_error(name)
+
+    def _answer(self, name, args):
+        if name == "nexus_task_cancel":
+            if self.refusals > 0:
+                self.refusals -= 1
+                return {"error": "CANDIDATE_REF_PROTECTED"}
+            self.cancelled = True
+        payload = super()._answer(name, args)
+        if name == "nexus_task_status" and any(c["tool"] == "nexus_task_cancel" for c in self.calls):
+            payload["status"] = "CANCELLED" if self.cancelled else "PENDING_HUMAN_APPROVAL"
+        return payload
+
+
+def test_refused_cancel_is_retried_with_backoff(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = _FinishingGateway(refusals=2)
+    sleeps: list[float] = []
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=sleeps.append)
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert not row.get("gateway_stuck") and row["outcome"] == "OK", row
+    assert [c["tool"] for c in gateway.calls].count("nexus_task_cancel") == 3
+    assert sleeps[:2] == [10.0, 20.0]  # backoff grows between retries
+
+
+def test_cancel_that_is_never_accepted_is_stuck_after_a_bounded_number_of_tries(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = _FinishingGateway(refusals=10_000)
+    with pytest.raises(nexus_driver.GatewayStuck):
+        _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert [c["tool"] for c in gateway.calls].count("nexus_task_cancel") <= 13
+
+
+def test_gateway_env_is_read_without_running_start_sh(tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import gateway_env
+
+    marker = tmp_path / "ran"
+    start = tmp_path / "start.sh"
+    start.write_text(
+        "#!/bin/bash\nset -euo pipefail\nROOT=/m/nexus-measure-2721\n"
+        "export NEXUS_MEASUREMENT_READ_ROOTS=\"${ROOT}/venvs:${ROOT}/py\"\n"
+        f"touch {marker}\n"
+        "export NEXUS_MEASUREMENT_CLAUDE_WORKER=1 NEXUS_MEASURE_DIR_SCOPE=1\n"
+        "exec python -m gateway --port 18766\nexport AFTER_EXEC=1\n")
+    env: dict[str, str] = {}
+    names = gateway_env.apply_gateway_env(start, env)
+    assert env["NEXUS_MEASUREMENT_READ_ROOTS"] == "/m/nexus-measure-2721/venvs:/m/nexus-measure-2721/py"
+    assert env["NEXUS_MEASUREMENT_CLAUDE_WORKER"] == "1" and "AFTER_EXEC" not in names and not marker.exists()
+    assert gateway_env.require_read_roots(env) == ["/m/nexus-measure-2721/venvs", "/m/nexus-measure-2721/py"]
+    with pytest.raises(gateway_env.GatewayEnvError):
+        gateway_env.require_read_roots({"NEXUS_MEASUREMENT_READ_ROOTS": ""})
+
+
+def test_driver_refuses_to_start_without_read_roots(manifest, tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("NEXUS_MEASUREMENT_READ_ROOTS", raising=False)
+    monkeypatch.setenv("NEXUS_MEASUREMENT_CLAUDE_WORKER", "0")  # restored after the test
+    env_file = tmp_path / "gateway.env"
+    env_file.write_text("NEXUS_MEASUREMENT_CLAUDE_WORKER=1\n")
+    token = tmp_path / "tok"
+    token.write_text("NEXUS_MCP_GATEWAY_TOKEN=t\n")
+    token.chmod(0o600)
+    rc = nexus_driver.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
+                            "--gateway-url", "http://127.0.0.1:18766", "--token-file", str(token),
+                            "--scope-id", "s", "--trace-dir", str(tmp_path / "t"),
+                            "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
+    assert rc == 2 and "READ_ROOTS_EMPTY" in capsys.readouterr().out
