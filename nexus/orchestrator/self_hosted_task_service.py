@@ -123,6 +123,7 @@ from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,  # noqa: F401 - facade surface, used by parts/task_build.py
     AttemptResolutionVerdict,  # noqa: F401 - facade surface, late-bound by parts/finalize_runtime.py
     WorkerExecutionReceipt,  # noqa: F401 - facade surface, late-bound by parts/task_build.py
+    enabled_measurement_worker_providers,  # noqa: F401 - facade surface, used by parts/task_build.py
     resolve_attempt,  # noqa: F401 - facade surface, late-bound by parts/finalize_runtime.py
 )
 from nexus.executors.worker_registry import WorkerRegistry

@@ -34,6 +34,18 @@ import json
 from typing import Any, Mapping, Optional
 
 
+def _assert_measurement_dispatch(provider: str, model: str) -> None:
+    from nexus.services.measurement_workforce_policy import assert_measurement_dispatch
+
+    assert_measurement_dispatch(provider, model)
+
+
+def _measurement_policy_loader() -> Any:
+    from nexus.services.measurement_workforce_policy import measurement_workforce_policy_loader
+
+    return measurement_workforce_policy_loader()
+
+
 def _service_module():
     # Late binding: the service imports this module at its top level, so its own
     # (and its patched) names are only resolved once a helper runs.
@@ -171,7 +183,8 @@ def validate_workforce_dispatch_binding(
         fresh = _service_module().evaluate_runtime_workforce_admission(
             demands,
             {channel: binding},
-            _service_module().WorkforcePolicyLoader(),
+            # #2721: the measurement policy when its switch is on, else the packaged one.
+            _measurement_policy_loader() or _service_module().WorkforcePolicyLoader(),
         ).to_dict()
         if not _service_module()._workforce_admission_readback_matches(admission, fresh):
             raise ValueError("workforce admission receipt is stale or tampered")
@@ -195,6 +208,8 @@ def validate_workforce_dispatch_binding(
             "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"
         )):
             raise ValueError("workforce admission resolved identity missing")
+        # #2721: on a measurement Gateway the readback must also be the measurement model.
+        _assert_measurement_dispatch(str(binding["provider"]), str(binding["model"]))
     except (TypeError, ValueError, KeyError) as exc:
         raise RuntimeError(f"WORKFORCE_ADMISSION_BINDING_INVALID:{exc}") from exc
     fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
