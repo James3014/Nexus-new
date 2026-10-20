@@ -828,3 +828,16 @@ def test_two_sided_possible_evasion_gives_no_with_report(env):
     rep = _analyze(env, outcome)
     assert rep["drops"]["possible_evasion_by_arm"] == {"NEXUS": 1, "BARE": 1}
     assert rep["primary_with_possible_evasion_groups"] is None
+
+
+def test_incomplete_group_rows_are_never_counted(env):
+    # NEXUS solves everything; its repeat-2 row sits in an incomplete group (BARE excluded as infra)
+    rep = _analyze(env, simple, n_tasks=1, drop={("pkg-100", 2, "BARE")}, excluded=[("pkg-100", 2, "BARE", True)])
+    rows = rows_of(env["tmp"] / "arch")
+    inc = [r for r in rows.values() if r["group_status"] == "DROPPED_INCOMPLETE_GROUP"]
+    assert len(inc) == 2 and all(r["counted"] is False and r["solved"] is None for r in inc)
+    assert rep["arms"]["NEXUS"] == {**rep["arms"]["NEXUS"], "rows": 3, "counted": 2, "solved": 2, "dropped": 1}
+    assert rep["arms"]["NOOP"]["counted"] == 2 and rep["arms"]["BARE"]["counted"] == 2
+    p = rep["primary"]
+    assert p["tasks"] == 1 and p["solve_rate_pooled_rows"]["NEXUS"] == 1.0
+    assert p["broke_existing_rate"]["NEXUS"] == 0.0
