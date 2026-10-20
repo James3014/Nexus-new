@@ -2998,3 +2998,22 @@ def test_gateway_task_id_fits_the_gateway_bound_and_stays_unique():
         assert _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", gw)
     short = arms.new_run_id("NEXUS", "pkg-100", 1)
     assert nexus_driver.gateway_task_id(short) == short  # short ids unchanged
+
+
+def test_pytest_temp_dirs_are_dropped_from_a_captured_diff_in_every_arm():
+    """35, formal M-main2: pytest's basetemp (pytest-of-<user>/..., pytest-current) landed in
+    a NEXUS Target worktree and in its diff, with a .env file; tool output, not an edit."""
+    from scripts.bench.measure_2721.leakage import drop_tool_artifacts
+
+    edit = "diff --git a/src/pkg/mod.py b/src/pkg/mod.py\n--- a/src/pkg/mod.py\n+++ b/src/pkg/mod.py\n@@ -1 +1 @@\n-a\n+b\n"
+    junk = ("diff --git a/pytest-of-someone/pytest-0/test_x0/.env b/pytest-of-someone/pytest-0/test_x0/.env\n"
+            "new file mode 100644\n--- /dev/null\n+++ b/pytest-of-someone/pytest-0/test_x0/.env\n@@ -0,0 +1 @@\n+K=v\n"
+            "diff --git a/pytest-current b/pytest-current\nnew file mode 120000\n--- /dev/null\n"
+            "+++ b/pytest-current\n@@ -0,0 +1 @@\n+pytest-of-someone/pytest-0\n\\ No newline at end of file\n")
+    diff, removed = drop_tool_artifacts(edit + junk)
+    assert diff == edit
+    assert removed == ["pytest-of-someone/pytest-0/test_x0/.env", "pytest-current"]
+    # Nothing else is touched: a real path that only looks alike stays.
+    lookalike = edit.replace("src/pkg/mod.py", "src/pytest-of-docs.py")
+    assert drop_tool_artifacts(lookalike) == (lookalike, [])
+    assert drop_tool_artifacts("") == ("", [])

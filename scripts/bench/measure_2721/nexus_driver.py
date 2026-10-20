@@ -66,7 +66,7 @@ from scripts.bench.measure_2721.common import (
     write_json,
 )
 from scripts.bench.measure_2721.gateway_env import measurement_env, read_roots_sha256
-from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, lookup_signals
+from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, drop_tool_artifacts, lookup_signals
 from scripts.bench.measure_2721.portable import to_portable_row
 
 LIVE_GATEWAY_PORT = 8766
@@ -841,6 +841,7 @@ class NexusArmDriver:
             if event is not None:
                 set_fact(row, "watchdog_event", True)
                 row["watchdog_event"] = event
+            diff, row["tool_artifact_paths"] = drop_tool_artifacts(diff)
             diff, redacted = redact_diff(diff, self.key_file)
             if redacted:
                 row.setdefault("flags", []).append(FLAG_SECRET_IN_DIFF)

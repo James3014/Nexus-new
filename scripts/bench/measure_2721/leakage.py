@@ -93,6 +93,28 @@ def strip_out_of_scope(diff: str, scope: Iterable[str]) -> tuple[str, list[str]]
     return "".join(kept), removed
 
 
+# pytest's temporary base (``pytest-of-<user>/``, ``pytest-current``) when a run falls back
+# to the working directory for its temp dir: tool output, never a candidate edit.
+_TOOL_ARTIFACT_RE = re.compile(r"^(pytest-of-[^/]+(/|$)|pytest-current(/|$))")
+
+
+def drop_tool_artifacts(diff: str) -> tuple[str, list[str]]:
+    """Remove pytest temp-dir file blocks from a captured diff, the same in every arm
+    (35, formal M-main2: a NEXUS row carried pytest-of-<user>/... with a .env file).
+    Returns the diff and the removed paths (recorded on the row, never scorer-visible)."""
+    kept: list[str] = []
+    removed: list[str] = []
+    for path, block in split_file_blocks(diff):
+        old = _FILE_BLOCK_RE.match(block.splitlines()[0]).group(1)  # type: ignore[union-attr]
+        if _TOOL_ARTIFACT_RE.match(path) and _TOOL_ARTIFACT_RE.match(old):
+            removed.append(path)
+        else:
+            kept.append(block)
+    if not removed:
+        return diff, []
+    return "".join(kept), removed
+
+
 def filter_candidate(diff: str, scope: Iterable[str]) -> dict[str, Any]:
     """Pre-registered order (both arms): tamper check -> test blocks -> scope.
 

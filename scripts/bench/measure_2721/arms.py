@@ -32,7 +32,7 @@ from scripts.bench.measure_2721.common import (
     sha256_text,
     write_json,
 )
-from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
+from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, drop_tool_artifacts, lookup_signals
 from scripts.bench.measure_2721.materialize import checkout_base, link_venv
 from scripts.bench.measure_2721.portable import to_portable_row
 from scripts.bench.measure_2721.providers import (
@@ -304,6 +304,7 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     tampered = git_meta_fingerprint(controller, workdir) != git_meta
     # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
     diff = "" if tampered else capture_diff(workdir, task["base_commit"])
+    diff, tool_artifacts = drop_tool_artifacts(diff)
     diff, redacted = redact_diff(diff, getattr(provider, "key_file", None))
     watchdog.mark_snapshot(run_root)
     diff_path = run_root / "diffs" / f"{run_id}.diff"
@@ -355,6 +356,7 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
         "model_calls": result.model_calls,
         "total_tokens": result.total_tokens,
         "diff_path": str(diff_path),
+        "tool_artifact_paths": tool_artifacts,
         "non_model_solve_path": non_model_solve(diff, claude_row_fields(extra)),
         **candidate_facts(diff, task),
     }
