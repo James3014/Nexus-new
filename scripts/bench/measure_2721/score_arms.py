@@ -950,6 +950,12 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
                       "flagged_but_stripped_remainder_resolved": sum(r["diagnostic_stripped_resolved"] for r in kept),
                       "dropped": sum(not r["counted"] for r in rs)}
     void = []
+    if amap.get("noop_nonempty_diff"):
+        # PREREG v0.9.7: a non-empty diff in any NOOP / NEXUS_NOOP row (any attempt, any
+        # block) voids the run without scoring.
+        void.append({"reason": "NOOP_NONEMPTY_DIFF: the run is void; stop and investigate",
+                     "rows": [{k: e.get(k) for k in ("arm", "run_id", "diff_sha256")}
+                              for e in amap["noop_nonempty_diff"]]})
     if noop:
         # S3: any RESOLVED in any round of any NOOP row (counted, dropped or incomplete).
         noop_resolved = [r["opaque_id"] for r in rows if r["arm"] == noop and (

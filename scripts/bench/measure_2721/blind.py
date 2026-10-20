@@ -127,9 +127,31 @@ def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
                               capture_output=True).returncode == 0
 
 
+NOOP_ARMS = ("NOOP", "NEXUS_NOOP")
+
+
+def noop_nonempty_diff(row: Mapping[str, Any], run_root: Path | str | None = None) -> dict[str, Any] | None:
+    """The record when a NOOP / NEXUS_NOOP row has a non-empty diff, else None.
+
+    Both no-model arms must leave the tree untouched by design, so a non-empty diff
+    in ANY of their rows (counted, excluded, superseded or incomplete) voids the run
+    without scoring (PREREG v0.9.7, layer1-rie 2026-10-20).
+    """
+    if row.get("arm") not in NOOP_ARMS:
+        return None
+    diff_path = row.get("diff_path")
+    text = read_diff(Path(diff_path)) if diff_path and Path(diff_path).is_file() else ""
+    if not text.strip() and row.get("empty") is not False:
+        return None
+    return {"arm": row.get("arm"), "run_id": row.get("run_id"), "task_id": row.get("task_id"),
+            "repeat": row.get("repeat"), "diff_sha256": sha256_text(text) if text else row.get("diff_sha256"),
+            "run_root": str(run_root) if run_root is not None else None}
+
+
 def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
           tasks: Mapping[str, Mapping[str, Any]], dropped: Sequence[Mapping[str, Any]] = (),
-          block_excluded: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+          block_excluded: Sequence[Mapping[str, Any]] = (),
+          noop_nonempty: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     mapping: dict[str, Any] = {}
     # Exclusions the runner decided per block (EXCLUDED_AFTER_RERUNS, a late watchdog event).
@@ -202,8 +224,10 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
     write_jsonl(out / "candidates.jsonl", candidates)
     candidates_sha = hashlib.sha256((out / "candidates.jsonl").read_bytes()).hexdigest()
     write_json(arm_map_path, {"schema": BLIND_SCHEMA, "candidates_jsonl_sha256": candidates_sha,
-                              "map": mapping, "excluded": excluded, "dropped": list(dropped)}, mode=0o600)
-    return {"candidates": len(candidates), "excluded": len(excluded), "candidates_jsonl_sha256": candidates_sha}
+                              "map": mapping, "excluded": excluded, "dropped": list(dropped),
+                              "noop_nonempty_diff": list(noop_nonempty)}, mode=0o600)
+    return {"candidates": len(candidates), "excluded": len(excluded), "candidates_jsonl_sha256": candidates_sha,
+            "noop_nonempty_diff": len(noop_nonempty)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -219,10 +243,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     from scripts.bench.measure_2721 import watchdog
     from scripts.bench.measure_2721.runner import block_outcomes
 
-    rows, dropped, block_excluded = [], [], []
+    rows, dropped, block_excluded, noop_nonempty = [], [], [], []
     for root in args.run_roots:
         outcome = block_outcomes(Path(root))
         root_rows = list(read_jsonl(Path(root) / "rows.jsonl"))
+        # Every NOOP / NEXUS_NOOP row of the run root, whether it counts or not.
+        noop_nonempty += [hit for hit in (noop_nonempty_diff(r, root) for r in root_rows) if hit]
         for block in (outcome or {}).get("excluded_blocks", ()):
             # Every arm of an excluded block, with a row or without one (an arm that
             # crashed): the scorer must see why the task/repeat is missing.
@@ -249,7 +275,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             rows.append(row)
     tasks = {task["task_id"]: task for task in read_jsonl(args.manifest)}
-    print(json.dumps(blind(rows, out, arm_map, tasks, dropped, block_excluded)))
+    if noop_nonempty:
+        print(f"VOID: {len(noop_nonempty)} NOOP/NEXUS_NOOP row(s) with a non-empty diff (see the arm map)",
+              file=sys.stderr)
+    print(json.dumps(blind(rows, out, arm_map, tasks, dropped, block_excluded, noop_nonempty)))
     return 0
 
 

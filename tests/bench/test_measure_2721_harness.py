@@ -2837,3 +2837,28 @@ def test_late_watchdog_event_on_a_counted_row_excludes_it(manifest, tmp_path, mo
     amap = json.loads(amap_path.read_text())
     assert [(e["arm"], e["reason"]) for e in amap["excluded"]] == [("NEXUS", "WATCHDOG_EVENT_LATE")]
     assert sorted(m["arm"] for m in amap["map"].values()) == ["BARE", "NOOP"]
+
+
+@pytest.mark.parametrize("arm", ["NOOP", "NEXUS_NOOP"])
+def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
+    """PREREG v0.9.7 (layer1-rie): any NOOP / NEXUS_NOOP row with a non-empty diff --
+    here in a superseded attempt of an excluded block -- is listed in the arm map."""
+    run = tmp_path / "run"
+    _excluded_block_run(run)
+    rows = list(read_jsonl(run / "rows.jsonl"))
+    diff = run / "diffs" / "x.diff"
+    diff.parent.mkdir()
+    diff.write_text("diff --git a/x.py b/x.py\n+edit\n")
+    rows.append({"arm": arm, "run_id": f"{arm}-extra", "task_id": "pkg-100", "repeat": 1, "infra": False,
+                 "diff_path": str(diff)})
+    rows.append({"arm": arm, "run_id": f"{arm}-clean", "task_id": "pkg-100", "repeat": 1, "infra": False,
+                 "empty": True})
+    (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text("")
+    amap_path = tmp_path / "custody" / "map.json"
+    blind.main(["--run-roots", str(run), "--out", str(tmp_path / "blind"), "--arm-map", str(amap_path),
+                "--manifest", str(manifest)])
+    hits = json.loads(amap_path.read_text())["noop_nonempty_diff"]
+    assert [(h["arm"], h["run_id"]) for h in hits] == [(arm, f"{arm}-extra")]
+    assert hits[0]["diff_sha256"] == blind.sha256_text("diff --git a/x.py b/x.py\n+edit\n")

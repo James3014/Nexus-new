@@ -841,3 +841,19 @@ def test_incomplete_group_rows_are_never_counted(env):
     p = rep["primary"]
     assert p["tasks"] == 1 and p["solve_rate_pooled_rows"]["NEXUS"] == 1.0
     assert p["broke_existing_rate"]["NEXUS"] == 0.0
+
+
+def test_noop_nonempty_diff_in_the_arm_map_voids_the_run(env):
+    """PREREG v0.9.7: a NOOP / NEXUS_NOOP row with a non-empty diff (recorded by
+    blind.py from every attempt) voids the run without any scorer label."""
+    blind_dir, arm_map, amap = make_blind(env["tmp"], env["tasks"][:4])
+    data = json.loads(arm_map.read_text())
+    data["noop_nonempty_diff"] = [{"arm": "NEXUS_NOOP", "run_id": "run-x", "diff_sha256": "ab" * 32}]
+    arm_map.write_text(json.dumps(data))
+    run(env, blind_dir, FakeRunner(amap, simple))
+    strata = {t["id"]: t["set"] for t in env["tasks"]}
+    rep = sa.analyze(env["tmp"] / "arch", arm_map, treatment="NEXUS", control="BARE", noop="NOOP", strata=strata,
+                     primary_set="M", expect_manifest_sha=_msha(env))
+    assert rep["verdict"] == "VOID"
+    assert rep["void"][0]["reason"].startswith("NOOP_NONEMPTY_DIFF")
+    assert rep["void"][0]["rows"] == [{"arm": "NEXUS_NOOP", "run_id": "run-x", "diff_sha256": "ab" * 32}]
