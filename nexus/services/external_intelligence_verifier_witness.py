@@ -35,14 +35,13 @@ conftest and so before any candidate code: the witness sweeps every loaded ``pyt
 ``_pytest.*``, ``pluggy.*`` and ``pytest_asyncio`` module: every module-level and class
 attribute (read raw from ``__dict__``, so descriptors are not bound) by identity, and
 every function behind them by code object, defaults, keyword defaults and closure cell
-contents.  It also
-records every hook caller, its ``_hookexec``, the order of its hookimpls and each
-hookimpl's function fingerprint.  A hot subset (the call/report internals, pluggy's call
-path, the hook callers and hookimpls) is re-checked around every test; the full sweep
-when collection starts (only the exact ``CONFIGURE_TIME_WRITES`` that pytest's own
-plugins make during configure are re-based there, pinned to pytest's own values) and at
-session end.  Any change, a removed or reordered hookimpl, or a later hookimpl from an
-untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
+contents.  It also records every hook caller, its ``_hookexec``, the order of its
+hookimpls and each hookimpl's function fingerprint.  A hot subset (the call/report
+internals, pluggy's call path, the hook callers and hookimpls) is re-checked around every
+test; the full sweep when collection starts (only the exact ``CONFIGURE_TIME_WRITES``
+that pytest's own plugins make during configure are re-based there, pinned to pytest's
+own values) and at session end.  Any change, a removed or reordered hookimpl, or a later
+hookimpl from an untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
 
 The emitter, key and fd are closure cells captured at import, and the module removes
 itself from ``sys.modules`` once its plugin is registered, so ``import``-by-name and
@@ -83,8 +82,8 @@ WITNESS_KEY_BYTES = 32
 WITNESS_TOOL_NAME = "nexus-eia-verifier-witness"
 # pytest internals a candidate would patch to rewrite outcomes.  Their identity AND content
 # (code object, defaults, keyword defaults, closure cell contents; #2812) are taken at
-# ``pytest_configure`` (before collection imports candidate code) and compared again
-# around every test and at session end.
+# ``-p`` import/registration, before conftests load, and compared again when collection
+# starts, around every test and at session end.
 PYTEST_INTERNALS = (
     ("_pytest.reports", "TestReport"),
     ("_pytest.reports", "TestReport.from_item_and_call"),
