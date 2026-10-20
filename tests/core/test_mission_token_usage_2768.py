@@ -86,7 +86,10 @@ def test_usage_recorded_in_unified_runtime_receipt_is_counted(tmp_path: Path) ->
         tmp_path / "unified_runtime" / "task.json",
         {
             "task_id": "t",
-            "online": {"gate_passed": True, "response": {"provider": "x", "usage": {"total_tokens": 120}}},
+            "online": {
+                "gate_passed": True,
+                "response": {"provider": "x", "usage": {"total_tokens": 120}},
+            },
         },
     )
     report = _run_report(tmp_path, receipt)
@@ -132,7 +135,11 @@ def test_mission_start_does_not_keep_passing_without_usage(tmp_path: Path) -> No
     first = start()
     assert first.exit_code != 0, first.output
     loaded = NexusMission.load(tmp_path)
-    assert loaded.status not in (MissionStatus.ACTIVE, MissionStatus.VERIFYING, MissionStatus.COMPLETED)
+    assert loaded.status not in (
+        MissionStatus.ACTIVE,
+        MissionStatus.VERIFYING,
+        MissionStatus.COMPLETED,
+    )
 
     second = start()
     assert second.exit_code != 0, second.output

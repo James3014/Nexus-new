@@ -97,3 +97,21 @@ def test_symlinked_receipt_is_not_followed(tmp_path: Path) -> None:
     m = _mission()
     assert m.add_tokens_from_receipt_file(report) == 0.0
     assert m.check_telemetry_budget() is False
+
+
+def test_dangling_report_symlink_fails_closed(tmp_path: Path) -> None:
+    report = tmp_path / "run_report.json"
+    report.symlink_to(tmp_path / "gone.json")
+    m = _mission()
+    assert m.add_tokens_from_receipt_file(report) == 0.0
+    assert m.check_telemetry_budget() is False
+
+
+def test_pointer_with_nul_fails_closed(tmp_path: Path) -> None:
+    report = tmp_path / "run_report.json"
+    report.write_text(
+        json.dumps({"unified_runtime_receipt_path": "a\u0000b.json"}), encoding="utf-8"
+    )
+    m = _mission()
+    assert m.add_tokens_from_receipt_file(report) == 0.0
+    assert m.check_telemetry_budget() is False

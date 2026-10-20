@@ -183,7 +183,7 @@ class NexusMission(BaseModel):
         missing report leaves the budget as it was.
         """
         receipt_file = Path(receipt_path)
-        if not receipt_file.exists():
+        if not os.path.lexists(receipt_file):  # a dangling symlink is present, not missing
             return 0.0
         payload = _read_json_bounded(receipt_file)
         added = extract_receipt_tokens(payload) if payload is not None else 0.0
@@ -304,7 +304,7 @@ def _unified_receipt_for(report_file: Path, report: dict) -> Optional[dict]:
     try:
         if candidate.resolve() == report_file.resolve():
             return None
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):  # ValueError: e.g. a NUL in the pointer
         return None
     unified = _read_json_bounded(candidate)
     if not isinstance(unified, dict):
