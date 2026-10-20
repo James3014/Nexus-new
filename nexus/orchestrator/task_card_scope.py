@@ -34,6 +34,10 @@ def protected_path_reason(path: str) -> str | None:
     parts = tuple(part.lower() for part in raw_parts if part != ".")
     if not parts:
         return "AUTHORITY_DIRECTORY"  # the repository root covers everything
+    # ``.git`` anywhere (``pkg/.gIt/HEAD`` too) addresses git metadata, never a
+    # source file (#2789).
+    if any(part.casefold() == ".git" for part in parts):
+        return "GIT_METADATA"
     if len(parts) == 1 and parts[0] in _PROTECTED_ROOT_FILES:
         return "AUTHORITY_ROOT_FILE"
     if parts[0] in _PROTECTED_TOP_DIRECTORIES:

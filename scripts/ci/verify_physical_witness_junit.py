@@ -70,6 +70,18 @@ AGY_SUBJECT_FILES = {
     "verifier": "scripts/ci/verify_physical_witness_junit.py",
     "ci_workflow": ".github/workflows/pytest.yml",
 }
+SANDBOX_RUNNER_TEST_FILE = "tests/engine/test_sandbox_runner_rundir_seatbelt_witness_2785.py"
+SANDBOX_RUNNER_TEST_CLASSNAME = "tests.engine.test_sandbox_runner_rundir_seatbelt_witness_2785"
+SANDBOX_RUNNER_EXPECTED_WITNESSES = (
+    "test_child_cannot_rename_or_replace_run_dir_under_real_sandbox_exec",
+    "test_python_child_still_loads_the_parent_guard_after_a_swap_attempt",
+)
+SANDBOX_RUNNER_SUBJECT_FILES = {
+    "test_file": SANDBOX_RUNNER_TEST_FILE,
+    "runner": "nexus/engine/sandbox_runner.py",
+    "verifier": "scripts/ci/verify_physical_witness_junit.py",
+    "ci_workflow": ".github/workflows/pytest.yml",
+}
 # suite name -> (test file, junit classname, expected witness nodes, subject files)
 SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
     "dsh": (TEST_FILE, TEST_CLASSNAME, EXPECTED_WITNESSES, SUBJECT_FILES),
@@ -78,6 +90,12 @@ SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
         AGY_TEST_CLASSNAME,
         AGY_EXPECTED_WITNESSES,
         AGY_SUBJECT_FILES,
+    ),
+    "sandbox-runner-rundir": (
+        SANDBOX_RUNNER_TEST_FILE,
+        SANDBOX_RUNNER_TEST_CLASSNAME,
+        SANDBOX_RUNNER_EXPECTED_WITNESSES,
+        SANDBOX_RUNNER_SUBJECT_FILES,
     ),
 }
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")

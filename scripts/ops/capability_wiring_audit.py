@@ -3612,8 +3612,15 @@ def probe_learn_mode(ws: Path) -> dict[str, Any]:
 
 
 def build_learn_phase_slo(ws: Path, variant: str) -> Scenario:
-    # Seeded at the project level (where LearnModeService(project_root) reads it).
+    # Seeded at the project level (where LearnModeService(project_root) reads it).  #2715:
+    # since #2702 the SLO fails closed, so the positive fixture is a passing ledger (every
+    # required row wrote back, every phase succeeded) and the negative one is the failing
+    # ledger (required write-backs missing), not an empty store.
     if variant == "positive":
+        _seed_into(
+            ws, "phase_writeback_passing.jsonl", ".nexus/reports/learn/phase_writeback.jsonl"
+        )
+    else:
         _seed_into(ws, "phase_writeback.jsonl", ".nexus/reports/learn/phase_writeback.jsonl")
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
@@ -3626,19 +3633,38 @@ def build_learn_phase_slo(ws: Path, variant: str) -> Scenario:
                 f"global={glob}",
             ),
             Check(
-                "missing_writebacks_fail_slo",
-                res.get("phase_slo_pass") is False,
-                f"phase_slo_pass={res.get('phase_slo_pass')}",
+                "complete_writebacks_pass_slo",
+                res.get("phase_slo_pass") is True,
+                f"phase_slo_pass={res.get('phase_slo_pass')} reason={res.get('reason')!r}",
             ),
         ]
 
     return Scenario(statement="Check the learn phase slo", task_type="research", check=check)
 
 
+def neg_learn_phase_slo(pos: Obs, neg_obs: Obs) -> Check:
+    # The failing ledger is read (its required rows are counted) and fails the SLO, while the
+    # passing ledger passes: the verdict follows the ledger, not "a report was built".
+    pv, nv = _result(pos), _result(neg_obs)
+    nglob = nv.get("global") if isinstance(nv.get("global"), Mapping) else {}
+    passed = (
+        pv.get("phase_slo_pass") is True
+        and nv.get("phase_slo_pass") is False
+        and int(nglob.get("writeback_required") or 0) >= 1
+        and nv.get("reason") == "phase_slo_below_threshold"
+    )
+    return Check(
+        "negative_control:failing_ledger_fails_slo",
+        passed,
+        f"passing_ledger={pv.get('phase_slo_pass')!r} failing_ledger={nv.get('phase_slo_pass')!r} "
+        f"failing_reason={nv.get('reason')!r} failing_global={nglob}",
+    )
+
+
 def probe_learn_phase_slo(ws: Path) -> dict[str, Any]:
     from nexus.research.learn_mode import LearnModeService
 
-    _seed_into(ws, "phase_writeback.jsonl", ".nexus/reports/learn/phase_writeback.jsonl")
+    _seed_into(ws, "phase_writeback_passing.jsonl", ".nexus/reports/learn/phase_writeback.jsonl")
     with chdir(ws):
         project = LearnModeService(project_root=ws).build_phase_slo_report(window=50)
         per_task = LearnModeService(
@@ -4636,10 +4662,11 @@ _SPEC_LIST += [
         "learn_phase_slo",
         "learn_phase_slo",
         build_learn_phase_slo,
-        negative_check=neg_learn_counts("phase_slo_pass"),
+        negative_check=neg_learn_phase_slo,
         probe=probe_learn_phase_slo,
         gaps=(
-            "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result",
+            "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1)",
+            "fixed #2702/#2715: gate_passed follows phase_slo_pass (fail closed); the positive fixture is a passing ledger, the negative a failing one",
         ),
     ),
     CapSpec(

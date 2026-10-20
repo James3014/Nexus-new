@@ -119,7 +119,7 @@ def _searchable_file(*, root: Path, candidate: Path) -> bool:
     """Re-validate one candidate file before reading it."""
     if candidate.is_symlink():
         return False
-    if ".git" in candidate.parts:
+    if any(part.casefold() == ".git" for part in candidate.parts):
         return False
     try:
         candidate.relative_to(root)

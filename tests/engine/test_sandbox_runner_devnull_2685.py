@@ -76,7 +76,8 @@ def test_default_profile_uses_resolved_workspace_path(tmp_path, monkeypatch):
     workspace = Path(result["workspace_path"])
     assert str(workspace.resolve()) in captured["write"]
     assert str(workspace.resolve()) in captured["read"]
-    assert str(workspace.resolve()).startswith(str(real.resolve()))
+    # The working copy lives in a system temp dir outside the project since #2698.
+    assert not str(workspace.resolve()).startswith(str(real.resolve()))
 
 
 def test_sandbox_run_pytest_pass_exits_0_and_fail_exits_1(tmp_path):

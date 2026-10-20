@@ -129,8 +129,12 @@ def _derive(
         source = _read_inside(root, parts)
         if source is None or len(source) > MAX_FILE_BYTES:
             continue
+        try:
+            symbols = _symbols(_module_name(parts), source, MAX_SYMBOLS - len(docs))
+        except (SyntaxError, ValueError, RecursionError):
+            continue  # one unparsable file must not drop the others
         files.append(rel)
-        for symbol in _symbols(_module_name(parts), source, MAX_SYMBOLS - len(docs)):
+        for symbol in symbols:
             if len(docs) >= MAX_SYMBOLS:
                 break
             if len(symbol) <= MAX_SYMBOL_LENGTH and _SYMBOL.fullmatch(symbol):

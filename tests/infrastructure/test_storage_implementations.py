@@ -83,3 +83,60 @@ def test_belief_store_exposes_semantic_weight_without_storage_ranking(tmp_path):
     weight = store.semantic_weight_for(["semantic:task:doc", ".nexus/reports/codeintel/impact.json"])
 
     assert weight == 0.55
+
+
+def test_lancedb_store_skips_tenant_ledger_under_state_read_only(tmp_path, monkeypatch):
+    """#2721 L-B: NEXUS_STATE_READ_ONLY=1 must leave the tenant ledger byte-identical."""
+    from nexus.infrastructure.storage_implementations import LanceDBStorage
+
+    storage = LanceDBStorage(tmp_path)
+    storage.store("t1", "worker_task_contract", {"a": 1})
+    ledger = tmp_path / ".nexus" / "tenants" / "t1" / "lancedb" / "worker_task_contract_stable.jsonl"
+    before = ledger.read_bytes()
+    monkeypatch.setenv("NEXUS_STATE_READ_ONLY", "1")
+    out = storage.store("t1", "worker_task_contract", {"a": 2})
+    assert out["status"] == "SKIPPED_READ_ONLY"
+    assert ledger.read_bytes() == before
+    out2 = storage.store("t2", "worker_task_contract", {"a": 3})
+    assert out2["status"] == "SKIPPED_READ_ONLY"
+    assert not (tmp_path / ".nexus" / "tenants" / "t2").exists()
+    monkeypatch.delenv("NEXUS_STATE_READ_ONLY")
+    assert storage.store("t1", "worker_task_contract", {"a": 4})["status"] == "COMPRESSED"
+    assert ledger.read_bytes() != before
+
+
+def test_mempalace_receipt_reports_skipped_ingest_under_state_read_only(tmp_path, monkeypatch):
+    """#2721 L-B: a frozen ledger gives an explicit skip, never a pass from an older row."""
+    from types import SimpleNamespace
+
+    from nexus.core import capability_executor_registry as reg
+    from nexus.orchestrator.self_hosted_task_service_parts.worker_gate_inputs import (
+        honest_gate_record,
+    )
+
+    plan = SimpleNamespace(
+        task_id="t1",
+        plan_id="p1",
+        capability_id="mempalace",
+        constraints={
+            "workspace_root": str(tmp_path),
+            "mempalace_tenant_id": "nexus-worker-path",
+            "mempalace_artifact_type": "worker_task_contract",
+            "mempalace_artifact": {"artifact_id": "contract-1", "content": "x"},
+            "mempalace_query": "contract-1",
+        },
+    )
+    first = reg._exec_mempalace(plan, "task")  # normal run: ingests and round-trips
+    assert first.outcome["ingest_performed"] is True and first.gate_passed is True
+    monkeypatch.setenv("NEXUS_STATE_READ_ONLY", "1")
+    second = reg._exec_mempalace(plan, "task")  # an older row with the same id exists
+    assert second.outcome["ingest_performed"] is False
+    assert second.outcome["error"] == "MEMPALACE_STATE_READ_ONLY"
+    assert second.gate_passed is False
+    record = honest_gate_record(
+        "mempalace_gate",
+        {"invoked": True, "status": "FAILED", "response": {"outcome": second.outcome}},
+        "t1",
+    )
+    assert record["response"]["status"] == "SKIPPED"
+    assert record["response"]["outcome"]["semantic_status"] == "NOT_APPLICABLE"

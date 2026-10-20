@@ -155,6 +155,7 @@ from nexus.orchestrator.governed_integration import (
     IntegrationExecutionError,
 )
 from nexus.orchestrator.lifecycle_guards import (
+    guard_dir_scopes,
     pre_action_guard,
     require_bound_approval_grant,
     trusted_runtime_manifest_hash,
@@ -968,6 +969,11 @@ def _require_no_legacy_default_state() -> None:
     repository_root = _repository_root_from_git()
     if repository_root is not None:
         require_no_legacy_self_hosted_state(repository_root)
+
+
+def _names_git_metadata(path: Path) -> bool:
+    """True when any component is ``.git`` in any case (APFS is case-insensitive, #2789)."""
+    return any(part.casefold() == ".git" for part in path.parts)
 
 
 class SelfHostedTaskService(
@@ -1925,6 +1931,10 @@ class SelfHostedTaskService(
                     else {}
                 ),
             )
+        if action and self.ephemeral:
+            # The ephemeral service skips the full guard above; a measurement
+            # ``dir/`` scope is still checked (no-op unless the switch is on), #2786.
+            guard_dir_scopes(action, request=request, canonical_root=CANONICAL_SOURCE_ROOT)
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")
@@ -5644,7 +5654,11 @@ class SelfHostedTaskService(
             artifact_path.resolve().relative_to(evidence_root)
         except ValueError as exc:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED") from exc
-        if not artifact_path.is_absolute() or ".git" in artifact_path.parts or not artifact_path.is_file():
+        if (
+            not artifact_path.is_absolute()
+            or _names_git_metadata(artifact_path)
+            or not artifact_path.is_file()
+        ):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED")
         try:
             artifact_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()

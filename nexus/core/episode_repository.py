@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import json
 from .memory_coordinator import MemoryCoordinator
+from .state_root import state_read_only
 
 
 class EpisodeRepository:
@@ -15,6 +16,8 @@ class EpisodeRepository:
         self.coordinator = coordinator or MemoryCoordinator()
 
     def append(self, episode: Dict[str, Any]) -> Path:
+        if state_read_only():  # #2721: nothing appended; callers ignore the path
+            return self.episode_file
         self.episode_file.parent.mkdir(parents=True, exist_ok=True)
         with self.coordinator.lock(self.episode_file):
             with self.episode_file.open("a", encoding="utf-8") as handle:
