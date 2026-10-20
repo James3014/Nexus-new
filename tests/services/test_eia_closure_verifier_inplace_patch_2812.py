@@ -152,8 +152,10 @@ def test_code_swap_on_a_registered_hookimpl_outside_the_internals_list_is_caught
     assert row["returncode"] == 0
     assert row["passed"] is False
     assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    # Session's hookimpl registers after the baseline; since #2815 the module sweep
+    # sees the swapped method itself.
     assert any(
-        entry.startswith("hookimpl:") for entry in row["witness"]["pytest_internals_patched"]
+        "pytest_runtest_logreport" in entry for entry in row["witness"]["pytest_internals_patched"]
     ), row["witness"]
 
 
@@ -277,3 +279,111 @@ def test_base_unchanged_subdirectory_conftest_with_hooks_is_trusted(tmp_path):
     assert row["passed"] is True, row
     assert row["witness"]["pytest_internals_patched"] == []
     assert row["witness"]["foreign_plugins"] == []
+
+
+# pytest-asyncio's own pytest_pyfunc_call wrapper is on the call path of async tests.
+_SWAP_ASYNCIO_PYFUNC_CALL = (
+    "import pytest_asyncio.plugin as _pa\n"
+    "_pa.pytest_pyfunc_call.__code__ = _pa.pytest_pyfunc_call.__code__.replace()\n"
+    "VALUE = 3\n"
+)
+
+
+def test_code_swap_on_the_pytest_asyncio_call_wrapper_is_patched(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": _SWAP_ASYNCIO_PYFUNC_CALL},
+        base={"pytest.ini": "[pytest]\nasyncio_mode = auto\n"},
+    )
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert any(
+        "pytest_asyncio" in e or "pytest_pyfunc_call" in e
+        for e in row["witness"]["pytest_internals_patched"]
+    ), row["witness"]
+
+
+# --- #2815 review round 3: candidate code that runs before collection ---------------
+
+_PRELOAD_TEST = "from mypkg import VALUE\n\n\ndef test_value():\n    assert VALUE == 2\n"
+
+
+def _preload_case(tmp_path, candidate_files, base_conftest, authorized):
+    base = {"mypkg/__init__.py": "VALUE = 1\n", "tests/test_mod.py": _PRELOAD_TEST}
+    if base_conftest is not None:
+        base["conftest.py"] = base_conftest
+    root, b, c = _repo(tmp_path, candidate_files, base=base)
+    return _row(root, b, c, _spec("tests/test_mod.py"), authorized)
+
+
+def test_swap_by_a_package_a_base_conftest_preloads_is_patched(tmp_path):
+    """The #2815 reviewer's repro: a base-unchanged root conftest imports ``mypkg`` while
+    pytest loads initial conftests; the candidate's ``mypkg/__init__.py`` swaps
+    ``pytest_pyfunc_call.__code__`` then.  The import-time baseline predates it."""
+    row = _preload_case(
+        tmp_path,
+        {"mypkg/__init__.py": _SWAP_PYFUNC_CALL_CODE},
+        "import mypkg  # noqa: F401\n",
+        ["mypkg/__init__.py"],
+    )
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert "_pytest.python:pytest_pyfunc_call" in row["witness"]["pytest_internals_patched"]
+
+
+def test_swap_in_a_submodule_a_base_conftest_preloads_is_patched(tmp_path):
+    row = _preload_case(
+        tmp_path,
+        {
+            "mypkg/__init__.py": "from mypkg import _impl  # noqa: F401\nVALUE = 3\n",
+            "mypkg/_impl.py": _SWAP_PYFUNC_CALL_CODE,
+        },
+        "import mypkg  # noqa: F401\n",
+        ["mypkg"],
+    )
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+
+
+def test_swap_in_an_authorized_changed_conftest_is_patched(tmp_path):
+    row = _preload_case(
+        tmp_path,
+        {"conftest.py": _SWAP_PYFUNC_CALL_CODE, "mypkg/__init__.py": "VALUE = 3\n"},
+        "",
+        ["conftest.py", "mypkg/__init__.py"],
+    )
+    assert row["root_shadowing_authorized_paths"] == ["conftest.py"]
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+
+
+def test_honest_suite_with_the_debugging_plugin_active_is_not_flagged(tmp_path):
+    """pytest's debugging (and legacypath) plugins write class attributes during
+    configure; only those exact, allow-listed writes are re-based."""
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={"pytest.ini": "[pytest]\nasyncio_mode = auto\n", "conftest.py": "import os\n"},
+    )
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["passed"] is True, row
+    assert row["witness"]["pytest_internals_patched"] == []
+
+
+def test_allow_listed_attribute_rebound_by_preloaded_candidate_code_is_patched(tmp_path):
+    """The allowlist is pinned to the value pytest itself writes: candidate code that
+    rebinds ``Config._getini_unknown_type`` to its own function is still PATCHED."""
+    swap = (
+        "from _pytest.config import Config\n"
+        "Config._getini_unknown_type = lambda self, name, type, value: value\n"
+        "VALUE = 3\n"
+    )
+    row = _preload_case(
+        tmp_path, {"mypkg/__init__.py": swap}, "import mypkg  # noqa: F401\n", ["mypkg"]
+    )
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert (
+        "_pytest.config:Config._getini_unknown_type" in row["witness"]["pytest_internals_patched"]
+    )
