@@ -44,7 +44,7 @@ ROUTE_MODE_AT_START = os.environ.get("NEXUS_CAIRNWORK_ROUTE", "off").strip().low
 ROUTE_BIN_AT_START = os.environ.get("NEXUS_CAIRNWORK_ROUTE_BIN", "").strip()
 ROUTE_STATE_AT_START = os.environ.get("NEXUS_CAIRNWORK_STATE", "").strip()
 CAIRNWORK_WORKER = "cairnwork"
-TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
+TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED", "SUPERSEDED"})
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}")
 # The only fields a pilot small fix may carry (booleans only when false).
 _SMALL_FIX_FIELDS = frozenset({
@@ -177,23 +177,36 @@ class _CairnworkRouteMixin:
         if root is None:
             return
         worker = str(arguments.get("worker") or "")
-        threading.Thread(target=_shadow_check, args=(root, worker, payload), daemon=True).start()
+        try:
+            threading.Thread(
+                target=_shadow_check, args=(root, worker, payload), daemon=True
+            ).start()
+        except RuntimeError:  # no thread available: skip the shadow line, never the response
+            return
 
     def _cairnwork_submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         task_id = payload["idempotency_key"]
         path = self._cairnwork_job_path(task_id)
         if path is None:
             raise _gateway().GatewayInputError("CAIRNWORK_NO_STATE_DIR")
+        if not ROUTE_BIN_AT_START or not ROUTE_STATE_AT_START:
+            raise _gateway().GatewayInputError("CAIRNWORK_UNCONFIGURED")  # before any record
         if not path.exists() and self.service.get_task_snapshot(task_id) is not None:
             raise _gateway().GatewayInputError("CAIRNWORK_TASK_ID_OWNED_BY_NEXUS")
         created = _create_record(path, task_id, payload["card_hash"])
+        if created and self.service.get_task_snapshot(task_id) is not None:
+            path.unlink(missing_ok=True)  # SelfHosted took the id meanwhile: nothing was sent
+            raise _gateway().GatewayInputError("CAIRNWORK_TASK_ID_OWNED_BY_NEXUS")
         code, body = call_cairnwork("submit", payload=payload)
         if code == 2 and body.get("error") == "NOT_ACCEPTING":
             if created:  # only the call that made the record may take it back
                 path.unlink(missing_ok=True)
             raise _gateway().GatewayInputError("CAIRNWORK_NOT_ACCEPTING")
         if code != 0:
-            raise _gateway().GatewayInputError(f"CAIRNWORK_{body.get('error') or 'ERROR'}")
+            error = str(body.get("error") or "ERROR")
+            raise _gateway().GatewayInputError(
+                error if error.startswith("CAIRNWORK_") else f"CAIRNWORK_{error}"
+            )
         return {
             "schema": "nexus.worker_candidate.v1",
             "task_id": task_id,
@@ -243,7 +256,7 @@ class _CairnworkRouteMixin:
         status = self._cairnwork_status(task_id)
         if not status.get("cairnwork_task_id"):
             return {**status, "cancelled": False}
-        code, body = call_cairnwork("cancel", "--task-id", str(status["cairnwork_task_id"]))
+        code, body = call_cairnwork("cancel", f"--task-id={status['cairnwork_task_id']}")
         if code != 0:
             return {
                 **status,

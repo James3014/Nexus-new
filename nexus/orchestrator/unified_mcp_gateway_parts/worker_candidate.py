@@ -577,6 +577,8 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             if current_target_head != target_head:
                 raise _gateway().GatewayInputError("EXTERNAL_TARGET_HEAD_DRIFT")
         _gateway().pre_action_guard(action, request=request, current_head=current_target_head, tool_manifest_hash=_gateway().TOOL_MANIFEST_REVISION)
+        if self._cairnwork_owns(task_id):  # a concurrent route call may have taken the id
+            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
         result = self.service.submit_task(request)
         payload = dict(result or {})
         payload.update({"schema": "nexus.worker_candidate.v1", "worker_id": worker_id,

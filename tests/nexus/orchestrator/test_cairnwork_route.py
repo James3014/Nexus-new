@@ -294,7 +294,7 @@ def test_forwarded_tasks_stay_visible_after_rollback_to_off(ctx):
     assert status["owner"] == "cairnwork" and status["status"] == "DISPATCHED"
     cancel = _tool(ctx, "nexus_task_cancel", {"task_id": "cw-4"})["structuredContent"]
     assert cancel["cancelled"] is False and cancel["error"] == "NOT_CANCELLABLE"
-    assert _calls(ctx)[-1]["args"] == ["cancel", "--task-id", "task-cw1"]
+    assert _calls(ctx)[-1]["args"] == ["cancel", "--task-id=task-cw1"]
     other = _tool(ctx, "nexus_task_cancel", {"task_id": "not-forwarded"})["structuredContent"]
     assert other == {"task_id": "not-forwarded", "service": "self_hosted"}
 
@@ -473,3 +473,44 @@ def test_other_refusals_keep_the_record_and_never_fall_back(ctx):
     assert result["structuredContent"]["error"] == "CAIRNWORK_DuplicateLogicalTask"
     assert (ctx["state"] / "cairnwork_jobs" / "cw-9.json").exists()
     assert ctx["service"].submitted == []
+
+
+def test_unconfigured_route_refuses_before_creating_any_record(ctx):
+    _mode(ctx, "route")
+    ctx["monkeypatch"].setattr(cr, "ROUTE_BIN_AT_START", "")
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "cw-10", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_UNCONFIGURED"
+    assert not (ctx["state"] / "cairnwork_jobs" / "cw-10.json").exists()
+
+
+def test_self_hosted_rechecks_ownership_right_before_submit(ctx):
+    _mode(ctx, "off")
+    gateway = ctx["gateway"]
+    real = gateway._cairnwork_owns
+    calls = {"n": 0}
+
+    def owned_late(task_id):  # a concurrent route call binds while planning runs
+        calls["n"] += 1
+        return calls["n"] > 1 or real(task_id)
+
+    ctx["monkeypatch"].setattr(gateway, "_cairnwork_owns", owned_late)
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "late-1"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_OWNS_TASK_ID"
+    assert ctx["service"].submitted == []
+
+
+def test_record_is_taken_back_if_self_hosted_took_the_id_meanwhile(ctx):
+    _mode(ctx, "route")
+    _answer(ctx, submit=SUBMITTED)
+    service = ctx["service"]
+    real = service.get_task_snapshot
+    seen = {"n": 0}
+
+    def snapshot(task_id):
+        seen["n"] += 1
+        return {"task_id": task_id} if seen["n"] > 1 else real(task_id)
+
+    ctx["monkeypatch"].setattr(service, "get_task_snapshot", snapshot)
+    result = _tool(ctx, "nexus_worker_candidate", _arguments(ctx, "cw-11", worker="cairnwork"))
+    assert result["structuredContent"]["error"] == "CAIRNWORK_TASK_ID_OWNED_BY_NEXUS"
+    assert not (ctx["state"] / "cairnwork_jobs" / "cw-11.json").exists() and _calls(ctx) == []
