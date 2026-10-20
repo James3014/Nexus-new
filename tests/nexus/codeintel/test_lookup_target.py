@@ -439,3 +439,16 @@ def test_directory_walk_byte_budget_is_checked_before_reading(tmp_path: Path, mo
     found = lookup_target.derive_codeintel_lookup("charlie", ["pkg/"], tmp_path)
     assert found["target_symbol"] == "pkg.c.charlie_handler"
     assert max(read) <= small + 11
+
+
+def test_explicit_file_is_read_before_a_large_directory_fills_the_budget(
+    tmp_path: Path,
+) -> None:
+    """Codex r2 on #2818: ``["pkg/", "target.py"]`` with 200+ files under pkg/."""
+    for i in range(205):
+        _write(tmp_path, f"pkg/m{i:03d}.py", f"def filler_{i}():\n    return {i}\n")
+    _write(tmp_path, "target.py", "def parse_widget_config():\n    return 1\n")
+
+    found = derive_codeintel_lookup("parse widget config", ["pkg/", "target.py"], tmp_path)
+
+    assert found == {"target_symbol": "target.parse_widget_config", "search_paths": ["target.py"]}

@@ -254,13 +254,15 @@ def _derive_scoped(task_text: str, entries: list[str], root: Path) -> dict[str, 
     """Files and expanded directories; ``search_paths`` = the chosen symbol's file first."""
     candidates: dict[tuple[str, ...], None] = {}
     budget = {"dirs": 0}
+    # Explicit files first, so a large directory cannot use up the file budget
+    # before a file the task names itself; directories get what is left.
+    for rel in entries:
+        file_parts = _relative_parts(rel)
+        if file_parts is not None and len(candidates) < MAX_WALK_FILES:
+            candidates.setdefault(file_parts)
     for rel in entries:
         if len(candidates) >= MAX_WALK_FILES:
             break
-        file_parts = _relative_parts(rel)
-        if file_parts is not None:
-            candidates.setdefault(file_parts)
-            continue
         dir_parts = _dir_parts(rel)
         if dir_parts is None:
             continue
