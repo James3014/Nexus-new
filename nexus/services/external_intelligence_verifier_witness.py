@@ -28,6 +28,14 @@ parent compares file, qualname and first line with what ``ast`` reads from the c
 test file, so swapping the test object (``Function._getobj``, ``obj``, the ``_obj`` cache)
 for an in-tree no-op is refused.
 
+pytest's own call path is fingerprinted by content, not only identity (#2812): for the
+``PYTEST_INTERNALS`` entries and for every hookimpl registered when the witness
+configures, the code object, defaults, keyword defaults and closure cell contents are
+recorded and re-checked around every test and at session end, so swapping
+``__code__`` or ``__defaults__`` in place is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
+Hookimpls that appear later are reported with their file and judged by the parent like
+plugins.
+
 The emitter, key and fd are closure cells captured at import, and the module removes
 itself from ``sys.modules`` once its plugin is registered, so ``import``-by-name and
 attribute patches no longer reach them (#2808 review).
@@ -62,9 +70,10 @@ WITNESS_FD_ENV = "NEXUS_VERIFIER_WITNESS_FD"
 WITNESS_KEY_FD_ENV = "NEXUS_VERIFIER_WITNESS_KEY_FD"
 WITNESS_KEY_BYTES = 32
 WITNESS_TOOL_NAME = "nexus-eia-verifier-witness"
-# pytest internals a candidate would patch to rewrite outcomes.  Their identity is taken
-# at ``pytest_configure`` (before collection imports candidate code) and compared again
-# at session end.
+# pytest internals a candidate would patch to rewrite outcomes.  Their identity AND content
+# (code object, defaults, keyword defaults, closure cell contents; #2812) are taken at
+# ``pytest_configure`` (before collection imports candidate code) and compared again
+# around every test and at session end.
 PYTEST_INTERNALS = (
     ("_pytest.reports", "TestReport"),
     ("_pytest.reports", "TestReport.from_item_and_call"),
@@ -101,6 +110,68 @@ def _resolve(module_name: str, dotted: str) -> Any:
         else:
             owner = getattr(owner, part, None)
     return owner
+
+
+_EMPTY_CELL = object()
+
+
+def _function_print(function: Any) -> tuple[Any, ...]:
+    """What a function runs: the object, its code, defaults, keyword defaults and the
+    contents of its closure cells.  Compared element by element with ``is``, so an
+    in-place ``__code__``/``__defaults__``/cell swap on the same object is a change."""
+    function = getattr(function, "__func__", function)
+    if not isinstance(function, types.FunctionType):
+        return (function,)
+    cells: list[Any] = []
+    for cell in function.__closure__ or ():
+        try:
+            cells.append(cell.cell_contents)
+        except ValueError:
+            cells.append(_EMPTY_CELL)
+    kwdefaults = function.__kwdefaults__ or {}
+    return (
+        function,
+        function.__code__,
+        tuple(function.__defaults__ or ()),
+        tuple((key, kwdefaults[key]) for key in sorted(kwdefaults)),
+        tuple(cells),
+    )
+
+
+def _fingerprint(obj: Any) -> tuple[Any, ...]:
+    """Identity plus the content of every function behind ``obj`` (a function, bound
+    method, classmethod/staticmethod or property); other objects by identity only."""
+    if isinstance(obj, (classmethod, staticmethod)):
+        functions = [obj.__func__]
+    elif isinstance(obj, property):
+        functions = [f for f in (obj.fget, obj.fset, obj.fdel) if f is not None]
+    elif isinstance(obj, (types.FunctionType, types.MethodType)):
+        functions = [obj]
+    else:
+        functions = []
+    return (obj, tuple(_function_print(f) for f in functions))
+
+
+def _same(left: Any, right: Any) -> bool:
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        return len(left) == len(right) and all(_same(a, b) for a, b in zip(left, right))
+    return left is right
+
+
+def _hookimpls(manager: Any) -> list[Any]:
+    impls: list[Any] = []
+    for caller in list(vars(manager.hook).values()):
+        get = getattr(caller, "get_hookimpls", None)
+        if callable(get):
+            found: Any = get()
+            impls.extend(found)
+    return impls
+
+
+def _hookimpl_file(impl: Any) -> str:
+    function = getattr(impl.function, "__func__", impl.function)
+    code = getattr(function, "__code__", None)
+    return str(Path(code.co_filename).resolve()) if code is not None else ""
 
 
 def _plugin_file(plugin: Any) -> str:
@@ -248,10 +319,39 @@ def _build_plugin(emit: Any) -> Any:
     """
     watch = _CodeWatch()
     internals: list[tuple[str, str, Any]] = []
+    # id(HookImpl) -> (HookImpl, fingerprint of its function) for every hookimpl
+    # registered when the witness configures; ``patched`` is sticky.
+    hook_snapshot: dict[int, tuple[Any, Any, tuple[Any, ...]]] = {}
+    managers: list[Any] = []
+    patched: dict[str, None] = {}
+    added: dict[tuple[str, str], None] = {}
+
+    def check() -> None:
+        for m, d, original in internals:
+            if not _same(_fingerprint(_resolve(m, d)), original):
+                patched[f"{m}:{d}"] = None
+        if not managers:
+            return
+        for impl in _hookimpls(managers[0]):
+            known = hook_snapshot.get(id(impl))
+            if known is None or known[0] is not impl:
+                # A hookimpl registered after configure (conftest, plugin, or one
+                # injected into an existing caller): the parent judges its file.
+                added[(str(getattr(impl, "plugin_name", "")), _hookimpl_file(impl))] = None
+            elif known[1] is not impl.function or not _same(
+                _function_print(impl.function), known[2]
+            ):
+                patched[
+                    f"hookimpl:{impl.plugin_name}:{getattr(impl.function, '__name__', '?')}"
+                ] = None
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_configure(config: pytest.Config) -> None:
-        internals[:] = [(m, d, _resolve(m, d)) for m, d in PYTEST_INTERNALS]
+        internals[:] = [(m, d, _fingerprint(_resolve(m, d))) for m, d in PYTEST_INTERNALS]
+        managers[:] = [config.pluginmanager]
+        hook_snapshot.clear()
+        for impl in _hookimpls(config.pluginmanager):
+            hook_snapshot[id(impl)] = (impl, impl.function, _function_print(impl.function))
         emit({
             "t": "begin",
             "pytest": pytest.__version__,
@@ -284,11 +384,13 @@ def _build_plugin(emit: Any) -> Any:
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
     def pytest_runtest_protocol(item: Any, nextitem: Any) -> Any:
         code = _test_code(item)
+        check()
         watch.begin(code)
         try:
             yield
         finally:
             state = watch.end()
+            check()
             emit({"t": "witness", "nodeid": item.nodeid, **state, **_code_identity(code)})
 
     def pytest_runtest_logreport(report: Any) -> None:
@@ -303,8 +405,13 @@ def _build_plugin(emit: Any) -> Any:
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(session: Any, exitstatus: Any) -> None:
-        patched = [f"{m}:{d}" for m, d, original in internals if _resolve(m, d) is not original]
-        emit({"t": "end", "exitstatus": int(exitstatus), "patched": patched})
+        check()
+        emit({
+            "t": "end",
+            "exitstatus": int(exitstatus),
+            "patched": list(patched),
+            "hookimpls_added": [{"plugin": p, "file": f} for p, f in added],
+        })
 
     plugin = _PluginHolder()
     for name, function in dict(

@@ -1751,6 +1751,16 @@ def _witness_outcomes(
         elif kind == "witness":
             witnesses[nodeid] = record
     patched = [str(p) for p in records[-1].get("patched") or []]
+    # Hookimpls that appeared after the witness configured (#2812): a conftest or a
+    # trusted plugin may add some; one whose function lives anywhere else (e.g. injected
+    # into an existing hook caller by candidate code) is a patched pytest call path.
+    for added in records[-1].get("hookimpls_added") or []:
+        file_text = str(added.get("file") or "") if isinstance(added, Mapping) else ""
+        if not _plugin_is_trusted(
+            file_text, root=root, trusted_dirs=trusted_plugin_dirs, in_tree_trusted=in_tree_trusted
+        ):
+            plugin_name = added.get("plugin") if isinstance(added, Mapping) else None
+            patched.append(f"hookimpl_added:{plugin_name}:{file_text or '<no file>'}")
     summary["foreign_plugins"] = sorted(set(foreign))[:_INTEGRITY_FINDINGS_LIMIT]
     summary["pytest_internals_patched"] = patched[:_INTEGRITY_FINDINGS_LIMIT]
     selected = selected if selected is not None else []
