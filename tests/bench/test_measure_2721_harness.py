@@ -510,8 +510,11 @@ def test_bare_claude_arm_runs_through_the_nexus_adapter(manifest, tmp_path, monk
                               identity=claude_identity(str(fake), str(token)))
     (task_root := Path(task["base_checkout"])).joinpath("README.md").exists()
     row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=60)
-    assert row["outcome"] == "OK", row
-    assert row["claude_version"].startswith("0.0.0") and row["models_seen"] == ["claude-haiku-5-5"]
+    # The fake CLI names only its own label, so the adapter never takes it for the
+    # measured model: the run is MODEL_FAILED, not OK (33).
+    assert row["outcome"] == "MODEL_FAILED", row
+    assert row["claude_version"].startswith("0.0.0") and row["models_seen"] == ["fake-edit"]
+    assert row["served_models"] == []
     assert row["cache_read_input_tokens"] == 0 and row["cache_creation_input_tokens"] == 0
     assert row["seatbelt_sha256"] and row["proxy_denied"] == []
     assert row["account"]["auth"] == "api_key" and len(row["account"]["api_key_sha256_12"]) == 12
@@ -806,15 +809,18 @@ def test_bare_claude_row_with_another_venv_after_the_run_is_infra(manifest, tmp_
     assert row["infra"] is True and row["venv_problem"] == "VENV_MISMATCH" and arms.FLAG_VENV in row["flags"]
 
 
-def _trace(trace_dir: Path, gw_task: str, name: str, *, cost, venv: str, limit: float, output: int) -> None:
+def _trace(trace_dir: Path, gw_task: str, name: str, *, cost, venv: str, limit: float, output: int,
+           timed_out: bool = False, infra=None, tools: int = 1, served: bool = True) -> None:
     base = trace_dir / gw_task
     base.mkdir(parents=True, exist_ok=True)
-    events = [{"type": "assistant", "message": {"model": "claude-haiku-5-5", "content": []}}]
+    content = [{"type": "tool_use", "name": "Edit", "input": {"file_path": "x"}} for _ in range(tools)]
+    events = [{"type": "assistant", "message": {"model": "claude-haiku-5-5", "content": content}}] if served else []
     if cost is not None:
-        events.append({"type": "result", "total_cost_usd": cost, "num_turns": 1,
-                       "usage": {"input_tokens": 1, "output_tokens": output}})
+        events.append({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": cost,
+                       "num_turns": 1, "usage": {"input_tokens": 1, "output_tokens": output}})
     (base / f"{name}.stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-    (base / f"{name}.run.json").write_text(json.dumps({"cli_timeout_seconds": limit, "venv": venv}))
+    (base / f"{name}.run.json").write_text(json.dumps({"cli_timeout_seconds": limit, "venv": venv,
+                                                       "timed_out": timed_out, "infra": infra}))
 
 
 def _tracing_driver(gateway: FakeGateway, trace_dir: Path, attempts) -> nexus_driver.NexusArmDriver:
@@ -983,20 +989,32 @@ def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path
 # -- 35 smoke findings: Controller pin, cancel retry, Gateway env ----------------
 
 
-def _controller(tmp_path: Path) -> tuple[Path, str]:
-    repo = tmp_path / "controller"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    (repo / "tasks").mkdir()
-    (repo / "tasks" / "index.md").write_text("pin\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "pin")
-    return repo, _git(repo, "rev-parse", "HEAD").strip()
+def _measure_layout(tmp_path: Path) -> dict:
+    """B1 layout: a measurement repo (main worktree ``src``, branch ``feature-x``),
+    another linked worktree ``other``, and the Controller as a linked worktree."""
+    measure = tmp_path / "measure"
+    src = measure / "src"
+    src.mkdir(parents=True)
+    _git(src, "init", "-q", "-b", "main")
+    (src / "tasks").mkdir()
+    (src / "tasks" / "index.md").write_text("pin\n")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-qm", "pin")
+    pin = _git(src, "rev-parse", "HEAD").strip()
+    _git(src, "branch", "feature-x")
+    _git(src, "tag", "v1")
+    _git(src, "worktree", "add", "-q", "-b", "other", str(measure / "other"), pin)
+    _git(src, "worktree", "add", "-q", "-b", "ctl", str(measure / "controller"), pin)
+    live = tmp_path / "live.env"
+    live.write_text("export NEXUS_CANONICAL_SOURCE_ROOT=/nonexistent/live/controller\n")
+    return {"measure": measure, "src": src, "other": measure / "other", "controller": measure / "controller",
+            "pin": pin, "live": [live]}
 
 
 class _CardCommitGateway(FakeGateway):
     """Commits a Task Card to the Controller like P1 does, checks expected_head, and
-    leaves a candidate ref, a branch, a stash-like ref and untracked files behind."""
+    leaves measurement refs, a non-measurement branch, a tag, a new worktree and
+    untracked files behind."""
 
     def __init__(self, repo: Path, **kw):
         super().__init__(**kw)
@@ -1008,12 +1026,15 @@ class _CardCommitGateway(FakeGateway):
             self.expected.append(args["expected_head"])
             if args["expected_head"] != _git(self.repo, "rev-parse", "HEAD").strip():
                 return {"status": "BLOCKED", "error": "TASK_CARD_COMMIT_HEAD_MISMATCH"}
-            (self.repo / "tasks" / f"{args['task_id']}.md").write_text("card\n")
+            task = args["task_id"]
+            (self.repo / "tasks" / f"{task}.md").write_text("card\n")
             _git(self.repo, "add", "-A")
-            _git(self.repo, "commit", "-qm", f"card {args['task_id']}")
-            _git(self.repo, "update-ref", f"refs/nexus-candidates/{args['task_id']}", "HEAD")
-            _git(self.repo, "branch", f"cand-{args['task_id']}"[:60])
+            _git(self.repo, "commit", "-qm", f"card {task}")
+            _git(self.repo, "update-ref", f"refs/nexus-candidates/{task}", "HEAD")
+            _git(self.repo, "update-ref", f"refs/heads/nexus/task/{task}", "HEAD")
+            _git(self.repo, "branch", f"keep-{task}"[:60])  # not a measurement ref: stays
             _git(self.repo, "update-ref", "refs/stash", "HEAD")
+            _git(self.repo, "worktree", "add", "-q", "--detach", str(self.repo.parent / f"wt-{task}"), "HEAD")
             (self.repo / "scratch.tmp").write_text("left behind\n")
             (self.repo / ".gitignore").write_text("ignored/\n")
             (self.repo / "ignored").mkdir(exist_ok=True)
@@ -1021,36 +1042,120 @@ class _CardCommitGateway(FakeGateway):
         return super()._answer(name, args)
 
 
-def test_controller_is_reset_to_its_pin_before_every_row(manifest, tmp_path):
-    (task,) = arms.load_manifest(manifest)
-    repo, pin = _controller(tmp_path)
-    gateway = _CardCommitGateway(repo)
+def _controller_driver(gateway, layout, **kw) -> nexus_driver.NexusArmDriver:
     client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
-    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
-                                         controller_repo=repo, controller_pin=pin, measurement_root=tmp_path)
+    return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                       controller_repo=layout["controller"], measurement_root=layout["measure"],
+                                       live_configs=layout["live"], **{"controller_pin": layout["pin"], **kw})
+
+
+def test_controller_reset_touches_only_the_controller_and_measurement_refs(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    layout = _measure_layout(tmp_path)
+    repo, pin = layout["controller"], layout["pin"]
+    gateway = _CardCommitGateway(repo)
+    driver = _controller_driver(gateway, layout)
     rows = [driver.run(task, repeat, tmp_path / "run", timeout_seconds=5) for repeat in (1, 2)]
     assert gateway.expected == [pin, pin]  # read from the Controller itself, not /health
     assert all(r["controller_reset"]["ok"] and r["outcome"] == "OK" for r in rows), rows
-    # r2 inherits nothing from r1, and what r1 left is flagged on r2 (M1).
+    # r2 inherits nothing from r1, and what r1 left is flagged on r2.
     assert "CONTROLLER_LEFTOVERS" not in (rows[0].get("flags") or [])
     assert "CONTROLLER_LEFTOVERS" in rows[1]["flags"]
-    assert any(ref.startswith("refs/nexus-candidates/") for ref in rows[1]["controller_leftovers"])
-    assert "refs/stash" in rows[1]["controller_leftovers"]
+    left = rows[1]["controller_leftovers"]
+    assert any(r.startswith("refs/nexus-candidates/") for r in left) and "refs/stash" in left
+    assert any(r.startswith("refs/heads/nexus/task/") for r in left) and any(r.startswith("worktree ") for r in left)
     driver.reset_controller()
-    assert _git(repo, "for-each-ref", "--format=%(refname)").split() == [_git(repo, "symbolic-ref", "HEAD").strip()]
+    refs = _git(layout["src"], "for-each-ref", "--format=%(refname)").split()
+    # B1: the repository's other branches, tags and worktrees survive.
+    assert {"refs/heads/main", "refs/heads/feature-x", "refs/heads/other", "refs/heads/ctl", "refs/tags/v1"} <= set(refs)
+    assert sum(r.startswith("refs/heads/keep-") for r in refs) == 2
+    assert not [r for r in refs if r.startswith(("refs/heads/nexus/task/", "refs/nexus-candidates/", "refs/stash"))]
+    worktrees = _git(layout["src"], "worktree", "list", "--porcelain")
+    assert str(os.path.realpath(layout["other"])) in worktrees and layout["other"].is_dir()
+    assert "wt-" not in worktrees
+    assert _git(layout["src"], "rev-parse", "HEAD").strip() == pin  # main worktree untouched
     assert _git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip() == ""
     assert _git(repo, "rev-parse", "HEAD").strip() == pin
 
 
 def test_controller_reset_failure_voids_the_row(manifest, tmp_path):
     (task,) = arms.load_manifest(manifest)
-    repo, _pin = _controller(tmp_path)
+    layout = _measure_layout(tmp_path)
     gateway = FakeGateway()
-    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
-    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
-                                         controller_repo=repo, controller_pin="0" * 40, measurement_root=tmp_path)
+    driver = _controller_driver(gateway, layout, controller_pin="0" * 40)
     row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
     assert row["infra"] is True and row["void_reason"] == "CONTROLLER_RESET_MISMATCH" and gateway.calls == []
+
+
+def test_controller_guard_rules(tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import controller_guard as cg
+
+    home = tmp_path / "home"
+    (home / "workspace").mkdir(parents=True)
+    (home / "Workspace").mkdir(parents=True, exist_ok=True)  # the same dir on a case-insensitive disk
+    monkeypatch.setenv("HOME", str(home))
+    # H1: roots that are too broad.
+    for broad in ("/", home, home / "workspace", home / "Workspace", tmp_path):
+        with pytest.raises(cg.ControllerGuardError, match="TOO_BROAD"):
+            cg.check_measurement_root(broad)
+    assert cg.check_measurement_root(home / "Workspace" / "nexus-measure-2721") == Path(
+        os.path.realpath(home / "Workspace" / "nexus-measure-2721"))
+    # M2: the given roots must nest; the outermost wins.
+    measure = home / "Workspace" / "m"
+    (measure / "targets").mkdir(parents=True)
+    assert cg.measurement_root({"a": measure, "b": measure / "targets", "c": None}) == Path(os.path.realpath(measure))
+    (home / "Workspace" / "n").mkdir()
+    with pytest.raises(cg.ControllerGuardError, match="DISAGREE"):
+        cg.measurement_root({"a": measure, "b": home / "Workspace" / "n"})
+    # B1: a linked worktree of a main clone is refused even when placed under the root.
+    main = home / "workspace" / "Nexus-new"
+    main.mkdir()
+    _git(main, "init", "-q", "-b", "main")
+    (main / "f").write_text("x\n")
+    _git(main, "add", "-A")
+    _git(main, "commit", "-qm", "c")
+    _git(main, "worktree", "add", "-q", "-b", "ctl", str(measure / "ctl"), "HEAD")
+    live = tmp_path / "live.env"
+    live.write_text("NEXUS_CANONICAL_SOURCE_ROOT=/nonexistent/live\n")
+    with pytest.raises(cg.ControllerGuardError, match="IN_MAIN_CLONE"):
+        cg.guard_controller(measure / "ctl", measure, cg.live_locations([live]))
+    with pytest.raises(cg.ControllerGuardError, match="IN_MAIN_CLONE"):
+        cg.guard_controller(main, main, [])
+    # A linked worktree of a repository outside the root: its common dir is outside.
+    outside = tmp_path / "elsewhere" / "repo"
+    outside.mkdir(parents=True)
+    _git(outside, "init", "-q", "-b", "main")
+    (outside / "f").write_text("x\n")
+    _git(outside, "add", "-A")
+    _git(outside, "commit", "-qm", "c")
+    _git(outside, "worktree", "add", "-q", "-b", "ctl", str(measure / "ctl2"), "HEAD")
+    with pytest.raises(cg.ControllerGuardError, match="COMMON_DIR_OUTSIDE"):
+        cg.guard_controller(measure / "ctl2", measure, [])
+    # Paths compare case-insensitively (macOS realpath keeps the case given).
+    assert cg.same_path(str(measure).swapcase(), measure)
+    assert cg.is_within(measure / "targets", str(measure).swapcase())
+
+
+def test_live_configuration_is_required_and_blocks_overlaps(tmp_path):
+    import plistlib
+
+    from scripts.bench.measure_2721 import controller_guard as cg
+
+    with pytest.raises(cg.ControllerGuardError, match="LIVE_CONFIG_UNREADABLE"):
+        cg.live_locations([tmp_path / "missing.plist"])
+    layout = _measure_layout(tmp_path)
+    plist = tmp_path / "com.nexus.mcp.gateway.direct.plist"
+    plist.write_bytes(plistlib.dumps({"WorkingDirectory": "/x/deployments/a1", "ProgramArguments": [
+        "/bin/zsh", "-c", f'cd "{layout["controller"]}" ; exec python -m gateway']}))
+    live = cg.live_locations([plist])
+    assert Path("/x/deployments/a1") in live and Path(str(layout["controller"])) in live
+    with pytest.raises(cg.ControllerGuardError, match="OVERLAPS_LIVE"):
+        cg.guard_controller(layout["controller"], layout["measure"], live)
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=FakeGateway())
+    with pytest.raises(cg.ControllerGuardError, match="LIVE_CONFIG_UNREADABLE"):
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                    controller_repo=layout["controller"], controller_pin=layout["pin"],
+                                    measurement_root=layout["measure"], live_configs=[tmp_path / "none"])
 
 
 class _FinishingGateway(FakeGateway):
@@ -1139,24 +1244,12 @@ def test_driver_refuses_to_start_without_read_roots(manifest, tmp_path, monkeypa
     assert rc == 2 and "READ_ROOTS_EMPTY" in capsys.readouterr().out
 
 
-def test_controller_repo_must_be_a_measurement_checkout(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    main_clone = home / "workspace" / "Nexus-new"
-    (main_clone / ".git").mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
-    with pytest.raises(ValueError, match="MAIN_CLONE"):
-        nexus_driver.guard_controller_repo(main_clone, [home / "workspace"])
-    outside = tmp_path / "elsewhere" / "ctl"
-    (outside / ".git").mkdir(parents=True)
-    with pytest.raises(ValueError, match="OUTSIDE_MEASUREMENT_ROOT"):
-        nexus_driver.guard_controller_repo(outside, [tmp_path / "measure"])
-    inside = tmp_path / "measure" / "ctl"
-    (inside / ".git").mkdir(parents=True)
-    assert nexus_driver.guard_controller_repo(inside, [tmp_path / "measure"]) == Path(os.path.realpath(inside))
+def test_controller_repo_and_pin_go_together(tmp_path):
     client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=FakeGateway())
     with pytest.raises(ValueError, match="go together"):
-        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", controller_repo=inside,
-                                    measurement_root=tmp_path / "measure")
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", controller_repo=tmp_path)
+    with pytest.raises(ValueError, match="go together"):
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", controller_pin="a" * 40)
     with pytest.raises(nexus_driver.LiveGatewayRefused):
         nexus_driver.GatewayClient("http://127.0.0.1:8766", "t", transport=FakeGateway())
 
@@ -1182,3 +1275,314 @@ def test_gateway_env_fails_closed_on_unexpanded_values(tmp_path, value):
     with pytest.raises(gateway_env.GatewayEnvError, match="unexpanded"):
         gateway_env.use_gateway_env(env_file)
     assert gateway_env.measurement_env().get("NEXUS_MEASUREMENT_READ_ROOTS") != value
+
+
+# -- round 6: state phases, duplicates, submitted, labels, schedule, preflight ----
+
+
+def _state_driver(gateway: FakeGateway, tmp_path: Path, phase: str, **kw) -> nexus_driver.NexusArmDriver:
+    state_root = tmp_path / "state"
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "learning").mkdir(parents=True)
+    (snapshot / "learning" / "episodes.jsonl").write_text("phase start\n")
+    state_root.mkdir()
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                       state_root=state_root, state_snapshot=snapshot,
+                                       state_dir=state_root / "tasks", learning_phase=phase, **kw)
+
+
+class _LearningGateway(FakeGateway):
+    """Writes learning state (and the probe cache) while the worker runs."""
+
+    def __init__(self, state_root: Path, **kw):
+        super().__init__(**kw)
+        self.state_root = state_root
+
+    def _answer(self, name, args):
+        if name == "nexus_worker_candidate":
+            (self.state_root / "learning" / "episodes.jsonl").write_text(f"learned from {args['task_id']}\n")
+            probe = self.state_root / "assisted_provider_jobs" / "probe_evidence"
+            probe.mkdir(parents=True, exist_ok=True)
+            (probe / f"{args['task_id']}.json").write_text("{}")
+        return super()._answer(name, args)
+
+
+def test_lb_restores_every_row_keeps_the_probe_cache_and_detects_writes(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = _LearningGateway(tmp_path / "state")
+    driver = _state_driver(gateway, tmp_path, "LB")
+    rows = [driver.run(task, r, tmp_path / "run", timeout_seconds=5) for r in (1, 2)]
+    assert all(r["state_restore"]["ok"] and r["state_restore_policy"] == "per_row" for r in rows)
+    # Q2: a learning write in the read-only phase voids the row.
+    assert all(r["infra"] and r["void_reason"] == "LB_STATE_CHANGED" for r in rows), rows
+    probe = tmp_path / "state" / "assisted_provider_jobs" / "probe_evidence"
+    assert len(list(probe.iterdir())) == 2  # never restored away
+
+
+def test_la_restores_once_per_phase_and_m_every_row(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    driver = _state_driver(_LearningGateway(tmp_path / "state"), tmp_path, "LA")
+    rows = [driver.run(task, r, tmp_path / "run", timeout_seconds=5) for r in (1, 2)]
+    assert "state_restore" in rows[0] and "state_restore" not in rows[1]
+    assert rows[1]["outcome"] == "OK" and (tmp_path / "state" / "learning" / "episodes.jsonl").read_text() \
+        .startswith("learned from")
+    assert nexus_driver.state_phase.restore_policy("M") == "per_row"
+
+
+def test_state_is_restored_only_when_the_instance_is_quiet(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    gateway = FakeGateway()
+    driver = _state_driver(gateway, tmp_path, "M")
+    tasks_dir = tmp_path / "state" / "tasks"
+    tasks_dir.mkdir()
+    (tasks_dir / "other.json").write_text(json.dumps({"status": "IN_PROGRESS"}))
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] and row["void_reason"].startswith("STATE_RESTORE_BUSY:TASK_IN_FLIGHT") and not gateway.calls
+    target = tmp_path / "left-target"
+    target.mkdir()
+    (tasks_dir / "other.json").write_text(json.dumps({"status": "CANCELLED", "lease": {"target_worktree": str(target)}}))
+    assert nexus_driver.state_phase.quiescence_problem(tasks_dir).startswith("TARGET_NOT_CLEANED")
+
+
+def test_invalid_state_records_refuse_the_driver(manifest, tmp_path, monkeypatch):
+    states = tmp_path / "states"
+    states.mkdir()
+    (states / "t.json").write_text(json.dumps({"state_valid": False}))
+    env_file = tmp_path / "g.env"
+    env_file.write_text(f"NEXUS_MEASUREMENT_READ_ROOTS={os.path.realpath(tmp_path)}\n")
+    token = tmp_path / "tok"
+    token.write_text("NEXUS_MCP_GATEWAY_TOKEN=t\n")
+    token.chmod(0o600)
+    import io
+    from contextlib import redirect_stdout
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = nexus_driver.main(["--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
+                                "--gateway-url", "http://127.0.0.1:18766", "--token-file", str(token),
+                                "--scope-id", "s", "--trace-dir", str(tmp_path / "t"), "--state-dir", str(states),
+                                "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
+    assert rc == 2 and "STATE_INVALID_RECORDS" in out.getvalue()
+
+
+def test_router_log_outside_the_state_root_is_restored_every_row(tmp_path):
+    from scripts.bench.measure_2721.state_phase import ExtraStateFiles
+
+    root = tmp_path / "project"
+    root.mkdir()
+    files = ExtraStateFiles.router_logs([root])
+    (root / "router_decisions.jsonl").write_text('{"decision": 1}\n')
+    result = files.restore()
+    assert result["ok"] and result["restored"] and not (root / "router_decisions.jsonl").exists()
+
+
+def test_each_repeat_has_its_own_card_and_duplicates_are_infra(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    driver = _driver(FakeGateway())
+    one, two = driver.card_args(task, "t-r1", 1), driver.card_args(task, "t-r2", 2)
+    assert one["objective"] != two["objective"] and "repeat 2" in two["objective"]
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        if name == "nexus_worker_candidate":
+            return {"status": "SUBMITTED", "duplicate": {"code": "DUPLICATE_LOGICAL_TASK", "existing_task_id": "x"}}
+        return original(name, args)
+
+    gateway._answer = answer
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] and row["void_reason"] == "DUPLICATE_TASK" and row["submitted"] is True
+
+
+def test_failures_before_submit_are_infra_and_after_submit_are_not_solved(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+
+    class CommitFails(FakeGateway):
+        def _is_error(self, name):
+            return name == "nexus_task_card_commit"
+
+        def _answer(self, name, args):
+            if name == "nexus_task_card_commit":
+                return {"error": "TASK_CARD_COMMIT_HEAD_MISMATCH"}
+            return super()._answer(name, args)
+
+    row = _driver(CommitFails()).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] and row["submitted"] is False
+    assert row["void_reason"] == "PRE_SUBMIT_FAILURE:nexus_task_card_commit"
+    row = _driver(FakeGateway(worker_error={"error": "WORKER_REFUSED_SCOPE"})).run(
+        task, 2, tmp_path / "run", timeout_seconds=5)
+    assert row["outcome"] == "GATEWAY_ERROR" and not row["infra"] and row["submitted"] is True
+    # The scorer gets it as a candidate that cannot count as solved.
+    assert blind.run_invalid_reason(row) == "OUTCOME:GATEWAY_ERROR"
+
+
+def test_a_hung_run_is_labelled_the_same_in_both_arms(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.providers import ProviderResult
+
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+    nexus = _tracing_driver(FakeGateway(), tmp_path / "traces", [
+        dict(cost=None, venv=venv, limit=limit, output=0, timed_out=True, served=False)])
+    nexus_row = nexus.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    monkeypatch.setattr(arms, "_claude_provider_type", lambda: _StubClaude)
+    bare_row = arms.run_bare(task, 1, tmp_path / "run", _StubClaude(lambda: ProviderResult(
+        status="TIMEOUT", provider="claude", model="claude-haiku-5-5", timed_out=True,
+        extra={"venv": venv, "cli_timeout_seconds": limit, "served_models": []})), timeout_seconds=5)
+    assert nexus_row["outcome"] == bare_row["outcome"] == "TIMEOUT", (nexus_row, bare_row)
+    for row in (nexus_row, bare_row):
+        assert arms.FLAG_SERVED_MODEL_MISMATCH not in row["flags"] and arms.FLAG_TIMEOUT in row["flags"]
+
+
+def test_a_rate_limited_run_with_a_partial_diff_is_infra_in_both_arms(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.providers import ProviderResult
+
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name in ("nexus_task_wait", "nexus_task_status"):
+            payload["measurement_worktree_diff"] = "diff --git a/x.py b/x.py\n"
+        return payload
+
+    gateway._answer = answer
+    nexus = _tracing_driver(gateway, tmp_path / "traces", [
+        dict(cost=None, venv=venv, limit=limit, output=0, infra="rate_limited")])
+    nexus_row = nexus.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    monkeypatch.setattr(arms, "_claude_provider_type", lambda: _StubClaude)
+    bare_row = arms.run_bare(task, 1, tmp_path / "run", _StubClaude(lambda: ProviderResult(
+        status="INFRA", provider="claude", model="claude-haiku-5-5", infra_reason="RATE_LIMITED",
+        extra={"venv": venv, "cli_timeout_seconds": limit, "served_models": []})), timeout_seconds=5)
+    assert nexus_row["infra"] and bare_row["infra"] and nexus_row["outcome"] == bare_row["outcome"] == "INFRA"
+
+
+def test_a_diff_without_any_model_tool_call_is_a_non_model_solve(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name in ("nexus_task_wait", "nexus_task_status"):
+            payload["measurement_worktree_diff"] = "diff --git a/x.py b/x.py\n+fixed\n"
+        return payload
+
+    gateway._answer = answer
+    driver = _tracing_driver(gateway, tmp_path / "traces", [
+        dict(cost=0.01, venv=venv, limit=arms.expected_cli_timeout(5), output=1, tools=0)])
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["non_model_solve_path"] is True and arms.FLAG_NON_MODEL_SOLVE in row["flags"]
+    assert blind.run_invalid_reason(row) == "NON_MODEL_SOLVE_PATH"
+    assert arms.non_model_solve("diff", {"tool_call_count": 3}) is False
+    assert arms.non_model_solve("diff", {}) is False  # no Claude run recorded
+
+
+def test_schedule_interleaves_the_arms_with_a_recorded_seed(tmp_path):
+    from scripts.bench.measure_2721 import runner
+
+    ids = [f"t{i}" for i in range(6)]
+    first = runner.build_schedule(ids, [1, 2])
+    assert first == runner.build_schedule(ids, [1, 2])  # same seed, same order
+    assert first != runner.build_schedule(ids, [1, 2], seed=1)
+    assert len(first) == 36 and {e["arm"] for e in first} == set(runner.ARMS)
+    assert [e["arm"] for e in first[:3]] != ["BARE", "NEXUS", "NOOP"] or \
+        [e["arm"] for e in first[3:6]] != ["BARE", "NEXUS", "NOOP"]
+    record = runner.write_schedule(tmp_path, first, runner.DEFAULT_SEED)
+    saved = json.loads((tmp_path / "schedule.json").read_text())
+    assert saved["seed"] == 20261020 and saved["order_sha256"] == record["order_sha256"]
+
+
+def test_preflight_excludes_unfair_tasks_for_every_arm(manifest, tmp_path, bank):
+    from scripts.bench.measure_2721 import preflight
+
+    (task,) = arms.load_manifest(manifest)
+    assert preflight.exclusion_reasons(task) == []
+    assert preflight.exclusion_reasons(dict(task, venv=None)) == [preflight.REASON_NO_VENV]
+    repo = tmp_path / "gitrules"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
+    (repo / "a.txt").write_text("a\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "c")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert preflight.git_problems(repo, head) == [preflight.REASON_LFS]
+    (repo / ".gitattributes").write_text("*.txt filter=crlf\n")
+    (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ../x\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "c2")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert preflight.git_problems(repo, head) == [preflight.REASON_FILTER, preflight.REASON_SUBMODULE]
+    _git(repo, "config", "diff.pdf.textconv", "cat")
+    (repo / ".gitattributes").write_text("")
+    _git(repo, "rm", "-q", ".gitmodules")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "c3")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert preflight.git_problems(repo, head) == [preflight.REASON_FILTER]
+
+
+def test_runners_write_the_same_preflight_and_skip_excluded_tasks(manifest, tmp_path):
+    rows_path = tmp_path / "run"
+    manifest_rows = [json.loads(line) for line in manifest.read_text().splitlines()]
+    no_venv = tmp_path / "manifest-novenv.jsonl"
+    no_venv.write_text(json.dumps(dict(manifest_rows[0], venv=None)) + "\n")
+    env_file = tmp_path / "g.env"
+    env_file.write_text("NEXUS_MEASUREMENT_READ_ROOTS=/m\n")
+    rc = arms.main(["bare", "--manifest", str(no_venv), "--run-root", str(rows_path), "--provider", "fake",
+                    "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
+    report = json.loads((rows_path / "preflight.json").read_text())
+    assert rc == 0 and report["measured"] == [] and report["excluded"][0]["reasons"] == ["NO_TASK_VENV"]
+    assert not (rows_path / "rows.jsonl").exists()
+
+
+def test_the_measured_model_comes_from_the_adapter():
+    from nexus.executors.claude_measurement_worker import CLAUDE_MEASUREMENT_MODEL
+
+    assert arms.MEASUREMENT_MODEL == CLAUDE_MEASUREMENT_MODEL
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=FakeGateway())
+    assert nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s").probe_model == \
+        CLAUDE_MEASUREMENT_MODEL
+
+
+def test_noop_rows_carry_the_fake_label_and_real_rows_the_measured_model(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+
+    def noop_driver(trace_dir, model):
+        gateway = FakeGateway()
+        original = gateway._answer
+
+        def answer(name, args):
+            if name == "nexus_worker_candidate":
+                base = trace_dir / args["task_id"]
+                base.mkdir(parents=True, exist_ok=True)
+                events = [{"type": "system", "subtype": "init", "model": model},
+                          {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.0,
+                           "num_turns": 1, "modelUsage": {model: {}}}]
+                (base / f"{'b' * 64}.stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+                (base / f"{'b' * 64}.run.json").write_text(json.dumps({"cli_timeout_seconds": limit, "venv": venv}))
+            return original(name, args)
+
+        gateway._answer = answer
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+        return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                           trace_dir=trace_dir, arm_label="NEXUS_NOOP")
+
+    row = noop_driver(tmp_path / "t1", "fake-noop").run(task, 1, tmp_path / "run", timeout_seconds=5)
+    # Read from the events only: modelUsage does not count as served.
+    assert row["models_seen"] == ["fake-noop"] and row["served_models"] == []
+    assert arms.FLAG_SERVED_MODEL_MISMATCH not in row["flags"], row
+    row = noop_driver(tmp_path / "t2", "claude-haiku-5-5").run(task, 2, tmp_path / "run", timeout_seconds=5)
+    assert arms.FLAG_SERVED_MODEL_MISMATCH in row["flags"]  # a NOOP row naming a real model
+    # A real completed row must show exactly the measured model, never nothing.
+    assert arms.outcome_flags("OK", []) == [arms.FLAG_SERVED_MODEL_MISMATCH]
+    assert arms.outcome_flags("OK", ["claude-haiku-5-5"]) == []
+    assert arms.fake_model_flag([]) == arms.FLAG_SERVED_MODEL_MISMATCH

@@ -5,7 +5,10 @@ script (a real file, not a symlink, as the measurement adapter requires).
 It never calls a model.  Every run prints a stream-json ``system/init`` event
 that carries ``fake_observed`` (argv, cwd, environment with the token value
 masked) so a dry run can compare exactly what each arm launched, then a
-successful ``result`` reporting ``claude-haiku-5-5``.
+successful ``result``.  A row run reports its own model label
+``fake-<mode>`` (init and modelUsage), never a real model name, so a fake
+run can never pass for the measured model.  Only the adapter's readiness
+probe (never a row) names the measured model, or P1 would refuse the worker.
 
 Modes:
 * ``record``: no edit (the symmetry dry run);
@@ -26,6 +29,7 @@ import os
 from pathlib import Path
 
 FAKE_VERSION = "0.0.0 (Fake Claude, no model)"
+FAKE_MODEL_PREFIX = "fake-"
 
 _TEMPLATE = r'''#!/usr/bin/python3
 import json, os, sys
@@ -43,12 +47,17 @@ try:
     git_status = {"rc": status.returncode, "out": status.stdout}
 except Exception as exc:
     git_status = {"rc": None, "out": type(exc).__name__}
-print(json.dumps({"type": "system", "subtype": "init", "model": "claude-haiku-5-5", "session_id": "fake",
+probe_run = not args[-1].startswith("Reply with exactly")
+# Row runs carry only the fake label.  The one exception is the adapter's own
+# readiness probe (not a row: its trace is filed under the probe task id), which
+# P1 refuses unless it names the measured model; without it NEXUS_NOOP could not
+# reach the worker at all.
+FAKE_MODEL = ("fake-" + MODE) if probe_run else "claude-haiku-5-5"
+print(json.dumps({"type": "system", "subtype": "init", "model": FAKE_MODEL, "session_id": "fake",
                   "tools": ["Bash", "Edit", "Read", "Write"], "mcp_servers": [], "permissionMode": "acceptEdits",
                   "claude_code_version": "0.0.0",
                   "fake_observed": {"mode": MODE, "argv": args, "cwd": os.getcwd(), "env": env,
                                     "git_status": git_status}}))
-probe_run = not args[-1].startswith("Reply with exactly")
 venv_probe = {}
 if MODE == "venvprobe" and probe_run:
     # The task venv must work inside the sandbox in both arms.
@@ -79,7 +88,7 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "nu
                   "total_cost_usd": 0.0, "session_id": "fake",
                   "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
                             "cache_creation_input_tokens": 0},
-                  "modelUsage": {"claude-haiku-5-5": {"inputTokens": 0, "outputTokens": 0}}}))
+                  "modelUsage": {FAKE_MODEL: {"inputTokens": 0, "outputTokens": 0}}}))
 '''
 
 

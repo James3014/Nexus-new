@@ -37,6 +37,7 @@ from scripts.bench.measure_2721.materialize import checkout_base, link_venv
 from scripts.bench.measure_2721.portable import to_portable_row
 from scripts.bench.measure_2721.providers import (
     STATUS_INFRA,
+    STATUS_MODEL_FAILED,
     STATUS_OK,
     STATUS_TIMEOUT,
     Provider,
@@ -115,7 +116,56 @@ def candidate_facts(diff: str, task: Mapping[str, Any]) -> dict[str, Any]:
 FLAG_SERVED_MODEL_MISMATCH = "SERVED_MODEL_MISMATCH"
 FLAG_GIT_TAMPERED = "GIT_METADATA_TAMPERED"
 FLAG_SECRET_IN_DIFF = "SECRET_REDACTED_FROM_DIFF"
-MEASUREMENT_MODEL = "claude-haiku-5-5"
+FLAG_NON_MODEL_SOLVE = "NON_MODEL_SOLVE_PATH"
+
+
+def _measurement_model() -> str:
+    from nexus.executors.claude_measurement_worker import CLAUDE_MEASUREMENT_MODEL
+
+    return CLAUDE_MEASUREMENT_MODEL
+
+
+# The adapter's own constant: one source of truth for the measured model.
+MEASUREMENT_MODEL = _measurement_model()
+
+
+def claude_status(*, infra: bool, timed_out: bool, completed: bool) -> str:
+    """One labelling rule for a Claude attempt in every arm (35's hang test).
+
+    Infra (the adapter's ``claude_infra:*``, e.g. a 429, and the run did not
+    complete) wins over a timeout, as in the adapter; the partial diff does not
+    matter -- the row is re-run in all arms.
+    """
+    if infra and not completed:
+        return STATUS_INFRA
+    if timed_out:
+        return STATUS_TIMEOUT
+    return STATUS_OK if completed else STATUS_MODEL_FAILED
+
+
+def outcome_flags(status: Optional[str], served: Any, *, seen: Any = None, fake_arm: bool = False) -> list[str]:
+    """Flags derived from the status, identical in every arm: the served-model
+    check applies only to a completed real run (a killed run never reports its
+    model, which would be a false SERVED_MODEL_MISMATCH); a fake (NOOP) run
+    must carry only the fake label."""
+    flags = [FLAG_TIMEOUT] if status == STATUS_TIMEOUT else []
+    if fake_arm:
+        fake_flag = fake_model_flag(seen)
+        if fake_flag:
+            flags.append(fake_flag)
+    elif status == STATUS_OK:
+        served_flag = served_model_flag(served)
+        if served_flag:
+            flags.append(served_flag)
+    return flags
+
+
+def non_model_solve(diff: str, fields: Mapping[str, Any]) -> bool:
+    """A non-empty candidate although the measured model made no tool call: the
+    change came from somewhere else (a Nexus fast path, a fixture), not the model."""
+    if "num_turns" not in fields and "tool_call_count" not in fields:
+        return False  # no Claude run recorded (zero-model fakes)
+    return bool(diff.strip()) and not int(fields.get("tool_call_count") or 0)
 
 
 def redact_diff(diff: str, key_file: Optional[str] = None) -> tuple[str, bool]:
@@ -141,11 +191,22 @@ def expected_cli_timeout(timeout_seconds: float) -> float:
     return measurement_cli_timeout(timeout_seconds)
 
 
+FAKE_MODEL_PREFIX = "fake-"
+
+
 def served_model_flag(served: Any) -> Optional[str]:
-    """Both arms must show exactly the measurement model serving the run (driver item 6)."""
+    """A real row must show exactly the measurement model serving the run, and
+    not nothing (driver item 6, 33)."""
     if served is None:
         return None
     return None if list(served) == [MEASUREMENT_MODEL] else FLAG_SERVED_MODEL_MISMATCH
+
+
+def fake_model_flag(seen: Any) -> Optional[str]:
+    """A NOOP (fake CLI) row must show only the fake label, never a real model."""
+    labels = list(seen or [])
+    return None if labels and all(str(m).startswith(FAKE_MODEL_PREFIX) for m in labels) \
+        else FLAG_SERVED_MODEL_MISMATCH
 
 
 def bare_worktree(task: Mapping[str, Any], root: Path, run_id: str) -> tuple[Path, Path]:
@@ -254,10 +315,9 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     network = [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")]
     infra_event = watchdog.infra_event_for(run_root, run_id)
     flags = [flag for flag in (
-        FLAG_TIMEOUT if result.status == STATUS_TIMEOUT else None,
+        *outcome_flags(result.status, extra.get("served_models")),
         lookup["flag"],
         FLAG_NETWORK_ATTEMPT if network else None,
-        served_model_flag(extra.get("served_models")) if result.status == STATUS_OK else None,
         FLAG_GIT_TAMPERED if tampered else None,
         FLAG_SECRET_IN_DIFF if redacted else None,
     ) if flag]
@@ -295,9 +355,11 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
         "model_calls": result.model_calls,
         "total_tokens": result.total_tokens,
         "diff_path": str(diff_path),
-        "non_model_solve_path": False,
+        "non_model_solve_path": non_model_solve(diff, claude_row_fields(extra)),
         **candidate_facts(diff, task),
     }
+    if row["non_model_solve_path"]:
+        row["flags"].append(FLAG_NON_MODEL_SOLVE)
     append_jsonl(run_root / "rows.jsonl", row)
     append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
     watchdog.end_row(run_root)
@@ -387,42 +449,23 @@ def load_manifest(path: Path | str, ids: Optional[Sequence[str]] = None) -> list
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from scripts.bench.measure_2721.runner import PrepareStop, add_common_args, prepare
+
     parser = argparse.ArgumentParser(description="Run the BARE or NOOP arm of #2721")
     parser.add_argument("arm", choices=[ARM_BARE.lower(), ARM_NOOP.lower()])
-    parser.add_argument("--manifest", required=True)
-    parser.add_argument("--run-root", required=True)
-    parser.add_argument("--repeats", type=int, nargs="+", default=[1])
-    parser.add_argument("--ids", nargs="*")
+    add_common_args(parser)
     parser.add_argument("--provider", choices=["claude", "agy", "fake"], default="fake",
                         help="'fake' makes no model call (default); 'claude' (prereg v0.4) and 'agy' are paid")
     parser.add_argument("--claude-bin", help="absolute, non-symlink claude CLI (same file as the Gateway's)")
-    parser.add_argument("--key-file", default=os.path.expanduser("~/.config/nexus-measure-2721/anthropic.env"),
-                        help="0600 KEY=value file with ANTHROPIC_API_KEY (read only by the adapter)")
-    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
-    parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
-    parser.add_argument("--gateway-env", required=True,
-                        help="the Gateway's start.sh or env file, so BARE runs with the same READ_ROOTS")
-    parser.add_argument("--max-row-usd", type=float, default=3.0,
-                        help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
-    parser.add_argument("--spend-ledger", required=True,
-                        help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     args = parser.parse_args(argv)
-    from scripts.bench.measure_2721.gateway_env import (
-        GatewayEnvError,
-        require_read_roots,
-        use_gateway_env,
-    )
-
-    use_gateway_env(args.gateway_env)
-    if args.arm == "bare" and args.provider == "claude":
-        try:
-            require_read_roots()  # same READ_ROOTS as the Gateway, or every row would be void
-        except GatewayEnvError as exc:
-            print(json.dumps({"stopped": "READ_ROOTS_EMPTY", "detail": str(exc)}))
-            return 2
+    try:
+        # Same READ_ROOTS as the Gateway, or every Claude row would be void.
+        tasks = prepare(args, need_read_roots=args.arm == "bare" and args.provider == "claude")
+    except PrepareStop as stop:
+        print(json.dumps(stop.payload))
+        return stop.code
     run_root = Path(args.run_root)
-    tasks = load_manifest(args.manifest, args.ids)
     provider = (
         build_provider(args.provider, claude_bin=args.claude_bin, trace_dir=run_root / "traces",
                        key_file=args.key_file)

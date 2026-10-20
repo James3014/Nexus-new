@@ -35,23 +35,27 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from nexus.executors.claude_measurement_worker import CLAUDE_MEASUREMENT_MODEL
+from scripts.bench.measure_2721 import controller_guard, state_phase
 from scripts.bench.measure_2721.arms import (
     ARM_NEXUS,
+    FLAG_NON_MODEL_SOLVE,
     FLAG_SECRET_IN_DIFF,
     ROW_SCHEMA,
     candidate_facts,
+    claude_status,
     expected_cli_timeout,
     input_capture,
-    load_manifest,
     new_run_id,
+    non_model_solve,
+    outcome_flags,
     redact_diff,
-    served_model_flag,
     task_prompt,
     venv_problem,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
 from scripts.bench.measure_2721.gateway_env import measurement_env, read_roots_sha256
-from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
+from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, lookup_signals
 from scripts.bench.measure_2721.portable import to_portable_row
 
 LIVE_GATEWAY_PORT = 8766
@@ -73,8 +77,7 @@ def _cancel_refused(payload: Any) -> bool:
     return any(marker in text for marker in CANCEL_REFUSED_MARKERS)
 
 
-TERMINAL_STATUSES = frozenset({"CANCELLED", "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "INTEGRATED",
-                               "INTEGRATION_FAILED", "RETAINED_FOR_REVIEW", "FAILED", "TERMINAL"})
+from scripts.bench.measure_2721.state_phase import TERMINAL_STATUSES  # noqa: E402
 
 
 class GatewayStuck(RuntimeError):
@@ -238,53 +241,13 @@ def measurement_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def dir_sha256(root: Path) -> str:
-    """sha256 over every file under ``root`` (relative path + content), ``.lock`` files excluded."""
-    import hashlib
-
-    digest = hashlib.sha256()
-    for path in sorted(p for p in Path(root).rglob("*") if p.is_file() and not p.name.endswith(".lock")):
-        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
-    return digest.hexdigest()
+    """State hash (locks and the ``assisted_provider_jobs`` probe cache excluded)."""
+    return state_phase.state_sha256(root)
 
 
 def restore_state_root(state_root: Path, snapshot: Path) -> dict[str, Any]:
     """Make ``state_root`` an exact copy of ``snapshot`` and prove it by hash (driver item 9)."""
-    import shutil
-
-    expected = dir_sha256(snapshot)
-    for child in list(Path(state_root).iterdir()) if Path(state_root).exists() else []:
-        if child.name.endswith(".lock"):
-            continue
-        shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
-    Path(state_root).mkdir(parents=True, exist_ok=True)
-    shutil.copytree(snapshot, state_root, dirs_exist_ok=True, symlinks=True)
-    actual = dir_sha256(state_root)
-    return {"expected_sha256": expected, "restored_sha256": actual, "ok": expected == actual}
-
-
-def guard_controller_repo(repo: Path, roots: Sequence[Path]) -> Path:
-    """The Controller checkout the driver may reset every row (H1).
-
-    It must resolve under a measurement root (the external-target root or an
-    explicit measurement dir) and must never be a main clone
-    (``~/workspace/<repo>`` / ``~/Workspace/<repo>``) or the live Controller.
-    """
-    real = Path(os.path.realpath(repo))
-    home = Path(os.path.realpath(Path.home()))
-    env_root = measurement_env().get("NEXUS_MEASURE_EXTERNAL_TARGET_ROOT")
-    allowed = [Path(os.path.realpath(r)) for r in [*roots, *([env_root] if env_root else [])]]
-    for main in (home / "workspace", home / "Workspace"):
-        if real.parent == main or real == main:
-            raise ValueError(f"CONTROLLER_REPO_IS_A_MAIN_CLONE: {real}")
-    live = measurement_env().get("NEXUS_MEASUREMENT_LIVE_CONTROLLER") or os.environ.get("NEXUS_LIVE_CONTROLLER_ROOT")
-    if live and real == Path(os.path.realpath(live)):
-        raise ValueError(f"CONTROLLER_REPO_IS_THE_LIVE_CONTROLLER: {real}")
-    if not any(root != real and root in real.parents for root in allowed):
-        raise ValueError(f"CONTROLLER_REPO_OUTSIDE_MEASUREMENT_ROOT: {real}")
-    if not (real / ".git").exists():
-        raise ValueError(f"CONTROLLER_REPO_NOT_A_CHECKOUT: {real}")
-    return real
+    return state_phase.restore_state(state_root, snapshot)
 
 
 def leak_surfaces(repo: Path) -> dict[str, list[str]]:
@@ -312,20 +275,35 @@ def new_leaks(before: Mapping[str, list[str]], after: Mapping[str, list[str]], o
 class NexusArmDriver:
     def __init__(self, client: GatewayClient, *, campaign_id: str, goal_id: str, scope_id: str,
                  controller_git: Optional[Path] = None, state_dir: Optional[Path] = None,
-                 external_target_root: Optional[Path] = None, probe_model: str = "claude-haiku-5-5",
+                 external_target_root: Optional[Path] = None, probe_model: str = CLAUDE_MEASUREMENT_MODEL,
                  probe_provider: str = "claude", trace_dir: Optional[Path] = None, arm_label: str = ARM_NEXUS,
                  poll_seconds: float = 60.0, sleep: Callable[[float], None] = time.sleep,
                  targets_root: Optional[Path] = None, state_root: Optional[Path] = None,
                  state_snapshot: Optional[Path] = None, learning_phase: Optional[str] = None,
                  key_file: Optional[str] = None, controller_repo: Optional[Path] = None,
                  controller_pin: Optional[str] = None, cancel_backoff: Sequence[float] = (10.0, 20.0, 40.0, 60.0),
-                 measurement_root: Optional[Path] = None):
+                 measurement_root: Optional[Path] = None, live_configs: Optional[Sequence[Path]] = None):
         self.client = client
         if (controller_repo is None) != (controller_pin is None):
             raise ValueError("controller_repo and controller_pin go together (M3)")
+        self._reset: Optional[controller_guard.ControllerReset] = None
+        router_roots: list[Path] = []
         if controller_repo is not None:
-            controller_repo = guard_controller_repo(
-                controller_repo, [r for r in (measurement_root, external_target_root) if r is not None])
+            # B1/H1/M1/M2: one nested measurement root, the Controller (a linked
+            # worktree) and its common dir under it, nothing live or main-clone.
+            root = controller_guard.measurement_root({
+                "--measurement-root": measurement_root,
+                "--external-target-root": external_target_root,
+                "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT": measurement_env().get("NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"),
+            })
+            guarded = controller_guard.guard_controller(
+                controller_repo, root, controller_guard.live_locations(live_configs))
+            controller_repo = guarded["controller"]
+            self._reset = controller_guard.ControllerReset(controller_repo, str(controller_pin))
+            # The router writes router_decisions.jsonl under its project root (the
+            # Controller or the repository's main worktree): restored every row.
+            router_roots = [controller_repo, guarded["common_dir"].parent]
+        self._extra_state = state_phase.ExtraStateFiles.router_logs(router_roots)
         # The Gateway's own Controller checkout: reset to its pin before every
         # row (each row adds a card commit), and the source of expected_head.
         self.controller_repo = controller_repo
@@ -357,15 +335,30 @@ class NexusArmDriver:
         # NEXUS_STATE_READ_ONLY (#2736) are set per phase by the instance owner.
         self.learning_phase = learning_phase
         self.key_file = key_file
+        self._phase_restored = False
+        # The task states themselves (P1 writes one per row) are not learning state:
+        # left out of the L-B read-only hash when they live inside the state root.
+        self._state_hash_exclude: list[str] = []
+        if state_root is not None and state_dir is not None:
+            try:
+                self._state_hash_exclude = [Path(os.path.realpath(state_dir)).relative_to(
+                    os.path.realpath(state_root)).as_posix()]
+            except ValueError:
+                pass
 
     # -- argument builders (pure; the dry run captures them) -------------------
-    def card_args(self, task: Mapping[str, Any], gw_task: str) -> dict[str, Any]:
+    def card_args(self, task: Mapping[str, Any], gw_task: str, repeat: Optional[int] = None) -> dict[str, Any]:
         text = task["text"]
+        # Every (task, repeat) gets its own task id and card content, so P1 never
+        # sees two rows as one logical task (DUPLICATE_LOGICAL_TASK).  The worker
+        # prompt is built from what/why only, so BARE and NEXUS prompts stay equal.
+        objective = text["what"] if repeat is None else (
+            f"{text['what']}\n\nMeasurement row {gw_task} (repeat {repeat}).")
         return {
             "owner_confirmation": True,
             "campaign_id": self.campaign_id,
             "task_id": gw_task,
-            "objective": text["what"],
+            "objective": objective,
             "allowed_files": list(text["allowed_files"]),
             "verifier_commands": list(text["verifier_commands"]),
             "authority_goal_id": self.goal_id,
@@ -483,12 +476,29 @@ class NexusArmDriver:
                 if not reset["ok"]:
                     row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="CONTROLLER_RESET_MISMATCH")
                     return row
+            extra = self._extra_state.restore()
+            row["extra_state_restore"] = extra
+            if not extra["ok"]:
+                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="EXTRA_STATE_RESTORE_MISMATCH")
+                return row
             if self.state_root is not None and self.state_snapshot is not None:
-                restore = restore_state_root(self.state_root, self.state_snapshot)
-                row["state_restore"] = restore
-                if not restore["ok"]:
-                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="STATE_ROOT_RESTORE_MISMATCH")
-                    return row
+                policy = state_phase.restore_policy(self.learning_phase)
+                row["state_restore_policy"] = policy
+                if policy == "per_row" or not self._phase_restored:
+                    # Only when the instance is quiet: no task in flight, the previous
+                    # task cancelled and its Target removed.
+                    busy = state_phase.quiescence_problem(self.state_dir)
+                    if busy:
+                        row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"STATE_RESTORE_BUSY:{busy}")
+                        return row
+                    restore = restore_state_root(self.state_root, self.state_snapshot)
+                    row["state_restore"] = restore
+                    if not restore["ok"]:
+                        row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="STATE_ROOT_RESTORE_MISMATCH")
+                        return row
+                    self._phase_restored = True
+                row["state_before_sha256"] = state_phase.state_sha256(self.state_root,
+                                                                     exclude=self._state_hash_exclude)
             health = self.client.health()
             row["gateway_health"] = {key: health.get(key) for key in (
                 "git_head", "repo_head_current", "server_instance_id", "core_provenance", "controller_binding")}
@@ -504,7 +514,7 @@ class NexusArmDriver:
                     row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=problem)
                     return row
                 controller = self.fresh_controller(task, run_root, run_id)
-            card = self.client.call("nexus_task_card_create", self.card_args(task, gw_task))
+            card = self.client.call("nexus_task_card_create", self.card_args(task, gw_task, repeat))
             created = True
             transcript.append({"tool": "nexus_task_card_create", "result": card})
             commit = self.client.call("nexus_task_card_commit", {
@@ -520,6 +530,12 @@ class NexusArmDriver:
             self._submitted = True  # from here on the worker may spend money
             submitted = self._submit_worker(worker_args, transcript)
             transcript.append({"tool": "nexus_worker_candidate", "result": submitted})
+            duplicate = submitted.get("duplicate") if isinstance(submitted, Mapping) else None
+            if duplicate or "DUPLICATE_LOGICAL_TASK" in json.dumps(submitted, default=str):
+                # P1 joined another row's task: this row did not run its own worker.
+                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="DUPLICATE_TASK",
+                           duplicate=duplicate if duplicate is not True else True)
+                return row
             final = self._wait(gw_task, started + timeout_seconds + 600.0, transcript)
             status = self.client.call("nexus_task_status", {"task_id": gw_task})
             transcript.append({"tool": "nexus_task_status", "result": status})
@@ -529,8 +545,15 @@ class NexusArmDriver:
             diff = row.pop("_diff", "")
         except GatewayToolError as exc:
             message = json.dumps(exc.payload)
-            row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
-                       infra=_is_infra(message), error=message[:2000])
+            if not self._submitted:
+                # Before the worker was submitted (card create/commit, probe, e.g.
+                # TASK_CARD_COMMIT_HEAD_MISMATCH): the model never ran -> infra,
+                # re-run in both arms.
+                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"PRE_SUBMIT_FAILURE:{exc.tool}",
+                           error=message[:2000])
+            else:
+                row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
+                           infra=_is_infra(message), error=message[:2000])
         finally:
             stuck = None
             if created:
@@ -552,8 +575,16 @@ class NexusArmDriver:
                 if leaks:
                     row["leaks"] = leaks
                     row.setdefault("flags", []).append("STATE_LEAK")
-            if self.state_root is not None and self.state_snapshot is not None and row.get("state_restore"):
-                row["state_after_sha256"] = dir_sha256(self.state_root)
+            row["submitted"] = bool(self._submitted)
+            if self.state_root is not None and row.get("state_before_sha256"):
+                row["state_after_sha256"] = state_phase.state_sha256(self.state_root,
+                                                                    exclude=self._state_hash_exclude)
+                if state_phase.read_only_phase(self.learning_phase) and \
+                        row["state_after_sha256"] != row["state_before_sha256"]:
+                    # Q2: L-B is read-only; a changed state means the freeze leaked.
+                    row.setdefault("flags", []).append("LB_STATE_CHANGED")
+                    row.update(outcome=OUTCOME_INFRA, infra=True,
+                               void_reason=row.get("void_reason") or "LB_STATE_CHANGED")
             event = watchdog.infra_event_for(run_root, run_id)
             if event is not None:
                 row.update(outcome=OUTCOME_INFRA, infra=True, watchdog_event=event)
@@ -569,6 +600,9 @@ class NexusArmDriver:
             write_diff(diff_path, diff)
             row["diff_path"] = str(diff_path)
             row.update(candidate_facts(diff, task))
+            row["non_model_solve_path"] = non_model_solve(diff, row)
+            if row["non_model_solve_path"]:
+                row.setdefault("flags", []).append(FLAG_NON_MODEL_SOLVE)
             append_jsonl(run_root / "rows.jsonl", row)
             append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
             watchdog.end_row(run_root)
@@ -650,53 +684,14 @@ class NexusArmDriver:
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
     def reset_controller(self) -> Optional[dict[str, Any]]:
-        """Make the Controller as clean as BARE's fresh clone, at its pin (gap item 4, M1).
-
-        Every row adds one Task Card commit and may leave candidate refs,
-        worktrees or a stash.  Reset to the pin, ``clean -fdx``, drop every
-        ref except the checked-out branch (refs/nexus-candidates/* included),
-        remove extra worktrees, clear the stash, then verify all of it with
-        untracked and ignored files included.
-        """
-        if self.controller_pin is None or self.controller_repo is None:
-            return None
-        repo = self.controller_repo
-        removed: list[str] = []
-        try:
-            branch = git(repo, "symbolic-ref", "-q", "HEAD", check=False).strip()
-            for line in git(repo, "worktree", "list", "--porcelain").splitlines():
-                path = line[len("worktree "):] if line.startswith("worktree ") else None
-                if path and Path(os.path.realpath(path)) != Path(os.path.realpath(repo)):
-                    git(repo, "worktree", "remove", "--force", path, check=False)
-                    removed.append(f"worktree {path}")
-            git(repo, "worktree", "prune")
-            git(repo, "reset", "-q", "--hard", self.controller_pin)
-            git(repo, "clean", "-q", "-fdx")
-            for ref in git(repo, "for-each-ref", "--format=%(refname)").splitlines():
-                if ref and ref != branch:
-                    git(repo, "update-ref", "-d", ref)
-                    removed.append(ref)
-            if git(repo, "rev-parse", "-q", "--verify", "refs/stash", check=False).strip():
-                git(repo, "update-ref", "-d", "refs/stash")
-                removed.append("refs/stash")
-            head = git(repo, "rev-parse", "HEAD").strip()
-            pin = git(repo, "rev-parse", f"{self.controller_pin}^{{commit}}").strip()
-            dirty = git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored").strip()
-            refs = [r for r in git(repo, "for-each-ref", "--format=%(refname)").splitlines() if r and r != branch]
-            worktrees = [line for line in git(repo, "worktree", "list", "--porcelain").splitlines()
-                         if line.startswith("worktree ")]
-        except RuntimeError as exc:
-            return {"ok": False, "error": str(exc)[-300:], "removed": removed}
-        ok = head == pin and not dirty and not refs and len(worktrees) == 1
-        # Only the checked-out branch is kept; whatever a previous row created
-        # is in ``removed`` and flagged on this row (CONTROLLER_LEFTOVERS).
-        return {"ok": ok, "head": head, "pin": pin, "dirty": bool(dirty), "extra_refs": refs,
-                "worktrees": len(worktrees), "removed": removed}
+        """Reset the Controller worktree to its pin (B1): its own worktree and the
+        measurement refs only; see ``controller_guard.ControllerReset``."""
+        return self._reset.reset() if self._reset is not None else None
 
     def controller_head(self, health: Mapping[str, Any]) -> Optional[str]:
         """expected_head for the card commit: the Controller's own HEAD."""
         if self.controller_repo is not None:
-            return git(self.controller_repo, "rev-parse", "HEAD").strip()
+            return git(self.controller_repo, "rev-parse", "HEAD").strip()  # the Controller's own HEAD
         return health.get("repo_head_current") or health.get("git_head")
 
     def _trace_runs(self, gw_task: str) -> list[Path]:
@@ -750,7 +745,11 @@ class NexusArmDriver:
         worktree, then the candidate commit; ``candidate_source`` says which.
         """
         from scripts.bench.measure_2721.arms import claude_row_fields
-        from scripts.bench.measure_2721.providers import claude_usage_fields, read_claude_trace
+        from scripts.bench.measure_2721.providers import (
+            claude_usage_fields,
+            observed_models,
+            read_claude_trace,
+        )
 
         state = {**status, **self._read_state(gw_task)}
         materialization = state.get("worker_model_context_materialization") or {}
@@ -783,11 +782,11 @@ class NexusArmDriver:
                 "usage": usage, "num_turns": sum(int(t["summary"].num_turns or 0) for t in traces),
                 "tool_call_count": sum(len(t["summary"].tool_calls) for t in traces),
                 "total_cost_usd": round(sum(float(c) for c in costs if c is not None), 6),
-                "models_seen": sorted({m for t in traces for m in t["summary"].models_seen}),
+                "models_seen": sorted({m for t in traces for m in observed_models(t["trace_path"])["seen"]}),
                 "seatbelt_sha256": trace["sidecar"].get("seatbelt_sha256"),
                 "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
                 "worker_span_ms": trace["sidecar"].get("wall_time_ms"),
-                "served_models": sorted({m for t in traces for m in t["summary"].served_models}),
+                "served_models": sorted({m for t in traces for m in observed_models(t["trace_path"])["served"]}),
                 "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
                 "key_label": trace["sidecar"].get("key_label"),
                 "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
@@ -799,6 +798,11 @@ class NexusArmDriver:
             claude["attempt_cli_timeouts"] = [t["sidecar"].get("cli_timeout_seconds") for t in traces]
             claude["attempt_venvs"] = [t["sidecar"].get("venv") for t in traces]
             claude["fake_observed"] = any(t["fake_observed"] for t in traces)
+            # The same labelling rule as BARE, from the last attempt's adapter record.
+            last = trace["sidecar"]
+            completed = bool(summary.result_seen) and summary.is_error is False
+            claude["attempt_status"] = claude_status(infra=bool(last.get("infra")),
+                                                     timed_out=bool(last.get("timed_out")), completed=completed)
             trace_text = "\n".join(json.dumps(call.get("input"), default=str)
                                    for t in traces for call in t["summary"].tool_calls)
         elif self.trace_dir is not None:
@@ -806,14 +810,21 @@ class NexusArmDriver:
             # sidecar -> the row is void, never scored (review M2).
             snapshot["invalid_reason"] = snapshot["invalid_reason"] or "TRACE_MISSING"
         telemetry = state.get("telemetry") or {}
-        infra = _is_infra(error) and not diff.strip()
+        status = claude.get("attempt_status")
+        # As in BARE: an infra attempt (a 429 included) voids the row whatever
+        # partial diff it left; both arms re-run it.
+        infra = _is_infra(error) or status == "INFRA"
         worker_texts = [json.dumps(state.get(key), default=str) for key in
                         ("execution", "executions", "execution_outcome", "error") if state.get(key) is not None]
         lookup = lookup_signals([*worker_texts, trace_text], repo=repo)
         timed_out = bool((final.get("wait") or {}).get("timed_out")) or "timed_out\": true" in " ".join(worker_texts)
         network = [a for a in claude.get("proxy_denied") or []]
-        flags = [flag for flag in (FLAG_TIMEOUT if timed_out else None, lookup["flag"],
-                                   FLAG_NETWORK_ATTEMPT if network else None) if flag]
+        if status is None and timed_out:
+            status = "TIMEOUT"
+        fake_arm = self.arm_label != ARM_NEXUS  # NEXUS_NOOP: the Gateway runs the fake CLI
+        flags = [*outcome_flags(status, claude.get("served_models"), seen=claude.get("models_seen"),
+                                fake_arm=fake_arm and bool(claude)),
+                 *(flag for flag in (lookup["flag"], FLAG_NETWORK_ATTEMPT if network else None) if flag)]
         if snapshot["invalid_reason"]:
             flags.append("SNAPSHOT_INVALID")
         expected_limit = getattr(self, "expected_cli_timeout", None)
@@ -829,9 +840,6 @@ class NexusArmDriver:
             if issue:
                 flags.append("VENV_NOT_USABLE")
                 snapshot["invalid_reason"] = snapshot["invalid_reason"] or issue
-        served_flag = served_model_flag(claude.get("served_models"))
-        if served_flag:
-            flags.append(served_flag)
         return {
             "flags": flags,
             "lookup": lookup,
@@ -840,7 +848,8 @@ class NexusArmDriver:
             "snapshot": {key: value for key, value in snapshot.items() if key != "diff"},
             "void_reason": snapshot["invalid_reason"],
             # An unusable snapshot voids the row: re-run in every arm (S4).
-            "outcome": OUTCOME_INFRA if infra or snapshot["invalid_reason"] else OUTCOME_DONE,
+            "outcome": OUTCOME_INFRA if infra or snapshot["invalid_reason"] else (
+                status if status in ("TIMEOUT", "MODEL_FAILED") else OUTCOME_DONE),
             "infra": infra or bool(snapshot["invalid_reason"]),
             "gateway_status": state.get("status"),
             "verification_verdict": state.get("verification_verdict"),
@@ -861,10 +870,11 @@ class NexusArmDriver:
         }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Drive the NEXUS arm of #2721 on a measurement Gateway")
-    parser.add_argument("--manifest", required=True)
-    parser.add_argument("--run-root", required=True)
+class DriverStartRefused(RuntimeError):
+    pass
+
+
+def add_gateway_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gateway-url", required=True, help="e.g. http://127.0.0.1:18766 (never :8766)")
     parser.add_argument("--token-file", required=True, help="0600 file with the measurement-only token")
     parser.add_argument("--campaign-id", default="measure-2721")
@@ -876,66 +886,73 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--trace-dir", required=True,
                         help="the Gateway's NEXUS_MEASUREMENT_TRACE_DIR (read only; cost and checks come from it)")
     parser.add_argument("--targets-root", help="measurement root for per-row Controller clones (#2742)")
-    parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored before each row)")
-    parser.add_argument("--state-snapshot", help="directory snapshot to restore NEXUS_STATE_ROOT from")
-    parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
-    parser.add_argument("--max-row-usd", type=float, default=3.0,
-                        help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
-    parser.add_argument("--spend-ledger", required=True,
-                        help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
-    parser.add_argument("--learning-phase", help="recorded on every row (LA / LB / COLD / IRRELEVANT / M)")
-    parser.add_argument("--key-file", default=str(Path("~/.config/nexus-measure-2721/anthropic.env").expanduser()),
-                        help="the measurement key file, used only to redact candidate diffs")
+    parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored per the phase's policy)")
+    parser.add_argument("--state-snapshot", help="phase-start snapshot NEXUS_STATE_ROOT is restored from")
+    parser.add_argument("--learning-phase", help="M / LA / LB (also COLD / IRRELEVANT); sets the restore policy")
     parser.add_argument("--arm-label", choices=[ARM_NEXUS, "NEXUS_NOOP"], default=ARM_NEXUS,
                         help="NEXUS_NOOP when the Gateway runs the no-model fake claude binary")
-    parser.add_argument("--repeats", type=int, nargs="+", default=[1])
-    parser.add_argument("--ids", nargs="*")
-    parser.add_argument("--timeout", type=float, default=900.0)
-    parser.add_argument("--gateway-env", required=True,
-                        help="the Gateway's start.sh or env file (assignments only, never executed)")
-    parser.add_argument("--controller-repo", help="the measurement Gateway's Controller checkout (reset per row; "
-                        "must lie under the measurement root)")
-    parser.add_argument("--measurement-root", help="extra root the Controller checkout may lie under "
-                        "(default: NEXUS_MEASURE_EXTERNAL_TARGET_ROOT / --external-target-root)")
+    parser.add_argument("--controller-repo", help="the measurement Gateway's Controller worktree (reset per row)")
     parser.add_argument("--controller-pin", help="commit the Controller is reset to before every row")
-    args = parser.parse_args(argv)
-    from scripts.bench.measure_2721.gateway_env import (
-        GatewayEnvError,
-        require_read_roots,
-        use_gateway_env,
-    )
+    parser.add_argument("--measurement-root", help="the measurement dir; the Controller and its git common dir "
+                        "must lie under it (with --external-target-root / NEXUS_MEASURE_EXTERNAL_TARGET_ROOT)")
+    parser.add_argument("--live-config", action="append",
+                        help="live Gateway configuration to read live locations from (default: the live "
+                        "launchd plists and mcp-gateway.env); none readable -> refuse to start")
 
-    use_gateway_env(args.gateway_env)
-    try:
-        require_read_roots()
-    except GatewayEnvError as exc:
-        print(json.dumps({"stopped": "READ_ROOTS_EMPTY", "detail": str(exc)}))
-        return 2
+
+def build_driver(args: argparse.Namespace, parser: argparse.ArgumentParser) -> "NexusArmDriver":
     if bool(args.controller_pin) != bool(args.controller_repo):
         parser.error("--controller-repo and --controller-pin go together (M3)")
+    if args.state_snapshot and not args.state_dir:
+        parser.error("--state-snapshot needs --state-dir (a restore waits for a quiet instance)")
+    bad = state_phase.invalid_states(Path(args.state_dir) if args.state_dir else None)
+    if bad:
+        raise DriverStartRefused(f"STATE_INVALID_RECORDS: {bad[:5]}")
     client = GatewayClient(args.gateway_url, read_token(args.token_file))
-    driver = NexusArmDriver(
-        client, campaign_id=args.campaign_id, goal_id=args.goal_id, scope_id=args.scope_id,
-        controller_git=Path(args.controller_git) if args.controller_git else None,
-        state_dir=Path(args.state_dir) if args.state_dir else None,
-        external_target_root=Path(args.external_target_root) if args.external_target_root else None,
-        trace_dir=Path(args.trace_dir),
-        arm_label=args.arm_label,
-        targets_root=Path(args.targets_root) if args.targets_root else None,
-        state_root=Path(args.state_root) if args.state_root else None,
-        state_snapshot=Path(args.state_snapshot) if args.state_snapshot else None,
-        learning_phase=args.learning_phase,
-        key_file=args.key_file,
-        controller_repo=Path(args.controller_repo) if args.controller_repo else None,
-        controller_pin=args.controller_pin,
-        measurement_root=Path(args.measurement_root) if args.measurement_root else None,
-    )
+    try:
+        return NexusArmDriver(
+            client, campaign_id=args.campaign_id, goal_id=args.goal_id, scope_id=args.scope_id,
+            controller_git=Path(args.controller_git) if args.controller_git else None,
+            state_dir=Path(args.state_dir) if args.state_dir else None,
+            external_target_root=Path(args.external_target_root) if args.external_target_root else None,
+            trace_dir=Path(args.trace_dir),
+            arm_label=args.arm_label,
+            targets_root=Path(args.targets_root) if args.targets_root else None,
+            state_root=Path(args.state_root) if args.state_root else None,
+            state_snapshot=Path(args.state_snapshot) if args.state_snapshot else None,
+            learning_phase=args.learning_phase,
+            key_file=args.key_file,
+            controller_repo=Path(args.controller_repo) if args.controller_repo else None,
+            controller_pin=args.controller_pin,
+            measurement_root=Path(args.measurement_root) if args.measurement_root else None,
+            live_configs=[Path(p) for p in args.live_config] if args.live_config else None,
+        )
+    except controller_guard.ControllerGuardError as exc:
+        raise DriverStartRefused(str(exc)) from exc
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    from scripts.bench.measure_2721.runner import PrepareStop, add_common_args, prepare
+
+    parser = argparse.ArgumentParser(description="Drive the NEXUS arm of #2721 on a measurement Gateway")
+    add_common_args(parser)
+    add_gateway_args(parser)
+    args = parser.parse_args(argv)
+    try:
+        tasks = prepare(args, need_read_roots=True)
+        driver = build_driver(args, parser)
+    except PrepareStop as stop:
+        print(json.dumps(stop.payload))
+        return stop.code
+    except DriverStartRefused as exc:
+        print(json.dumps({"stopped": "DRIVER_REFUSED", "detail": str(exc)}))
+        return 2
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
     ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
     rows = []
     try:
-        for task in load_manifest(args.manifest, args.ids):
+        for task in tasks:
             for repeat in args.repeats:
                 rows.append(driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout,
                                        ledger=ledger))

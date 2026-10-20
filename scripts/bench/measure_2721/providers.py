@@ -301,6 +301,36 @@ def estimate_stream_usd(stream: Any) -> float:
     return round(sum(estimate_usage_usd(usage) for usage in per_message.values()), 6)
 
 
+def observed_models(stream: Any) -> dict[str, list[str]]:
+    """Models actually seen in a trace's events (33): ``seen`` = the init model
+    and every assistant ``message.model``; ``served`` = the assistant
+    ``message.model`` values only.  Nothing read -> empty lists."""
+    import json as _json
+
+    seen: list[str] = []
+    served: list[str] = []
+    path = Path(stream) if stream else None
+    if path is None or not path.is_file():
+        return {"seen": seen, "served": served}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = _json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        model = None
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            model = event.get("model")
+        elif event.get("type") == "assistant" and isinstance(event.get("message"), dict):
+            model = event["message"].get("model")
+            if isinstance(model, str) and model not in served:
+                served.append(model)
+        if isinstance(model, str) and model not in seen:
+            seen.append(model)
+    return {"seen": seen, "served": served}
+
+
 def claude_usage_fields(summary: Any) -> dict[str, Any]:
     usage = summary.usage or {}
     fields = {key: int(usage.get(key) or 0) for key in (
@@ -395,7 +425,7 @@ class ClaudeProvider:
             "num_turns": summary.num_turns,
             "total_cost_usd": summary.total_cost_usd,
             "usage": usage,
-            "models_seen": list(summary.models_seen),
+            "models_seen": observed_models(trace["trace_path"])["seen"],
             "tool_calls": [{"name": call["name"]} for call in summary.tool_calls],
             "tool_call_count": len(summary.tool_calls),
             # Tool inputs (Bash commands, paths) for the UPSTREAM_LOOKUP scan.
@@ -408,7 +438,7 @@ class ClaudeProvider:
             "proxy_attempts": trace["sidecar"].get("proxy_attempts"),
             "env_keys": trace["sidecar"].get("env_keys"),
             "argv_sha256": trace["sidecar"].get("argv_sha256"),
-            "served_models": list(summary.served_models),
+            "served_models": observed_models(trace["trace_path"])["served"],
             "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
             "key_label": trace["sidecar"].get("key_label"),
             "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),

@@ -53,6 +53,8 @@ def run_invalid_reason(row: Mapping[str, Any]) -> str | None:
         return f"VOID:{row['void_reason']}"
     if "STATE_LEAK" in (row.get("flags") or []):
         return "STATE_LEAK"
+    if row.get("non_model_solve_path"):
+        return "NON_MODEL_SOLVE_PATH"
     if row.get("outcome") not in SCORABLE_OUTCOMES:
         return f"OUTCOME:{row.get('outcome')}"
     return None
