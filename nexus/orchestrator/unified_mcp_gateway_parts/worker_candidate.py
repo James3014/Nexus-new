@@ -45,6 +45,12 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
 )
 from nexus.orchestrator.task_contract import parse_task_card_expected_evidence
+from nexus.orchestrator.unified_mcp_gateway_parts.cairnwork_route import (
+    CAIRNWORK_WORKER,
+    cairnwork_payload,
+    route_mode,
+    small_fix_shape,
+)
 from nexus.services.model_capability_lineage import CHANGE_KIND_VALUES, LineageResolutionError
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -136,6 +142,11 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
     if TYPE_CHECKING:  # provided by UnifiedMCPGateway
         _workforce_loader: Any  # WorkforcePolicyLoader; pyright cannot resolve that import symbol
         _calibration_planner: CalibrationPlanner
+
+        # from _CairnworkRouteMixin (council F)
+        def _cairnwork_owns(self, task_id: str) -> bool: ...
+        def _cairnwork_submit(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+        def _cairnwork_shadow(self, arguments: Mapping[str, Any], payload: dict[str, Any]) -> None: ...
 
         @staticmethod
         def _canonical_request(
@@ -337,6 +348,24 @@ class _WorkerCandidateMixin(_WorkerCandidateBase):
             raise _gateway().GatewayInputError(f"TASK_CARD_BINDING_INVALID:{exc}") from exc
         if hashlib.sha256(card_bytes).hexdigest() != task_card_hash:
             raise _gateway().GatewayInputError("TASK_CARD_BINDING_MISMATCH")
+        # Council F (cairnwork docs/GATEWAY_ROUTE.md): off by default; see cairnwork_route.py.
+        cairnwork_mode = route_mode()
+        wants_cairnwork = str(arguments.get("worker") or "").strip().lower() == CAIRNWORK_WORKER
+        if self._cairnwork_owns(task_id) and not (cairnwork_mode == "route" and wants_cairnwork):
+            raise _gateway().GatewayInputError("CAIRNWORK_OWNS_TASK_ID")
+        if cairnwork_mode != "off" and external_root is None:
+            small_fix = small_fix_shape(arguments, verifiers)
+            payload_for_cairnwork = cairnwork_payload(
+                task_id=task_id, task_card_hash=task_card_hash, what=what, why=why,
+                repo=Path(_gateway().CANONICAL_SOURCE_ROOT), base=head, allowed=allowed,
+                verifiers=verifiers,
+            )
+            if cairnwork_mode == "route" and wants_cairnwork:
+                if not small_fix:
+                    raise _gateway().GatewayInputError("CAIRNWORK_TASK_SHAPE_UNSUPPORTED")
+                return self._cairnwork_submit(payload_for_cairnwork)
+            if cairnwork_mode == "shadow" and small_fix:
+                self._cairnwork_shadow(arguments, payload_for_cairnwork)
         try:
             card_universe = parse_task_card_expected_evidence(card_bytes.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:

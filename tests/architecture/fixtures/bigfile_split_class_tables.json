@@ -811,6 +811,38 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:value: Mapping[str, Any]) -> dict[str, Any]"
    },
+   "_cairnwork_cancel": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "_cairnwork_job_path": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> Optional[Path]"
+   },
+   "_cairnwork_owns": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> bool"
+   },
+   "_cairnwork_root": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> Path"
+   },
+   "_cairnwork_shadow": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:payload: dict[str, Any]) -> None"
+   },
+   "_cairnwork_status": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
+   },
+   "_cairnwork_submit": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:payload: dict[str, Any]) -> dict[str, Any]"
+   },
+   "_cairnwork_wait": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:timeout_seconds: float, KEYWORD_ONLY:poll_interval_seconds: float) -> dict[str, Any]"
+   },
    "_call_tool": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:name: str, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any]) -> dict[str, Any]"
