@@ -801,7 +801,6 @@ def run_shadow(
     for case in corpus["cases"]:
         case_id = case["case_id"]
         family = case["hostile_family"]
-        family_counts[family] += 1
         attempt_path = attempts_dir / f"{case_id}.json"
         if attempt_path.stat().st_mode & 0o222:
             raise PermissionError(f"attempt receipt must be read-only: {attempt_path}")
@@ -829,6 +828,8 @@ def run_shadow(
         actual_disposition = str(attempt["actual_disposition"])
         infra_invalid = bool(attempt["infra_invalid"])
         infra_reason = attempt["infra_invalid_reason"]
+        if not infra_invalid:
+            family_counts[family] += 1
         if (
             not infra_invalid
             and case.get("expected_disposition") != "CERTIFIED"
