@@ -119,6 +119,7 @@ CARD = (
     "task_id: `task-1`\n"
     "attempt_id: attempt-1\n"
     "Tracks James3014/Nexus-new#42.\n"
+    "\n## Allowed files\n\n- `docs/a.md`\n"
 )
 
 
@@ -138,7 +139,12 @@ def _write_card(root: Path, text: str | bytes = CARD, name: str = "card.md") -> 
 
 
 def _authority(**overrides: Any) -> dict[str, str]:
-    values: dict[str, Any] = {"issue_number": 42, "task_id": "task-1", "attempt_id": "attempt-1"}
+    values: dict[str, Any] = {
+        "issue_number": 42,
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "allowed_paths": ["docs/a.md"],
+    }
     values.update(overrides)
     return UnifiedMCPGateway._mutation_task_card_authority(**values)
 

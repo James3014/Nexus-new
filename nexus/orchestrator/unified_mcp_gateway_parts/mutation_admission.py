@@ -23,7 +23,11 @@ import re
 from typing import TYPE_CHECKING, Any, Mapping
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass
-from nexus.orchestrator.mutation_admission import MutationAdmissionError
+from nexus.orchestrator.mutation_admission import (
+    MutationAdmissionError,
+    governed_scope_excess,
+    task_card_allowed_files,
+)
 
 if TYPE_CHECKING:
     from nexus.orchestrator.mutation_admission import MutationAdmissionStore
@@ -73,6 +77,7 @@ class _MutationAdmissionMixin(_MutationAdmissionBase):
         attempt_id: str,
         task_card_path: str,
         task_card_hash: str,
+        allowed_paths: list[str] | tuple[str, ...],
     ) -> dict[str, str]:
         _gateway()._safe_relative_path(task_card_path, "task_card_path")
         if not task_card_path.startswith("tasks/") or not task_card_path.endswith(".md"):
@@ -108,6 +113,19 @@ class _MutationAdmissionMixin(_MutationAdmissionBase):
         issue_marker = f"James3014/Nexus-new#{issue_number}"
         if issue_marker not in source:
             raise _gateway().GatewayInputError("MUTATION_ADMISSION_TASK_CARD_ISSUE_MISMATCH")
+        # #2766: the requested write scope must stay inside the hashed card's own
+        # allowed files (equal or narrower); a GOVERNED caller cannot widen it, and
+        # this lane has no Owner override. Read from the same bytes that were hashed.
+        try:
+            card_allowed = task_card_allowed_files(source)
+        except MutationAdmissionError as exc:
+            raise _gateway().GatewayInputError(f"MUTATION_ADMISSION_{exc}") from exc
+        widened = governed_scope_excess(list(allowed_paths), card_allowed)
+        if widened:
+            raise _gateway().GatewayInputError(
+                "MUTATION_ADMISSION_ALLOWED_PATHS_EXCEED_TASK_CARD:"
+                + json.dumps(widened, ensure_ascii=True)
+            )
         governance_source_head = _gateway()._git("rev-parse", "HEAD").strip()
         if not re.fullmatch(r"[0-9a-f]{40}", governance_source_head):
             raise _gateway().GatewayInputError("MUTATION_ADMISSION_GOVERNANCE_SOURCE_INVALID")
@@ -182,6 +200,7 @@ class _MutationAdmissionMixin(_MutationAdmissionBase):
                 attempt_id=attempt_id,
                 task_card_path=task_card_path,
                 task_card_hash=task_card_hash,
+                allowed_paths=allowed_paths,
             )
         else:
             if authority_kind != "OWNER_INLINE":
