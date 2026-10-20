@@ -38,6 +38,7 @@ from nexus.services import external_intelligence_verifier_witness as witness_plu
 from nexus.services.external_intelligence_closure import (
     _XML_INVALID_CHARS,
     UNIT_VERIFICATION_SCHEMA,
+    VERIFIER_DECLARED_TESTS_NOT_PASSED,
     VERIFIER_ENV_ALLOWLIST,
     VERIFIER_EVIDENCE_TAMPERED,
     VERIFIER_FOREIGN_PLUGIN,
@@ -46,6 +47,7 @@ from nexus.services.external_intelligence_closure import (
     VERIFIER_JUNIT_SKIPPED,
     VERIFIER_OUTCOME_FORGED,
     VERIFIER_PYTEST_INTERNALS_PATCHED,
+    VERIFIER_TEST_IDENTITY_UNRESOLVED,
     VERIFIER_TESTS_DESELECTED,
     VERIFIER_WITNESS_ENV_KEYS,
     VERIFIER_WITNESS_FD_ENV,
@@ -674,3 +676,91 @@ def test_junit_names_keep_ordinary_node_names_unchanged():
     for text in ("test_value", "tests.test_mod", "test_param[1-a b]", "test_\u00e9t\u00e9[\u4e2d]"):
         assert _XML_INVALID_CHARS.sub("?", text) == text
     assert _XML_INVALID_CHARS.sub("?", "a\x00b\x1fc\ufffe") == "a?b?c?"
+
+
+# --- #2808 review round 3 -------------------------------------------------------
+
+_SILENT_DROP_CONFTEST = (
+    "def pytest_collection_modifyitems(items):\n"
+    "    # In place, and without pytest_deselected: nothing reports the drop.\n"
+    "    items[:] = [i for i in items if i.name != 'test_slow']\n"
+)
+_TWO_TESTS = "def test_fast():\n    assert True\n\n\ndef test_slow():\n    assert True\n"
+
+
+def test_declared_node_silently_dropped_by_a_base_conftest_is_not_passed(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={"tests/conftest.py": _SILENT_DROP_CONFTEST, "tests/test_sel.py": _TWO_TESTS},
+    )
+    # Declaring both: the remaining one passes (pytest rc=0), the dropped one must
+    # still block the pass, and the row names it as not observed.
+    both = _row(
+        root,
+        base,
+        cand,
+        _spec("tests/test_sel.py::test_fast", "tests/test_sel.py::test_slow"),
+        ["src_mod.py"],
+    )
+    assert both["returncode"] == 0
+    assert both["passed"] is False
+    assert both["error"] in {VERIFIER_TESTS_DESELECTED, VERIFIER_DECLARED_TESTS_NOT_PASSED}
+    assert both["witness"]["declared_node_ids_missing"] == ["tests/test_sel.py::test_slow"]
+    # Not declared: the file-level verifier passes and the drop is recorded.
+    whole = _row(root, base, cand, _spec("tests/test_sel.py"), ["src_mod.py"])
+    assert whole["passed"] is True, whole
+    assert whole["witness"]["deselected_node_ids"] == ["tests/test_sel.py::test_slow"]
+
+
+_NEVER_COLLECT_CONFTEST = (
+    "def pytest_pycollect_makeitem(collector, name, obj):\n"
+    "    if name == 'test_slow':\n"
+    "        return []\n"
+)
+
+
+def test_declared_node_never_collected_is_declared_not_passed(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": "VALUE = 2\n"},
+        base={"tests/conftest.py": _NEVER_COLLECT_CONFTEST, "tests/test_sel.py": _TWO_TESTS},
+    )
+    row = _row(
+        root,
+        base,
+        cand,
+        _spec("tests/test_sel.py::test_fast", "tests/test_sel.py::test_slow"),
+        ["src_mod.py"],
+    )
+    # pytest itself reports the unknown node id ("not found") and runs nothing, so
+    # neither declared node is observed.
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_DECLARED_TESTS_NOT_PASSED, row
+    assert "tests/test_sel.py::test_slow" in row["witness"]["declared_node_ids_missing"]
+    assert row["witness"]["deselected_node_ids"] == []
+
+
+@pytest.mark.parametrize("shape", ["imported_from_another_module", "defined_twice"])
+def test_test_whose_identity_cannot_be_derived_is_unresolved_not_passed(tmp_path, shape):
+    if shape == "imported_from_another_module":
+        files = {
+            "tests/shared_checks.py": "def test_shared():\n    assert True\n",
+            "tests/test_mod.py": "from tests.shared_checks import test_shared  # noqa: F401\n",
+            "tests/__init__.py": "",
+        }
+        node = "tests/test_mod.py::test_shared"
+    else:
+        files = {
+            "tests/test_mod.py": (
+                "def test_twice():\n    assert False\n\n\ndef test_twice():\n    assert True\n"
+            )
+        }
+        node = "tests/test_mod.py::test_twice"
+    root, base, cand = _repo(tmp_path, files)
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["tests"])
+    assert row["returncode"] == 0
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_TEST_IDENTITY_UNRESOLVED, row
+    assert row["witness"]["identity_unresolved_node_ids"] == [node]
+    assert row["witness"]["forged_node_ids"] == []

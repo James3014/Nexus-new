@@ -35,8 +35,13 @@ attribute patches no longer reach them (#2808 review).
 Residual (documented in the PR): this is not a security boundary against a candidate that
 knows about the witness.  The plugin and its closure cells stay reachable through the
 plugin manager and ``gc``, and closure cells are writable, so a short targeted
-monkeypatch can still rewrite the records.  Witness-targeted routes are out of scope for
-P1 of #2795; the candidate diff review and the claim ceiling are the backstop.
+monkeypatch can still rewrite the records.  The same holds for other in-process
+candidate code: ``CodeType.replace`` on the test function's ``__code__`` keeping its
+filename, qualname and first line; jumping ``frame.f_lineno`` from candidate code the
+test calls; and plugin trust, which relies on a self-reported module path and on the git
+state rather than on the content actually loaded.  Witness-targeted and these
+in-process routes are out of scope for P1 of #2795; the candidate diff review and the
+claim ceiling are the backstop.
 """
 
 from __future__ import annotations

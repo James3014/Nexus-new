@@ -1446,6 +1446,7 @@ VERIFIER_WITNESS_TAMPERED = "VERIFIER_WITNESS_TAMPERED"
 VERIFIER_FOREIGN_PLUGIN = "VERIFIER_FOREIGN_PLUGIN"
 VERIFIER_PYTEST_INTERNALS_PATCHED = "VERIFIER_PYTEST_INTERNALS_PATCHED"
 VERIFIER_OUTCOME_FORGED = "VERIFIER_OUTCOME_FORGED"
+VERIFIER_TEST_IDENTITY_UNRESOLVED = "VERIFIER_TEST_IDENTITY_UNRESOLVED"
 VERIFIER_TESTS_DESELECTED = "VERIFIER_TESTS_DESELECTED"
 VERIFIER_SANDBOX_SETUP_FAILED = "VERIFIER_SANDBOX_SETUP_FAILED"
 VERIFIER_EVIDENCE_TAMPERED = "VERIFIER_EVIDENCE_TAMPERED"
@@ -1534,6 +1535,8 @@ def _empty_witness_summary() -> dict[str, Any]:
         "forged_node_ids": [],
         "not_run_node_ids": [],
         "deselected_node_ids": [],
+        "identity_unresolved_node_ids": [],
+        "declared_node_ids_missing": [],
     }
 
 
@@ -1584,6 +1587,13 @@ def _expected_test_code(
                 and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name == head
             ):
+                same = [
+                    n
+                    for n in body
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == head
+                ]
+                if len(same) != 1:
+                    return None  # defined twice: the identity is ambiguous
                 lines = [node.lineno, *(d.lineno for d in node.decorator_list)]
                 return ".".join([*chain, head]), min(lines)
         return None
@@ -1738,6 +1748,7 @@ def _witness_outcomes(
     forged: list[str] = []
     not_run: list[str] = []
     ast_cache: dict[str, Any] = {}
+    unresolved: list[str] = []
     for nodeid in dict.fromkeys(selected):
         phases = reports.get(nodeid, {})
         outcome = {when: str(rep.get("outcome")) for when, rep in phases.items()}
@@ -1756,7 +1767,12 @@ def _witness_outcomes(
             )
             cases.append((nodeid, "skipped", text))
         elif all(outcome.get(when) == "passed" for when in ("setup", "call", "teardown")):
-            if _witness_passed(witnesses.get(nodeid), _expected_test_code(root, nodeid, ast_cache)):
+            expected = _expected_test_code(root, nodeid, ast_cache)
+            if expected is None:
+                # Fail closed, but say why: the parent cannot name the test's own code.
+                unresolved.append(nodeid)
+                cases.append((nodeid, "failure", VERIFIER_TEST_IDENTITY_UNRESOLVED))
+            elif _witness_passed(witnesses.get(nodeid), expected):
                 cases.append((nodeid, "passed", ""))
             else:
                 forged.append(nodeid)
@@ -1771,6 +1787,15 @@ def _witness_outcomes(
     summary["forged_node_ids"] = forged[:_INTEGRITY_FINDINGS_LIMIT]
     summary["not_run_node_ids"] = not_run[:_INTEGRITY_FINDINGS_LIMIT]
     summary["deselected_node_ids"] = deselected[:_INTEGRITY_FINDINGS_LIMIT]
+    summary["identity_unresolved_node_ids"] = unresolved[:_INTEGRITY_FINDINGS_LIMIT]
+    # Every declared node must appear among the observed cases (#2808 review round 3):
+    # a hook that drops it from ``session.items`` without ``pytest_deselected`` is not
+    # silent any more.
+    observed = [nodeid for nodeid, _kind, _text in cases]
+    missing_declared = [
+        d for d in declared_node_ids if not any(_declared_match(n, [d]) for n in observed)
+    ]
+    summary["declared_node_ids_missing"] = missing_declared[:_INTEGRITY_FINDINGS_LIMIT]
     error = ""
     if foreign:
         error = VERIFIER_FOREIGN_PLUGIN
@@ -1778,6 +1803,8 @@ def _witness_outcomes(
         error = VERIFIER_PYTEST_INTERNALS_PATCHED
     elif forged:
         error = VERIFIER_OUTCOME_FORGED
+    elif unresolved:
+        error = VERIFIER_TEST_IDENTITY_UNRESOLVED
     elif any(_declared_match(n, declared_node_ids) for n in deselected) and not (
         deselect_allowed and set(deselected) <= deselected_by_hook
     ):
@@ -1785,6 +1812,9 @@ def _witness_outcomes(
         # other deselections (e.g. an unchanged in-tree plugin's
         # ``pytest_collection_modifyitems``) are only recorded (#2808 review).
         error = VERIFIER_TESTS_DESELECTED
+    elif missing_declared:
+        # Never collected, or dropped some other way: not observed, not passed.
+        error = VERIFIER_DECLARED_TESTS_NOT_PASSED
     return error, cases, summary
 
 
