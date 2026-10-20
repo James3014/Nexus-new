@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import shutil
@@ -1239,6 +1240,55 @@ def test_sync_reexecs_new_host_sync_to_activate_new_component_in_one_call(
     assert payload["state"] == "ALIGNED"
     assert payload["reexec"]["exit_code"] == 0
     assert payload["reexec"]["from_sha256"] != payload["reexec"]["to_sha256"]
+    assert entrypoint.is_symlink()
+    assert payload["components"]["core_issue_check_local"]["status"] == "VERIFIED"
+
+
+def test_sync_reexecs_when_launched_through_installed_symlink(tmp_path: Path) -> None:
+    """#2758: launchd runs the installed `sync_target` symlink. `_activate` repoints
+    it to the new script, so a from-hash taken after activation equals the to-hash
+    and the re-exec never fires. The running script's hash must be captured first."""
+    repo, rev_a, rev_b = _make_old_then_new_repo(tmp_path)
+    runtime_root, manager_python, dispatch_target, sync_target = _reexec_env(tmp_path)
+    old_script = _write_old_script(repo, rev_a, tmp_path / "old-host-sync")
+    first = _invoke_with_script(
+        old_script,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_a,
+    )
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert sync_target.is_symlink()
+    old_bytes = sync_target.resolve().read_bytes()
+    assert old_bytes == old_script.read_bytes()
+
+    second = _invoke_with_script(
+        sync_target,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_b,
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    payload = json.loads(second.stdout)
+    assert sync_target.resolve().read_bytes() != old_bytes
+    assert "reexec" in payload, payload
+    assert payload["reexec"]["from_sha256"] == hashlib.sha256(old_bytes).hexdigest()
+    assert (
+        payload["reexec"]["to_sha256"]
+        == hashlib.sha256(sync_target.resolve().read_bytes()).hexdigest()
+    )
+    assert payload["reexec"]["from_sha256"] != payload["reexec"]["to_sha256"]
+    assert payload["reexec"]["exit_code"] == 0
+    assert payload["state"] == "ALIGNED"
+    entrypoint = dispatch_target.parent / "nexus-core-issue-check-local"
     assert entrypoint.is_symlink()
     assert payload["components"]["core_issue_check_local"]["status"] == "VERIFIED"
 
