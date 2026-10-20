@@ -349,6 +349,52 @@ def cli_install_dir_ok(cli_dir: Path) -> bool:
     )
 
 
+MEASURE_EXTERNAL_TARGET_ROOT_ENV = "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"
+
+
+class WorktreeGitdirOutsideMeasurementRoot(ValueError):
+    """A linked worktree whose common gitdir is not a fresh per-task Controller
+    under the measurement root (review H2'): its refs could hold the answer."""
+
+
+def require_gitdir_in_measurement_root(
+    target: Path, environ: Optional[Mapping[str, str]] = None
+) -> None:
+    """For a linked worktree, the common gitdir must resolve under
+    ``NEXUS_MEASURE_EXTERNAL_TARGET_ROOT`` (where #2742 keeps one fresh Controller
+    per task/repeat); otherwise the run fails.  A shared Controller (e.g. the
+    Gateway's own Nexus-new checkout) could expose a later fix or earlier
+    repeats' candidates through ``git log --all``."""
+    dot_git = Path(target) / ".git"
+    if not dot_git.is_file():
+        return  # a standalone repository: its gitdir is inside the target
+    env = os.environ if environ is None else environ
+    raw_root = str(env.get(MEASURE_EXTERNAL_TARGET_ROOT_ENV, "") or "").strip()
+    common = _linked_common_gitdir(Path(target))
+    if not raw_root or not os.path.isabs(raw_root) or common is None:
+        raise WorktreeGitdirOutsideMeasurementRoot("worktree_gitdir_outside_measurement_root")
+    root = Path(os.path.realpath(raw_root))
+    if root not in common.parents:
+        raise WorktreeGitdirOutsideMeasurementRoot("worktree_gitdir_outside_measurement_root")
+
+
+def _linked_common_gitdir(target: Path) -> Optional[Path]:
+    dot_git = target / ".git"
+    try:
+        line = dot_git.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not line.startswith("gitdir:"):
+        return None
+    gitdir = Path(line.split(":", 1)[1].strip())
+    gitdir = Path(os.path.realpath(gitdir if gitdir.is_absolute() else target / gitdir))
+    try:
+        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return Path(os.path.realpath(Path(common) if os.path.isabs(common) else gitdir / common))
+
+
 def worktree_git_dirs(target: Path, controller_root: Optional[Path | str] = None) -> list[Path]:
     """For a linked worktree (``.git`` is a ``gitdir:`` file), its gitdir and the
     common gitdir; ``[]`` for a standalone repository.  Read from the files,
@@ -1071,6 +1117,10 @@ class ClaudeMeasurementWorkerAdapter:
             raise WorkerProviderUnavailable(f"{self.provider}: {lease_failure}")
         del require_leased_target
         target = Path(os.path.realpath(lease.target_worktree))
+        try:
+            require_gitdir_in_measurement_root(target, self._env())
+        except WorktreeGitdirOutsideMeasurementRoot as exc:
+            raise WorkerProviderUnavailable(f"{self.provider}: {exc}") from exc
         run = run_claude_once(
             str(preflight.executable),
             target=target,

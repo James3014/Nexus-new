@@ -186,6 +186,8 @@ def _enable(monkeypatch, tmp_path, **fake) -> Path:
     monkeypatch.setenv(cmw.MEASUREMENT_TRACE_DIR_ENV, str(tmp_path / "traces"))
     # tmp_path lives under a denied user-data root; the operator lists it.
     monkeypatch.setenv(cmw.MEASUREMENT_READ_ROOTS_ENV, str(tmp_path))
+    # Fresh per-task Controllers live under the measurement root (#2742).
+    monkeypatch.setenv(cmw.MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(tmp_path))
     cmw._PROBE_CACHE.clear()
     return exe
 
@@ -588,6 +590,7 @@ def test_p1_chain_dispatches_the_claude_worker_end_to_end(tmp_path):
         cmw.MEASUREMENT_ANTHROPIC_ENV_FILE_ENV: str(token),
         cmw.MEASUREMENT_TRACE_DIR_ENV: str(tmp_path / "traces"),
         cmw.MEASUREMENT_READ_ROOTS_ENV: str(tmp_path),
+        cmw.MEASURE_EXTERNAL_TARGET_ROOT_ENV: str(tmp_path),
         "PYTHONPATH": os.pathsep.join([str(REPO_ROOT), env.get("PYTHONPATH", "")]),
     })
     subprocess.run(
@@ -984,3 +987,38 @@ def test_sidecar_records_key_label_and_id_never_the_key(monkeypatch, tmp_path):
         side
     )
     assert side["cli_timeout_seconds"] == 30.0
+
+
+def test_a_worktree_of_a_controller_outside_the_measurement_root_fails_the_run(
+    monkeypatch, tmp_path
+):
+    """Review H2': a shared Controller (e.g. the Gateway's Nexus-new checkout) could
+    expose a later fix through ``git log --all``; such a run never starts."""
+    _enable(monkeypatch, tmp_path)
+    outside = tmp_path / "shared"
+    outside.mkdir()
+    contract, lease = _linked_worktree_lease(outside)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=contract.controller_repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(["git", "branch", "future", head], cwd=contract.controller_repo_root, check=True)
+    monkeypatch.setenv(cmw.MEASURE_EXTERNAL_TARGET_ROOT_ENV, str(tmp_path / "measurement-root"))
+    with pytest.raises(WorkerProviderUnavailable, match="worktree_gitdir_outside_measurement_root"):
+        cmw.ClaudeMeasurementWorkerAdapter().invoke(
+            contract, lease, prompt="WHAT: x", timeout_seconds=60
+        )
+    monkeypatch.delenv(cmw.MEASURE_EXTERNAL_TARGET_ROOT_ENV)
+    with pytest.raises(WorkerProviderUnavailable, match="worktree_gitdir_outside_measurement_root"):
+        cmw.ClaudeMeasurementWorkerAdapter().invoke(
+            contract, lease, prompt="WHAT: x", timeout_seconds=60
+        )
+    assert not (tmp_path / "traces").exists()  # no CLI process was started
+
+
+def test_a_standalone_target_needs_no_measurement_root(tmp_path):
+    _contract, lease = _lease(tmp_path)
+    cmw.require_gitdir_in_measurement_root(Path(lease.target_worktree), {})
