@@ -174,41 +174,24 @@ class NexusMission(BaseModel):
         return limit - self.accumulated_usage.get("wall_time_sec", 0.0) - open_stretch
 
     def add_tokens_from_receipt_file(self, receipt_path: Path) -> float:
-        """Add tokens recorded in a run receipt/report JSON to accumulated usage. Returns tokens added."""
+        """Add tokens recorded in a run receipt/report JSON to accumulated usage. Returns tokens added.
+
+        A `nexus run` report carries no usage itself; it names the unified runtime receipt
+        (``unified_runtime_receipt_path``), where stage usage is recorded. When the report
+        exists but no usage can be read from it or that receipt, a mission with ``max_tokens``
+        marks its token spend unknown and fails the budget check from then on (#2768). Only a
+        missing report leaves the budget as it was.
+        """
         receipt_file = Path(receipt_path)
-        try:
-            raw_text = receipt_file.read_text(encoding="utf-8")
-        except OSError:
+        if not receipt_file.exists():
             return 0.0
-
-        try:
-            payload = json.loads(raw_text)
-        except ValueError:
-            payload = None
-
+        payload = _read_json_bounded(receipt_file)
         added = extract_receipt_tokens(payload) if payload is not None else 0.0
 
         if isinstance(payload, dict):
-            unified_path_raw = payload.get("unified_runtime_receipt_path")
-            if isinstance(unified_path_raw, (str, Path)) and str(unified_path_raw).strip():
-                try:
-                    unified_path = Path(unified_path_raw)
-                    if not unified_path.is_file():
-                        for parent in receipt_file.parents:
-                            candidate = parent / unified_path
-                            if candidate.is_file():
-                                unified_path = candidate
-                                break
-                    if unified_path.is_file():
-                        try:
-                            is_same = unified_path.resolve() == receipt_file.resolve()
-                        except Exception:
-                            is_same = False
-                        if not is_same:
-                            unified_payload = json.loads(unified_path.read_text(encoding="utf-8"))
-                            added += extract_receipt_tokens(unified_payload)
-                except (OSError, ValueError):
-                    pass
+            unified = _unified_receipt_for(receipt_file, payload)
+            if unified is not None:
+                added += extract_receipt_tokens(unified)
 
         self.accumulated_usage["tokens"] = self.accumulated_usage.get("tokens", 0.0) + added
 
@@ -290,3 +273,44 @@ class NexusMission(BaseModel):
             self.persist(project_root)
         
         return True
+
+
+_MAX_RECEIPT_BYTES = 8 * 1024 * 1024
+
+
+def _read_json_bounded(path: Path) -> Any:
+    """Parse a regular JSON file of bounded size; None when it cannot be read or parsed."""
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_RECEIPT_BYTES:
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
+        return None
+
+
+def _unified_receipt_for(report_file: Path, report: dict) -> Optional[dict]:
+    """The unified runtime receipt a run report names, if it is this run's.
+
+    The pointer is taken as written (absolute, as `nexus run` writes it) or relative to the
+    report's own directory; the same file as the report is ignored, and when both sides carry
+    a task id they must agree, so a stale receipt from another run is not counted.
+    """
+    raw = report.get("unified_runtime_receipt_path")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = report_file.parent / candidate
+    try:
+        if candidate.resolve() == report_file.resolve():
+            return None
+    except (OSError, RuntimeError):
+        return None
+    unified = _read_json_bounded(candidate)
+    if not isinstance(unified, dict):
+        return None
+    expected = report.get("unified_runtime_task_id")
+    actual = unified.get("task_id")
+    if expected and actual and str(expected) != str(actual):
+        return None
+    return unified
