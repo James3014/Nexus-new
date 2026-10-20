@@ -888,9 +888,9 @@ def test_arm_map_without_the_noop_check_is_refused(env):
 
 # -- L-B state contrast (lb_contrast.py, PREREG v0.9.9) ---------------------------------
 
-def _state_run(env, name, nexus_solved):
+def _state_run(env, name, nexus_solved, tasks=None):
     """One L-B state's run root (BARE + NEXUS), scored; ``nexus_solved(task, repeat)``."""
-    tasks = env["tasks"][:3]
+    tasks = tasks if tasks is not None else env["tasks"][:3]
     blind_dir, arm_map, amap = make_blind(env["tmp"] / name, tasks, arms=("BARE", "NEXUS"))
     outcome = lambda a, t, r, n: "RESOLVED" if a == "NEXUS" and nexus_solved(t, r) else "UNRESOLVED"  # noqa: E731
     arch = env["tmp"] / name / "arch"
@@ -919,6 +919,14 @@ def test_lb_contrast_pairs_task_repeat_and_bootstraps_the_per_task_difference(en
     partial = lb_contrast.contrast(learn, [r for r in cold if r["repeat"] != 3])
     assert partial["pairs"] == 6 and partial["unpaired"] == 3
     assert abs(partial["ci95"]["mean"] - 0.5) < 1e-9
+    # No pair at all refuses.
+    with pytest.raises(sa.Refused, match="NO_PAIRS"):
+        lb_contrast.contrast(learn, [])
+    # Same task set in every state; a state run on other tasks refuses.
+    lb_contrast.same_task_set({"learn": learn_map, "cold": cold_map})
+    other_arch, other_map, _ = _state_run(env, "other", lambda t, r: True, tasks=env["tasks"][1:4])
+    with pytest.raises(sa.Refused, match="STATE_TASK_SETS_DIFFER"):
+        lb_contrast.same_task_set({"learn": learn_map, "cold": other_map})
     # The wrong manifest sha refuses (the state's own analysis must pass first).
     with pytest.raises(sa.Refused):
         lb_contrast.state_rows(cold_arch, cold_map, strata=strata, primary_set=primary,

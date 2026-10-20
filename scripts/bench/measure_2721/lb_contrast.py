@@ -14,7 +14,8 @@ state contrast is computed here, after unblinding, with the registered formula:
   labelled ``cards-only`` (Q2 measures the findings cards, no Belief writeback).
 
 Each run root must first pass ``score_arms.analyze`` (archive and arm map
-verified, NEXUS vs BARE): a void or refused run root refuses the contrast.
+verified, NEXUS vs BARE): a void or refused run root refuses the contrast, and so
+do states run on different task sets and a contrast with no pair.
 """
 
 from __future__ import annotations
@@ -33,6 +34,21 @@ from scripts.bench.measure_2721 import score_arms as sa
 SCHEMA = "nexus.measure_2721.lb_contrast.v1"
 LABEL = "cards-only"
 TREATMENT, CONTROL = "NEXUS", "BARE"
+
+
+def state_tasks(arm_map_path: Path) -> frozenset[str]:
+    """Every task the state's run root ran: candidates and infra exclusions alike."""
+    amap = json.loads(Path(arm_map_path).read_text())
+    return frozenset({m["task_id"] for m in amap["map"].values()} |
+                     {e["task_id"] for e in amap.get("excluded") or ()})
+
+
+def same_task_set(arm_maps: Mapping[str, Path]) -> None:
+    """Refuse states run on different task sets.  (The ``MANIFEST_SHA256`` arguments are
+    each scoring archive's own sha and differ by construction; the task set is compared.)"""
+    sets = {state: state_tasks(path) for state, path in arm_maps.items()}
+    if len(set(sets.values())) > 1:
+        raise sa.Refused("STATE_TASK_SETS_DIFFER: " + json.dumps({k: sorted(v) for k, v in sets.items()}))
 
 
 def state_rows(arch: Path, arm_map_path: Path, *, strata: Mapping[str, str], primary_set: str,
@@ -59,6 +75,8 @@ def contrast(learn: Sequence[Mapping[str, Any]], other: Sequence[Mapping[str, An
     per_task: dict[str, list[tuple[bool, bool]]] = {}
     for key in sorted(set(a) & set(b)):
         per_task.setdefault(key[0], []).append((a[key], b[key]))
+    if not per_task:
+        raise sa.Refused("NO_PAIRS: no (task, repeat) counted in both states")
     diffs = [sum(x for x, _ in pairs) / len(pairs) - sum(y for _, y in pairs) / len(pairs)
              for _, pairs in sorted(per_task.items())]
     return {"ci95": sa.paired_bootstrap(diffs), "tasks": len(per_task),
@@ -76,11 +94,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--out", type=Path, help="write the report here (create-only)")
     args = p.parse_args(argv)
     try:
+        specs = {state: spec for state in ("learn", "cold", "irrelevant") if (spec := getattr(args, state))}
+        same_task_set({state: Path(spec[1]) for state, spec in specs.items()})
         s1 = json.loads(Path(args.s1_result).read_text())
         strata = {row["id"]: row["set"] for row in s1["rows"] if row.get("survives")}
         rows = {state: state_rows(Path(spec[0]), Path(spec[1]), strata=strata, primary_set=args.primary_set,
                                   expect_manifest_sha=spec[2])
-                for state in ("learn", "cold", "irrelevant") if (spec := getattr(args, state))}
+                for state, spec in specs.items()}
         report = {"schema": SCHEMA, "seed": sa.BOOTSTRAP_SEED, "resamples": sa.BOOTSTRAP_RESAMPLES,
                   "primary": {"contrast": "LEARN-COLD", **contrast(rows["learn"], rows["cold"])}}
         if "irrelevant" in rows:
