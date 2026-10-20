@@ -2982,3 +2982,19 @@ def test_card_objective_fits_the_gateway_limit_for_a_4000_character_what(tmp_pat
     assert driver.card_args(task, gw_task)["objective"] == "w" * 4000
     # The worker gets the full what (the prompt is unchanged).
     assert driver.worker_args(task, gw_task, "card.md", "h", external=False)["what"] == "w" * 4000
+
+
+def test_gateway_task_id_fits_the_gateway_bound_and_stays_unique():
+    """The card and worker task_id take at most 80 characters (the old 96 cut also dropped
+    the repeat and random part of a long run id)."""
+    import re as _re
+
+    long_task = "some-org__a-rather-long-repository-name-" + "x" * 60
+    ids = {nexus_driver.gateway_task_id(arms.new_run_id(arm, long_task, repeat))
+           for arm in ("NEXUS", "NEXUS_NOOP") for repeat in (1, 2, 3)}
+    assert len(ids) == 6
+    for gw in ids:
+        assert len(gw) <= nexus_driver.GATEWAY_TASK_ID_MAX == 80
+        assert _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", gw)
+    short = arms.new_run_id("NEXUS", "pkg-100", 1)
+    assert nexus_driver.gateway_task_id(short) == short  # short ids unchanged

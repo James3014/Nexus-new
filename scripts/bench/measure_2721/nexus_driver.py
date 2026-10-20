@@ -21,6 +21,7 @@ Safety rails:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -216,9 +217,19 @@ def tool_properties(tools: Sequence[Mapping[str, Any]], name: str) -> set[str]:
     return set()
 
 
+# The Gateway's task_id bound: card create (``_safe_slug``) and worker candidate
+# (``[A-Za-z0-9][A-Za-z0-9_.-]{0,79}``) both take at most 80 characters.
+GATEWAY_TASK_ID_MAX = 80
+
+
 def gateway_task_id(run_id: str) -> str:
+    """The run id as a Gateway task id.  A long one keeps its start and ends with a hash of
+    the whole run id, so it stays unique per row (repeat and random part included)."""
     slug = re.sub(r"[^a-z0-9-]+", "-", run_id.lower()).strip("-")
-    return slug[:96]
+    if len(slug) <= GATEWAY_TASK_ID_MAX:
+        return slug
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:16]
+    return f"{slug[:GATEWAY_TASK_ID_MAX - len(digest) - 1].rstrip('-')}-{digest}"
 
 
 def _is_infra(error: str) -> bool:
