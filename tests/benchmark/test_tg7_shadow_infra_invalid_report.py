@@ -146,7 +146,9 @@ def test_all_eligible_run_still_produces_valid_report(stage):
     selection, tg5, corpus, run = stage
     shadow, report = run({})
     total = len(corpus["cases"])
-    assert validate_shadow_receipt(shadow, corpus=corpus, tg5_receipt=tg5, selection=selection) == []
+    assert (
+        validate_shadow_receipt(shadow, corpus=corpus, tg5_receipt=tg5, selection=selection) == []
+    )
     assert validate_report(report) == []
     assert validate_report(report, shadow_receipt=shadow, corpus=corpus) == []
     assert shadow["eligible_count"] == total
@@ -170,7 +172,9 @@ def test_infra_invalid_attempts_produce_self_valid_report(stage, picks):
     eligible = total - len(infra)
 
     # The shadow receipt was already self-consistent before the fix.
-    assert validate_shadow_receipt(shadow, corpus=corpus, tg5_receipt=tg5, selection=selection) == []
+    assert (
+        validate_shadow_receipt(shadow, corpus=corpus, tg5_receipt=tg5, selection=selection) == []
+    )
     assert shadow["eligible_count"] == eligible
     assert shadow["infra_invalid_count"] == len(infra)
 
