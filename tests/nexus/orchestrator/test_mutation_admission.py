@@ -419,3 +419,135 @@ def test_integration_gate_blocks_scope_escape(
     assert report["status"] == "BLOCK"
     assert report["scope_escape_paths"] == ["outside.txt"]
     assert "ADMISSION_SCOPE_ESCAPE" in report["blockers"]
+
+
+def _commit_rename(repo: Path, source: str, destination: str) -> str:
+    (repo / Path(destination)).parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "mv", source, destination)
+    _git(repo, "commit", "-m", f"rename {source} -> {destination}")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _seed(repo: Path, *paths: str) -> str:
+    for path in paths:
+        target = repo / Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"{path}\n", encoding="utf-8")
+        _git(repo, "add", path)
+    _git(repo, "commit", "-m", "seed")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_integration_gate_blocks_a_rename_from_outside_into_scope(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    # #2765: git diff --name-only reported only the destination of a rename
+    repo, _base, _head = git_repo
+    base = _seed(repo, "outside/x.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-in",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "outside/x.py", "allowed/x.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert "ADMISSION_SCOPE_ESCAPE" in report["blockers"]
+    assert report["scope_escape_paths"] == ["outside/x.py"]
+    assert sorted(report["changed_paths"]) == ["allowed/x.py", "outside/x.py"]
+
+
+def test_integration_gate_passes_a_rename_inside_scope(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-inside",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "allowed/a.py", "allowed/b.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "PASS"
+    assert sorted(report["changed_paths"]) == ["allowed/a.py", "allowed/b.py"]
+    assert report["scope_escape_paths"] == []
+
+
+def test_integration_gate_blocks_a_rename_from_scope_to_outside(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-out",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "allowed/a.py", "outside/a.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/a.py"]
+
+
+def test_integration_gate_reads_non_ascii_names_unquoted(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/seed.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:non-ascii",
+        allowed_paths=["allowed/**"],
+    )
+    (repo / "allowed" / "設定.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "allowed/設定.md")
+    _git(repo, "commit", "-m", "non-ascii")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["changed_paths"] == ["allowed/設定.md"]
