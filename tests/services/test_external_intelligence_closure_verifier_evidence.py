@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.external_intelligence_closure import (
     _JUNIT_MAX_BYTES,
     TASK_CANDIDATE_SCHEMA,
@@ -26,6 +27,7 @@ from nexus.services.external_intelligence_closure import (
     VERIFIER_JUNIT_MISSING,
     VERIFIER_JUNIT_SKIPPED,
     VERIFIER_ROOT_SHADOWING_REFUSED,
+    VERIFIER_WITNESS_PLUGIN,
     WHOLE_VERIFICATION_SCHEMA,
     _base_pytest_config,
     _junit_evidence,
@@ -132,7 +134,13 @@ def test_genuine_passing_pytest_verifier_passes_with_junit_evidence(tmp_path):
     assert executed[executed.index("--rootdir") + 1] == str(root.resolve())
     assert executed[executed.index("--confcutdir") + 1] == str(root.resolve())
     assert "no:cacheprovider" in executed
-    assert any(part.startswith("--junitxml=<verifier-sandbox>") for part in executed)
+    # #2795: the child gets no report path; the trusted witness plugin is loaded last and
+    # the parent writes the JUnit evidence from the witness channel.
+    assert not any(part.startswith("--junitxml") for part in executed)
+    assert executed[-2:] == ["-p", VERIFIER_WITNESS_PLUGIN]
+    assert row["junit"]["evidence_source"] == "parent_witness_channel"
+    assert row["witness"]["complete"] is True
+    assert row["sandbox"]["sandboxed"] is os_sandbox_available()
 
 
 def test_genuine_failing_pytest_verifier_fails(tmp_path):
@@ -328,6 +336,9 @@ def test_base_pytest_config_is_replicated_without_addopts(tmp_path):
 
 
 def test_verifier_env_contains_only_allow_listed_variables(tmp_path, monkeypatch):
+    # The verifiers below dump their environment outside the work tree, which the macOS
+    # sandbox (#2795) rightly denies; this test is about the environment only.
+    monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
     monkeypatch.setenv("GH_TOKEN", "ghp_fake_2793")
     monkeypatch.setenv("NEXUS_FAKE_SECRET_2793", "secret")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "evil"))

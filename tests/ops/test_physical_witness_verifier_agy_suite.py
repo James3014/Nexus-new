@@ -103,11 +103,16 @@ def test_third_declared_witness_in_agy_source_is_rejected() -> None:
 
 
 def test_suites_name_existing_files_and_subject_files() -> None:
-    assert set(v.SUITES) == {"dsh", "agy-dispatch", "sandbox-runner-rundir"}
+    assert set(v.SUITES) == {
+        "dsh",
+        "agy-dispatch",
+        "sandbox-runner-rundir",
+        "eia-closure-verifier",
+    }
     for test_file, classname, witnesses, subject in v.SUITES.values():
         assert (ROOT / test_file).is_file()
         assert classname == test_file[:-3].replace("/", ".")
-        assert len(witnesses) == 2
+        assert len(witnesses) >= 2
         assert test_file in subject.values()
         for rel in subject.values():
             assert (ROOT / rel).is_file(), rel

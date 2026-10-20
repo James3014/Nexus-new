@@ -858,6 +858,7 @@ jobs:
           printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"physical witness did not reach verification"}' > "$WITNESS_DIR/receipt.json"
           cp "$WITNESS_DIR/receipt.json" "$WITNESS_DIR/receipt-agy-dispatch.json"
           cp "$WITNESS_DIR/receipt.json" "$WITNESS_DIR/receipt-sandbox-runner-rundir.json"
+          cp "$WITNESS_DIR/receipt.json" "$WITNESS_DIR/receipt-eia-closure-verifier.json"
 
       - name: Checkout exact head
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -1045,6 +1046,48 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           test "$(cat "$WITNESS_DIR/pytest-exit-sandbox-runner-rundir.txt")" = 0
+
+      - name: Run EIA closure verifier Seatbelt physical witnesses
+        # Issue #2795: closure pytest verifiers run under sandbox-exec with an
+        # out-of-process witness channel.
+        env:
+          NEXUS_TEST_MODE: CI
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          eia_cmd=(
+            .venv/bin/python -m pytest tests/services/test_eia_closure_verifier_seatbelt_witness_2795.py
+            -v -rA --timeout=600 -p no:cacheprovider "--junitxml=$WITNESS_DIR/junit-eia-closure-verifier.xml"
+          )
+          printf '%q ' "${eia_cmd[@]}" > "$WITNESS_DIR/command-eia-closure-verifier.txt"
+          date -u +%Y-%m-%dT%H:%M:%S+00:00 > "$WITNESS_DIR/not-before-eia-closure-verifier.txt"
+          set +e
+          "${eia_cmd[@]}" 2>&1 | tee "$WITNESS_DIR/pytest-eia-closure-verifier.log"
+          pytest_status="${PIPESTATUS[0]}"
+          set -e
+          echo "$pytest_status" > "$WITNESS_DIR/pytest-exit-eia-closure-verifier.txt"
+          echo "pytest exit: $pytest_status"
+          exit "$pytest_status"
+
+      - name: Verify EIA closure verifier physical witness receipt
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/ci/verify_physical_witness_junit.py verify \
+            --suite eia-closure-verifier \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --expected-head-sha "$HEAD_SHA" \
+            --junit "$WITNESS_DIR/junit-eia-closure-verifier.xml" \
+            --not-before "$(cat "$WITNESS_DIR/not-before-eia-closure-verifier.txt")" \
+            --command "$(cat "$WITNESS_DIR/command-eia-closure-verifier.txt")" \
+            --require-github-hosted \
+            --output "$WITNESS_DIR/receipt-eia-closure-verifier.json"
+          {
+            echo "## EIA closure verifier Seatbelt physical witness"
+            echo '```json'
+            cat "$WITNESS_DIR/receipt-eia-closure-verifier.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$(cat "$WITNESS_DIR/pytest-exit-eia-closure-verifier.txt")" = 0
 
       - name: Install gitlink metadata for checkout post-cleanup
         if: always()
