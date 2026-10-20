@@ -2542,7 +2542,7 @@ def test_non_json_gateway_reply_after_acceptance_is_not_solved_and_never_rerun(m
     monkeypatch.setattr(driver, "_collect", lambda *a, **k: (_ for _ in ()).throw(KeyError("status")))
     row = driver.run(task, 2, tmp_path / "run2", timeout_seconds=5)
     assert row["worker_accepted"] and row["outcome"] == "GATEWAY_ERROR" and not row["infra"]
-    assert row["void_reason"] == "GATEWAY_ERROR_AFTER_ACCEPTANCE"
+    assert row["void_reason"] == "GATEWAY_ERROR_AFTER_ACCEPTANCE:KeyError"
     # The runner dies after the row was written but before its completion record: the
     # resume takes the row from rows.jsonl instead of calling it CRASHED.
     run3 = tmp_path / "run3"
@@ -2563,3 +2563,65 @@ def test_non_json_gateway_reply_after_acceptance_is_not_solved_and_never_rerun(m
     (block,) = list(read_jsonl(run3 / "blocks.jsonl"))
     assert (block["attempt"], block["status"]) == (0, "COMPLETE") and block["run_ids"]["NEXUS"] == first["run_id"]
     assert len([r for r in read_jsonl(run3 / "rows.jsonl") if r["arm"] == "NEXUS"]) == 1
+
+
+def test_interrupt_after_acceptance_is_crashed_and_the_whole_block_reruns(manifest, tmp_path, monkeypatch):
+    class Interrupted(FakeGateway):
+        def __init__(self):
+            super().__init__()
+            self.fired = False
+
+        def __call__(self, method, path, body):
+            if not self.fired and body and body.get("params", {}).get("name") == "nexus_task_wait":
+                self.fired = True
+                raise KeyboardInterrupt("operator")
+            return super().__call__(method, path, body)
+
+    _fake_build(monkeypatch, {"NEXUS": Interrupted()})
+    run = tmp_path / "run"
+    with pytest.raises(KeyboardInterrupt):
+        _runner_main(manifest, tmp_path, run)
+    (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert row["worker_accepted"] and row["outcome"] == "INTERRUPTED" and row["infra"]
+    assert row["void_reason"] == "INTERRUPTED:KeyboardInterrupt"
+    before = {r["arm"]: r["run_id"] for r in read_jsonl(run / "rows.jsonl")}
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED"
+    final = blocks[1]["run_ids"]
+    assert set(final) == {"BARE", "NEXUS", "NOOP"} and not set(final.values()) & set(before.values())
+
+
+@pytest.mark.parametrize("tamper", ["no_offset", "consumed"])
+def test_recovery_needs_an_offset_and_an_unconsumed_finished_row(manifest, tmp_path, monkeypatch, tamper):
+    from scripts.bench.measure_2721 import runner
+
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    run = tmp_path / "run"
+    real_append = runner._append
+
+    def dies_on_nexus_done(path, record):
+        if record.get("arm") == "NEXUS" and "event" not in record:
+            raise KeyboardInterrupt("killed")
+        real_append(path, record)
+
+    monkeypatch.setattr(runner, "_append", dies_on_nexus_done)
+    with pytest.raises(KeyboardInterrupt):
+        _runner_main(manifest, tmp_path, run)
+    monkeypatch.setattr(runner, "_append", real_append)
+    (nexus,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    progress = run / "progress.jsonl"
+    records = list(read_jsonl(progress))
+    if tamper == "no_offset":
+        records = [{k: v for k, v in r.items() if k != "rows_offset"} if r.get("arm") == "NEXUS" else r
+                   for r in records]
+    else:  # another progress record already consumed that row
+        records.append({"block": 99, "attempt": 0, "slot": 0, "arm": "NEXUS", "run_id": nexus["run_id"],
+                        "infra": False})
+    progress.write_text("".join(json.dumps(r) + "\n" for r in records))
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED" and blocks[1]["run_ids"]["NEXUS"] != nexus["run_id"]

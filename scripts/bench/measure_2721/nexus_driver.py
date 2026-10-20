@@ -73,6 +73,7 @@ OUTCOME_BLOCKED_EXTERNAL = "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED"
 OUTCOME_GATEWAY_ERROR = "GATEWAY_ERROR"
 OUTCOME_INFRA = "INFRA"
 OUTCOME_DONE = "OK"
+OUTCOME_INTERRUPTED = "INTERRUPTED"
 _INFRA_MARKERS = INFRA_ERROR_MARKERS
 CANCEL_RETRY_STATUSES = frozenset({"PENDING_HUMAN_APPROVAL"})
 CANCEL_REFUSED_MARKERS = ("CANDIDATE_REF_PROTECTED", "PENDING_HUMAN_APPROVAL")
@@ -745,11 +746,19 @@ class NexusArmDriver:
             # not solved.  Before acceptance it is the harness's own failure: infra.
             message = f"{type(exc).__name__}: {str(exc)[:1000]}"
             if self._worker_accepted:
-                row.update(outcome=OUTCOME_GATEWAY_ERROR, infra=False, void_reason="GATEWAY_ERROR_AFTER_ACCEPTANCE",
-                           error=message)
+                row.update(outcome=OUTCOME_GATEWAY_ERROR, infra=False,
+                           void_reason=f"GATEWAY_ERROR_AFTER_ACCEPTANCE:{type(exc).__name__}", error=message)
             else:
                 row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"HARNESS_ERROR:{type(exc).__name__}",
                            error=message)
+        except BaseException as exc:
+            # KeyboardInterrupt / SystemExit (the runner is being killed): the row is
+            # written as INTERRUPTED + infra (an audit trail of a run that may have spent
+            # money) and the interrupt goes on.  The runner never takes an INTERRUPTED row
+            # as a result: the arm is CRASHED and the whole block re-runs, the same as a
+            # BARE row killed before it was written (re-review #5).
+            row.update(outcome=OUTCOME_INTERRUPTED, infra=True, void_reason=f"INTERRUPTED:{type(exc).__name__}")
+            raise
         finally:
             stuck = None
             if created:

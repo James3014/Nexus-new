@@ -110,6 +110,9 @@ def symmetric_infra_reasons(row: Mapping[str, Any]) -> list[str]:
         reasons.append("PROVIDER_INFRA_MARKER")
     if row.get("watchdog_event") is not None:
         reasons.append("WATCHDOG_EVENT")
+    if row.get("outcome") == "INTERRUPTED":
+        # The run was killed (KeyboardInterrupt / SystemExit): infra in every arm.
+        reasons.append("INTERRUPTED")
     stuck = str(row.get("gateway_stuck") or "")
     if stuck and not stuck.startswith(GATEWAY_ANSWER_STUCK_PREFIXES):
         # PREREG §3.3 / v0.9.2: a task the harness's own bounded polling found never

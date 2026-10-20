@@ -225,6 +225,14 @@ def _records(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in complete if line.strip()]
 
 
+def _finished_row(row: Mapping[str, Any]) -> bool:
+    """A row that is a real result: an outcome other than INTERRUPTED and a boolean infra.
+    A row written while the runner was being killed is not (re-review #5)."""
+    outcome = row.get("outcome")
+    return isinstance(outcome, str) and bool(outcome) and outcome != "INTERRUPTED" \
+        and isinstance(row.get("infra"), bool)
+
+
 def _drop_torn_tail(path: Path) -> None:
     """Cut a torn last line before appending again (so it never ends up mid-file)."""
     if path.is_file():
@@ -381,10 +389,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         done_arms = {p["arm"] for p in done_progress if int(p["block"]) == block["block"]
                      and int(p["attempt"]) == attempt}
         rows_file = run_root / "rows.jsonl"
+        consumed = {p.get("run_id") for p in done_progress}
         for start in [p for p in started if int(p["block"]) == block["block"] and int(p["attempt"]) == attempt
                       and p["arm"] not in done_arms]:
-            if not rows_file.is_file():
-                continue
+            if not rows_file.is_file() or "rows_offset" not in start:
+                continue  # no offset recorded: the row cannot be tied to this start -> CRASHED
             with rows_file.open("rb") as handle:
                 handle.seek(int(start.get("rows_offset") or 0))
                 tail = handle.read().decode("utf-8", errors="replace")
@@ -394,7 +403,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 except ValueError:
                     continue
                 if row.get("arm") == start["arm"] and row.get("task_id") == block["task_id"] \
-                        and row.get("repeat") == block["repeat"] and row.get("run_id"):
+                        and row.get("repeat") == block["repeat"] and row.get("run_id") \
+                        and row["run_id"] not in consumed and _finished_row(row):
                     entry = {"block": block["block"], "attempt": attempt, "slot": start["slot"], "arm": start["arm"],
                              "run_id": row["run_id"], "infra": bool(row.get("infra")), "recovered_from_rows": True}
                     _append(progress, entry)
