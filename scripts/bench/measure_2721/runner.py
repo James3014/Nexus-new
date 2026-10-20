@@ -226,11 +226,16 @@ def _records(path: Path) -> list[dict[str, Any]]:
 
 
 def _finished_row(row: Mapping[str, Any]) -> bool:
-    """A row that is a real result: an outcome other than INTERRUPTED and a boolean infra.
-    A row written while the runner was being killed is not (re-review #5)."""
+    """A row recover() may take as this arm's result: common.classify_row on its facts says
+    not infra and not interrupted (re-review #6).  A BARE/NOOP row (no facts): an outcome
+    other than INTERRUPTED and ``infra`` false."""
+    from scripts.bench.measure_2721.common import classify_row
+
+    if isinstance(row.get("facts"), Mapping):
+        verdict = classify_row(row["facts"])
+        return not verdict["infra"] and not row["facts"].get("interrupted")
     outcome = row.get("outcome")
-    return isinstance(outcome, str) and bool(outcome) and outcome != "INTERRUPTED" \
-        and isinstance(row.get("infra"), bool)
+    return isinstance(outcome, str) and bool(outcome) and outcome != "INTERRUPTED" and row.get("infra") is False
 
 
 def _drop_torn_tail(path: Path) -> None:

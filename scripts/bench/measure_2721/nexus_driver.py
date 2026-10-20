@@ -38,7 +38,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from nexus.executors.claude_measurement_worker import CLAUDE_MEASUREMENT_MODEL
-from scripts.bench.measure_2721 import blind, controller_guard, state_phase
+from scripts.bench.measure_2721 import controller_guard, state_phase
 from scripts.bench.measure_2721.arms import (
     ARM_NEXUS,
     FLAG_NON_MODEL_SOLVE,
@@ -58,7 +58,9 @@ from scripts.bench.measure_2721.arms import (
 from scripts.bench.measure_2721.common import (
     INFRA_ERROR_MARKERS,
     append_jsonl,
+    classify_row,
     git,
+    set_fact,
     write_diff,
     write_json,
 )
@@ -73,7 +75,7 @@ OUTCOME_BLOCKED_EXTERNAL = "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED"
 OUTCOME_GATEWAY_ERROR = "GATEWAY_ERROR"
 OUTCOME_INFRA = "INFRA"
 OUTCOME_DONE = "OK"
-OUTCOME_INTERRUPTED = "INTERRUPTED"
+OUTCOME_INTERRUPTED = "INTERRUPTED"  # set by common.classify_row
 _INFRA_MARKERS = INFRA_ERROR_MARKERS
 CANCEL_RETRY_STATUSES = frozenset({"PENDING_HUMAN_APPROVAL"})
 CANCEL_REFUSED_MARKERS = ("CANDIDATE_REF_PROTECTED", "PENDING_HUMAN_APPROVAL")
@@ -613,22 +615,18 @@ class NexusArmDriver:
         try:
             if busy:
                 prefix = "STATE_RESTORE_BUSY" if self._restore_targets else "INSTANCE_BUSY"
-                row.update(
-                    outcome=OUTCOME_INFRA,
-                    infra=True,
-                    void_reason=f"{prefix}:{busy}",
-                    controller_reset_skipped=True,
-                )
+                set_fact(row, "harness_error", f"{prefix}:{busy}")
+                row["controller_reset_skipped"] = True
                 return row
             if reset is not None:
                 row["controller_reset"] = reset
                 if not reset["ok"]:
-                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="CONTROLLER_RESET_MISMATCH")
+                    set_fact(row, "harness_error", "CONTROLLER_RESET_MISMATCH")
                     return row
             extra = self._extra_state.restore()
             row["extra_state_restore"] = extra
             if not extra["ok"]:
-                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="EXTRA_STATE_RESTORE_MISMATCH")
+                set_fact(row, "harness_error", "EXTRA_STATE_RESTORE_MISMATCH")
                 return row
             if self._restore_targets:
                 policy = state_phase.restore_policy(self.learning_phase)
@@ -638,7 +636,7 @@ class NexusArmDriver:
                     # task cancelled and its Target removed.
                     busy = state_phase.quiescence_problem(self.state_dir)
                     if busy:
-                        row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"STATE_RESTORE_BUSY:{busy}")
+                        set_fact(row, "harness_error", f"STATE_RESTORE_BUSY:{busy}")
                         return row
                     restored: dict[str, str] = {}
                     for label, root, snapshot in self._restore_targets:
@@ -647,15 +645,8 @@ class NexusArmDriver:
                             "state_restore" if label == "state_root" else f"{label}_state_restore"
                         ] = restore
                         if not restore["ok"]:
-                            row.update(
-                                outcome=OUTCOME_INFRA,
-                                infra=True,
-                                void_reason=(
-                                    "STATE_ROOT_RESTORE_MISMATCH"
-                                    if label == "state_root"
-                                    else "SELF_HOSTED_STATE_RESTORE_MISMATCH"
-                                ),
-                            )
+                            set_fact(row, "harness_error", "STATE_ROOT_RESTORE_MISMATCH" if label == "state_root"
+                                     else "SELF_HOSTED_STATE_RESTORE_MISMATCH")
                             return row
                         restored[label] = restore["restored_sha256"]
                     self._phase_restored = True
@@ -675,13 +666,15 @@ class NexusArmDriver:
             props = tool_properties(self.client.tools(), "nexus_worker_candidate")
             if external and EXTERNAL_TARGET_FIELD not in props:
                 capture["gateway_worker_args"] = self.worker_args(task, gw_task, "<card>", "<hash>", external)
-                row.update(outcome=OUTCOME_BLOCKED_EXTERNAL, infra=False, model_calls=0, total_tokens=None)
+                set_fact(row, "nexus_refusal", OUTCOME_BLOCKED_EXTERNAL)
+                set_fact(row, "refusal_outcome", OUTCOME_BLOCKED_EXTERNAL)
+                row.update(model_calls=0, total_tokens=None)
                 return row
             if external:
                 problem = venv_problem(task)
                 if problem:
                     # Both arms must run with the task venv (8d pre-run witness).
-                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=problem)
+                    set_fact(row, "harness_error", problem)
                     return row
                 controller = self.fresh_controller(task, run_root, run_id)
             card = self.client.call("nexus_task_card_create", self.card_args(task, gw_task, repeat))
@@ -699,65 +692,88 @@ class NexusArmDriver:
             capture["gateway_worker_args"] = worker_args
             self._submitted = True  # from here on the worker may spend money
             submitted = self._submit_worker(worker_args, transcript)
-            self._worker_accepted = True  # the Gateway took the worker call without an error
             transcript.append({"tool": "nexus_worker_candidate", "result": submitted})
             duplicate = submitted.get("duplicate") if isinstance(submitted, Mapping) else None
             if duplicate or "DUPLICATE_LOGICAL_TASK" in json.dumps(submitted, default=str):
                 # P1 joined another row's task: this row did not run its own worker.
                 # Amendment 10: this row's model never ran, so it counts as not accepted.
-                self._worker_accepted = False
-                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason="DUPLICATE_TASK",
-                           duplicate=duplicate if duplicate is not True else True)
+                set_fact(row, "nexus_refusal", "DUPLICATE_TASK")
+                set_fact(row, "void_reason", "DUPLICATE_TASK")
+                row["duplicate"] = duplicate if duplicate is not True else True
                 return row
+            self._worker_accepted = True  # the Gateway took the worker call without an error
+            set_fact(row, "accepted", True)
             final = self._wait(gw_task, started + timeout_seconds + 600.0, transcript)
             status = self.client.call("nexus_task_status", {"task_id": gw_task})
             transcript.append({"tool": "nexus_task_status", "result": status})
-            row.update(self._collect(gw_task, status, final,
-                                     controller if external else self.controller_git,
-                                     repo=str(task.get("repo") or ""), base=task["base_commit"]))
+            collected = self._collect(gw_task, status, final,
+                                      controller if external else self.controller_git,
+                                      repo=str(task.get("repo") or ""), base=task["base_commit"])
+            collected_outcome, collected_void = collected.pop("outcome"), collected.pop("void_reason")
+            collected.pop("infra")
+            row.update(collected)
             diff = row.pop("_diff", "")
+            # Facts from the collected task (classified once, at the end of the row).
+            if collected.get("attempt_status") == "INFRA":
+                set_fact(row, "model_infra", "MODEL_ATTEMPT_INFRA")
+            if _is_infra(str(collected.get("error") or "")):
+                set_fact(row, "model_infra", "PROVIDER_INFRA_MARKER")
+            for flag in ("CLI_TIMEOUT_MISMATCH", "VENV_NOT_USABLE"):
+                if flag in (collected.get("flags") or []):
+                    set_fact(row, "model_infra", flag)
+            if collected_void:
+                set_fact(row, "void_reason", collected_void)
+                set_fact(row, "void", collected_void)
+            set_fact(row, "model_outcome",
+                     collected_outcome if collected_outcome in ("TIMEOUT", "MODEL_FAILED") else OUTCOME_DONE)
         except GatewayToolError as exc:
             message = json.dumps(exc.payload)
             if not self._submitted:
                 # Before the worker was submitted (card create/commit, probe, e.g.
                 # TASK_CARD_COMMIT_HEAD_MISMATCH): the model never ran -> infra,
                 # re-run in both arms.
-                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"PRE_SUBMIT_FAILURE:{exc.tool}",
-                           error=message[:2000])
+                set_fact(row, "nexus_refusal", f"PRE_SUBMIT_FAILURE:{exc.tool}")
+                set_fact(row, "void_reason", f"PRE_SUBMIT_FAILURE:{exc.tool}")
+                row.setdefault("error", message[:2000])
             elif not self._worker_accepted:
                 # Amendment 10: the Gateway refused the worker request, so the model
                 # never ran -> infra (Nexus reliability), re-run in all arms.
-                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"WORKER_NOT_ACCEPTED:{exc.tool}",
-                           error=message[:2000])
+                set_fact(row, "nexus_refusal", f"WORKER_NOT_ACCEPTED:{exc.tool}")
+                set_fact(row, "void_reason", f"WORKER_NOT_ACCEPTED:{exc.tool}")
+                row.setdefault("error", message[:2000])
             else:
-                row.update(outcome=OUTCOME_INFRA if _is_infra(message) else OUTCOME_GATEWAY_ERROR,
-                           infra=_is_infra(message), error=message[:2000])
+                set_fact(row, "model_infra" if _is_infra(message) else "gateway_error",
+                         "PROVIDER_INFRA_MARKER" if _is_infra(message) else f"TOOL_ERROR:{exc.tool}")
+                row.setdefault("error", message[:2000])
         except GatewayConnectionLost as exc:
             # The row is always written.  Before acceptance: infra (Nexus reliability).
             # After acceptance: a Nexus failure (GATEWAY_ERROR, not solved) unless the
             # watchdog recorded an event for this row (it killed the Gateway) -> INFRA,
             # set in ``finally`` from the watchdog event (re-review #3).
-            row.update(outcome=OUTCOME_GATEWAY_ERROR if self._worker_accepted else OUTCOME_INFRA,
-                       infra=not self._worker_accepted, void_reason="GATEWAY_CONNECTION_LOST",
-                       gateway_connection_lost=True, error=str(exc)[:2000])
+            set_fact(row, "connection_lost", True)
+            if not self._worker_accepted:
+                set_fact(row, "nexus_refusal", "GATEWAY_CONNECTION_LOST")
+            set_fact(row, "void_reason", "GATEWAY_CONNECTION_LOST")
+            row["gateway_connection_lost"] = True
+            row.setdefault("error", str(exc)[:2000])
         except Exception as exc:  # noqa: BLE001 - re-review #4: a row is always written, never a crash
             # After acceptance any other failure (half-written state JSON, a corrupt
             # snapshot, a malformed status) comes from Gateway output: a Nexus failure,
             # not solved.  Before acceptance it is the harness's own failure: infra.
             message = f"{type(exc).__name__}: {str(exc)[:1000]}"
             if self._worker_accepted:
-                row.update(outcome=OUTCOME_GATEWAY_ERROR, infra=False,
-                           void_reason=f"GATEWAY_ERROR_AFTER_ACCEPTANCE:{type(exc).__name__}", error=message)
+                set_fact(row, "gateway_error", f"GATEWAY_ERROR_AFTER_ACCEPTANCE:{type(exc).__name__}")
+                set_fact(row, "void_reason", f"GATEWAY_ERROR_AFTER_ACCEPTANCE:{type(exc).__name__}")
             else:
-                row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=f"HARNESS_ERROR:{type(exc).__name__}",
-                           error=message)
+                set_fact(row, "harness_error", f"HARNESS_ERROR:{type(exc).__name__}")
+            row.setdefault("error", message)
         except BaseException as exc:
             # KeyboardInterrupt / SystemExit (the runner is being killed): the row is
             # written as INTERRUPTED + infra (an audit trail of a run that may have spent
             # money) and the interrupt goes on.  The runner never takes an INTERRUPTED row
             # as a result: the arm is CRASHED and the whole block re-runs, the same as a
             # BARE row killed before it was written (re-review #5).
-            row.update(outcome=OUTCOME_INTERRUPTED, infra=True, void_reason=f"INTERRUPTED:{type(exc).__name__}")
+            set_fact(row, "interrupted", type(exc).__name__)  # sticky: wins over every later fact
             raise
         finally:
             stuck = None
@@ -774,7 +790,13 @@ class NexusArmDriver:
                     refused = False
                 stuck = self._await_terminal(gw_task, transcript, cancel_refused=refused)
                 if stuck is not None:
-                    row.update(outcome=OUTCOME_INFRA, infra=True, gateway_stuck=stuck)
+                    row["gateway_stuck"] = stuck
+                    if stuck.startswith("connection_lost:"):
+                        set_fact(row, "connection_lost", True)
+                    elif stuck.startswith("status_error:"):
+                        set_fact(row, "gateway_error", "STATUS_ERROR")
+                    else:
+                        set_fact(row, "stuck_by_harness_timeout", True)
             if reset is not None and reset.get("removed"):
                 row.setdefault("flags", []).append("CONTROLLER_LEFTOVERS")
                 row["controller_leftovers"] = reset["removed"]
@@ -795,11 +817,12 @@ class NexusArmDriver:
                         row["state_after_sha256"] != row["state_before_sha256"]:
                     # Q2: L-B is read-only; a changed state means the freeze leaked.
                     row.setdefault("flags", []).append("LB_STATE_CHANGED")
-                    row.update(outcome=OUTCOME_INFRA, infra=True,
-                               void_reason=row.get("void_reason") or "LB_STATE_CHANGED")
+                    set_fact(row, "void", "LB_STATE_CHANGED")
+                    set_fact(row, "void_reason", "LB_STATE_CHANGED")
             event = watchdog.infra_event_for(run_root, run_id)
             if event is not None:
-                row.update(outcome=OUTCOME_INFRA, infra=True, watchdog_event=event)
+                set_fact(row, "watchdog_event", True)
+                row["watchdog_event"] = event
             diff, redacted = redact_diff(diff, self.key_file)
             if redacted:
                 row.setdefault("flags", []).append(FLAG_SECRET_IN_DIFF)
@@ -815,17 +838,13 @@ class NexusArmDriver:
             row["non_model_solve_path"] = non_model_solve(diff, row)
             if row["non_model_solve_path"]:
                 row.setdefault("flags", []).append(FLAG_NON_MODEL_SOLVE)
-            # Amendment 10 (blind.exclusion_reason applies the same rule): not accepted
-            # -> infra; accepted -> infra only for the model-side causes BARE shares,
-            # any other failure is Nexus-side and a not-solved candidate.
-            row["symmetric_infra_reasons"] = blind.symmetric_infra_reasons(row)
-            rule = blind.exclusion_reason(row)
-            if rule is None and row.get("infra"):
-                row.update(infra=False, nexus_failure_after_acceptance=True)
-            elif rule is not None:
-                row.update(infra=True, infra_rule=rule[0])
-                if not row.get("void_reason"):
-                    row["void_reason"] = f"WORKER_NOT_ACCEPTED:{row.get('outcome')}"
+            # Re-review #6: the ONE classification of the row, from its facts, after the
+            # cancel and the clean-up (common.classify_row; blind.py and the runner use it).
+            set_fact(row, "accepted", bool(self._worker_accepted))
+            verdict = classify_row(row["facts"])
+            row.update(outcome=verdict["outcome"], infra=verdict["infra"], void_reason=verdict["void_reason"],
+                       symmetric_infra_reasons=verdict["symmetric_infra_reasons"],
+                       infra_rule=verdict["exclusion"][0] if verdict["exclusion"] else None)
             append_jsonl(run_root / "rows.jsonl", row)
             append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
             watchdog.end_row(run_root)

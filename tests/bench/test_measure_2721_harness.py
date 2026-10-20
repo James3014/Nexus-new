@@ -2625,3 +2625,146 @@ def test_recovery_needs_an_offset_and_an_unconsumed_finished_row(manifest, tmp_p
     blocks = list(read_jsonl(run / "blocks.jsonl"))
     assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
     assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED" and blocks[1]["run_ids"]["NEXUS"] != nexus["run_id"]
+
+
+# -- re-review #6: one classification from immutable facts ------------------------------
+
+_ACC = {"accepted": True}
+
+
+@pytest.mark.parametrize("facts, expected", [
+    # (facts, (outcome, infra, void_reason, rule, nexus_reliability))
+    ({"accepted": True, "model_outcome": "OK"}, ("OK", False, None, None, False)),
+    ({**_ACC, "model_outcome": "TIMEOUT"}, ("TIMEOUT", False, None, None, False)),
+    ({**_ACC, "model_outcome": "MODEL_FAILED"}, ("MODEL_FAILED", False, None, None, False)),
+    # 2. not accepted
+    ({"accepted": False, "harness_error": "CONTROLLER_RESET_MISMATCH"},
+     ("INFRA", True, "CONTROLLER_RESET_MISMATCH", "HARNESS_NOT_SUBMITTED", False)),
+    ({"accepted": False, "nexus_refusal": "WORKER_NOT_ACCEPTED:x", "void_reason": "WORKER_NOT_ACCEPTED:x"},
+     ("INFRA", True, "WORKER_NOT_ACCEPTED:x", "NEXUS_NOT_ACCEPTED", True)),
+    ({"accepted": False, "nexus_refusal": "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED",
+      "refusal_outcome": "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED"},
+     ("BLOCKED_EXTERNAL_TARGET_UNSUPPORTED", True, "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED", "NEXUS_NOT_ACCEPTED", True)),
+    ({"accepted": False, "nexus_refusal": "GATEWAY_CONNECTION_LOST", "connection_lost": True},
+     ("INFRA", True, "GATEWAY_CONNECTION_LOST", "NEXUS_NOT_ACCEPTED", True)),
+    # 3-5. accepted, symmetric infra
+    ({**_ACC, "connection_lost": True, "watchdog_event": True, "void_reason": "GATEWAY_CONNECTION_LOST"},
+     ("INFRA", True, "GATEWAY_CONNECTION_LOST", "SYMMETRIC_INFRA", False)),
+    ({**_ACC, "model_infra": ["MODEL_ATTEMPT_INFRA"]}, ("INFRA", True, None, "SYMMETRIC_INFRA", False)),
+    ({**_ACC, "model_infra": ["VENV_NOT_USABLE"], "void_reason": "VENV_MISMATCH"},
+     ("INFRA", True, "VENV_MISMATCH", "SYMMETRIC_INFRA", False)),
+    ({**_ACC, "stuck_by_harness_timeout": True}, ("INFRA", True, None, "SYMMETRIC_INFRA", False)),
+    # 6. accepted, Gateway-side error: not infra
+    ({**_ACC, "connection_lost": True, "void_reason": "GATEWAY_CONNECTION_LOST"},
+     ("GATEWAY_ERROR", False, "GATEWAY_CONNECTION_LOST", None, False)),
+    ({**_ACC, "gateway_error": "TOOL_ERROR:nexus_task_wait"}, ("GATEWAY_ERROR", False, None, None, False)),
+    ({**_ACC, "gateway_error": "STATUS_ERROR"}, ("GATEWAY_ERROR", False, None, None, False)),
+    # 7. accepted, void: not infra
+    ({**_ACC, "void": ["LB_STATE_CHANGED"], "void_reason": "LB_STATE_CHANGED", "model_outcome": "OK"},
+     ("OK", False, "LB_STATE_CHANGED", None, False)),
+    ({**_ACC, "void": ["TRACE_MISSING"], "void_reason": "TRACE_MISSING"}, ("OK", False, "TRACE_MISSING", None, False)),
+    # precedence
+    ({**_ACC, "interrupted": "KeyboardInterrupt", "connection_lost": True, "void": ["LB_STATE_CHANGED"],
+      "void_reason": "LB_STATE_CHANGED", "gateway_error": "STATUS_ERROR"},
+     ("INTERRUPTED", True, "INTERRUPTED:KeyboardInterrupt", "INTERRUPTED", False)),
+    ({"accepted": False, "interrupted": "SystemExit", "harness_error": "X"},
+     ("INTERRUPTED", True, "INTERRUPTED:SystemExit", "INTERRUPTED", False)),
+    ({"accepted": False, "harness_error": "INSTANCE_BUSY:x", "nexus_refusal": "PRE_SUBMIT_FAILURE:y"},
+     ("INFRA", True, "INSTANCE_BUSY:x", "HARNESS_NOT_SUBMITTED", False)),
+    ({**_ACC, "watchdog_event": True, "gateway_error": "TOOL_ERROR:x"}, ("INFRA", True, None, "SYMMETRIC_INFRA", False)),
+    ({**_ACC, "stuck_by_harness_timeout": True, "gateway_error": "TOOL_ERROR:x"},
+     ("INFRA", True, None, "SYMMETRIC_INFRA", False)),
+    ({**_ACC, "gateway_error": "TOOL_ERROR:x", "void": ["SNAPSHOT_MISSING"], "void_reason": "SNAPSHOT_MISSING"},
+     ("GATEWAY_ERROR", False, "SNAPSHOT_MISSING", None, False)),
+])
+def test_classify_row_rules_and_precedence(facts, expected):
+    from scripts.bench.measure_2721.common import classify_row
+
+    verdict = classify_row(facts)
+    rule = verdict["exclusion"][0] if verdict["exclusion"] else None
+    assert (verdict["outcome"], verdict["infra"], verdict["void_reason"], rule, verdict["nexus_reliability"]) == \
+        expected
+
+
+def test_sticky_facts_are_never_cleared():
+    from scripts.bench.measure_2721.common import set_fact
+
+    row: dict = {}
+    set_fact(row, "interrupted", "KeyboardInterrupt")
+    set_fact(row, "interrupted", "SystemExit")
+    set_fact(row, "connection_lost", True)
+    set_fact(row, "connection_lost", False)
+    set_fact(row, "void", "A")
+    set_fact(row, "void", "B")
+    set_fact(row, "void_reason", "A")
+    set_fact(row, "void_reason", "B")
+    assert row["facts"] == {"interrupted": "KeyboardInterrupt", "connection_lost": True, "void": ["A", "B"],
+                            "void_reason": "A"}
+
+
+class _InterruptThenDead(FakeGateway):
+    """Ctrl-C during the first wait after acceptance; afterwards the Gateway is gone too
+    (the same process group got the signal), so the cancel loses its connection."""
+
+    def __init__(self, state_root=None):
+        super().__init__()
+        self.fired = False
+        self.state_root = state_root
+
+    def __call__(self, method, path, body):
+        name = (body or {}).get("params", {}).get("name")
+        if name == "nexus_task_wait" and not self.fired:
+            self.fired = True
+            raise KeyboardInterrupt("Ctrl-C")
+        if self.fired and name in ("nexus_task_cancel", "nexus_task_status", "nexus_task_wait"):
+            raise ConnectionResetError(54, "Connection reset by peer")
+        return super().__call__(method, path, body)
+
+    def _answer(self, name, args):
+        if name == "nexus_worker_candidate" and self.state_root is not None:
+            (self.state_root / "learning" / "episodes.jsonl").write_text(f"learned from {args['task_id']}\n")
+        return super()._answer(name, args)
+
+
+def test_interrupt_then_lost_cancel_after_acceptance_reruns_the_whole_block(manifest, tmp_path, monkeypatch):
+    _fake_build(monkeypatch, {"NEXUS": _InterruptThenDead()})
+    run = tmp_path / "run"
+    with pytest.raises(KeyboardInterrupt):
+        _runner_main(manifest, tmp_path, run)
+    (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert row["facts"]["interrupted"] == "KeyboardInterrupt" and row["facts"]["connection_lost"]
+    assert row["outcome"] == "INTERRUPTED" and row["infra"] and row["void_reason"] == "INTERRUPTED:KeyboardInterrupt"
+    before = {r["run_id"] for r in read_jsonl(run / "rows.jsonl")}
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED"
+    assert set(blocks[1]["run_ids"]) == {"BARE", "NEXUS", "NOOP"} and not set(blocks[1]["run_ids"].values()) & before
+
+
+def test_interrupt_with_an_lb_state_change_reruns_the_whole_block(manifest, tmp_path, monkeypatch):
+    state_root, snapshot = tmp_path / "state", tmp_path / "snapshot"
+    (snapshot / "learning").mkdir(parents=True)
+    (snapshot / "learning" / "episodes.jsonl").write_text("phase start\n")
+    state_root.mkdir()
+    gateways = {"current": _InterruptThenDead(state_root)}
+
+    def build(args, parser):
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateways["current"])
+        return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None,
+                                           state_root=state_root, state_snapshot=snapshot,
+                                           state_dir=state_root / "tasks", learning_phase="LB")
+
+    monkeypatch.setattr(nexus_driver, "build_driver", build)
+    run = tmp_path / "run"
+    with pytest.raises(KeyboardInterrupt):
+        _runner_main(manifest, tmp_path, run)
+    (row,) = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert "LB_STATE_CHANGED" in row["facts"]["void"] and row["facts"]["interrupted"]
+    assert row["outcome"] == "INTERRUPTED" and row["infra"]  # the interrupt wins over the L-B change
+    gateways["current"] = FakeGateway()
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"]) for b in blocks] == [(0, "RERUN"), (1, "COMPLETE")]
+    assert blocks[0]["infra_why"]["NEXUS"] == "CRASHED"

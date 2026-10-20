@@ -170,3 +170,122 @@ def write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
+
+
+# -- row classification (re-review #6: one pure function of immutable facts) ----------
+#
+# The NEXUS driver records FACTS on ``row["facts"]`` as they happen, with sticky setters
+# (``set_fact``: a True flag is never cleared, a text keeps its first value, a list only
+# grows).  ``classify_row(facts)`` is called once, at the very end of the row (after the
+# cancel and clean-up in ``finally``); blind.py, runner.recover() and the driver all use
+# it, so no code path rewrites ``outcome`` along the way.  PREREG v0.9.4 / amendment 10.
+#
+# Precedence (first matching rule wins):
+#   1. interrupted (KeyboardInterrupt / SystemExit, at any time) -> INTERRUPTED, infra,
+#      never a finished row (rule INTERRUPTED).
+#   2. not accepted: a harness pre-check failed -> infra, HARNESS_NOT_SUBMITTED;
+#      else (the Gateway/Nexus refused, or was unreachable) -> infra, NEXUS_NOT_ACCEPTED
+#      (Nexus reliability).
+#   3. accepted + a watchdog event for the row (the watchdog killed the run or the
+#      Gateway, incl. a lost connection) -> infra, SYMMETRIC_INFRA.
+#   4. accepted + model-side infra BARE has too (attempt INFRA e.g. a 429, provider
+#      infra marker, CLI time-limit mismatch, unusable venv) -> infra, SYMMETRIC_INFRA.
+#   5. accepted + the harness's own bounded polling found the task never terminal
+#      (GATEWAY_STUCK) -> infra, SYMMETRIC_INFRA (PREREG §3.3).
+#   6. accepted + a Gateway-side error (HTTP error, non-JSON/malformed reply, tool
+#      error, a lost connection WITHOUT a watchdog event, any other exception after
+#      acceptance) -> GATEWAY_ERROR, not infra (RUN_INVALID_NOT_SOLVED).
+#   7. accepted + LB state changed / snapshot missing or invalid / trace missing ->
+#      void (void_reason), not infra (RUN_INVALID_NOT_SOLVED).
+#   8. otherwise the model outcome (OK / TIMEOUT / MODEL_FAILED), not infra.
+
+LIST_FACTS = frozenset({"model_infra", "void"})
+
+
+def set_fact(row: dict[str, Any], key: str, value: Any = True) -> None:
+    """Sticky: True is never cleared, a text keeps its first value, a list only grows."""
+    facts = row.setdefault("facts", {})
+    if key in LIST_FACTS:
+        values = facts.setdefault(key, [])
+        if value not in values:
+            values.append(value)
+    elif isinstance(value, bool):
+        if value:
+            facts[key] = True
+        else:
+            facts.setdefault(key, False)
+    elif value is not None:
+        facts.setdefault(key, value)
+
+
+def classify_row(facts: Mapping[str, Any]) -> dict[str, Any]:
+    """The one classification of a NEXUS row from its facts (see the precedence above)."""
+    def result(outcome: str, infra: bool, void: Any = None, rule: Any = None, reason: Any = None,
+               reliability: bool = False, symmetric: Any = ()) -> dict[str, Any]:
+        return {"outcome": outcome, "infra": infra, "void_reason": void,
+                "exclusion": (rule, reason) if rule else None, "nexus_reliability": reliability,
+                "symmetric_infra_reasons": list(symmetric)}
+
+    first_void = facts.get("void_reason")
+    if facts.get("interrupted"):
+        void = f"INTERRUPTED:{facts['interrupted']}"
+        return result("INTERRUPTED", True, void, "INTERRUPTED", void, symmetric=["INTERRUPTED"])
+    if not facts.get("accepted"):
+        if facts.get("harness_error"):
+            reason = str(facts["harness_error"])
+            return result("INFRA", True, reason, "HARNESS_NOT_SUBMITTED", reason)
+        reason = str(facts.get("nexus_refusal") or "NOT_ACCEPTED")
+        return result(str(facts.get("refusal_outcome") or "INFRA"), True, first_void or reason,
+                      "NEXUS_NOT_ACCEPTED", first_void or reason, reliability=True)
+    symmetric = [*(["WATCHDOG_EVENT"] if facts.get("watchdog_event") else []), *(facts.get("model_infra") or []),
+                 *(["GATEWAY_STUCK"] if facts.get("stuck_by_harness_timeout") else [])]
+    if symmetric:
+        return result("INFRA", True, first_void, "SYMMETRIC_INFRA", ",".join(symmetric), symmetric=symmetric)
+    if facts.get("gateway_error") or facts.get("connection_lost"):
+        return result("GATEWAY_ERROR", False, first_void)
+    if facts.get("void"):
+        return result(str(facts.get("model_outcome") or "OK"), False, first_void or facts["void"][0])
+    return result(str(facts.get("model_outcome") or "OK"), False, first_void)
+
+
+NEXUS_REFUSAL_PREFIXES = ("PRE_SUBMIT_FAILURE:", "WORKER_NOT_ACCEPTED:", "DUPLICATE_TASK", "GATEWAY_CONNECTION_LOST")
+GATEWAY_ANSWER_STUCK_PREFIXES = ("connection_lost:", "status_error:")
+SYMMETRIC_INFRA_FLAGS = ("CLI_TIMEOUT_MISMATCH", "VENV_NOT_USABLE")
+
+
+def row_facts(row: Mapping[str, Any]) -> dict[str, Any]:
+    """``row["facts"]``; for a row written without facts (hand-built or older rows) the
+    same facts derived from its fields, so every NEXUS row goes through classify_row."""
+    if isinstance(row.get("facts"), Mapping):
+        return dict(row["facts"])
+    void = str(row.get("void_reason") or "")
+    outcome = str(row.get("outcome") or "")
+    stuck = str(row.get("gateway_stuck") or "")
+    facts: dict[str, Any] = {"accepted": bool(row.get("worker_accepted")), "void_reason": void or None}
+    if outcome == "INTERRUPTED" or void.startswith("INTERRUPTED:"):
+        facts["interrupted"] = void.split(":", 1)[1] if ":" in void else "unknown"
+    if not facts["accepted"]:
+        if void.startswith(NEXUS_REFUSAL_PREFIXES) or outcome == "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED":
+            facts.update(nexus_refusal=void or outcome, refusal_outcome=outcome or None)
+        else:
+            facts["harness_error"] = void or outcome or "NOT_ACCEPTED"
+    if row.get("watchdog_event") is not None:
+        facts["watchdog_event"] = True
+    model_infra = []
+    if row.get("attempt_status") == "INFRA":
+        model_infra.append("MODEL_ATTEMPT_INFRA")
+    if any(marker in str(row.get("error") or "") for marker in INFRA_ERROR_MARKERS):
+        model_infra.append("PROVIDER_INFRA_MARKER")
+    model_infra += [flag for flag in SYMMETRIC_INFRA_FLAGS if flag in (row.get("flags") or [])]
+    facts["model_infra"] = model_infra
+    if stuck and not stuck.startswith(GATEWAY_ANSWER_STUCK_PREFIXES):
+        facts["stuck_by_harness_timeout"] = True
+    if row.get("gateway_connection_lost") or stuck.startswith("connection_lost:"):
+        facts["connection_lost"] = True
+    if outcome == "GATEWAY_ERROR" or stuck.startswith("status_error:"):
+        facts["gateway_error"] = void or "GATEWAY_ERROR"
+    if void:
+        facts["void"] = [void]
+    if outcome in ("OK", "TIMEOUT", "MODEL_FAILED"):
+        facts["model_outcome"] = outcome
+    return facts
