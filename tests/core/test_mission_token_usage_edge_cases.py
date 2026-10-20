@@ -61,9 +61,10 @@ def test_receipt_of_another_run_is_not_counted(tmp_path: Path) -> None:
     report = tmp_path / "reports" / "run_report.json"
     report.parent.mkdir()
     report.write_text(
-        json.dumps(
-            {"unified_runtime_receipt_path": str(stale), "unified_runtime_task_id": "new-task"}
-        ),
+        json.dumps({
+            "unified_runtime_receipt_path": str(stale),
+            "unified_runtime_task_id": "new-task",
+        }),
         encoding="utf-8",
     )
     m = _mission()
