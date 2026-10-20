@@ -683,30 +683,58 @@ def test_a_row_without_a_usable_venv_never_reaches_the_gateway(manifest, tmp_pat
 def test_spend_ledger_stops_before_the_cap(tmp_path):
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    ledger = SpendLedger(tmp_path / "spend.json", cap_usd=1.0)
+    ledger = SpendLedger(tmp_path / "spend.json", cap_usd=1.0, max_row_usd=0.5)
     ledger.finish_row(ledger.begin_row(), 0.3)
     ledger.finish_row(ledger.begin_row(), 0.4)  # 0.3 + max(0.3, 0.5) <= 1.0
     with pytest.raises(BudgetExhausted):
         ledger.begin_row()  # 0.7 + 0.5 > 1.0
-    assert SpendLedger(tmp_path / "spend.json", 1.0).state()["rows"] == 2
+    assert SpendLedger(tmp_path / "spend.json", 1.0, 0.5).state()["rows"] == 2
 
 
 def test_spend_ledger_reserves_stores_the_cap_and_estimates_unknown_cost(tmp_path):
     from scripts.bench.measure_2721.budget import BudgetConfigError, BudgetExhausted, SpendLedger
 
     path = tmp_path / "spend.json"
-    ledger = SpendLedger(path, cap_usd=1.2)
+    ledger = SpendLedger(path, cap_usd=1.2, max_row_usd=0.5)
     first = ledger.begin_row()
     second = ledger.begin_row()  # 0 + 0.5 reserved + 0.5 <= 1.2
     with pytest.raises(BudgetExhausted):
         ledger.begin_row()  # in-flight reservations count (parallel arms, review L1)
-    # A killed row (cost never reported) is charged its reservation (review H1).
+    # A killed row (cost never reported) is charged the per-attempt ceiling (review H1).
     assert ledger.finish_row(first, None) == {"charged_usd": 0.5, "estimated": True}
-    assert ledger.finish_row(second, 0.1, unknown_attempts=1)["charged_usd"] == pytest.approx(0.6)
+    # One ceiling per unknown attempt (review H-a).
+    assert ledger.finish_row(second, 0.1, unknown_attempts=2, estimate_usd=0.2)["charged_usd"] == pytest.approx(1.1)
     state = ledger.state()
-    assert state["spent_usd"] == pytest.approx(1.1) and state["estimated_rows"] == 2 and state["cap_usd"] == 1.2
+    assert state["spent_usd"] == pytest.approx(1.6) and state["estimated_rows"] == 2 and state["cap_usd"] == 1.2
+    assert state["worst_row_usd"] == pytest.approx(1.1)  # estimated rows teach the reservation too (H-b)
     with pytest.raises(BudgetConfigError):
-        SpendLedger(path, cap_usd=60.0)  # one shared ledger, one cap (review H3)
+        SpendLedger(path, cap_usd=60.0, max_row_usd=0.5)  # one shared ledger, one cap (review H3)
+    with pytest.raises(BudgetConfigError):
+        SpendLedger(path, cap_usd=1.2, max_row_usd=3.0)
+    big = SpendLedger(tmp_path / "big.json", cap_usd=60.0, max_row_usd=0.5)
+    # A usage-priced estimate above the ceiling wins (review H-b).
+    assert big.finish_row(big.begin_row(), None, estimate_usd=2.0)["charged_usd"] == pytest.approx(2.0)
+    default = SpendLedger(tmp_path / "default.json")
+    assert default.finish_row(default.begin_row(), None)["charged_usd"] == pytest.approx(3.0)
+
+
+def test_usage_priced_estimate_follows_haiku_rates(tmp_path):
+    from scripts.bench.measure_2721.providers import estimate_stream_usd, estimate_usage_usd
+
+    assert estimate_usage_usd({"input_tokens": 1_000_000}) == pytest.approx(0.50)  # > 100K prompt: long rate
+    assert estimate_usage_usd({"input_tokens": 50_000, "output_tokens": 1_000}) == pytest.approx(0.0055)
+    assert estimate_usage_usd({"input_tokens": 10, "cache_read_input_tokens": 200_000,
+                               "output_tokens": 0}) == pytest.approx((10 * 0.5 + 200_000 * 0.05) / 1e6)
+    assert estimate_usage_usd({"cache_creation_input_tokens": 80_000}) == pytest.approx(80_000 * 0.125 / 1e6)
+    stream = tmp_path / "s.stream.jsonl"
+    usage = {"input_tokens": 1000, "output_tokens": 1000}
+    stream.write_text("".join(json.dumps(e) + "\n" for e in (
+        {"type": "assistant", "message": {"id": "m1", "usage": usage}},
+        {"type": "assistant", "message": {"id": "m1", "usage": usage}},  # same message, counted once
+        {"type": "assistant", "message": {"id": "m2", "usage": usage}},
+    )))
+    assert estimate_stream_usd(stream) == pytest.approx(2 * estimate_usage_usd(usage))
+    assert estimate_stream_usd(tmp_path / "missing") == 0.0
 
 
 def test_bare_row_is_charged_even_when_the_run_fails(manifest, tmp_path):
@@ -721,10 +749,10 @@ def test_bare_row_is_charged_even_when_the_run_fails(manifest, tmp_path):
     with pytest.raises(RuntimeError):
         arms.run_bare(task, 1, tmp_path / "run", FakeProvider(edit=boom), timeout_seconds=5, ledger=ledger)
     state = ledger.state()
-    assert state["rows"] == 1 and state["spent_usd"] == pytest.approx(0.5) and state["reservations"] == {}
+    assert state["rows"] == 1 and state["spent_usd"] == pytest.approx(3.0) and state["reservations"] == {}
     arms.run_bare(task, 2, tmp_path / "run", FakeProvider(extra={"total_cost_usd": 0.02}), timeout_seconds=5,
                   ledger=ledger)
-    assert ledger.state()["spent_usd"] == pytest.approx(0.52)
+    assert ledger.state()["spent_usd"] == pytest.approx(3.02)
 
 
 class _StubClaude:
@@ -751,6 +779,8 @@ def test_bare_claude_row_checks_the_venv_before_spending(manifest, tmp_path, mon
     row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5, ledger=ledger)
     assert row["infra"] is True and row["void_reason"] == "VENV_OUTSIDE_READ_ROOTS"
     assert ledger.state()["rows"] == 0
+    # The void row is in the portable rows too, so every arm has the same row count (review M-a).
+    assert [r["task_id"] for r in read_jsonl(tmp_path / "run" / "rows.portable.jsonl")] == [task["task_id"]]
 
 
 def test_bare_claude_row_with_another_venv_after_the_run_is_infra(manifest, tmp_path, monkeypatch):
@@ -798,7 +828,7 @@ def test_nexus_row_bills_every_attempt_and_checks_each(manifest, tmp_path):
     (task,) = arms.load_manifest(manifest)
     venv = os.path.realpath(task["venv"])
     limit = arms.expected_cli_timeout(5)
-    ledger = SpendLedger(tmp_path / "spend.json")
+    ledger = SpendLedger(tmp_path / "spend.json", max_row_usd=0.5)
     driver = _tracing_driver(FakeGateway(), tmp_path / "traces", [
         dict(cost=0.03, venv=venv, limit=limit, output=10),
         dict(cost=0.02, venv=venv, limit=limit, output=5),
@@ -808,7 +838,7 @@ def test_nexus_row_bills_every_attempt_and_checks_each(manifest, tmp_path):
     assert row["output_tokens"] == 15 and row["outcome"] == "OK", row
     assert ledger.state()["spent_usd"] == pytest.approx(0.05)
     # A killed attempt (no result event) is estimated; another venv voids the row.
-    ledger2 = SpendLedger(tmp_path / "spend2.json")
+    ledger2 = SpendLedger(tmp_path / "spend2.json", max_row_usd=0.5)
     driver = _tracing_driver(FakeGateway(), tmp_path / "traces2", [
         dict(cost=0.03, venv=venv, limit=limit, output=10),
         dict(cost=None, venv="/other/venv", limit=limit, output=0),
@@ -816,6 +846,32 @@ def test_nexus_row_bills_every_attempt_and_checks_each(manifest, tmp_path):
     row = driver.run(task, 2, tmp_path / "run", timeout_seconds=5, ledger=ledger2)
     assert row["infra"] is True and row["void_reason"] == "VENV_MISMATCH" and row["cost_unknown_attempts"] == 1
     assert ledger2.state()["spent_usd"] == pytest.approx(0.53) and ledger2.state()["estimated_rows"] == 1
+
+
+class _ProbeGateway(FakeGateway):
+    """Asks for one model probe before accepting the worker."""
+
+    def _is_error(self, name: str) -> bool:
+        return name == "nexus_worker_candidate" and not any(c["tool"] == "nexus_model_probe" for c in self.calls)
+
+    def _answer(self, name, args):
+        if name == "nexus_worker_candidate" and self._is_error(name):
+            return {"error": "MODEL_PROBE_REQUIRED"}
+        if name == "nexus_model_probe_result":
+            return {"status": "VERSION_VERIFIED", "probe_usage": {"output_tokens": 1_000_000}}
+        return super()._answer(name, args)
+
+
+def test_a_model_probe_the_driver_triggers_is_charged(manifest, tmp_path):
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    driver = _tracing_driver(_ProbeGateway(), tmp_path / "traces",
+                             [dict(cost=0.01, venv=venv, limit=arms.expected_cli_timeout(5), output=1)])
+    ledger = SpendLedger(tmp_path / "spend.json")
+    driver.run(task, 1, tmp_path / "run", timeout_seconds=5, ledger=ledger)
+    assert ledger.state()["spent_usd"] == pytest.approx(0.51)  # 0.01 worker + 1M output tokens at $0.50
 
 
 def test_nexus_row_without_a_trace_is_void(manifest, tmp_path):

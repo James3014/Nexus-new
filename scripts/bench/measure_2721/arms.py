@@ -197,17 +197,19 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
             row = {"schema": ROW_SCHEMA, "arm": ARM_BARE, "run_id": new_run_id(ARM_BARE, task["task_id"], repeat),
                    "task_id": task["task_id"], "repeat": repeat, "outcome": STATUS_INFRA, "infra": True,
                    "void_reason": problem, "venv_problem": problem, "flags": [FLAG_VENV], "empty": True,
-                   "total_cost_usd": 0.0}
+                   "total_cost_usd": 0.0, "model_calls": 0, "total_tokens": None}
+            # Same row count in every arm, also for a void row (review M-a).
             append_jsonl(run_root / "rows.jsonl", row)
+            append_jsonl(run_root / "rows.portable.jsonl", to_portable_row(row))
             return row
     token = ledger.begin_row() if ledger is not None else None
-    spend: dict[str, Any] = {"ran": False, "cost": None}
+    spend: dict[str, Any] = {"ran": False, "cost": None, "estimate": 0.0}
     try:
         return _run_bare(task, repeat, run_root, provider, timeout_seconds=timeout_seconds,
                          keep_workdir=keep_workdir, spend=spend)
     finally:
         if ledger is not None:
-            ledger.finish_row(token, spend["cost"] if spend["ran"] else 0.0)
+            ledger.finish_row(token, spend["cost"] if spend["ran"] else 0.0, estimate_usd=spend["estimate"])
 
 
 def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
@@ -231,6 +233,10 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
                                           run_id=run_id, controller=controller)
     # None (timeout, kill, no result message) -> the ledger charges the reservation (H1).
     spend["cost"] = (result.extra or {}).get("total_cost_usd")
+    if spend["cost"] is None:
+        from scripts.bench.measure_2721.providers import estimate_stream_usd
+
+        spend["estimate"] = estimate_stream_usd((result.extra or {}).get("trace_path"))
     wall = time.monotonic() - started
     tampered = git_meta_fingerprint(controller, workdir) != git_meta
     # #2749: a changed .git/config, info/ or hooks/ means no git command is run.
@@ -386,6 +392,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--max-row-usd", type=float, default=3.0,
+                        help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
     parser.add_argument("--spend-ledger", required=True,
                         help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     args = parser.parse_args(argv)
@@ -398,7 +406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd)
+    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
     rows = []
     try:
         for task in tasks:

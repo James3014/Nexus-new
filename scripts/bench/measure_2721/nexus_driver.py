@@ -293,6 +293,7 @@ class NexusArmDriver:
         self.probe_model = probe_model
         self.probe_provider = probe_provider
         self.trace_dir = trace_dir
+        self._probes: list[Any] = []
         # NEXUS_NOOP: the same P1 path while the Gateway's claude binary is the
         # no-model fake (``fake_claude.py`` mode noop); must score 0 RESOLVED.
         self.arm_label = arm_label
@@ -383,6 +384,7 @@ class NexusArmDriver:
             raise ValueError("NEXUS_NEW_TASKS_NOT_MEASURED")
         token = ledger.begin_row() if ledger is not None else None
         self._submitted = False
+        self._probes: list[Any] = []
         try:
             return self._run(task, repeat, run_root, timeout_seconds=timeout_seconds)
         finally:
@@ -390,8 +392,8 @@ class NexusArmDriver:
                 if not self._submitted:
                     ledger.finish_row(token, 0.0)
                 else:
-                    known, unknown = self.attempt_cost(gateway_task_id(self._run_id))
-                    ledger.finish_row(token, known, unknown_attempts=unknown)
+                    known, unknown, estimate = self.attempt_cost(gateway_task_id(self._run_id))
+                    ledger.finish_row(token, known, unknown_attempts=unknown, estimate_usd=estimate)
 
     def _run(self, task: Mapping[str, Any], repeat: int, run_root: Path, *, timeout_seconds: float) -> dict[str, Any]:
         if task.get("repo") == NEXUS_REPO:
@@ -535,6 +537,7 @@ class NexusArmDriver:
             if "MODEL_PROBE_REQUIRED" not in json.dumps(exc.payload):
                 raise
         probe_id = f"{args['task_id']}-probe"[:96]
+        self._probes.append(None)  # a model call: charged even if its usage never comes back
         probe = self.client.call("nexus_model_probe", {
             "provider": self.probe_provider, "model": self.probe_model, "task_id": probe_id,
             "prompt": "Return exactly a JSON object with boolean field ok=true. Do not use tools or modify files.",
@@ -546,6 +549,8 @@ class NexusArmDriver:
             result = self.client.call("nexus_model_probe_result", {"task_id": probe_id})
             if str(result.get("status") or "").upper() not in ("", "PENDING", "RUNNING", "QUEUED"):
                 transcript.append({"tool": "nexus_model_probe_result", "result": result})
+                if isinstance(result.get("probe_usage"), dict):
+                    self._probes[-1] = result["probe_usage"]
                 break
             self.sleep(10.0)
         return self.client.call("nexus_worker_candidate", args)
@@ -571,26 +576,41 @@ class NexusArmDriver:
             return []
         return sorted((self.trace_dir / gw_task).glob("*.run.json"), key=lambda p: (p.stat().st_mtime, p.name))
 
-    def attempt_cost(self, gw_task: str) -> tuple[Optional[float], int]:
-        """(known cost summed over every attempt, attempts whose cost is unknown).
+    def attempt_cost(self, gw_task: str) -> tuple[float, int, float]:
+        """(known cost over every attempt, unknown attempts, usage-priced estimate of those).
 
         Read straight from the traces so that it also works when the row
         failed part-way (review M3).  No trace at all counts as one unknown.
+        Model probes the driver triggered are charged too (usage-priced, or
+        one unknown attempt when the Gateway did not report usage).
         """
-        from scripts.bench.measure_2721.providers import read_claude_trace
+        from scripts.bench.measure_2721.providers import (
+            estimate_stream_usd,
+            estimate_usage_usd,
+            read_claude_trace,
+        )
 
-        known, unknown = 0.0, 0
+        known, unknown, estimate = 0.0, 0, 0.0
         runs = self._trace_runs(gw_task)
         for run in runs:
+            name = run.name.split(".", 1)[0]
             try:
-                cost = read_claude_trace(self.trace_dir, gw_task, run.name.split(".", 1)[0])["summary"].total_cost_usd
+                cost = read_claude_trace(self.trace_dir, gw_task, name)["summary"].total_cost_usd
             except Exception:  # noqa: BLE001 - an unreadable trace is an unknown cost
                 cost = None
             if cost is None:
                 unknown += 1
+                estimate += estimate_stream_usd(self.trace_dir / gw_task / f"{name}.stream.jsonl")
             else:
                 known += float(cost)
-        return round(known, 6), (unknown if runs else 1)
+        if not runs:
+            unknown += 1
+        for usage in getattr(self, "_probes", []):
+            if isinstance(usage, dict):
+                known += estimate_usage_usd(usage)
+            else:
+                unknown += 1
+        return round(known, 6), unknown, round(estimate, 6)
 
     def _collect(self, gw_task: str, status: Mapping[str, Any], final: Mapping[str, Any],
                  controller: Optional[Path], *, repo: str = "", base: str = "") -> dict[str, Any]:
@@ -731,6 +751,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored before each row)")
     parser.add_argument("--state-snapshot", help="directory snapshot to restore NEXUS_STATE_ROOT from")
     parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--max-row-usd", type=float, default=3.0,
+                        help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
     parser.add_argument("--spend-ledger", required=True,
                         help="the ONE ledger file every arm of the measurement shares (cap stored in it)")
     parser.add_argument("--learning-phase", help="recorded on every row (LA / LB / COLD / IRRELEVANT / M)")
@@ -758,7 +780,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd)
+    ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
     rows = []
     try:
         for task in load_manifest(args.manifest, args.ids):

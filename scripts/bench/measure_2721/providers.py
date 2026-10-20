@@ -253,6 +253,54 @@ def _json_dumps(value: Any) -> str:
     return _json.dumps(value, ensure_ascii=False, default=str)
 
 
+# Haiku list prices (USD per million tokens) used only to ESTIMATE the cost of
+# an attempt that never reported total_cost_usd.  Prompt > 100K tokens uses the
+# long-context rates; cache writes are 1.25x and cache reads 0.1x the input rate.
+HAIKU_PRICE_PER_MTOK = {"input": 0.10, "output": 0.50, "input_long": 0.50, "output_long": 2.50}
+LONG_PROMPT_TOKENS = 100_000
+CACHE_WRITE_FACTOR = 1.25
+CACHE_READ_FACTOR = 0.10
+
+
+def estimate_usage_usd(usage: Any) -> float:
+    """Price one message's ``usage`` at the Haiku rates above."""
+    if not isinstance(usage, dict):
+        return 0.0
+    count = {key: int(usage.get(key) or 0) for key in (
+        "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")}
+    prompt = count["input_tokens"] + count["cache_creation_input_tokens"] + count["cache_read_input_tokens"]
+    long = prompt > LONG_PROMPT_TOKENS
+    rate_in = HAIKU_PRICE_PER_MTOK["input_long" if long else "input"]
+    rate_out = HAIKU_PRICE_PER_MTOK["output_long" if long else "output"]
+    return (count["input_tokens"] * rate_in
+            + count["cache_creation_input_tokens"] * rate_in * CACHE_WRITE_FACTOR
+            + count["cache_read_input_tokens"] * rate_in * CACHE_READ_FACTOR
+            + count["output_tokens"] * rate_out) / 1_000_000
+
+
+def estimate_stream_usd(stream: Any) -> float:
+    """Usage-priced cost of every assistant message in a stream-json trace.
+
+    A message split over several events repeats its usage; the last one per
+    message id counts.
+    """
+    import json as _json
+
+    path = Path(stream) if stream else None
+    if path is None or not path.is_file():
+        return 0.0
+    per_message: dict[str, Any] = {}
+    for index, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines()):
+        try:
+            event = _json.loads(line)
+        except ValueError:
+            continue
+        message = event.get("message") if isinstance(event, dict) and event.get("type") == "assistant" else None
+        if isinstance(message, dict) and isinstance(message.get("usage"), dict):
+            per_message[str(message.get("id") or f"#{index}")] = message["usage"]
+    return round(sum(estimate_usage_usd(usage) for usage in per_message.values()), 6)
+
+
 def claude_usage_fields(summary: Any) -> dict[str, Any]:
     usage = summary.usage or {}
     fields = {key: int(usage.get(key) or 0) for key in (
