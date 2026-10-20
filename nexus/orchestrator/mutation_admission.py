@@ -188,8 +188,16 @@ def _validate_scope(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
 
 
 def path_is_allowed(path: str, allowed_paths: tuple[str, ...] | list[str]) -> bool:
-    candidate = str(path).strip()
-    if not candidate or candidate.startswith("/") or "\\" in candidate:
+    candidate = str(path)
+    # A name is checked exactly as git reports it (#2765): surrounding whitespace or a
+    # control character would otherwise be stripped/ignored and let "\tallowed/x" match.
+    if (
+        not candidate
+        or candidate != candidate.strip()
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate)
+        or candidate.startswith("/")
+        or "\\" in candidate
+    ):
         return False
     pure = PurePosixPath(candidate)
     if (

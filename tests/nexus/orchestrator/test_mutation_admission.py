@@ -420,3 +420,270 @@ def test_integration_gate_blocks_scope_escape(
     assert report["status"] == "BLOCK"
     assert report["scope_escape_paths"] == ["outside.txt"]
     assert "ADMISSION_SCOPE_ESCAPE" in report["blockers"]
+
+
+def _commit_rename(repo: Path, source: str, destination: str) -> str:
+    (repo / Path(destination)).parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "mv", source, destination)
+    _git(repo, "commit", "-m", f"rename {source} -> {destination}")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _seed(repo: Path, *paths: str) -> str:
+    for path in paths:
+        target = repo / Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"{path}\n", encoding="utf-8")
+        _git(repo, "add", path)
+    _git(repo, "commit", "-m", "seed")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_integration_gate_blocks_a_rename_from_outside_into_scope(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    # #2765: git diff --name-only reported only the destination of a rename
+    repo, _base, _head = git_repo
+    base = _seed(repo, "outside/x.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-in",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "outside/x.py", "allowed/x.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert "ADMISSION_SCOPE_ESCAPE" in report["blockers"]
+    assert report["scope_escape_paths"] == ["outside/x.py"]
+    assert sorted(report["changed_paths"]) == ["allowed/x.py", "outside/x.py"]
+
+
+def test_integration_gate_passes_a_rename_inside_scope(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-inside",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "allowed/a.py", "allowed/b.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "PASS"
+    assert sorted(report["changed_paths"]) == ["allowed/a.py", "allowed/b.py"]
+    assert report["scope_escape_paths"] == []
+
+
+def test_integration_gate_blocks_a_rename_from_scope_to_outside(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:rename-out",
+        allowed_paths=["allowed/**"],
+    )
+    head = _commit_rename(repo, "allowed/a.py", "outside/a.py")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/a.py"]
+
+
+def test_integration_gate_reads_non_ascii_names_unquoted(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/seed.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:non-ascii",
+        allowed_paths=["allowed/**"],
+    )
+    (repo / "allowed" / "設定.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "allowed/設定.md")
+    _git(repo, "commit", "-m", "non-ascii")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["changed_paths"] == ["allowed/設定.md"]
+
+
+@pytest.mark.parametrize(
+    "name", ["\tallowed/x.py", "\nallowed/x.py", " allowed/x.py", "allowed/x.py "]
+)
+def test_integration_gate_blocks_whitespace_wrapped_names(
+    tmp_path: Path, git_repo: tuple[Path, str, str], name: str
+) -> None:
+    # -z hands names over unquoted; a name must not be stripped into scope (#2765 review)
+    repo, _base, _head = git_repo
+    base = _seed(repo, "allowed/seed.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:whitespace",
+        allowed_paths=["allowed/**"],
+    )
+    target = repo / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "--", name)
+    _git(repo, "commit", "-m", "whitespace name")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == [name]
+
+
+def test_integration_gate_ignores_diff_relative_config(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    # diff.relative only filters when git runs below the top level, so the gate is
+    # pointed at a subdirectory here; --no-relative keeps outside/x.py visible.
+    repo, _base, _head = git_repo
+    base = _seed(repo, "outside/x.py", "allowed/a.py")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:diff-relative",
+        allowed_paths=["allowed/**"],
+    )
+    (repo / "outside" / "x.py").write_text("changed\n", encoding="utf-8")
+    _git(repo, "add", "outside/x.py")
+    _git(repo, "commit", "-m", "outside change")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "config", "diff.relative", "true")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo / "allowed",
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/x.py"]
+
+
+def test_integration_gate_sees_an_ignored_submodule_change(
+    tmp_path: Path, git_repo: tuple[Path, str, str]
+) -> None:
+    # A submodule "ignore=all" setting must not hide an out-of-scope gitlink update.
+    repo, _base, _head = git_repo
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-b", "main")
+    _git(sub, "config", "user.email", "test@example.test")
+    _git(sub, "config", "user.name", "Test User")
+    (sub / "f.txt").write_text("1\n", encoding="utf-8")
+    _git(sub, "add", "f.txt")
+    _git(sub, "commit", "-m", "one")
+    first = _git(sub, "rev-parse", "HEAD")
+    (sub / "f.txt").write_text("2\n", encoding="utf-8")
+    _git(sub, "commit", "-am", "two")
+    second = _git(sub, "rev-parse", "HEAD")
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{first},outside/sub")
+    (repo / ".gitmodules").write_text(
+        '[submodule "outside/sub"]\n\tpath = outside/sub\n\turl = ./sub\n\tignore = all\n',
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".gitmodules")
+    _git(repo, "commit", "-m", "add ignored submodule")
+    base = _git(repo, "rev-parse", "HEAD")
+    state_root = tmp_path / "state"
+    receipt = _admission(
+        state_root,
+        base=base,
+        operation_id="owner:issue2765:submodule",
+        allowed_paths=["allowed/**"],
+    )
+    _git(repo, "update-index", "--cacheinfo", f"160000,{second},outside/sub")
+    _git(repo, "commit", "-m", "bump ignored submodule")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    report = evaluate(
+        repository="James3014/Nexus-new",
+        base_sha=base,
+        head_sha=head,
+        pr_body=pr_binding_block(receipt),
+        repo_root=repo,
+        state_root=state_root,
+    )
+
+    assert report["status"] == "BLOCK"
+    assert report["scope_escape_paths"] == ["outside/sub"]
+
+
+@pytest.mark.parametrize(
+    "path, allowed",
+    [
+        ("allowed/x.py", True),
+        (" allowed/x.py", False),
+        ("allowed/x.py\n", False),
+        ("\tallowed/x.py", False),
+        ("allowed/x\x7f.py", False),
+        ("allowed/設定.md", True),
+    ],
+)
+def test_path_is_allowed_checks_the_exact_name(path: str, allowed: bool) -> None:
+    from nexus.orchestrator.mutation_admission import path_is_allowed
+
+    assert path_is_allowed(path, ["allowed/**"]) is allowed
