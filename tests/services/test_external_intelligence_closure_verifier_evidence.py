@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from nexus.services.external_intelligence_closure import (
+    TASK_CANDIDATE_SCHEMA,
     UNIT_VERIFICATION_SCHEMA,
     VERIFIER_DECLARED_TESTS_NOT_PASSED,
     VERIFIER_ENV_ALLOWLIST,
@@ -23,8 +24,12 @@ from nexus.services.external_intelligence_closure import (
     VERIFIER_JUNIT_MISSING,
     VERIFIER_JUNIT_SKIPPED,
     VERIFIER_ROOT_SHADOWING_REFUSED,
+    WHOLE_VERIFICATION_SCHEMA,
+    _base_pytest_config,
     _root_shadowing_paths,
     _run_verifier_specs,
+    _verifier_pytest_ini,
+    verify_whole_task_candidate,
 )
 
 # Set by pytest itself inside the verifier process, not inherited from the daemon.
@@ -245,7 +250,8 @@ def test_root_shadowing_paths_only_flag_root_level_files(tmp_path):
     )
     paths, error = _root_shadowing_paths(root, base, cand)
     assert error == ""
-    assert paths == ["Conftest.py", "pytest/__init__.py"]
+    # Config files only count at the root; conftest.py counts at any depth (#2794 r2).
+    assert paths == ["Conftest.py", "pytest/__init__.py", "tests/conftest.py"]
 
 
 def test_declared_node_ids_must_all_pass(tmp_path):
@@ -366,3 +372,148 @@ def test_verifier_env_contains_only_allow_listed_variables(tmp_path, monkeypatch
     assert pytest_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
     for row in verification["results"]:
         assert set(row["env_keys"]) <= VERIFIER_ENV_ALLOWLIST
+
+
+# --- Review round 2 (#2794) ------------------------------------------------------
+
+_MAKEREPORT_FAKE_PASS = (
+    "import pytest\n\n\n"
+    "@pytest.hookimpl(hookwrapper=True)\n"
+    "def pytest_runtest_makereport(item, call):\n"
+    "    outcome = yield\n"
+    "    report = outcome.get_result()\n"
+    "    report.outcome = 'passed'\n"
+    "    report.longrepr = None\n"
+)
+
+
+def test_nested_conftest_is_refused_unless_exactly_authorized(tmp_path):
+    root, base, cand = _repo(
+        tmp_path, {"tests/conftest.py": _MAKEREPORT_FAKE_PASS, "src_mod.py": "VALUE = 3\n"}
+    )
+    spec = _pytest_spec("tests/test_mod.py")
+    row = _row(_verify(root, base, cand, [spec], ["tests", "src_mod.py"]))
+    assert row["error"] == VERIFIER_ROOT_SHADOWING_REFUSED
+    assert row["root_shadowing_refused_paths"] == ["tests/conftest.py"]
+    assert row["passed"] is False
+
+    flagged = _row(_verify(root, base, cand, [spec], ["tests/conftest.py", "src_mod.py"]))
+    assert flagged["root_shadowing_authorized_paths"] == ["tests/conftest.py"]
+    assert flagged["root_shadowing_refused_paths"] == []
+    assert flagged["error"] != VERIFIER_ROOT_SHADOWING_REFUSED
+
+
+def test_pytest_asyncio_shadows_and_nested_conftest_are_flagged(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {
+            "pytest_asyncio.py": "",
+            "pytest_asyncio/plugin.py": "",
+            "pkg/deep/Conftest.py": "",
+            "pkg/pytest_asyncio.py": "",
+        },
+    )
+    paths, error = _root_shadowing_paths(root, base, cand)
+    assert error == ""
+    assert paths == ["pkg/deep/Conftest.py", "pytest_asyncio.py", "pytest_asyncio/plugin.py"]
+
+
+def test_importorskip_in_untouched_file_is_tolerated_and_recorded(tmp_path):
+    optional = (
+        "import pytest\n\npytest.importorskip('nonexistent_mod_2794r2')\n\n\n"
+        "def test_optional():\n    assert True\n"
+    )
+    root, base, cand = _repo(
+        tmp_path, {"src_mod.py": "VALUE = 2\n"}, base={"tests/test_optional.py": optional}
+    )
+    row = _row(_verify(root, base, cand, [_pytest_spec("tests")], ["src_mod.py"]))
+    assert row["passed"] is True, row
+    assert row["junit"]["skipped"] == 1
+    assert row["junit"]["skipped_untouched"] == ["tests.test_optional"]
+    assert row["junit"]["skipped_touched"] == []
+
+
+def test_skip_injected_from_authorized_source_into_touched_test_file_fails(tmp_path):
+    injected = "import pytest\n\npytest.skip('hidden', allow_module_level=True)\nVALUE = 3\n"
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": injected, "tests/test_mod.py": _TEST_NEEDS_TWO + "# touched\n"},
+        base={"tests/test_other.py": "def test_trivial():\n    assert True\n"},
+    )
+    row = _row(_verify(root, base, cand, [_pytest_spec("tests")], ["src_mod.py", "tests"]))
+    assert row["returncode"] == 0
+    assert row["error"] == VERIFIER_JUNIT_SKIPPED
+    assert row["junit"]["skipped_touched"] == ["tests.test_mod"]
+    assert row["passed"] is False
+
+
+def test_skip_injected_from_authorized_source_into_untouched_test_file_fails(tmp_path):
+    injected = "import pytest\n\npytest.skip('hidden', allow_module_level=True)\nVALUE = 3\n"
+    root, base, cand = _repo(
+        tmp_path,
+        {"src_mod.py": injected},
+        base={"tests/test_other.py": "def test_trivial():\n    assert True\n"},
+    )
+    row = _row(_verify(root, base, cand, [_pytest_spec("tests")], ["src_mod.py"]))
+    # The skip is raised from the touched src_mod.py, so it counts as touched.
+    assert row["returncode"] == 0
+    assert row["error"] == VERIFIER_JUNIT_SKIPPED
+    assert row["junit"]["skipped_touched"] == ["tests.test_mod"]
+    assert row["passed"] is False
+
+
+def test_declared_node_id_skipped_in_untouched_file_fails(tmp_path):
+    optional = (
+        "import pytest\n\n\ndef test_optional():\n"
+        "    pytest.importorskip('nonexistent_mod_2794r2')\n"
+    )
+    root, base, cand = _repo(
+        tmp_path, {"src_mod.py": "VALUE = 2\n"}, base={"tests/test_optional.py": optional}
+    )
+    spec = _pytest_spec("tests/test_optional.py::test_optional", "tests/test_mod.py")
+    row = _row(_verify(root, base, cand, [spec], ["src_mod.py"]))
+    assert row["returncode"] == 0
+    assert row["error"] == VERIFIER_DECLARED_TESTS_NOT_PASSED
+    assert row["passed"] is False
+
+
+def test_import_mode_given_as_two_tokens_is_kept(tmp_path):
+    _ini, extra = _verifier_pytest_ini(tmp_path, {"addopts": "-v --import-mode importlib --co"})
+    assert extra == ["--import-mode=importlib"]
+    _ini, extra = _verifier_pytest_ini(tmp_path, {"addopts": ["--import-mode", "append"]})
+    assert extra == ["--import-mode=append"]
+
+
+def test_refs_replace_cannot_hide_shadowing_or_swap_base_config(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"pytest.py": _FORGING_PYTEST},
+        base={"pytest.ini": "[pytest]\nasyncio_mode = auto\n"},
+    )
+    base_tree = _git(root, "rev-parse", f"{base}^{{tree}}")
+    fake_candidate = _git(root, "commit-tree", base_tree, "-p", base, "-m", "fake")
+    _git(root, "replace", cand, fake_candidate)
+    empty_tree = _git(root, "hash-object", "-t", "tree", "-w", "/dev/null")
+    fake_base = _git(root, "commit-tree", empty_tree, "-m", "fake base")
+    _git(root, "replace", base, fake_base)
+    paths, error = _root_shadowing_paths(root, base, cand)
+    assert (paths, error) == (["pytest.py"], "")
+    config, source = _base_pytest_config(root, base)
+    assert source == "pytest.ini"
+    assert config.get("asyncio_mode") == "auto"
+
+
+def test_whole_task_composed_path_fallback_is_not_explicit_authorization(tmp_path):
+    root, base, cand = _repo(tmp_path, {"pytest.py": _FORGING_PYTEST})
+    candidate = {
+        "schema": TASK_CANDIDATE_SCHEMA,
+        "task_id": "t-2794",
+        "workspace_path": str(root),
+        "candidate_commit": cand,
+        "base_sha": base,
+        "changed_paths": ["pytest.py"],
+        "deleted_paths": [],
+    }
+    result = verify_whole_task_candidate(candidate, [_pytest_spec("tests/test_mod.py")])
+    assert result["schema"] == WHOLE_VERIFICATION_SCHEMA
+    assert _row(result)["error"] == VERIFIER_ROOT_SHADOWING_REFUSED

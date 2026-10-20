@@ -206,6 +206,12 @@ def _raw_diff_patch(root: Path, base: str, head: str) -> str:
     return result.stdout
 
 
+def _git_no_replace_env() -> dict[str, str]:
+    """Environment for closure-owned git reads: ``refs/replace`` must not change what
+    closure sees as the base config or the base..candidate diff."""
+    return {**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"}
+
+
 def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | None, str, str]:
     argv = ["git", *args]
     try:
@@ -216,6 +222,7 @@ def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | No
             text=True,
             timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
             check=False,
+            env=_git_no_replace_env(),
         )
     except subprocess.TimeoutExpired as exc:
         return argv, None, str(exc.stdout or ""), str(exc.stderr or "")
@@ -903,10 +910,12 @@ VERIFIER_DECLARED_TESTS_NOT_PASSED = "VERIFIER_DECLARED_TESTS_NOT_PASSED"
 VERIFIER_PYTEST_INTERPRETER_UNRESOLVED = "VERIFIER_PYTEST_INTERPRETER_UNRESOLVED"
 VERIFIER_ROOT_SHADOWING_REFUSED = "VERIFIER_ROOT_SHADOWING_REFUSED"
 VERIFIER_ROOT_SHADOW_CHECK_ERROR = "VERIFIER_ROOT_SHADOW_CHECK_ERROR"
-# Root-level paths (compared case-insensitively) that can shadow ``python -m pytest``,
-# inject code at interpreter start-up, or carry pytest configuration.
+# Root-level paths (compared case-insensitively) that can shadow ``python -m pytest``
+# or a plugin closure loads explicitly, inject code at interpreter start-up, or carry
+# pytest configuration.
 VERIFIER_ROOT_SHADOW_NAMES = frozenset({
     "pytest.py",
+    "pytest_asyncio.py",
     "conftest.py",
     "sitecustomize.py",
     "usercustomize.py",
@@ -915,8 +924,12 @@ VERIFIER_ROOT_SHADOW_NAMES = frozenset({
     "pytest.ini",
     ".pytest.ini",
 })
-# Root-level package directories that shadow pytest exactly like ``pytest.py``.
-VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest"})
+# Root-level package directories that shadow pytest (or the explicitly loaded
+# ``pytest_asyncio`` plugin: the candidate root is on ``pythonpath``) like ``pytest.py``.
+VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio"})
+# Basenames refused at ANY depth: a nested ``conftest.py`` below ``--confcutdir`` is
+# loaded too and can rewrite outcomes (e.g. a ``pytest_runtest_makereport`` hookwrapper).
+VERIFIER_ANY_DEPTH_SHADOW_NAMES = frozenset({"conftest.py"})
 # The complete verifier environment.  Nothing else from the daemon environment is
 # forwarded (no tokens, keys, ``GH_*``, ``NEXUS_*``, ``PYTHONPATH``, ``GIT_*`` ...).
 # ``PATH`` is needed because task cards name ``python3``/``sh``/``git`` by name and the
@@ -1045,6 +1058,7 @@ def _git_show_bytes(root: Path, rev: str, path: str) -> bytes | None:
             capture_output=True,
             timeout=INTEGRITY_CHECK_TIMEOUT_SECONDS,
             check=False,
+            env=_git_no_replace_env(),
         )
     except subprocess.TimeoutExpired:
         return None
@@ -1130,9 +1144,12 @@ def _verifier_pytest_ini(root: Path, base_config: Mapping[str, Any]) -> tuple[st
             addopts = shlex.split(addopts)
         except ValueError:
             addopts = []
-    for token in addopts:
-        if str(token).startswith("--import-mode="):
-            extra.append(str(token))
+    tokens = [str(token) for token in addopts]
+    for index, token in enumerate(tokens):
+        if token.startswith("--import-mode="):
+            extra.append(token)
+        elif token == "--import-mode" and index + 1 < len(tokens):
+            extra.append(f"--import-mode={tokens[index + 1]}")
     # Plugin autoload is disabled; load pytest-asyncio explicitly when the base config
     # declares it (otherwise async tests fail, which is fail-closed).
     if any(str(key).startswith("asyncio_") for key in base_config):
@@ -1140,11 +1157,51 @@ def _verifier_pytest_ini(root: Path, base_config: Mapping[str, Any]) -> tuple[st
     return "\n".join(lines) + "\n", extra
 
 
+_SKIP_LOCATION_RES = (
+    re.compile(r"^\('(?P<path>[^']+)', [0-9]+,"),
+    re.compile(r"^(?P<path>[^\n:]+):[0-9]+: "),
+)
+
+
+def _dotted_module(path: str) -> str:
+    return re.sub(r"\.py$", "", PurePosixPath(path).as_posix().replace("/", "."))
+
+
 def _junit_evidence(
-    junit_path: Path, declared_node_ids: Sequence[str]
+    junit_path: Path,
+    declared_node_ids: Sequence[str],
+    *,
+    root: Path | None = None,
+    touched_paths: Sequence[str] = (),
 ) -> tuple[str, dict[str, Any]]:
-    """Positive evidence from a pytest JUnit file: (error code or "", summary)."""
+    """Positive evidence from a pytest JUnit file: (error code or "", summary).
+
+    Skip policy: a skipped (or xfailed) test fails the verifier when it belongs to a
+    test module the candidate diff touched, or when the skip was raised from a touched
+    file; skips in untouched modules (e.g. ``importorskip`` of an optional dependency)
+    are tolerated and listed in ``skipped_untouched``.  At least one test must pass and
+    every declared node id must pass.
+    """
     import xml.etree.ElementTree as ElementTree
+
+    touched_modules = {_dotted_module(p) for p in touched_paths if p.endswith(".py")}
+    touched_set = {PurePosixPath(p).as_posix() for p in touched_paths}
+
+    def skip_is_touched(owner: str, text: str) -> bool:
+        if any(owner == m or owner.startswith(m + ".") for m in touched_modules):
+            return True
+        for pattern in _SKIP_LOCATION_RES:
+            match = pattern.match(text.strip())
+            if not match:
+                continue
+            location = Path(match.group("path"))
+            if root is not None and location.is_absolute():
+                try:
+                    location = location.resolve().relative_to(root)
+                except (OSError, ValueError):
+                    return False
+            return location.as_posix() in touched_set
+        return False
 
     summary: dict[str, Any] = {
         "present": False,
@@ -1154,6 +1211,8 @@ def _junit_evidence(
         "skipped": 0,
         "declared_node_ids": list(declared_node_ids),
         "declared_node_ids_not_passed": [],
+        "skipped_touched": [],
+        "skipped_untouched": [],
     }
     try:
         if not junit_path.is_file() or junit_path.is_symlink():
@@ -1187,16 +1246,31 @@ def _junit_evidence(
             case_counts["failures"] += int("failure" in outcomes)
             case_counts["errors"] += int("error" in outcomes)
             case_counts["skipped"] += int("skipped" in outcomes)
-            if outcomes & {"failure", "error", "skipped"}:
-                continue
             classname = str(case.get("classname") or "")
             name = str(case.get("name") or "")
-            passed_names.append(f"{classname}.{name}" if classname else name)
+            full = f"{classname}.{name}" if classname else name
+            if "skipped" in outcomes and not outcomes & {"failure", "error"}:
+                skipped = case.find("skipped")
+                text = (skipped.text or "") if skipped is not None else ""
+                bucket = (
+                    "skipped_touched"
+                    if skip_is_touched(classname or name, text)
+                    else "skipped_untouched"
+                )
+                summary[bucket].append(full)
+            if outcomes & {"failure", "error", "skipped"}:
+                continue
+            passed_names.append(full)
     for key in attr_counts:
         summary[key] = max(attr_counts[key], case_counts[key])
     if summary["errors"] or summary["failures"]:
         return VERIFIER_JUNIT_FAILURES, summary
-    if summary["skipped"]:
+    # A skip count in the suite attributes without matching testcases cannot be
+    # attributed to a module, so it is treated as touched.
+    unattributed = summary["skipped"] - case_counts["skipped"]
+    summary["skipped_touched"] = summary["skipped_touched"][:_INTEGRITY_FINDINGS_LIMIT]
+    summary["skipped_untouched"] = summary["skipped_untouched"][:_INTEGRITY_FINDINGS_LIMIT]
+    if summary["skipped_touched"] or unattributed > 0:
         return VERIFIER_JUNIT_SKIPPED, summary
     if summary["tests"] < 1 or not passed_names:
         return VERIFIER_JUNIT_NO_TESTS, summary
@@ -1220,13 +1294,8 @@ def _junit_evidence(
     return "", summary
 
 
-def _root_shadowing_paths(
-    root: Path, base_sha: str, candidate_commit: str
-) -> tuple[list[str] | None, str]:
-    """Root-level shadowing paths changed in ``base_sha..candidate_commit``.
-
-    Returns ``(None, code)`` when git fails (fail closed).
-    """
+def _candidate_changed_paths(root: Path, base_sha: str, candidate_commit: str) -> list[str] | None:
+    """Paths changed in ``base_sha..candidate_commit`` (``None`` when git fails)."""
     _argv, rc, out, _err = _integrity_git(
         root,
         [
@@ -1241,18 +1310,39 @@ def _root_shadowing_paths(
         ],
     )
     if rc != 0:
-        return None, VERIFIER_ROOT_SHADOW_CHECK_ERROR
+        return None
+    return sorted(set(_nul_paths(out)))
+
+
+def _shadowing_paths(changed_paths: Sequence[str]) -> list[str]:
     found: list[str] = []
-    for path in _nul_paths(out):
+    for path in changed_paths:
         parts = PurePosixPath(path).parts
         if not parts:
             continue
         head = parts[0].casefold()
-        if (len(parts) == 1 and head in VERIFIER_ROOT_SHADOW_NAMES) or (
-            len(parts) > 1 and head in VERIFIER_ROOT_SHADOW_DIRS
+        name = PurePosixPath(path).name.casefold()
+        if (
+            (len(parts) == 1 and head in VERIFIER_ROOT_SHADOW_NAMES)
+            or (len(parts) > 1 and head in VERIFIER_ROOT_SHADOW_DIRS)
+            or name in VERIFIER_ANY_DEPTH_SHADOW_NAMES
         ):
             found.append(path)
-    return sorted(set(found)), ""
+    return sorted(set(found))
+
+
+def _root_shadowing_paths(
+    root: Path, base_sha: str, candidate_commit: str
+) -> tuple[list[str] | None, str]:
+    """Shadowing paths changed in ``base_sha..candidate_commit``: root-level
+    interpreter/pytest shadows and config files, and ``conftest.py`` at any depth.
+
+    Returns ``(None, code)`` when git fails (fail closed).
+    """
+    changed = _candidate_changed_paths(root, base_sha, candidate_commit)
+    if changed is None:
+        return None, VERIFIER_ROOT_SHADOW_CHECK_ERROR
+    return _shadowing_paths(changed), ""
 
 
 def _verifier_env(
@@ -1299,8 +1389,8 @@ def _run_verifier_specs(
         deletable_paths=deletable_paths,
     )
     results: list[dict[str, Any]] = []
-    # Root shadowing: a root-level pytest.py/conftest.py/sitecustomize.py/... or pytest
-    # config file changed by the candidate is refused unless it is explicitly (exactly)
+    # Shadowing: a root-level pytest.py/sitecustomize.py/... or pytest config file, or a
+    # conftest.py at any depth, changed by the candidate is refused unless it is explicitly (exactly)
     # authorized; an authorized one is still flagged on every row.
     explicit = {
         str(path).strip().rstrip("/")
@@ -1308,7 +1398,11 @@ def _run_verifier_specs(
             authorized_paths if shadow_authorized_paths is None else shadow_authorized_paths
         )
     }
-    shadow_paths, shadow_error = _root_shadowing_paths(root, base_sha, candidate_commit)
+    changed_paths = _candidate_changed_paths(root, base_sha, candidate_commit)
+    if changed_paths is None:
+        shadow_paths, shadow_error = None, VERIFIER_ROOT_SHADOW_CHECK_ERROR
+    else:
+        shadow_paths, shadow_error = _shadowing_paths(changed_paths), ""
     refused_shadow = sorted(p for p in shadow_paths or [] if p not in explicit)
     authorized_shadow = sorted(p for p in shadow_paths or [] if p in explicit)
     if not shadow_error and refused_shadow:
@@ -1389,7 +1483,10 @@ def _run_verifier_specs(
                     error = "VERIFIER_TIMEOUT"
                 if isinstance(invocation, _PytestInvocation):
                     junit_error, junit_summary = _junit_evidence(
-                        junit_path, invocation.declared_node_ids
+                        junit_path,
+                        invocation.declared_node_ids,
+                        root=root,
+                        touched_paths=changed_paths or (),
                     )
                     if not error and returncode == 0:
                         error = junit_error
