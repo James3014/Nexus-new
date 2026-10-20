@@ -2935,3 +2935,31 @@ def test_venv_asymmetry_between_bare_and_nexus_is_caught(tmp_path):
     assert runner.venv_asymmetry(run, entries) == {"BARE": "/m/venvs/a", "NEXUS": "/m/venvs/b"}
     write(None, "/m/venvs/t", claude=False)  # no Claude run on either side (fake provider): nothing to compare
     assert runner.venv_asymmetry(run, entries) is None
+
+
+def test_venv_missing_on_both_sides_stops_when_the_task_has_one(tmp_path):
+    """1d L2: no venv in BARE and NEXUS although the task has one -- stop, do not burn re-runs."""
+    from scripts.bench.measure_2721 import runner
+
+    run = tmp_path / "run"
+    run.mkdir()
+    rows = [{"run_id": "b", "arm": "BARE", "venv": None, "claude_version": "2"},
+            {"run_id": "n", "arm": "NEXUS", "venv": None, "claude_version": "2"}]
+    (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    entries = [{"arm": "BARE", "run_id": "b"}, {"arm": "NEXUS", "run_id": "n"}]
+    assert runner.venv_asymmetry(run, entries, "/m/venvs/t") == {"BARE": None, "NEXUS": None,
+                                                                 "task_venv": "/m/venvs/t"}
+    assert runner.venv_asymmetry(run, entries, None) is None
+
+
+def test_a_fatal_stop_is_never_resumed(manifest, tmp_path, monkeypatch, capsys):
+    """1d M1: a VENV_ASYMMETRY stop must not be washed out by a resume."""
+    from scripts.bench.measure_2721 import runner
+
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 0
+    (run / runner.FATAL_STOP_FILE).write_text(json.dumps({"reason": "VENV_ASYMMETRY"}))
+    capsys.readouterr()
+    assert _runner_main(manifest, tmp_path, run) == 2
+    assert "FATAL_STOP_NOT_RESUMABLE" in capsys.readouterr().out

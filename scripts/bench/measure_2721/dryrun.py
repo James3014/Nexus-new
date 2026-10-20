@@ -140,6 +140,25 @@ def file_scope_manifest(manifest: Path, out: Path) -> Path:
 
 
 def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str, Any]:
+    """READ_ROOTS reach the arms the formal way: only through a loaded Gateway env file,
+    never the runner's os.environ (1d L3: a process variable hid the BARE venv bug)."""
+    from scripts.bench.measure_2721 import gateway_env
+
+    saved_loaded = dict(gateway_env._LOADED)
+    saved_roots = os.environ.pop(gateway_env.READ_ROOTS_ENV, None)
+    try:
+        return _dry_run(manifest, out, file_scope=file_scope,
+                        read_roots=saved_loaded.get(gateway_env.READ_ROOTS_ENV) or saved_roots)
+    finally:
+        gateway_env._LOADED.clear()
+        gateway_env._LOADED.update(saved_loaded)
+        if saved_roots is not None:
+            os.environ[gateway_env.READ_ROOTS_ENV] = saved_roots
+
+
+def _dry_run(manifest: Path, out: Path, *, file_scope: bool, read_roots: str | None) -> dict[str, Any]:
+    from scripts.bench.measure_2721.gateway_env import READ_ROOTS_ENV, use_gateway_env
+
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     if file_scope:
@@ -150,7 +169,9 @@ def dry_run(manifest: Path, out: Path, *, file_scope: bool = False) -> dict[str,
     fake_key = "-".join(("sk", "ant", "dryrun", "NOT", "A", "REAL", "KEY", "0000000000"))
     token.write_text(f"ANTHROPIC_API_KEY={fake_key}\n", encoding="utf-8")
     os.chmod(token, 0o600)
-    os.environ.setdefault("NEXUS_MEASUREMENT_READ_ROOTS", str(out))
+    env_file = out / "gateway.env"
+    env_file.write_text(f"{READ_ROOTS_ENV}={read_roots or out}\n", encoding="utf-8")
+    use_gateway_env(env_file)
     trace_dir = out / "traces"
     provider = ClaudeProvider(str(fake), trace_dir, str(token), identity=claude_identity(str(fake), str(token)))
     per_task: dict[str, Any] = {}

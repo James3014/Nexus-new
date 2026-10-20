@@ -50,6 +50,9 @@ RESOLVED = frozenset({"COMPLETE", "EXCLUDED_AFTER_RERUNS"})
 PROGRESS_FILE = "progress.jsonl"
 BLOCKS_FILE = "blocks.jsonl"
 STOP_FILE = "stop.json"
+# Stops a resume must not wash out (1d M1): the marker stays when stop.json is rewritten.
+FATAL_STOP_FILE = "fatal_stop.json"
+FATAL_STOPS = frozenset({"VENV_ASYMMETRY"})
 LEDGER_BINDING_FILE = "ledger_binding.json"
 SINGLE_ARM_FLAG = "--single-arm-debug"
 SINGLE_ARM_REFUSED = "SINGLE_ARM_FORMAL_RUN_REFUSED"
@@ -254,15 +257,18 @@ def _append(path: Path, record: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
-def venv_asymmetry(run_root: Path, entries: Sequence[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+def venv_asymmetry(run_root: Path, entries: Sequence[Mapping[str, Any]],
+                   task_venv: Optional[str] = None) -> Optional[dict[str, Any]]:
     """{arm: venv} when the attempt's BARE and NEXUS Claude rows ran in different task
-    venvs (one of them None included), else None.  Only rows that ran the Claude
-    adapter (``claude_version``) are compared."""
+    venvs (one of them None included), or both in none although the task has one;
+    else None.  Only rows that ran the Claude adapter (``claude_version``) are compared."""
     by_run = {entry.get("run_id"): entry["arm"] for entry in entries if entry["arm"] in ("BARE", "NEXUS")}
     venvs = {by_run[row["run_id"]]: row.get("venv") for row in _records(Path(run_root) / "rows.jsonl")
              if row.get("run_id") in by_run and "claude_version" in row}
     if len(venvs) == 2 and venvs["BARE"] != venvs["NEXUS"]:
         return venvs
+    if venvs and task_venv and all(value is None for value in venvs.values()):
+        return {**venvs, "task_venv": task_venv}  # L2: no venv on either side, every re-run would burn
     return None
 
 
@@ -358,6 +364,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     previous = run_root / "schedule.json"
     resume = previous.is_file()
     binding_path = run_root / LEDGER_BINDING_FILE
+    if (run_root / FATAL_STOP_FILE).is_file():
+        # A fatal stop (VENV_ASYMMETRY) is never resumed: re-running the attempt would turn
+        # it into an infra re-run and, at worst, an excluded block -- and the run goes on.
+        fatal = json.loads((run_root / FATAL_STOP_FILE).read_text(encoding="utf-8"))
+        print(json.dumps({"stopped": "FATAL_STOP_NOT_RESUMABLE", "reason": fatal.get("reason")}))
+        return 2
     if resume:
         # The spend ledger is bound to the run: a resume with a new (or missing) ledger
         # would start the US$100 cap from 0 again.
@@ -407,6 +419,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                                 if k in ("cap_usd", "spent_usd", "worst_row_usd", "rows")},
                   **extra}
         write_json(run_root / STOP_FILE, record)
+        if reason in FATAL_STOPS:
+            write_json(run_root / FATAL_STOP_FILE, record)
         print(json.dumps({"stopped": reason, **{k: v for k, v in record.items() if k != "ledger"}}))
         return code
 
@@ -494,6 +508,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             # (a crash), an infra row or a watchdog event re-runs the WHOLE block, every
             # arm.  Arms never started (the runner stopped on purpose after a non-infra
             # row, e.g. a lost Gateway without a watchdog event) simply run now.
+            # A runner killed after the rows and before its venv check: check now (1d M1).
+            asymmetry = venv_asymmetry(run_root, [p for p in done_progress if int(p["block"]) == block["block"]
+                                                  and int(p["attempt"]) == attempt],
+                                       by_id[block["task_id"]].get("venv"))
+            if asymmetry:
+                return stop(2, "VENV_ASYMMETRY", block=block["block"], attempt=attempt, venvs=asymmetry)
             infra_now = [arm for arm in evaluate(block, attempt)[0] if arm in begun]
             if infra_now:
                 if record_attempt(block, attempt) != "RERUN":
@@ -548,7 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return stop(75, "INSTANCE_BUSY", detail=row.get("void_reason"), block=block["block"])
                 rows.append({"slot": slot, "arm": arm, "run_id": row.get("run_id"), "attempt": attempt})
             asymmetry = venv_asymmetry(run_root, [p for p in done_progress if int(p["block"]) == block["block"]
-                                                  and int(p["attempt"]) == attempt])
+                                                  and int(p["attempt"]) == attempt], task.get("venv"))
             if asymmetry:
                 # v0.9.8 (layer1-rie): BARE and NEXUS must run in the same task venv; refuse
                 # to go on (not resumable) rather than measure two environments.
