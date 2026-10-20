@@ -120,6 +120,9 @@ CARD = (
     "attempt_id: attempt-1\n"
     "Tracks James3014/Nexus-new#42.\n"
 )
+# #2766: a GOVERNED card must declare its scope; added when the card is written so the
+# parametrized ids built from CARD stay the same as before.
+CARD_SCOPE = "\n## Allowed files\n\n- `docs/a.md`\n"
 
 
 @pytest.fixture
@@ -133,12 +136,17 @@ def card_root(monkeypatch, tmp_path: Path) -> Path:
 
 def _write_card(root: Path, text: str | bytes = CARD, name: str = "card.md") -> tuple[str, str]:
     path = root / "tasks" / name
-    path.write_bytes(text.encode("utf-8") if isinstance(text, str) else text)
+    path.write_bytes((text + CARD_SCOPE).encode("utf-8") if isinstance(text, str) else text)
     return f"tasks/{name}", hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _authority(**overrides: Any) -> dict[str, str]:
-    values: dict[str, Any] = {"issue_number": 42, "task_id": "task-1", "attempt_id": "attempt-1"}
+    values: dict[str, Any] = {
+        "issue_number": 42,
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "allowed_paths": ["docs/a.md"],
+    }
     values.update(overrides)
     return UnifiedMCPGateway._mutation_task_card_authority(**values)
 

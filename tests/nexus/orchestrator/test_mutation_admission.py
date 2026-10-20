@@ -174,6 +174,7 @@ def _task_card(
         "attempt_id: attempt-1429-test\n"
         "execution_lane: `GOVERNED`\n"
         "- GitHub Issue: `James3014/Nexus-new#1429`\n"
+        "\n## Allowed files\n\n- `nexus/orchestrator/**`\n"
     )
     card.write_text(source, encoding="utf-8")
     return relative, hashlib.sha256(source.encode("utf-8")).hexdigest()

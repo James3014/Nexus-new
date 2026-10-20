@@ -969,7 +969,7 @@
    },
    "_mutation_task_card_authority": {
     "kind": "staticmethod",
-    "signature": "(KEYWORD_ONLY:issue_number: int, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:task_card_path: str, KEYWORD_ONLY:task_card_hash: str) -> dict[str, str]"
+    "signature": "(KEYWORD_ONLY:issue_number: int, KEYWORD_ONLY:task_id: str, KEYWORD_ONLY:attempt_id: str, KEYWORD_ONLY:task_card_path: str, KEYWORD_ONLY:task_card_hash: str, KEYWORD_ONLY:allowed_paths: list[str] | tuple[str, ...]) -> dict[str, str]"
    },
    "_negotiate_initialize": {
     "kind": "function",
