@@ -950,7 +950,10 @@ def analyze(arch: Path, arm_map_path: Path, *, treatment: str, control: str, noo
                       "flagged_but_stripped_remainder_resolved": sum(r["diagnostic_stripped_resolved"] for r in kept),
                       "dropped": sum(not r["counted"] for r in rs)}
     void = []
-    if amap.get("noop_nonempty_diff"):
+    if "noop_nonempty_diff" not in amap:
+        # Fail closed: an arm map from a blind.py without the check must not skip it.
+        raise Refused("NOOP_CHECK_MISSING: the arm map has no noop_nonempty_diff (re-run blind.py)")
+    if amap["noop_nonempty_diff"]:
         # PREREG v0.9.7: a non-empty diff in any NOOP / NEXUS_NOOP row (any attempt, any
         # block) voids the run without scoring.
         void.append({"reason": "NOOP_NONEMPTY_DIFF: the run is void; stop and investigate",
