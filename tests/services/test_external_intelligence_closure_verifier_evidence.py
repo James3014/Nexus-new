@@ -15,17 +15,20 @@ import sys
 from pathlib import Path
 
 from nexus.services.external_intelligence_closure import (
+    _JUNIT_MAX_BYTES,
     TASK_CANDIDATE_SCHEMA,
     UNIT_VERIFICATION_SCHEMA,
     VERIFIER_DECLARED_TESTS_NOT_PASSED,
     VERIFIER_ENV_ALLOWLIST,
     VERIFIER_EVIDENCE_EXIT_CODE_ONLY,
     VERIFIER_EVIDENCE_PYTEST_JUNIT,
+    VERIFIER_JUNIT_INVALID,
     VERIFIER_JUNIT_MISSING,
     VERIFIER_JUNIT_SKIPPED,
     VERIFIER_ROOT_SHADOWING_REFUSED,
     WHOLE_VERIFICATION_SCHEMA,
     _base_pytest_config,
+    _junit_evidence,
     _root_shadowing_paths,
     _run_verifier_specs,
     _verifier_pytest_ini,
@@ -517,3 +520,39 @@ def test_whole_task_composed_path_fallback_is_not_explicit_authorization(tmp_pat
     result = verify_whole_task_candidate(candidate, [_pytest_spec("tests/test_mod.py")])
     assert result["schema"] == WHOLE_VERIFICATION_SCHEMA
     assert _row(result)["error"] == VERIFIER_ROOT_SHADOWING_REFUSED
+
+
+# --- Untrusted JUnit parsing (#2794 bandit B314) ---------------------------------
+
+_JUNIT_OK = (
+    b'<testsuites><testsuite name="pytest" tests="1" failures="0" errors="0" skipped="0">'
+    b'<testcase classname="tests.test_mod" name="test_value"/></testsuite></testsuites>'
+)
+
+
+def test_junit_with_dtd_or_entity_is_invalid(tmp_path):
+    junit = tmp_path / "junit.xml"
+    junit.write_bytes(_JUNIT_OK)
+    assert _junit_evidence(junit, ())[0] == ""
+    for prefix in (
+        b'<?xml version="1.0"?><!DOCTYPE t [<!ENTITY a "aaaa">]>',
+        b"<!doctype testsuites>",
+        b'<!ENTITY a "x">',
+    ):
+        junit.write_bytes(prefix + _JUNIT_OK)
+        assert _junit_evidence(junit, ())[0] == VERIFIER_JUNIT_INVALID, prefix
+
+
+def test_junit_utf16_is_invalid(tmp_path):
+    junit = tmp_path / "junit.xml"
+    junit.write_bytes(
+        ('<?xml version="1.0" encoding="utf-16"?>' + _JUNIT_OK.decode()).encode("utf-16")
+    )
+    assert _junit_evidence(junit, ())[0] == VERIFIER_JUNIT_INVALID
+
+
+def test_oversized_junit_is_invalid(tmp_path):
+    junit = tmp_path / "junit.xml"
+    padding = b"<!-- " + b"x" * (_JUNIT_MAX_BYTES + 1) + b" -->"
+    junit.write_bytes(_JUNIT_OK.replace(b"<testsuites>", b"<testsuites>" + padding))
+    assert _junit_evidence(junit, ())[0] == VERIFIER_JUNIT_INVALID

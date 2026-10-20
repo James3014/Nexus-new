@@ -986,7 +986,7 @@ _PYTEST_VALUE_OPTIONS = frozenset({
 })
 _PYTHON_VALUE_OPTIONS = frozenset({"-X", "-W", "-Q"})
 _PYTHON_NAME_RE = re.compile(r"^python(?:[0-9]+(?:\.[0-9]+)*)?$")
-_JUNIT_MAX_BYTES = 32 * 1024 * 1024
+_JUNIT_MAX_BYTES = 10 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -1219,13 +1219,25 @@ def _junit_evidence(
             return VERIFIER_JUNIT_MISSING, summary
         if junit_path.stat().st_size > _JUNIT_MAX_BYTES:
             return VERIFIER_JUNIT_INVALID, summary
-        raw = junit_path.read_bytes()
+        with junit_path.open("rb") as stream:
+            raw = stream.read(_JUNIT_MAX_BYTES + 1)
     except OSError:
         return VERIFIER_JUNIT_MISSING, summary
     summary["present"] = True
     summary["junit_sha256"] = _sha256(raw)
+    # The JUnit file is untrusted (candidate code can write it): refuse oversized
+    # files, NUL bytes (UTF-16/32 would hide the markers below) and any DTD/entity
+    # declaration, the XML feature that makes the stdlib parser unsafe, before parsing.
+    upper = raw.upper()
+    if (
+        len(raw) > _JUNIT_MAX_BYTES
+        or b"\x00" in raw
+        or b"<!DOCTYPE" in upper
+        or b"<!ENTITY" in upper
+    ):
+        return VERIFIER_JUNIT_INVALID, summary
     try:
-        tree = ElementTree.fromstring(raw)
+        tree = ElementTree.fromstring(raw)  # noqa: S314  # nosec B314 - DTD/entities rejected above
     except ElementTree.ParseError:
         return VERIFIER_JUNIT_INVALID, summary
     suites = list(tree.iter("testsuite"))
