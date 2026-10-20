@@ -93,12 +93,24 @@ def evaluate(
     current_head = _git(repo_root, "rev-parse", "HEAD").strip()
     if current_head != head_sha:
         blockers.append("PR_HEAD_SHA_MISMATCH")
+    # --no-renames: a rename lists both its source and its destination, so a file
+    # renamed from outside the scope into it is still checked (#2765); -z: names are
+    # NUL-separated and never C-quoted; --no-relative / --ignore-submodules=none:
+    # diff.relative or a submodule "ignore" setting cannot hide a changed path.
     changed = [
-        line.strip()
-        for line in _git(
-            repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}", "--"
-        ).splitlines()
-        if line.strip()
+        name
+        for name in _git(
+            repo_root,
+            "diff",
+            "--name-only",
+            "--no-renames",
+            "--no-relative",
+            "--ignore-submodules=none",
+            "-z",
+            f"{base_sha}...{head_sha}",
+            "--",
+        ).split("\0")
+        if name
     ]
     if not changed:
         blockers.append("EMPTY_CHANGESET")
