@@ -11,6 +11,10 @@
   conservative per-attempt ceiling (the reservation, at least ``max_row_usd``);
   the usage-priced estimate replaces it when larger.  Such rows are marked
   ``estimated`` and still raise ``worst_row_usd``.
+* Blocks (runner.py, PREREG v0.9): ``begin_block(n)`` admits a whole block
+  only if the remaining budget covers ``n`` reservations; the rows of an
+  admitted block then run even if the cap is crossed mid-block
+  (``admitted()``), so the overshoot is bounded by one block.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-DEFAULT_CAP_USD = 60.0
+DEFAULT_CAP_USD = 100.0  # PREREG v0.9: actual API spend cap US$100
 DEFAULT_MAX_ROW_USD = 3.0
 
 
@@ -67,14 +71,15 @@ class SpendLedger:
     def state(self) -> dict[str, Any]:
         return self._locked()
 
-    def begin_row(self) -> str:
-        """Admit one row and reserve its expected cost, atomically; raise when over the cap."""
+    def begin_row(self, *, admitted: bool = False) -> str:
+        """Admit one row and reserve its expected cost, atomically; raise when over the cap
+        (not for a row of an already admitted block)."""
         token = uuid.uuid4().hex
 
         def update(data: dict[str, Any]) -> None:
             reserve = max(float(data["worst_row_usd"]), self.min_reserve)
             pending = sum(float(v) for v in data["reservations"].values())
-            if float(data["spent_usd"]) + pending + reserve > float(data["cap_usd"]):
+            if not admitted and float(data["spent_usd"]) + pending + reserve > float(data["cap_usd"]):
                 raise BudgetExhausted(
                     f"BUDGET_STOP: spent {data['spent_usd']:.4f} + reserved {pending:.4f} "
                     f"+ next {reserve:.4f} > cap {data['cap_usd']}"
@@ -83,6 +88,25 @@ class SpendLedger:
 
         self._locked(update)
         return token
+
+    def begin_block(self, rows: int) -> dict[str, Any]:
+        """Admit a block of ``rows`` rows: remaining budget >= rows x the per-row reservation.
+
+        Nothing is reserved (the block's rows run one at a time); raises
+        ``BudgetExhausted`` when the block does not fit.
+        """
+        data = self.state()
+        reserve = max(float(data["worst_row_usd"]), self.min_reserve)
+        pending = sum(float(v) for v in data["reservations"].values())
+        need = reserve * int(rows)
+        remaining = float(data["cap_usd"]) - float(data["spent_usd"]) - pending
+        if need > remaining + 1e-9:
+            raise BudgetExhausted(f"BUDGET_STOP: remaining {remaining:.4f} < block reservation {need:.4f} "
+                                  f"({rows} x {reserve:.4f}), cap {data['cap_usd']}")
+        return {"remaining_usd": round(remaining, 6), "block_reservation_usd": round(need, 6)}
+
+    def admitted(self) -> "_AdmittedLedger":
+        return _AdmittedLedger(self)
 
     def finish_row(self, token: str, cost_usd: Any, *, unknown_attempts: int = 0,
                    estimate_usd: float = 0.0) -> dict[str, Any]:
@@ -108,3 +132,16 @@ class SpendLedger:
             return {"charged_usd": cost, "estimated": not known}
 
         return self._locked(update)["_result"]
+
+
+class _AdmittedLedger:
+    """The ledger as seen by the rows of an admitted block: no cap check per row."""
+
+    def __init__(self, ledger: SpendLedger):
+        self._ledger = ledger
+
+    def begin_row(self) -> str:
+        return self._ledger.begin_row(admitted=True)
+
+    def finish_row(self, token: str, cost_usd: Any, **kw: Any) -> dict[str, Any]:
+        return self._ledger.finish_row(token, cost_usd, **kw)

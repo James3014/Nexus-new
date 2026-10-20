@@ -21,19 +21,24 @@ by the scoring owner on #2721, 2026-10-20):
   boolean, unchanged.
 * NEXUS rows with ``worker_accepted: false`` (card create/commit, model probe,
   the Gateway refusing the worker request, a duplicate task): the model never
-  ran for this row -> infra (``rule: NEXUS_NOT_ACCEPTED``), re-run in all arms,
-  then dropped, and reported per arm as Nexus reliability
-  (``nexus_reliability: true`` in ``excluded``).
+  ran for this row -> infra, re-run in all arms, then dropped.  A Gateway/Nexus
+  refusal (``rule: NEXUS_NOT_ACCEPTED``) is reported per arm as Nexus
+  reliability (``nexus_reliability: true``); a failure of the harness's own
+  pre-checks is ``rule: HARNESS_NOT_SUBMITTED`` (``harness_failure: true``).
 * NEXUS rows with ``worker_accepted: true``: infra ONLY for the model-side
   causes that make a BARE row infra too (``symmetric_infra_reasons``): the
   Claude attempt ended as infra (``claude_infra:*``, e.g. a 429 with a
   partial diff, provider unavailable), a provider infra marker in the worker
   error, a watchdog (host) event, a CLI time-limit mismatch or an unusable
-  task venv (``rule: SYMMETRIC_INFRA``).  Any other failure after acceptance
-  is Gateway/Nexus-side -- GATEWAY_ERROR, STATE_LEAK, a void such as
-  SNAPSHOT_MISSING, TRACE_MISSING or LB_STATE_CHANGED, a task that never
-  terminated -- and is NOT infra: the row stays a candidate with
+  task venv, plus a stuck Gateway (PREREG §3.3) (``rule: SYMMETRIC_INFRA``).
+  Any other failure after acceptance is Gateway/Nexus-side -- GATEWAY_ERROR,
+  STATE_LEAK, a void such as SNAPSHOT_MISSING, TRACE_MISSING or
+  LB_STATE_CHANGED -- and is NOT infra: the row stays a candidate with
   ``RUN_INVALID_NOT_SOLVED``.
+* Rows of a runner run root that are not the final attempt of a resolved
+  block (``runner.block_outcomes``: superseded by an infra re-run, or part of
+  a block that never finished) are dropped before blinding (``dropped`` in the
+  arm map), so only complete blocks reach the scorer.
 """
 
 from __future__ import annotations
@@ -81,6 +86,11 @@ def run_invalid_reason(row: Mapping[str, Any]) -> str | None:
     return None
 
 
+# A NEXUS row not accepted counts as Nexus reliability only when the Gateway/Nexus
+# refused (an error answer to card create/commit, probe or the worker request, or a
+# duplicate task); a failure of the harness's own pre-checks (venv, Controller reset,
+# state restore, a busy instance) is HARNESS_NOT_SUBMITTED.
+NEXUS_REFUSAL_PREFIXES = ("PRE_SUBMIT_FAILURE:", "WORKER_NOT_ACCEPTED:", "DUPLICATE_TASK")
 # Model-side infra causes a BARE row also has (arms.run_bare), checked on NEXUS rows.
 SYMMETRIC_INFRA_FLAGS = ("CLI_TIMEOUT_MISMATCH", "VENV_NOT_USABLE")
 
@@ -94,6 +104,10 @@ def symmetric_infra_reasons(row: Mapping[str, Any]) -> list[str]:
         reasons.append("PROVIDER_INFRA_MARKER")
     if row.get("watchdog_event") is not None:
         reasons.append("WATCHDOG_EVENT")
+    if row.get("gateway_stuck"):
+        # PREREG §3.3: a stuck Gateway is INFRA (both arms re-run), whether or not
+        # the watchdog fired first.
+        reasons.append("GATEWAY_STUCK")
     reasons.extend(flag for flag in SYMMETRIC_INFRA_FLAGS if flag in (row.get("flags") or []))
     return reasons
 
@@ -104,7 +118,9 @@ def exclusion_reason(row: Mapping[str, Any]) -> tuple[str, str] | None:
     if "worker_accepted" not in row:  # BARE / NOOP: unchanged
         return ("ROW_INFRA", reason) if row.get("infra") else None
     if not row["worker_accepted"]:
-        return "NEXUS_NOT_ACCEPTED", reason
+        nexus_side = str(row.get("void_reason") or "").startswith(NEXUS_REFUSAL_PREFIXES) or \
+            row.get("outcome") == "BLOCKED_EXTERNAL_TARGET_UNSUPPORTED"
+        return ("NEXUS_NOT_ACCEPTED" if nexus_side else "HARNESS_NOT_SUBMITTED"), reason
     symmetric = symmetric_infra_reasons(row)
     return ("SYMMETRIC_INFRA", ",".join(symmetric)) if symmetric else None
 
@@ -128,7 +144,7 @@ def applies_to_base(diff: str, task: Mapping[str, Any]) -> bool:
 
 
 def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
-          tasks: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+          tasks: Mapping[str, Mapping[str, Any]], dropped: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     mapping: dict[str, Any] = {}
     excluded: list[dict[str, Any]] = []
@@ -149,6 +165,8 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
                      "infra": True, "reason": row.get("void_reason") or row.get("outcome")}
             if rule != "ROW_INFRA":
                 entry.update(rule=rule, nexus_reliability=rule == "NEXUS_NOT_ACCEPTED")
+                if rule == "HARNESS_NOT_SUBMITTED":
+                    entry["harness_failure"] = True
                 if rule == "SYMMETRIC_INFRA":
                     entry["symmetric_infra_reasons"] = reason.split(",")
             excluded.append(entry)
@@ -198,7 +216,7 @@ def blind(rows: Iterable[dict[str, Any]], out: Path, arm_map_path: Path,
     write_jsonl(out / "candidates.jsonl", candidates)
     candidates_sha = hashlib.sha256((out / "candidates.jsonl").read_bytes()).hexdigest()
     write_json(arm_map_path, {"schema": BLIND_SCHEMA, "candidates_jsonl_sha256": candidates_sha,
-                              "map": mapping, "excluded": excluded}, mode=0o600)
+                              "map": mapping, "excluded": excluded, "dropped": list(dropped)}, mode=0o600)
     return {"candidates": len(candidates), "excluded": len(excluded), "candidates_jsonl_sha256": candidates_sha}
 
 
@@ -212,9 +230,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     out, arm_map = Path(args.out).resolve(), Path(args.arm_map).resolve()
     if out in arm_map.parents or arm_map == out:
         parser.error("--arm-map must live outside --out (the scorer must not see it)")
-    rows = [row for root in args.run_roots for row in read_jsonl(Path(root) / "rows.jsonl")]
+    from scripts.bench.measure_2721.runner import block_outcomes
+
+    rows, dropped = [], []
+    for root in args.run_roots:
+        outcome = block_outcomes(Path(root))
+        for row in read_jsonl(Path(root) / "rows.jsonl"):
+            if outcome is not None and row.get("run_id") not in outcome["counted"]:
+                # Only the final attempt of a resolved block counts (runner.py).
+                dropped.append({key: row.get(key) for key in ("arm", "run_id", "task_id", "repeat", "infra")} |
+                               {"reason": outcome["dropped"].get(row.get("run_id"), "NOT_IN_RUNNER_PROGRESS")})
+                continue
+            rows.append(row)
     tasks = {task["task_id"]: task for task in read_jsonl(args.manifest)}
-    print(json.dumps(blind(rows, out, arm_map, tasks)))
+    print(json.dumps(blind(rows, out, arm_map, tasks, dropped)))
     return 0
 
 

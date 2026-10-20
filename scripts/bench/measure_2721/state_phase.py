@@ -10,7 +10,7 @@
   the driver's ``--state-dir``), each from its own phase-start snapshot,
   unless the self-hosted dir lies inside the state root (one restore then
   covers both).
-* ``assisted_provider_jobs/probe_evidence/`` is never restored or hashed: it
+* ``assisted_provider_jobs/`` is never restored or hashed (PREREG §5): it
   is the Gateway's model-probe cache, not learning state.
 * L-A's "restored once" is persisted in the run root
   (``state_phase_<phase>.restored.json`` with the snapshot hashes), so a
@@ -35,7 +35,9 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 # Relative paths kept as they are by a restore and left out of every hash.
-PRESERVED_STATE_PATHS = ("assisted_provider_jobs/probe_evidence",)
+# PREREG §5: the whole probe cache (``assisted_provider_jobs/``: probe jobs, their
+# stdout/stderr and ``probe_evidence/``) is never restored, or every row re-probes.
+PRESERVED_STATE_PATHS = ("assisted_provider_jobs",)
 PHASE_MARKER_SCHEMA = "nexus.measure_2721.state_phase_marker.v1"
 PER_ROW_PHASES = frozenset({"M", "LB", "L-B", "COLD", "IRRELEVANT"})
 PER_PHASE_PHASES = frozenset({"LA", "L-A"})

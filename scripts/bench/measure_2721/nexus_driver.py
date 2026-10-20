@@ -277,6 +277,8 @@ def new_leaks(before: Mapping[str, list[str]], after: Mapping[str, list[str]], o
 
 
 class NexusArmDriver:
+    QUIESCENCE_POLLS = 6
+    QUIESCENCE_SLEEP_S = 10.0
     def __init__(
         self,
         client: GatewayClient,
@@ -407,6 +409,21 @@ class NexusArmDriver:
                 "SELF_HOSTED_STATE_NOT_RESTORED: --state-dir lies outside --state-root; "
                 "give --state-dir-snapshot"
             )
+        if learning_phase is not None or gateway_state_paths:
+            # Fail closed (review blocking 3): a learning phase (M, L-A, L-B, ...) restores
+            # every state tree the Gateway uses, each from its own snapshot.
+            phase = str(learning_phase or "").upper()
+            if phase not in state_phase.PER_ROW_PHASES | state_phase.PER_PHASE_PHASES:
+                raise ValueError(f"LEARNING_PHASE_REQUIRED: {learning_phase!r}")
+            if state_root is None or state_snapshot is None:
+                raise ValueError("STATE_ROOT_SNAPSHOT_REQUIRED: give --state-root and --state-snapshot")
+            if state_dir is None:
+                raise ValueError("SELF_HOSTED_STATE_DIR_REQUIRED: give --state-dir")
+            if not inside_root and state_dir_snapshot is None:
+                raise ValueError(
+                    "SELF_HOSTED_STATE_NOT_RESTORED: --state-dir lies outside --state-root; "
+                    "give --state-dir-snapshot"
+                )
         self._restore_targets: list[tuple[str, Path, Path]] = []
         if state_root is not None and state_snapshot is not None:
             self._restore_targets.append(("state_root", Path(state_root), Path(state_snapshot)))
@@ -544,13 +561,20 @@ class NexusArmDriver:
         diff = ""
         controller: Optional[Path] = None
         row["learning_phase"] = self.learning_phase
-        watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=self.arm_label,
-                           cap_s=timeout_seconds)
+        row["started_at"] = watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"],
+                                               arm=self.arm_label, cap_s=timeout_seconds)
         leak_repo = self.controller_repo or self.controller_git
         # M2 (84ae047ba review): the instance must be quiet BEFORE anything is
         # reset -- on a resume a previous Gateway task may still be in flight in
         # the Controller, and ``clean -fdx`` would wipe it.  Checked on every row.
         busy = state_phase.quiescence_problem(self.state_dir)
+        for _ in range(self.QUIESCENCE_POLLS if busy else 0):
+            # Wait a bounded time for the previous task to end; a row that is still
+            # busy is INFRA and the runner stops with exit 75 (review item 6).
+            self.sleep(self.QUIESCENCE_SLEEP_S)
+            busy = state_phase.quiescence_problem(self.state_dir)
+            if not busy:
+                break
         # The reset reports (and this row flags) whatever the previous row left (M1).
         reset = None if busy else self.reset_controller()
         leak_before = leak_surfaces(leak_repo) if leak_repo is not None else None
@@ -1032,6 +1056,14 @@ class DriverStartRefused(RuntimeError):
     pass
 
 
+BUSY_PREFIXES = ("INSTANCE_BUSY:", "STATE_RESTORE_BUSY:")
+
+
+def instance_busy(row: Mapping[str, Any]) -> bool:
+    """The row found the instance still busy after the bounded wait: stop the run (exit 75)."""
+    return str(row.get("void_reason") or "").startswith(BUSY_PREFIXES)
+
+
 def add_gateway_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gateway-url", required=True, help="e.g. http://127.0.0.1:18766 (never :8766)")
     parser.add_argument("--token-file", required=True, help="0600 file with the measurement-only token")
@@ -1159,6 +1191,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for repeat in args.repeats:
                 rows.append(driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout,
                                        ledger=ledger))
+                if instance_busy(rows[-1]):
+                    print(json.dumps({"stopped": "INSTANCE_BUSY", "detail": rows[-1]["void_reason"],
+                                      "rows": len(rows)}))
+                    return 75
     except BudgetExhausted as exc:
         print(json.dumps({"stopped": str(exc), "rows": len(rows)}))
         return 75

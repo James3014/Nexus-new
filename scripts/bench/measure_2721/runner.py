@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import random
+import shlex
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -40,6 +41,15 @@ DEFAULT_SEED = 20261020
 SCHEDULE_SCHEMA = "nexus.measure_2721.schedule.v1"
 SCHEDULE_SCHEME = "block_randomized_v1"
 ARMS = ("BARE", "NEXUS", "NOOP")
+ALL_ARMS = ("BARE", "NEXUS", "NOOP", "NEXUS_NOOP")
+# Arms whose rows are charged to the ledger (block admission, PREREG v0.9).
+CHARGED_ARMS = frozenset({"BARE", "NEXUS", "NEXUS_NOOP"})
+# A block with an infra row in any arm is re-run whole up to this many times, then excluded.
+MAX_INFRA_RERUNS = 2
+RESOLVED = frozenset({"COMPLETE", "EXCLUDED_AFTER_RERUNS"})
+PROGRESS_FILE = "progress.jsonl"
+BLOCKS_FILE = "blocks.jsonl"
+STOP_FILE = "stop.json"
 SINGLE_ARM_FLAG = "--single-arm-debug"
 SINGLE_ARM_REFUSED = "SINGLE_ARM_FORMAL_RUN_REFUSED"
 
@@ -84,7 +94,8 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--key-file", default=os.path.expanduser("~/.config/nexus-measure-2721/anthropic.env"),
                         help="0600 KEY=value file with ANTHROPIC_API_KEY (read only by the adapter)")
-    parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--budget-usd", "--cap-usd", dest="budget_usd", type=float, default=100.0,
+                        help="hard stop for the whole measurement (PREREG v0.9: US$100 actual API spend)")
     parser.add_argument("--max-row-usd", type=float, default=3.0,
                         help="conservative charge per attempt whose cost was never reported (stored in the ledger)")
     parser.add_argument("--spend-ledger", required=True,
@@ -106,10 +117,20 @@ def prepare(args: argparse.Namespace, *, need_read_roots: bool) -> list[dict[str
     from scripts.bench.measure_2721.arms import load_manifest
     from scripts.bench.measure_2721.gateway_env import (
         GatewayEnvError,
+        gate6_switches,
         require_read_roots,
         use_gateway_env,
     )
 
+    gate6_warnings: list[str] = []
+    gate6 = gate6_switches(args.gateway_env, warnings=gate6_warnings)
+    for name in gate6_warnings:
+        print(f"WARNING: GATE 6: {name} is enabled on the measurement Gateway (pending decision)", file=sys.stderr)
+    if gate6:
+        # GATE 6: no external/local model, judge or committee on the measurement Gateway.
+        payload = {"stopped": "GATE6_EXTRA_MODEL_SWITCH", "switches": gate6, "gateway_env": str(args.gateway_env)}
+        write_json(Path(args.run_root) / "gate6_refused.json", payload)
+        raise PrepareStop(2, payload)
     try:
         use_gateway_env(args.gateway_env)
     except GatewayEnvError as exc:
@@ -182,70 +203,205 @@ def write_schedule(run_root: Path, schedule: Sequence[Mapping[str, Any]], seed: 
     return record
 
 
+def _blocks(schedule: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The schedule as blocks: index, task, repeat and the arm order inside the block."""
+    blocks: dict[int, dict[str, Any]] = {}
+    for entry in schedule:
+        block = blocks.setdefault(int(entry["block"]), {"block": int(entry["block"]), "task_id": entry["task_id"],
+                                                         "repeat": entry["repeat"], "arms": [], "slots": []})
+        block["arms"].append(entry["arm"])
+        block["slots"].append(entry["slot"])
+    return [blocks[key] for key in sorted(blocks)]
+
+
+def _records(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _append(path: Path, record: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(record), sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def block_outcomes(run_root: Path) -> Optional[dict[str, Any]]:
+    """Which rows of a runner run root count (None: not a runner run root).
+
+    Only the final attempt of a resolved block counts (``COMPLETE`` or
+    ``EXCLUDED_AFTER_RERUNS``); rows of earlier attempts are ``RERUN_SUPERSEDED``,
+    rows of a block that never finished are ``INCOMPLETE_BLOCK`` (blind.py
+    drops both, so only complete blocks reach the scorer).
+    """
+    run_root = Path(run_root)
+    progress = _records(run_root / PROGRESS_FILE)
+    if not progress and not (run_root / BLOCKS_FILE).is_file():
+        return None
+    final: dict[int, dict[str, Any]] = {}
+    for record in _records(run_root / BLOCKS_FILE):
+        final[int(record["block"])] = record
+    counted: set[str] = set()
+    dropped: dict[str, str] = {}
+    for entry in progress:
+        block = final.get(int(entry["block"]))
+        if block is not None and block["status"] in RESOLVED and int(entry["attempt"]) == int(block["attempt"]):
+            counted.add(entry["run_id"])
+        elif block is not None and int(entry["attempt"]) <= int(block["attempt"]):
+            dropped[entry["run_id"]] = "RERUN_SUPERSEDED"
+        else:
+            dropped[entry["run_id"]] = "INCOMPLETE_BLOCK"
+    return {"counted": counted, "dropped": dropped}
+
+
+def _noop_driver(args: argparse.Namespace, nexus_driver: Any) -> Any:
+    """The NEXUS_NOOP driver: P1 on a second measurement Gateway whose claude binary is
+    the no-model fake (``fake_claude.py`` mode ``noop``), from ``--noop-gateway-args``."""
+    from scripts.bench.measure_2721.gateway_env import gate6_switches
+
+    sub = argparse.ArgumentParser(prog="--noop-gateway-args")
+    nexus_driver.add_gateway_args(sub)
+    sub.add_argument("--gateway-env", required=True)
+    noop = sub.parse_args(shlex.split(args.noop_gateway_args or ""))
+    if getattr(args, "gateway_url", None) and noop.gateway_url.rstrip("/") == args.gateway_url.rstrip("/"):
+        raise nexus_driver.DriverStartRefused("NOOP_GATEWAY_IS_THE_NEXUS_GATEWAY")
+    switches = gate6_switches(noop.gateway_env)
+    if switches:
+        raise nexus_driver.DriverStartRefused(f"GATE6_EXTRA_MODEL_SWITCH (NEXUS_NOOP Gateway): {switches}")
+    noop.arm_label = "NEXUS_NOOP"
+    noop.key_file = args.key_file
+    return nexus_driver.build_driver(noop, sub)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     from scripts.bench.measure_2721 import arms as arms_module
     from scripts.bench.measure_2721 import nexus_driver
     from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
 
-    parser = argparse.ArgumentParser(description="Run BARE, NEXUS and NOOP rows of #2721 in one seeded order")
+    parser = argparse.ArgumentParser(description="Run the #2721 arms in one block-randomized order")
     add_common_args(parser)
     nexus_driver.add_gateway_args(parser)
-    parser.add_argument("--arms", nargs="+", choices=list(ARMS), default=list(ARMS))
+    parser.add_argument("--arms", nargs="+", choices=list(ALL_ARMS), default=list(ARMS),
+                        help="arms in every block; NOOP = no P1 (empty), NEXUS_NOOP = P1 with the fake claude "
+                        "on a second Gateway (--noop-gateway-args); which count is PREREG's decision")
+    parser.add_argument("--noop-gateway-args",
+                        help="NEXUS_NOOP Gateway arguments, e.g. '--gateway-url http://127.0.0.1:18767 "
+                        "--token-file F --scope-id S --trace-dir D --gateway-env E ...'")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--provider", choices=["claude", "fake"], default="fake")
     parser.add_argument("--claude-bin")
     args = parser.parse_args(argv)
+    if "NEXUS_NOOP" in args.arms and not args.noop_gateway_args:
+        parser.error("--arms NEXUS_NOOP needs --noop-gateway-args")
     try:
-        tasks = prepare(args, need_read_roots=args.provider == "claude" or "NEXUS" in args.arms)
+        tasks = prepare(args, need_read_roots=args.provider == "claude" or "NEXUS" in args.arms
+                        or "NEXUS_NOOP" in args.arms)
     except PrepareStop as stop:
         print(json.dumps(stop.payload))
         return stop.code
     run_root = Path(args.run_root)
     by_id = {task["task_id"]: task for task in tasks}
     schedule = build_schedule(list(by_id), args.repeats, args.arms, args.seed)
-    write_schedule(run_root, schedule, args.seed)
+    previous = run_root / "schedule.json"
+    if previous.is_file():
+        # Exit 75 is resumable only with the same seed, arms and task set (same order).
+        old = json.loads(previous.read_text(encoding="utf-8"))
+        if old.get("seed") != args.seed or old.get("order_sha256") != hashlib.sha256(json.dumps(schedule, sort_keys=True).encode()).hexdigest():
+            print(json.dumps({"stopped": "SCHEDULE_CHANGED_ON_RESUME", "seed": args.seed}))
+            return 2
+    else:
+        write_schedule(run_root, schedule, args.seed)
     ledger = SpendLedger(Path(args.spend_ledger), args.budget_usd, args.max_row_usd)
     provider = arms_module.build_provider(args.provider, claude_bin=args.claude_bin,
                                           trace_dir=run_root / "traces", key_file=args.key_file) \
         if "BARE" in args.arms else None
-    driver = None
-    if "NEXUS" in args.arms:
-        try:
-            driver = nexus_driver.build_driver(args, parser)
-        except nexus_driver.DriverStartRefused as exc:
-            print(json.dumps({"stopped": "DRIVER_REFUSED", "detail": str(exc)}))
-            return 2
-    rows = []
+    drivers: dict[str, Any] = {}
     try:
-        for entry in schedule:
-            task = by_id[entry["task_id"]]
-            if entry["arm"] == "BARE":
-                row = arms_module.run_bare(task, entry["repeat"], run_root, provider, timeout_seconds=args.timeout,
-                                           ledger=ledger)
-            elif entry["arm"] == "NEXUS":
-                row = driver.run(task, entry["repeat"], run_root, timeout_seconds=args.timeout, ledger=ledger)
-            else:
-                row = arms_module.run_noop(task, entry["repeat"], run_root)
-            rows.append({"slot": entry["slot"], "arm": entry["arm"], "run_id": row.get("run_id")})
-    except BudgetExhausted as exc:
-        print(json.dumps({"stopped": str(exc), "rows": len(rows)}))
-        return 75
-    except nexus_driver.GatewayStuck as exc:
-        print(json.dumps({"stopped": "GATEWAY_STUCK", "detail": str(exc), "rows": len(rows)}))
-        return 75
-    except nexus_driver.state_phase.PhaseMarkerMismatch as exc:
-        print(
-            json.dumps({
-                "stopped": "STATE_PHASE_MARKER_MISMATCH",
-                "detail": str(exc),
-                "rows": len(rows),
-            })
-        )
+        if "NEXUS" in args.arms:
+            drivers["NEXUS"] = nexus_driver.build_driver(args, parser)
+        if "NEXUS_NOOP" in args.arms:
+            drivers["NEXUS_NOOP"] = _noop_driver(args, nexus_driver)
+    except nexus_driver.DriverStartRefused as exc:
+        print(json.dumps({"stopped": "DRIVER_REFUSED", "detail": str(exc)}))
         return 2
-    write_json(run_root / "schedule_done.json", {"seed": args.seed, "rows": rows})
-    print(json.dumps({"rows": len(rows), "seed": args.seed}))
-    return 0
+    progress, blocks_path = run_root / PROGRESS_FILE, run_root / BLOCKS_FILE
+    done_progress = _records(progress)
+    last_status = {int(r["block"]): r for r in _records(blocks_path)}
+    rows: list[dict[str, Any]] = []
+    last_completed = max((b for b, r in last_status.items() if r["status"] in RESOLVED), default=None)
 
+    def stop(code: int, reason: str, **extra: Any) -> int:
+        record = {"reason": reason, "last_completed_block": last_completed, "rows_this_session": len(rows),
+                  "seed": args.seed, "ledger": {k: v for k, v in ledger.state().items()
+                                                if k in ("cap_usd", "spent_usd", "worst_row_usd", "rows")},
+                  **extra}
+        write_json(run_root / STOP_FILE, record)
+        print(json.dumps({"stopped": reason, **{k: v for k, v in record.items() if k != "ledger"}}))
+        return code
+
+    for block in _blocks(schedule):
+        state = last_status.get(block["block"])
+        if state is not None and state["status"] in RESOLVED:
+            continue  # resumed: completed rows are never re-run
+        attempt = int(state["attempt"]) + 1 if state is not None else 0
+        task = by_id[block["task_id"]]
+        while True:
+            done = {p["arm"]: p for p in done_progress if int(p["block"]) == block["block"]
+                    and int(p["attempt"]) == attempt}
+            remaining = [arm for arm in block["arms"] if arm not in done]
+            if remaining:
+                try:
+                    # PREREG v0.9: admit the whole (rest of the) block or start nothing.
+                    ledger.begin_block(sum(arm in CHARGED_ARMS for arm in remaining))
+                except BudgetExhausted as exc:
+                    return stop(75, "BUDGET_CAP", detail=str(exc), next_block=block["block"])
+            admitted = ledger.admitted()
+            for arm in remaining:
+                slot = block["slots"][block["arms"].index(arm)]
+                try:
+                    if arm == "BARE":
+                        row = arms_module.run_bare(task, block["repeat"], run_root, provider,
+                                                   timeout_seconds=args.timeout, ledger=admitted)
+                    elif arm in drivers:
+                        row = drivers[arm].run(task, block["repeat"], run_root, timeout_seconds=args.timeout,
+                                               ledger=admitted)
+                    else:
+                        row = arms_module.run_noop(task, block["repeat"], run_root)
+                except nexus_driver.GatewayStuck as exc:
+                    run_id = drivers[arm]._run_id
+                    written = [r for r in _records(run_root / "rows.jsonl") if r.get("run_id") == run_id]
+                    entry = {"block": block["block"], "attempt": attempt, "slot": slot, "arm": arm, "run_id": run_id,
+                             "infra": bool(written and written[-1].get("infra")), "gateway_stuck": True}
+                    _append(progress, entry)
+                    return stop(75, "GATEWAY_STUCK", detail=str(exc), block=block["block"])
+                except nexus_driver.state_phase.PhaseMarkerMismatch as exc:
+                    return stop(2, "STATE_PHASE_MARKER_MISMATCH", detail=str(exc))
+                entry = {"block": block["block"], "attempt": attempt, "slot": slot, "arm": arm,
+                         "run_id": row.get("run_id"), "infra": bool(row.get("infra"))}
+                _append(progress, entry)
+                done_progress.append(entry)
+                if arm in drivers and nexus_driver.instance_busy(row):
+                    # Busy to the end: stop (resumable) instead of spending on the other arms.
+                    return stop(75, "INSTANCE_BUSY", detail=row.get("void_reason"), block=block["block"])
+                done[arm] = entry
+                rows.append({"slot": slot, "arm": arm, "run_id": row.get("run_id"), "attempt": attempt})
+            infra_arms = sorted(arm for arm, entry in done.items() if entry["infra"])
+            status = "COMPLETE" if not infra_arms else (
+                "RERUN" if attempt < MAX_INFRA_RERUNS else "EXCLUDED_AFTER_RERUNS")
+            record = {"block": block["block"], "task_id": block["task_id"], "repeat": block["repeat"],
+                      "attempt": attempt, "status": status, "arm_order": block["arms"], "infra_arms": infra_arms,
+                      "run_ids": {arm: done[arm]["run_id"] for arm in block["arms"]}}
+            _append(blocks_path, record)
+            last_status[block["block"]] = record
+            if status != "RERUN":
+                break
+            attempt += 1  # an infra row in any arm: the whole block again, same arm order
+        last_completed = block["block"]
+    write_json(run_root / "schedule_done.json", {"seed": args.seed, "rows": rows})
+    stop(0, "DONE")
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

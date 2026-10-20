@@ -3,6 +3,9 @@
 Protocol (in ``<run_root>/run/``):
 * ``current_row.json``: written before each row (row_id, task_id, arm,
   started_at, cap_s); updated with ``snapshot_taken`` once the diff is captured;
+  ``started_at`` (UTC, trailing ``Z``) is written once per row and never
+  rewritten -- workspace-35's supervisor kills leftover verifier pytest started
+  after ``started_at - 5 s``; the row itself carries the same ``started_at``;
 * ``rows_done``: an integer, incremented after each row;
 * ``infra_events.jsonl``: written by the watchdog; a row listed there is
   INFRA and is re-run in every arm.
@@ -29,11 +32,14 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(partial, path)
 
 
-def begin_row(run_root: Path, *, row_id: str, task_id: str, arm: str, cap_s: float) -> None:
+def begin_row(run_root: Path, *, row_id: str, task_id: str, arm: str, cap_s: float) -> str:
+    """Write ``current_row.json``; returns its ``started_at`` (the row records the same value)."""
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     _write_atomic(_run_dir(run_root) / "current_row.json", json.dumps({
         "row_id": row_id, "task_id": task_id, "arm": arm, "cap_s": cap_s,
-        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "snapshot_taken": False,
+        "started_at": started_at, "snapshot_taken": False,
     }, sort_keys=True))
+    return started_at
 
 
 def mark_snapshot(run_root: Path) -> None:

@@ -288,9 +288,9 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     write_json(run_root / "inputs" / f"{run_id}.json",
                input_capture(ARM_BARE, task, repeat, run_id, prompt=prompt, tree_sha=tree_sha,
                              timeout_seconds=timeout_seconds))
-    watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=ARM_BARE, cap_s=timeout_seconds)
+    started_at = watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=ARM_BARE,
+                                    cap_s=timeout_seconds)
     started = time.monotonic()
-    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     spend["ran"] = True  # from here on money may have been spent
     result: ProviderResult = provider.run(prompt=prompt, workdir=workdir, timeout_seconds=timeout_seconds,
                                           run_id=run_id, controller=controller)
@@ -410,7 +410,10 @@ def claude_row_fields(extra: Mapping[str, Any]) -> dict[str, Any]:
 
 def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, Any]:
     """No model, no edit: the S3 NOOP arm.  Must score 0 RESOLVED."""
+    from scripts.bench.measure_2721 import watchdog
+
     run_id = new_run_id(ARM_NOOP, task["task_id"], repeat)
+    started_at = watchdog.begin_row(run_root, row_id=run_id, task_id=task["task_id"], arm=ARM_NOOP, cap_s=0.0)
     tree_sha = git(Path(task["base_checkout"]), "rev-parse", "HEAD^{tree}").strip()
     write_json(run_root / "inputs" / f"{run_id}.json",
                input_capture(ARM_NOOP, task, repeat, run_id, prompt=task_prompt(task), tree_sha=tree_sha,
@@ -426,6 +429,7 @@ def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, 
         "run_id": run_id,
         "task_id": task["task_id"],
         "repeat": repeat,
+        "started_at": started_at,
         "wall_seconds": 0.0,
         "outcome": STATUS_OK,
         "infra": False,
@@ -437,6 +441,7 @@ def run_noop(task: Mapping[str, Any], repeat: int, run_root: Path) -> dict[str, 
         **candidate_facts(diff, task),
     }
     append_jsonl(run_root / "rows.jsonl", row)
+    watchdog.end_row(run_root)
     return row
 
 

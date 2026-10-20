@@ -104,6 +104,62 @@ def gateway_state_paths(
     return kept
 
 
+# GATE 6 (#2721 final audit, 77c6): the measurement Gateway must not switch in an
+# extra model.  Defence in depth behind workspace-35's ``run/start.sh`` (exit 66),
+# which refuses exactly GATE6_START_SH_SWITCHES; this check uses the same list
+# (``NEXUS_LOCAL_MODEL*`` is a prefix) and refuses when one is set to anything but
+# an explicit off value (empty, 0, false, no, off).
+GATE6_START_SH_SWITCHES = (
+    "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT", "NEXUS_LOCAL_MODEL*",
+    "NEXUS_LLM_JUDGE_PROVIDERS", "NEXUS_LEARNING_REFLECT_JUDGE", "NEXUS_USE_COMMITTEE",
+    "NEXUS_COMMITTEE_BUDGET_REMAINING", "NEXUS_CORE_EXTERNAL_VERIFICATION", "NEXUS_DOC_SCOUT_EXTERNAL_ROWS_JSON",
+)
+# Extra names found in Nexus-new ``nexus/`` (read sites in brackets), refused the same way:
+# * NEXUS_MSA_ENABLED: model routing in the core router [core/router]; an
+#   "external" flag in services/live_semantic_readiness.
+# * NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL: the committee-routed tool
+#   [services/local_heal/committee_activation_gate].
+# * NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR, NEXUS_ONLINE_LOCAL_ASSIST: local-model swarm
+#   and assist [research/sprint_service, research/flow/capability_evidence].
+# * NEXUS_OLLAMA_ENABLED: local Ollama retries [services/local_heal].
+# * NEXUS_SHADOW_ADVISOR_ENABLED: a shadow model advisor [gate/experimental_gate].
+# Not listed: model-name / endpoint settings (they switch nothing on), and the
+# default-on S2T 3B advisor (services/s2t_strict), which nothing on the P1 path imports.
+GATE6_EXTRA_SWITCHES = (
+    "NEXUS_MSA_ENABLED", "NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL", "NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR",
+    "NEXUS_ONLINE_LOCAL_ASSIST", "NEXUS_OLLAMA_ENABLED", "NEXUS_SHADOW_ADVISOR_ENABLED",
+)
+# Warned, not refused (a pending decision): it authorizes the Agy (Gemini) worker
+# [executors/worker_registry].
+GATE6_WARN_SWITCHES = ("NEXUS_AGY_RUNTIME_AUTHORIZED",)
+_OFF = frozenset({"", "0", "false", "no", "off"})
+
+
+def _gate6_match(names: tuple[str, ...], values: Mapping[str, str]) -> list[str]:
+    found = []
+    for pattern in names:
+        prefix = pattern[:-1] if pattern.endswith("*") else None
+        for name in sorted(values):
+            if (name == pattern or (prefix is not None and name.startswith(prefix))) and \
+                    values[name].strip().lower() not in _OFF:
+                found.append(name)
+    return found
+
+
+def gate6_switches(path: Path | str, base: Optional[Mapping[str, str]] = None, *,
+                   warnings: Optional[list[str]] = None) -> list[str]:
+    """Extra-model switches enabled in the Gateway env file ``path`` (never executed); [] = clean.
+
+    Every assignment is read (not only the measurement whitelist); only names
+    are returned, never values.  ``warnings`` (if given) receives the enabled
+    GATE6_WARN_SWITCHES.
+    """
+    values = _assignments(path, {} if base is None else base)
+    if warnings is not None:
+        warnings.extend(_gate6_match(GATE6_WARN_SWITCHES, values))
+    return _gate6_match(GATE6_START_SH_SWITCHES + GATE6_EXTRA_SWITCHES, values)
+
+
 def use_gateway_env(path: Path | str) -> list[str]:
     """Hold the Gateway's whitelisted settings for this process; returns the names only."""
     _LOADED.clear()

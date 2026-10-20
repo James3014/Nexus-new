@@ -491,9 +491,9 @@ def test_driver_stops_the_batch_when_a_task_does_not_terminate(manifest, tmp_pat
     with pytest.raises(nexus_driver.GatewayStuck):
         _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
     (row,) = list(read_jsonl(tmp_path / "run" / "rows.jsonl"))
-    # Amendment 10: accepted, then stuck on the Gateway side -> a not-solved candidate.
-    assert row["infra"] is False and row["gateway_stuck"] == "PENDING_HUMAN_APPROVAL"
-    assert row["nexus_failure_after_acceptance"] and blind.run_invalid_reason(row) == "OUTCOME:INFRA"
+    # PREREG §3.3 / v0.9.2: a stuck Gateway is INFRA even after acceptance (both arms re-run).
+    assert row["infra"] is True and row["gateway_stuck"] == "PENDING_HUMAN_APPROVAL"
+    assert blind.exclusion_reason(row) == ("SYMMETRIC_INFRA", "GATEWAY_STUCK")
 
 
 @needs_sandbox
@@ -1794,12 +1794,14 @@ def test_state_inside_the_controller_refuses_to_start(tmp_path, monkeypatch):
             state_root=tmp_path / "elsewhere",
             gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)},
         )
-    _controller_driver(
-        FakeGateway(),
-        layout,
-        state_root=outside,
-        gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)},
-    )
+    # A Gateway state path without a learning phase and its snapshot fails closed.
+    with pytest.raises(ValueError, match="LEARNING_PHASE_REQUIRED"):
+        _controller_driver(FakeGateway(), layout, state_root=outside, state_dir=outside / "tasks",
+                           gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)})
+    (tmp_path / "snap").mkdir()
+    _controller_driver(FakeGateway(), layout, state_root=outside, state_dir=outside / "tasks",
+                       state_snapshot=tmp_path / "snap", learning_phase="M",
+                       gateway_state_paths={"NEXUS_STATE_ROOT": str(outside)})
 
 
 def test_self_hosted_state_dir_is_restored_per_row_and_keeps_probe_evidence(manifest, tmp_path):
@@ -1853,11 +1855,11 @@ def test_self_hosted_state_dir_is_restored_per_row_and_keeps_probe_evidence(mani
     assert all(r["self_hosted_state_restore"]["ok"] and r["state_restore"]["ok"] for r in rows), (
         rows
     )
-    # Row 2 started from the phase start: row 1's learning and assist job were restored away ...
+    # Row 2 started from the phase start: row 1's learning was restored away ...
     assert (hosted / "memory.json").read_text().endswith(f'{rows[1]["gateway_task_id"]}"}}')
+    # ... but the whole probe cache (PREREG §5: jobs and probe evidence) is kept, never hashed.
     jobs = sorted(p.name for p in (hosted / "assisted_provider_jobs").glob("*.json"))
-    assert jobs == sorted(["old-job.json", f"{rows[1]['gateway_task_id']}.json"])
-    # ... but the probe evidence of both rows is kept and never hashed.
+    assert jobs == sorted(f"{r['gateway_task_id']}.json" for r in rows)
     assert len(list((hosted / "assisted_provider_jobs" / "probe_evidence").iterdir())) == 2
     from scripts.bench.measure_2721 import state_phase
 
@@ -1927,7 +1929,9 @@ def test_a10_nexus_rejected_before_acceptance_is_excluded_infra(manifest, tmp_pa
      "VOID:LB_STATE_CHANGED"),
     ({"outcome": "INFRA", "infra": True, "void_reason": "TRACE_MISSING", "flags": ["SNAPSHOT_INVALID"]},
      "VOID:TRACE_MISSING"),
-    ({"outcome": "INFRA", "infra": True, "gateway_stuck": "IN_PROGRESS"}, "OUTCOME:INFRA"),
+    # A stuck Gateway is now INFRA (PREREG v0.9.2), see test_driver_stops_the_batch_...;
+    # an accepted row the driver marked INFRA for a Nexus-side cause stays a candidate.
+    ({"outcome": "INFRA", "infra": True}, "OUTCOME:INFRA"),
 ])
 def test_a10_nexus_failure_after_acceptance_is_a_not_solved_candidate(manifest, tmp_path, fields, reason):
     (task,) = arms.load_manifest(manifest)
@@ -2025,3 +2029,292 @@ def test_a10_driver_infra_follows_acceptance(manifest, tmp_path):
     assert [e["run_id"] for e in amap["excluded"]] == [refused["run_id"]]
     (candidate,) = candidates
     assert "RUN_INVALID_NOT_SOLVED" in candidate["scoring_flags"]
+
+
+# -- review of 3b6b2b894 + PREREG v0.9/v0.9.2: runner blocks, budget, resume, GATE 6 ----
+
+
+def _runner_env(tmp_path: Path, extra: str = "") -> Path:
+    env_file = tmp_path / "gw.env"
+    env_file.write_text(f"NEXUS_MEASUREMENT_READ_ROOTS={os.path.realpath(tmp_path)}\n{extra}")
+    return env_file
+
+
+def _fake_build(monkeypatch, gateways: dict):
+    """runner.main builds its drivers with FakeGateway transports (per arm label)."""
+
+    def build(args, parser):
+        gateway = gateways[args.arm_label]
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+        return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                           sleep=lambda _s: None, arm_label=args.arm_label)
+
+    monkeypatch.setattr(nexus_driver, "build_driver", build)
+
+
+def _runner_main(manifest, tmp_path, run, *extra, repeats=("1",), arms_=("BARE", "NEXUS", "NOOP"),
+                 cap="100", max_row="1.0", ledger="spend.json"):
+    from scripts.bench.measure_2721 import runner
+
+    env_file = _runner_env(tmp_path)
+    noop_args = (f"--gateway-url http://127.0.0.1:18767 --token-file {tmp_path / 'tok'} --scope-id s "
+                 f"--trace-dir {tmp_path / 'tn'} --gateway-env {env_file}")
+    return runner.main(["--manifest", str(manifest), "--run-root", str(run), "--repeats", *repeats,
+                        "--spend-ledger", str(tmp_path / ledger), "--cap-usd", cap, "--max-row-usd", max_row,
+                        "--gateway-env", str(env_file), "--gateway-url", "http://127.0.0.1:18766",
+                        "--token-file", str(tmp_path / "tok"), "--scope-id", "s", "--trace-dir", str(tmp_path / "t"),
+                        "--arms", *arms_, "--noop-gateway-args", noop_args, *extra])
+
+
+def test_runner_schedules_both_noop_variants_and_both_make_no_edit(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import runner
+
+    arms4 = ("BARE", "NEXUS", "NOOP", "NEXUS_NOOP")
+    ids = [f"t{i}" for i in range(12)]
+    schedule = runner.build_schedule(ids, [1, 2, 3], arms4)
+    stats = runner.schedule_stats(schedule)
+    assert set(stats["mean_slot"]) == set(arms4) and max(stats["mean_slot"].values()) - \
+        min(stats["mean_slot"].values()) < 4 and set(stats["first_third"].values()) == {12}
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway(), "NEXUS_NOOP": FakeGateway()})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run, repeats=("1", "2"), arms_=arms4) == 0
+    rows = list(read_jsonl(run / "rows.jsonl"))
+    assert sorted(r["arm"] for r in rows) == sorted(["BARE", "NEXUS", "NOOP", "NEXUS_NOOP"] * 2)
+    # Zero-model dry run: neither NOOP variant can resolve anything (empty diff).
+    assert all(r["empty"] for r in rows if r["arm"] in ("NOOP", "NEXUS_NOOP"))
+    assert json.loads((run / "stop.json").read_text())["reason"] == "DONE"
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [b["status"] for b in blocks] == ["COMPLETE", "COMPLETE"]
+    assert all(sorted(b["arm_order"]) == sorted(arms4) for b in blocks)
+    # The NEXUS_NOOP Gateway must be another Gateway than the NEXUS one.
+    with pytest.raises(nexus_driver.DriverStartRefused, match="NOOP_GATEWAY_IS_THE_NEXUS_GATEWAY"):
+        import argparse
+
+        runner._noop_driver(argparse.Namespace(gateway_url="http://127.0.0.1:18767", key_file=None,
+                                               noop_gateway_args="--gateway-url http://127.0.0.1:18767 "
+                                               "--token-file t --scope-id s --trace-dir d --gateway-env e"),
+                            nexus_driver)
+
+
+def test_runner_admits_whole_blocks_and_stops_at_the_cap_with_75(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721.budget import DEFAULT_CAP_USD, SpendLedger
+
+    assert DEFAULT_CAP_USD == 100.0
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    run = tmp_path / "run"
+    rc = _runner_main(manifest, tmp_path, run, repeats=tuple(str(r) for r in range(1, 7)), cap="5", max_row="1.0")
+    assert rc == 75
+    stop = json.loads((run / "stop.json").read_text())
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    # Every started block finished (all three arms), none was started without room for it.
+    assert stop["reason"] == "BUDGET_CAP" and stop["last_completed_block"] == blocks[-1]["block"]
+    assert all(b["status"] == "COMPLETE" and len(b["run_ids"]) == 3 for b in blocks)
+    state = SpendLedger(tmp_path / "spend.json", 5.0, 1.0).state()
+    assert len(blocks) == 2 and state["spent_usd"] == pytest.approx(4.0)  # 2 charged arms x 1.0 per block
+    assert state["cap_usd"] == 5.0 and state["max_row_usd"] == 1.0
+    # A different cap on the same ledger is refused.
+    with pytest.raises(Exception, match="cap_usd"):
+        _runner_main(manifest, tmp_path, run, repeats=tuple(str(r) for r in range(1, 7)), cap="6")
+    # Mid-block, an admitted block finishes even past the cap (overshoot bounded by one block).
+    ledger = SpendLedger(tmp_path / "s2.json", 1.0, 1.0)
+    ledger.begin_block(1)
+    admitted = ledger.admitted()
+    for _ in range(3):
+        admitted.finish_row(admitted.begin_row(), None)
+    assert ledger.state()["spent_usd"] == pytest.approx(3.0)
+
+
+def test_runner_resumes_without_rerunning_completed_rows(manifest, tmp_path, monkeypatch):
+    _fake_build(monkeypatch, {"NEXUS": FakeGateway()})
+    run = tmp_path / "run"
+    repeats = tuple(str(r) for r in range(1, 5))
+    assert _runner_main(manifest, tmp_path, run, repeats=repeats, cap="5", max_row="1.0") == 75
+    before = [r["run_id"] for r in read_jsonl(run / "rows.jsonl")]
+    schedule = (run / "schedule.json").read_text()
+    # Same seed and schedule, a bigger budget (a new ledger): continue with the next block only.
+    rc = _runner_main(manifest, tmp_path, run, repeats=repeats, cap="100", max_row="1.0", ledger="spend2.json")
+    assert rc == 0 and (run / "schedule.json").read_text() == schedule
+    after = [r["run_id"] for r in read_jsonl(run / "rows.jsonl")]
+    assert after[:len(before)] == before and len(after) == 4 * 3
+    assert [b["block"] for b in read_jsonl(run / "blocks.jsonl")] == [0, 1, 2, 3]
+    # Another seed (or task set) on the same run root is refused.
+    assert _runner_main(manifest, tmp_path, run, "--seed", "1", repeats=repeats, ledger="spend2.json") == 2
+
+
+def test_runner_reruns_an_infra_block_twice_then_excludes_it(manifest, tmp_path, monkeypatch):
+    class Flaky(FakeGateway):
+        def __init__(self, refusals):
+            super().__init__()
+            self.refusals = refusals
+
+            self.refused_last = False
+
+        def _is_error(self, name):
+            return name == "nexus_worker_candidate" and self.refused_last
+
+        def _answer(self, name, args):
+            self.refused_last = name == "nexus_worker_candidate" and self.refusals > 0
+            if self.refused_last:
+                self.refusals -= 1
+                return {"error": "WORKER_REFUSED"}
+            return super()._answer(name, args)
+
+    _fake_build(monkeypatch, {"NEXUS": Flaky(1)})
+    run = tmp_path / "run"
+    assert _runner_main(manifest, tmp_path, run) == 0
+    blocks = list(read_jsonl(run / "blocks.jsonl"))
+    assert [(b["attempt"], b["status"], b["infra_arms"]) for b in blocks] == [
+        (0, "RERUN", ["NEXUS"]), (1, "COMPLETE", [])]
+    assert blocks[0]["arm_order"] == blocks[1]["arm_order"]  # the same order on a re-run
+    out, amap_path = tmp_path / "blind", tmp_path / "custody" / "map.json"
+    blind.main(["--run-roots", str(run), "--out", str(out), "--arm-map", str(amap_path),
+                "--manifest", str(manifest)])
+    amap = json.loads(amap_path.read_text())
+    assert len(amap["map"]) == 3 and amap["excluded"] == []
+    assert sorted(d["reason"] for d in amap["dropped"]) == ["RERUN_SUPERSEDED"] * 3
+    # Infra in all three attempts: the block is excluded after two re-runs.
+    _fake_build(monkeypatch, {"NEXUS": Flaky(3)})
+    run2 = tmp_path / "run2"
+    assert _runner_main(manifest, tmp_path, run2, ledger="spend2.json") == 0
+    statuses = [(b["attempt"], b["status"]) for b in read_jsonl(run2 / "blocks.jsonl")]
+    assert statuses == [(0, "RERUN"), (1, "RERUN"), (2, "EXCLUDED_AFTER_RERUNS")]
+
+
+def test_runner_stops_with_75_when_the_instance_stays_busy(manifest, tmp_path, monkeypatch):
+    from scripts.bench.measure_2721 import runner
+
+    states = tmp_path / "self-hosted"
+    states.mkdir()
+    (states / "other.json").write_text(json.dumps({"status": "IN_PROGRESS"}))
+    gateway = FakeGateway()
+
+    def build(args, parser):
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+        return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                           sleep=lambda _s: None, state_dir=states)
+
+    monkeypatch.setattr(nexus_driver, "build_driver", build)
+    run = tmp_path / "run"
+    rc = _runner_main(manifest, tmp_path, run, "--seed", "3", repeats=("1", "2"), arms_=("NEXUS", "BARE"))
+    stop = json.loads((run / "stop.json").read_text())
+    assert rc == 75 and stop["reason"] == "INSTANCE_BUSY" and not gateway.calls
+    rows = list(read_jsonl(run / "rows.jsonl"))
+    assert rows[-1]["arm"] == "NEXUS" and rows[-1]["void_reason"].startswith("INSTANCE_BUSY:")
+    assert runner.block_outcomes(run)["counted"] == set()
+
+
+@pytest.mark.parametrize("line", [
+    "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1", "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT=/x",
+    "NEXUS_LOCAL_MODEL_CALL_ALLOWED=1", "NEXUS_LOCAL_MODEL=qwen", "NEXUS_LLM_JUDGE_PROVIDERS=codex",
+    "NEXUS_LEARNING_REFLECT_JUDGE=1", "NEXUS_USE_COMMITTEE=1", "NEXUS_COMMITTEE_BUDGET_REMAINING=5",
+    "NEXUS_CORE_EXTERNAL_VERIFICATION=1", "NEXUS_DOC_SCOUT_EXTERNAL_ROWS_JSON=/r.json", "NEXUS_MSA_ENABLED=1",
+    "NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL=1", "NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR=true",
+    "NEXUS_ONLINE_LOCAL_ASSIST=yes", "NEXUS_OLLAMA_ENABLED=1", "export NEXUS_SHADOW_ADVISOR_ENABLED=True",
+])
+def test_gate6_refuses_every_extra_model_switch(manifest, tmp_path, line, capsys):
+    env_file = _runner_env(tmp_path, line + "\nexec python gateway.py\n")
+    rc = arms.main(["noop", "--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
+                    "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
+    out = capsys.readouterr().out
+    name = line.split()[-1].split("=")[0]
+    assert rc == 2 and "GATE6_EXTRA_MODEL_SWITCH" in out and name in out
+    assert json.loads((tmp_path / "run" / "gate6_refused.json").read_text())["switches"] == [name]
+    assert "/x" not in out and "qwen" not in out  # names only, never values
+
+
+def test_gate6_clean_env_passes_and_agy_only_warns(manifest, tmp_path, capsys):
+    from scripts.bench.measure_2721 import gateway_env
+
+    env_file = _runner_env(tmp_path, "NEXUS_USE_COMMITTEE=0\nNEXUS_LOCAL_MODEL_CALL_ALLOWED=\n"
+                                     "NEXUS_AGY_RUNTIME_AUTHORIZED=1\nexec x\nNEXUS_USE_COMMITTEE=1\n")
+    warnings: list[str] = []
+    assert gateway_env.gate6_switches(env_file, warnings=warnings) == []
+    assert warnings == ["NEXUS_AGY_RUNTIME_AUTHORIZED"]
+    rc = arms.main(["noop", "--manifest", str(manifest), "--run-root", str(tmp_path / "run"),
+                    "--spend-ledger", str(tmp_path / "spend.json"), "--gateway-env", str(env_file)])
+    assert rc == 0 and "GATE 6: NEXUS_AGY_RUNTIME_AUTHORIZED" in capsys.readouterr().err
+
+
+def test_learning_phase_without_every_snapshot_fails_closed(tmp_path):
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "t", transport=FakeGateway())
+    root, snap, hosted = tmp_path / "state", tmp_path / "snap", tmp_path / "hosted"
+    for phase in ("M", "LA", "LB"):
+        with pytest.raises(ValueError, match="STATE_ROOT_SNAPSHOT_REQUIRED"):
+            nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", state_root=root,
+                                        state_dir=root / "tasks", learning_phase=phase)
+        with pytest.raises(ValueError, match="SELF_HOSTED_STATE_DIR_REQUIRED"):
+            nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", state_root=root,
+                                        state_snapshot=snap, learning_phase=phase)
+        with pytest.raises(ValueError, match="SELF_HOSTED_STATE_NOT_RESTORED"):
+            nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", state_root=root,
+                                        state_snapshot=snap, state_dir=hosted, learning_phase=phase)
+    with pytest.raises(ValueError, match="LEARNING_PHASE_REQUIRED"):
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s", state_root=root,
+                                    state_snapshot=snap, state_dir=root / "tasks", learning_phase="X")
+    with pytest.raises(ValueError, match="LEARNING_PHASE_REQUIRED"):
+        nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                    gateway_state_paths={"NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR": str(hosted)})
+
+
+def test_probe_cache_is_never_restored_or_hashed(tmp_path):
+    from scripts.bench.measure_2721 import state_phase
+
+    root, snap = tmp_path / "state", tmp_path / "snap"
+    (snap / "learning").mkdir(parents=True)
+    (snap / "learning" / "x.json").write_text("start")
+    jobs = root / "assisted_provider_jobs"
+    (jobs / "probe_evidence").mkdir(parents=True)
+    (jobs / "probe-1.json").write_text("{}")
+    (jobs / "probe-1.stdout").write_text("ok")
+    (jobs / "probe_evidence" / "e.json").write_text("{}")
+    result = state_phase.restore_state(root, snap)
+    assert result["ok"] and (jobs / "probe-1.json").is_file() and (jobs / "probe-1.stdout").is_file()
+    assert state_phase.state_sha256(root) == state_phase.state_sha256(snap)
+
+
+def test_harness_side_presubmit_failure_is_not_nexus_reliability(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    row = {**_nexus_row(1, task_id=task["task_id"]), "worker_accepted": False, "submitted": False,
+           "infra": True, "outcome": "INFRA", "void_reason": "CONTROLLER_RESET_MISMATCH"}
+    gateway_refused = {**row, "run_id": "n-r2", "repeat": 2, "void_reason": "PRE_SUBMIT_FAILURE:nexus_task_card_create"}
+    _candidates, amap = _blind_rows([row, gateway_refused], tmp_path, task)
+    by_run = {e["run_id"]: e for e in amap["excluded"]}
+    assert by_run["n-r1"]["rule"] == "HARNESS_NOT_SUBMITTED" and by_run["n-r1"]["nexus_reliability"] is False
+    assert by_run["n-r1"]["harness_failure"] is True
+    assert by_run["n-r2"]["rule"] == "NEXUS_NOT_ACCEPTED" and by_run["n-r2"]["nexus_reliability"] is True
+
+
+def test_started_at_is_written_once_in_utc_for_every_arm(manifest, tmp_path, monkeypatch):
+    import re
+    import time as time_module
+
+    from scripts.bench.measure_2721 import watchdog
+
+    (task,) = arms.load_manifest(manifest)
+    run = tmp_path / "run"
+    current = run / "run" / "current_row.json"
+    utc = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+    seen = {}
+    real_mark, real_gmtime = watchdog.mark_snapshot, time_module.gmtime
+
+    def later_snapshot(run_root):
+        before = json.loads(current.read_text())["started_at"]
+        watchdog.time.gmtime = lambda *_a: real_gmtime(4102444800)  # year 2100
+        try:
+            real_mark(run_root)
+        finally:
+            watchdog.time.gmtime = real_gmtime
+        seen["after"] = json.loads(current.read_text())
+        assert seen["after"]["started_at"] == before  # never rewritten by the snapshot update
+
+    monkeypatch.setattr(watchdog, "mark_snapshot", later_snapshot)
+    bare = arms.run_bare(task, 1, run, FakeProvider(edit=_edit), timeout_seconds=5)
+    assert utc.match(bare["started_at"]) and bare["started_at"] == seen["after"]["started_at"]
+    assert seen["after"]["snapshot_at"].startswith("2100-")
+    nexus = _driver(FakeGateway()).run(task, 1, run, timeout_seconds=5)
+    assert utc.match(nexus["started_at"]) and nexus["started_at"] == json.loads(current.read_text())["started_at"]
+    noop = arms.run_noop(task, 1, run)
+    assert utc.match(noop["started_at"]) and json.loads(current.read_text())["row_id"] == noop["run_id"]
+    assert json.loads(current.read_text())["started_at"] == noop["started_at"]
+    for row in read_jsonl(run / "rows.jsonl"):
+        assert utc.match(row["started_at"]), row["arm"]
