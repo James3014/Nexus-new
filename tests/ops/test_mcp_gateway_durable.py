@@ -9066,3 +9066,43 @@ def test_r1_state_root_validation_matches_deployer(tmp_path, monkeypatch, kind):
             outcomes.append(("refused",))
     assert outcomes[0] == outcomes[1], outcomes
     assert outcomes[0][0] == ("ok" if kind in ("missing", "existing_0755") else "refused")
+
+
+def test_r1_cairnwork_env_export_mirrors_deployer_exactly():
+    """Cairnwork F clause: R1 keeps its own copy (bound by the manager hash)."""
+    from scripts.ops import nexus_gateway_auto_deploy as ad
+
+    assert g.R1_CAIRNWORK_ENV_VARS == ad.CAIRNWORK_ENV_VARS
+    assert g._r1_cairnwork_env_export() == ad.cairnwork_env_export()
+    # Live configuration, never refused as a measurement-only switch.
+    assert not set(g.R1_CAIRNWORK_ENV_VARS) & set(g.R1_MEASUREMENT_ONLY_ENV_VARS)
+
+
+def test_r1_recovery_wrapper_passes_cairnwork_env(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    home = tmp_path / "test-home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    r1 = g._recovery_wrapper_command(plan.desired_root)
+    fragment = g._r1_cairnwork_env_export()
+    assert r1.count(fragment) == 1
+    assert r1.index("source ") < r1.index(g._r1_measurement_env_guard()) < r1.index(fragment)
+    assert r1.index(fragment) < r1.index("exec ")
+    # The fragment really exports env-file assignments and leaves unset ones unset.
+    shell = next(
+        s for s in ("/bin/zsh", shutil.which("zsh"), shutil.which("bash")) if s and Path(s).exists()
+    )
+    env_file = tmp_path / "cw.env"
+    env_file.write_text("NEXUS_CAIRNWORK_ROUTE=route\nNEXUS_CAIRNWORK_STATE=/cw/state\n")
+    clean = {k: v for k, v in os.environ.items() if k not in g.R1_CAIRNWORK_ENV_VARS}
+    out = subprocess.run(
+        [shell, "-c", f'source "{env_file}" ; {fragment}exec env'],
+        env=clean,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout.splitlines()
+    assert "NEXUS_CAIRNWORK_ROUTE=route" in out
+    assert "NEXUS_CAIRNWORK_STATE=/cw/state" in out
+    assert not [line for line in out if line.startswith("NEXUS_CAIRNWORK_ROUTE_BIN=")]
