@@ -9089,7 +9089,9 @@ def test_r1_recovery_wrapper_passes_cairnwork_env(tmp_path, monkeypatch):
     assert r1.index("source ") < r1.index(g._r1_measurement_env_guard()) < r1.index(fragment)
     assert r1.index(fragment) < r1.index("exec ")
     # The fragment really exports env-file assignments and leaves unset ones unset.
-    shell = next(s for s in ("/bin/zsh", shutil.which("zsh"), shutil.which("bash")) if s)
+    shell = next(
+        s for s in ("/bin/zsh", shutil.which("zsh"), shutil.which("bash")) if s and Path(s).exists()
+    )
     env_file = tmp_path / "cw.env"
     env_file.write_text("NEXUS_CAIRNWORK_ROUTE=route\nNEXUS_CAIRNWORK_STATE=/cw/state\n")
     clean = {k: v for k, v in os.environ.items() if k not in g.R1_CAIRNWORK_ENV_VARS}
