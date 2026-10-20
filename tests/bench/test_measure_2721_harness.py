@@ -1170,3 +1170,14 @@ def test_rows_carry_the_read_roots_hash_and_arms_must_agree(manifest, tmp_path):
     other = dict(nexus, read_roots_sha256="0" * 16)
     with pytest.raises(RuntimeError, match="READ_ROOTS_DIFFER_ACROSS_ARMS"):
         blind.blind([bare, other], tmp_path / "blind", tmp_path / "map.json", tasks)
+
+
+@pytest.mark.parametrize("value", ["${ROOT:-/m}/venvs", "$(pwd)/venvs", "`pwd`/venvs"])
+def test_gateway_env_fails_closed_on_unexpanded_values(tmp_path, value):
+    from scripts.bench.measure_2721 import gateway_env
+
+    env_file = tmp_path / "x.env"
+    env_file.write_text(f"NEXUS_MEASUREMENT_READ_ROOTS='{value}'\n")
+    with pytest.raises(gateway_env.GatewayEnvError, match="unexpanded"):
+        gateway_env.use_gateway_env(env_file)
+    assert gateway_env.measurement_env().get("NEXUS_MEASUREMENT_READ_ROOTS") != value

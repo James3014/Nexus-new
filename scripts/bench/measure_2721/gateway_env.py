@@ -67,7 +67,14 @@ def load_gateway_env(path: Path | str, base: Optional[Mapping[str, str]] = None)
         for token in tokens:
             name, value = token.split("=", 1)
             values[name] = _expand(value, values, base)
-    return {name: value for name, value in values.items() if whitelisted(name)}
+    kept = {name: value for name, value in values.items() if whitelisted(name)}
+    for name, value in kept.items():
+        if "${" in value or "$(" in value or "`" in value:
+            # ${VAR:-default}, command substitution etc. are not expanded here:
+            # fail closed instead of passing a literal through (use a fully
+            # expanded env file, e.g. 35's run/make_env.sh output).
+            raise GatewayEnvError(f"{name}: unexpanded shell expression in {Path(path).name}")
+    return kept
 
 
 def use_gateway_env(path: Path | str) -> list[str]:
