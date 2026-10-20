@@ -16,6 +16,7 @@ import json
 import os
 import plistlib
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -7959,12 +7960,32 @@ def test_cairnwork_probe_timeout_with_grandchild_holding_stdout(
 ) -> None:
     """subprocess.run would wait for EOF forever; the whole group is killed."""
     monkeypatch.setattr(ad, "CAIRNWORK_PROBE_TIMEOUT_SECONDS", 1)
-    binary = _cairnwork_bin(tmp_path, "sleep 60 &\nsleep 60")
+    pidfile = tmp_path / "grandchild.pid"
+    binary = _cairnwork_bin(tmp_path, f'sleep 60 &\necho $! > "{pidfile}"\nsleep 60')
     _cairnwork_env(cfg, "route", binary, "/cw/state")
     started = time.monotonic()
     result = ad.Host().cairnwork_in_flight(cfg)
     assert time.monotonic() - started < 15
     assert result["reason"] == "CAIRNWORK_PROBE_TIMEOUT"
+    # The whole process group was killed: the grandchild is gone too.
+    grandchild = int(pidfile.read_text().strip())
+    deadline = time.monotonic() + 5
+    alive = True
+    while alive and time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+            # Reparented to init; it may sit briefly as a zombie before reaping.
+            state = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(grandchild)], capture_output=True, text=True
+            ).stdout.strip()
+            alive = bool(state) and not state.startswith("Z")
+        except ProcessLookupError:
+            alive = False
+        if alive:
+            time.sleep(0.1)
+    if alive:
+        os.kill(grandchild, signal.SIGKILL)  # never leave it behind
+    assert not alive
 
 
 def test_cairnwork_probe_inherits_path(cfg: ad.Config, tmp_path: Path) -> None:
