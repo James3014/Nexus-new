@@ -1245,6 +1245,12 @@ def _emit(payload: dict[str, Any]) -> None:
 
 REEXEC_ENV = "NEXUS_HOST_SYNC_REEXEC"
 REEXEC_DETAIL_TAIL = 2000
+# Hash of the bytes this process is actually running, captured at load time.
+# It must be taken before `_activate` repoints `runtime/current` and the
+# `sync_target` symlink: afterwards `Path(__file__).resolve()` names the NEW
+# script when launched through the installed symlink (launchd path), which made
+# from == to and suppressed the re-exec (#2758).
+RUNNING_SCRIPT_SHA256 = _sha256(Path(__file__).resolve())
 
 
 def _reexec_error(
@@ -1274,7 +1280,7 @@ def _maybe_reexec_new_host_sync(
     new_script = release / "snapshot" / "scripts" / "ops" / "nexus-host-sync"
     if not new_script.is_file():
         return None
-    from_sha = _sha256(Path(__file__).resolve())
+    from_sha = RUNNING_SCRIPT_SHA256
     to_sha = _sha256(new_script)
     if from_sha == to_sha:
         return None
