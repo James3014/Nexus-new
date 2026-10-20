@@ -1999,6 +1999,9 @@ _CAIRNWORK_MENTION = re.compile(
 )
 # shlex treats ``#`` inside a word as a comment, the shell does not.
 _MIDWORD_HASH = re.compile(r"(?<![ \t])#")
+# Command separators, pipes, redirections and grouping: ``x=route;`` is
+# ``route`` to the shell but ``route;`` to shlex.  Refused, even when quoted.
+_SHELL_CONTROL = re.compile(r"[;&|<>(){}]")
 
 
 def cairnwork_route_config(
@@ -2043,19 +2046,26 @@ def cairnwork_route_config(
                 errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
             continue
         key, value = match.group(1), match.group(2)
-        if _MIDWORD_HASH.search(value):
-            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
-            continue
-        try:
-            parts = shlex.split(value, comments=True)
-        except ValueError:
-            errors[key] = f"CAIRNWORK_ENV_LINE_UNPARSEABLE:{key}"
-            continue
-        if len(parts) > 1 or any(ch in "".join(parts) for ch in ("$", "`")):
-            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
-            continue
-        if _CAIRNWORK_MENTION.search(value.split("#", 1)[0]):
-            errors[key] = f"CAIRNWORK_ENV_LINE_UNSUPPORTED:{key}"
+        problem: Optional[str] = None
+        parts: List[str] = []
+        if _MIDWORD_HASH.search(value) or _SHELL_CONTROL.search(value):
+            problem = "CAIRNWORK_ENV_LINE_UNSUPPORTED"
+        else:
+            try:
+                parts = shlex.split(value, comments=True)
+            except ValueError:
+                problem = "CAIRNWORK_ENV_LINE_UNPARSEABLE"
+        if problem is None and (
+            len(parts) > 1
+            or any(ch in "".join(parts) for ch in ("$", "`"))
+            or _CAIRNWORK_MENTION.search(value.split("#", 1)[0])
+        ):
+            problem = "CAIRNWORK_ENV_LINE_UNSUPPORTED"
+        if problem is not None:
+            # Every Cairnwork name on the line: ``A=1 NEXUS_CAIRNWORK_ROUTE=x``
+            # must never leave ROUTE unread and error-free.
+            for name in mentioned:
+                errors[name] = f"{problem}:{name}"
             continue
         found[key] = parts[0] if parts else ""
         errors.pop(key, None)

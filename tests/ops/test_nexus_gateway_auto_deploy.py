@@ -7897,8 +7897,25 @@ def test_cairnwork_route_config_reads_the_env_file_like_the_shell(tmp_path: Path
         "NEXUS_CAIRNWORK_ROUTE=off#x",
         "NEXUS_CAIRNWORK_ROUTE=$MODE",
         "NEXUS_CAIRNWORK_ROUTE=off NEXUS_CAIRNWORK_STATE=/x",
+        "export NEXUS_CAIRNWORK_STATE=/cw/state NEXUS_CAIRNWORK_ROUTE=route",
+        "export NEXUS_CAIRNWORK_ROUTE_BIN=/cw/bin NEXUS_CAIRNWORK_ROUTE=route",
+        "export NEXUS_CAIRNWORK_ROUTE=route;",
+        "NEXUS_CAIRNWORK_ROUTE=route&&true",
+        "NEXUS_CAIRNWORK_ROUTE=route|cat",
     ],
-    ids=["tab_export", "typeset", "multi_assign", "midword_hash", "expansion", "two_vars"],
+    ids=[
+        "tab_export",
+        "typeset",
+        "multi_assign",
+        "midword_hash",
+        "expansion",
+        "two_vars",
+        "route_second_after_state",
+        "route_second_after_bin",
+        "semicolon",
+        "and_list",
+        "pipe",
+    ],
 )
 def test_cairnwork_route_line_the_parser_cannot_follow_fails_closed(
     cfg: ad.Config, line: str
