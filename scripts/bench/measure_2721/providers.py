@@ -362,6 +362,7 @@ class ClaudeProvider:
             "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
             "key_label": trace["sidecar"].get("key_label"),
             "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
+            "venv": trace["sidecar"].get("venv"),
             "fake_observed": trace["fake_observed"],
             "receipt_failure_reason": receipt.failure_reason,
         }

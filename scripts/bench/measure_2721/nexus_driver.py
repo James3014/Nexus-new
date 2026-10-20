@@ -46,6 +46,7 @@ from scripts.bench.measure_2721.arms import (
     redact_diff,
     served_model_flag,
     task_prompt,
+    venv_problem,
 )
 from scripts.bench.measure_2721.common import append_jsonl, git, write_diff, write_json
 from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, lookup_signals
@@ -380,6 +381,7 @@ class NexusArmDriver:
         run_id = new_run_id(self.arm_label, task["task_id"], repeat)
         gw_task = gateway_task_id(run_id)
         external = True
+        self._current_task = task
         self.expected_cli_timeout = expected_cli_timeout(timeout_seconds)
         prompt = task_prompt(task)
         tree_sha = git(Path(task["base_checkout"]), "rev-parse", "HEAD^{tree}").strip()
@@ -417,6 +419,11 @@ class NexusArmDriver:
                 row.update(outcome=OUTCOME_BLOCKED_EXTERNAL, infra=False, model_calls=0, total_tokens=None)
                 return row
             if external:
+                problem = venv_problem(task)
+                if problem:
+                    # Both arms must run with the task venv (8d pre-run witness).
+                    row.update(outcome=OUTCOME_INFRA, infra=True, void_reason=problem)
+                    return row
                 controller = self.fresh_controller(task, run_root, run_id)
             card = self.client.call("nexus_task_card_create", self.card_args(task, gw_task))
             created = True
@@ -583,6 +590,7 @@ class NexusArmDriver:
                 "cli_timeout_seconds": trace["sidecar"].get("cli_timeout_seconds"),
                 "key_label": trace["sidecar"].get("key_label"),
                 "api_key_sha256_12": trace["sidecar"].get("api_key_sha256_12"),
+                "venv": trace["sidecar"].get("venv"),
             })
             claude["claude_trace_path"] = trace["trace_path"]
             claude["claude_attempts"] = len(runs)
@@ -604,6 +612,11 @@ class NexusArmDriver:
             # M2': both arms must have had the same CLI time limit.
             snapshot["invalid_reason"] = snapshot["invalid_reason"] or "CLI_TIMEOUT_MISMATCH"
             flags.append("CLI_TIMEOUT_MISMATCH")
+        if claude and getattr(self, "_current_task", None) is not None:
+            issue = venv_problem(self._current_task, claude.get("venv"), check_observed=True)
+            if issue:
+                flags.append("VENV_NOT_USABLE")
+                snapshot["invalid_reason"] = snapshot["invalid_reason"] or issue
         served_flag = served_model_flag(claude.get("served_models"))
         if served_flag:
             flags.append(served_flag)
@@ -652,6 +665,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--targets-root", help="measurement root for per-row Controller clones (#2742)")
     parser.add_argument("--state-root", help="the Gateway's NEXUS_STATE_ROOT (restored before each row)")
     parser.add_argument("--state-snapshot", help="directory snapshot to restore NEXUS_STATE_ROOT from")
+    parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--spend-ledger", help="ledger shared with the BARE runner (same file for every arm)")
     parser.add_argument("--learning-phase", help="recorded on every row (LA / LB / COLD / IRRELEVANT / M)")
     parser.add_argument("--key-file", default=str(Path("~/.config/nexus-measure-2721/anthropic.env").expanduser()),
                         help="the measurement key file, used only to redact candidate diffs")
@@ -675,11 +690,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         learning_phase=args.learning_phase,
         key_file=args.key_file,
     )
+    from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
+
+    ledger = SpendLedger(Path(args.spend_ledger) if args.spend_ledger else Path(args.run_root) / "run" / "spend.json",
+                         args.budget_usd)
     rows = []
     try:
         for task in load_manifest(args.manifest, args.ids):
             for repeat in args.repeats:
-                rows.append(driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout))
+                ledger.check_can_start()
+                row = driver.run(task, repeat, Path(args.run_root), timeout_seconds=args.timeout)
+                ledger.add(row.get("total_cost_usd"))
+                rows.append(row)
+    except BudgetExhausted as exc:
+        print(json.dumps({"stopped": str(exc), "rows": len(rows)}))
+        return 75
     except GatewayStuck as exc:
         print(json.dumps({"stopped": "GATEWAY_STUCK", "detail": str(exc), "rows": len(rows)}))
         return 75

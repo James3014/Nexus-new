@@ -163,6 +163,28 @@ def bare_worktree(task: Mapping[str, Any], root: Path, run_id: str) -> tuple[Pat
     return controller, target
 
 
+FLAG_VENV = "VENV_NOT_USABLE"
+
+
+def venv_problem(task: Mapping[str, Any], observed: Any = None, *, check_observed: bool = False) -> Optional[str]:
+    """Why the task venv is not the one both arms must use, else None (8d witness).
+
+    The venv must be set, resolve inside ``NEXUS_MEASUREMENT_READ_ROOTS`` and,
+    after the run, be exactly the venv the adapter granted (sidecar ``venv``)."""
+    from nexus.executors.claude_measurement_worker import configured_read_roots
+
+    expected = task.get("venv")
+    if not expected:
+        return "VENV_MISSING"
+    real = Path(os.path.realpath(expected))
+    roots = configured_read_roots()
+    if not any(real == root or root in real.parents for root in roots):
+        return "VENV_OUTSIDE_READ_ROOTS"
+    if check_observed and observed != str(real):
+        return "VENV_MISMATCH"
+    return None
+
+
 def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Provider, *,
              timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS, keep_workdir: bool = False) -> dict[str, Any]:
     from scripts.bench.measure_2721 import watchdog
@@ -203,6 +225,12 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         FLAG_GIT_TAMPERED if tampered else None,
         FLAG_SECRET_IN_DIFF if redacted else None,
     ) if flag]
+    venv_issue = (
+        venv_problem(task, extra.get("venv"), check_observed=True)
+        if isinstance(provider, _claude_provider_type()) else None
+    )
+    if venv_issue:
+        flags.append(FLAG_VENV)
     timeout_mismatch = (
         extra.get("cli_timeout_seconds") is not None
         and extra.get("cli_timeout_seconds") != expected_cli_timeout(timeout_seconds)
@@ -221,8 +249,10 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
         "started_at": started_at,
         "wall_seconds": round(wall, 3),
         "outcome": "TAMPERED" if tampered else (
-            STATUS_INFRA if infra_event or timeout_mismatch else result.status),
-        "infra": result.status == STATUS_INFRA or infra_event is not None or timeout_mismatch,
+            STATUS_INFRA if infra_event or timeout_mismatch or venv_issue else result.status),
+        "infra": result.status == STATUS_INFRA or infra_event is not None or timeout_mismatch or bool(venv_issue),
+        "venv_problem": venv_issue,
+        "venv": extra.get("venv"),
         "watchdog_event": infra_event,
         "provider": result.as_dict(),
         "model_calls": result.model_calls,
@@ -237,6 +267,12 @@ def run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pro
     if not keep_workdir:
         shutil.rmtree(run_root / "work" / run_id, ignore_errors=True)
     return row
+
+
+def _claude_provider_type() -> type:
+    from scripts.bench.measure_2721.providers import ClaudeProvider
+
+    return ClaudeProvider
 
 
 def claude_row_fields(extra: Mapping[str, Any]) -> dict[str, Any]:
@@ -261,6 +297,7 @@ def claude_row_fields(extra: Mapping[str, Any]) -> dict[str, Any]:
         "cli_timeout_seconds": extra.get("cli_timeout_seconds"),
         "key_label": extra.get("key_label"),
         "api_key_sha256_12": extra.get("api_key_sha256_12"),
+        "venv": extra.get("venv"),
         "seatbelt_sha256": extra.get("seatbelt_sha256"),
         "proxy_denied": [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")],
     }
@@ -320,6 +357,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="0600 KEY=value file with ANTHROPIC_API_KEY (read only by the adapter)")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--keep-workdir", action="store_true")
+    parser.add_argument("--budget-usd", type=float, default=60.0, help="hard stop for the whole measurement")
+    parser.add_argument("--spend-ledger", help="ledger shared by every arm (default <run-root>/run/spend.json)")
     args = parser.parse_args(argv)
     run_root = Path(args.run_root)
     tasks = load_manifest(args.manifest, args.ids)
@@ -328,14 +367,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                        key_file=args.key_file)
         if args.arm == "bare" else None
     )
+    from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
+
+    ledger = SpendLedger(Path(args.spend_ledger) if args.spend_ledger else run_root / "run" / "spend.json",
+                         args.budget_usd)
     rows = []
-    for task in tasks:
-        for repeat in args.repeats:
-            if args.arm == "bare":
-                rows.append(run_bare(task, repeat, run_root, provider, timeout_seconds=args.timeout,
-                                     keep_workdir=args.keep_workdir))
-            else:
-                rows.append(run_noop(task, repeat, run_root))
+    try:
+        for task in tasks:
+            for repeat in args.repeats:
+                if args.arm == "bare":
+                    ledger.check_can_start()
+                    row = run_bare(task, repeat, run_root, provider, timeout_seconds=args.timeout,
+                                   keep_workdir=args.keep_workdir)
+                    ledger.add(row.get("total_cost_usd"))
+                    rows.append(row)
+                else:
+                    rows.append(run_noop(task, repeat, run_root))
+    except BudgetExhausted as exc:
+        print(json.dumps({"stopped": str(exc), "rows": len(rows)}))
+        return 75
     print(json.dumps({"rows": len(rows), "rows_path": str(run_root / "rows.jsonl")}))
     return 0
 

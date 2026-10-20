@@ -11,7 +11,13 @@ Modes:
 * ``record``: no edit (the symmetry dry run);
 * ``noop``: no edit (the NEXUS_NOOP arm: P1 with a worker that makes no
   model call must score 0 RESOLVED with an empty diff);
-* ``edit``: appends one line to ``README.md`` (pipeline tests).
+* ``edit``: appends one line to ``README.md`` (pipeline tests);
+* ``venvprobe``: runs ``python -c 'import encodings'`` and a pytest
+  collection with the task venv inside the sandbox, reported as a
+  ``system/venv_probe`` event;
+* ``smoke``: edits ``README.md`` (outside the allowed scope) and creates an
+  untracked file in the first allowed directory;
+* ``hang``: writes one file, then sleeps past any time cap (timeout snapshot).
 """
 
 from __future__ import annotations
@@ -42,10 +48,33 @@ print(json.dumps({"type": "system", "subtype": "init", "model": "claude-haiku-5-
                   "claude_code_version": "0.0.0",
                   "fake_observed": {"mode": MODE, "argv": args, "cwd": os.getcwd(), "env": env,
                                     "git_status": git_status}}))
-if MODE == "edit" and not args[-1].startswith("Reply with exactly"):
+probe_run = not args[-1].startswith("Reply with exactly")
+venv_probe = {}
+if MODE == "venvprobe" and probe_run:
+    # The task venv must work inside the sandbox in both arms.
+    for name, cmd in (("import_encodings", ["python", "-c", "import encodings, sys; print(sys.prefix)"]),
+                      ("pytest_collect", ["python", "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"])):
+        try:
+            done = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            venv_probe[name] = {"rc": done.returncode, "tail": (done.stdout + done.stderr)[-400:]}
+        except Exception as exc:
+            venv_probe[name] = {"rc": None, "tail": type(exc).__name__}
+    print(json.dumps({"type": "system", "subtype": "venv_probe", "venv_probe": venv_probe}))
+if MODE in ("edit", "smoke") and probe_run:
     readme = Path("README.md")
     if readme.exists():
         readme.write_text(readme.read_text() + "\nfake edit\n")
+if MODE == "smoke" and probe_run:
+    # Smoke shapes the measurement must handle: an untracked new file inside the
+    # first allowed directory and an edit outside the allowed scope (README above).
+    allowed = next((line.split(":", 1)[1] for line in args[-1].splitlines() if line.startswith("Allowed files:")), "")
+    scope = next((entry.strip() for entry in allowed.split(",") if entry.strip().endswith("/")), "")
+    if scope and Path(scope).is_dir():
+        (Path(scope) / "m2721_smoke_new_file.py").write_text("SMOKE = 1\n")
+if MODE == "hang" and probe_run:
+    import time
+    Path("hang_started.txt").write_text("worker edit before the cap\n")
+    time.sleep(10 ** 6)
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
                   "total_cost_usd": 0.0, "session_id": "fake",
                   "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
@@ -55,7 +84,7 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "nu
 
 
 def write_fake_claude(path: Path, mode: str = "record") -> Path:
-    if mode not in ("record", "noop", "edit"):
+    if mode not in ("record", "noop", "edit", "venvprobe", "smoke", "hang"):
         raise ValueError(f"unknown fake mode {mode!r}")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

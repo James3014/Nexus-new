@@ -68,10 +68,17 @@ def bank(tmp_path: Path) -> dict:
 
 
 @pytest.fixture()
-def manifest(bank: dict) -> Path:
+def manifest(bank: dict, monkeypatch) -> Path:
     out = bank["root"] / "mat"
+    # A per-task venv under an operator read root, as the measurement requires.
+    venvs = bank["root"] / "venvs"
+    venv = venvs / bank["row"]["id"]
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to("/usr/bin/python3")
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", str(venvs.resolve()))
     assert materialize.main(["--tasks", str(bank["tasks"]), "--repos-root", str(bank["root"] / "repos"),
-                             "--out", str(out)]) == 0
+                             "--out", str(out), "--venv-root", str(venvs)]) == 0
     return out / "manifest.jsonl"
 
 
@@ -657,3 +664,75 @@ def test_portable_rows_are_written_for_every_row(manifest, tmp_path):
     assert [r["arm"] for r in rows] == ["BARE", "NEXUS"] and all(r["schema"] == PORTABLE_ROW_SCHEMA for r in rows)
     assert set(rows[0]) >= {"task_id", "arm", "attempt_id", "candidate_commit", "outcome", "cost_tokens",
                             "wall_seconds", "verdict"}
+
+
+
+def test_a_row_without_a_usable_venv_never_reaches_the_gateway(manifest, tmp_path, monkeypatch):
+    (task,) = arms.load_manifest(manifest)
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", str(tmp_path / "elsewhere"))
+    gateway = FakeGateway()
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["infra"] is True and row["void_reason"] == "VENV_OUTSIDE_READ_ROOTS" and gateway.calls == []
+    assert arms.venv_problem(dict(task, venv=None)) == "VENV_MISSING"
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", str(Path(task["venv"]).parent))
+    assert arms.venv_problem(task) is None
+    assert arms.venv_problem(task, "/other/venv", check_observed=True) == "VENV_MISMATCH"
+    assert arms.venv_problem(task, os.path.realpath(task["venv"]), check_observed=True) is None
+
+
+def test_spend_ledger_stops_before_the_cap(tmp_path):
+    from scripts.bench.measure_2721.budget import BudgetExhausted, SpendLedger
+
+    ledger = SpendLedger(tmp_path / "spend.json", cap_usd=1.0)
+    ledger.check_can_start()
+    ledger.add(0.3)
+    ledger.check_can_start()  # 0.3 + max(0.3, 0.5) <= 1.0
+    ledger.add(0.4)
+    with pytest.raises(BudgetExhausted):
+        ledger.check_can_start()  # 0.7 + 0.5 > 1.0
+    assert SpendLedger(tmp_path / "spend.json", 1.0).state()["rows"] == 2
+
+
+@needs_sandbox
+def test_venv_probe_runs_python_and_pytest_inside_the_sandbox(manifest, tmp_path, monkeypatch):
+    """8d witness item 3, zero-model: the task venv works under the adapter's sandbox."""
+    from scripts.bench.measure_2721.fake_claude import write_fake_claude
+    from scripts.bench.measure_2721.providers import ClaudeProvider, claude_identity
+
+    import site
+    import subprocess as sp
+    import sys
+
+    (task,) = arms.load_manifest(manifest)
+    # A real venv (the fixture's /usr/bin/python3 link is an xcrun shim on macOS):
+    # this interpreter's base install, plus this run's site-packages for pytest.
+    venv = Path(os.path.realpath(task["venv"]))
+    for child in venv.iterdir():
+        child.unlink() if not child.is_dir() else None
+    sp.run([sys.executable, "-m", "venv", "--without-pip", "--clear", str(venv)], check=True)
+    site_dir = next(Path(p) for p in site.getsitepackages() if p.endswith("site-packages"))
+    venv_site = next(venv.glob("lib/python*/site-packages"))
+    import shutil
+
+    # The task venv must be self-contained (only it is readable in the sandbox):
+    # copy pytest and its runtime dependencies in.
+    for name in ("pytest", "_pytest", "pluggy", "iniconfig", "packaging", "py.py", "pygments"):
+        source = site_dir / name
+        if source.is_dir():
+            shutil.copytree(source, venv_site / name)
+        elif source.is_file():
+            shutil.copy(source, venv_site / name)
+    base_prefix = Path(os.path.realpath(sys.base_prefix))
+    monkeypatch.setenv("NEXUS_MEASUREMENT_READ_ROOTS", ":".join((str(venv.parent), str(base_prefix))))
+    fake = write_fake_claude(tmp_path / "bin" / "claude", "venvprobe")
+    key = tmp_path / "anthropic.env"
+    key.write_text("ANTHROPIC_API_KEY=" + "-".join(("sk", "ant", "test", "NOTAREALKEY000000000000")) + "\n")
+    key.chmod(0o600)
+    provider = ClaudeProvider(str(fake), tmp_path / "run" / "traces", str(key),
+                              identity=claude_identity(str(fake), str(key)))
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=900)
+    assert row["venv"] == os.path.realpath(task["venv"]) and row["venv_problem"] is None, row
+    trace = Path(row["provider"]["extra"]["trace_path"]).read_text().splitlines()
+    probe = next(json.loads(line)["venv_probe"] for line in trace if '"venv_probe"' in line)
+    assert probe["import_encodings"]["rc"] == 0, probe
+    assert probe["pytest_collect"]["rc"] in (0, 5), probe  # 5 = collected nothing (fixture repo)
