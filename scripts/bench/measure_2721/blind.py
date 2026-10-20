@@ -301,8 +301,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows.append(row)
     tasks = {task["task_id"]: task for task in read_jsonl(args.manifest)}
     if noop_nonempty:
-        print(f"VOID: {len(noop_nonempty)} NOOP/NEXUS_NOOP row(s) with a non-empty diff (see the arm map)",
-              file=sys.stderr)
+        # PREREG v0.9.7 (layer1-rie): the run is void and is not scored -- no
+        # candidates.jsonl; the arm map with the hits goes to custody for the inquiry.
+        write_json(arm_map, {"schema": BLIND_SCHEMA, "candidates_jsonl_sha256": None, "map": {},
+                             "excluded": block_excluded, "dropped": dropped,
+                             "noop_nonempty_diff": noop_nonempty, "void": "NOOP_NONEMPTY_DIFF"}, mode=0o600)
+        print(json.dumps({"void": "NOOP_NONEMPTY_DIFF", "noop_nonempty_diff": noop_nonempty}))
+        return 3
     print(json.dumps(blind(rows, out, arm_map, tasks, dropped, block_excluded, noop_nonempty)))
     return 0
 

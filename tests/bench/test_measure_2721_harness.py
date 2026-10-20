@@ -2863,8 +2863,11 @@ def test_noop_nonempty_diff_is_recorded_from_any_attempt(tmp_path, arm):
     manifest = tmp_path / "manifest.jsonl"
     manifest.write_text("")
     amap_path = tmp_path / "custody" / "map.json"
-    blind.main(["--run-roots", str(run), "--out", str(tmp_path / "blind"), "--arm-map", str(amap_path),
-                "--manifest", str(manifest)])
+    rc = blind.main(["--run-roots", str(run), "--out", str(tmp_path / "blind"), "--arm-map", str(amap_path),
+                     "--manifest", str(manifest)])
+    # A hit voids the run: exit 3, nothing for the scorer, the arm map in custody (0600).
+    assert rc == 3 and not (tmp_path / "blind" / "candidates.jsonl").exists()
+    assert stat.S_IMODE(amap_path.stat().st_mode) == 0o600
     hits = json.loads(amap_path.read_text())["noop_nonempty_diff"]
     assert [(h["arm"], h["run_id"]) for h in hits] == [
         (arm, f"{arm}-extra"), (arm, f"{arm}-unproven"), (arm, f"m2721-{arm.lower()}-pkg-100-r1-orphan")]
