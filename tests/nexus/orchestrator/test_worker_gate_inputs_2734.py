@@ -258,3 +258,33 @@ def test_honest_gate_record_keeps_success_and_unknown_errors_unchanged():
         "response": {"outcome": {"error": "boom"}},
     }
     assert wgi.honest_gate_record("mempalace_gate", crashed, "t1") == crashed
+
+
+@pytest.mark.parametrize("invoked", [False, None])
+@pytest.mark.parametrize(
+    ("name", "error"),
+    [
+        ("pregate", "EXPLICIT_VERIFY_COMMANDS_REQUIRED"),
+        ("harness_preflight_sensor", "VERIFY_COMMAND_WIRING_REQUIRED"),
+        ("plan_quality_gate", "PLAN_QUALITY_CONTEXT_REQUIRED"),
+        ("mempalace_gate", "MEMPALACE_ARTIFACT_CONTEXT_REQUIRED"),
+    ],
+)
+def test_honest_gate_record_keeps_crash_named_like_a_refusal_code(name, error, invoked):
+    """A crash whose message equals a refusal code is not a refusal: never NOT_APPLICABLE."""
+    crashed = {
+        "status": "FAILED",
+        "response": {"outcome": {"error": error}},
+    }
+    if invoked is not None:
+        crashed["invoked"] = invoked
+    before = deepcopy(crashed)
+    out = wgi.honest_gate_record(name, crashed, "t1", {"task_id": "t1"})
+    assert out == before
+    assert "skipped" not in out and "applicability" not in out
+    # The genuine refusal (gate invoked, returned the code) is still converted.
+    refused = {**before, "invoked": True}
+    converted = wgi.honest_gate_record(name, refused, "t1", {"task_id": "t1"})
+    assert converted["skipped"] is True
+    assert converted["applicability"] == "NOT_APPLICABLE"
+    assert converted["skip_reason"].startswith(f"NOT_APPLICABLE:{error}")
