@@ -208,3 +208,148 @@ def test_verification_write_uses_no_conflict_resolution_clause():
     source = Path(transport.__file__).read_text(encoding="utf-8")
     assert "INSERT INTO core_mutation_verifications" in source
     assert not re.search(r"INSERT\s+OR\s+\w+\s+INTO\s+core_mutation_verifications", source)
+
+
+_PRE2776_DDL = """
+    CREATE TABLE core_mutation_verifications (
+        session_id TEXT PRIMARY KEY,
+        binding_hash TEXT NOT NULL,
+        candidate_state_hash TEXT NOT NULL,
+        core_status TEXT NOT NULL,
+        change_set_hash TEXT NOT NULL,
+        verification_plan_hash TEXT NOT NULL,
+        evidence_bundle_hash TEXT NOT NULL,
+        change_manifest_hash TEXT NOT NULL,
+        projection_hash TEXT NOT NULL,
+        core_reason_codes_json TEXT NOT NULL,
+        verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+_QUARANTINE = "core_mutation_verifications_quarantine_pre2776"
+
+
+def test_pre_2776_null_session_rows_are_quarantined_not_lost(tmp_path, core, caplog):
+    """A NULL session_id (allowed by the old TEXT PRIMARY KEY) must not make the DB unopenable."""
+    db_path = tmp_path / "legacy-null.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(_PRE2776_DDL)
+        conn.execute(
+            "INSERT INTO core_mutation_verifications VALUES"
+            " (NULL, 'bh0', 'csh0', 'FAILED_VERIFICATION', 'c0', 'p0', 'e0', 'm0', 'proj0',"
+            " '[\"ORPHAN\"]', '2026-09-30 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO core_mutation_verifications VALUES"
+            " (?, 'bh', 'csh', 'FAILED_VERIFICATION', 'c', 'p', 'e', 'm', 'proj', '[\"OLD\"]',"
+            " '2026-10-01 00:00:00')",
+            (SESSION_ID,),
+        )
+
+    caplog.set_level("WARNING", logger=transport.__name__)
+    port = transport.CanonicalNexusCoreTransportPort(db_path=db_path)
+    readback = port.readback_session(SESSION_ID)
+    assert port.pre2776_quarantined_rows == 1
+    assert any(
+        "1 row(s) with NULL session_id" in rec.getMessage() and _QUARANTINE in rec.getMessage()
+        for rec in caplog.records
+    )
+    assert readback["verification_count"] == 1
+    assert readback["verification_row"]["candidate_state_hash"] == "csh"
+
+    with sqlite3.connect(db_path) as conn:
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+        quarantined = conn.execute(f"SELECT * FROM {_QUARANTINE}").fetchall()
+        q_columns = [row[1] for row in conn.execute(f"PRAGMA table_info({_QUARANTINE})")]
+        null_in_main = conn.execute(
+            "SELECT COUNT(*) FROM core_mutation_verifications WHERE session_id IS NULL"
+        ).fetchone()[0]
+    assert "core_mutation_verifications_pre2776" not in names
+    assert null_in_main == 0
+    assert q_columns == [
+        "session_id",
+        "binding_hash",
+        "candidate_state_hash",
+        "core_status",
+        "change_set_hash",
+        "verification_plan_hash",
+        "evidence_bundle_hash",
+        "change_manifest_hash",
+        "projection_hash",
+        "core_reason_codes_json",
+        "verified_at",
+    ]
+    assert quarantined == [
+        (
+            None,
+            "bh0",
+            "csh0",
+            "FAILED_VERIFICATION",
+            "c0",
+            "p0",
+            "e0",
+            "m0",
+            "proj0",
+            '["ORPHAN"]',
+            "2026-09-30 00:00:00",
+        )
+    ]
+
+    # The migrated database stays usable, and reopening it quarantines nothing more.
+    core.append(("VERIFIED", []))
+    _verify(port, tmp_path, "sha256:" + "2" * 64)
+    again = transport.CanonicalNexusCoreTransportPort(db_path=db_path)
+    assert again.readback_session(SESSION_ID)["verification_count"] == 2
+    assert again.pre2776_quarantined_rows == 0
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(f"SELECT COUNT(*) FROM {_QUARANTINE}").fetchone()[0] == 1
+
+
+def test_pre_2776_migration_without_null_rows_creates_no_quarantine(tmp_path):
+    db_path = tmp_path / "legacy-clean.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(_PRE2776_DDL)
+        conn.execute(
+            "INSERT INTO core_mutation_verifications VALUES"
+            " (?, 'bh', 'csh', 'VERIFIED', 'c', 'p', 'e', 'm', 'proj', '[]',"
+            " '2026-10-01 00:00:00')",
+            (SESSION_ID,),
+        )
+    port = transport.CanonicalNexusCoreTransportPort(db_path=db_path)
+    assert port.readback_session(SESSION_ID)["verification_count"] == 1
+    assert port.pre2776_quarantined_rows == 0
+    with sqlite3.connect(db_path) as conn:
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    assert _QUARANTINE not in names
+
+
+def test_readback_latest_is_highest_id_even_when_verified_at_disagrees(tmp_path):
+    """Latest = last appended (highest id), never the latest or earliest ``verified_at``."""
+    db_path = tmp_path / "core.sqlite"
+    port = transport.CanonicalNexusCoreTransportPort(db_path=db_path)
+    port._ensure_db()
+    # Insert order: B (10-02), C (10-03), A (10-01): verified_at agrees with neither
+    # ascending nor descending insert order.
+    rows = [
+        ("FAILED_VERIFICATION", "2026-10-02 00:00:00", "csh-b"),
+        ("BLOCKED", "2026-10-03 00:00:00", "csh-c"),
+        ("VERIFIED", "2026-10-01 00:00:00", "csh-a"),
+    ]
+    with sqlite3.connect(db_path) as conn:
+        for status, verified_at, csh in rows:
+            conn.execute(
+                "INSERT INTO core_mutation_verifications (session_id, binding_hash,"
+                " candidate_state_hash, core_status, change_set_hash, verification_plan_hash,"
+                " evidence_bundle_hash, change_manifest_hash, projection_hash,"
+                " core_reason_codes_json, verified_at)"
+                " VALUES (?, 'bh', ?, ?, 'c', 'p', 'e', 'm', 'proj', '[]', ?)",
+                (SESSION_ID, csh, status, verified_at),
+            )
+        max_id = conn.execute("SELECT MAX(id) FROM core_mutation_verifications").fetchone()[0]
+
+    readback = port.readback_session(SESSION_ID)
+    history = readback["verification_history"]
+    assert [row["candidate_state_hash"] for row in history] == ["csh-b", "csh-c", "csh-a"]
+    assert [row["id"] for row in history] == sorted(row["id"] for row in history)
+    assert readback["verification_row"]["id"] == max_id
+    assert readback["verification_row"]["core_status"] == "VERIFIED"
+    assert readback["prior_core_statuses"] == ["FAILED_VERIFICATION", "BLOCKED"]

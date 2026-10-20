@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -617,8 +618,41 @@ _MIGRATE_PRE2776_ROWS_SQL = """
      verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
      core_reason_codes_json, verified_at
     FROM core_mutation_verifications_pre2776
+    WHERE session_id IS NOT NULL
     ORDER BY verified_at, rowid
 """
+# A pre-#2776 row with a NULL ``session_id`` (the old ``TEXT PRIMARY KEY`` allowed it)
+# cannot enter the NOT NULL table. It is moved here, with the same columns, instead of
+# failing the migration (which would leave the database unopenable) or being dropped.
+_QUARANTINE_PRE2776_TABLE = "core_mutation_verifications_quarantine_pre2776"
+_QUARANTINE_PRE2776_DDL = """
+    CREATE TABLE IF NOT EXISTS core_mutation_verifications_quarantine_pre2776 (
+        session_id TEXT,
+        binding_hash TEXT,
+        candidate_state_hash TEXT,
+        core_status TEXT,
+        change_set_hash TEXT,
+        verification_plan_hash TEXT,
+        evidence_bundle_hash TEXT,
+        change_manifest_hash TEXT,
+        projection_hash TEXT,
+        core_reason_codes_json TEXT,
+        verified_at TIMESTAMP
+    )
+"""
+_QUARANTINE_PRE2776_ROWS_SQL = """
+    INSERT INTO core_mutation_verifications_quarantine_pre2776
+    (session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
+     verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
+     core_reason_codes_json, verified_at)
+    SELECT session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
+     verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
+     core_reason_codes_json, verified_at
+    FROM core_mutation_verifications_pre2776
+    WHERE session_id IS NULL
+    ORDER BY verified_at, rowid
+"""
+_LOG = logging.getLogger(__name__)
 _APPEND_ONLY_TRIGGERS_SQL = (
     """
     CREATE TRIGGER IF NOT EXISTS core_mutation_verifications_no_update
@@ -650,13 +684,18 @@ _VERIFICATIONS_DDL = """
 """
 
 
-def _ensure_append_only_verifications(conn: sqlite3.Connection) -> None:
+def _ensure_append_only_verifications(conn: sqlite3.Connection) -> int:
     """Create or migrate ``core_mutation_verifications`` to append-only (#2776).
 
     A database created before #2776 keyed the table by ``session_id``. Its
     rows are copied, in order, into the new table inside one IMMEDIATE
     transaction, so a concurrent opener sees either the old or the new table.
+    Rows with a NULL ``session_id`` are moved to
+    ``core_mutation_verifications_quarantine_pre2776`` instead (never dropped).
+
+    Returns the number of rows quarantined by this call (0 when nothing migrated).
     """
+    quarantined = 0
     conn.commit()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -668,6 +707,12 @@ def _ensure_append_only_verifications(conn: sqlite3.Connection) -> None:
             )
             conn.execute(_VERIFICATIONS_DDL)
             conn.execute(_MIGRATE_PRE2776_ROWS_SQL)
+            quarantined = conn.execute(
+                "SELECT COUNT(*) FROM core_mutation_verifications_pre2776 WHERE session_id IS NULL"
+            ).fetchone()[0]
+            if quarantined:
+                conn.execute(_QUARANTINE_PRE2776_DDL)
+                conn.execute(_QUARANTINE_PRE2776_ROWS_SQL)
             conn.execute("DROP TABLE core_mutation_verifications_pre2776")
         conn.execute(_VERIFICATIONS_DDL)
         conn.execute(
@@ -680,6 +725,14 @@ def _ensure_append_only_verifications(conn: sqlite3.Connection) -> None:
     except BaseException:
         conn.rollback()
         raise
+    if quarantined:
+        _LOG.warning(
+            "core_mutation_verifications migration (#2776): %d row(s) with NULL session_id "
+            "moved to %s",
+            quarantined,
+            _QUARANTINE_PRE2776_TABLE,
+        )
+    return quarantined
 
 
 class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
@@ -701,6 +754,8 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         self.db_path = Path(db_path)
         self.simulate_core_unavailable = simulate_core_unavailable
         self._db_ready = False
+        # Rows with a NULL session_id quarantined when this port migrated a pre-#2776 DB.
+        self.pre2776_quarantined_rows = 0
 
     def _ensure_db(self) -> None:
         if self._db_ready:
@@ -726,7 +781,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            _ensure_append_only_verifications(conn)
+            self.pre2776_quarantined_rows = _ensure_append_only_verifications(conn)
             # #2346: a declared-universe task that ended without a Candidate.
             # One row per (task, attempt); additive, so existing rows and
             # readers are unchanged.
