@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -124,6 +125,19 @@ class CandidateCommitter:
         )
 
     def create_candidate_commit(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        receipt: VerifiedCandidateReceipt,
+    ) -> PromotionApprovalPacket:
+        # Every git call below runs bound to the contract's Controller, so an
+        # external measurement Controller's Target stays hardened (#2749).
+        manager = getattr(self, "worktree_manager", None)
+        scope = manager.controller_git_scope(contract) if manager is not None else nullcontext()
+        with scope:
+            return self._create_candidate_commit(contract, lease, receipt)
+
+    def _create_candidate_commit(
         self,
         contract: SelfHostedTaskContract,
         lease: TargetWorktreeLease,

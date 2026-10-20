@@ -27,7 +27,25 @@ Validation fails closed with a stable ``EXTERNAL_TARGET_*`` code:
   explicitly configured ``NEXUS_CANONICAL_SOURCE_ROOT``;
 * the work tree is clean (tracked and untracked).  The Target lease refuses a
   dirty Controller anyway (``WorktreeManager._verify_controller``), so a dirty
-  external repository is refused here, before any planner or provider work.
+  external repository is refused here, before any planner or provider work;
+* no submodule (``.gitmodules``, a gitlink, or a non-empty ``modules/``)
+  and no git filter can run (#2749): the repository config defines no
+  ``filter.*`` driver (nor a ``diff.*.textconv``/``command`` driver), no
+  ``.gitattributes`` in the base tree declares ``filter=`` and no
+  ``info/attributes`` file is non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
+  This is checked before the first ``git status``, since status runs clean
+  filters.
+
+In measurement mode every git call ``WorktreeManager`` makes goes through
+``run_hardened_git`` (#2749):
+the flags above plus ``core.attributesFile=/dev/null`` and
+``commit.gpgSign=false`` and ``submodule.recurse=false`` (status and diff also
+get ``--ignore-submodules=all``), the inherited ``GIT_*`` environment dropped, no
+system/global config or system attributes, no prompt, stdin closed, and a
+driver re-check before each call, so a filter planted after validation makes
+the call refuse instead of running it.  With the variable unset at start
+(the live Gateway) nothing changes; ``external_git_context`` only decides
+where the lease re-check runs.
 
 The Task Card still lives in the Nexus-new ``tasks/`` tree; only the Controller
 (the repository the Target worktree is cut from) changes.
@@ -41,7 +59,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 MEASURE_EXTERNAL_TARGET_ROOT_ENV = "NEXUS_MEASURE_EXTERNAL_TARGET_ROOT"
 EXTERNAL_TARGET_KEYS = frozenset({"repo_root", "base_revision"})
@@ -58,10 +76,34 @@ _GIT_SAFE_CONFIG = (
     "-c", "core.hooksPath=/dev/null",
     "-c", "protocol.allow=never",
 )  # fmt: skip
+# The lease/capture runner adds two more (#2749): no attributes file from the
+# repository config and no signing program on a candidate commit.
+HARDENED_GIT_CONFIG = (
+    *_GIT_SAFE_CONFIG,
+    "-c", "core.attributesFile=/dev/null",
+    "-c", "commit.gpgSign=false",
+    "-c", "submodule.recurse=false",
+)  # fmt: skip
+# Subcommands that would otherwise look into submodules (and run their filters).
+_IGNORE_SUBMODULES_COMMANDS = frozenset({"status", "diff"})
+# Config keys that name a command git runs on file content: filter drivers
+# (clean/smudge/process) and diff textconv/external commands (#2749).
+GIT_DRIVER_CONFIG_REGEX = r"^filter\.|^diff\..*\.(textconv|command)$"
+FILTER_DRIVER_PRESENT = "EXTERNAL_TARGET_FILTER_DRIVER_PRESENT"
+SUBMODULE_PRESENT = "EXTERNAL_TARGET_SUBMODULE_PRESENT"
+_ATTRIBUTE_FILTER = re.compile(rb"(?:^|\s)filter=", re.MULTILINE)
 
 
 class ExternalTargetError(ValueError):
     """A refused external target; ``str(exc)`` is the stable code."""
+
+
+class ExternalGitRefused(RuntimeError):
+    """A hardened git call on an external Controller was refused (#2749).
+
+    A ``RuntimeError`` like every other ``WorktreeManager`` git failure, so the
+    lease's rollback paths still run; ``str(exc)`` is the stable code.
+    """
 
 
 @dataclass(frozen=True)
@@ -100,15 +142,25 @@ def _measurement_root(env: Optional[Mapping[str, str]]) -> Path:
     return resolved
 
 
-def _git_environment() -> dict[str, str]:
-    """Inherited env without any ``GIT_*`` variable; no system/global config, no prompt."""
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+def hardened_git_environment(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """``base`` (default: the process env) without any ``GIT_*`` variable.
+
+    No system/global config and no prompt.  A ``GIT_*`` value the caller put in
+    ``base`` is dropped too: the hardened runner sets every git variable itself.
+    """
+    source = os.environ if base is None else base
+    environment = {key: value for key, value in source.items() if not key.startswith("GIT_")}
     environment.update({
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
     })
     return environment
+
+
+def _git_environment() -> dict[str, str]:
+    """Inherited env without any ``GIT_*`` variable; no system/global config, no prompt."""
+    return hardened_git_environment()
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -121,6 +173,7 @@ def _git(repo_root: Path, *args: str) -> str:
             timeout=10,
             check=False,
             env=environment,
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ExternalTargetError("EXTERNAL_TARGET_GIT_UNAVAILABLE") from exc
@@ -276,7 +329,18 @@ def validate_external_target(
             raise ExternalTargetError("EXTERNAL_TARGET_FORBIDDEN_PATH")
     if external_target_head(repo_root) != raw_revision:
         raise ExternalTargetError("EXTERNAL_TARGET_HEAD_MISMATCH")
-    if _git(repo_root, "status", "--porcelain=v1", "-z", "--untracked-files=all"):
+    # Before the status probe below: ``git status`` runs clean filters (#2749).
+    finding = filter_driver_finding(repo_root, raw_revision)
+    if finding is not None:
+        raise ExternalTargetError(finding)
+    if _git(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignore-submodules=all",
+    ):
         raise ExternalTargetError("EXTERNAL_TARGET_DIRTY")
     return ExternalTarget(repo_root=repo_root, base_revision=raw_revision)
 
@@ -310,3 +374,309 @@ def accepted_external_controller(
         env=env,
         forbidden_roots=forbidden_roots,
     )
+
+
+# --------------------------------------------------------------------------
+# Hardened git for the lease, capture and commit of an external Controller
+# (#2749).  ``WorktreeManager`` routes a call here when
+# ``external_git_context`` says git would read an external repository.
+# --------------------------------------------------------------------------
+
+
+def _measurement_root_at_start() -> Optional[Path]:
+    """The start-time measurement root, resolved; ``None`` when the mode is off.
+
+    Raises ``ExternalGitRefused`` when the mode is on but the root cannot be
+    resolved: the caller must then treat every git call as external.
+    """
+    raw = MEASURE_EXTERNAL_TARGET_ROOT_AT_START
+    if not raw:
+        return None
+    try:
+        return Path(raw).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ExternalGitRefused("EXTERNAL_TARGET_ROOT_UNCONFIGURED") from exc
+
+
+def _discovered_git_dirs(start: Path) -> Optional[tuple[Path, Path]]:
+    """The ``(gitdir, common dir)`` git would use from ``start``, read in Python.
+
+    ``None`` when it cannot be told (no ``.git`` found, an unreadable pointer).
+    """
+    for directory in (start, *start.parents):
+        dotgit = directory / ".git"
+        try:
+            if dotgit.is_dir():
+                gitdir = dotgit.resolve(strict=True)
+            elif dotgit.is_file():
+                text = dotgit.read_text(encoding="utf-8").strip()
+                if not text.startswith("gitdir:"):
+                    return None
+                gitdir = (directory / text[len("gitdir:") :].strip()).resolve(strict=True)
+            elif os.path.lexists(dotgit):
+                return None
+            else:
+                continue
+            try:
+                pointer = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                return gitdir, gitdir
+            return gitdir, (gitdir / pointer).resolve(strict=True)
+        except (OSError, RuntimeError, UnicodeDecodeError):
+            return None
+    return None
+
+
+def external_git_context(cwd: Any) -> bool:
+    """Would a git call run in ``cwd`` read an external measurement repository?
+
+    Always ``False`` when ``NEXUS_MEASURE_EXTERNAL_TARGET_ROOT`` was unset at
+    start (the live Gateway): nothing is read, so live git calls are unchanged.
+    In measurement mode it is ``True`` when ``cwd`` is under the measurement
+    root, or the gitdir or common dir git would discover from ``cwd`` is (a
+    Target worktree of an external Controller lives outside the root but its
+    ``.git`` points into it), and it fails closed (``True``) whenever that
+    cannot be told: an unresolvable root or path, no readable ``.git``, or an
+    inherited variable that redirects git's repository discovery.
+    """
+    try:
+        root = _measurement_root_at_start()
+    except ExternalGitRefused:
+        return True
+    if root is None:
+        return False
+    if any(key in os.environ for key in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")):
+        return True
+    try:
+        start = Path(cwd if cwd is not None else os.getcwd()).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return True
+    if _same_or_ancestor(start, root):
+        return True
+    discovered = _discovered_git_dirs(start)
+    if discovered is None:
+        return True
+    return any(_same_or_ancestor(path, root) for path in discovered)
+
+
+def hardened_git_argv(args: Sequence[str], *, attr_source: Optional[str] = None) -> list[str]:
+    """``git [--attr-source=<base>] <caller -c pairs> <hardened -c> <command>``.
+
+    Leading ``-c`` pairs of ``args`` (e.g. the candidate commit's author) stay,
+    but the hardened values come after them, so they win (a caller's
+    ``core.hooksPath`` is overridden by ``/dev/null``).
+    """
+    rest = list(args)
+    leading: list[str] = []
+    while len(rest) >= 2 and rest[0] == "-c":
+        leading.extend(rest[:2])
+        rest = rest[2:]
+    prefix = [f"--attr-source={attr_source}"] if attr_source else []
+    if rest and rest[0] in _IGNORE_SUBMODULES_COMMANDS:
+        rest = [rest[0], "--ignore-submodules=all", *rest[1:]]
+    return ["git", *prefix, *leading, *HARDENED_GIT_CONFIG, *rest]
+
+
+def _runner_environment(base: Optional[Mapping[str, str]]) -> dict[str, str]:
+    environment = hardened_git_environment(base)
+    environment["GIT_ATTR_NOSYSTEM"] = "1"
+    return environment
+
+
+def configured_driver_keys(cwd: Any, *, pin: Optional[Mapping[str, str]] = None) -> list[str]:
+    """Config keys (local, worktree and included files) naming a content command.
+
+    Read with the hardened flags and environment (plus ``pin``, the trusted
+    ``GIT_DIR``/``GIT_WORK_TREE`` of a Target), so system and global config
+    are not consulted and reading runs nothing.  Raises ``ExternalGitRefused``
+    when the config cannot be read.
+    """
+    environment = _runner_environment(None)
+    environment.update(pin or {})
+    try:
+        result = subprocess.run(
+            [
+                "git", *HARDENED_GIT_CONFIG,
+                "config", "--name-only", "--get-regexp", GIT_DRIVER_CONFIG_REGEX,
+            ],
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ExternalGitRefused("EXTERNAL_TARGET_GIT_CONFIG_UNREADABLE") from exc
+    if result.returncode == 1 and not result.stdout.strip():
+        return []
+    if result.returncode != 0:
+        raise ExternalGitRefused("EXTERNAL_TARGET_GIT_CONFIG_UNREADABLE")
+    return result.stdout.split()
+
+
+def _info_attributes_present(directories: Iterable[Path]) -> bool:
+    for directory in directories:
+        try:
+            if (Path(directory) / "info" / "attributes").stat().st_size > 0:
+                return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
+def run_hardened_git(
+    args: Sequence[str],
+    *,
+    cwd: Any,
+    env: Optional[Mapping[str, str]] = None,
+    attr_source: Optional[str] = None,
+    text: bool = True,
+    pin: Optional[Mapping[str, str]] = None,
+    metadata_dirs: Optional[Iterable[Path]] = None,
+) -> subprocess.CompletedProcess:
+    """Run one git command on an external Controller or its Target (#2749).
+
+    Right before the command (not atomically) it refuses with
+    ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` when a filter or textconv driver
+    is configured or ``info/attributes`` is non-empty in the gitdir or common
+    dir, so no clean/smudge filter runs even if one was planted after the
+    lease.  ``pin`` (trusted ``GIT_DIR``/``GIT_WORK_TREE``/
+    ``GIT_CEILING_DIRECTORIES`` of a verified Target) is set after the
+    inherited ``GIT_*`` variables are dropped; ``metadata_dirs`` are the
+    trusted gitdir and common dir (discovered from ``cwd`` when not given).
+    The returned process is never checked here.
+    """
+    if metadata_dirs is None:
+        start = Path(cwd if cwd is not None else os.getcwd())
+        try:
+            discovered = _discovered_git_dirs(start.resolve(strict=True))
+        except (OSError, RuntimeError):
+            discovered = None
+        if discovered is None:
+            raise ExternalGitRefused("EXTERNAL_TARGET_GIT_METADATA_UNREADABLE")
+        metadata_dirs = discovered
+    if _info_attributes_present(metadata_dirs):
+        raise ExternalGitRefused(FILTER_DRIVER_PRESENT)
+    if configured_driver_keys(cwd, pin=pin):
+        raise ExternalGitRefused(FILTER_DRIVER_PRESENT)
+    environment = _runner_environment(env)
+    environment.update(pin or {})
+    return subprocess.run(
+        hardened_git_argv(args, attr_source=attr_source),
+        cwd=cwd,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=text,
+        check=False,
+    )
+
+
+def measurement_mode_at_start() -> bool:
+    """Whether the measurement root variable was set (non-blank) at start."""
+    return bool(MEASURE_EXTERNAL_TARGET_ROOT_AT_START)
+
+
+def discovered_git_dirs(path: Path) -> Optional[tuple[Path, Path]]:
+    """Public form of the Python gitdir discovery (``None`` when unknown)."""
+    try:
+        return _discovered_git_dirs(Path(path).resolve(strict=True))
+    except (OSError, RuntimeError):
+        return None
+
+
+def _hardened_output(repo_root: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        ["git", *HARDENED_GIT_CONFIG, *args],
+        cwd=repo_root,
+        env=_runner_environment(None),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ExternalGitRefused("EXTERNAL_TARGET_GIT_CONFIG_UNREADABLE")
+    return result.stdout
+
+
+def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
+    """A refusal code when a git filter could run, else ``None``.
+
+    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a
+    ``.gitmodules`` or a gitlink, or the common dir has a non-empty
+    ``modules/`` (a submodule's own config and attributes are not checked
+    here, so a repository with submodules is refused outright).
+    ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` otherwise, as follows.
+
+    The repository refuses when its config defines a ``filter.*`` (or diff
+    textconv/command) driver, a ``.gitattributes`` in ``base_revision``
+    declares ``filter=``, or ``info/attributes`` in its gitdir or common dir is
+    non-empty.  A probe failure is reported as the same refusal.  Only
+    ``config``, ``rev-parse``, ``ls-tree`` and ``cat-file`` run: none of them
+    run a filter.
+    """
+    try:
+        if configured_driver_keys(repo_root):
+            return FILTER_DRIVER_PRESENT
+        for flag in ("--absolute-git-dir", "--git-common-dir"):
+            raw = _hardened_output(repo_root, "rev-parse", "--path-format=absolute", flag)
+            info = Path(raw.decode("utf-8").strip()) / "info" / "attributes"
+            try:
+                if info.stat().st_size > 0:
+                    return FILTER_DRIVER_PRESENT
+            except FileNotFoundError:
+                pass
+        common = Path(
+            _hardened_output(repo_root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            .decode("utf-8")
+            .strip()
+        )
+        modules = common / "modules"
+        if modules.is_symlink() or (modules.is_dir() and any(modules.iterdir())):
+            return SUBMODULE_PRESENT
+        listing = _hardened_output(
+            repo_root, "ls-tree", "-r", "-z", "--full-tree", "--end-of-options", base_revision
+        )
+        for entry in listing.split(b"\0"):
+            meta, _, name = entry.partition(b"\t")
+            fields = meta.split()
+            # A gitlink or a .gitmodules: git would recurse into a submodule
+            # and run that repository's filters (#2749 review B2).
+            if (len(fields) == 3 and fields[1] == b"commit") or name == b".gitmodules":
+                return SUBMODULE_PRESENT
+            if name.rsplit(b"/", 1)[-1] != b".gitattributes":
+                continue
+            if len(fields) != 3 or fields[1] != b"blob":
+                return FILTER_DRIVER_PRESENT
+            blob = _hardened_output(repo_root, "cat-file", "blob", fields[2].decode("ascii"))
+            if _ATTRIBUTE_FILTER.search(blob):
+                return FILTER_DRIVER_PRESENT
+    except (ExternalGitRefused, OSError, UnicodeDecodeError):
+        return FILTER_DRIVER_PRESENT
+    return None
+
+
+def recheck_external_controller_at_lease(repo_root: Path, base_revision: str) -> None:
+    """Lease-time re-check of an external Controller, just before git touches files.
+
+    The Controller must still sit (with its gitdir and common dir) strictly
+    inside the start-time measurement root and no git filter may be able to
+    run (``filter_driver_finding``).  Raises ``ExternalGitRefused``.
+    """
+    root = _measurement_root_at_start()
+    if root is None:
+        raise ExternalGitRefused("EXTERNAL_TARGET_DISABLED")
+    resolved = Path(repo_root).resolve()
+    if not _strictly_inside(resolved, root):
+        raise ExternalGitRefused("EXTERNAL_TARGET_OUTSIDE_ROOT")
+    for flag in ("--absolute-git-dir", "--git-common-dir"):
+        raw = _hardened_output(resolved, "rev-parse", "--path-format=absolute", flag)
+        meta = Path(raw.decode("utf-8").strip()).resolve()
+        if not _strictly_inside(meta, root):
+            raise ExternalGitRefused("EXTERNAL_TARGET_GIT_METADATA_OUTSIDE_ROOT")
+    finding = filter_driver_finding(resolved, base_revision)
+    if finding is not None:
+        raise ExternalGitRefused(finding)
