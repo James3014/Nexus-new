@@ -22,7 +22,9 @@ LAB_ONLY = [
 # Lab-only, then physically deleted 2026-10-17 (#2475, dead-code batch B4,
 # ARCHIVED_2026-10-17_deadcode_b4.md). The case keeps its test id and asserts the
 # module can no longer be imported.
-DELETED = frozenset({"nexus.services.aos_oracle"})
+# nexus.core.planner_auditor followed on 2026-10-21 (#2584, Phase-2 batch B,
+# ARCHIVED_2026-10-21_phase2_batch_B.md).
+DELETED = frozenset({"nexus.services.aos_oracle", "nexus.core.planner_auditor"})
 
 
 def _import_warnings(module: str) -> str:
@@ -40,7 +42,7 @@ def _import_warnings(module: str) -> str:
 @pytest.mark.parametrize("module", LAB_ONLY)
 def test_lab_only_module_warns_on_import(module):
     if module in DELETED:
-        assert importlib.util.find_spec(module) is None, f"{module} was deleted (#2475)"
+        assert importlib.util.find_spec(module) is None, f"{module} was deleted (#2475/#2584)"
         return
     assert "#1740" in _import_warnings(module)
 

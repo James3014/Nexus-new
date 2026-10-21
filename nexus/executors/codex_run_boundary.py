@@ -5,8 +5,8 @@ copied auth file and an allowlisted environment (``agy_write_admission``).
 Codex had neither: it inherited the host HOME (``~/.ssh``, ``~/.config/gh``,
 ``~/.gitconfig``, the whole ``~/.codex`` with history, sessions, memories,
 MCP servers and hooks) and the ambient environment.  This module is the
-Codex counterpart, shared by ``scripts/ops/start_codex_nexus_enforced.sh``
-(through ``scripts/ops/codex_run_guard.py``) and ``CodexCliExecutor``.
+Codex counterpart, used by ``CodexCliExecutor`` (the shell launcher that also
+used it was retired on 2026-10-21, #2584 Phase-2 batch B).
 
 Codex authenticates with ``$CODEX_HOME/auth.json`` alone (probed with codex
 0.162.1: ``config.toml`` is not needed, and the real one carries MCP servers,
