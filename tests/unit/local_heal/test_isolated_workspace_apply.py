@@ -827,8 +827,8 @@ def test_scope_quoted_git_paths_for_the_target_still_bind(tmp_path) -> None:
     (source / "caf\u00e9 f.py").write_text("a = 1\nb = 2\n", encoding="utf-8")
     quoted = '"caf\\303\\251 f.py"'
     diff = (
-        f'diff --git "a/caf\\303\\251 f.py" "b/caf\\303\\251 f.py"\n'
-        f'--- "a/caf\\303\\251 f.py"\n+++ "b/caf\\303\\251 f.py"\n'
+        'diff --git "a/caf\\303\\251 f.py" "b/caf\\303\\251 f.py"\n'
+        '--- "a/caf\\303\\251 f.py"\n+++ "b/caf\\303\\251 f.py"\n'
         "@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
     )
     assert quoted
