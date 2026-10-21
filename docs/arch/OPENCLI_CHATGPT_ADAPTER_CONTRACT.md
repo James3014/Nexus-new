@@ -46,8 +46,8 @@ Consistency comes from this contract plus a conformance test in each repo.
    spawning the child: `GITHUB_*`, `GH_*`, names containing `TOKEN`, `API_KEY`,
    `SECRET`, `PASSWORD` or `CREDENTIAL`, and provider prefixes (`GOOGLE_`,
    `GEMINI_`, `OPENAI_`, `ANTHROPIC_`). Names containing `OPENCLI` stay,
-   because they configure the child itself. open-swe's `_environment()` is the
-   reference filter. A full copy of `os.environ` (or an inherited
+   because they configure the child itself. the denylist in open-swe's `_environment()` before
+   nexus-open-swe-runtime#152 was the reference filter for this minimum. A full copy of `os.environ` (or an inherited
    `process.env`) is non-conforming.
 4. Session mode is `--site-session ephemeral`. A call that needs a persistent
    session must say why, in a comment at the call site.
@@ -73,8 +73,8 @@ upper-cased once) and drops a variable when its name:
   `AWS_`;
 - is exactly `SSH_AUTH_SOCK`, `KUBECONFIG`, `DOCKER_AUTH_CONFIG` or `DATABASE_URL`.
 
-`OPENCLI_*` names (such as `OPENCLI_PROFILE`) stay, unless they also match a
-secret marker (`OPENCLI_TOKEN`, `OPENCLI_API_KEY` are dropped). The word
+`OPENCLI_*` names (such as `OPENCLI_PROFILE`) stay, unless they match any rule
+above (`OPENCLI_TOKEN`, `OPENCLI_API_KEY` are dropped). The word
 `OPENCLI` elsewhere in a name no longer exempts it, and the earlier open-swe
 filter's `PROVIDER` exemption is dropped (its only history, commit 7f834e2,
 gives no reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
@@ -84,7 +84,7 @@ gives no reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
 | Adapter | Prompt | Conversation | Environment | Session mode |
 | --- | --- | --- | --- | --- |
 | reviewer | argv (`opencli.py:182`); records use `safe_argv` (`:96-98`, `:184`) | always `--new` (`:182`) | hardened denylist `child_environment()` (`opencli.py:10-66`) on every opencli spawn: transport ask/detail/`--version`, `service_cli._opencli_json`/`_opencli_browser`/`_daemon_restart`, `OpenCLIPreflight._run`; nexus-opencli-reviewer#108 (closes #105), tests in `tests/test_opencli_child_environment.py` | `ephemeral` (`:183`, `:224`) |
-| open-swe | argv (`opencli_web_model.py:2084`) | `--conversation` when bound, else `--new` (`:2085-2088`) | hardened denylist in `_environment()` (`:1224-1228`, filter `:979-1021`) on the opencli child spawned by `_run` (`:1241`); nexus-open-swe-runtime#152 (refs #151), test `tests/test_opencli_credential_filter_hardened.py` | `ephemeral` default (`:1015`), passed at `:2094` |
+| open-swe | argv (`opencli_web_model.py:2101`) | `--conversation` when bound, else `--new` (`:2102-2105`) | hardened denylist in `_environment()` (`:1224-1228`, filter `:979-1021`) on the opencli child spawned by `_run` (`:1230`, env at `:1241`); nexus-open-swe-runtime#152 (refs #151), test `tests/test_opencli_credential_filter_hardened.py` | `ephemeral` default (`:1043`), passed at `:2111` |
 | Nexus-new embedded copy | argv (`opencli_web_model.py:906`) | `--conversation` when bound, else `--new` (`:908-910`) | hardened denylist in `_environment()` (`:587`, filter `:461-510`); test `tests/services/test_open_swe_embedded_opencli_environment.py` | `ephemeral` default (`:529`) |
 | devspace | argv (`chat-swarm-runtime.ts:1476`, `:1531`) | `--new` on the first ask (`:1480`), then `--conversation` (`:1533`) | inherits `process.env`: `spawn` at `:1681` passes no `env` | `ephemeral` (`:1443`, `:1484`, `:1537`, `:1669`) |
 
@@ -113,5 +113,5 @@ Rule 5 tests live in each repo, not in this document.
 - SWE-4 (nexus-open-swe-runtime#103, closed): fresh-versus-reused conversation.
   Covered by rule 2.
 - SWE-2 (nexus-open-swe-runtime#101, closed): credentials inherited by the
-  subprocess. Fixed there with the denylist filter, which is the reference for
-  rule 3.
+  subprocess. Fixed there with the denylist filter (the pre-#152 version is the
+  reference for rule 3; #152 later hardened it).
