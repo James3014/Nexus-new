@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Any
 
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
@@ -84,8 +85,12 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
     * File identity and non-hunk patch operations (new/deleted files, mode
       changes, binary sections) are not part of this hash: a diff over several
       files canonicalizes as the concatenation of its hunks, header-free.  No
-      gate here checks that the patch touches only ``target_file`` (tracked
-      in #2836); do not rely on this identity for that.
+      gate in this function checks the patch scope: ``_patch_scope_violation``
+      (#2836) runs before the workspace is created and refuses any patch that
+      git itself reads as touching a file other than ``target_file``, creating,
+      deleting, renaming, copying or mode-changing anything, carrying binary
+      data, or whose hunk payload differs from what git would apply.  Do not
+      rely on this identity for any of that.
     """
     output: list[str] = []
     hunk_lines: list[str] = []
@@ -170,6 +175,198 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
     return "\n".join(output).strip(_GIT_TRAILING_WS + "\n")
 
 
+def _scan_patch(diff_text: str) -> tuple[int, int, int, list[str]]:
+    """Return ``(added, deleted, hunks, header_lines)`` consuming hunks as ``git apply`` does."""
+    added = deleted = hunks = 0
+    old_left = new_left = 0
+    headers: list[str] = []
+    for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
+        if old_left > 0 or new_left > 0:
+            if raw_line.startswith("\\"):
+                continue
+            operation = raw_line[:1] or " "
+            if operation == "+":
+                added += 1
+                new_left -= 1
+            elif operation == "-":
+                deleted += 1
+                old_left -= 1
+            else:
+                old_left -= 1
+                new_left -= 1
+            continue
+        header = _HUNK_HEADER_RE.match(raw_line.rstrip(_GIT_TRAILING_WS))
+        if header:
+            hunks += 1
+            old_left = int(header.group(1)) if header.group(1) is not None else 1
+            new_left = int(header.group(2)) if header.group(2) is not None else 1
+        else:
+            headers.append(raw_line)
+    return added, deleted, hunks, headers
+
+
+def _hunk_payload_counts(diff_text: str) -> tuple[int, int]:
+    """Count added/removed payload lines the way ``git apply`` consumes hunks."""
+    added, deleted, _hunks, _headers = _scan_patch(diff_text)
+    return added, deleted
+
+
+_FORBIDDEN_HEADER_RE = re.compile(
+    r"^(old mode |new mode |new file mode |deleted file mode |rename |copy |similarity index |"
+    r"dissimilarity index |GIT binary patch|Binary files )"
+)
+
+
+_QUOTED_NAME = r'"(?:\\.|[^"\\])*"'
+_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _unquote_git_name(text: str) -> str | None:
+    """Undo git's C-style path quoting; ``None`` when the text is not a well-formed quoted name."""
+    if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
+        return None
+    body, out, index = text[1:-1], bytearray(), 0
+    while index < len(body):
+        char = body[index]
+        if char != "\\":
+            out += char.encode("utf-8")
+            index += 1
+            continue
+        index += 1
+        if index >= len(body):
+            return None
+        if body[index] in _ESCAPES:
+            out.append(_ESCAPES[body[index]])
+            index += 1
+        elif re.fullmatch(r"[0-7]{3}", body[index : index + 3]):
+            out.append(int(body[index : index + 3], 8))
+            index += 3
+        else:
+            return None
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _header_violation(target_file: str, headers: list[str]) -> str | None:
+    """Every file header git may read must name ``target_file`` and nothing else (#2836)."""
+    allowed = os.path.normpath(target_file)
+
+    def names_target(text: str, prefixes: tuple[str, ...]) -> bool:
+        name = text.split("\t", 1)[0].rstrip(_GIT_TRAILING_WS)
+        if name.startswith('"'):
+            unquoted = _unquote_git_name(name)
+            if unquoted is None:
+                return False
+            name = unquoted
+        if name == "/dev/null":
+            return False  # create/delete of the tracked target is never a plain hunk edit
+        for prefix in prefixes:
+            if name.startswith(prefix) and os.path.normpath(name[len(prefix) :]) == allowed:
+                return True
+        return os.path.normpath(name) == allowed
+
+    for line in headers:
+        if _FORBIDDEN_HEADER_RE.match(line):
+            return f"non-hunk operation header: {line[:80]!r}"
+        if line.startswith("diff --git "):
+            rest = line[len("diff --git ") :]
+            quoted = re.fullmatch(rf"({_QUOTED_NAME}) ({_QUOTED_NAME})", rest)
+            pair = (
+                (_unquote_git_name(quoted.group(1)), _unquote_git_name(quoted.group(2)))
+                if quoted
+                else None
+            )
+            if rest not in {
+                f"a/{target_file} b/{target_file}",
+                f"{target_file} {target_file}",
+            } and pair not in {
+                (f"a/{target_file}", f"b/{target_file}"),
+                (target_file, target_file),
+            }:
+                return f"diff header names another path: {line[:120]!r}"
+        elif line.startswith("--- ") and not names_target(line[4:], ("a/",)):
+            return f"--- header names another path: {line[:120]!r}"
+        elif line.startswith("+++ ") and not names_target(line[4:], ("b/",)):
+            return f"+++ header names another path: {line[:120]!r}"
+    return None
+
+
+def _git_apply_query(flags: list[str], diff_bytes: bytes) -> subprocess.CompletedProcess[bytes]:
+    with tempfile.TemporaryDirectory(prefix="armor-scope-") as scratch:
+        return subprocess.run(
+            ["git", "apply", *flags, "--unidiff-zero", "-"],
+            cwd=scratch,
+            input=diff_bytes,
+            shell=False,
+            capture_output=True,
+            timeout=10.0,
+        )
+
+
+def _patch_scope_violation(target_file: str, diff_content: str) -> tuple[str, str] | None:
+    """Return ``(kind, detail)`` when the selected patch is not exactly an edit of ``target_file``.
+
+    Fail closed (#2836): the allowed file set of this receipt is ``target_file``
+    alone (``verifier_files`` are copied untracked and never part of the applied
+    diff).  Git's own reading of the patch (``git apply --numstat -z`` and
+    ``--summary``) must show hunks for that one path only, with no create, delete,
+    rename, copy or mode line and no binary section, and the hunk payload counted
+    here must equal what git reports, so no operation escapes the canonical
+    identity.  ``kind`` is ``unparseable`` when git cannot read the patch at all.
+    """
+    diff_bytes = diff_content.encode("utf-8")
+    try:
+        numstat = _git_apply_query(["--numstat", "-z"], diff_bytes)
+        summary = _git_apply_query(["--summary"], diff_bytes)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return "unparseable", f"{type(exc).__name__}: {exc}"
+    for res in (numstat, summary):
+        if res.returncode != 0:
+            detail = (
+                res.stderr.decode("utf-8", "replace").strip()
+                or "git apply could not read the patch"
+            )
+            return "unparseable", detail[:500]
+    _added, _deleted, hunk_count, header_lines = _scan_patch(diff_content)
+    header_problem = _header_violation(target_file, header_lines)
+    if header_problem:
+        return "scope", header_problem[:500]
+    if hunk_count == 0:
+        return "scope", "patch carries no hunk"
+    # A header-less (traditional) patch makes git guess create/delete for a hunk that starts
+    # from or ends at an empty file; that is a plain edit of the tracked target, never a
+    # mode-carrying file operation (those headers are refused above).
+    benign = {f" create {target_file}", f" delete {target_file}"}
+    summary_lines = [
+        line
+        for line in summary.stdout.decode("utf-8", "replace").splitlines()
+        if line.strip() and line.rstrip() not in benign
+    ]
+    if summary_lines:
+        return "scope", f"non-hunk operation: {summary_lines[0].strip()}"[:500]
+    allowed = os.path.normpath(target_file)
+    git_added = git_deleted = 0
+    entries = [entry for entry in numstat.stdout.decode("utf-8", "replace").split("\0") if entry]
+    if not entries:
+        return "unparseable", "git reports no file in the patch"
+    for entry in entries:
+        parts = entry.split("\t", 2)
+        if len(parts) != 3:
+            return "scope", f"unreadable git numstat entry: {entry!r}"[:500]
+        added_text, deleted_text, path = parts
+        if os.path.normpath(path) != allowed:
+            return "scope", f"patch touches {path!r}, allowed only {target_file!r}"
+        if not (added_text.isdigit() and deleted_text.isdigit()):
+            return "scope", f"binary patch for {path!r}"
+        git_added += int(added_text)
+        git_deleted += int(deleted_text)
+    if (git_added, git_deleted) != _hunk_payload_counts(diff_content):
+        return "scope", "hunk payload does not cover every operation git would apply"
+    return None
+
+
 def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApplyReceipt:
     if not request.mutation_allowed:
         return IsolatedApplyReceipt(
@@ -200,6 +397,27 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             mutation_allowed=True,
         )
 
+    diff_content = request.unified_diff
+    if not diff_content.endswith("\n"):
+        diff_content += "\n"
+    # #2836: refuse before any workspace exists (and before C6BD may retry) unless git
+    # itself reads the patch as hunk edits of target_file only.
+    scope_violation = _patch_scope_violation(request.target_file, diff_content)
+    if scope_violation is not None:
+        kind, detail = scope_violation
+        return IsolatedApplyReceipt(
+            task_id=request.task_id,
+            workspace_path="",
+            target_file=request.target_file,
+            patch_apply_status="failed" if kind == "unparseable" else "blocked",
+            patch_apply_error=f"patch_scope_{kind}: {detail}",
+            selected_candidate_hash=request.selected_candidate_hash,
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=False,
+            mutation_allowed=True,
+        )
+
     # Durable parent by default (.nexus/artifacts/local_armor/workspaces).
     # When work_dir is set, isolate under that durable/operator-supplied parent.
     tmpdir = str(make_isolated_workspace(work_dir=request.work_dir or None, prefix="armor-apply-"))
@@ -221,10 +439,6 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
         subprocess.run(["git", "add", request.target_file], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
 
         patch_file = os.path.join(tmpdir, "candidate.patch")
-        diff_content = request.unified_diff
-        if not diff_content.endswith("\n"):
-            diff_content += "\n"
-
         with open(patch_file, "w", encoding="utf-8") as f:
             f.write(diff_content)
 
