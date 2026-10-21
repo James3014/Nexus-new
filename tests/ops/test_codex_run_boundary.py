@@ -122,6 +122,9 @@ def _launcher_retired() -> None:
 def test_codex_runs_in_a_disposable_home_with_auth_only(tmp_path):
     real_home = tmp_path / "realhome"
     (real_home / ".ssh").mkdir(parents=True)
+    (real_home / ".ssh" / "id_ed25519").write_text("PRIVATE\n", encoding="utf-8")
+    (real_home / ".config" / "gh").mkdir(parents=True)
+    (real_home / ".config" / "gh" / "hosts.yml").write_text("token: x\n", encoding="utf-8")
     (real_home / ".gitconfig").write_text("[user]\n\tname = real\n", encoding="utf-8")
     codex_home = real_home / ".codex"
     codex_home.mkdir()
@@ -138,8 +141,9 @@ def test_codex_runs_in_a_disposable_home_with_auth_only(tmp_path):
     assert home != real_home and real_home not in home.parents
     assert env["HOME"] == str(home)
     assert env["CODEX_HOME"] == str(home / ".codex")
-    for forbidden in (".ssh", ".gitconfig"):
+    for forbidden in (".ssh", ".config/gh", ".gitconfig"):
         assert not (home / forbidden).exists()
+    assert sorted(p.name for p in home.iterdir()) == [".codex", "auth-baseline.sha256", "tmp"]
     assert sorted(p.name for p in (home / ".codex").iterdir()) == ["auth.json"]
     auth = home / ".codex" / "auth.json"
     assert not auth.is_symlink()

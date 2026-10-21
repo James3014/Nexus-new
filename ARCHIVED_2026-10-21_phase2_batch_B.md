@@ -63,25 +63,38 @@ Evidence: the #2584 per-symbol evidence for batch B (gathered read-only at 01dc1
 
 ## Tests
 
-Deleted (every case exercises only deleted code; 6 files, 1,170 lines, 49 test ids):
-`tests/ops/test_start_codex_nexus_enforced.py` (406, 22 ids),
-`tests/ops/test_codex_run_guard_sweep.py` (228, 6),
+Deleted (every case exercises only deleted code; 3 files, 485 lines, 18 test ids):
 `tests/security/test_legacy_script_hardening_2620.py` (98, 8; only the bridge and dashboard),
 `tests/nexus/orchestrator/test_refactor_campaign.py` (66, 2),
-`tests/nexus/orchestrator/test_worker_competition.py` (321, 8),
-`tests/governance/test_planner_depth.py` (51, 3).
-One more id disappears without a file deletion: `tests/core/test_layer_ports.py` parametrizes over
-the files under `nexus/core/`, so its `[nexus/core/planner_auditor.py]` case goes away with the file.
+`tests/nexus/orchestrator/test_worker_competition.py` (321, 8).
+None of them sits under a directory that an impact-map row on the base selects, so the exact-base
+impact gate never collects them on the base side.
+
+Kept with every id, cases rewritten to assert absence (their directories, `tests/ops` and
+`tests/core`, are selected whole by base impact-map rows, so an id must not vanish there):
+- `tests/ops/test_start_codex_nexus_enforced.py` (22 ids) and
+  `tests/ops/test_codex_run_guard_sweep.py` (6 ids): each case asserts the launcher, proxy and
+  guard files are gone and `find_spec("scripts.ops.codex_run_guard") is None`.
+- `tests/core/test_layer_ports.py`: `nexus/core/planner_auditor.py` stays an explicit parameter
+  (`RETIRED_CORE_FILES`) of `test_core_modules_do_not_load_upper_layer_modules`, and that case
+  asserts the file is absent; all other ids unchanged.
+- `tests/governance/test_planner_depth.py` (3 ids): the two `HealthScorer.apply_snapshot`
+  plan-density cases cover live code and are unchanged apart from the dropped auditor call; the
+  auditor-only case asserts `find_spec("nexus.core.planner_auditor") is None`.
 
 Edited (every test id is kept):
+- `muse_nexus.egg-info/SOURCES.txt` (tracked): the rows for the three deleted `scripts/*.py`
+  files are removed (`tests/ops/test_source_inventory_integrity.py`).
 - `tests/ops/test_codex_run_boundary.py` (30 ids): the boundary module is live
   (`CodexCliExecutor`), so cases that checked a boundary behaviour through the launcher now call
   `nexus.executors.codex_run_boundary` directly with the same planted mutations: 13 target-integrity
   cases (escaping symlinks, `.git` pointer, nested / case-variant / unreadable `.git`, committed
-  baseline) on a detached worktree, 4 auth write-back cases, the disposable-HOME and env-allowlist
-  cases. The 7 launcher-only cases (process-group kill, guard exit codes, state dir, HOME removal,
-  rejected-run write-back) assert the launcher and guard are gone; rejected-run write-back stays
-  covered by `tests/nexus/executors/test_codex_run_boundary_executor.py`.
+  baseline) on a detached worktree, 4 auth write-back cases, the disposable-HOME case (planted
+  `~/.ssh`, `~/.config/gh`, `~/.gitconfig` and Codex history/config/sessions are not copied) and
+  the env-allowlist case. The 7 launcher-only cases (process-group kill, guard exit codes, state
+  dir, HOME removal, rejected-run write-back) assert the launcher and guard are gone; HOME removal
+  after a run and rejected-run write-back stay covered for the live path by
+  `tests/nexus/executors/test_codex_run_boundary_executor.py`.
 - `tests/nexus/orchestrator/test_state_id_path_traversal.py` (all ids kept): the
   `worker_competition` / `refactor_campaign` cases assert `importlib.util.find_spec(...) is None`;
   the two MCP cases assert the retired tools are rejected as unknown and touch no state.
@@ -125,4 +138,6 @@ the 8 tools; plus a non-vacuity test.
 
 Historical mentions left as is: `ARCHIVED_2026-10-12.md`, `ARCHIVED_2026-10-13.md`,
 `ARCHIVED_2026-10-17_deadcode_b4.md`, `docs/`, `tasks/`, `scripts/archive/`, `nexus_wiki_vault/`
-(except `06_Ops/NEXUS_ENFORCED_LAUNCH.md`, updated to say the Codex launcher is retired).
+(including `06_Ops/NEXUS_ENFORCED_LAUNCH.md`, which still documents the launcher; it is left
+unchanged so the generated Wiki artifacts stay reproducible, and needs a Wiki regeneration
+follow-up).

@@ -19,6 +19,9 @@ from nexus.engine.core_ports import CORE_ENGINE_PORTS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CORE_DIR = REPO_ROOT / "nexus" / "core"
 CORE_FILES = sorted(CORE_DIR.rglob("*.py"))
+# Deleted 2026-10-21 (#2584 Phase-2 batch B, ARCHIVED_2026-10-21_phase2_batch_B.md). Kept
+# as explicit parameters so their test ids stay stable; each case asserts the file is gone.
+RETIRED_CORE_FILES = (CORE_DIR / "planner_auditor.py",)
 _UPPER_LAYER_NAMES = frozenset({"engine", "app"})
 _UPPER_LAYER_TEXT = re.compile(r"nexus\.(?:engine|app)\b")
 # Receipt metadata naming the physical implementation is identity, not a dependency.
@@ -98,8 +101,15 @@ def _upper_layer_references(source: str) -> list[str]:
     return hits
 
 
-@pytest.mark.parametrize("path", CORE_FILES, ids=lambda p: str(p.relative_to(REPO_ROOT)))
+@pytest.mark.parametrize(
+    "path",
+    sorted({*CORE_FILES, *RETIRED_CORE_FILES}),
+    ids=lambda p: str(p.relative_to(REPO_ROOT)),
+)
 def test_core_modules_do_not_load_upper_layer_modules(path: Path) -> None:
+    if path in RETIRED_CORE_FILES:
+        assert not path.exists(), f"{path.relative_to(REPO_ROOT)} was retired (#2584)"
+        return
     assert _upper_layer_references(path.read_text(encoding="utf-8")) == []
 
 
