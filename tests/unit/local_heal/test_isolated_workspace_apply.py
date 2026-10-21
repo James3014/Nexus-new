@@ -809,3 +809,44 @@ def test_scope_traditional_patches_git_guesses_create_or_delete_for_still_bind(t
     )
     assert receipt.patch_apply_status == "applied", receipt.patch_apply_error
     assert receipt.selected_candidate_hash_matches_applied is True
+
+
+def test_scope_explicit_dev_null_delete_of_the_target_is_refused(tmp_path) -> None:
+    diff = "--- a/f.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a = 1\n-b = 2\n"
+    receipt, workdir = _scope_apply(tmp_path, diff, name="devnull")
+    assert receipt.patch_apply_status == "blocked"
+    assert receipt.selected_candidate_hash_matches_applied is False
+    assert receipt.workspace_path == ""
+
+
+def test_scope_quoted_git_paths_for_the_target_still_bind(tmp_path) -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo-quoted"
+    source.mkdir()
+    (source / "caf\u00e9 f.py").write_text("a = 1\nb = 2\n", encoding="utf-8")
+    quoted = '"caf\\303\\251 f.py"'
+    diff = (
+        f'diff --git "a/caf\\303\\251 f.py" "b/caf\\303\\251 f.py"\n'
+        f'--- "a/caf\\303\\251 f.py"\n+++ "b/caf\\303\\251 f.py"\n'
+        "@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    )
+    assert quoted
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="quoted",
+            source_root=str(source),
+            target_file="caf\u00e9 f.py",
+            unified_diff=diff,
+            selected_candidate_hash=_canonical_candidate_hash(diff),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts-quoted"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied", receipt.patch_apply_error
+    other = (
+        'diff --git "a/f.py" "b/conftest.py"\n--- "a/f.py"\n+++ "b/f.py"\n'
+        "@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    )
+    receipt2, _ = _scope_apply(tmp_path, other, name="quoted2")
+    assert receipt2.patch_apply_status == "blocked"

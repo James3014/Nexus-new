@@ -217,14 +217,51 @@ _FORBIDDEN_HEADER_RE = re.compile(
 )
 
 
+_QUOTED_NAME = r'"(?:\\.|[^"\\])*"'
+_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _unquote_git_name(text: str) -> str | None:
+    """Undo git's C-style path quoting; ``None`` when the text is not a well-formed quoted name."""
+    if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
+        return None
+    body, out, index = text[1:-1], bytearray(), 0
+    while index < len(body):
+        char = body[index]
+        if char != "\\":
+            out += char.encode("utf-8")
+            index += 1
+            continue
+        index += 1
+        if index >= len(body):
+            return None
+        if body[index] in _ESCAPES:
+            out.append(_ESCAPES[body[index]])
+            index += 1
+        elif re.fullmatch(r"[0-7]{3}", body[index : index + 3]):
+            out.append(int(body[index : index + 3], 8))
+            index += 3
+        else:
+            return None
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _header_violation(target_file: str, headers: list[str]) -> str | None:
     """Every file header git may read must name ``target_file`` and nothing else (#2836)."""
     allowed = os.path.normpath(target_file)
 
     def names_target(text: str, prefixes: tuple[str, ...]) -> bool:
         name = text.split("\t", 1)[0].rstrip(_GIT_TRAILING_WS)
+        if name.startswith('"'):
+            unquoted = _unquote_git_name(name)
+            if unquoted is None:
+                return False
+            name = unquoted
         if name == "/dev/null":
-            return True  # git's own create/delete reading is judged by --summary below
+            return False  # create/delete of the tracked target is never a plain hunk edit
         for prefix in prefixes:
             if name.startswith(prefix) and os.path.normpath(name[len(prefix) :]) == allowed:
                 return True
@@ -235,9 +272,18 @@ def _header_violation(target_file: str, headers: list[str]) -> str | None:
             return f"non-hunk operation header: {line[:80]!r}"
         if line.startswith("diff --git "):
             rest = line[len("diff --git ") :]
+            quoted = re.fullmatch(rf"({_QUOTED_NAME}) ({_QUOTED_NAME})", rest)
+            pair = (
+                (_unquote_git_name(quoted.group(1)), _unquote_git_name(quoted.group(2)))
+                if quoted
+                else None
+            )
             if rest not in {
                 f"a/{target_file} b/{target_file}",
                 f"{target_file} {target_file}",
+            } and pair not in {
+                (f"a/{target_file}", f"b/{target_file}"),
+                (target_file, target_file),
             }:
                 return f"diff header names another path: {line[:120]!r}"
         elif line.startswith("--- ") and not names_target(line[4:], ("a/",)):
