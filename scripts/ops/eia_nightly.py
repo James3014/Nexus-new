@@ -1003,6 +1003,8 @@ class Nightly:
                 # UNKNOWN is only recorded here; ``start`` re-checks and fails closed.
                 if str(exc).startswith("DAEMON_CHECKOUT_STALE"):
                     return self._fail_start(loaded, exc)
+        if not (loaded.get("started") or {}).get("ok"):
+            self._warn_bridge_down(loaded)
         if night:
             night = loaded
         if night and night.get("card_pr"):
@@ -1483,6 +1485,24 @@ class Nightly:
     def _bridge_connected(self) -> bool:
         out = self.run([self.opencli, "daemon", "status"], timeout=30)
         return bool(re.search(r"extension:\s*connected", str(out.stdout), re.IGNORECASE))
+
+    def _warn_bridge_down(self, night: dict[str, Any]) -> None:
+        """Early warning at prepare: tell the coordinator now, not at start, when the Browser
+        Bridge is down (2026-10-19..21 it was disconnected for three days unnoticed).  Only a
+        warning: ``start`` still tries to bring it up.  One message per night."""
+        if self._bridge_connected():
+            return
+        self._event(night, "bridge_down_at_prepare")
+        self._queue_msg(
+            night,
+            "bridge-down",
+            "coordinator",
+            f"EIA nightly {night['night']}: Browser Bridge not connected at prepare "
+            "(opencli daemon status: Extension disconnected). Reload OpenCLI in the Chrome "
+            "'ibase' profile (chrome://extensions) before start, or the night fails "
+            "BROWSER_BRIDGE_NOT_CONNECTED.",
+        )
+        self._flush_outbox(night)
 
     def _ensure_bridge(self) -> None:
         if self._bridge_connected():

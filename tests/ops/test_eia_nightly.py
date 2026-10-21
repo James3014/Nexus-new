@@ -2128,3 +2128,25 @@ def test_renamed_verifier_file_still_lists_its_old_path(env) -> None:
     gap = env["app"]._daemon_checkout_gap()
     assert gap["status"] == "STALE"
     assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
+
+
+# ------------------------------------------------------------------ bridge early warning
+
+
+def test_prepare_warns_coordinator_when_bridge_is_down(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    env["sys"].bridge = "Extension: disconnected"
+    night = env["app"].prepare()
+    assert night["status"] == "CARDS_PENDING"  # a warning only; the night is still prepared
+    warnings = [m for m in env["sys"].coord() if "Browser Bridge not connected" in m]
+    assert len(warnings) == 1 and "coordinator" in warnings[0]
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T20:00:00")
+    env["app"].prepare()  # the 20:00 prepare does not repeat it
+    assert len([m for m in env["sys"].coord() if "Browser Bridge not connected" in m]) == 1
+
+
+def test_prepare_sends_no_bridge_warning_when_connected(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    env["app"].prepare()
+    assert not [m for m in env["sys"].coord() if "Browser Bridge" in m]
+    assert any(c[0].endswith("opencli") for c in env["sys"].calls)
