@@ -24,6 +24,9 @@ from pathlib import Path
 import pytest
 
 from nexus.services.external_intelligence_closure import (
+    INTEGRITY_CHECK_SCOPE,
+    UNIT_VERIFICATION_SCHEMA,
+    VERIFIER_BASE_RUN_FAILED,
     VERIFIER_DECLARED_FILE_DESELECTED,
     VERIFIER_DECLARED_NODE_MISSING,
     VERIFIER_DECLARED_TESTS_NOT_PASSED,
@@ -32,6 +35,7 @@ from nexus.services.external_intelligence_closure import (
     VERIFIER_SANDBOX_SETUP_FAILED,
     VERIFIER_TESTS_DESELECTED,
     _pytest_invocation,
+    _run_verifier_specs,
     _witness_outcomes,
 )
 from tests.services.test_external_intelligence_closure_out_of_process_2795 import (
@@ -454,3 +458,100 @@ def test_probing_a_module_that_does_not_exist_is_not_flagged(tmp_path):
     row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
     assert row["passed"] is True, row
     assert row["witness"]["pytest_internals_patched"] == []
+
+
+# --- #2846 review round 2 ------------------------------------------------------------
+
+
+def test_absolute_target_is_compared_against_the_base_tree(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"tests/conftest.py": _DROP_AT_MAKEITEM},
+        base={"tests/test_sel.py": _FAST_AND_SLOW, "tests/test_mod.py": _PASSING},
+    )
+    row = _row(root, base, cand, _spec(str(root / "tests/test_sel.py")), ["tests/conftest.py"])
+    assert row["returncode"] == 0
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_DECLARED_NODE_MISSING, row
+    assert row["base_collect"]["missing"] == [_SLOW]
+
+
+def test_honest_absolute_target_with_a_fixture_only_conftest_passes(tmp_path):
+    fixture = "import pytest\n\n\n@pytest.fixture\ndef extra():\n    return 1\n"
+    root, base, cand = _repo(
+        tmp_path,
+        {"tests/conftest.py": fixture, "src_mod.py": "VALUE = 2\n"},
+        base={"tests/test_sel.py": _FAST_AND_SLOW},
+    )
+    row = _row(
+        root,
+        base,
+        cand,
+        _spec(str(root / "tests/test_sel.py")),
+        ["tests/conftest.py", "src_mod.py"],
+    )
+    assert row["passed"] is True, row
+    assert row["base_collect"]["selected"] == 2
+
+
+def test_base_collection_error_fails_closed(tmp_path):
+    """The declared file cannot be collected at base (it needs a name the candidate
+    adds), so the base has no node to compare: fail closed instead of passing."""
+    needs_new = (
+        "from src_mod import NEW\n\n\n"
+        "def test_fast():\n    assert True\n\n\n"
+        "def test_slow():\n    assert NEW == 2\n"
+    )
+    root, base, cand = _repo(
+        tmp_path,
+        {"tests/conftest.py": _DROP_AT_MAKEITEM, "src_mod.py": "VALUE = 1\nNEW = 3\n"},
+        base={"tests/test_sel.py": needs_new, "tests/test_mod.py": _PASSING},
+    )
+    row = _row(root, base, cand, _spec("tests/test_sel.py"), ["tests/conftest.py", "src_mod.py"])
+    assert row["returncode"] == 0
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_BASE_RUN_FAILED, row
+    assert row["base_collect"]["returncode"] not in (0, 5)
+
+
+def test_no_op_edit_of_an_unauthorized_declared_test_file_fails_the_scope_check(tmp_path):
+    """#2846 Gemini r2 finding 3: the changed-test-file exemption needs the test file
+    in the authorized scope; a no-op edit outside it fails the verification."""
+    root, base, cand = _repo(
+        tmp_path,
+        {
+            "tests/conftest.py": _DROP_AT_MAKEITEM,
+            "tests/test_sel.py": _FAST_AND_SLOW + "# touched\n",
+        },
+        base={"tests/test_sel.py": _FAST_AND_SLOW, "tests/test_mod.py": _PASSING},
+    )
+    verification = _run_verifier_specs(
+        task_id="t-2811",
+        unit_id="u-2811",
+        workspace_path=str(root),
+        candidate_commit=cand,
+        specs=[_spec("tests/test_sel.py")],
+        schema=UNIT_VERIFICATION_SCHEMA,
+        scope="UNIT",
+        base_sha=base,
+        authorized_paths=["tests/conftest.py"],
+        deletable_paths=(),
+    )
+    assert verification["status"] == "FAIL"
+    assert INTEGRITY_CHECK_SCOPE in verification["failed_integrity_check_ids"]
+
+
+def test_late_module_blocked_with_none_after_use_is_patched(tmp_path):
+    source = (
+        "import sys\n"
+        "import _pytest.pytester_assertions as _pa\n"
+        "_pa.assert_outcomes.__code__ = (lambda *a, **k: None).__code__\n"
+        "sys.modules['_pytest.pytester_assertions'] = None\n"
+        "VALUE = 2\n"
+    )
+    root, base, cand = _repo(tmp_path, {"src_mod.py": source})
+    row = _row(root, base, cand, _spec("tests/test_mod.py"), ["src_mod.py"])
+    assert row["returncode"] == 0
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_PYTEST_INTERNALS_PATCHED, row
+    assert "late_module:_pytest.pytester_assertions" in row["witness"]["pytest_internals_patched"]

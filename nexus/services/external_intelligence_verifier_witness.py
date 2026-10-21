@@ -270,7 +270,9 @@ def _module_changes(
         if name not in current:
             changes.append(f"module_removed:{name}")
     for name in list(audited):
-        if name in baseline or name in current:
+        # Still loaded: reported above.  Gone, or blocked with ``None`` after use
+        # (#2846 review r2): judged by its file.
+        if name in baseline or current.get(name) is not None:
             continue
         parent, _, last = name.rpartition(".")
         dirs = (package_dirs or {}).get(parent, ())

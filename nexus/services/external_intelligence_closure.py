@@ -1721,7 +1721,7 @@ def _declared_path_prefixes(root: Path, declared_paths: Sequence[str]) -> list[s
         text = os.path.normpath(token)
         if os.path.isabs(text):
             try:
-                text = os.path.relpath(text, root)
+                text = os.path.relpath(os.path.realpath(text), root)
             except ValueError:
                 continue
         prefixes.append(Path(text).as_posix())
@@ -2403,11 +2403,18 @@ def _base_skipped_nodes(
 
 
 def _base_collect_invocation(
-    invocation: _PytestInvocation, base_tree: Path
+    invocation: _PytestInvocation, base_tree: Path, root: Path
 ) -> _PytestInvocation | None:
-    """The same verifier as a ``--collect-only`` run at the base commit.  Positional
-    targets missing at base are dropped (a file the candidate added has nothing to
-    compare); ``None`` when every declared target was dropped."""
+    """The same verifier as a ``--collect-only`` run at the base commit, over the
+    card's file and directory targets only.
+
+    Node-id targets are left out: a declared node must be observed and passed anyway
+    (``VERIFIER_DECLARED_TESTS_NOT_PASSED``), and one that is new at the candidate would
+    make the base run fail.  Targets are made relative to the candidate root (an
+    absolute one would otherwise name the candidate tree, #2846 review r2); targets
+    outside the root or missing at base are dropped (a file the candidate added has
+    nothing to compare).  ``None`` when no file or directory target is left although
+    the card named targets."""
     args: list[str] = []
     skip_next = False
     had_target = kept_target = False
@@ -2418,10 +2425,15 @@ def _base_collect_invocation(
             skip_next = True
         elif not token.startswith("-"):
             had_target = True
-            path_part = token.partition("::")[0]
-            if not (base_tree / path_part).exists():
+            if "::" in token:
+                continue
+            (rel,) = _declared_path_prefixes(root, [token]) or ("",)
+            if not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel):
+                continue
+            if not (base_tree / rel).exists():
                 continue
             kept_target = True
+            token = rel
         args.append(token)
     if had_target and not kept_target:
         return None
@@ -2453,7 +2465,7 @@ def _base_declared_nodes_missing(
     ``pytest_collect_file``, ``pytest_pycollect_makeitem`` ...).  Nodes in test files the
     candidate changed or added are judged by the other rules.  ``None`` when the base
     collection produced no complete witness (fail closed)."""
-    base_invocation = _base_collect_invocation(invocation, base_tree)
+    base_invocation = _base_collect_invocation(invocation, base_tree, root)
     if base_invocation is None:
         return [], {"ran": False, "reason": "no_declared_target_at_base"}
     run_dir = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-collect-")).resolve()
@@ -2479,16 +2491,25 @@ def _base_declared_nodes_missing(
         "sandboxed": bool(run.sandbox.get("sandboxed")),
         "selected": len(run.selected_node_ids),
     }
-    if not run.witness.get("complete") or run.witness.get("error") in {
-        VERIFIER_WITNESS_TAMPERED,
-        VERIFIER_JUNIT_MISSING,
-    }:
+    # Fail closed on anything but a clean collection (#2846 review r2): an incomplete
+    # or flagged witness, collection errors (rc 2), usage errors (rc 4) ...  rc 5 (no
+    # tests collected) is a clean, empty base collection.
+    if (
+        not run.witness.get("complete")
+        or run.witness.get("error")
+        or run.error in {VERIFIER_WITNESS_TAMPERED, VERIFIER_JUNIT_MISSING}
+        or run.returncode not in (0, 5)
+    ):
         info["error"] = VERIFIER_BASE_RUN_FAILED
         return None, info
     changed = {PurePosixPath(p).as_posix() for p in changed_paths}
     prefixes = _declared_path_prefixes(root, invocation.declared_paths)
     whole_run = not invocation.declared_paths and not invocation.declared_node_ids
     observed = set(candidate_selected)
+    # A test file the candidate changed is exempt: changing it needs it in the card's
+    # authorized scope (``nexus.integrity.scope`` fails the verification otherwise),
+    # and with that authorization the candidate may delete or rewrite its tests
+    # outright; such a node is judged by the other rules and by diff review.
     missing = [
         n
         for n in run.selected_node_ids
