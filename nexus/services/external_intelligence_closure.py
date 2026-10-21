@@ -918,6 +918,7 @@ VERIFIER_ROOT_SHADOW_CHECK_ERROR = "VERIFIER_ROOT_SHADOW_CHECK_ERROR"
 VERIFIER_ROOT_SHADOW_NAMES = frozenset({
     "pytest.py",
     "pytest_asyncio.py",
+    "pluggy.py",
     "conftest.py",
     "sitecustomize.py",
     "usercustomize.py",
@@ -928,7 +929,8 @@ VERIFIER_ROOT_SHADOW_NAMES = frozenset({
 })
 # Root-level package directories that shadow pytest (or the explicitly loaded
 # ``pytest_asyncio`` plugin: the candidate root is on ``pythonpath``) like ``pytest.py``.
-VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio"})
+# ``pluggy`` (and ``pluggy.py`` above) too: pytest's hook machinery (#2811).
+VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio", "pluggy"})
 # Basenames refused at ANY depth: a nested ``conftest.py`` below ``--confcutdir`` is
 # loaded too and can rewrite outcomes (e.g. a ``pytest_runtest_makereport`` hookwrapper).
 VERIFIER_ANY_DEPTH_SHADOW_NAMES = frozenset({"conftest.py"})
@@ -1006,6 +1008,8 @@ class _PytestInvocation:
     interpreter_args: tuple[str, ...]
     pytest_args: tuple[str, ...]
     declared_node_ids: tuple[str, ...]
+    # Positional file or directory targets without ``::`` (#2811).
+    declared_paths: tuple[str, ...] = ()
 
 
 def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation | None | str:
@@ -1041,6 +1045,7 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
     else:
         return None
     declared: list[str] = []
+    declared_paths: list[str] = []
     skip_next = False
     for token in pytest_args:
         if skip_next:
@@ -1049,7 +1054,10 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
         if token in _PYTEST_VALUE_OPTIONS:
             skip_next = True
             continue
-        if token.startswith("-") or "::" not in token:
+        if token.startswith("-"):
+            continue
+        if "::" not in token:
+            declared_paths.append(token)
             continue
         path_part, _, rest = token.partition("::")
         declared.append(f"{PurePosixPath(path_part).as_posix()}::{rest}")
@@ -1058,6 +1066,7 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
         interpreter_args=interpreter_args,
         pytest_args=pytest_args,
         declared_node_ids=tuple(declared),
+        declared_paths=tuple(declared_paths),
     )
 
 
@@ -1448,6 +1457,13 @@ VERIFIER_PYTEST_INTERNALS_PATCHED = "VERIFIER_PYTEST_INTERNALS_PATCHED"
 VERIFIER_OUTCOME_FORGED = "VERIFIER_OUTCOME_FORGED"
 VERIFIER_TEST_IDENTITY_UNRESOLVED = "VERIFIER_TEST_IDENTITY_UNRESOLVED"
 VERIFIER_TESTS_DESELECTED = "VERIFIER_TESTS_DESELECTED"
+# A node of a declared file (or directory) was deselected or silently dropped while the
+# candidate changed a ``conftest.py`` (#2811).
+VERIFIER_DECLARED_FILE_DESELECTED = "VERIFIER_DECLARED_FILE_DESELECTED"
+# A node the same verifier selects at the base commit, in a declared target whose test
+# file the candidate did not change, is not selected in the candidate run while the
+# candidate changed a ``conftest.py`` (dropped at collection time; #2811 review).
+VERIFIER_DECLARED_NODE_MISSING = "VERIFIER_DECLARED_NODE_MISSING"
 VERIFIER_SANDBOX_SETUP_FAILED = "VERIFIER_SANDBOX_SETUP_FAILED"
 VERIFIER_EVIDENCE_TAMPERED = "VERIFIER_EVIDENCE_TAMPERED"
 VERIFIER_BASE_RUN_FAILED = "VERIFIER_BASE_RUN_FAILED"
@@ -1547,6 +1563,7 @@ def _empty_witness_summary() -> dict[str, Any]:
         "forged_node_ids": [],
         "not_run_node_ids": [],
         "deselected_node_ids": [],
+        "declared_file_deselected_node_ids": [],
         "identity_unresolved_node_ids": [],
         "declared_node_ids_missing": [],
     }
@@ -1697,6 +1714,30 @@ def _declared_match(nodeid: str, declared: Sequence[str]) -> bool:
     )
 
 
+def _declared_path_prefixes(root: Path, declared_paths: Sequence[str]) -> list[str]:
+    """Root-relative posix forms of the card's positional file/directory targets."""
+    prefixes: list[str] = []
+    for token in declared_paths:
+        text = os.path.normpath(token)
+        if os.path.isabs(text):
+            try:
+                text = os.path.relpath(os.path.realpath(text), root)
+            except ValueError:
+                continue
+        prefixes.append(Path(text).as_posix())
+    return prefixes
+
+
+def _conftest_changed(changed_paths: Sequence[str]) -> bool:
+    """The candidate diff touches a ``conftest.py`` at any depth (git paths use ``/``)."""
+    return any(PurePosixPath(p).name.casefold() == "conftest.py" for p in changed_paths)
+
+
+def _in_declared_path(nodeid: str, prefixes: Sequence[str]) -> bool:
+    path = nodeid.split("::", 1)[0]
+    return any(p == "." or path == p or path.startswith(p + "/") for p in prefixes)
+
+
 def _witness_outcomes(
     records: Sequence[Mapping[str, Any]],
     *,
@@ -1705,12 +1746,19 @@ def _witness_outcomes(
     deselect_allowed: bool,
     declared_node_ids: Sequence[str] = (),
     in_tree_trusted: Callable[[str], bool] = lambda _rel: False,
+    declared_paths: Sequence[str] = (),
+    conftest_changed: bool = False,
 ) -> tuple[str, list[tuple[str, str, str]] | None, dict[str, Any]]:
     """Derive per-test outcomes from verified witness records.
 
     Returns (error code or "", JUnit cases or None when the stream is incomplete,
     witness summary).  pytest's reports are untrusted: "passed" also needs the witness
     observation; "failed"/"skipped" are believed because they can only lose a pass.
+
+    ``conftest_changed`` (the candidate diff touches a ``conftest.py``): a deselected or
+    silently dropped node of a declared file or directory (``declared_paths``; no
+    positional target at all declares the whole run) is refused (#2811), since a
+    file-level declaration is otherwise satisfied by any surviving node of that file.
     """
     summary = _empty_witness_summary()
     summary["present"] = bool(records)
@@ -1810,6 +1858,16 @@ def _witness_outcomes(
     summary["not_run_node_ids"] = not_run[:_INTEGRITY_FINDINGS_LIMIT]
     summary["deselected_node_ids"] = deselected[:_INTEGRITY_FINDINGS_LIMIT]
     summary["identity_unresolved_node_ids"] = unresolved[:_INTEGRITY_FINDINGS_LIMIT]
+    declared_file_deselected: list[str] = []
+    if conftest_changed:
+        whole_run = not declared_paths and not declared_node_ids
+        prefixes = _declared_path_prefixes(root, declared_paths)
+        declared_file_deselected = [
+            n for n in deselected if whole_run or _in_declared_path(n, prefixes)
+        ]
+    summary["declared_file_deselected_node_ids"] = declared_file_deselected[
+        :_INTEGRITY_FINDINGS_LIMIT
+    ]
     # Every declared node must appear among the observed cases (#2808 review round 3):
     # a hook that drops it from ``session.items`` without ``pytest_deselected`` is not
     # silent any more.
@@ -1827,6 +1885,10 @@ def _witness_outcomes(
         error = VERIFIER_OUTCOME_FORGED
     elif unresolved:
         error = VERIFIER_TEST_IDENTITY_UNRESOLVED
+    elif declared_file_deselected:
+        # Even a card ``-k``/``-m``/``--deselect`` does not excuse it: a changed conftest
+        # can report its own drop through ``pytest_deselected`` (#2811).
+        error = VERIFIER_DECLARED_FILE_DESELECTED
     elif any(_declared_match(n, declared_node_ids) for n in deselected) and not (
         deselect_allowed and set(deselected) <= deselected_by_hook
     ):
@@ -1878,6 +1940,18 @@ def _write_deny_rules(paths: Sequence[Path], literals: Sequence[Path]) -> list[s
     return rules
 
 
+def _refuse_trusted_roots_in_writable(
+    interpreter_dirs: Sequence[Path], writable: Sequence[Path]
+) -> None:
+    """No trusted interpreter or plugin root may lie inside a dir the verifier child can
+    write (the work tree for a candidate run, the per-run child dir): candidate code
+    could rewrite site-packages or pytest there.  Applied with and without an OS
+    sandbox (#2811)."""
+    for directory in interpreter_dirs:
+        if any(directory.is_relative_to(w) for w in writable):
+            raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+
+
 def _verifier_sandbox_profile(
     *,
     root: Path,
@@ -1901,9 +1975,7 @@ def _verifier_sandbox_profile(
     )
 
     writable = [str(child_dir)] + ([str(root)] if root_writable else [])
-    for directory in interpreter_dirs:
-        if any(directory.is_relative_to(Path(w)) for w in writable):
-            raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+    _refuse_trusted_roots_in_writable(interpreter_dirs, [Path(w) for w in writable])
     read_roots = checked_read_roots([
         str(root),
         str(child_dir),
@@ -2098,6 +2170,9 @@ class _PytestRun:
     skipped_names: list[str]
     env_keys: list[str]
     junit_bytes: bytes = b""
+    # The node ids pytest selected (the witness ``selected`` record), for the #2811
+    # base collection comparison.
+    selected_node_ids: tuple[str, ...] = ()
 
 
 def _run_pytest_verifier(
@@ -2167,6 +2242,9 @@ def _run_pytest_verifier(
         return result(VERIFIER_PYTEST_INTERPRETER_UNRESOLVED)
     try:
         interpreter_dirs = _interpreter_dirs(located, child_dir)
+        _refuse_trusted_roots_in_writable(
+            interpreter_dirs, [child_dir.resolve()] + ([root] if root_writable else [])
+        )
     except (ClosureError, OSError, subprocess.SubprocessError):
         return result(VERIFIER_SANDBOX_SETUP_FAILED)
     profile: str | None = None
@@ -2242,6 +2320,8 @@ def _run_pytest_verifier(
         trusted_plugin_dirs=[trusted_dir.resolve(), *interpreter_dirs],
         deselect_allowed=bool(pytest_args & _DESELECT_OPTIONS),
         declared_node_ids=invocation.declared_node_ids,
+        declared_paths=invocation.declared_paths,
+        conftest_changed=_conftest_changed(changed_paths),
         in_tree_trusted=(
             _base_unchanged_predicate(root, base_sha, changed_paths)
             if root_writable
@@ -2268,6 +2348,14 @@ def _run_pytest_verifier(
     run = result(witness_error or junit_error, returncode, out, err)
     run.skipped_names = skipped_names
     run.junit_bytes = junit_bytes
+    run.selected_node_ids = next(
+        (
+            tuple(str(n) for n in r.get("nodeids") or [])
+            for r in reversed(records)
+            if r.get("t") == "selected"
+        ),
+        (),
+    )
     return run
 
 
@@ -2314,6 +2402,144 @@ def _base_skipped_nodes(
     return set(run.skipped_names), info
 
 
+def _base_collect_invocation(
+    invocation: _PytestInvocation, base_tree: Path, root: Path
+) -> _PytestInvocation | None:
+    """The same verifier as a ``--collect-only`` run at the base commit, over the
+    card's file and directory targets only.
+
+    Node-id targets are left out: a declared node must be observed and passed anyway
+    (``VERIFIER_DECLARED_TESTS_NOT_PASSED``), and one that is new at the candidate would
+    make the base run fail.  Targets are made relative to the candidate root (an
+    absolute one would otherwise name the candidate tree, #2846 review r2); targets
+    outside the root or missing at base are dropped (a file the candidate added has
+    nothing to compare).  ``None`` when no file or directory target is left although
+    the card named targets."""
+    args: list[str] = []
+    skip_next = False
+    had_target = kept_target = False
+    for token in invocation.pytest_args:
+        if skip_next:
+            skip_next = False
+        elif token in _PYTEST_VALUE_OPTIONS:
+            skip_next = True
+        elif not token.startswith("-"):
+            had_target = True
+            if "::" in token:
+                continue
+            (rel,) = _declared_path_prefixes(root, [token]) or ("",)
+            if not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel):
+                continue
+            if not (base_tree / rel).exists():
+                continue
+            kept_target = True
+            token = rel
+        args.append(token)
+    if had_target and not kept_target:
+        return None
+    return _PytestInvocation(
+        interpreter=invocation.interpreter,
+        interpreter_args=invocation.interpreter_args,
+        pytest_args=(*args, "--collect-only"),
+        declared_node_ids=(),
+        declared_paths=(),
+    )
+
+
+def _base_declared_nodes_missing(
+    invocation: _PytestInvocation,
+    candidate_selected: Collection[str],
+    *,
+    root: Path,
+    base_sha: str,
+    base_config: Mapping[str, Any],
+    base_tree: Path,
+    candidate_commit: str,
+    timeout: float,
+    changed_paths: Sequence[str],
+) -> tuple[list[str] | None, dict[str, Any]]:
+    """#2811 review: with a changed ``conftest.py``, every node the same verifier
+    selects at the base commit in a declared target (no positional target: the whole
+    run) whose test file the candidate did not change must also be selected in the
+    candidate run; otherwise it was dropped at collection time (``pytest_ignore_collect``,
+    ``pytest_collect_file``, ``pytest_pycollect_makeitem`` ...).  Nodes in test files the
+    candidate changed or added are judged by the other rules.  ``None`` when the base
+    collection produced no complete witness (fail closed)."""
+    base_invocation = _base_collect_invocation(invocation, base_tree, root)
+    if base_invocation is None:
+        return [], {"ran": False, "reason": "no_declared_target_at_base"}
+    run_dir = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-collect-")).resolve()
+    try:
+        run = _run_pytest_verifier(
+            base_invocation,
+            root=base_tree,
+            run_dir=run_dir,
+            base_config=base_config,
+            base_sha=base_sha,
+            candidate_commit=candidate_commit,
+            timeout=timeout,
+            changed_paths=(),
+            base_skipped=(),
+            root_writable=False,
+        )
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+    info: dict[str, Any] = {
+        "ran": True,
+        "returncode": run.returncode,
+        "witness_complete": bool(run.witness.get("complete")),
+        "sandboxed": bool(run.sandbox.get("sandboxed")),
+        "selected": len(run.selected_node_ids),
+    }
+    # Fail closed on anything but a clean collection (#2846 review r2): an incomplete
+    # or flagged witness, collection errors (rc 2), usage errors (rc 4) ...  rc 5 (no
+    # tests collected) is a clean, empty base collection.
+    if (
+        not run.witness.get("complete")
+        or run.witness.get("error")
+        or run.error in {VERIFIER_WITNESS_TAMPERED, VERIFIER_JUNIT_MISSING}
+        or run.returncode not in (0, 5)
+    ):
+        info["error"] = VERIFIER_BASE_RUN_FAILED
+        return None, info
+    changed = {PurePosixPath(p).as_posix() for p in changed_paths}
+    prefixes = _declared_path_prefixes(root, invocation.declared_paths)
+    whole_run = not invocation.declared_paths and not invocation.declared_node_ids
+    observed = set(candidate_selected)
+    # A test file the candidate changed is exempt: changing it needs it in the card's
+    # authorized scope (``nexus.integrity.scope`` fails the verification otherwise),
+    # and with that authorization the candidate may delete or rewrite its tests
+    # outright; such a node is judged by the other rules and by diff review.
+    missing = [
+        n
+        for n in run.selected_node_ids
+        if n.split("::", 1)[0] not in changed
+        and (whole_run or _in_declared_path(n, prefixes))
+        and n not in observed
+    ]
+    info["missing"] = missing[:_INTEGRITY_FINDINGS_LIMIT]
+    return missing, info
+
+
+def _ensure_base_tree(
+    root: Path, base_sha: str, base_tree_parent: Path | None, base_tree_error: str
+) -> tuple[Path | None, str]:
+    """One read-only base checkout per call, extracted on first use (#2795)."""
+    if base_tree_parent is None and not base_tree_error:
+        base_tree_parent = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-tree-")).resolve()
+        try:
+            _base_checkout(root, base_sha, base_tree_parent / "tree")
+        except (
+            ClosureError,
+            OSError,
+            ValueError,
+            tarfile.TarError,
+            subprocess.SubprocessError,
+        ):
+            base_tree_error = VERIFIER_BASE_RUN_FAILED
+    return base_tree_parent, base_tree_error
+
+
 def _run_one_verifier(
     spec: VerifierSpec,
     *,
@@ -2335,6 +2561,7 @@ def _run_one_verifier(
     witness_summary: dict[str, Any] | None = None
     sandbox_info: dict[str, Any] = {"sandboxed": False, "barrier": None}
     base_run: dict[str, Any] | None = None
+    base_collect: dict[str, Any] | None = None
     returncode: int | None = None
     stdout = stderr = error = ""
     try:
@@ -2378,20 +2605,9 @@ def _run_one_verifier(
             env_keys = run.env_keys
             if error == VERIFIER_JUNIT_SKIPPED and returncode == 0 and run.junit_bytes:
                 # A skip passes only if the same node is also skipped at the base commit.
-                if base_tree_parent is None and not base_tree_error:
-                    base_tree_parent = Path(
-                        tempfile.mkdtemp(prefix="nexus-verifier-base-tree-")
-                    ).resolve()
-                    try:
-                        _base_checkout(root, base_sha, base_tree_parent / "tree")
-                    except (
-                        ClosureError,
-                        OSError,
-                        ValueError,
-                        tarfile.TarError,
-                        subprocess.SubprocessError,
-                    ):
-                        base_tree_error = VERIFIER_BASE_RUN_FAILED
+                base_tree_parent, base_tree_error = _ensure_base_tree(
+                    root, base_sha, base_tree_parent, base_tree_error
+                )
                 if base_tree_error or base_tree_parent is None:
                     base_run = {"ran": False, "error": base_tree_error or VERIFIER_BASE_RUN_FAILED}
                 else:
@@ -2413,6 +2629,29 @@ def _run_one_verifier(
                             base_skipped=base_skipped,
                         )
                         junit_summary["evidence_source"] = "parent_witness_channel"
+            if not error and returncode == 0 and _conftest_changed(changed_paths or ()):
+                base_tree_parent, base_tree_error = _ensure_base_tree(
+                    root, base_sha, base_tree_parent, base_tree_error
+                )
+                if base_tree_error or base_tree_parent is None:
+                    base_collect = {"ran": False, "error": base_tree_error}
+                    error = VERIFIER_BASE_RUN_FAILED
+                else:
+                    missing, base_collect = _base_declared_nodes_missing(
+                        invocation,
+                        run.selected_node_ids,
+                        root=root,
+                        base_sha=base_sha,
+                        base_config=base_pytest_config[0],
+                        base_tree=base_tree_parent / "tree",
+                        candidate_commit=candidate_commit,
+                        timeout=spec.timeout,
+                        changed_paths=changed_paths or (),
+                    )
+                    if missing is None:
+                        error = VERIFIER_BASE_RUN_FAILED
+                    elif missing:
+                        error = VERIFIER_DECLARED_NODE_MISSING
         else:
             sandbox_info["reason"] = "not_a_pytest_verifier"
             try:
@@ -2457,6 +2696,7 @@ def _run_one_verifier(
         "witness": witness_summary,
         "sandbox": sandbox_info,
         "base_run": base_run,
+        "base_collect": base_collect,
         "env_keys": env_keys,
         "root_shadowing_refused_paths": list(refused_shadow),
         "root_shadowing_authorized_paths": list(authorized_shadow),
