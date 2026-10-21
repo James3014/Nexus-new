@@ -161,7 +161,7 @@ def _launch(tmp_path: Path, task_id: str, *, core_bound: bool):
         target_root=str(tmp_path / "targets"),
         ambient_core_port=_FakeCorePort() if core_bound else None,
         core_envelope_required=core_bound,
-        verifier_commands=("git --version",),
+        verifier_commands=("python -c pass",),
     )
     receipt = launcher.launch_managed_agent(request)
     return launcher, receipt, base_sha

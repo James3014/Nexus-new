@@ -652,3 +652,130 @@ def test_wave4_effect_binding_requires_projection_pair_before_worker(tmp_path: P
     assert receipt.worker_invocation_count == 0
     assert invoked == []
     assert receipt.failure_reasons == ("EFFECT_AUTHORIZATION_PROJECTION_PAIR_REQUIRED",)
+
+
+# --- #2825: pre_write_machine_enforced_core_bound means a Core binding was established ---
+def _effect_request(tmp_path: Path, repo: Path, base_sha: str, task_id: str, **overrides):
+    kwargs: dict[str, Any] = dict(
+        task_id=task_id,
+        what="exercise effect-bound managed execution",
+        why="prove early blocks never claim a Core binding",
+        repository_root=str(repo),
+        repository_identity="James3014/example",
+        base_revision=base_sha,
+        worker_provider="codex",
+        target_root=str(tmp_path / "targets"),
+        ambient_core_port=FakeAmbientCorePort(),
+        core_envelope_required=True,
+        effect_authorization={
+            "operation_id": f"op-{task_id}",
+            "attempt_id": f"attempt-{task_id}-1",
+            "repository": "James3014/example",
+            "source_revision": base_sha,
+            "base_revision": base_sha,
+            "workspace_id": task_id,
+            "target_id": task_id,
+        },
+        tool_projection_requests={
+            "codex": {
+                "backend_id": "codex-cli",
+                "selected_tools": ["edit"],
+                "selected_effects": {"filesystem": {"write_paths": ["src/"]}},
+            }
+        },
+    )
+    kwargs.update(overrides)
+    return ManagedLocalAgentRequest(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["identity_missing", "pair_missing", "identity_mismatch", "projection_missing"],
+)
+def test_2825_early_effect_block_reports_no_core_binding(tmp_path: Path, case: str):
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    invoked: list[str] = []
+    launcher = ManagedLocalAgentLauncher(service=_setup_service(tmp_path, invoked))
+    task_id = f"t2825-{case.replace('_', '-')}"
+    overrides: dict[str, Any] = {}
+    if case == "identity_missing":
+        overrides["repository_identity"] = None
+    elif case == "pair_missing":
+        overrides["tool_projection_requests"] = {}
+    elif case == "identity_mismatch":
+        overrides["repository_identity"] = "James3014/other"
+    else:
+        overrides["tool_projection_requests"] = {"gemini": {"backend_id": "x"}}
+
+    receipt = launcher.launch_managed_agent(
+        _effect_request(tmp_path, repo, base_sha, task_id, **overrides)
+    )
+
+    assert receipt.terminal_status == "FINAL_BLOCK"
+    assert receipt.worker_invocation_count == 0
+    assert invoked == []
+    assert receipt.core_binding_hash is None
+    # Core envelope required and port supplied, yet nothing was bound.
+    assert receipt.pre_write_machine_enforced_core_bound is False
+
+
+def test_2825_completed_binding_reports_core_bound(tmp_path: Path):
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    invoked: list[str] = []
+    launcher = ManagedLocalAgentLauncher(service=_setup_service(tmp_path, invoked))
+    receipt = launcher.launch_managed_agent(
+        ManagedLocalAgentRequest(
+            task_id="t2825-complete",
+            what="completed binding",
+            why="prove completed Core binding reports True",
+            repository_root=str(repo),
+            base_revision=base_sha,
+            worker_provider="codex",
+            target_root=str(tmp_path / "targets"),
+            ambient_core_port=FakeAmbientCorePort(verified=True),
+            core_envelope_required=True,
+            allowed_files=["src/"],
+            verifier_commands=("python -c pass",),
+        )
+    )
+    assert receipt.core_binding_hash
+    assert receipt.pre_write_machine_enforced_core_bound is True
+
+
+def test_2825_missing_binding_hash_in_state_reports_false(tmp_path: Path):
+    """Evidence-derived: a supplied port without a stored binding hash is not enough."""
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    service = _setup_service(tmp_path, [])
+    real_read_state = service._read_state
+
+    def read_state_without_hash(task_id):
+        state = dict(real_read_state(task_id) or {})
+        state["verified_receipt"] = {
+            k: v
+            for k, v in dict(state.get("verified_receipt") or {}).items()
+            if k != "core_binding_hash"
+        }
+        return state
+
+    service._read_state = read_state_without_hash
+    launcher = ManagedLocalAgentLauncher(service=service)
+    receipt = launcher.launch_managed_agent(
+        ManagedLocalAgentRequest(
+            task_id="t2825-nohash",
+            what="no stored hash",
+            why="prove the field follows the stored hash, not the supplied port",
+            repository_root=str(repo),
+            base_revision=base_sha,
+            worker_provider="codex",
+            target_root=str(tmp_path / "targets"),
+            ambient_core_port=FakeAmbientCorePort(verified=True),
+            core_envelope_required=True,
+            allowed_files=["src/"],
+            verifier_commands=("python -c pass",),
+        )
+    )
+    assert receipt.core_binding_hash is None
+    assert receipt.pre_write_machine_enforced_core_bound is False
