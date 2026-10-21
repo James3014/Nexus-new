@@ -114,6 +114,13 @@ class ManagedLocalAgentReceipt:
     execution_lane: str
     status: str
     terminal_status: Optional[str]
+    # Evidence-derived claim (#2825): True only when a Core binding was actually
+    # established for this receipt, i.e. the Core envelope was required, a Core
+    # port was supplied AND the stored state carries a non-empty
+    # ``core_binding_hash`` (the same value surfaced as ``core_binding_hash``).
+    # A merely supplied port is NOT enough. Early FINAL_BLOCK receipts (missing
+    # port, effect-authorization blocks, submission failure) and REBIND_REQUIRED
+    # / raw-mutation receipts always report False.
     pre_write_machine_enforced_core_bound: bool
     path_level_prewrite_containment_proven: bool
     post_hoc_physical_verification: bool
@@ -193,7 +200,11 @@ class ManagedLocalAgentLauncher:
             request, repo_path, current_head, attempt_id
         )
 
-        core_bound = bool(request.core_envelope_required and request.ambient_core_port is not None)
+        # Only an *eligibility* flag (envelope required and a port supplied). It is
+        # never reported as-is: the receipt field is derived from evidence below.
+        core_bound_eligible = bool(
+            request.core_envelope_required and request.ambient_core_port is not None
+        )
         if request.core_envelope_required:
             if request.ambient_core_port is None:
                 # Missing Core port blocks before worker invocation (worker_invocation_count = 0)
@@ -237,7 +248,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=core_bound,
+                    pre_write_machine_enforced_core_bound=False,  # early block: no Core binding completed
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -257,7 +268,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=core_bound,
+                    pre_write_machine_enforced_core_bound=False,  # early block: no Core binding completed
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -291,7 +302,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=core_bound,
+                    pre_write_machine_enforced_core_bound=False,  # early block: no Core binding completed
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -313,7 +324,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=core_bound,
+                    pre_write_machine_enforced_core_bound=False,  # early block: no Core binding completed
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -423,17 +434,31 @@ class ManagedLocalAgentLauncher:
         is_pty = bool(request.shell_pty_mode)
         path_containment = not is_pty and (terminal_status == "PENDING_HUMAN_APPROVAL")
 
+        # The completed Core binding is recorded on the verified receipt (set from
+        # the Core preparation's binding_hash); a top-level state value, if any,
+        # is honoured too. Absent evidence means no binding was established.
+        core_binding_hash = state.get("core_binding_hash")
+        if not core_binding_hash:
+            core_binding_hash = (
+                verified_receipt.get("core_binding_hash")
+                if isinstance(verified_receipt, Mapping)
+                else getattr(verified_receipt, "core_binding_hash", None)
+            )
+        if not isinstance(core_binding_hash, str) or not core_binding_hash:
+            core_binding_hash = None
+        core_binding_established = bool(core_bound_eligible and core_binding_hash)
+
         return ManagedLocalAgentReceipt(
             task_id=request.task_id,
             worker_provider=provider,
             execution_lane=request.execution_lane,
             status=str(submitted.get("status")),
             terminal_status=terminal_status,
-            pre_write_machine_enforced_core_bound=core_bound,
+            pre_write_machine_enforced_core_bound=core_binding_established,
             path_level_prewrite_containment_proven=path_containment,
             post_hoc_physical_verification=True,
             core_provenance_verified=core_provenance_verified,
-            core_binding_hash=state.get("core_binding_hash"),
+            core_binding_hash=core_binding_hash,
             candidate_state_hash=state.get("candidate_state_hash"),
             candidate_commit_sha=candidate_commit_sha,
             candidate_ref=candidate_ref,
