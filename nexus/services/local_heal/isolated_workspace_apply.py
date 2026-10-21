@@ -175,10 +175,11 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
     return "\n".join(output).strip(_GIT_TRAILING_WS + "\n")
 
 
-def _hunk_payload_counts(diff_text: str) -> tuple[int, int]:
-    """Count added/removed payload lines the way ``git apply`` consumes hunks."""
-    added = deleted = 0
+def _scan_patch(diff_text: str) -> tuple[int, int, int, list[str]]:
+    """Return ``(added, deleted, hunks, header_lines)`` consuming hunks as ``git apply`` does."""
+    added = deleted = hunks = 0
     old_left = new_left = 0
+    headers: list[str] = []
     for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
         if old_left > 0 or new_left > 0:
             if raw_line.startswith("\\"):
@@ -196,9 +197,54 @@ def _hunk_payload_counts(diff_text: str) -> tuple[int, int]:
             continue
         header = _HUNK_HEADER_RE.match(raw_line.rstrip(_GIT_TRAILING_WS))
         if header:
+            hunks += 1
             old_left = int(header.group(1)) if header.group(1) is not None else 1
             new_left = int(header.group(2)) if header.group(2) is not None else 1
+        else:
+            headers.append(raw_line)
+    return added, deleted, hunks, headers
+
+
+def _hunk_payload_counts(diff_text: str) -> tuple[int, int]:
+    """Count added/removed payload lines the way ``git apply`` consumes hunks."""
+    added, deleted, _hunks, _headers = _scan_patch(diff_text)
     return added, deleted
+
+
+_FORBIDDEN_HEADER_RE = re.compile(
+    r"^(old mode |new mode |new file mode |deleted file mode |rename |copy |similarity index |"
+    r"dissimilarity index |GIT binary patch|Binary files )"
+)
+
+
+def _header_violation(target_file: str, headers: list[str]) -> str | None:
+    """Every file header git may read must name ``target_file`` and nothing else (#2836)."""
+    allowed = os.path.normpath(target_file)
+
+    def names_target(text: str, prefixes: tuple[str, ...]) -> bool:
+        name = text.split("\t", 1)[0].rstrip(_GIT_TRAILING_WS)
+        if name == "/dev/null":
+            return True  # git's own create/delete reading is judged by --summary below
+        for prefix in prefixes:
+            if name.startswith(prefix) and os.path.normpath(name[len(prefix) :]) == allowed:
+                return True
+        return os.path.normpath(name) == allowed
+
+    for line in headers:
+        if _FORBIDDEN_HEADER_RE.match(line):
+            return f"non-hunk operation header: {line[:80]!r}"
+        if line.startswith("diff --git "):
+            rest = line[len("diff --git ") :]
+            if rest not in {
+                f"a/{target_file} b/{target_file}",
+                f"{target_file} {target_file}",
+            }:
+                return f"diff header names another path: {line[:120]!r}"
+        elif line.startswith("--- ") and not names_target(line[4:], ("a/",)):
+            return f"--- header names another path: {line[:120]!r}"
+        elif line.startswith("+++ ") and not names_target(line[4:], ("b/",)):
+            return f"+++ header names another path: {line[:120]!r}"
+    return None
 
 
 def _git_apply_query(flags: list[str], diff_bytes: bytes) -> subprocess.CompletedProcess[bytes]:
@@ -237,8 +283,20 @@ def _patch_scope_violation(target_file: str, diff_content: str) -> tuple[str, st
                 or "git apply could not read the patch"
             )
             return "unparseable", detail[:500]
+    _added, _deleted, hunk_count, header_lines = _scan_patch(diff_content)
+    header_problem = _header_violation(target_file, header_lines)
+    if header_problem:
+        return "scope", header_problem[:500]
+    if hunk_count == 0:
+        return "scope", "patch carries no hunk"
+    # A header-less (traditional) patch makes git guess create/delete for a hunk that starts
+    # from or ends at an empty file; that is a plain edit of the tracked target, never a
+    # mode-carrying file operation (those headers are refused above).
+    benign = {f" create {target_file}", f" delete {target_file}"}
     summary_lines = [
-        line for line in summary.stdout.decode("utf-8", "replace").splitlines() if line.strip()
+        line
+        for line in summary.stdout.decode("utf-8", "replace").splitlines()
+        if line.strip() and line.rstrip() not in benign
     ]
     if summary_lines:
         return "scope", f"non-hunk operation: {summary_lines[0].strip()}"[:500]

@@ -622,13 +622,13 @@ def test_scope_rename_is_refused_end_to_end(tmp_path) -> None:
         "diff --git a/f.py b/g.py\nsimilarity index 100%\nrename from f.py\nrename to g.py\n"
     )
     receipt, workdir = _scope_apply(tmp_path, rename, name="rename")
-    _assert_refused(receipt, workdir, "rename")
+    _assert_refused(receipt, workdir, "g.py")
     renamed_with_edit = (
         "diff --git a/f.py b/g.py\nsimilarity index 50%\nrename from f.py\nrename to g.py\n"
         "--- a/f.py\n+++ b/g.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
     )
     receipt, workdir = _scope_apply(tmp_path, renamed_with_edit, name="rename2")
-    _assert_refused(receipt, workdir, "rename")
+    _assert_refused(receipt, workdir, "g.py")
 
 
 def test_scope_copy_is_refused(tmp_path) -> None:
@@ -741,3 +741,71 @@ def test_canonicalize_docstring_names_the_scope_gate() -> None:
     docstring = _canonicalize_effective_diff.__doc__ or ""
     assert "_patch_scope_violation" in docstring
     assert "No gate here checks" not in docstring
+
+
+def test_scope_new_mode_without_old_mode_is_refused(tmp_path) -> None:
+    diff = (
+        "diff --git a/f.py b/f.py\nnew mode 100755\n"
+        "--- a/f.py\n+++ b/f.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    )
+    receipt, workdir = _scope_apply(tmp_path, diff, name="newmode")
+    _assert_refused(receipt, workdir, "mode")
+
+
+def test_scope_mismatched_file_headers_are_refused(tmp_path) -> None:
+    diff = "--- a/conftest.py\n+++ b/f.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    receipt, workdir = _scope_apply(tmp_path, diff, name="mismatch")
+    _assert_refused(receipt, workdir, "conftest.py")
+    diff = "diff --git a/f.py b/conftest.py\n" + _HONEST_F
+    receipt, workdir = _scope_apply(tmp_path, diff, name="mismatch2")
+    _assert_refused(receipt, workdir, "conftest.py")
+
+
+def test_scope_patch_without_hunks_is_refused(tmp_path) -> None:
+    diff = "diff --git a/f.py b/f.py\nindex 1111111..2222222 100644\n"
+    receipt, workdir = _scope_apply(tmp_path, diff, name="nohunk")
+    _assert_refused(receipt, workdir, "no hunk")
+
+
+def test_scope_traditional_patches_git_guesses_create_or_delete_for_still_bind(tmp_path) -> None:
+    """Review finding: a header-less hunk from/to an empty file is an edit of the tracked target."""
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    cases = {
+        "clear": ("a = 1\nb = 2\n", "--- a/f.py\n+++ b/f.py\n@@ -1,2 +0,0 @@\n-a = 1\n-b = 2\n"),
+        "fill": ("", "--- a/f.py\n+++ b/f.py\n@@ -0,0 +1,2 @@\n+x = 1\n+y = 2\n"),
+        "insert": ("a = 1\nb = 2\n", "--- a/f.py\n+++ b/f.py\n@@ -2,0 +3 @@\n+c = 3\n"),
+    }
+    for name, (original, diff) in cases.items():
+        source = tmp_path / f"repo-{name}"
+        source.mkdir()
+        (source / "f.py").write_text(original, encoding="utf-8")
+        receipt = run_isolated_workspace_apply(
+            IsolatedApplyRequest(
+                task_id=name,
+                source_root=str(source),
+                target_file="f.py",
+                unified_diff=diff,
+                selected_candidate_hash=_canonical_candidate_hash(diff),
+                mutation_allowed=True,
+                work_dir=str(tmp_path / f"artifacts-{name}"),
+            )
+        )
+        assert receipt.patch_apply_status == "applied", (name, receipt.patch_apply_error)
+        assert not os.path.exists(os.path.join(receipt.workspace_path, "conftest.py"))
+    missing = tmp_path / "repo-missing"
+    missing.mkdir()
+    diff = cases["fill"][1].replace("f.py", "new.py")
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="missing",
+            source_root=str(missing),
+            target_file="new.py",
+            unified_diff=diff,
+            selected_candidate_hash=_canonical_candidate_hash(diff),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts-missing"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied", receipt.patch_apply_error
+    assert receipt.selected_candidate_hash_matches_applied is True
