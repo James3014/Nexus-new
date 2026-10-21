@@ -1,9 +1,11 @@
 import importlib.util
 import unittest
-from nexus.state.task_state_store import TaskStateStore
-from nexus.memory.memory_retrieval_service import MemoryRetrievalService
-from nexus.memory.memory_models import MemoryHit, FailureSignatureHit
+
 from nexus.governance.backfill_service import BackfillService
+from nexus.memory.memory_models import FailureSignatureHit, MemoryHit
+from nexus.memory.memory_retrieval_service import MemoryRetrievalService
+from nexus.state.task_state_store import TaskStateStore
+
 
 class TestV28ContractSealing(unittest.TestCase):
     """

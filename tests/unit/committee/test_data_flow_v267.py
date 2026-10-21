@@ -1,11 +1,12 @@
+import os
 import re
 import unittest
+
 from nexus.committee.controller import CommitteeControllerV263
 from nexus.verifiers.contracts import FailureTag, VerifierVerdict
-from nexus.verifiers.registry import VerifierRegistry
 from nexus.verifiers.packs.base import VerifierPack
 from nexus.verifiers.packs.registry import PackRegistry
-import os
+from nexus.verifiers.registry import VerifierRegistry
 
 
 def _name_sanity_verdict(candidate_id: str, patch: str) -> VerifierVerdict:

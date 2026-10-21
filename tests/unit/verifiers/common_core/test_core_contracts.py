@@ -1,7 +1,9 @@
 import importlib.util
-import unittest
 import threading
+import unittest
+
 from nexus.verifiers.domain.common_core.state_guards import execute_with_double_checked_lock
+
 
 class TestCore(unittest.TestCase):
     def test_locks(self):
