@@ -531,3 +531,213 @@ def test_hunk_counts_include_blank_lines_and_default_to_one() -> None:
     assert _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y\n+evil\n") == "@@ -0,1 +0,1 @@\n-X\n+Y"
     # a marker after a non-hunk line attaches to nothing
     assert "No newline" not in _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y\n+evil\n\\ No newline at end of file\n")
+
+
+# --- #2836: the selected patch must be hunk edits of target_file only --------------------
+
+_HONEST_F = "--- a/f.py\n+++ b/f.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+
+
+def _scope_apply(tmp_path, diff: str, *, name: str = "scope", verifier_files=()):
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / f"repo-{name}"
+    source.mkdir()
+    (source / "f.py").write_text("a = 1\nb = 2\n", encoding="utf-8")
+    (source / "repro.py").write_text("print('ok')\n", encoding="utf-8")
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id=name,
+            source_root=str(source),
+            target_file="f.py",
+            unified_diff=diff,
+            selected_candidate_hash=_canonical_candidate_hash(diff),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / f"artifacts-{name}"),
+            verifier_files=tuple(verifier_files),
+        )
+    )
+    return receipt, tmp_path / f"artifacts-{name}"
+
+
+def _assert_refused(receipt, workdir, needle: str) -> None:
+    assert receipt.patch_apply_status == "blocked"
+    assert receipt.patch_apply_error.startswith("patch_scope_scope:")
+    assert needle in receipt.patch_apply_error
+    assert receipt.selected_candidate_hash_matches_applied is False
+    assert receipt.candidate_output_isolated is False
+    assert receipt.workspace_path == ""
+    assert not workdir.exists() or not any(workdir.iterdir())  # nothing was applied anywhere
+
+
+def test_scope_extra_conftest_file_is_refused_end_to_end(tmp_path) -> None:
+    extra = (
+        "diff --git a/conftest.py b/conftest.py\nnew file mode 100644\n"
+        "--- /dev/null\n+++ b/conftest.py\n@@ -0,0 +1 @@\n+import os\n"
+    )
+    receipt, workdir = _scope_apply(tmp_path, _HONEST_F + extra)
+    _assert_refused(receipt, workdir, "conftest.py")
+
+
+def test_scope_empty_new_file_without_hunks_is_refused(tmp_path) -> None:
+    extra = "diff --git a/conftest.py b/conftest.py\nnew file mode 100644\nindex 0000000..e69de29\n"
+    receipt, workdir = _scope_apply(tmp_path, _HONEST_F + extra, name="empty")
+    _assert_refused(receipt, workdir, "conftest.py")
+
+
+def test_scope_binary_sidecar_is_refused_end_to_end(tmp_path) -> None:
+    import subprocess
+
+    repo = tmp_path / "binrepo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "blob.bin").write_bytes(bytes(range(256)))
+    subprocess.run(["git", "add", "blob.bin"], cwd=repo, check=True)
+    binary = subprocess.run(
+        ["git", "diff", "--cached", "--binary"], cwd=repo, check=True, capture_output=True
+    ).stdout.decode("utf-8")
+    assert "GIT binary patch" in binary
+    receipt, workdir = _scope_apply(tmp_path, _HONEST_F + binary, name="binary")
+    _assert_refused(receipt, workdir, "blob.bin")
+
+
+def test_scope_binary_patch_for_the_target_itself_is_refused(tmp_path) -> None:
+    import subprocess
+
+    repo = tmp_path / "binself"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "f.py").write_bytes(bytes(range(256)))
+    subprocess.run(["git", "add", "f.py"], cwd=repo, check=True)
+    binary = subprocess.run(
+        ["git", "diff", "--cached", "--binary"], cwd=repo, check=True, capture_output=True
+    ).stdout.decode("utf-8")
+    receipt, workdir = _scope_apply(tmp_path, binary, name="binself")
+    assert receipt.patch_apply_status == "blocked"
+    assert receipt.selected_candidate_hash_matches_applied is False
+
+
+def test_scope_rename_is_refused_end_to_end(tmp_path) -> None:
+    rename = (
+        "diff --git a/f.py b/g.py\nsimilarity index 100%\nrename from f.py\nrename to g.py\n"
+    )
+    receipt, workdir = _scope_apply(tmp_path, rename, name="rename")
+    _assert_refused(receipt, workdir, "rename")
+    renamed_with_edit = (
+        "diff --git a/f.py b/g.py\nsimilarity index 50%\nrename from f.py\nrename to g.py\n"
+        "--- a/f.py\n+++ b/g.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    )
+    receipt, workdir = _scope_apply(tmp_path, renamed_with_edit, name="rename2")
+    _assert_refused(receipt, workdir, "rename")
+
+
+def test_scope_copy_is_refused(tmp_path) -> None:
+    copy = "diff --git a/f.py b/h.py\nsimilarity index 100%\ncopy from f.py\ncopy to h.py\n"
+    receipt, workdir = _scope_apply(tmp_path, _HONEST_F + copy, name="copy")
+    assert receipt.patch_apply_status == "blocked"
+    assert receipt.selected_candidate_hash_matches_applied is False
+
+
+def test_scope_mode_change_is_refused_end_to_end(tmp_path) -> None:
+    mode_only = "diff --git a/f.py b/f.py\nold mode 100644\nnew mode 100755\n"
+    receipt, workdir = _scope_apply(tmp_path, mode_only, name="mode")
+    _assert_refused(receipt, workdir, "mode")
+    mode_plus_edit = (
+        "diff --git a/f.py b/f.py\nold mode 100644\nnew mode 100755\n"
+        "--- a/f.py\n+++ b/f.py\n@@ -1,2 +1,2 @@\n a = 1\n-b = 2\n+b = 3\n"
+    )
+    receipt, workdir = _scope_apply(tmp_path, mode_plus_edit, name="mode2")
+    _assert_refused(receipt, workdir, "mode")
+    other_mode = _HONEST_F + "diff --git a/repro.py b/repro.py\nold mode 100644\nnew mode 100755\n"
+    receipt, workdir = _scope_apply(tmp_path, other_mode, name="mode3")
+    _assert_refused(receipt, workdir, "repro.py")
+
+
+def test_scope_delete_outside_the_allowed_set_is_refused(tmp_path) -> None:
+    delete = (
+        "diff --git a/repro.py b/repro.py\ndeleted file mode 100644\n"
+        "--- a/repro.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-print('ok')\n"
+    )
+    receipt, workdir = _scope_apply(
+        tmp_path, _HONEST_F + delete, name="delete", verifier_files=("repro.py",)
+    )
+    _assert_refused(receipt, workdir, "repro.py")
+
+
+def test_scope_edit_of_a_verifier_input_file_is_refused(tmp_path) -> None:
+    edit_repro = "--- a/repro.py\n+++ b/repro.py\n@@ -1 +1 @@\n-print('ok')\n+print('pwned')\n"
+    receipt, workdir = _scope_apply(
+        tmp_path, _HONEST_F + edit_repro, name="verifier", verifier_files=("repro.py",)
+    )
+    _assert_refused(receipt, workdir, "repro.py")
+
+
+def test_scope_extra_hunk_headers_hidden_from_hunk_parser_are_refused() -> None:
+    from nexus.services.local_heal.isolated_workspace_apply import (
+        _hunk_payload_counts,
+        _patch_scope_violation,
+    )
+
+    assert _hunk_payload_counts(_HONEST_F) == (1, 1)
+    assert _patch_scope_violation("f.py", _HONEST_F) is None
+    # git reads two sections for f.py; the parser reads both too, so counts still agree
+    assert _patch_scope_violation("f.py", _HONEST_F + _HONEST_F) is None
+    # a file the target gate never named
+    kind, detail = _patch_scope_violation("f.py", _HONEST_F.replace("f.py", "other.py")) or ("", "")
+    assert kind == "scope" and "other.py" in detail
+
+
+def test_scope_garbage_patch_fails_closed_as_unparseable(tmp_path) -> None:
+    receipt, _ = _scope_apply(tmp_path, "this is not a patch\n", name="garbage")
+    assert receipt.patch_apply_status == "failed"
+    assert receipt.patch_apply_error.startswith("patch_scope_unparseable:")
+    assert receipt.selected_candidate_hash_matches_applied is False
+    assert receipt.workspace_path == ""
+
+
+def test_scope_valid_single_file_patch_still_binds(tmp_path) -> None:
+    receipt, _ = _scope_apply(tmp_path, _HONEST_F, name="single")
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.selected_candidate_hash_matches_applied is True
+    assert (
+        open(os.path.join(receipt.workspace_path, "f.py"), encoding="utf-8").read()
+        == "a = 1\nb = 3\n"
+    )
+    assert not os.path.exists(os.path.join(receipt.workspace_path, "conftest.py"))
+
+
+def test_scope_valid_multi_hunk_patch_still_binds(tmp_path) -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo-multi"
+    source.mkdir()
+    original = "".join(f"line{n}\n" for n in range(1, 21))
+    (source / "f.py").write_text(original, encoding="utf-8")
+    diff = (
+        "--- a/f.py\n+++ b/f.py\n"
+        "@@ -2,3 +2,3 @@\n line2\n-line3\n+LINE3\n line4\n"
+        "@@ -17,3 +17,4 @@\n line17\n-line18\n+LINE18\n+EXTRA\n line19\n"
+    )
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="multi",
+            source_root=str(source),
+            target_file="f.py",
+            unified_diff=diff,
+            selected_candidate_hash=_canonical_candidate_hash(diff),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts-multi"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.selected_candidate_hash_matches_applied is True
+    text = open(os.path.join(receipt.workspace_path, "f.py"), encoding="utf-8").read()
+    assert "LINE3\n" in text and "LINE18\nEXTRA\n" in text
+
+
+def test_canonicalize_docstring_names_the_scope_gate() -> None:
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    docstring = _canonicalize_effective_diff.__doc__ or ""
+    assert "_patch_scope_violation" in docstring
+    assert "No gate here checks" not in docstring
