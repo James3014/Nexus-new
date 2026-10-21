@@ -3175,3 +3175,58 @@ def test_a_lost_worker_request_is_not_taken_as_a_refusal(manifest, tmp_path):
         driver.run(task, 1, tmp_path / "run", timeout_seconds=900, ledger=ledger)
     assert sum(c["tool"] == "nexus_task_status" for c in gateway.calls) == 12  # the full wait
     assert ledger.state()["spent_usd"] >= 1.0  # unknown cost, charged
+
+
+# -- revision 15: top-level tempfile artifacts -------------------------------------
+
+
+def _new_file_block(path: str, body: str = "x") -> str:
+    return (
+        f"diff --git a/{path} b/{path}\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n"
+        f"+++ b/{path}\n@@ -0,0 +1 @@\n+{body}\n"
+    )
+
+
+def test_untracked_top_level_tempfile_paths_are_dropped_as_tool_artifacts():
+    """Revision 15: an untracked top-level ``tmp`` + 8 of [a-z0-9_] path (a ``tempfile``
+    name) is tool output, dropped and recorded like the pytest temp dirs."""
+    from scripts.bench.measure_2721.leakage import drop_tool_artifacts
+
+    edit = "diff --git a/src/pkg/mod.py b/src/pkg/mod.py\n--- a/src/pkg/mod.py\n+++ b/src/pkg/mod.py\n@@ -1 +1 @@\n-a\n+b\n"
+    junk = (
+        _new_file_block("tmpabcd_123/out.json")
+        + _new_file_block("tmp0a1b2c3d.txt")
+        + _new_file_block("tmpq9w8e7r6")
+    )
+    diff, removed, removed_text = drop_tool_artifacts(edit + junk)
+    assert diff == edit
+    assert removed == ["tmpabcd_123/out.json", "tmp0a1b2c3d.txt", "tmpq9w8e7r6"]
+    assert removed_text == junk
+
+
+def test_tempfile_lookalikes_are_kept():
+    """Revision 15 boundaries: nested, too short, upper case, or a tracked file -> kept."""
+    from scripts.bench.measure_2721.leakage import drop_tool_artifacts
+
+    for kept in (
+        _new_file_block("a/tmpabcdefgh/x"),
+        _new_file_block("tmpabc/x"),
+        _new_file_block("tmpABCDEFGH/x"),
+        _new_file_block("src/tmpabcdefgh.py"),
+    ):
+        assert drop_tool_artifacts(kept) == (kept, [], "")
+    tracked = (
+        "diff --git a/tmpabcdefgh.py b/tmpabcdefgh.py\nindex 1111111..2222222 100644\n"
+        "--- a/tmpabcdefgh.py\n+++ b/tmpabcdefgh.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    assert drop_tool_artifacts(tracked) == (tracked, [], "")
+    renamed = (
+        "diff --git a/src/mod.py b/tmpabcdefgh.py\nsimilarity index 100%\n"
+        "rename from src/mod.py\nrename to tmpabcdefgh.py\n"
+    )
+    assert drop_tool_artifacts(renamed) == (renamed, [], "")
+    # Mixed: only the top-level tempfile block goes.
+    _, removed, _ = drop_tool_artifacts(
+        _new_file_block("a/tmpabcdefgh/x") + _new_file_block("tmpabcdefgh/x")
+    )
+    assert removed == ["tmpabcdefgh/x"]

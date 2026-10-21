@@ -96,11 +96,31 @@ def strip_out_of_scope(diff: str, scope: Iterable[str]) -> tuple[str, list[str]]
 # pytest's temporary base (``pytest-of-<user>/``, ``pytest-current``) when a run falls back
 # to the working directory for its temp dir: tool output, never a candidate edit.
 _TOOL_ARTIFACT_RE = re.compile(r"^(pytest-of-[^/]+(/|$)|pytest-current(/|$))")
+# Revision 15: a top-level ``tempfile`` name (``tmp`` + 8 of [a-z0-9_]) the tools left
+# in the worktree, dropped only when the block adds an untracked path (``new file mode``),
+# never when it edits a file that is in the base commit.
+_TMP_ARTIFACT_RE = re.compile(r"^tmp[a-z0-9_]{8}[^/]*")
+
+
+def _is_new_file(block: str) -> bool:
+    for line in block.splitlines()[1:]:
+        if line.startswith(("--- ", "+++ ", "@@", "GIT binary patch", "Binary files ")):
+            return False
+        if line.startswith("new file mode "):
+            return True
+    return False
+
+
+def _is_tool_artifact(path: str, old: str, block: str) -> bool:
+    if _TOOL_ARTIFACT_RE.match(path) and _TOOL_ARTIFACT_RE.match(old):
+        return True
+    return bool(_TMP_ARTIFACT_RE.match(path) and old == path and _is_new_file(block))
 
 
 def drop_tool_artifacts(diff: str) -> tuple[str, list[str], str]:
     """Remove pytest temp-dir file blocks from a captured diff, the same in every arm
-    (35, formal M-main2: a NEXUS row carried pytest-of-<user>/... with a .env file).
+    (35, formal M-main2: a NEXUS row carried pytest-of-<user>/... with a .env file), and
+    untracked top-level ``tmp<8 of [a-z0-9_]>...`` paths (revision 15).
     Returns the diff, the removed paths (recorded on the row, never scorer-visible) and
     the removed text (for the secret scan).  Fails closed: a ``diff --git`` header this
     parser cannot read (a quoted or spaced path) leaves the diff as it is."""
@@ -112,7 +132,7 @@ def drop_tool_artifacts(diff: str) -> tuple[str, list[str], str]:
     removed_text: list[str] = []
     for path, block in split_file_blocks(diff):
         old = _FILE_BLOCK_RE.match(block.splitlines()[0]).group(1)  # type: ignore[union-attr]
-        if _TOOL_ARTIFACT_RE.match(path) and _TOOL_ARTIFACT_RE.match(old):
+        if _is_tool_artifact(path, old, block):
             removed.append(path)
             removed_text.append(block)
         else:
