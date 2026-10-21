@@ -136,6 +136,9 @@ def read_token(path: Path | str) -> str:
 
 
 Transport = Callable[[str, str, Optional[dict[str, Any]]], dict[str, Any]]
+# The worker_candidate request waits while the Gateway plans and starts the worker; the
+# 120 s default cut it short.  Every worker_candidate request uses at least this.
+WORKER_CANDIDATE_TIMEOUT_SECONDS = 300.0
 
 
 class GatewayClient:
@@ -143,6 +146,7 @@ class GatewayClient:
         self.url = refuse_live(url)
         self._token = token
         self._timeout = timeout
+        self._request_timeout: Optional[float] = None  # one call's override of ``timeout``
         self._transport = transport or self._http
         self._next_id = 0
 
@@ -158,10 +162,22 @@ class GatewayClient:
             self.url + path, data=data, method=method,
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self._token}"},
         )
-        with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310 (fixed scheme)
+        timeout = (
+            self._timeout
+            if self._request_timeout is None
+            else max(self._timeout, self._request_timeout)
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 (fixed scheme)
             return json.loads(response.read().decode("utf-8"))
 
-    def _send(self, method: str, path: str, body: Optional[dict[str, Any]]) -> dict[str, Any]:
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]],
+        timeout: Optional[float] = None,
+    ) -> dict[str, Any]:
+        self._request_timeout = timeout
         try:
             return self._transport(method, path, body)
         except urllib.error.HTTPError as exc:
@@ -175,21 +191,31 @@ class GatewayClient:
         except (OSError, http.client.HTTPException) as exc:
             # URLError, ConnectionResetError, socket timeouts, RemoteDisconnected, ...
             raise GatewayConnectionLost(f"{method} {path}: {type(exc).__name__}: {str(exc)[:200]}") from exc
+        finally:
+            self._request_timeout = None
 
     def health(self) -> dict[str, Any]:
         return self.redact(self._send("GET", "/health", None))
 
-    def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    def _rpc(
+        self, method: str, params: dict[str, Any], timeout: Optional[float] = None
+    ) -> dict[str, Any]:
         self._next_id += 1
-        reply = self._send("POST", "/mcp", {"jsonrpc": "2.0", "id": self._next_id, "method": method,
-                                             "params": params})
+        reply = self._send(
+            "POST",
+            "/mcp",
+            {"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params},
+            timeout,
+        )
         return self.redact(reply)
 
     def tools(self) -> list[dict[str, Any]]:
         return list((self._rpc("tools/list", {}).get("result") or {}).get("tools") or [])
 
-    def call(self, tool: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        reply = self._rpc("tools/call", {"name": tool, "arguments": dict(arguments)})
+    def call(
+        self, tool: str, arguments: Mapping[str, Any], *, timeout: Optional[float] = None
+    ) -> dict[str, Any]:
+        reply = self._rpc("tools/call", {"name": tool, "arguments": dict(arguments)}, timeout)
         if not isinstance(reply, Mapping):
             raise GatewayToolError(tool, {"malformed_reply": str(reply)[:500]})
         if "error" in reply:
@@ -923,7 +949,9 @@ class NexusArmDriver:
 
     def _submit_worker(self, args: Mapping[str, Any], transcript: list[dict[str, Any]]) -> dict[str, Any]:
         try:
-            return self.client.call("nexus_worker_candidate", args)
+            return self.client.call(
+                "nexus_worker_candidate", args, timeout=WORKER_CANDIDATE_TIMEOUT_SECONDS
+            )
         except GatewayToolError as exc:
             if "MODEL_PROBE_REQUIRED" not in json.dumps(exc.payload):
                 raise
@@ -944,7 +972,9 @@ class NexusArmDriver:
                     self._probes[-1] = result["probe_usage"]
                 break
             self.sleep(10.0)
-        return self.client.call("nexus_worker_candidate", args)
+        return self.client.call(
+            "nexus_worker_candidate", args, timeout=WORKER_CANDIDATE_TIMEOUT_SECONDS
+        )
 
     def _wait(self, gw_task: str, deadline: float, transcript: list[dict[str, Any]]) -> dict[str, Any]:
         while True:

@@ -3291,3 +3291,73 @@ def test_nexus_row_without_worker_usage_keeps_total_tokens_unknown(manifest, tmp
     (task,) = arms.load_manifest(manifest)
     row = _driver(FakeGateway()).run(task, 1, tmp_path / "run", timeout_seconds=5)
     assert row.get("input_tokens") is None and row["total_tokens"] is None  # never an invented 0
+
+
+# -- worker_candidate request timeout ----------------------------------------------
+
+
+class _UrlopenRecorder:
+    """Stands in for ``urllib.request.urlopen``: records each tool and its timeout."""
+
+    def __init__(self, probe_first: bool = False):
+        self.seen: list[tuple[str, float]] = []
+        self.probe_first = probe_first
+
+    def __call__(self, request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        tool = body["params"].get("name", body["method"])
+        self.seen.append((tool, timeout))
+        payload: dict = {"status": "QUEUED"}
+        is_error = False
+        if tool == "nexus_worker_candidate" and self.probe_first:
+            self.probe_first = False
+            payload, is_error = {"error": "MODEL_PROBE_REQUIRED"}, True
+        elif tool == "nexus_model_probe_result":
+            payload = {"status": "DONE"}
+        reply = {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {"structuredContent": payload, "isError": is_error},
+        }
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(reply).encode("utf-8")
+
+        return _Response()
+
+
+def test_worker_candidate_timeout_constant_is_at_least_300_seconds():
+    assert nexus_driver.WORKER_CANDIDATE_TIMEOUT_SECONDS >= 300
+
+
+@pytest.mark.parametrize("probe_first", [False, True])
+def test_every_worker_candidate_request_waits_at_least_300_seconds(monkeypatch, probe_first):
+    recorder = _UrlopenRecorder(probe_first=probe_first)
+    monkeypatch.setattr(nexus_driver.urllib.request, "urlopen", recorder)
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123")
+    driver = nexus_driver.NexusArmDriver(
+        client, campaign_id="c", goal_id="g", scope_id="s", sleep=lambda _s: None
+    )
+    driver._submit_worker({"task_id": "t-1"}, [])
+    client.call("nexus_task_status", {"task_id": "t-1"})
+    worker = [timeout for tool, timeout in recorder.seen if tool == "nexus_worker_candidate"]
+    assert len(worker) == (2 if probe_first else 1)
+    assert all(timeout >= 300 for timeout in worker)
+    # Other calls keep the client's default.
+    others = {timeout for tool, timeout in recorder.seen if tool != "nexus_worker_candidate"}
+    assert others == {120.0}
+
+
+def test_worker_candidate_timeout_never_lowers_a_longer_client_timeout(monkeypatch):
+    recorder = _UrlopenRecorder()
+    monkeypatch.setattr(nexus_driver.urllib.request, "urlopen", recorder)
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", timeout=900.0)
+    client.call("nexus_worker_candidate", {}, timeout=nexus_driver.WORKER_CANDIDATE_TIMEOUT_SECONDS)
+    assert recorder.seen == [("nexus_worker_candidate", 900.0)]
