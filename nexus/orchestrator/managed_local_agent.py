@@ -193,6 +193,7 @@ class ManagedLocalAgentLauncher:
             request, repo_path, current_head, attempt_id
         )
 
+        core_bound = bool(request.core_envelope_required and request.ambient_core_port is not None)
         if request.core_envelope_required:
             if request.ambient_core_port is None:
                 # Missing Core port blocks before worker invocation (worker_invocation_count = 0)
@@ -236,7 +237,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=True,
+                    pre_write_machine_enforced_core_bound=core_bound,
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -256,7 +257,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=True,
+                    pre_write_machine_enforced_core_bound=core_bound,
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -290,7 +291,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=True,
+                    pre_write_machine_enforced_core_bound=core_bound,
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -312,7 +313,7 @@ class ManagedLocalAgentLauncher:
                     execution_lane=request.execution_lane,
                     status="FINAL_BLOCK",
                     terminal_status="FINAL_BLOCK",
-                    pre_write_machine_enforced_core_bound=True,
+                    pre_write_machine_enforced_core_bound=core_bound,
                     path_level_prewrite_containment_proven=False,
                     post_hoc_physical_verification=False,
                     core_provenance_verified=False,
@@ -428,7 +429,7 @@ class ManagedLocalAgentLauncher:
             execution_lane=request.execution_lane,
             status=str(submitted.get("status")),
             terminal_status=terminal_status,
-            pre_write_machine_enforced_core_bound=True,
+            pre_write_machine_enforced_core_bound=core_bound,
             path_level_prewrite_containment_proven=path_containment,
             post_hoc_physical_verification=True,
             core_provenance_verified=core_provenance_verified,
@@ -467,13 +468,27 @@ class ManagedLocalAgentLauncher:
             }
 
         # Reconcile same effect identity
+        stored_attempt_id = state.get("attempt_id")
+        if expected_effect_identity is not None and (
+            not isinstance(stored_attempt_id, str)
+            or not stored_attempt_id
+            or expected_effect_identity != stored_attempt_id
+        ):
+            return {
+                "action": ReconcileAction.BLOCK.value,
+                "reason": (
+                    f"effect identity mismatch during reconcile: stored {stored_attempt_id} "
+                    f"!= expected {expected_effect_identity}"
+                ),
+            }
+
         current_status = state.get("status")
         return {
             "action": ReconcileAction.RECONCILE_EXISTING.value,
             "task_id": task_id,
             "status": current_status,
             "terminal_status": state.get("terminal_status"),
-            "attempt_id": state.get("attempt_id"),
+            "attempt_id": stored_attempt_id,
             "candidate_ref": state.get("candidate_ref"),
         }
 
