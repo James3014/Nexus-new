@@ -41,7 +41,9 @@ internals, pluggy's call path, the hook callers and hookimpls) is re-checked aro
 test; the full sweep when collection starts (only the exact ``CONFIGURE_TIME_WRITES``
 that pytest's own plugins make during configure are re-based there, pinned to pytest's
 own values) and at session end.  Any change, a removed or reordered hookimpl, or a later
-hookimpl from an untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.
+hookimpl from an untrusted file is ``VERIFIER_PYTEST_INTERNALS_PATCHED``.  So is a
+module of those packages first imported after the baseline, or replaced in
+``sys.modules`` (#2811): it was never swept, so it fails closed.
 
 The emitter, key and fd are closure cells captured at import, and the module removes
 itself from ``sys.modules`` once its plugin is registered, so ``import``-by-name and
@@ -194,11 +196,15 @@ _MISSING = object()
 # Attributes that pytest's own plugins legitimately (re)bind between the import-time
 # baseline and the start of collection (pytest_configure / sessionstart).  Exact labels
 # only; each was observed on an honest run (#2815 review round 3).  They are re-based at
-# collection start, every other difference is PATCHED.
-CONFIGURE_TIME_WRITES: dict[str, str | None] = {
+# collection start, every other difference is PATCHED.  Each is pinned by identity to
+# the value pytest itself writes (or left at its baseline value): a ``CONFIG_PINS`` key
+# (#2811) or the label of the swept function pytest installs.
+CONFIG_PIN_CONFIG = "@config"
+CONFIG_PIN_PLUGINMANAGER = "@config.pluginmanager"
+CONFIGURE_TIME_WRITES: dict[str, str] = {
     # _pytest.debugging.pytest_configure stores the config and plugin manager.
-    "_pytest.debugging:pytestPDB._pluginmanager": None,
-    "_pytest.debugging:pytestPDB._config": None,
+    "_pytest.debugging:pytestPDB._pluginmanager": CONFIG_PIN_PLUGINMANAGER,
+    "_pytest.debugging:pytestPDB._config": CONFIG_PIN_CONFIG,
     # _pytest.legacypath.pytest_load_initial_conftests monkeypatches this in; accepted
     # only when the new value IS legacypath's own function as it was at the baseline.
     "_pytest.config:Config._getini_unknown_type": "_pytest.legacypath.Config__getini_unknown_type",
@@ -207,6 +213,36 @@ CONFIGURE_TIME_WRITES: dict[str, str | None] = {
 
 def _in_sweep(module_name: str) -> bool:
     return any(module_name == p or module_name.startswith(p + ".") for p in SWEEP_PACKAGES)
+
+
+def _sweep_modules() -> dict[str, Any]:
+    """name -> module object for every loaded sweep-package module."""
+    return {n: m for n, m in list(sys.modules.items()) if m is not None and _in_sweep(n)}
+
+
+def _module_changes(baseline: dict[str, Any]) -> list[str]:
+    """Sweep-package modules first imported after the baseline (#2811), or whose
+    ``sys.modules`` entry is no longer the baseline module object.
+
+    A late module was not swept, so nothing it defines is covered: its code could have
+    been changed before any check saw it (a first-seen snapshot would bake that in), and
+    an assertion-rewritten module cannot be compared with a plain compile of its file.
+    So any late module fails closed.  An honest run imports none: with pytest 9.0,
+    pluggy 1.6 and pytest-asyncio 1.3 every submodule is loaded at the baseline except
+    ``_pytest.pytester_assertions`` (only for the ``pytester`` plugin),
+    ``_pytest.terminalprogress`` (Windows or an explicit ``-p``, which loads it before
+    the witness) and ``pytest.__main__``.
+    """
+    changes: list[str] = []
+    for name, module in list(sys.modules.items()):
+        if not name.startswith(SWEEP_PACKAGES) or not _in_sweep(name) or module is None:
+            continue
+        known = baseline.get(name, _MISSING)
+        if known is _MISSING:
+            changes.append(f"late_module:{name}")
+        elif known is not module:
+            changes.append(f"module_replaced:{name}")
+    return changes
 
 
 def _label(container: Any, attr: str) -> str:
@@ -411,6 +447,8 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
         (m, d, _fingerprint(_resolve(m, d))) for m, d in (*PYTEST_INTERNALS, *PLUGGY_HOT)
     ]
     sweep: dict[str, tuple[Any, str, tuple[Any, ...]]] = _sweep()
+    modules: dict[str, Any] = _sweep_modules()
+    configs: list[Any] = []
     # hook name -> (caller, its _hookexec, ordered impls, {id: (impl, function, print)})
     hooks: dict[str, tuple[Any, Any, list[Any], dict[int, tuple[Any, Any, Any]]]] = {}
     managers: list[tuple[Any, Any]] = []
@@ -455,6 +493,8 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
             if not _same(_fingerprint(_resolve(m, d)), original):
                 patched[f"{m}:{d}"] = None
         check_hooks()
+        for change in _module_changes(modules):
+            patched[change] = None
 
     def check_all(allowed: frozenset[str] = frozenset()) -> None:
         if not managers:
@@ -478,18 +518,30 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
                 {id(i): (i, i.function, _function_print(i.function)) for i in impls},
             )
 
-    def rebase_allowed() -> None:
+    def rebase_allowed(session: Any) -> None:
+        # Pins (#2811): the config this witness was configured with (it must also be the
+        # session's) and the plugin manager it registered with at ``-p`` time.
+        config = configs[0] if configs else _MISSING
+        if getattr(session, "config", _MISSING) is not config:
+            config = _MISSING
+        pins = {
+            CONFIG_PIN_CONFIG: config,
+            CONFIG_PIN_PLUGINMANAGER: managers[0][0] if managers else _MISSING,
+        }
         for label, source in CONFIGURE_TIME_WRITES.items():
             entry = sweep.get(label)
             if entry is None:
                 continue
-            container, attr, _old = entry
+            container, attr, old = entry
             value = vars(container).get(attr, _MISSING)
-            if source is not None:
+            if source in pins:
+                expected_value = pins[source]
+            else:
                 expected = sweep.get(source)
-                if expected is None or value is not expected[2][0]:
-                    patched[label] = None
-                    continue
+                expected_value = expected[2][0] if expected is not None else _MISSING
+            if value is _MISSING or (value is not old[0] and value is not expected_value):
+                patched[label] = None
+                continue
             sweep[label] = (container, attr, _fingerprint(value))
 
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -499,11 +551,13 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
         # it.  Only the exact CONFIGURE_TIME_WRITES are re-based; any other difference
         # is PATCHED (sticky).
         check_all(allowed=frozenset(CONFIGURE_TIME_WRITES))
-        rebase_allowed()
+        rebase_allowed(session)
         yield
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_configure(config: pytest.Config) -> None:
+        if not configs:
+            configs.append(config)
         emit({
             "t": "begin",
             "pytest": pytest.__version__,

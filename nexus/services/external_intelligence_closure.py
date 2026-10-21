@@ -918,6 +918,7 @@ VERIFIER_ROOT_SHADOW_CHECK_ERROR = "VERIFIER_ROOT_SHADOW_CHECK_ERROR"
 VERIFIER_ROOT_SHADOW_NAMES = frozenset({
     "pytest.py",
     "pytest_asyncio.py",
+    "pluggy.py",
     "conftest.py",
     "sitecustomize.py",
     "usercustomize.py",
@@ -928,7 +929,8 @@ VERIFIER_ROOT_SHADOW_NAMES = frozenset({
 })
 # Root-level package directories that shadow pytest (or the explicitly loaded
 # ``pytest_asyncio`` plugin: the candidate root is on ``pythonpath``) like ``pytest.py``.
-VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio"})
+# ``pluggy`` (and ``pluggy.py`` above) too: pytest's hook machinery (#2811).
+VERIFIER_ROOT_SHADOW_DIRS = frozenset({"pytest", "_pytest", "pytest_asyncio", "pluggy"})
 # Basenames refused at ANY depth: a nested ``conftest.py`` below ``--confcutdir`` is
 # loaded too and can rewrite outcomes (e.g. a ``pytest_runtest_makereport`` hookwrapper).
 VERIFIER_ANY_DEPTH_SHADOW_NAMES = frozenset({"conftest.py"})
@@ -1006,6 +1008,8 @@ class _PytestInvocation:
     interpreter_args: tuple[str, ...]
     pytest_args: tuple[str, ...]
     declared_node_ids: tuple[str, ...]
+    # Positional file or directory targets without ``::`` (#2811).
+    declared_paths: tuple[str, ...] = ()
 
 
 def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation | None | str:
@@ -1041,6 +1045,7 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
     else:
         return None
     declared: list[str] = []
+    declared_paths: list[str] = []
     skip_next = False
     for token in pytest_args:
         if skip_next:
@@ -1049,7 +1054,10 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
         if token in _PYTEST_VALUE_OPTIONS:
             skip_next = True
             continue
-        if token.startswith("-") or "::" not in token:
+        if token.startswith("-"):
+            continue
+        if "::" not in token:
+            declared_paths.append(token)
             continue
         path_part, _, rest = token.partition("::")
         declared.append(f"{PurePosixPath(path_part).as_posix()}::{rest}")
@@ -1058,6 +1066,7 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
         interpreter_args=interpreter_args,
         pytest_args=pytest_args,
         declared_node_ids=tuple(declared),
+        declared_paths=tuple(declared_paths),
     )
 
 
@@ -1448,6 +1457,9 @@ VERIFIER_PYTEST_INTERNALS_PATCHED = "VERIFIER_PYTEST_INTERNALS_PATCHED"
 VERIFIER_OUTCOME_FORGED = "VERIFIER_OUTCOME_FORGED"
 VERIFIER_TEST_IDENTITY_UNRESOLVED = "VERIFIER_TEST_IDENTITY_UNRESOLVED"
 VERIFIER_TESTS_DESELECTED = "VERIFIER_TESTS_DESELECTED"
+# A node of a declared file (or directory) was deselected or silently dropped while the
+# candidate changed a ``conftest.py`` (#2811).
+VERIFIER_DECLARED_FILE_DESELECTED = "VERIFIER_DECLARED_FILE_DESELECTED"
 VERIFIER_SANDBOX_SETUP_FAILED = "VERIFIER_SANDBOX_SETUP_FAILED"
 VERIFIER_EVIDENCE_TAMPERED = "VERIFIER_EVIDENCE_TAMPERED"
 VERIFIER_BASE_RUN_FAILED = "VERIFIER_BASE_RUN_FAILED"
@@ -1547,6 +1559,7 @@ def _empty_witness_summary() -> dict[str, Any]:
         "forged_node_ids": [],
         "not_run_node_ids": [],
         "deselected_node_ids": [],
+        "declared_file_deselected_node_ids": [],
         "identity_unresolved_node_ids": [],
         "declared_node_ids_missing": [],
     }
@@ -1697,6 +1710,25 @@ def _declared_match(nodeid: str, declared: Sequence[str]) -> bool:
     )
 
 
+def _declared_path_prefixes(root: Path, declared_paths: Sequence[str]) -> list[str]:
+    """Root-relative posix forms of the card's positional file/directory targets."""
+    prefixes: list[str] = []
+    for token in declared_paths:
+        text = os.path.normpath(token)
+        if os.path.isabs(text):
+            try:
+                text = os.path.relpath(text, root)
+            except ValueError:
+                continue
+        prefixes.append(Path(text).as_posix())
+    return prefixes
+
+
+def _in_declared_path(nodeid: str, prefixes: Sequence[str]) -> bool:
+    path = nodeid.split("::", 1)[0]
+    return any(p == "." or path == p or path.startswith(p + "/") for p in prefixes)
+
+
 def _witness_outcomes(
     records: Sequence[Mapping[str, Any]],
     *,
@@ -1705,12 +1737,19 @@ def _witness_outcomes(
     deselect_allowed: bool,
     declared_node_ids: Sequence[str] = (),
     in_tree_trusted: Callable[[str], bool] = lambda _rel: False,
+    declared_paths: Sequence[str] = (),
+    conftest_changed: bool = False,
 ) -> tuple[str, list[tuple[str, str, str]] | None, dict[str, Any]]:
     """Derive per-test outcomes from verified witness records.
 
     Returns (error code or "", JUnit cases or None when the stream is incomplete,
     witness summary).  pytest's reports are untrusted: "passed" also needs the witness
     observation; "failed"/"skipped" are believed because they can only lose a pass.
+
+    ``conftest_changed`` (the candidate diff touches a ``conftest.py``): a deselected or
+    silently dropped node of a declared file or directory (``declared_paths``; no
+    positional target at all declares the whole run) is refused (#2811), since a
+    file-level declaration is otherwise satisfied by any surviving node of that file.
     """
     summary = _empty_witness_summary()
     summary["present"] = bool(records)
@@ -1810,6 +1849,16 @@ def _witness_outcomes(
     summary["not_run_node_ids"] = not_run[:_INTEGRITY_FINDINGS_LIMIT]
     summary["deselected_node_ids"] = deselected[:_INTEGRITY_FINDINGS_LIMIT]
     summary["identity_unresolved_node_ids"] = unresolved[:_INTEGRITY_FINDINGS_LIMIT]
+    declared_file_deselected: list[str] = []
+    if conftest_changed:
+        whole_run = not declared_paths and not declared_node_ids
+        prefixes = _declared_path_prefixes(root, declared_paths)
+        declared_file_deselected = [
+            n for n in deselected if whole_run or _in_declared_path(n, prefixes)
+        ]
+    summary["declared_file_deselected_node_ids"] = declared_file_deselected[
+        :_INTEGRITY_FINDINGS_LIMIT
+    ]
     # Every declared node must appear among the observed cases (#2808 review round 3):
     # a hook that drops it from ``session.items`` without ``pytest_deselected`` is not
     # silent any more.
@@ -1827,6 +1876,10 @@ def _witness_outcomes(
         error = VERIFIER_OUTCOME_FORGED
     elif unresolved:
         error = VERIFIER_TEST_IDENTITY_UNRESOLVED
+    elif declared_file_deselected:
+        # Even a card ``-k``/``-m``/``--deselect`` does not excuse it: a changed conftest
+        # can report its own drop through ``pytest_deselected`` (#2811).
+        error = VERIFIER_DECLARED_FILE_DESELECTED
     elif any(_declared_match(n, declared_node_ids) for n in deselected) and not (
         deselect_allowed and set(deselected) <= deselected_by_hook
     ):
@@ -1878,6 +1931,18 @@ def _write_deny_rules(paths: Sequence[Path], literals: Sequence[Path]) -> list[s
     return rules
 
 
+def _refuse_trusted_roots_in_writable(
+    interpreter_dirs: Sequence[Path], writable: Sequence[Path]
+) -> None:
+    """No trusted interpreter or plugin root may lie inside a dir the verifier child can
+    write (the work tree for a candidate run, the per-run child dir): candidate code
+    could rewrite site-packages or pytest there.  Applied with and without an OS
+    sandbox (#2811)."""
+    for directory in interpreter_dirs:
+        if any(directory.is_relative_to(w) for w in writable):
+            raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+
+
 def _verifier_sandbox_profile(
     *,
     root: Path,
@@ -1901,9 +1966,7 @@ def _verifier_sandbox_profile(
     )
 
     writable = [str(child_dir)] + ([str(root)] if root_writable else [])
-    for directory in interpreter_dirs:
-        if any(directory.is_relative_to(Path(w)) for w in writable):
-            raise ClosureError(VERIFIER_SANDBOX_SETUP_FAILED)
+    _refuse_trusted_roots_in_writable(interpreter_dirs, [Path(w) for w in writable])
     read_roots = checked_read_roots([
         str(root),
         str(child_dir),
@@ -2167,6 +2230,9 @@ def _run_pytest_verifier(
         return result(VERIFIER_PYTEST_INTERPRETER_UNRESOLVED)
     try:
         interpreter_dirs = _interpreter_dirs(located, child_dir)
+        _refuse_trusted_roots_in_writable(
+            interpreter_dirs, [child_dir.resolve()] + ([root] if root_writable else [])
+        )
     except (ClosureError, OSError, subprocess.SubprocessError):
         return result(VERIFIER_SANDBOX_SETUP_FAILED)
     profile: str | None = None
@@ -2242,6 +2308,10 @@ def _run_pytest_verifier(
         trusted_plugin_dirs=[trusted_dir.resolve(), *interpreter_dirs],
         deselect_allowed=bool(pytest_args & _DESELECT_OPTIONS),
         declared_node_ids=invocation.declared_node_ids,
+        declared_paths=invocation.declared_paths,
+        conftest_changed=any(
+            PurePosixPath(p).name.casefold() == "conftest.py" for p in changed_paths
+        ),
         in_tree_trusted=(
             _base_unchanged_predicate(root, base_sha, changed_paths)
             if root_writable
