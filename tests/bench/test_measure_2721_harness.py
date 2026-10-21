@@ -3216,20 +3216,39 @@ def test_tempfile_lookalikes_are_kept():
     ):
         assert drop_tool_artifacts(kept) == (kept, [], "")
     tracked = (
-        "diff --git a/tmpabcdefgh.py b/tmpabcdefgh.py\nindex 1111111..2222222 100644\n"
-        "--- a/tmpabcdefgh.py\n+++ b/tmpabcdefgh.py\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/tmpab12cdef.py b/tmpab12cdef.py\nindex 1111111..2222222 100644\n"
+        "--- a/tmpab12cdef.py\n+++ b/tmpab12cdef.py\n@@ -1 +1 @@\n-a\n+b\n"
     )
     assert drop_tool_artifacts(tracked) == (tracked, [], "")
     renamed = (
-        "diff --git a/src/mod.py b/tmpabcdefgh.py\nsimilarity index 100%\n"
-        "rename from src/mod.py\nrename to tmpabcdefgh.py\n"
+        "diff --git a/src/mod.py b/tmpab12cdef.py\nsimilarity index 100%\n"
+        "rename from src/mod.py\nrename to tmpab12cdef.py\n"
     )
     assert drop_tool_artifacts(renamed) == (renamed, [], "")
     # Mixed: only the top-level tempfile block goes.
     _, removed, _ = drop_tool_artifacts(
-        _new_file_block("a/tmpabcdefgh/x") + _new_file_block("tmpabcdefgh/x")
+        _new_file_block("a/tmpab12cdef/x") + _new_file_block("tmpab12cdef/x")
     )
-    assert removed == ["tmpabcdefgh/x"]
+    assert removed == ["tmpab12cdef/x"]
+
+
+def test_tempfile_random_part_needs_a_digit():
+    """Revision 15 (review): names whose 8 characters after ``tmp`` hold no digit are real
+    files (tmpl_helpers.py, tmp_directory.py, tmpfile_utils/...); tempfile names, including
+    a suffix with no dot (NamedTemporaryFile(suffix="afile")), are dropped."""
+    from scripts.bench.measure_2721.leakage import drop_tool_artifacts
+
+    for kept in ("tmpl_helpers.py", "tmp_directory.py", "tmpfile_utils/__init__.py", "tmpabcdefgh/x"):
+        block = _new_file_block(kept)
+        assert drop_tool_artifacts(block) == (block, [], ""), kept
+    junk = (
+        _new_file_block("tmpsnv0j9ufafile")
+        + _new_file_block("tmpab12cdef/out.json")
+        + _new_file_block("tmpab12cdef.zip")
+    )
+    diff, removed, _ = drop_tool_artifacts(junk)
+    assert diff == ""
+    assert removed == ["tmpsnv0j9ufafile", "tmpab12cdef/out.json", "tmpab12cdef.zip"]
 
 
 # -- NEXUS total_tokens: the BARE sum of the four sub-fields -----------------------

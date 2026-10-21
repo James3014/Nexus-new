@@ -99,8 +99,10 @@ def strip_out_of_scope(diff: str, scope: Iterable[str]) -> tuple[str, list[str]]
 _TOOL_ARTIFACT_RE = re.compile(r"^(pytest-of-[^/]+(/|$)|pytest-current(/|$))")
 # Revision 15: a top-level ``tempfile`` name (``tmp`` + 8 of [a-z0-9_]) the tools left
 # in the worktree, dropped only when the block adds an untracked path (``new file mode``),
-# never when it edits a file that is in the base commit.
-_TMP_ARTIFACT_RE = re.compile(r"^tmp[a-z0-9_]{8}[^/]*")
+# never when it edits a file that is in the base commit.  The 8-character random part must
+# hold a digit (about 92% of tempfile names do): English names such as ``tmpl_helpers.py``
+# or ``tmp_directory.py`` have none and stay; a missed real tempfile stays in both arms.
+_TMP_ARTIFACT_RE = re.compile(r"^tmp(?=[a-z0-9_]{0,7}[0-9])[a-z0-9_]{8}[^/]*")
 
 
 def _is_new_file(block: str) -> bool:
