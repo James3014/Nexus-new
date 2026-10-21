@@ -180,6 +180,7 @@ def _hookimpl_file(impl: Any) -> str:
 # loads it explicitly and it wraps pytest_pyfunc_call): every function
 # (raw from module and class ``__dict__``) by content, and every module-level and class
 # attribute by identity.
+# A tuple: ``str.startswith`` takes it directly (_module_changes).
 SWEEP_PACKAGES = ("pytest", "_pytest", "pluggy", "pytest_asyncio")
 # The hot subset re-checked around every test (the full sweep runs at session end).
 PLUGGY_HOT = (
@@ -220,9 +221,30 @@ def _sweep_modules() -> dict[str, Any]:
     return {n: m for n, m in list(sys.modules.items()) if m is not None and _in_sweep(n)}
 
 
-def _module_changes(baseline: dict[str, Any]) -> list[str]:
+def _package_dirs(modules: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """package name -> its ``__path__`` entries, copied at the baseline."""
+    dirs: dict[str, tuple[str, ...]] = {}
+    for name, module in modules.items():
+        path = getattr(module, "__path__", None)
+        if path is not None:
+            dirs[name] = tuple(str(d) for d in path)
+    return dirs
+
+
+def _module_changes(
+    baseline: dict[str, Any],
+    audited: Any = (),
+    package_dirs: dict[str, tuple[str, ...]] | None = None,
+    exists: Any = os.path.exists,
+) -> list[str]:
     """Sweep-package modules first imported after the baseline (#2811), or whose
-    ``sys.modules`` entry is no longer the baseline module object.
+    ``sys.modules`` entry is no longer the baseline module object (replaced, set to
+    ``None`` or removed).
+
+    ``audited`` holds the sweep-package names the ``import`` audit hook saw after the
+    baseline: one that is gone from ``sys.modules`` by the time of a check (imported,
+    used, then deleted) still counts as late when its file exists in the parent
+    package's baseline directories (a probe for a module that does not exist does not).
 
     A late module was not swept, so nothing it defines is covered: its code could have
     been changed before any check saw it (a first-seen snapshot would bake that in), and
@@ -234,14 +256,29 @@ def _module_changes(baseline: dict[str, Any]) -> list[str]:
     the witness) and ``pytest.__main__``.
     """
     changes: list[str] = []
-    for name, module in list(sys.modules.items()):
-        if not name.startswith(SWEEP_PACKAGES) or not _in_sweep(name) or module is None:
+    current = dict(sys.modules)
+    for name, module in current.items():
+        if not name.startswith(SWEEP_PACKAGES) or not _in_sweep(name):
             continue
         known = baseline.get(name, _MISSING)
         if known is _MISSING:
-            changes.append(f"late_module:{name}")
+            if module is not None:
+                changes.append(f"late_module:{name}")
         elif known is not module:
             changes.append(f"module_replaced:{name}")
+    for name in baseline:
+        if name not in current:
+            changes.append(f"module_removed:{name}")
+    for name in list(audited):
+        if name in baseline or name in current:
+            continue
+        parent, _, last = name.rpartition(".")
+        dirs = (package_dirs or {}).get(parent, ())
+        if any(
+            exists(os.path.join(d, last + ".py")) or exists(os.path.join(d, last, "__init__.py"))
+            for d in dirs
+        ):
+            changes.append(f"late_module:{name}")
     return changes
 
 
@@ -448,6 +485,18 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
     ]
     sweep: dict[str, tuple[Any, str, tuple[Any, ...]]] = _sweep()
     modules: dict[str, Any] = _sweep_modules()
+    package_dirs = _package_dirs(modules)
+    exists = os.path.exists
+    audited: dict[str, None] = {}
+
+    def audit(event: str, args: Any) -> None:
+        # Audit hooks cannot be removed; this one only records names (#2811 review).
+        if event == "import" and args and isinstance(args[0], str):
+            name = args[0]
+            if name.startswith(SWEEP_PACKAGES) and name not in modules and _in_sweep(name):
+                audited[name] = None
+
+    sys.addaudithook(audit)
     configs: list[Any] = []
     # hook name -> (caller, its _hookexec, ordered impls, {id: (impl, function, print)})
     hooks: dict[str, tuple[Any, Any, list[Any], dict[int, tuple[Any, Any, Any]]]] = {}
@@ -493,7 +542,7 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
             if not _same(_fingerprint(_resolve(m, d)), original):
                 patched[f"{m}:{d}"] = None
         check_hooks()
-        for change in _module_changes(modules):
+        for change in _module_changes(modules, audited, package_dirs, exists):
             patched[change] = None
 
     def check_all(allowed: frozenset[str] = frozenset()) -> None:
