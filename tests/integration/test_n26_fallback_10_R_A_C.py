@@ -97,9 +97,13 @@ def test_exec_ultra_review_runs(tmp_path) -> None:
         assert r.gate_passed, r.outcome
         assert "tests/test_target.py" in r.outcome["executed_checks"]
     else:
-        # PR tests run only behind an OS barrier; elsewhere the review fails closed.
-        assert r.gate_passed is False
-        assert r.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
+        # PR tests run only behind an OS barrier; elsewhere they cannot run. Since #2738 (Refs #2732) the
+        # review is record-only (advisory, never a completion gate): the missing barrier is
+        # recorded as BLOCKED + review_error, and the receipt itself does not block.
+        assert r.gate_passed is True
+        assert r.outcome["advisory_only"] is True
+        assert r.outcome["review_status"] == "BLOCKED"
+        assert r.outcome["review_error"] == "ghost_regression_not_executed:no_os_barrier"
 
 
 def test_exec_learning_closure_runs() -> None:

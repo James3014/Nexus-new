@@ -369,6 +369,40 @@ def _run_family_canary(
     positive: bool,
     task_id_override: str = "",
 ) -> dict[str, Any]:
+    if not (positive and name == "learn_phase_slo"):
+        return _run_family_canary_impl(name, positive=positive, task_id_override=task_id_override)
+    # #2702: learn_phase_slo fails closed (an empty phase ledger is NO_DATA, never a pass).  The
+    # mainchain invoker gives this executor no workspace_root, so it reads the learn store of the
+    # cwd.  Run the positive arm from the canary workspace with one healthy required write-back
+    # row; the empty/failing paths stay pinned in tests/research/test_phase_slo_fail_closed_2702.py.
+    task_id = str(task_id_override or f"pos-{name}")
+    canary_root = CANARY_WORKSPACE_ROOT / task_id
+    ledger = canary_root / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps({
+            "phase": "R",
+            "phase_status": "SUCCESS",
+            "writeback_policy": {"required": True},
+            "writeback_done": True,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    previous_cwd = os.getcwd()
+    os.chdir(canary_root)
+    try:
+        return _run_family_canary_impl(name, positive=True, task_id_override=task_id)
+    finally:
+        os.chdir(previous_cwd)
+
+
+def _run_family_canary_impl(
+    name: str,
+    *,
+    positive: bool,
+    task_id_override: str = "",
+) -> dict[str, Any]:
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
     os.environ["NEXUS_ARMOR_ALLOW_EPHEMERAL"] = "1"
     contract = PLANNER_EXECUTION_CONTRACTS[name]
