@@ -239,7 +239,6 @@ scripts/link_mapper.py
 scripts/master_test.py
 scripts/memory_temp_manager.py
 scripts/migrationsafetyvalidator.py
-scripts/morning_briefing.py
 scripts/nexus_cli.py
 scripts/nexus_os_kernel.py
 scripts/nexus_pilot_cli.py
@@ -266,7 +265,6 @@ scripts/replay_case.py
 scripts/report_search_usage.py
 scripts/run_acheron_scan.py
 scripts/safepatcher.py
-scripts/script_dashboard.py
 scripts/self_evolution.py
 scripts/self_refiner.py
 scripts/semantic_gravity_smelter.py
@@ -302,7 +300,6 @@ scripts/test_stream_audit.py
 scripts/test_swarm_v20_otel.py
 scripts/test_swarm_v21_nsp.py
 scripts/test_token_direct.py
-scripts/tg_pty_bridge.py
 scripts/token_probe.py
 scripts/tracelog_analyzer.py
 scripts/trinity_status.py

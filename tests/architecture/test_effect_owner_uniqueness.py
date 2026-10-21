@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import functools
 import hashlib
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -73,11 +74,14 @@ COMPETITION_SINK = Ref(
     "integrate_task_state",
     "COMPATIBILITY_ONLY",
 )
+# Retired 2026-10-21 (#2584 Phase-2 batch B): worker_competition.py was deleted
+# with the self-hosted MCP competition tools. Kept as a RETIRED record only; it
+# is not in DECLARED, so ``integrate_task_state`` now has no admitted caller.
 COMPETITION_CALLER = Ref(
     "nexus/orchestrator/worker_competition.py",
     "WorkerCompetitionCoordinator",
     "integrate_winner",
-    "COMPATIBILITY_ONLY",
+    "RETIRED",
 )
 UNIFIED_CALLER = Ref(
     "nexus/orchestrator/unified_mcp_gateway.py",
@@ -148,7 +152,6 @@ DECLARED = (
     CANDIDATE_SINK,
     TARGET_LIFECYCLE_CALLER,
     COMPETITION_SINK,
-    COMPETITION_CALLER,
     UNIFIED_CALLER,
     SELF_HOSTED_CALLER,
     GATEWAY_MANAGER,
@@ -163,7 +166,6 @@ EDGES = (
     (SELF_HOSTED_CALLER, "self.service.integrate_approved"),
     (CANDIDATE_FACADE, "ControlledIntegrationManager().integrate_authorized_task_state"),
     (TARGET_LIFECYCLE_CALLER, "manager.integrate_authorized_task_state"),
-    (COMPETITION_CALLER, "ControlledIntegrationManager().integrate_task_state"),
     (SWITCH_CALLER, "_write_transition_file"),
     (RESTORE_CALLER, "_write_transition_file"),
 )
@@ -330,7 +332,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         strings = _strings(row)
         if "integrate_authorized_task_state" in tails and row.id not in allowed_candidate_callers:
             candidate_conflicts.append(row)
-        elif "integrate_task_state" in tails and row.id != COMPETITION_CALLER.id:
+        elif "integrate_task_state" in tails:  # no admitted caller since #2584 batch B
             candidate_conflicts.append(row)
         elif (
             "update-ref" in strings
@@ -387,7 +389,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
                     "name": "competition_winner_integration",
                     "caller": COMPETITION_CALLER.id,
                     "physical_sink": COMPETITION_SINK.id,
-                    "classification": "COMPATIBILITY_ONLY",
+                    "classification": "RETIRED",
                 },
             },
             "gateway_durable_deployment_recovery": {
@@ -439,7 +441,11 @@ def test_competition_integration_is_explicit_compatibility_domain():
     result = verify(Path(__file__).resolve().parents[2])
     candidate = result["effects"]["candidate_integration"]
     compatibility = candidate["compatibility_domain"]
-    assert compatibility["classification"] == "COMPATIBILITY_ONLY"
+    # Retired with worker_competition.py (#2584 Phase-2 batch B): any caller of
+    # integrate_task_state now fails verify() as a second Git-apply primitive.
+    assert importlib.util.find_spec("nexus.orchestrator.worker_competition") is None
+    assert compatibility["classification"] == "RETIRED"
+    assert COMPETITION_CALLER not in DECLARED
     assert compatibility["caller"] == COMPETITION_CALLER.id
     assert compatibility["physical_sink"] == COMPETITION_SINK.id
     assert TARGET_LIFECYCLE_CALLER.id in candidate["compatibility_callers"]

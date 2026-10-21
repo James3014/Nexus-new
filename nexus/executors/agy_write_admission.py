@@ -894,11 +894,11 @@ def git_config_fingerprint(root: Path | str) -> Optional[str]:
     """sha256 hex of the code-bearing Git config behind ``root``; ``None`` on failure.
 
     Exactly the config material ``checkout_fingerprint`` covers, for callers
-    that fingerprint the rest of a checkout themselves: the Codex launcher
-    (``scripts/ops/start_codex_nexus_enforced.sh``) reads it through
-    ``scripts/ops/codex_run_guard.py git-config-fingerprint`` so the
-    bookkeeping exclusions have one definition (#2547).  A root Git cannot
-    resolve, or a config Git refuses to parse, fails closed.
+    that fingerprint the rest of a checkout themselves, so the bookkeeping
+    exclusions have one definition (#2547).  Its only caller, the Codex
+    launcher and ``codex_run_guard.py``, was retired on 2026-10-21 (#2584
+    Phase-2 batch B).  A root Git cannot resolve, or a config Git refuses to
+    parse, fails closed.
     """
     path = Path(os.path.realpath(root))
     common = _git_output(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
