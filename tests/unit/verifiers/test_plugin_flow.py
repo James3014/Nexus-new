@@ -1,8 +1,41 @@
+import re
 import unittest
-from nexus.verifiers.registry import VerifierRegistry
-from nexus.verifiers.domain.name_sanity import NameSanityVerifier
-from nexus.verifiers.domain.inheritance import DeepInheritanceVerifier
+
 from nexus.committee.controller import CommitteeControllerV263
+from nexus.verifiers.contracts import FailureTag, VerifierVerdict
+from nexus.verifiers.registry import VerifierRegistry
+
+
+def _name_sanity_verdict(candidate_id: str, patch: str) -> VerifierVerdict:
+    # Same rule as the retired nexus.verifiers.domain.name_sanity.NameSanityVerifier.
+    usages = set(re.findall(r"([a-zA-Z0-9_]+)\.", patch)) - {"self"}
+    allowed = set(re.findall(r"import\s+([a-zA-Z0-9_]+)", patch))
+    allowed |= set(re.findall(r"as\s+([a-zA-Z0-9_]+)", patch))
+    allowed |= {"os", "sys", "time", "numpy", "np", "pandas", "pd"}
+    missing = sorted(usages - allowed)
+    if missing:
+        return VerifierVerdict(
+            verifier_name="name_sanity",
+            candidate_id=candidate_id,
+            passed=False,
+            score=-5.0,
+            failure_tags=[FailureTag(code="NAME_ERROR", description=f"MISSING: {missing}")],
+        )
+    return VerifierVerdict(
+        verifier_name="name_sanity",
+        candidate_id=candidate_id,
+        passed=True,
+        score=2.0 if usages else 1.0,
+        failure_tags=[FailureTag(code="SUCCESS", description="All imports resolved")],
+    )
+
+
+class _StubNameSanityVerifier:
+    """Test-local plugin; NameSanityVerifier was retired in Phase-2 batch C (#2584)."""
+
+    def evaluate(self, candidate_id: str, patch: str) -> VerifierVerdict:
+        return _name_sanity_verdict(candidate_id, patch)
+
 
 class TestPluginArchitecture(unittest.TestCase):
     def setUp(self):
@@ -11,7 +44,7 @@ class TestPluginArchitecture(unittest.TestCase):
     def test_plugin_registration_and_execution(self):
         """驗證：外掛註冊後能自動被 Controller 執行"""
         # 1. 註冊外掛
-        VerifierRegistry.register("name_sanity", NameSanityVerifier())
+        VerifierRegistry.register("name_sanity", _StubNameSanityVerifier())
         
         # 2. 執行控制器
         controller = CommitteeControllerV263("test-plugin")
