@@ -44,6 +44,7 @@ class IsolatedApplyReceipt:
 
 
 _HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+_GIT_TRAILING_WS = " \t\r"  # what git itself strips/ignores; not \f, NBSP, U+2028 ...
 _NO_EOL_MARKER = "\\ No newline at end of file"
 
 
@@ -68,7 +69,8 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
       Lines beyond the counts are not part of any hunk, as in ``git apply``.
 
     Accepted, deliberately (#2821):
-    * Trailing whitespace and CR are stripped from every line.  This identity
+    * Trailing space, tab and CR (only those: other Unicode whitespace such as
+      form feed or NBSP stays identity) are stripped from every line.  This identity
       binds the selected patch to the diff git renders after
       ``git apply --whitespace=fix``, which itself strips trailing whitespace
       and CR from added lines and matches removed/context lines ignoring it;
@@ -79,9 +81,11 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
       (the unchanged lines between them are not in the selected patch).  This
       fails closed (a valid edit may be rejected, never a different edit
       accepted).
-    * File identity is not part of this hash: a diff over several files
-      canonicalizes as the concatenation of its hunks, header-free.  The
-      target-file gate (one ``target_file`` per apply) owns file identity.
+    * File identity and non-hunk patch operations (new/deleted files, mode
+      changes, binary sections) are not part of this hash: a diff over several
+      files canonicalizes as the concatenation of its hunks, header-free.  No
+      gate here checks that the patch touches only ``target_file`` (tracked
+      separately as a follow-up Issue); do not rely on this identity for that.
     """
     output: list[str] = []
     hunk_lines: list[str] = []
@@ -107,7 +111,7 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
                 end += 1
             hunk_lines[:] = hunk_lines[start : end + 1]
         hunk_lines[:] = [
-            line for line in hunk_lines if not (line.startswith(" ") and not line[1:].rstrip())
+            line for line in hunk_lines if not (line.startswith(" ") and not line[1:].rstrip(_GIT_TRAILING_WS))
         ]
         old_count = sum(1 for line in hunk_lines if not line.startswith("+"))
         new_count = sum(1 for line in hunk_lines if not line.startswith("-"))
@@ -120,7 +124,7 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
         return old_left is not None and new_left is not None and old_left <= 0 and new_left <= 0
 
     for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
-        line = raw_line.rstrip()
+        line = raw_line.rstrip(_GIT_TRAILING_WS)
         if line.startswith("@@"):
             flush_hunk()
             in_hunk = True
@@ -148,7 +152,7 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
             continue
         if raw_line.startswith(("-", "+", " ")):
             operation = raw_line[0]
-            content = raw_line[1:].rstrip()
+            content = raw_line[1:].rstrip(_GIT_TRAILING_WS)
             hunk_lines.append(f"{operation}{content}")
         elif raw_line == "":
             operation = " "
@@ -163,7 +167,7 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
             if operation != "-":
                 new_left -= 1
     flush_hunk()
-    return "\n".join(output).strip()
+    return "\n".join(output).strip(_GIT_TRAILING_WS + "\n")
 
 
 def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApplyReceipt:

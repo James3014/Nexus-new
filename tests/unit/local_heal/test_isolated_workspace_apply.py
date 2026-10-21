@@ -506,3 +506,28 @@ def test_canonicalize_docstring_no_longer_claims_a_local_anchor() -> None:
     docstring = _canonicalize_effective_diff.__doc__ or ""
     assert "preserves a local anchor" not in docstring
     assert "keeps no anchor" in docstring
+
+
+def test_only_git_trailing_whitespace_is_ignored_not_other_unicode_whitespace() -> None:
+    """#2821 review: git keeps ``\\f`` / NBSP on added lines, so they stay identity."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    base = "@@ -1 +1 @@\n-X\n+Y\n"
+    assert _canonicalize_effective_diff(base) != _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y\x0c\n")
+    assert _canonicalize_effective_diff(base) != _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y \n")
+    assert _canonicalize_effective_diff(base) == _canonicalize_effective_diff("@@ -1 +1 @@\n-X \t\r\n+Y \t\r\n")
+
+
+def test_hunk_counts_include_blank_lines_and_default_to_one() -> None:
+    """#2821 review: blank lines count against the hunk (as git), omitted count means 1."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    # blank context line counts: hunk -1,3 +1,3 is complete after "-X", "+Y", blank, so "+evil" is outside.
+    with_blank = "@@ -1,3 +1,3 @@\n a\n\n-X\n+Y\n+evil\n"
+    assert "evil" not in _canonicalize_effective_diff(with_blank)
+    # a hunk that is still open keeps its later lines
+    assert "+Y" in _canonicalize_effective_diff("@@ -1,4 +1,4 @@\n a\n\n-X\n+Y\n")
+    # omitted counts default to 1/1: the extra added line is outside the hunk
+    assert _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y\n+evil\n") == "@@ -0,1 +0,1 @@\n-X\n+Y"
+    # a marker after a non-hunk line attaches to nothing
+    assert "No newline" not in _canonicalize_effective_diff("@@ -1 +1 @@\n-X\n+Y\n+evil\n\\ No newline at end of file\n")
