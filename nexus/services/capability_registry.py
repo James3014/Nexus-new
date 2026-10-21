@@ -2450,6 +2450,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
         elif name == "nightshift":
             keys = _NIGHTSHIFT_CONSTRAINT_KEYS
         else:
+            # Includes learn_mode / learn_phase_slo on purpose: their store comes from the
+            # process (state root or cwd), never from request context (#2826).
             return {}
         out: dict[str, Any] = {}
         for k in keys:
