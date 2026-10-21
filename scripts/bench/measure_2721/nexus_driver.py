@@ -571,6 +571,7 @@ class NexusArmDriver:
         self._submitted = False
         self._worker_accepted = False
         self._never_created = False
+        self._worker_refused = False
         self._probes: list[Any] = []
         try:
             return self._run(task, repeat, run_root, timeout_seconds=timeout_seconds)
@@ -757,6 +758,9 @@ class NexusArmDriver:
             elif not self._worker_accepted:
                 # Amendment 10: the Gateway refused the worker request, so the model
                 # never ran -> infra (Nexus reliability), re-run in all arms.
+                # An explicit refusal (a tool error, never a lost connection) is what
+                # lets a NOT_FOUND task end at once (revision 16, 1d review).
+                self._worker_refused = exc.tool == "nexus_worker_candidate"
                 set_fact(row, "nexus_refusal", f"WORKER_NOT_ACCEPTED:{exc.tool}")
                 set_fact(row, "void_reason", f"WORKER_NOT_ACCEPTED:{exc.tool}")
                 row.setdefault("error", message[:2000])
@@ -990,10 +994,12 @@ class NexusArmDriver:
         return health.get("repo_head_current") or health.get("git_head")
 
     def _refused_before_any_worker(self, gw_task: str) -> bool:
-        """The worker was never accepted and no Claude trace exists for the task (with no
-        trace dir configured nothing can be proven: False)."""
-        return (not self._worker_accepted and self.trace_dir is not None
-                and not (self.trace_dir / gw_task).exists())
+        """The Gateway explicitly refused the worker request (a tool error, not a lost
+        connection or a timeout, after which it may still be creating the task), the worker
+        was never accepted and no Claude trace exists for the task (with no trace dir
+        configured nothing can be proven: False)."""
+        return (getattr(self, "_worker_refused", False) and not self._worker_accepted
+                and self.trace_dir is not None and not (self.trace_dir / gw_task).exists())
 
     def _trace_runs(self, gw_task: str) -> list[Path]:
         if self.trace_dir is None or not (self.trace_dir / gw_task).is_dir():

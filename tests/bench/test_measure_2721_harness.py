@@ -3149,3 +3149,29 @@ def test_a_refused_row_with_a_trace_is_never_charged_zero(manifest, tmp_path):
     finally:
         nd.new_run_id = original
     assert ledger.state()["spent_usd"] >= 1.0  # the unknown attempt is charged
+
+
+def test_a_lost_worker_request_is_not_taken_as_a_refusal(manifest, tmp_path):
+    """1d review of a981ab1c7: a lost connection or a timeout on the worker request is not a
+    refusal -- the Gateway may still be creating the task -- so a NOT_FOUND status keeps the
+    old wait (GatewayStuck) and the conservative unknown-cost charge."""
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    class LostRequest(_DispatchRefusingGateway):
+        def __call__(self, method, path, body):
+            if body and body.get("method") == "tools/call" and body["params"]["name"] == "nexus_worker_candidate":
+                raise TimeoutError("timed out")
+            return super().__call__(method, path, body)
+
+    gateway = LostRequest()
+    traces = tmp_path / "gw-traces"
+    traces.mkdir()
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                         sleep=lambda _s: None, trace_dir=traces)
+    (task,) = arms.load_manifest(manifest)
+    ledger = SpendLedger(tmp_path / "spend.json", 100.0, 1.0)
+    with pytest.raises(nexus_driver.GatewayStuck):
+        driver.run(task, 1, tmp_path / "run", timeout_seconds=900, ledger=ledger)
+    assert sum(c["tool"] == "nexus_task_status" for c in gateway.calls) == 12  # the full wait
+    assert ledger.state()["spent_usd"] >= 1.0  # unknown cost, charged
