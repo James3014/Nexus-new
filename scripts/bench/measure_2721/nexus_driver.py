@@ -1056,6 +1056,7 @@ class NexusArmDriver:
             claude_usage_fields,
             observed_models,
             read_claude_trace,
+            total_from_token_fields,
         )
 
         state = {**status, **self._read_state(gw_task)}
@@ -1169,7 +1170,8 @@ class NexusArmDriver:
             "worker_started_at": state.get("worker_started_at"),
             "worker_finished_at": state.get("worker_finished_at"),
             "model_calls": claude.get("num_turns", telemetry.get("provider_calls") if isinstance(telemetry, Mapping) else None),
-            "total_tokens": None,
+            # The same sum BARE reports; None when no worker usage is known.
+            "total_tokens": total_from_token_fields(claude),
             "telemetry": telemetry,
             **claude,
             "error": error[:2000] if error not in ('""', "null") else "",

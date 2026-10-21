@@ -3230,3 +3230,64 @@ def test_tempfile_lookalikes_are_kept():
         _new_file_block("a/tmpabcdefgh/x") + _new_file_block("tmpabcdefgh/x")
     )
     assert removed == ["tmpabcdefgh/x"]
+
+
+# -- NEXUS total_tokens: the BARE sum of the four sub-fields -----------------------
+
+
+def test_total_from_token_fields_sums_the_known_subfields_and_keeps_unknown_as_none():
+    from scripts.bench.measure_2721.providers import total_from_token_fields
+
+    assert total_from_token_fields({}) is None
+    assert total_from_token_fields({"input_tokens": None, "output_tokens": None}) is None
+    assert total_from_token_fields({"input_tokens": 0, "output_tokens": 0}) == 0
+    assert (
+        total_from_token_fields({
+            "input_tokens": 3,
+            "output_tokens": None,
+            "cache_read_input_tokens": 4,
+        })
+        == 7
+    )
+    assert (
+        total_from_token_fields({
+            "input_tokens": 1,
+            "output_tokens": 2,
+            "cache_creation_input_tokens": 3,
+            "cache_read_input_tokens": 4,
+            "total_tokens": 999,
+        })
+        == 10
+    )
+
+
+def test_nexus_row_total_tokens_is_the_sum_of_the_token_subfields(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    venv = os.path.realpath(task["venv"])
+    limit = arms.expected_cli_timeout(5)
+    driver = _tracing_driver(
+        FakeGateway(),
+        tmp_path / "traces",
+        [
+            dict(cost=0.03, venv=venv, limit=limit, output=10),
+            dict(cost=0.02, venv=venv, limit=limit, output=5),
+        ],
+    )
+    row = driver.run(task, 1, tmp_path / "run", timeout_seconds=5)
+    parts = [
+        row[key]
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        )
+    ]
+    assert parts == [2, 15, 0, 0]
+    assert row["total_tokens"] == sum(parts) == 17
+
+
+def test_nexus_row_without_worker_usage_keeps_total_tokens_unknown(manifest, tmp_path):
+    (task,) = arms.load_manifest(manifest)
+    row = _driver(FakeGateway()).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row.get("input_tokens") is None and row["total_tokens"] is None  # never an invented 0

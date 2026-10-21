@@ -19,7 +19,7 @@ import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Mapping, Optional, Protocol
 
 STATUS_OK = "OK"
 STATUS_TIMEOUT = "TIMEOUT"
@@ -330,6 +330,21 @@ def observed_models(stream: Any) -> dict[str, list[str]]:
         if isinstance(model, str) and model not in seen:
             seen.append(model)
     return {"seen": seen, "served": served}
+
+
+TOKEN_SUBFIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
+
+
+def total_from_token_fields(fields: Mapping[str, Any]) -> Optional[int]:
+    """``total_tokens`` as BARE counts it: the sum of the four token sub-fields that are
+    known; None when none of them is (an unknown total is never reported as 0)."""
+    known = [int(fields[key]) for key in TOKEN_SUBFIELDS if fields.get(key) is not None]
+    return sum(known) if known else None
 
 
 def claude_usage_fields(summary: Any) -> dict[str, Any]:
