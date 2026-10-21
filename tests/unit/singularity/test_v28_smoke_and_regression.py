@@ -1,9 +1,9 @@
+import importlib.util
 import unittest
 from nexus.state.task_state_store import TaskStateStore, TaskState
 from nexus.replay.replay_artifact import ReplayArtifact
 from nexus.telemetry.telemetry_models import TelemetryBundle
 from nexus.evidence.evidence_chain_service import EvidenceChainService
-from nexus.gate.gate_judge import GateJudge, BlockerCodes
 from nexus.governance.backfill_service import BackfillService
 from nexus.memory.memory_retrieval_service import MemoryRetrievalService
 from nexus.memory.memory_models import MemoryHit, FailureSignatureHit
@@ -34,10 +34,10 @@ class TestV28SmokeAndRegression(unittest.TestCase):
         barrier = self.evidence_service.barrier(seal, partial_telemetry=not tel.complete, dirty_write=False)
         self.assertEqual(barrier["status"], "PASS")
 
-        # 5. Gate
-        verdict = GateJudge.decide(task_id, replay=replay, telemetry=tel, evidence_seal=seal)
-        self.assertTrue(verdict["allowed"])
-        self.assertEqual(verdict["blocker"], BlockerCodes.NONE)
+        # 5. Gate: the nexus.gate package (GateJudge) was retired in Phase-2 batch C (#2584);
+        # the replay it consumed must still be a complete contract.
+        replay.validate()
+        self.assertIsNone(importlib.util.find_spec("nexus.gate"))
 
     def test_backfill_main_path_smoke(self):
         """Task 9: Backfill Path"""

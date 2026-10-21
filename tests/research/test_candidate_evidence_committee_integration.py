@@ -1,11 +1,54 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from nexus.committee.controller import CommitteeControllerV263
-from nexus.verifiers.packs.astropy_pack import AstropyPack
+from nexus.verifiers.contracts import FailureTag, VerifierVerdict
+from nexus.verifiers.packs.base import VerifierPack
 from nexus.verifiers.packs.registry import PackRegistry
+
+
+def _name_sanity_verdict(candidate_id: str, patch: str) -> VerifierVerdict:
+    # Same rule as the retired nexus.verifiers.domain.name_sanity.NameSanityVerifier.
+    usages = set(re.findall(r"([a-zA-Z0-9_]+)\.", patch)) - {"self"}
+    allowed = set(re.findall(r"import\s+([a-zA-Z0-9_]+)", patch))
+    allowed |= set(re.findall(r"as\s+([a-zA-Z0-9_]+)", patch))
+    allowed |= {"os", "sys", "time", "numpy", "np", "pandas", "pd"}
+    missing = sorted(usages - allowed)
+    if missing:
+        return VerifierVerdict(
+            verifier_name="name_sanity",
+            candidate_id=candidate_id,
+            passed=False,
+            score=-5.0,
+            failure_tags=[FailureTag(code="NAME_ERROR", description=f"MISSING: {missing}")],
+        )
+    return VerifierVerdict(
+        verifier_name="name_sanity",
+        candidate_id=candidate_id,
+        passed=True,
+        score=2.0 if usages else 1.0,
+        failure_tags=[FailureTag(code="SUCCESS", description="All imports resolved")],
+    )
+
+
+class _StubAstropyPack(VerifierPack):
+    """Test-local stand-in for AstropyPack, retired in Phase-2 batch C (#2584)."""
+
+    name = "stub_astropy_pack"
+    domain_tags = ["astropy", "science", "ffi"]
+
+    def evaluate_all(self, candidate_id: str, patch: str) -> list[VerifierVerdict]:
+        inheritance = VerifierVerdict(
+            verifier_name="inheritance",
+            candidate_id=candidate_id,
+            passed=True,
+            score=1.0,
+            failure_tags=[FailureTag(code="SUCCESS", description="INHERITANCE_STRUCTURE_OK")],
+        )
+        return [_name_sanity_verdict(candidate_id, patch), inheritance]
 
 
 def test_generic_committee_collects_all_candidates_without_training_promotion(
@@ -20,7 +63,7 @@ def test_generic_committee_collects_all_candidates_without_training_promotion(
     monkeypatch.setenv("NEXUS_USE_PACKS", "1")
 
     PackRegistry.clear()
-    PackRegistry.register(AstropyPack())
+    PackRegistry.register(_StubAstropyPack())
     controller = CommitteeControllerV263("collector-committee-task")
     receipt = controller.process_proposals([
         {
@@ -61,7 +104,7 @@ def test_committee_collection_failure_cannot_change_winner(monkeypatch) -> None:
     monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
     monkeypatch.setenv("NEXUS_USE_PACKS", "1")
     PackRegistry.clear()
-    PackRegistry.register(AstropyPack())
+    PackRegistry.register(_StubAstropyPack())
 
     def _boom(**_kwargs):
         raise RuntimeError("sidecar unavailable")
