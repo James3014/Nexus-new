@@ -433,16 +433,20 @@ def _resolve_learn_store(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str
 
     ``LearnModeService(<project>)`` keeps claims and the phase ledger under
     ``<state root>/.nexus``, where the state root is ``<project>`` unless
-    ``NEXUS_STATE_ROOT`` moves a per-deploy project (#2688).  The project is a trusted
-    in-process ``workspace_root`` constraint (else ``project_root``, else the cwd).  An
-    explicit ``run_root`` / ``runtime_root`` constraint still isolates the run (tests);
-    without one the executor must not invent a fresh, empty per-task directory, because
-    the report would then never see the project data.
+    ``NEXUS_STATE_ROOT`` moves a per-deploy project (#2688).  The project is a
+    ``workspace_root`` constraint (else ``project_root``, else the cwd).  An explicit
+    ``run_root`` / ``runtime_root`` constraint still isolates the run (tests); without one
+    the executor must not invent a fresh, empty per-task directory, because the report
+    would then never see the project data.
 
-    The main-chain invoker passes **no** request context into ``learn_mode`` /
-    ``learn_phase_slo`` plans (#2826): ``learn_phase_slo`` fails closed (#2715), and a
-    context-chosen store would let the caller pick the ledger it reads.  On the live
-    layout (cwd = ``NEXUS_CANONICAL_SOURCE_ROOT``) the store is the state root.
+    This function does not check where a constraint came from; it trusts its caller.
+    The main-chain invoker therefore allowlists **no** request-context constraints for
+    ``learn_mode`` / ``learn_phase_slo`` (#2826): ``learn_phase_slo`` fails closed
+    (#2715), and a context-chosen store would let the caller pick the ledger it reads.
+    Only ``plan.task_id`` comes from the request; it labels the receipt (``run_id``) and
+    does not select the ledger.  With ``NEXUS_STATE_ROOT`` set and the cwd a per-deploy
+    root (the live layout: cwd = ``NEXUS_CANONICAL_SOURCE_ROOT``), the store is the state
+    root; otherwise it is the cwd.
     """
     constraints = plan.constraints or {}
     raw_root = str(

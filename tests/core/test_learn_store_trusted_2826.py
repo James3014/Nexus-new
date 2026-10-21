@@ -70,6 +70,7 @@ def test_live_layout_resolves_to_state_root(
     from nexus.core.capability_executor_registry import _resolve_learn_store
 
     state = tmp_path / "state"
+    state.mkdir()
     controller = tmp_path / "controllers" / "a1-x"
     controller.mkdir(parents=True)
     monkeypatch.setenv(STATE_ROOT_ENV, str(state))
@@ -92,3 +93,36 @@ def test_without_state_root_the_cwd_is_the_store(
     project_root, run_root, _ = _resolve_learn_store(plan)
     assert project_root == tmp_path.resolve()
     assert Path(run_root).resolve() == tmp_path.resolve()
+
+
+def test_end_to_end_gate_reads_state_root_not_forged_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invoker -> real learn_phase_slo executor on the live layout: a forged ledger at a
+    context-chosen root is never the store the gate reads."""
+    import json
+
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    state = tmp_path / "state"
+    state.mkdir()
+    controller = tmp_path / "controllers" / "a1-x"
+    controller.mkdir(parents=True)
+    attacker = tmp_path / "target"
+    (attacker / ".nexus").mkdir(parents=True)
+    monkeypatch.setenv(STATE_ROOT_ENV, str(state))
+    monkeypatch.setenv(CANONICAL_SOURCE_ROOT_ENV, str(controller))
+    monkeypatch.chdir(controller)
+    invoker = build_real_executor_invoker("learn_phase_slo")
+    assert invoker is not None
+    result = invoker({
+        "task_id": "t-2826-e2e",
+        "task_statement": "s",
+        "workspace_root": str(attacker),
+        "run_root": str(attacker),
+        "route": {"workspace_root": str(attacker)},
+    })
+    dumped = json.dumps(result, default=str)
+    assert str(state.resolve()) in dumped
+    assert str(attacker) not in dumped
+    assert not (attacker / ".nexus" / "reports").exists()
