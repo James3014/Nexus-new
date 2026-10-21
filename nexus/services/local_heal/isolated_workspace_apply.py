@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from typing import Any
@@ -42,19 +43,52 @@ class IsolatedApplyReceipt:
     applied_patch_hash_source: str = ""
 
 
+_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+_NO_EOL_MARKER = "\\ No newline at end of file"
+
+
 def _canonicalize_effective_diff(diff_text: str) -> str:
     """Canonicalize one target's selected/applied effect for hash binding.
 
     Git may render a different unchanged context window around the same
     payload.  Keep the nearest unchanged line on either side of the payload;
-    this preserves a local anchor while making the hash independent of extra
-    context that git adds when it renders the applied diff.  Every added or
-    removed payload line remains part of the identity.  Target, source,
-    successful apply, isolation, and verifier checks are separate gates.
+    a side whose nearest context line is blank keeps no anchor (git may add or
+    drop such lines), and the location itself is bound by ``git apply`` with
+    the patch's own context plus the target-file gate, not by this identity.
+    Every added or removed payload line remains part of the identity.  Target,
+    source, successful apply, isolation, and verifier checks are separate gates.
+
+    Fixed (#2821):
+    * ``\\ No newline at end of file`` is part of the identity: it attaches to
+      the line it follows, so ``Y\n`` and ``Y`` canonicalize differently.
+    * Hunks are consumed by their ``@@ -a,b +c,d @@`` counts (as ``git apply``
+      does), so ``--- a/..`` / ``+++ b/..`` / ``diff --git`` headers of a
+      further file are never read as edited lines; a payload line that merely
+      looks like a header (``--- x`` removed, ``+++ y`` added) stays payload.
+      Lines beyond the counts are not part of any hunk, as in ``git apply``.
+
+    Accepted, deliberately (#2821):
+    * Trailing whitespace and CR are stripped from every line.  This identity
+      binds the selected patch to the diff git renders after
+      ``git apply --whitespace=fix``, which itself strips trailing whitespace
+      and CR from added lines and matches removed/context lines ignoring it;
+      the two sides would never bind if byte-exact whitespace were kept.
+      Whitespace inside a line (including leading indentation) is kept.
+    * Edits that the selected patch gives as separate hunks canonicalize
+      differently from the same edits rendered by git as one merged hunk
+      (the unchanged lines between them are not in the selected patch).  This
+      fails closed (a valid edit may be rejected, never a different edit
+      accepted).
+    * File identity is not part of this hash: a diff over several files
+      canonicalizes as the concatenation of its hunks, header-free.  The
+      target-file gate (one ``target_file`` per apply) owns file identity.
     """
     output: list[str] = []
     hunk_lines: list[str] = []
     in_hunk = False
+    old_left: int | None = None
+    new_left: int | None = None
+    attachable = False
 
     def flush_hunk() -> None:
         nonlocal hunk_lines, in_hunk
@@ -82,20 +116,52 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
         hunk_lines = []
         in_hunk = False
 
+    def hunk_complete() -> bool:
+        return old_left is not None and new_left is not None and old_left <= 0 and new_left <= 0
+
     for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
         line = raw_line.rstrip()
         if line.startswith("@@"):
             flush_hunk()
             in_hunk = True
+            attachable = False
+            header = _HUNK_HEADER_RE.match(line)
+            if header:
+                old_left = int(header.group(1)) if header.group(1) is not None else 1
+                new_left = int(header.group(2)) if header.group(2) is not None else 1
+            else:
+                old_left = new_left = None
             continue
         if not in_hunk:
+            continue
+        if raw_line.startswith("diff --git "):
+            flush_hunk()
+            continue
+        if raw_line.startswith("\\"):
+            # "\ No newline at end of file" belongs to the line before it.
+            if attachable and hunk_lines:
+                hunk_lines[-1] = f"{hunk_lines[-1]}\n{_NO_EOL_MARKER}"
+            attachable = False
+            continue
+        if hunk_complete():
+            attachable = False
             continue
         if raw_line.startswith(("-", "+", " ")):
             operation = raw_line[0]
             content = raw_line[1:].rstrip()
             hunk_lines.append(f"{operation}{content}")
         elif raw_line == "":
+            operation = " "
             hunk_lines.append(" ")
+        else:
+            attachable = False
+            continue
+        attachable = True
+        if old_left is not None and new_left is not None:
+            if operation != "+":
+                old_left -= 1
+            if operation != "-":
+                new_left -= 1
     flush_hunk()
     return "\n".join(output).strip()
 

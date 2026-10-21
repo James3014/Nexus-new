@@ -345,3 +345,164 @@ def test_blank_context_next_to_the_change_does_not_move_the_anchor() -> None:
     selected = "@@ -2,3 +2,3 @@\n \n-X\n+Y\n c\n"
     applied = "@@ -1,4 +1,4 @@\n a\n \n-X\n+Y\n c\n"
     assert _canonicalize_effective_diff(selected) == _canonicalize_effective_diff(applied)
+
+
+def test_no_newline_at_eof_marker_is_part_of_the_identity() -> None:
+    """#2821 item 1: a patch producing ``Y\\n`` and one producing ``Y`` differ."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    with_newline = "@@ -1 +1 @@\n-X\n+Y\n"
+    without_newline = "@@ -1 +1 @@\n-X\n+Y\n\\ No newline at end of file\n"
+    old_without_newline = "@@ -1 +1 @@\n-X\n\\ No newline at end of file\n+Y\n"
+    assert _canonicalize_effective_diff(with_newline) != _canonicalize_effective_diff(without_newline)
+    assert _canonicalize_effective_diff(without_newline) != _canonicalize_effective_diff(
+        old_without_newline
+    )
+    # Same marker, different surrounding noise (CRLF transport, header lines) still binds.
+    assert _canonicalize_effective_diff(without_newline) == _canonicalize_effective_diff(
+        "--- a/f\n+++ b/f\n" + without_newline.replace("\n", "\r\n")
+    )
+    # A marker after a trailing context line is kept too.
+    context_marker = "@@ -1,2 +1,2 @@\n-X\n+Y\n c\n\\ No newline at end of file\n"
+    assert _canonicalize_effective_diff(context_marker) != _canonicalize_effective_diff(
+        "@@ -1,2 +1,2 @@\n-X\n+Y\n c\n"
+    )
+
+
+def test_apply_binds_no_newline_at_eof_end_to_end(tmp_path) -> None:
+    """#2821 item 1: the receipt binds the EOF-newline effect git really applied."""
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    (source / "f.txt").write_text("a\nX\n", encoding="utf-8")
+    honest = (
+        "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-X\n+Y\n\\ No newline at end of file\n"
+    )
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="eof-marker",
+            source_root=str(source),
+            target_file="f.txt",
+            unified_diff=honest,
+            selected_candidate_hash=_canonical_candidate_hash(honest),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.selected_candidate_hash_matches_applied is True
+
+    # Claiming the identity of the newline-terminated edit while git applied the
+    # no-newline one must not bind.
+    newline_variant = "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-X\n+Y\n"
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="eof-marker-claim",
+            source_root=str(source),
+            target_file="f.txt",
+            unified_diff=honest,
+            selected_candidate_hash=_canonical_candidate_hash(newline_variant),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts2"),
+        )
+    )
+    assert receipt.selected_candidate_hash_matches_applied is False
+
+
+def test_whitespace_normalisation_is_the_documented_accepted_behaviour() -> None:
+    """#2821 item 2: trailing whitespace / CR are stripped on purpose.
+
+    ``git apply --whitespace=fix`` strips them from added lines itself and matches
+    removed lines ignoring them, so selected and applied diffs only bind when the
+    identity ignores them.  Whitespace inside a line is still identity.
+    """
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    base = "@@ -1 +1 @@\n-X\n+Y\n"
+    assert _canonicalize_effective_diff(base) == _canonicalize_effective_diff(
+        "@@ -1 +1 @@\r\n-X  \r\n+Y\t\r\n"
+    )
+    assert _canonicalize_effective_diff(base) != _canonicalize_effective_diff(
+        "@@ -1 +1 @@\n-X\n+ Y\n"
+    )
+    assert _canonicalize_effective_diff(base) != _canonicalize_effective_diff(
+        "@@ -1 +1 @@\n-X\n+Y Z\n"
+    )
+    docstring = _canonicalize_effective_diff.__doc__ or ""
+    assert "Accepted, deliberately" in docstring and "whitespace=fix" in docstring
+
+
+def test_apply_binds_trailing_whitespace_added_line_after_git_fix(tmp_path) -> None:
+    """#2821 item 2: why it must stay accepted: git rewrites the added line itself."""
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    (source / "f.txt").write_text("a\nX\n", encoding="utf-8")
+    patch = "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-X\n+Y   \n"
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="ws-fix",
+            source_root=str(source),
+            target_file="f.txt",
+            unified_diff=patch,
+            selected_candidate_hash=_canonical_candidate_hash(patch),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.selected_candidate_hash_matches_applied is True
+
+
+def test_separate_hunks_versus_merged_hunk_is_documented_fail_closed() -> None:
+    """#2821 item 3: accepted. Different forms (never a false match), and documented."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    separate = "@@ -2 +2 @@\n-b\n+B\n@@ -4 +4 @@\n-d\n+D\n"
+    merged = "@@ -2,3 +2,3 @@\n-b\n+B\n c\n-d\n+D\n"
+    assert _canonicalize_effective_diff(separate) != _canonicalize_effective_diff(merged)
+    # The edits themselves are still bound in both forms.
+    assert _canonicalize_effective_diff(separate) != _canonicalize_effective_diff(
+        separate.replace("+D", "+E")
+    )
+    docstring = _canonicalize_effective_diff.__doc__ or ""
+    assert "separate hunks" in docstring and "fails closed" in docstring
+
+
+def test_file_headers_of_further_files_are_not_edited_lines() -> None:
+    """#2821 item 4: ``--- a/y`` / ``+++ b/y`` between hunks are headers, not payload."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    two_files = (
+        "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-c\n+d\n"
+    )
+    canonical = _canonicalize_effective_diff(two_files)
+    assert canonical == "@@ -0,1 +0,1 @@\n-a\n+b\n@@ -0,1 +0,1 @@\n-c\n+d"
+    # Plain unified diff (no ``diff --git`` line): the count of the first hunk ends it.
+    plain = (
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-c\n+d\n"
+    )
+    assert _canonicalize_effective_diff(plain) == canonical
+    # A payload line that merely looks like a header stays payload while the counts say so.
+    lookalike = "@@ -1 +1 @@\n--- x\n+++ y\n"
+    assert _canonicalize_effective_diff(lookalike) == "@@ -0,1 +0,1 @@\n--- x\n+++ y"
+    # Stray lines after a complete hunk are not smuggled in as payload.
+    assert _canonicalize_effective_diff("@@ -1 +1 @@\n-a\n+b\n+evil\n") == (
+        "@@ -0,1 +0,1 @@\n-a\n+b"
+    )
+    # A short-counted hunk is cut at the next ``diff --git`` line.
+    assert _canonicalize_effective_diff("@@ -1,5 +1,5 @@\n-a\n+b\ndiff --git a/y b/y\n+q\n") == (
+        "@@ -0,1 +0,1 @@\n-a\n+b"
+    )
+
+
+def test_canonicalize_docstring_no_longer_claims_a_local_anchor() -> None:
+    """#2821 item 5: the docstring states the post-#2820 anchor behaviour."""
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    docstring = _canonicalize_effective_diff.__doc__ or ""
+    assert "preserves a local anchor" not in docstring
+    assert "keeps no anchor" in docstring
