@@ -2757,14 +2757,15 @@ def _assert_kept(result, binding, effect_id=None):
         assert result["intelligence_effect_id"] == effect_id
 
 
-def test_carry_closure_dispatching_reconciliation_keeps_binding(tmp_path):
+def test_detection_save_closure_dispatching_carries_no_binding(tmp_path):
+    """Detection saves keep base behaviour: no binding carried (#2852 review)."""
     automation, item, body, _, _, binding, effect_id = _seed(tmp_path, "CLOSURE_DISPATCHING", 21)
     result = automation.run_issue("o/r", 21, "title", body)
     assert result["state"] == "RECONCILIATION_REQUIRED"
-    _assert_kept(result, binding, effect_id)
+    assert "worker_binding" not in result
 
 
-def test_carry_replay_mismatch_keeps_persisted_binding(tmp_path):
+def test_detection_save_replay_mismatch_carries_no_binding(tmp_path):
     automation, item, body, _, _, binding, effect_id = _seed(
         tmp_path, "INTELLIGENCE_DISPATCHING", 22
     )
@@ -2777,42 +2778,40 @@ def test_carry_replay_mismatch_keeps_persisted_binding(tmp_path):
     )
     result = automation.run_issue("o/r", 22, "title", body)
     assert result["error"] == "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"
-    assert result["worker_binding"] == stale
-    assert result["intelligence_effect_id"] == effect_id
+    assert "worker_binding" not in result
 
 
-def test_carry_missing_binding_save_keeps_effect_id(tmp_path):
+def test_detection_save_missing_binding_stays_missing(tmp_path):
     automation, item, body, _, _, _, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 23)
     automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
     result = automation.run_issue("o/r", 23, "title", body)
     assert result["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
-    assert result["intelligence_effect_id"] == effect_id
     assert "worker_binding" not in result
 
 
-def test_carry_missing_effect_id_keeps_binding(tmp_path):
+def test_detection_save_missing_effect_id_carries_no_binding(tmp_path):
     automation, _, body, _, _, binding, _ = _seed(
         tmp_path, "INTELLIGENCE_DISPATCHING", 24, with_effect=False
     )
     result = automation.run_issue("o/r", 24, "title", body)
     assert result["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISSING"
-    _assert_kept(result, binding)
+    assert "worker_binding" not in result
 
 
-def test_carry_effect_id_mismatch_keeps_binding_and_2837_sequence_recovers(tmp_path):
-    # #2837: a detection save used to drop worker_binding, so the NEXT resume
-    # reported CANONICAL_WORKFORCE_BINDING_MISSING and refused to replay.
+def test_effect_id_mismatch_then_restored_context_still_refuses_replay(tmp_path):
+    # #2852 review (Codex): carrying the binding through the mismatch save would let a
+    # later run with the original context replay the dispatch; base refuses that.
     automation, item, body, _, _, binding, effect_id = _seed(
         tmp_path, "INTELLIGENCE_DISPATCHING", 25
     )
     changed_body = body.replace("issue prose", "changed issue prose and context")
     first = automation.run_issue("o/r", 25, "title", changed_body)
     assert first["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
-    _assert_kept(first, binding, effect_id)
+    assert "worker_binding" not in first
     second = automation.run_issue("o/r", 25, "title", body)
-    assert second["state"] == "COMPLETE"
-    assert second.get("error") != "CANONICAL_WORKFORCE_BINDING_MISSING"
-    assert len(automation.sidecar.calls) == 1
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert automation.sidecar.calls == []
 
 
 def test_carry_fanout_receipt_missing_keeps_binding(tmp_path):
@@ -2938,4 +2937,18 @@ def test_carry_forward_prefers_the_persisted_binding_over_this_runs(tmp_path):
     assert carried["intelligence_effect_id"] == effect_id
     automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
     assert automation._carry_forward(item)["worker_binding"]["profile_id"] == "this-run-profile"
-    assert "worker_binding" not in automation._carry_forward(item, persisted_only=True)
+
+
+def test_transition_log_records_error_codes_not_error_text(tmp_path):
+    store = AutomationStateStore(tmp_path / "state")
+    item = IssueWorkItem("o/r", 7, "t", "b", _contract("tasks/x.md", "0" * 64))
+    store.save(
+        item,
+        "BLOCKED",
+        error="CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:token=ghp_secretvalue https://x",
+        error_code="weird text with spaces: and more",
+    )
+    (line,) = _read_transitions(tmp_path)
+    assert line["error"] == "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID"
+    assert line["error_code"] == "UNPRINTABLE_ERROR"
+    assert "ghp_secretvalue" not in (tmp_path / "state" / "transitions.jsonl").read_text()

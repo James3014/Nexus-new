@@ -492,6 +492,14 @@ def _save_caller(frame: Any) -> str:
         return "unknown"
 
 
+def _log_code(value: Any) -> str | None:
+    """The leading code of an error value (text before the first ":"), capped."""
+    if value is None:
+        return None
+    code = str(value).split(":", 1)[0].strip()
+    return code[:120] if re.fullmatch(r"[A-Za-z0-9_.\-]+", code) else "UNPRINTABLE_ERROR"
+
+
 class AutomationStateStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -553,8 +561,9 @@ class AutomationStateStore:
                 "identity_hash": item.identity_hash,
                 "from_state": from_state,
                 "to_state": value.get("state"),
-                "error": value.get("error"),
-                "error_code": value.get("error_code"),
+                # Codes only: error text can carry transport detail (tokens, URLs).
+                "error": _log_code(value.get("error")),
+                "error_code": _log_code(value.get("error_code")),
                 "has_worker_binding": isinstance(value.get("worker_binding"), Mapping),
                 "semantic_dispatched": value.get("semantic_dispatched"),
                 "caller": caller,
@@ -567,7 +576,9 @@ class AutomationStateStore:
                 0o600,
             )
             try:
-                os.write(fd, data)
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view) :]
             finally:
                 os.close(fd)
         except (OSError, TypeError, ValueError):
@@ -1202,20 +1213,16 @@ class ExternalIntelligenceAutomation:
             attempts[str(unit["unit_id"])] = dict(attempt)
         return attempts
 
-    def _carry_forward(
-        self, item: IssueWorkItem, *, persisted_only: bool = False
-    ) -> dict[str, Any]:
-        """Fields a reconciliation/blocked save must not drop (#2852).
+    def _carry_forward(self, item: IssueWorkItem) -> dict[str, Any]:
+        """Fields a BLOCKED / terminal save must not drop (#2852).
 
         Returns the worker binding and intelligence effect id of the record
         currently on disk; only when nothing is persisted and that record is in
         a dispatch state is this run's binding used. A persisted binding always
-        wins, so a later resume still compares against what was actually
-        dispatched (a mismatch stays detectable). ``persisted_only`` is for the
-        saves that DETECT a
-        missing/mismatched binding: they must keep exactly what was persisted
-        and never substitute this run's binding. Persistence only: never used
-        to decide anything.
+        wins. Not used on the RECONCILIATION_REQUIRED saves that detect a
+        missing or mismatched binding / effect id: those keep base behaviour
+        (no binding carried), because a carried binding would let a later
+        resume replay a dispatch that base refuses. Persistence only.
         """
         try:
             current = self.state_store.load(item) or {}
@@ -1224,11 +1231,7 @@ class ExternalIntelligenceAutomation:
         persisted = current.get("worker_binding")
         persisted = dict(persisted) if isinstance(persisted, Mapping) else None
         own = None
-        if (
-            not persisted_only
-            and current.get("state") in _CARRY_STATES
-            and self._worker_binding is not None
-        ):
+        if current.get("state") in _CARRY_STATES and self._worker_binding is not None:
             own = dict(self._worker_binding)
         binding = persisted or own
         carried: dict[str, Any] = {}
@@ -1408,7 +1411,6 @@ class ExternalIntelligenceAutomation:
             return self.state_store.save(
                 item,
                 "RECONCILIATION_REQUIRED",
-                **self._carry_forward(item, persisted_only=True),
                 prior_state="CLOSURE_DISPATCHING",
                 reconcile_only=True,
                 semantic_dispatched=True,
@@ -1457,7 +1459,6 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "RECONCILIATION_REQUIRED",
-                        **self._carry_forward(item, persisted_only=True),
                         prior_state=resume_from,
                         error="CANONICAL_WORKFORCE_BINDING_MISSING",
                         reconcile_only=True,
@@ -1467,7 +1468,6 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "RECONCILIATION_REQUIRED",
-                        **self._carry_forward(item, persisted_only=True),
                         prior_state=resume_from,
                         error="CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH",
                         reconcile_only=True,
@@ -1500,7 +1500,6 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "RECONCILIATION_REQUIRED",
-                        **self._carry_forward(item, persisted_only=True),
                         prior_state=resume_from,
                         error="INTELLIGENCE_DISPATCH_BINDING_MISSING",
                         reconcile_only=True,
@@ -1510,7 +1509,6 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "RECONCILIATION_REQUIRED",
-                        **self._carry_forward(item, persisted_only=True),
                         prior_state=resume_from,
                         error="INTELLIGENCE_DISPATCH_BINDING_MISMATCH",
                         reconcile_only=True,
@@ -1525,7 +1523,7 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "BLOCKED",
-                        **self._carry_forward(item, persisted_only=True),
+                        **self._carry_forward(item),
                         error="INTELLIGENCE_RECEIPT_MISSING",
                         semantic_dispatched=True,
                     )
