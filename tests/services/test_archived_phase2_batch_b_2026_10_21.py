@@ -17,7 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_ROOTS = ("nexus", "scripts")
+SCAN_ROOTS = ("nexus", "scripts", ".github")
+# Root-level files that can launch scripts (scanned when present).
+ROOT_FILES = ("Makefile", "justfile", "pyproject.toml")
 SCAN_EXCLUDED_PREFIXES = ("scripts/archive/",)
 TEXT_SUFFIXES = {
     ".py",
@@ -31,6 +33,7 @@ TEXT_SUFFIXES = {
     ".sh",
     ".html",
     ".plist",
+    ".template",  # launchd plist templates (*.plist.template)
 }
 REAPPEAR_SUFFIXES = (".py", ".json", ".txt")
 
@@ -121,6 +124,7 @@ def _scanned_files() -> list[Path]:
                 continue
             if path.is_file() and path.suffix in TEXT_SUFFIXES:
                 files.append(path)
+    files += [REPO_ROOT / name for name in ROOT_FILES if (REPO_ROOT / name).is_file()]
     return files
 
 
