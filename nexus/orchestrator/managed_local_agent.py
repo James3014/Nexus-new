@@ -193,9 +193,7 @@ class ManagedLocalAgentLauncher:
             request, repo_path, current_head, attempt_id
         )
 
-        core_bound = bool(
-            request.core_envelope_required and request.ambient_core_port is not None
-        )
+        core_bound = bool(request.core_envelope_required and request.ambient_core_port is not None)
         if request.core_envelope_required:
             if request.ambient_core_port is None:
                 # Missing Core port blocks before worker invocation (worker_invocation_count = 0)
@@ -471,9 +469,10 @@ class ManagedLocalAgentLauncher:
 
         # Reconcile same effect identity
         stored_attempt_id = state.get("attempt_id")
-        if (
-            expected_effect_identity is not None
-            and expected_effect_identity != stored_attempt_id
+        if expected_effect_identity is not None and (
+            not isinstance(stored_attempt_id, str)
+            or not stored_attempt_id
+            or expected_effect_identity != stored_attempt_id
         ):
             return {
                 "action": ReconcileAction.BLOCK.value,
