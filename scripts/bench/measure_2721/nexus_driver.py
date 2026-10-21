@@ -570,6 +570,7 @@ class NexusArmDriver:
         token = ledger.begin_row() if ledger is not None else None
         self._submitted = False
         self._worker_accepted = False
+        self._never_created = False
         self._probes: list[Any] = []
         try:
             return self._run(task, repeat, run_root, timeout_seconds=timeout_seconds)
@@ -892,6 +893,14 @@ class NexusArmDriver:
             status = str(snapshot.get("status") or "")
             if status in TERMINAL_STATUSES:
                 return None
+            if status.upper() == "NOT_FOUND" and self._refused_before_any_worker(gw_task):
+                # The Gateway refused the worker request synchronously (e.g. a non-Claude
+                # dispatch): no task was created and no worker ran, so there is nothing to
+                # wait for.  Polling it 12 times (120 s) and raising GatewayStuck stopped the
+                # runner on every such row (M-main3, revision 16).
+                self._never_created = True
+                transcript.append({"tool": "nexus_task_status", "never_created": True})
+                return None
             backoff = self.cancel_backoff[min(retries, len(self.cancel_backoff) - 1)] if self.cancel_backoff else 10.0
             self.sleep(backoff)
             if cancel_refused or status in CANCEL_RETRY_STATUSES:
@@ -914,7 +923,7 @@ class NexusArmDriver:
         except GatewayToolError as exc:
             if "MODEL_PROBE_REQUIRED" not in json.dumps(exc.payload):
                 raise
-        probe_id = f"{args['task_id']}-probe"[:96]
+        probe_id = f"{str(args['task_id'])[:GATEWAY_TASK_ID_MAX - len('-probe')]}-probe"
         self._probes.append(None)  # a model call: charged even if its usage never comes back
         probe = self.client.call("nexus_model_probe", {
             "provider": self.probe_provider, "model": self.probe_model, "task_id": probe_id,
@@ -980,6 +989,12 @@ class NexusArmDriver:
             return git(self.controller_repo, "rev-parse", "HEAD").strip()  # the Controller's own HEAD
         return health.get("repo_head_current") or health.get("git_head")
 
+    def _refused_before_any_worker(self, gw_task: str) -> bool:
+        """The worker was never accepted and no Claude trace exists for the task (with no
+        trace dir configured nothing can be proven: False)."""
+        return (not self._worker_accepted and self.trace_dir is not None
+                and not (self.trace_dir / gw_task).exists())
+
     def _trace_runs(self, gw_task: str) -> list[Path]:
         if self.trace_dir is None or not (self.trace_dir / gw_task).is_dir():
             return []
@@ -1012,8 +1027,8 @@ class NexusArmDriver:
                 estimate += estimate_stream_usd(self.trace_dir / gw_task / f"{name}.stream.jsonl")
             else:
                 known += float(cost)
-        if not runs:
-            unknown += 1
+        if not runs and not (getattr(self, "_never_created", False) and self._refused_before_any_worker(gw_task)):
+            unknown += 1  # a task the Gateway never created, with no trace, ran no worker: known 0
         for usage in getattr(self, "_probes", []):
             if isinstance(usage, dict):
                 known += estimate_usage_usd(usage)

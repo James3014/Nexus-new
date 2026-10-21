@@ -3070,3 +3070,82 @@ def test_pytest_output_in_a_no_model_row_voids_the_run(tmp_path, arm):
     hit = blind.noop_nonempty_diff(row, tmp_path)
     assert hit is not None and hit["tool_artifact_paths"] == ["pytest-current"]
     assert blind.noop_nonempty_diff({**row, "tool_artifact_paths": []}, tmp_path) is None
+
+
+class _DispatchRefusingGateway(FakeGateway):
+    """M-main3, revision 16: the Gateway refuses the worker request at once (a non-Claude
+    workforce dispatch), never creates the task, and answers NOT_FOUND afterwards."""
+
+    REFUSAL = {"error": "WORKFORCE_INTERNAL_BINDING_INVALID:measurement_dispatch_not_claude:codex/x",
+               "schema": "nexus.mcp_gateway_error.v1"}
+
+    def _is_error(self, name):
+        return name in ("nexus_worker_candidate", "nexus_task_cancel")
+
+    def _answer(self, name, args):
+        if name == "nexus_worker_candidate":
+            return dict(self.REFUSAL)
+        if name == "nexus_task_cancel":
+            return {"error": "unknown task_id"}
+        if name in ("nexus_task_status", "nexus_task_wait"):
+            return {"task_id": args.get("task_id"), "status": "NOT_FOUND"}
+        return super()._answer(name, args)
+
+
+def test_a_refused_worker_request_ends_at_once_costs_nothing_and_follows_the_rerun_rule(
+        manifest, tmp_path, monkeypatch):
+    """Revision 16: a worker never accepted, a task NOT_FOUND and no trace -> the row ends
+    at once (no 120 s poll, no GatewayStuck / exit 75) and costs a known 0; it is still
+    NEXUS_NOT_ACCEPTED and the block still re-runs twice, then is excluded."""
+    from scripts.bench.measure_2721 import runner
+
+    gateway = _DispatchRefusingGateway()
+    traces = tmp_path / "gw-traces"
+    traces.mkdir()
+
+    def build(args, parser):
+        client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+        return nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                           sleep=lambda _s: None, arm_label=args.arm_label, trace_dir=traces)
+
+    monkeypatch.setattr(nexus_driver, "build_driver", build)
+    run = tmp_path / "run"
+    # NEXUS alone: the fake BARE provider reports no cost (an estimated row by design).
+    assert _runner_main(manifest, tmp_path, run, arms_=("NEXUS",)) == 0  # never exit 75
+    statuses = [(b["attempt"], b["status"]) for b in read_jsonl(run / "blocks.jsonl")]
+    assert statuses == [(0, "RERUN"), (1, "RERUN"), (2, "EXCLUDED_AFTER_RERUNS")]
+    nexus_rows = [r for r in read_jsonl(run / "rows.jsonl") if r["arm"] == "NEXUS"]
+    assert len(nexus_rows) == 3
+    for row in nexus_rows:
+        assert row["infra_rule"] == "NEXUS_NOT_ACCEPTED" and row["infra"] is True
+        assert "gateway_stuck" not in row and not row["facts"].get("stuck_by_harness_timeout")
+    # Only one status poll per row: it ended at once.
+    assert sum(c["tool"] == "nexus_task_status" for c in gateway.calls) == 3
+    ledger = json.loads((tmp_path / "spend.json").read_text())
+    assert ledger["spent_usd"] == 0.0 and ledger["reservations"] == {} and ledger["worst_row_usd"] == 0.0
+
+
+def test_a_refused_row_with_a_trace_is_never_charged_zero(manifest, tmp_path):
+    """Revision 16: with any trace for the task the zero-cost rule does not apply (the row
+    keeps the conservative unknown-cost charge and the old wait)."""
+    from scripts.bench.measure_2721.budget import SpendLedger
+
+    gateway = _DispatchRefusingGateway()
+    traces = tmp_path / "gw-traces"
+    client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", transport=gateway)
+    driver = nexus_driver.NexusArmDriver(client, campaign_id="c", goal_id="g", scope_id="s",
+                                         sleep=lambda _s: None, trace_dir=traces)
+    (task,) = arms.load_manifest(manifest)
+    real_run_id = arms.new_run_id
+    fixed = real_run_id("NEXUS", task["task_id"], 1)
+    (traces / nexus_driver.gateway_task_id(fixed)).mkdir(parents=True)  # a trace dir exists
+    ledger = SpendLedger(tmp_path / "spend.json", 100.0, 1.0)
+    import scripts.bench.measure_2721.nexus_driver as nd
+    original = nd.new_run_id
+    nd.new_run_id = lambda arm, task_id, repeat: fixed
+    try:
+        with pytest.raises(nexus_driver.GatewayStuck):
+            driver.run(task, 1, tmp_path / "run", timeout_seconds=900, ledger=ledger)
+    finally:
+        nd.new_run_id = original
+    assert ledger.state()["spent_usd"] >= 1.0  # the unknown attempt is charged
