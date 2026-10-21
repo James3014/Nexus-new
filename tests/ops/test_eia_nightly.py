@@ -2073,3 +2073,28 @@ def test_fetch_failure_is_unknown_and_start_fails_closed(env) -> None:
     assert night["daemon_checkout"]["status"] == "UNKNOWN"
     assert "FETCH_FAILED" in night["daemon_checkout"]["error"]
     assert not [c for c in env["sys"].calls if c[0] in ("launchctl", "open")]
+
+
+def test_late_prepare_does_not_fail_a_started_night_on_stale_checkout(env) -> None:
+    _started(env)
+    _origin_ahead(env, "nexus/services/external_intelligence_closure.py")
+    night = env["app"].prepare()
+    assert night["started"]["ok"] and night["status"] == "RUNNING"
+    night = _dispatch(env, "2026-10-17T00:00:00")
+    assert night["status"] != "START_FAILED"
+
+
+def test_open_swe_service_module_and_lock_are_daemon_critical(env) -> None:
+    for path in ("nexus/services/open_swe_external_intelligence.py", "uv.lock"):
+        _origin_ahead(env, path)
+        gap = env["app"]._daemon_checkout_gap()
+        assert gap["status"] == "STALE" and path in gap["touched"], (path, gap)
+
+
+def test_a_later_different_start_failure_is_still_reported(env) -> None:
+    night = {"night": NIGHT, "issues": {}, "order": []}
+    env["app"]._fail_start(night, en.NightlyError("DAEMON_CHECKOUT_STALE:behind 1 commits"))
+    env["app"]._fail_start(night, en.NightlyError("HEALTHCHECK_FAILED"))
+    notes = [m["note"] for m in night["outbox"].values()]
+    assert any("DAEMON_CHECKOUT_STALE" in n for n in notes)
+    assert any("HEALTHCHECK_FAILED" in n for n in notes)

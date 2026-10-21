@@ -158,7 +158,10 @@ PUBLICATION_GRACE_MIN = 15
 # behind main, so the closure-verifier hardening of #2794/#2808/#2815 was not in effect).
 # A checkout that misses a change to any of these paths would run the nightly with an old
 # closure verifier / witness / driver, so the night fails closed (DAEMON_CHECKOUT_STALE).
-# Anything outside this list is only recorded.  fnmatch globs; "*" also crosses "/".
+# Anything outside this list is only recorded.  Direct imports of the driver, the daemon
+# service and the closure verifier only (the transitive closure is ~400 files through package
+# __init__s), plus the dependency lock, whose change means the daemon .venv is stale too.
+# fnmatch globs; "*" also crosses "/".
 DAEMON_CRITICAL_PATHS = (
     "nexus/services/external_intelligence_*.py",  # automation, closure, core binding, witness
     "nexus/services/external_intelligence.py",  # imported by the closure verifier
@@ -167,6 +170,11 @@ DAEMON_CRITICAL_PATHS = (
     "nexus/engine/sandboxed_lane.py",  # sandbox-exec profile the closure verifier runs under
     "nexus/engine/canonical_task_seam.py",  # imported by the automation module
     "nexus/services/eia_source_excerpt.py",  # imported by the automation module
+    "nexus/services/open_swe_external_intelligence.py",  # daemon service: model pin, admission
+    "nexus/core/exit_codes.py",  # imported by the daemon service
+    "nexus/core/repo_root.py",  # imported by canonical_task_seam
+    "pyproject.toml",
+    "uv.lock",
 )
 
 
@@ -761,9 +769,10 @@ class Nightly:
         started = night.setdefault("started", {"at": self._iso()})
         started.update(ok=False, error=str(exc))
         night["status"] = "START_FAILED"
-        self._queue_msg(
+        code = str(exc).split(":", 1)[0]
+        self._queue_msg(  # one key per cause: a later, different failure is still reported
             night,
-            "start-failed",
+            f"start-failed-{code}",
             "coordinator",
             f"EIA nightly {night['night']}: START_FAILED {exc}; nothing will be armed.",
         )
@@ -980,12 +989,15 @@ class Nightly:
         night_id = night_id or night_of(self.now())
         night = self.load(night_id)
         loaded = night or {"schema": STATE_SCHEMA, "night": night_id, "issues": {}, "order": []}
-        try:
-            self._check_daemon_checkout(loaded)
-        except NightlyError as exc:
-            # UNKNOWN is only recorded here; ``start`` re-checks and fails closed.
-            if str(exc).startswith("DAEMON_CHECKOUT_STALE"):
-                return self._fail_start(loaded, exc)
+        # A night that already started keeps running: a late or repeated prepare must not mark
+        # an armed night START_FAILED (dispatch would then stop harvesting it).
+        if not (loaded.get("started") or {}).get("ok"):
+            try:
+                self._check_daemon_checkout(loaded)
+            except NightlyError as exc:
+                # UNKNOWN is only recorded here; ``start`` re-checks and fails closed.
+                if str(exc).startswith("DAEMON_CHECKOUT_STALE"):
+                    return self._fail_start(loaded, exc)
         if night:
             night = loaded
         if night and night.get("card_pr"):
