@@ -17,8 +17,13 @@ class TestV28ContractSealing(unittest.TestCase):
         self.store.commit(self.ticket_id, {"desc": "test task"}) # v1
 
     def test_memory_volatility_does_not_affect_gate_verdict(self):
-        """nexus.gate (GateJudge) was retired in Phase-2 batch C (#2584)."""
+        """nexus.gate (GateJudge) was retired in Phase-2 batch C (#2584); the memory side of
+        the original check stays: packing the same hits twice gives the same pack."""
         self.assertIsNone(importlib.util.find_spec("nexus.gate"))
+        h1 = MemoryHit("h1", "distraction", 0.95)
+        pack1 = MemoryRetrievalService.rank_and_pack([h1], current_state_version=1)
+        pack2 = MemoryRetrievalService.rank_and_pack([h1], current_state_version=1)
+        self.assertEqual(pack1, pack2)
 
     def test_state_version_physical_filtering(self):
         """驗證版本鎖：高版本狀態下的 Memory 不得污染低版本決策"""

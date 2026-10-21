@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = ("nexus", "scripts")
 SCAN_EXCLUDED_PREFIXES = ("scripts/archive/",)
 TEXT_SUFFIXES = {".py", ".json", ".txt", ".toml", ".yaml", ".yml", ".cfg", ".ini", ".sh"}
-REAPPEAR_SUFFIXES = (".py", ".json", ".txt")
+REAPPEAR_SUFFIXES = (".py", ".json", ".txt", ".py.bak")  # the batch deleted a .py.bak too
 
 RETIRED_MODULES = (
     # 1a: nexus/verifiers/domain (benchmark fixture group kept, see KEPT_MODULES)
