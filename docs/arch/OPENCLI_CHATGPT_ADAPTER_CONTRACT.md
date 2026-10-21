@@ -79,7 +79,7 @@ above (`OPENCLI_TOKEN`, `OPENCLI_API_KEY` are dropped). The word
 filter's `PROVIDER` exemption is dropped (its only history, commit 7f834e2,
 gives no reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
 
-## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17; open-swe environment cell updated 2026-10-21)
+## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17; open-swe row updated 2026-10-21)
 
 | Adapter | Prompt | Conversation | Environment | Session mode |
 | --- | --- | --- | --- | --- |
