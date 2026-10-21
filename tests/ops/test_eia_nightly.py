@@ -1977,3 +1977,154 @@ def test_start_python_check_requires_pydantic(env) -> None:
     env["app"].start()
     checks = [c for c in env["sys"].calls if "-c" in c and c[0] == "/usr/bin/env"]
     assert checks and checks[0][-1] == "import nexus, pytest, pydantic"
+
+
+# ------------------------------------------------------------------ daemon checkout freshness
+
+
+def _origin_ahead(env, path: str) -> str:
+    """Leave the daemon checkout on its commit while origin/main gains one touching ``path``."""
+    repo = env["repo"]
+    base = _git(repo, "rev-parse", "HEAD")
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("changed\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", f"touch {path}")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "reset", "-q", "--hard", base)
+    return base
+
+
+def test_prepare_fails_closed_when_daemon_checkout_misses_verifier_change(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, "nexus/services/external_intelligence_closure.py")
+    night = env["app"].prepare()
+    assert night["status"] == "START_FAILED"
+    assert "DAEMON_CHECKOUT_STALE" in night["started"]["error"]
+    assert "behind 1 commits" in night["started"]["error"]
+    assert "nexus/services/external_intelligence_closure.py" in night["started"]["error"]
+    assert night["daemon_checkout"]["head"] == base
+    assert not env["gh"].prs  # no card PR for a night that cannot run
+    env["app"]._flush_outbox(night)
+    assert any("msg coordinator" in m and "DAEMON_CHECKOUT_STALE" in m for m in env["sys"].coord())
+    assert env["app"].load(NIGHT)["status"] == "START_FAILED"
+
+
+def test_start_rechecks_daemon_checkout_and_fails_closed(env) -> None:
+    _prepared(env)
+    _origin_ahead(env, "scripts/ops/eia_nightly.py")
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    env["app"]._flush_outbox(night)
+    assert night["status"] == "START_FAILED"
+    assert "DAEMON_CHECKOUT_STALE" in night["started"]["error"]
+    assert "scripts/ops/eia_nightly.py" in night["started"]["error"]
+    assert not [c for c in env["sys"].calls if c[0] in ("launchctl", "open")]
+    assert night.get("caffeinate_pid") is None
+    assert any("DAEMON_CHECKOUT_STALE" in m for m in env["sys"].coord())
+
+
+def test_unrelated_gap_is_recorded_and_the_night_runs(env) -> None:
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, "docs/unrelated.md")
+    night = env["app"].prepare()
+    assert night["status"] == "CARDS_PENDING"
+    gap = night["daemon_checkout"]
+    assert (gap["status"], gap["behind"], gap["head"]) == ("BEHIND", 1, base)
+    assert gap["origin_main"] == _git(env["repo"], "rev-parse", "refs/remotes/origin/main")
+    pr = env["gh"].prs[night["card_pr"]["number"]]
+    pr.update(state="MERGED", mergeCommit={"oid": pr["headRefOid"]})
+    _git(env["repo"], "update-ref", "refs/remotes/origin/main", pr["headRefOid"])
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["started"]["ok"] and night["status"] == "RUNNING"
+    assert night["daemon_checkout"]["head"] == base
+
+
+def test_up_to_date_daemon_checkout_is_recorded_with_head_sha(env) -> None:
+    night = _started(env)
+    head = _git(env["repo"], "rev-parse", "HEAD")
+    assert night["daemon_checkout"]["head"] == head
+    assert night["status"] == "RUNNING"
+    gap = en.Nightly._daemon_checkout_gap(env["app"])
+    assert gap["status"] == "BEHIND" and gap["touched"] == []  # card PR commit only
+
+
+def test_daemon_checkout_current_when_head_is_origin_main(env) -> None:
+    gap = env["app"]._daemon_checkout_gap()
+    assert (gap["status"], gap["behind"], gap["touched"]) == ("CURRENT", 0, [])
+
+
+def test_fetch_failure_is_unknown_and_start_fails_closed(env) -> None:
+    _prepared(env)
+    original = env["app"].run
+
+    def runner(argv, **kw):
+        if argv[0] == "git" and "fetch" in argv and str(env["repo"]) in argv:
+            return _cp(argv, 1, "", "could not resolve host")
+        return original(argv, **kw)
+
+    env["app"].run = runner
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED"
+    assert "DAEMON_CHECKOUT_UNVERIFIED" in night["started"]["error"]
+    assert night["daemon_checkout"]["status"] == "UNKNOWN"
+    assert "FETCH_FAILED" in night["daemon_checkout"]["error"]
+    assert not [c for c in env["sys"].calls if c[0] in ("launchctl", "open")]
+
+
+def test_late_prepare_does_not_fail_a_started_night_on_stale_checkout(env) -> None:
+    _started(env)
+    _origin_ahead(env, "nexus/services/external_intelligence_closure.py")
+    night = env["app"].prepare()
+    assert night["started"]["ok"] and night["status"] == "RUNNING"
+    night = _dispatch(env, "2026-10-17T00:00:00")
+    assert night["status"] != "START_FAILED"
+
+
+def test_open_swe_service_module_and_lock_are_daemon_critical(env) -> None:
+    for path in ("nexus/services/open_swe_external_intelligence.py", "uv.lock"):
+        _origin_ahead(env, path)
+        gap = env["app"]._daemon_checkout_gap()
+        assert gap["status"] == "STALE" and path in gap["touched"], (path, gap)
+
+
+def test_a_later_different_start_failure_is_still_reported(env) -> None:
+    night = {"night": NIGHT, "issues": {}, "order": []}
+    env["app"]._fail_start(night, en.NightlyError("DAEMON_CHECKOUT_STALE:behind 1 commits"))
+    env["app"]._fail_start(night, en.NightlyError("HEALTHCHECK_FAILED"))
+    notes = [m["note"] for m in night["outbox"].values()]
+    assert any("DAEMON_CHECKOUT_STALE" in n for n in notes)
+    assert any("HEALTHCHECK_FAILED" in n for n in notes)
+
+
+def test_local_commit_reverting_a_verifier_file_is_stale(env) -> None:
+    repo = env["repo"]
+    target = repo / "nexus/services/external_intelligence_closure.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("local edit\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "local daemon-only commit")
+    gap = env["app"]._daemon_checkout_gap()
+    assert gap["status"] == "STALE"
+    assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
+
+
+def test_renamed_verifier_file_still_lists_its_old_path(env) -> None:
+    repo = env["repo"]
+    old = repo / "nexus/services/external_intelligence_closure.py"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("".join(f"line {i}\n" for i in range(50)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add closure")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "mv", str(old), str(repo / "nexus/verifier_moved.py"))
+    _git(repo, "commit", "-qm", "move closure")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "reset", "-q", "--hard", base)
+    gap = env["app"]._daemon_checkout_gap()
+    assert gap["status"] == "STALE"
+    assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
