@@ -85,7 +85,7 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
       changes, binary sections) are not part of this hash: a diff over several
       files canonicalizes as the concatenation of its hunks, header-free.  No
       gate here checks that the patch touches only ``target_file`` (tracked
-      separately as a follow-up Issue); do not rely on this identity for that.
+      in #2836); do not rely on this identity for that.
     """
     output: list[str] = []
     hunk_lines: list[str] = []
