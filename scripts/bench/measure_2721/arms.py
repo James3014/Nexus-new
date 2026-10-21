@@ -32,7 +32,13 @@ from scripts.bench.measure_2721.common import (
     sha256_text,
     write_json,
 )
-from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, FLAG_TIMEOUT, drop_tool_artifacts, lookup_signals
+from scripts.bench.measure_2721.leakage import (
+    FLAG_NETWORK_ATTEMPT,
+    FLAG_TIMEOUT,
+    drop_tool_artifacts,
+    lookup_signals,
+    prompt_scope_texts,
+)
 from scripts.bench.measure_2721.materialize import checkout_base, link_venv
 from scripts.bench.measure_2721.portable import to_portable_row
 from scripts.bench.measure_2721.providers import (
@@ -313,8 +319,15 @@ def _run_bare(task: Mapping[str, Any], repeat: int, run_root: Path, provider: Pr
     write_diff(diff_path, diff)
     extra = result.extra or {}
     lookup = lookup_signals(
-        [extra.get("response_text") or "", extra.get("stderr_tail") or "", extra.get("tool_inputs_text") or ""],
-        repo=task.get("repo", ""), denied_actions=extra.get("denied_actions") or ())
+        [
+            extra.get("response_text") or "",
+            extra.get("stderr_tail") or "",
+            extra.get("tool_inputs_text") or "",
+        ],
+        repo=task.get("repo", ""),
+        denied_actions=extra.get("denied_actions") or (),
+        prompt_texts=prompt_scope_texts(task),
+    )
     network = [a for a in (extra.get("proxy_attempts") or []) if not a.get("allowed")]
     infra_event = watchdog.infra_event_for(run_root, run_id)
     flags = [flag for flag in (

@@ -15,6 +15,7 @@ these signals are a lower bound on web use.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Iterable, Mapping, Optional
 
@@ -158,14 +159,59 @@ def filter_candidate(diff: str, scope: Iterable[str]) -> dict[str, Any]:
             "stripped_out_of_scope_paths": scope_paths, "flags": flags}
 
 
-def lookup_signals(texts: Iterable[str], *, repo: str = "", denied_actions: Iterable[Mapping[str, Any]] = ()) -> dict[str, Any]:
-    """Web-tool and upstream-URL evidence found in the run's visible output."""
+# A prompt piece shorter than this is not cut out of the scanned text (it would cut
+# ordinary words out of a reply); a URL-bearing statement is always longer.
+_PROMPT_PIECE_MIN = 16
+
+
+def prompt_scope_texts(task: Mapping[str, Any]) -> list[str]:
+    """The task's own prompt text, which neither arm's lookup scan may read: the rendered
+    base prompt and its WHAT / WHY statement (the NEXUS worker prompt embeds both)."""
+    from scripts.bench.measure_2721.task_text import render_worker_prompt
+
+    text = task.get("text") or {}
+    pieces = [str(text.get(key) or "") for key in ("what", "why")]
+    if pieces[0] or pieces[1]:
+        try:
+            pieces.insert(0, render_worker_prompt(text))
+        except (KeyError, TypeError):
+            pass
+    return [piece for piece in pieces if piece]
+
+
+def without_prompt(text: str, prompt_texts: Iterable[str]) -> str:
+    """``text`` with every copy of the prompt pieces cut out, raw or JSON-escaped (the
+    NEXUS state and both arms' tool inputs are scanned as JSON dumps)."""
+    forms: set[str] = set()
+    for piece in prompt_texts:
+        if len(piece) < _PROMPT_PIECE_MIN:
+            continue
+        forms.update((piece, json.dumps(piece)[1:-1], json.dumps(piece, ensure_ascii=False)[1:-1]))
+    for form in sorted(forms, key=len, reverse=True):
+        text = text.replace(form, " ")
+    return text
+
+
+def lookup_signals(
+    texts: Iterable[str],
+    *,
+    repo: str = "",
+    denied_actions: Iterable[Mapping[str, Any]] = (),
+    prompt_texts: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Web-tool and upstream-URL evidence found in the run's visible output.
+
+    Both arms scan the same scope: the task's own prompt text (``prompt_texts``, from
+    ``prompt_scope_texts``) is cut out first, so a URL that only the task statement
+    carries is never counted, in BARE or NEXUS."""
     tools: set[str] = set()
     upstream_urls: set[str] = set()
     repo_url = re.compile(r"github\.com/" + re.escape(repo) + r"(/[^\s)\"'`]*)?", re.I) if repo else None
+    prompt_texts = list(prompt_texts)
     for text in texts:
         if not text:
             continue
+        text = without_prompt(text, prompt_texts)
         tools.update(_WEB_TOOL_RE.findall(text))
         if repo_url is not None:
             upstream_urls.update(match.group(0) for match in repo_url.finditer(text))

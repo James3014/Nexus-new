@@ -3361,3 +3361,118 @@ def test_worker_candidate_timeout_never_lowers_a_longer_client_timeout(monkeypat
     client = nexus_driver.GatewayClient("http://127.0.0.1:18766", "tok-123", timeout=900.0)
     client.call("nexus_worker_candidate", {}, timeout=nexus_driver.WORKER_CANDIDATE_TIMEOUT_SECONDS)
     assert recorder.seen == [("nexus_worker_candidate", 900.0)]
+
+
+# -- upstream_urls_seen: the same scan scope in both arms ---------------------------
+
+_PROMPT_URL = "https://github.com/acme/widget/issues/7"
+_REPLY_URL = "https://github.com/acme/widget/pull/8"
+
+
+def _task_with_url_in_statement(manifest) -> dict:
+    """A synthetic task whose statement (WHY) carries an upstream URL."""
+    (task,) = arms.load_manifest(manifest)
+    task["repo"] = "acme/widget"
+    task["text"] = {**task["text"], "why": f"{task['text']['why']}\nReported at {_PROMPT_URL}"}
+    task["prompt_sha256"] = arms.sha256_text(task_text.render_worker_prompt(task["text"]))
+    return task
+
+
+def test_lookup_signals_never_counts_a_url_only_in_the_task_prompt():
+    statement = f"Widget breaks on empty input; see {_PROMPT_URL} for the report."
+    prompt = f"WHAT: Fix it\nWHY: {statement}\n"
+    for scanned in (prompt, json.dumps({"prompt": prompt}), json.dumps({"input": statement})):
+        found = leakage.lookup_signals(
+            [scanned], repo="acme/widget", prompt_texts=[prompt, statement]
+        )
+        assert found["upstream_urls_seen"] == [] and found["flag"] is None
+    reply = leakage.lookup_signals(
+        [json.dumps({"prompt": prompt}), f"I read {_REPLY_URL}"],
+        repo="acme/widget",
+        prompt_texts=[prompt, statement],
+    )
+    assert reply["upstream_urls_seen"] == ["github.com/acme/widget/pull/8"]
+    assert reply["flag"] == leakage.FLAG_UPSTREAM_LOOKUP
+    # Without prompt texts the scan is unchanged.
+    assert leakage.lookup_signals([prompt], repo="acme/widget")["upstream_urls_seen"] == [
+        "github.com/acme/widget/issues/7"
+    ]
+    # A tiny prompt piece is never cut out of the reply.
+    assert leakage.without_prompt("see x", ["x"]) == "see x"
+
+
+def test_prompt_scope_texts_are_the_rendered_prompt_and_the_statement(manifest):
+    task = _task_with_url_in_statement(manifest)
+    texts = leakage.prompt_scope_texts(task)
+    assert texts == [arms.task_prompt(task), task["text"]["what"], task["text"]["why"]]
+    assert leakage.prompt_scope_texts({}) == []
+
+
+def test_bare_row_does_not_flag_a_url_only_in_the_prompt(manifest, tmp_path):
+    task = _task_with_url_in_statement(manifest)
+    prompt = arms.task_prompt(task)
+    provider = FakeProvider(
+        edit=_edit,
+        extra={
+            "response_text": "Fixed add().",
+            "stderr_tail": "",
+            "tool_inputs_text": json.dumps({"description": prompt}),
+            "denied_actions": [],
+        },
+    )
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5)
+    assert (
+        row["lookup"]["upstream_urls_seen"] == []
+        and leakage.FLAG_UPSTREAM_LOOKUP not in row["flags"]
+    )
+
+
+def test_bare_row_flags_a_url_in_the_reply(manifest, tmp_path):
+    task = _task_with_url_in_statement(manifest)
+    provider = FakeProvider(
+        edit=_edit,
+        extra={
+            "response_text": f"Compared with {_REPLY_URL} first",
+            "stderr_tail": "",
+            "denied_actions": [],
+        },
+    )
+    row = arms.run_bare(task, 1, tmp_path / "run", provider, timeout_seconds=5)
+    assert row["lookup"]["upstream_urls_seen"] == ["github.com/acme/widget/pull/8"]
+    assert leakage.FLAG_UPSTREAM_LOOKUP in row["flags"]
+
+
+def _gateway_with_execution(execution: dict) -> FakeGateway:
+    gateway = FakeGateway()
+    original = gateway._answer
+
+    def answer(name, args):
+        payload = original(name, args)
+        if name == "nexus_task_status":
+            payload["execution"] = execution
+        return payload
+
+    gateway._answer = answer
+    return gateway
+
+
+def test_nexus_row_does_not_flag_a_url_only_in_the_prompt(manifest, tmp_path):
+    task = _task_with_url_in_statement(manifest)
+    prompt = arms.task_prompt(task) + "\nNexus guidance appended here."
+    gateway = _gateway_with_execution({"prompt": prompt, "stdout_tail": "Fixed add()."})
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert (
+        row["lookup"]["upstream_urls_seen"] == []
+        and leakage.FLAG_UPSTREAM_LOOKUP not in row["flags"]
+    )
+
+
+def test_nexus_row_flags_a_url_in_the_worker_reply(manifest, tmp_path):
+    task = _task_with_url_in_statement(manifest)
+    gateway = _gateway_with_execution({
+        "prompt": arms.task_prompt(task),
+        "stdout_tail": f"Compared with {_REPLY_URL} first",
+    })
+    row = _driver(gateway).run(task, 1, tmp_path / "run", timeout_seconds=5)
+    assert row["lookup"]["upstream_urls_seen"] == ["github.com/acme/widget/pull/8"]
+    assert leakage.FLAG_UPSTREAM_LOOKUP in row["flags"]

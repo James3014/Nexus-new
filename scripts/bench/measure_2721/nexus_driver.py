@@ -66,7 +66,12 @@ from scripts.bench.measure_2721.common import (
     write_json,
 )
 from scripts.bench.measure_2721.gateway_env import measurement_env, read_roots_sha256
-from scripts.bench.measure_2721.leakage import FLAG_NETWORK_ATTEMPT, drop_tool_artifacts, lookup_signals
+from scripts.bench.measure_2721.leakage import (
+    FLAG_NETWORK_ATTEMPT,
+    drop_tool_artifacts,
+    lookup_signals,
+    prompt_scope_texts,
+)
 from scripts.bench.measure_2721.portable import to_portable_row
 
 LIVE_GATEWAY_PORT = 8766
@@ -1154,7 +1159,12 @@ class NexusArmDriver:
         infra = _is_infra(error) or status == "INFRA"
         worker_texts = [json.dumps(state.get(key), default=str) for key in
                         ("execution", "executions", "execution_outcome", "error") if state.get(key) is not None]
-        lookup = lookup_signals([*worker_texts, trace_text], repo=repo)
+        task = getattr(self, "_current_task", None)
+        lookup = lookup_signals(
+            [*worker_texts, trace_text],
+            repo=repo,
+            prompt_texts=prompt_scope_texts(task) if task is not None else (),
+        )
         timed_out = bool((final.get("wait") or {}).get("timed_out")) or "timed_out\": true" in " ".join(worker_texts)
         network = [a for a in claude.get("proxy_denied") or []]
         if status is None and timed_out:
