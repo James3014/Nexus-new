@@ -753,7 +753,6 @@ def test_2825_missing_binding_hash_in_state_reports_false(tmp_path: Path):
 
     def read_state_without_hash(task_id):
         state = dict(real_read_state(task_id) or {})
-        state.pop("core_binding_hash", None)
         state["verified_receipt"] = {
             k: v
             for k, v in dict(state.get("verified_receipt") or {}).items()

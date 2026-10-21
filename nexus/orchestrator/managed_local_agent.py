@@ -118,7 +118,9 @@ class ManagedLocalAgentReceipt:
     # established for this receipt, i.e. the Core envelope was required, a Core
     # port was supplied AND the stored state carries a non-empty
     # ``core_binding_hash`` (the same value surfaced as ``core_binding_hash``).
-    # A merely supplied port is NOT enough. Early FINAL_BLOCK receipts (missing
+    # The hash is recorded once Core verification has produced a binding, so a
+    # run blocked before that point reports False (understates, never overstates).
+    # It does not track later terminal status. A merely supplied port is NOT enough. Early FINAL_BLOCK receipts (missing
     # port, effect-authorization blocks, submission failure) and REBIND_REQUIRED
     # / raw-mutation receipts always report False.
     pre_write_machine_enforced_core_bound: bool
@@ -434,17 +436,16 @@ class ManagedLocalAgentLauncher:
         is_pty = bool(request.shell_pty_mode)
         path_containment = not is_pty and (terminal_status == "PENDING_HUMAN_APPROVAL")
 
-        # The completed Core binding is recorded on the verified receipt (set from
-        # the Core preparation's binding_hash); a top-level state value, if any,
-        # is honoured too. Absent evidence means no binding was established.
-        core_binding_hash = state.get("core_binding_hash")
-        if not core_binding_hash:
-            core_binding_hash = (
-                verified_receipt.get("core_binding_hash")
-                if isinstance(verified_receipt, Mapping)
-                else getattr(verified_receipt, "core_binding_hash", None)
-            )
-        if not isinstance(core_binding_hash, str) or not core_binding_hash:
+        # The completed Core binding is recorded only on the verified receipt (set by
+        # the ambient Core path from the Core preparation's binding_hash, after Core
+        # verification). No other state key is trusted. Absent evidence means no
+        # binding was established.
+        core_binding_hash = (
+            verified_receipt.get("core_binding_hash")
+            if isinstance(verified_receipt, Mapping)
+            else getattr(verified_receipt, "core_binding_hash", None)
+        )
+        if not isinstance(core_binding_hash, str) or not core_binding_hash.strip():
             core_binding_hash = None
         core_binding_established = bool(core_bound_eligible and core_binding_hash)
 
