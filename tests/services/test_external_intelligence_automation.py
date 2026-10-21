@@ -2686,3 +2686,239 @@ def test_read_git_blob_fails_closed_on_non_utf8_source(tmp_path):
     assert automation._read_git_blob(sha, "ok.py") == (True, "ok content\n")
     with pytest.raises(AutomationError, match="CONTRACT_SOURCE_NOT_UTF8"):
         automation._read_git_blob(sha, "bin.py")
+
+
+# --- #2852: transition log and worker_binding carry-forward -----------------
+
+
+def _read_transitions(tmp_path):
+    path = tmp_path / "state" / "transitions.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _seed(tmp_path, state, issue, *, with_effect=True, **kw):
+    repo, card, contract, body, store = _setup(tmp_path)
+    automation = _automation(
+        tmp_path, repo, store, sidecar=kw.get("sidecar"), c=kw.get("c"), d=kw.get("d")
+    )
+    item = IssueWorkItem("o/r", issue, "title", body, contract)
+    text = card.read_text(encoding="utf-8")
+    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), text)
+    automation._worker_binding = binding
+    effect_id = automation._intelligence_effect_id(item, text)
+    extra = {"worker_binding": binding}
+    if with_effect:
+        extra["intelligence_effect_id"] = effect_id
+    if state == "RECONCILIATION_REQUIRED":
+        extra.update(prior_state=kw.get("prior_state", "INTELLIGENCE_DISPATCHING"))
+    automation.state_store.save(item, state, **extra)
+    return automation, item, body, card, store, binding, effect_id
+
+
+def test_save_appends_transition_line_with_caller_and_states(tmp_path):
+    store = AutomationStateStore(tmp_path / "state")
+    item = IssueWorkItem("o/r", 5, "t", "b", _contract("tasks/x.md", "0" * 64))
+    store.save(item, "DISCOVERED")
+    store.save(
+        item,
+        "RECONCILIATION_REQUIRED",
+        worker_binding={"secret": "must-not-leak"},
+        error="X",
+        error_code="CODE",
+        semantic_dispatched=True,
+    )
+    first, second = _read_transitions(tmp_path)
+    assert first["from_state"] is None and first["to_state"] == "DISCOVERED"
+    assert first["has_worker_binding"] is False
+    assert second["from_state"] == "DISCOVERED"
+    assert second["to_state"] == "RECONCILIATION_REQUIRED"
+    assert second["has_worker_binding"] is True
+    assert second["error"] == "X" and second["error_code"] == "CODE"
+    assert second["semantic_dispatched"] is True
+    assert second["repository"] == "o/r" and second["issue_number"] == 5
+    assert second["identity_hash"] == item.identity_hash
+    assert second["caller"].startswith("tests/services/test_external_intelligence_automation.py:")
+    assert second["caller"].endswith(" test_save_appends_transition_line_with_caller_and_states")
+    assert "must-not-leak" not in (tmp_path / "state" / "transitions.jsonl").read_text()
+
+
+def test_transition_log_failure_does_not_break_save(tmp_path):
+    store = AutomationStateStore(tmp_path / "state")
+    (tmp_path / "state" / "transitions.jsonl").mkdir(parents=True)
+    item = IssueWorkItem("o/r", 6, "t", "b", _contract("tasks/x.md", "0" * 64))
+    value = store.save(item, "DISCOVERED")
+    assert value["state"] == "DISCOVERED"
+    assert store.load(item)["state"] == "DISCOVERED"
+
+
+def _assert_kept(result, binding, effect_id=None):
+    assert result["worker_binding"] == binding
+    if effect_id is not None:
+        assert result["intelligence_effect_id"] == effect_id
+
+
+def test_carry_closure_dispatching_reconciliation_keeps_binding(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(tmp_path, "CLOSURE_DISPATCHING", 21)
+    result = automation.run_issue("o/r", 21, "title", body)
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_replay_mismatch_keeps_persisted_binding(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 22
+    )
+    stale = {**binding, "profile_id": "stale-profile"}
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        worker_binding=stale,
+        intelligence_effect_id=effect_id,
+    )
+    result = automation.run_issue("o/r", 22, "title", body)
+    assert result["error"] == "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"
+    assert result["worker_binding"] == stale
+    assert result["intelligence_effect_id"] == effect_id
+
+
+def test_carry_missing_binding_save_keeps_effect_id(tmp_path):
+    automation, item, body, _, _, _, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 23)
+    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
+    result = automation.run_issue("o/r", 23, "title", body)
+    assert result["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert result["intelligence_effect_id"] == effect_id
+    assert "worker_binding" not in result
+
+
+def test_carry_missing_effect_id_keeps_binding(tmp_path):
+    automation, _, body, _, _, binding, _ = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 24, with_effect=False
+    )
+    result = automation.run_issue("o/r", 24, "title", body)
+    assert result["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISSING"
+    _assert_kept(result, binding)
+
+
+def test_carry_effect_id_mismatch_keeps_binding_and_2837_sequence_recovers(tmp_path):
+    # #2837: a detection save used to drop worker_binding, so the NEXT resume
+    # reported CANONICAL_WORKFORCE_BINDING_MISSING and refused to replay.
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 25
+    )
+    changed_body = body.replace("issue prose", "changed issue prose and context")
+    first = automation.run_issue("o/r", 25, "title", changed_body)
+    assert first["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    _assert_kept(first, binding, effect_id)
+    second = automation.run_issue("o/r", 25, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert second.get("error") != "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert len(automation.sidecar.calls) == 1
+
+
+def test_carry_fanout_receipt_missing_keeps_binding(tmp_path):
+    automation, _, body, _, _, binding, effect_id = _seed(tmp_path, "FANOUT_DISPATCHING", 26)
+    result = automation.run_issue("o/r", 26, "title", body)
+    assert result["error"] == "INTELLIGENCE_RECEIPT_MISSING"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_sidecar_not_completed_keeps_binding(tmp_path):
+    sidecar = FakeSidecar(ExternalIntelligenceStore(tmp_path / "intel"), non_dispatched=True)
+    automation, _, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 27, sidecar=sidecar
+    )
+    result = automation.run_issue("o/r", 27, "title", body)
+    assert result["state"] == "BLOCKED" and result["stage"] == "INTELLIGENCE"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_fanout_binding_drift_keeps_binding(tmp_path):
+    automation, item, body, card, store, binding, effect_id = _seed(
+        tmp_path, "RECONCILIATION_REQUIRED", 28, prior_state="FANOUT_DISPATCHING"
+    )
+    _install_completed_receipt(automation, item, card, store)
+    result = automation.run_issue("o/r", 28, "title", body)
+    assert result["error"] == "FANOUT_RECONCILIATION_BINDING_DRIFT"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_invalid_fanout_receipts_keep_binding(tmp_path):
+    automation, _, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 29, c=FakeC(mode="missing")
+    )
+    result = automation.run_issue("o/r", 29, "title", body)
+    assert result["state"] == "BLOCKED" and result["stage"] == "FANOUT"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_closure_blocked_keeps_binding(tmp_path):
+    class NoCeilingD(FakeD):
+        def close_task(self, **kwargs):
+            return {"status": "SOMETHING_ELSE", "run_id": "d" * 64}
+
+    automation, _, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 30, d=NoCeilingD()
+    )
+    result = automation.run_issue("o/r", 30, "title", body)
+    assert result["state"] == "BLOCKED" and result["stage"] == "CLOSURE"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_closure_terminal_disposition_keeps_binding(tmp_path):
+    class TerminalD(FakeD):
+        def close_task(self, **kwargs):
+            return {"status": "UNIT_REPAIR_REQUIRED", "run_id": "d" * 64}
+
+    automation, _, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 31, d=TerminalD()
+    )
+    result = automation.run_issue("o/r", 31, "title", body)
+    assert result["state"] == "UNIT_REPAIR_REQUIRED"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_automation_error_after_dispatching_keeps_binding(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 32
+    )
+
+    def lineage_fails(*args, **kwargs):
+        raise AutomationError("SOURCE_LINEAGE_FAILED")
+
+    automation._validate_source_lineage = lineage_fails
+    result = automation.run_issue("o/r", 32, "title", body)
+    assert result["error"] == "SOURCE_LINEAGE_FAILED"
+    assert result["state"] == "BLOCKED"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_non_ambiguous_exception_after_intelligence_completed_keeps_binding(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 33
+    )
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("c units exploded")
+
+    automation._c_units = boom
+    result = automation.run_issue("o/r", 33, "title", body)
+    assert result["state"] == "BLOCKED" and result["error"] == "RuntimeError"
+    _assert_kept(result, binding, effect_id)
+
+
+def test_carry_invalid_fanout_reconciliation_blocked_keeps_binding(tmp_path):
+    class AllUnknownC(FakeC):
+        def run(self, units, lease):
+            return {
+                "receipts": {},
+                "errors": {u["unit_id"]: "FANOUT_RECONCILIATION_REQUIRED" for u in units},
+                "run_sha256": "c" * 64,
+            }
+
+    automation, _, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 34, c=AllUnknownC()
+    )
+    automation._fanout_attempts_are_reconcilable = lambda units, attempts: False
+    result = automation.run_issue("o/r", 34, "title", body)
+    assert result["error"] == "FANOUT_RECONCILIATION_BINDING_INVALID"
+    _assert_kept(result, binding, effect_id)
