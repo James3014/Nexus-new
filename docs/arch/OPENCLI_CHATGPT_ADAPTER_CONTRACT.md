@@ -58,9 +58,11 @@ Consistency comes from this contract plus a conformance test in each repo.
    `OPENAI_API_KEY` and `MY_SECRET` are absent from the child environment. The
    test must run on Linux in CI and must not skip.
 
-### Hardened filter (reviewer and embedded copy, 2026-10-17)
+### Hardened filter (reviewer, embedded copy and open-swe)
 
-This goes beyond the open-swe reference filter. It is case-insensitive (name
+The reviewer and the embedded copy use this filter (2026-10-17), and open-swe
+adopted it in nexus-open-swe-runtime#152 (2026-10-21). It goes beyond the
+minimum in rule 3. It is case-insensitive (name
 upper-cased once) and drops a variable when its name:
 
 - contains `TOKEN`, `API_KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`,
@@ -73,16 +75,16 @@ upper-cased once) and drops a variable when its name:
 
 `OPENCLI_*` names (such as `OPENCLI_PROFILE`) stay, unless they also match a
 secret marker (`OPENCLI_TOKEN`, `OPENCLI_API_KEY` are dropped). The word
-`OPENCLI` elsewhere in a name no longer exempts it, and the reference's
-`PROVIDER` exemption is dropped (its only history, commit 7f834e2, gives no
-reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
+`OPENCLI` elsewhere in a name no longer exempts it, and the earlier open-swe
+filter's `PROVIDER` exemption is dropped (its only history, commit 7f834e2,
+gives no reason). `PATH`, `HOME`, `LANG`, `TMPDIR` and `OPENCLI_PROFILE` pass.
 
-## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17)
+## Current conformance (origin/main, checked 2026-10-16; reviewer and embedded rows updated 2026-10-17; open-swe environment cell updated 2026-10-21)
 
 | Adapter | Prompt | Conversation | Environment | Session mode |
 | --- | --- | --- | --- | --- |
 | reviewer | argv (`opencli.py:182`); records use `safe_argv` (`:96-98`, `:184`) | always `--new` (`:182`) | hardened denylist `child_environment()` (`opencli.py:10-66`) on every opencli spawn: transport ask/detail/`--version`, `service_cli._opencli_json`/`_opencli_browser`/`_daemon_restart`, `OpenCLIPreflight._run`; nexus-opencli-reviewer#108 (closes #105), tests in `tests/test_opencli_child_environment.py` | `ephemeral` (`:183`, `:224`) |
-| open-swe | argv (`opencli_web_model.py:2084`) | `--conversation` when bound, else `--new` (`:2085-2088`) | denylist filter (`:1196-1208`, markers `:979-980`); `AWS_*` and other unlisted names pass | `ephemeral` default (`:1015`), passed at `:2094` |
+| open-swe | argv (`opencli_web_model.py:2084`) | `--conversation` when bound, else `--new` (`:2085-2088`) | hardened denylist in `_environment()` (`:1224-1228`, filter `:979-1021`) on the opencli child spawned by `_run` (`:1241`); nexus-open-swe-runtime#152 (refs #151), test `tests/test_opencli_credential_filter_hardened.py` | `ephemeral` default (`:1015`), passed at `:2094` |
 | Nexus-new embedded copy | argv (`opencli_web_model.py:906`) | `--conversation` when bound, else `--new` (`:908-910`) | hardened denylist in `_environment()` (`:587`, filter `:461-510`); test `tests/services/test_open_swe_embedded_opencli_environment.py` | `ephemeral` default (`:529`) |
 | devspace | argv (`chat-swarm-runtime.ts:1476`, `:1531`) | `--new` on the first ask (`:1480`), then `--conversation` (`:1533`) | inherits `process.env`: `spawn` at `:1681` passes no `env` | `ephemeral` (`:1443`, `:1484`, `:1537`, `:1669`) |
 
@@ -90,9 +92,7 @@ Reading the table: argv prompt delivery is accepted (rule 1). Conversation
 policy and session mode conform everywhere. Environment is the gap, now closed to the
 minimum for reviewer, open-swe and the embedded copy; only devspace still
 inherits `process.env`. The three denylists conform to the minimum but not to
-the allowlist target. The reviewer and the embedded copy use the hardened
-filter described above; open-swe still has the older reference filter
-(nexus-open-swe-runtime#151 asks it to adopt the hardened one).
+the allowlist target. All three use the hardened filter described above.
 Rule 5 tests live in each repo, not in this document.
 
 ## Known non-conformances and follow-ups
@@ -102,7 +102,7 @@ Rule 5 tests live in each repo, not in this document.
 | ~~reviewer passes the full environment~~ fixed (denylist, rule 5 test) | nexus-opencli-reviewer | nexus-opencli-reviewer#105, PR #108 |
 | ~~Nexus-new embedded copy passes the full environment~~ fixed (denylist, rule 5 test) | Nexus-new | Nexus-new#2394 |
 | devspace inherits `process.env` | devspace, paused, not scheduled | none |
-| open-swe has the older reference filter, not the hardened one, and is a denylist, not an allowlist | nexus-open-swe-runtime | nexus-open-swe-runtime#151 |
+| ~~open-swe has the older reference filter, not the hardened one~~ fixed (hardened denylist); it is still a denylist, not an allowlist | nexus-open-swe-runtime | nexus-open-swe-runtime#151, PR #152 |
 | Rule 5 recording-fake test present for reviewer and the embedded copy; open-swe and devspace not covered here | open-swe, devspace | none |
 
 ## Earlier findings mapped to this contract
