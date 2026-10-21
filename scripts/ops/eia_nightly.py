@@ -737,7 +737,12 @@ class Nightly:
                 self._git(repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
             )
             info["behind"] = int(self._git(repo, "rev-list", "--count", "HEAD..origin/main"))
-            names = self._git(repo, "diff", "--name-only", "HEAD...origin/main")
+            # Endpoint diff (not HEAD...origin/main): a local commit on the daemon checkout that
+            # reverts a verifier fix must show up too.  --no-renames: a moved critical file
+            # must still list its old path.
+            names = self._git(
+                repo, "diff", "--name-only", "--no-renames", "HEAD", "refs/remotes/origin/main"
+            )
         except (NightlyError, ValueError) as exc:
             info["error"] = _one_line(str(exc), 300)
             return info

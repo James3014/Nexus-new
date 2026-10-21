@@ -2098,3 +2098,33 @@ def test_a_later_different_start_failure_is_still_reported(env) -> None:
     notes = [m["note"] for m in night["outbox"].values()]
     assert any("DAEMON_CHECKOUT_STALE" in n for n in notes)
     assert any("HEALTHCHECK_FAILED" in n for n in notes)
+
+
+def test_local_commit_reverting_a_verifier_file_is_stale(env) -> None:
+    repo = env["repo"]
+    target = repo / "nexus/services/external_intelligence_closure.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("local edit\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "local daemon-only commit")
+    gap = env["app"]._daemon_checkout_gap()
+    assert gap["status"] == "STALE"
+    assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
+
+
+def test_renamed_verifier_file_still_lists_its_old_path(env) -> None:
+    repo = env["repo"]
+    old = repo / "nexus/services/external_intelligence_closure.py"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("".join(f"line {i}\n" for i in range(50)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add closure")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "mv", str(old), str(repo / "nexus/verifier_moved.py"))
+    _git(repo, "commit", "-qm", "move closure")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "reset", "-q", "--hard", base)
+    gap = env["app"]._daemon_checkout_gap()
+    assert gap["status"] == "STALE"
+    assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
