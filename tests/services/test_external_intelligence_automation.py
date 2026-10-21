@@ -2922,3 +2922,20 @@ def test_carry_invalid_fanout_reconciliation_blocked_keeps_binding(tmp_path):
     result = automation.run_issue("o/r", 34, "title", body)
     assert result["error"] == "FANOUT_RECONCILIATION_BINDING_INVALID"
     _assert_kept(result, binding, effect_id)
+
+
+def test_carry_forward_prefers_the_persisted_binding_over_this_runs(tmp_path):
+    """#2852 review: a persisted binding always wins, so a later resume still compares
+    against what was actually dispatched and a mismatch stays detectable."""
+    automation, item, _, _, _, binding, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 31)
+    persisted = {**binding, "profile_id": "dispatched-profile"}
+    automation.state_store.save(
+        item, "INTELLIGENCE_DISPATCHING", worker_binding=persisted, intelligence_effect_id=effect_id
+    )
+    automation._worker_binding = {**binding, "profile_id": "this-run-profile"}
+    carried = automation._carry_forward(item)
+    assert carried["worker_binding"] == persisted
+    assert carried["intelligence_effect_id"] == effect_id
+    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
+    assert automation._carry_forward(item)["worker_binding"]["profile_id"] == "this-run-profile"
+    assert "worker_binding" not in automation._carry_forward(item, persisted_only=True)

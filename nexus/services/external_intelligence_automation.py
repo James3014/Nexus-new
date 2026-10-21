@@ -1208,8 +1208,11 @@ class ExternalIntelligenceAutomation:
         """Fields a reconciliation/blocked save must not drop (#2852).
 
         Returns the worker binding and intelligence effect id of the record
-        currently on disk, or this run's binding when that record is in a
-        dispatch state. ``persisted_only`` is for the saves that DETECT a
+        currently on disk; only when nothing is persisted and that record is in
+        a dispatch state is this run's binding used. A persisted binding always
+        wins, so a later resume still compares against what was actually
+        dispatched (a mismatch stays detectable). ``persisted_only`` is for the
+        saves that DETECT a
         missing/mismatched binding: they must keep exactly what was persisted
         and never substitute this run's binding. Persistence only: never used
         to decide anything.
@@ -1227,7 +1230,7 @@ class ExternalIntelligenceAutomation:
             and self._worker_binding is not None
         ):
             own = dict(self._worker_binding)
-        binding = own or persisted
+        binding = persisted or own
         carried: dict[str, Any] = {}
         if binding is not None:
             carried["worker_binding"] = binding
