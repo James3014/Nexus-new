@@ -154,6 +154,20 @@ RESUMABLE_PRIOR = {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}
 INFRA_MARKERS = ("OPENCLI_", "TRANSPORT", "OUTCOME_UNKNOWN", "REMOTE_MAIN_REFRESH_FAILED")
 MODEL_MARKERS = ("WORKER_BLOCKED", "REPAIR", "SCOPE_DELTA", "VERIFICATION_FAIL", "VERIFIER_FAIL")
 PUBLICATION_GRACE_MIN = 15
+# The daemon runs from its own checkout that nothing updates (2026-10-21 it was 202 commits
+# behind main, so the closure-verifier hardening of #2794/#2808/#2815 was not in effect).
+# A checkout that misses a change to any of these paths would run the nightly with an old
+# closure verifier / witness / driver, so the night fails closed (DAEMON_CHECKOUT_STALE).
+# Anything outside this list is only recorded.  fnmatch globs; "*" also crosses "/".
+DAEMON_CRITICAL_PATHS = (
+    "nexus/services/external_intelligence_*.py",  # automation, closure, core binding, witness
+    "nexus/services/external_intelligence.py",  # imported by the closure verifier
+    "scripts/ops/eia_nightly.py",  # this driver: its own fixes must be in effect
+    "scripts/ops/external_intelligence_service.py",  # daemon launchd/service helpers
+    "nexus/engine/sandboxed_lane.py",  # sandbox-exec profile the closure verifier runs under
+    "nexus/engine/canonical_task_seam.py",  # imported by the automation module
+    "nexus/services/eia_source_excerpt.py",  # imported by the automation module
+)
 
 
 class NightlyError(RuntimeError):
@@ -695,6 +709,67 @@ class Nightly:
             self._git(self.work_repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
         )
 
+    def _daemon_checkout_gap(self) -> dict[str, Any]:
+        """Compare the daemon checkout with origin/main.  Never changes its work tree.
+
+        ``status`` is CURRENT, BEHIND (gap only on unrelated paths), STALE (the missing range
+        touches DAEMON_CRITICAL_PATHS) or UNKNOWN.  A fetch/git failure (offline) is UNKNOWN,
+        not a crash: ``start`` fails closed on it (DAEMON_CHECKOUT_UNVERIFIED) because an
+        unverifiable checkout may lack verifier fixes, while ``prepare`` only records it.
+        """
+        repo = self.daemon_repo
+        info: dict[str, Any] = {"status": "UNKNOWN", "at": self._iso()}
+        try:
+            info["head"] = _sha(self._git(repo, "rev-parse", "--verify", "HEAD^{commit}"))
+            refspec = "+refs/heads/main:refs/remotes/origin/main"
+            self._git(
+                repo, "fetch", "--no-tags", "origin", refspec, code="FETCH_FAILED", timeout=180
+            )
+            info["origin_main"] = _sha(
+                self._git(repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
+            )
+            info["behind"] = int(self._git(repo, "rev-list", "--count", "HEAD..origin/main"))
+            names = self._git(repo, "diff", "--name-only", "HEAD...origin/main")
+        except (NightlyError, ValueError) as exc:
+            info["error"] = _one_line(str(exc), 300)
+            return info
+        touched = sorted({
+            line
+            for line in names.splitlines()
+            if any(fnmatch.fnmatchcase(line, glob) for glob in DAEMON_CRITICAL_PATHS)
+        })
+        info["touched"] = touched
+        info["status"] = "STALE" if touched else ("BEHIND" if info["behind"] else "CURRENT")
+        return info
+
+    def _check_daemon_checkout(self, night: dict[str, Any]) -> None:
+        """Record the daemon checkout state; raise NightlyError when the night must not run."""
+        info = self._daemon_checkout_gap()
+        night["daemon_checkout"] = info
+        self._event(night, "daemon_checkout", **info)
+        if info["status"] == "STALE":
+            paths = ",".join(info["touched"][:8])
+            raise NightlyError(
+                f"DAEMON_CHECKOUT_STALE:behind {info['behind']} commits "
+                f"(head {info['head'][:12]}, origin/main {info['origin_main'][:12]}), "
+                f"missing changes to {paths}"
+            )
+        if info["status"] == "UNKNOWN":
+            raise NightlyError(f"DAEMON_CHECKOUT_UNVERIFIED:{info.get('error', '')}")
+
+    def _fail_start(self, night: dict[str, Any], exc: NightlyError) -> dict[str, Any]:
+        started = night.setdefault("started", {"at": self._iso()})
+        started.update(ok=False, error=str(exc))
+        night["status"] = "START_FAILED"
+        self._queue_msg(
+            night,
+            "start-failed",
+            "coordinator",
+            f"EIA nightly {night['night']}: START_FAILED {exc}; nothing will be armed.",
+        )
+        self.save(night)
+        return night
+
     def _gh_file(self, args: list[str], text: str) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as fh:
             fh.write(text)
@@ -904,12 +979,21 @@ class Nightly:
         self.finish_previous_night()
         night_id = night_id or night_of(self.now())
         night = self.load(night_id)
+        loaded = night or {"schema": STATE_SCHEMA, "night": night_id, "issues": {}, "order": []}
+        try:
+            self._check_daemon_checkout(loaded)
+        except NightlyError as exc:
+            # UNKNOWN is only recorded here; ``start`` re-checks and fails closed.
+            if str(exc).startswith("DAEMON_CHECKOUT_STALE"):
+                return self._fail_start(loaded, exc)
+        if night:
+            night = loaded
         if night and night.get("card_pr"):
             if not night["card_pr"].get("number"):
                 return self._open_card_pr(night)
             self.refresh_card_pr(night)
             return night
-        night = night or {"schema": STATE_SCHEMA, "night": night_id, "issues": {}, "order": []}
+        night = loaded
         self._ensure_labels()
         rows = self._ghj(
             *f"issue list --repo {REPOSITORY} --state open --label {L_QUEUE} --limit 100".split(),
@@ -1316,6 +1400,11 @@ class Nightly:
         }
         if (night.get("started") or {}).get("ok"):
             return night
+        if night.get("issues") or night.get("status") == "START_FAILED":
+            try:  # re-checked here: the checkout may have changed since prepare
+                self._check_daemon_checkout(night)
+            except NightlyError as exc:
+                return self._fail_start(night, exc)
         if not night.get("issues"):
             night["status"] = "SKIPPED_NO_TASKS"
         elif not self.refresh_card_pr(night):
@@ -1354,16 +1443,7 @@ class Nightly:
             else:
                 raise NightlyError("HEALTHCHECK_FAILED")
         except NightlyError as exc:
-            started.update(ok=False, error=str(exc))
-            night["status"] = "START_FAILED"
-            self._queue_msg(
-                night,
-                "start-failed",
-                "coordinator",
-                f"EIA nightly {night_id}: START_FAILED {exc}; nothing will be armed.",
-            )
-            self.save(night)
-            return night
+            return self._fail_start(night, exc)
         started["ok"] = True
         night["status"] = "RUNNING"
         self._event(night, "started")
