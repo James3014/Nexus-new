@@ -4175,19 +4175,25 @@ else:
     @click.option("--task-id", required=True, help="Task ID to dispose.")
     @click.option("--disposition", type=click.Choice(["REJECTED", "SUPERSEDED"], case_sensitive=False), required=True, help="Disposition type (REJECTED or SUPERSEDED).")
     @click.option("--superseded-by", default=None, help="Optional replacing task or evidence ID if SUPERSEDED.")
+    @click.option("--authority-goal-id", required=True, help="Goal ID of the Owner standing grant authorizing this disposition.")
+    @click.option("--authority-coordination-scope-id", required=True, help="Coordination scope ID of that Owner standing grant.")
     @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
     @translate_action_exceptions
     def self_hosted_dispose(
         task_id: str,
         disposition: str,
         superseded_by: str | None,
+        authority_goal_id: str,
+        authority_coordination_scope_id: str,
         state_dir: str | None,
     ) -> None:
-        """Dispose candidate promotion (REJECTED or SUPERSEDED)."""
+        """Dispose candidate promotion (REJECTED or SUPERSEDED); requires an Owner standing grant (#2870)."""
         res = run_self_hosted_dispose(
             task_id=task_id,
             disposition=disposition.upper(),
             superseded_by=superseded_by,
+            authority_goal_id=authority_goal_id,
+            authority_coordination_scope_id=authority_coordination_scope_id,
             state_dir=state_dir,
         )
         click.echo(json.dumps(res, indent=2, ensure_ascii=False))

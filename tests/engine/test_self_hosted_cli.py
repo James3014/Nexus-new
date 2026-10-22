@@ -672,7 +672,7 @@ def test_self_hosted_integrate_requires_approved(tmp_path: Path):
     assert "exact approved binding is required" in res_before.output
 
 
-def test_self_hosted_dispose_candidate(tmp_path: Path):
+def test_self_hosted_dispose_candidate(monkeypatch, tmp_path: Path):
     runner = CliRunner()
     state_dir = str(tmp_path / "state")
     req = _valid_request(tmp_path, task_id="test-sh-dispose-001")
@@ -705,17 +705,168 @@ def test_self_hosted_dispose_candidate(tmp_path: Path):
     service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
     service._mutate_state(req["task_id"], lambda s: s.update({"promotion_status": "PENDING_HUMAN_APPROVAL"}))
 
+    _issue_dispose_grant(monkeypatch, tmp_path, goal="goal-a", scope="scope-a")
+    _use_tracked_snapshot_service(monkeypatch)
     dispose_cmd = [
         "nexus", "self-hosted", "dispose",
         "--task-id", "test-sh-dispose-001",
         "--disposition", "REJECTED",
+        "--authority-goal-id", "goal-a",
+        "--authority-coordination-scope-id", "scope-a",
         "--state-dir", state_dir,
     ]
     res = runner.invoke(nexus, dispose_cmd)
-    assert res.exit_code == 0
+    assert res.exit_code == 0, res.output
     out_data = json.loads(res.output)
     assert out_data["promotion_status"] == "REJECTED"
     assert out_data["status"] == "REJECTED"
+    assert out_data["owner_authority"]["action"] == "CANDIDATE_REJECT"
+    assert out_data["guard_receipt"]
+
+
+class _TrackedSnapshotService(SelfHostedTaskService):
+    """Real service whose snapshot carries the tracked-card identity the Gateway admission binds to."""
+
+    def get_task_snapshot(self, task_id, include_details=False):
+        snapshot = dict(super().get_task_snapshot(task_id, include_details=include_details))
+        snapshot.update({
+            "controller_revision": "a" * 40,
+            "contract_kind": "TRACKED_TASK_CARD",
+            "task_card_hash": "b" * 64,
+            "contract_hash": "b" * 64,
+            "promotion_packet": {
+                "candidate_commit_sha": "c" * 40,
+                "candidate_tree_sha": "e" * 40,
+                "candidate_state_hash": "1" * 64,
+                "verified_receipt_hash": "2" * 64,
+            },
+        })
+        return snapshot
+
+
+def _use_tracked_snapshot_service(monkeypatch) -> None:
+    def _factory(state_dir=None, service=None):
+        if service is not None:
+            return service
+        return _TrackedSnapshotService(state_dir=str(state_dir), auto_reconcile=False, ephemeral=True)
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", _factory)
+
+
+def _issue_dispose_grant(monkeypatch, tmp_path: Path, *, goal: str, scope: str) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    import nexus.orchestrator.standing_grant_store as sg_store
+    from nexus.contracts.autonomy_goal import (
+        AutonomyActionClass,
+        RepositoryIdentity,
+        StandingGrantContext,
+    )
+    from nexus.orchestrator.standing_grant_store import StandingGrantReceipt
+
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id=scope,
+        goal_id=goal,
+        allowed_actions=(AutonomyActionClass.CANDIDATE_REJECT, AutonomyActionClass.CANDIDATE_SUPERSEDE),
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=30),
+    )
+    sg_store.write_keyed_standing_grant_receipt(
+        StandingGrantReceipt.issue(grant_id=f"grant-{goal}", context=context)
+    )
+
+
+def _submit_pending_dispose_task(tmp_path: Path, task_id: str) -> str:
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    req = _valid_request(tmp_path, task_id=task_id)
+    runner.invoke(nexus, [
+        "nexus", "self-hosted", "submit",
+        "--task-id", req["task_id"], "--what", req["what"], "--why", req["why"],
+        "--controller-revision", req["controller_revision"],
+        "--target-base-revision", req["target_base_revision"],
+        "--controller-repo-root", req["controller_repo_root"],
+        "--target-repo-root", req["target_repo_root"],
+        "--target-worktree-root", req["target_worktree_root"],
+        "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
+        "--worker", req["worker"], "--state-dir", state_dir,
+    ])
+    runner.invoke(nexus, [
+        "nexus", "self-hosted", "wait", "--task-id", task_id, "--timeout", "2.0",
+        "--state-dir", state_dir,
+    ])
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._mutate_state(task_id, lambda s: s.update({"promotion_status": "PENDING_HUMAN_APPROVAL"}))
+    return state_dir
+
+
+def _promotion_status(state_dir: str, task_id: str):
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    return service.get_task_snapshot(task_id, include_details=True).get("promotion_status")
+
+
+def test_self_hosted_dispose_refused_without_authority_arguments(tmp_path: Path):
+    state_dir = _submit_pending_dispose_task(tmp_path, "test-sh-dispose-noargs")
+    res = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "dispose", "--task-id", "test-sh-dispose-noargs",
+        "--disposition", "REJECTED", "--state-dir", state_dir,
+    ])
+    assert res.exit_code != 0
+    assert "authority-goal-id" in res.output
+    assert _promotion_status(state_dir, "test-sh-dispose-noargs") == "PENDING_HUMAN_APPROVAL"
+
+
+def test_self_hosted_dispose_refused_for_blank_authority_arguments(tmp_path: Path):
+    state_dir = _submit_pending_dispose_task(tmp_path, "test-sh-dispose-blank")
+    res = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "dispose", "--task-id", "test-sh-dispose-blank",
+        "--disposition", "REJECTED",
+        "--authority-goal-id", " ", "--authority-coordination-scope-id", " ",
+        "--state-dir", state_dir,
+    ])
+    assert res.exit_code != 0
+    assert "OWNER_AUTHORITY_KEY_REQUIRED" in res.output
+    assert _promotion_status(state_dir, "test-sh-dispose-blank") == "PENDING_HUMAN_APPROVAL"
+
+
+def test_self_hosted_dispose_refused_for_identity_without_grant(monkeypatch, tmp_path: Path):
+    _issue_dispose_grant(monkeypatch, tmp_path, goal="goal-a", scope="scope-a")
+    _use_tracked_snapshot_service(monkeypatch)
+    state_dir = _submit_pending_dispose_task(tmp_path, "test-sh-dispose-nogrant")
+    for goal, scope in (("goal-b", "scope-a"), ("goal-a", "scope-b"), ("agent-goal", "agent-scope")):
+        res = CliRunner().invoke(nexus, [
+            "nexus", "self-hosted", "dispose", "--task-id", "test-sh-dispose-nogrant",
+            "--disposition", "REJECTED",
+            "--authority-goal-id", goal, "--authority-coordination-scope-id", scope,
+            "--state-dir", state_dir,
+        ])
+        assert res.exit_code != 0
+        assert "OWNER_AUTHORITY_REQUIRED" in res.output
+        assert _promotion_status(state_dir, "test-sh-dispose-nogrant") == "PENDING_HUMAN_APPROVAL"
+
+
+def test_self_hosted_dispose_supersede_requires_successor_even_with_grant(monkeypatch, tmp_path: Path):
+    _issue_dispose_grant(monkeypatch, tmp_path, goal="goal-a", scope="scope-a")
+    _use_tracked_snapshot_service(monkeypatch)
+    state_dir = _submit_pending_dispose_task(tmp_path, "test-sh-dispose-super")
+    res = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "dispose", "--task-id", "test-sh-dispose-super",
+        "--disposition", "SUPERSEDED",
+        "--authority-goal-id", "goal-a", "--authority-coordination-scope-id", "scope-a",
+        "--state-dir", state_dir,
+    ])
+    assert res.exit_code != 0
+    assert "superseded_by is required" in res.output
+    assert _promotion_status(state_dir, "test-sh-dispose-super") == "PENDING_HUMAN_APPROVAL"
 
 
 def test_self_hosted_cancel_task(tmp_path: Path):
