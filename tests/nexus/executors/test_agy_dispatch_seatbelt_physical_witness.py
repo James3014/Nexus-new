@@ -220,7 +220,9 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
         opened = _run(
             boundary, '/usr/bin/open -g -j -a TextEdit "$1"', checkout / "tracked.py", cwd=target
         )
-        print("WITNESS open -a TextEdit (full profile) rc=", opened.returncode, opened.stderr.strip())
+        print(
+            "WITNESS open -a TextEdit (full profile) rc=", opened.returncode, opened.stderr.strip()
+        )
         assert opened.returncode != 0 and DENIED in opened.stderr
         # Independent of the exec rules: the mach-lookup deny alone must stop
         # LSOpen.  A control profile without it must LAUNCH the app, so the
