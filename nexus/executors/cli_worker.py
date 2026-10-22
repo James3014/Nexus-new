@@ -616,17 +616,20 @@ def _pid_live_resident(pid: int) -> bool:
     if proc_entry.exists():
         return not _proc_is_zombie(proc_entry)
     try:
-        state = subprocess.run(
-            ["ps", "-o", "stat=", "-p", str(pid)],
+        probe = subprocess.run(
+            ["/bin/ps", "-o", "stat=", "-p", str(pid)],
+            env=_probe_env(),
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
-        ).stdout.strip()
+        )
     except (OSError, subprocess.SubprocessError):
         return True
+    state = probe.stdout.strip()
     if not state:
-        return False
+        # Exited between the checks, or ps failed: trust the kernel, not ps.
+        return _pid_alive(pid)
     return not state.startswith("Z")
 
 
