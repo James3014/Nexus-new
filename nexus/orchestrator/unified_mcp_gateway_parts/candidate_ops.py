@@ -38,6 +38,7 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
 )
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
+from nexus.orchestrator.self_hosted_task_service import candidate_dispose_effect
 
 if TYPE_CHECKING:
     # Typing only: the mutation-admission (and, through it, worker-candidate / model-probe /
@@ -532,12 +533,6 @@ class _CandidateOpsMixin(_CandidateOpsBase):
             )
         except RuntimeError as exc:
             raise _gateway().GatewayInputError(str(exc)) from exc
-        candidate_binding = {
-            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),  # pyright: ignore[reportOptionalMemberAccess]
-            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),  # pyright: ignore[reportOptionalMemberAccess]
-            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),  # pyright: ignore[reportOptionalMemberAccess]
-            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),  # pyright: ignore[reportOptionalMemberAccess]
-        }
         owner_action = (
             AutonomyActionClass.CANDIDATE_REJECT
             if disposition == "REJECTED"
@@ -545,17 +540,14 @@ class _CandidateOpsMixin(_CandidateOpsBase):
         )
         owner_authority = self._require_owner_effect_authority(
             owner_action,
-            {
-                "task_id": task_id,
-                "attempt_id": str(state.get("attempt_id") or ""),
-                "controller_revision": base,
-                "contract_kind": contract_identity["contract_kind"],
-                "contract_hash": contract_identity["contract_hash"],
-                "task_card_hash": contract_identity["task_card_hash"],
-                "disposition": disposition,
-                "superseded_by": superseded_by,
-                **candidate_binding,
-            },
+            candidate_dispose_effect(
+                state,
+                task_id=task_id,
+                controller_revision=base,
+                contract_identity=contract_identity,
+                disposition=disposition,
+                superseded_by=superseded_by,
+            ),
             key=owner_key,
         )
         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {

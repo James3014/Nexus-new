@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Mapping, Optional
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
@@ -308,7 +309,7 @@ class NexusSelfHostedMCPServer:
         }
 
     @staticmethod
-    def _require_dispose_owner_authority(task_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _require_dispose_owner_authority(service: Any, task_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Fail closed unless an Owner standing grant authorizes this disposition (#2767).
 
         Same authority as the Gateway ``nexus_candidate_dispose``: the durable
@@ -316,6 +317,10 @@ class NexusSelfHostedMCPServer:
         """
         from nexus.contracts.autonomy_goal import AutonomyActionClass
         from nexus.orchestrator import standing_grant_store
+        from nexus.orchestrator.self_hosted_task_service import (
+            candidate_dispose_effect,
+            resolve_contract_identity,
+        )
         from nexus.orchestrator.unified_mcp_gateway import GITHUB_REPOSITORY
 
         disposition = str(arguments.get("disposition") or "").strip().upper()
@@ -330,16 +335,35 @@ class NexusSelfHostedMCPServer:
             key = standing_grant_store.StandingGrantKey(GITHUB_REPOSITORY, goal_id, scope_id)
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
+        if disposition == "SUPERSEDED" and not superseded_by:
+            raise ValueError("superseded_by is required for SUPERSEDED")
         action = (
             AutonomyActionClass.CANDIDATE_REJECT
             if disposition == "REJECTED"
             else AutonomyActionClass.CANDIDATE_SUPERSEDE
         )
+        # Bind the authorization to this task's own Candidate, exactly as the
+        # Gateway nexus_candidate_dispose does (shared candidate_dispose_effect).
+        state = service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise RuntimeError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise RuntimeError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        contract_identity = resolve_contract_identity(state, expected_task_id=task_id, expected_head=base)
+        effect = candidate_dispose_effect(
+            state,
+            task_id=task_id,
+            controller_revision=base,
+            contract_identity=contract_identity,
+            disposition=disposition,
+            superseded_by=superseded_by,
+        )
         try:
             return standing_grant_store.authorize_durable_standing_grant_effect(
                 repository=GITHUB_REPOSITORY,
                 action=action,
-                effect={"task_id": task_id, "disposition": disposition, "superseded_by": superseded_by},
+                effect=effect,
                 key=key,
             )
         except standing_grant_store.StandingGrantReceiptError as exc:
@@ -408,12 +432,13 @@ class NexusSelfHostedMCPServer:
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration/main")),
             )
         if name == "nexus_self_hosted_dispose_candidate":
-            self._require_dispose_owner_authority(task_id, arguments)
-            return self.service.dispose_candidate(
+            owner_authority = self._require_dispose_owner_authority(self.service, task_id, arguments)
+            result = self.service.dispose_candidate(
                 task_id,
                 disposition=str(arguments["disposition"]),
                 superseded_by=arguments.get("superseded_by"),
             )
+            return {**dict(result), "owner_authority": owner_authority}
         if name == "nexus_self_hosted_close_retained_without_candidate":
             return self.service.close_retained_without_candidate(
                 task_id,
