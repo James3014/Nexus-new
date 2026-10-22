@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
@@ -318,6 +319,8 @@ def _run_operation(
         return _run_operation_inner(**kwargs)
     # TODO(#2875): once kill_unproven_cwd_matches lands, also pass
     # kill_unproven_cwd_matches=False to the sweep.
+    cwd = _canonical_path(cwd)
+    kwargs["cwd"] = cwd
     cwd_refusal = _codex_cwd_refusal(cwd)
     if cwd_refusal is not None:
         Path(prompt_file).unlink(missing_ok=True)
@@ -360,6 +363,32 @@ def _run_operation(
         return code
 
 
+def _canonical_path(value: str) -> str:
+    """Real on-disk spelling of a directory (macOS volumes are case-insensitive)."""
+    path = Path(value).expanduser().resolve()
+    f_getpath = getattr(fcntl, "F_GETPATH", None)
+    if f_getpath is None:
+        return str(path)
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return str(path)
+    try:
+        raw = fcntl.fcntl(fd, f_getpath, b"\0" * 1024)
+        return os.fsdecode(raw.split(b"\0", 1)[0]) or str(path)
+    except OSError:
+        return str(path)
+    finally:
+        os.close(fd)
+
+
+def _same_dir(left: Path, right: Path) -> bool:
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
 def _git_out(cwd: Path, *args: str) -> str | None:
     try:
         done = subprocess.run(
@@ -381,9 +410,11 @@ def _codex_cwd_refusal(cwd: str) -> str | None:
     worktree (or scratch clone) is disposable.  HOME, its ancestors, non-git
     directories and main clones are refused.
     """
-    path = Path(cwd).resolve()
-    home = Path.home().resolve()
-    if path == home or path in home.parents:
+    path = Path(_canonical_path(cwd))
+    home = Path.home()
+    # Identity, not string, comparison: ~/Workspace and ~/workspace are one
+    # directory on a case-insensitive volume.
+    if _same_dir(path, home) or any(_same_dir(parent, path) for parent in home.parents):
         return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
     if _git_out(path, "rev-parse", "--show-toplevel") is None:
         return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
@@ -391,11 +422,11 @@ def _codex_cwd_refusal(cwd: str) -> str | None:
     common = _git_out(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if git_dir is None or common is None:
         return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
-    if Path(git_dir).resolve() == Path(common).resolve():
+    if _same_dir(Path(git_dir), Path(common)):
         # Main clone (not a linked worktree) unless it lives outside ~/workspace
         # as an explicit scratch clone.
-        workspace = (home / "workspace").resolve()
-        if workspace == path or workspace in path.parents:
+        workspace = home / "workspace"
+        if any(_same_dir(item, workspace) for item in (path, *path.parents)):
             return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
     return None
 
@@ -987,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
     provider = args.provider.strip().lower()
     adapter = get_execution_adapter(provider)
     model = str(args.model or adapter.default_model()).strip()
-    cwd = str(Path(args.cwd).expanduser().resolve())
+    cwd = _canonical_path(args.cwd)
     if not Path(cwd).is_dir():
         raise SystemExit("INVALID_CWD")
 

@@ -233,6 +233,44 @@ def test_codex_cwd_home_and_main_clone_refused_linked_worktree_allowed(
     assert journal.read(op)["failure_kind"] == refused
 
 
+def test_codex_cwd_case_variant_paths_are_judged_by_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "host-home"
+    (home / "workspace").mkdir(parents=True)
+    if not (home / "Workspace").exists():
+        pytest.skip("case-sensitive filesystem")
+    monkeypatch.setenv("HOME", str(home))
+
+    def git(*a: str, cwd: Path) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    main = home / "workspace" / "repo"
+    main.mkdir()
+    git("init", "-q", cwd=main)
+    git("commit", "-q", "--allow-empty", "-m", "i", cwd=main)
+    linked = home / "workspace" / "wt-linked"
+    git("worktree", "add", "-q", str(linked), cwd=main)
+    refused = "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    assert dispatch._codex_cwd_refusal(str(home / "Workspace" / "repo")) == refused
+    assert dispatch._codex_cwd_refusal(str(home / "Workspace" / "wt-linked")) is None
+    assert dispatch._canonical_path(str(home / "Workspace" / "wt-linked")) == str(linked.resolve())
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(dispatch._codex_boundary, "materialize_codex_home", lambda h: None)
+    monkeypatch.setattr(dispatch, "_run_operation_inner", lambda **kw: seen.update(kw) or 0)
+    monkeypatch.setattr(dispatch, "_codex_run_clean", lambda *_a: False)
+    _journal, _op, kwargs = _codex_op(tmp_path, linked, "ops3")
+    kwargs["cwd"] = str(home / "Workspace" / "wt-linked")
+    assert dispatch._run_operation(**kwargs) == 0
+    assert seen["cwd"] == str(linked.resolve())
+
+
 def test_background_cline_operation_reaches_terminal_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
