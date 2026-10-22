@@ -140,6 +140,18 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/executors/agy_worker_account.py",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/ops/agy-worker-exec",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/install_agy_worker_exec.sh",
+      "mode": "0755"
+    },
+    {
       "path": "nexus/executors/agy_write_admission.py",
       "mode": "0644"
     },
