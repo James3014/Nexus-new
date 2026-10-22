@@ -1802,10 +1802,19 @@ def test_reconcile_refuses_a_transplanted_marker_and_a_replaced_root(
     journal.update(operation_id, worker_run_root=str(root_b))
     record = dispatch._reconcile_operation(journal, operation_id)
     assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
-    # A new directory under the original name has another inode.
+    # A new directory under the original name with another inode.  ext4
+    # hands a freshly freed inode number straight back, so park any reuse
+    # under a decoy name and allocate again (APFS never reuses here).
     journal.update(operation_id, worker_run_root=str(root_a))
+    recorded_ino = root_a.lstat().st_ino
     shutil.rmtree(root_a)
-    root_a.mkdir()
+    for attempt in range(64):
+        root_a.mkdir()
+        if root_a.lstat().st_ino != recorded_ino:
+            break
+        root_a.rename(runs / f"decoy-{attempt}")
+    else:
+        pytest.fail("could not allocate a directory with a fresh inode")
     worker_mod.write_operation_marker(root_a, operation_id)
     record = dispatch._reconcile_operation(journal, operation_id)
     assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
