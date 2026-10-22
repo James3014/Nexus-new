@@ -117,7 +117,7 @@ AGY_WORKER_LAUNCH_FAILED = "AGY_WORKER_LAUNCH_FAILED"
 AGY_WORKER_COPY_BACK_FAILED = "AGY_WORKER_COPY_BACK_FAILED"  # target partly written
 AGY_WORKER_COPY_BACK_REFUSED = "AGY_WORKER_COPY_BACK_REFUSED"  # nothing applied
 
-# The wrapper this module speaks to: the installed copy must equal this file.
+# The wrapper this module speaks to: this reference must exist and match the installed copy.
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
 
 
@@ -231,6 +231,34 @@ def sweep_argv(
         str(run_root),
         *sorted(set(pid_tokens), key=lambda token: int(token.split(":", 1)[0])),
     ]
+
+
+def sweep_run_root(
+    run_root: Path,
+    pid_tokens: Iterable[str] = (),
+    *,
+    user: str = WORKER_USER,
+    wrapper: Path = WORKER_WRAPPER,
+    run_command: Optional[Callable[..., Any]] = None,
+) -> str:
+    """Sweep a validated worker run through the wrapper with a fixed launch environment."""
+    try:
+        completed = (run_command or subprocess.run)(
+            sweep_argv(run_root, pid_tokens, user=user, wrapper=wrapper),
+            cwd="/",
+            env=dict(LAUNCH_ENV),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=SWEEP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "SWEEP_ERROR"
+    lines = (completed.stdout or "").strip().splitlines()
+    if completed.returncode == 0 and lines and lines[-1] == "AGY_WORKER_SWEEP clean":
+        return "CLEAN"
+    return "UNCLEAN"
 
 
 _PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
@@ -395,7 +423,7 @@ def _walk_tree(root: Path, *, strict: bool = False) -> dict[str, tuple]:
 
 
 def _check_copy_caps(manifest: Mapping[str, tuple], workdir: Path) -> None:
-    """Refuse before agy runs when the copy-back caps would already be exceeded."""
+    """Refuse a source or workdir manifest that already exceeds the copy caps."""
     if len(manifest) > MAX_COPY_BACK_ENTRIES:
         raise _refuse("target_too_large")
     total = sum(
@@ -412,16 +440,29 @@ def _copy_in(source: Path, workdir: Path) -> dict[str, tuple]:
     copy-back compares both the worker copy and the target against.
     """
     manifest = _walk_tree(source)
+    _check_copy_caps(manifest, source)
     workdir.mkdir()
-    for rel, entry in sorted(manifest.items()):
-        src, dst = source / rel, workdir / rel
-        kind = entry[0]
-        if kind == "dir":
-            dst.mkdir()
-        elif kind == "symlink":
-            os.symlink(entry[1], dst)
-        elif kind == "file":
-            shutil.copyfile(src, dst, follow_symlinks=False)
+    copied = 0
+    try:
+        for rel, entry in sorted(manifest.items()):
+            src, dst = source / rel, workdir / rel
+            kind = entry[0]
+            if kind == "dir":
+                dst.mkdir()
+            elif kind == "symlink":
+                os.symlink(entry[1], dst)
+            elif kind == "file":
+                with src.open("rb") as reader, dst.open("wb") as writer:
+                    # Read at most one byte beyond the remaining allowance to
+                    # detect growth since the manifest without writing past it.
+                    while chunk := reader.read(min(1 << 20, MAX_COPY_BACK_BYTES - copied + 1)):
+                        if copied + len(chunk) > MAX_COPY_BACK_BYTES:
+                            raise _refuse("target_too_large")
+                        writer.write(chunk)
+                        copied += len(chunk)
+    except BaseException:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
     return {rel: entry for rel, entry in manifest.items() if entry[0] != "other"}
 
 
@@ -737,21 +778,16 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
         baseline = self._baseline
         tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
-        try:
-            completed = self.run_command(
-                sweep_argv(self.run_root, tokens, user=self.worker_user, wrapper=self.wrapper),
-                cwd="/",
-                env=dict(LAUNCH_ENV),
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=SWEEP_TIMEOUT_SECONDS,
-                check=False,
+        return (
+            sweep_run_root(
+                self.run_root,
+                tokens,
+                user=self.worker_user,
+                wrapper=self.wrapper,
+                run_command=self.run_command,
             )
-        except (OSError, subprocess.SubprocessError):
-            return False
-        lines = (completed.stdout or "").strip().splitlines()
-        return completed.returncode == 0 and bool(lines) and lines[-1] == "AGY_WORKER_SWEEP clean"
+            == "CLEAN"
+        )
 
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
@@ -849,7 +885,9 @@ def prepare_worker_account_boundary(
         raise _refuse("owner_not_in_run_group")
     runs_dir = _check_runs_dir(Path(runs_dir), gid)
     _check_owner_executable(Path(wrapper), "wrapper")
-    if repo_wrapper.is_file() and _sha256_file(Path(wrapper)) != _sha256_file(repo_wrapper):
+    if not repo_wrapper.is_file():
+        raise _refuse("wrapper_reference_missing")
+    if _sha256_file(Path(wrapper)) != _sha256_file(repo_wrapper):
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
     if not source_agy or _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):

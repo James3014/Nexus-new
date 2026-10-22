@@ -2598,6 +2598,7 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
 
 
 _DESCENDANT_SWEEP_KEYS = _agy_operation_journal.DESCENDANT_SWEEP_KEYS
+_WORKER_SWEEP_KEYS = ("worker_run_as_user", "worker_run_root")
 _descendant_sweep_unproven = _agy_operation_journal.descendant_sweep_unproven
 
 
@@ -5257,6 +5258,13 @@ def dispatch_run(
                     # completion path treat the attempt's sweep as unclean, so
                     # a verdict write that fails (or a second signal during
                     # it) never reads as clean.
+                    worker_sweep_fields = (
+                        {
+                            "worker_run_as_user": run_as_user,
+                            "worker_run_root": str(write_boundary.run_root),
+                        }
+                        if run_as_user is not None else {}
+                    )
                     _operation_hook(
                         operation_hook,
                         descendant_sweep_clean=None,
@@ -5264,6 +5272,7 @@ def dispatch_run(
                         # roots the operator ack re-checks (the run root is
                         # removed at cleanup unless kept for diagnostics)
                         descendant_sweep_roots=list(getattr(write_boundary, "sweep_roots", ())),
+                        **worker_sweep_fields,
                     )
                 try:
                     code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
@@ -6271,7 +6280,9 @@ def _run_background_operation(
                 state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             snapshot = dict(state)
             sweep_changes = {
-                key: event[key] for key in _DESCENDANT_SWEEP_KEYS if key in event
+                key: event[key]
+                for key in (*_DESCENDANT_SWEEP_KEYS, *_WORKER_SWEEP_KEYS)
+                if key in event
             }
         if sweep_changes:
             # #2470: the sweep marker/verdict is written on its own, in the
@@ -6612,15 +6623,53 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
             lock_obj.close()
 
 
+def _run_worker_sweep(record: dict[str, Any]) -> dict[str, Any]:
+    """Validate journal data before invoking the whitelisted worker sweep."""
+    worker = _agy_worker_account()
+    raw_root = record.get("worker_run_root")
+    outcome = {"result": "RECORD_INVALID", "run_root": raw_root}
+    if record.get("worker_run_as_user") != worker.WORKER_USER:
+        return outcome
+    if not isinstance(raw_root, str) or not raw_root or "\x00" in raw_root:
+        return outcome
+    try:
+        run_root = Path(raw_root)
+        if (
+            ".." in run_root.parts
+            or str(run_root.resolve()) != raw_root
+            or run_root.parent != worker.WORKER_RUNS.resolve()
+        ):
+            return outcome
+    except (OSError, ValueError, RuntimeError):
+        return outcome
+    if not os.path.lexists(run_root):
+        outcome["result"] = "RUN_ROOT_GONE"
+    else:
+        outcome["result"] = worker.sweep_run_root(run_root)
+    return outcome
+
+
 def _reconcile_operation(
     journal: AgyOperationJournal,
     operation_id: str,
 ) -> dict[str, Any]:
+    existing = journal.read(operation_id)
+    worker_sweep = (
+        _run_worker_sweep(existing)
+        if any(key in existing for key in _WORKER_SWEEP_KEYS) else None
+    )
     record = journal.reconcile(operation_id)
     lease_cleanup = _cleanup_reconciled_lease(record)
     reconciliation = dict(record.get("reconciliation") or {})
     reconciliation["lease_cleanup"] = lease_cleanup
-    if _completed_provider_exit_proven(record):
+    worker_sweep_failed = worker_sweep is not None and worker_sweep["result"] not in (
+        "CLEAN", "RUN_ROOT_GONE",
+    )
+    if worker_sweep is not None:
+        reconciliation["worker_sweep"] = worker_sweep
+        if worker_sweep_failed:
+            reconciliation["retry_permitted"] = False
+    if _completed_provider_exit_proven(record) and not worker_sweep_failed:
         reconciliation.update({
             "provider_alive_before": False,
             "provider_alive_after": False,

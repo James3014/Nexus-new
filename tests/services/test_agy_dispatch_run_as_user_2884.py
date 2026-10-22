@@ -1375,3 +1375,324 @@ def test_dispatch_copy_back_refusal_needs_no_reconciliation(worker_env, monkeypa
     assert meta["failure_kind"] == "AGY_WORKER_COPY_BACK_REFUSED:symlink_created:src/link"
     assert meta["reconciliation_required"] is False and meta["provider_effect"] is False
     assert meta["rotations"] == 0
+
+
+# ---------------------------------------------------------------------------
+# #2888: fail-closed copy-in and durable worker reconciliation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def worker_preflight(worker_env, monkeypatch):
+    # Layout validation has its own tests above. These unit tests isolate it
+    # because some test hosts strip setgid even after a successful chmod.
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, gid: path)
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_prepare_refuses_a_missing_wrapper_reference(worker_env, tmp_path):
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="wrapper_reference_missing"):
+        _prepare(worker_env, repo_wrapper=tmp_path / "missing-wrapper")
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize("cap", ["MAX_COPY_BACK_ENTRIES", "MAX_COPY_BACK_BYTES"])
+@pytest.mark.usefixtures("worker_preflight")
+def test_oversized_copy_in_is_refused_before_creating_files(worker_env, monkeypatch, cap):
+    monkeypatch.setattr(worker_mod, cap, 2)
+    real_open = Path.open
+    writes = []
+
+    def observe_open(path, mode="r", *args, **kwargs):
+        if mode == "wb" and path.is_relative_to(worker_env["runs"]):
+            writes.append(path)
+        return real_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", observe_open)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    assert writes == []
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "cap, grown_size, expected_writes",
+    [(32, 30, [7]), ((1 << 20) + 10, (1 << 20) + 16, [7, 1 << 20])],
+)
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_counts_actual_bytes_when_a_source_file_grows(
+    worker_env, monkeypatch, cap, grown_size, expected_writes
+):
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", cap)
+    real_check = worker_mod._check_copy_caps
+
+    def grow_after_preflight(manifest, source):
+        real_check(manifest, source)
+        (source / "src" / "a.py").write_bytes(b"x" * grown_size)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", grow_after_preflight)
+    real_open = Path.open
+    written = []
+
+    class CountingWriter:
+        def __init__(self, file):
+            self.file = file
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.file.close()
+
+        def write(self, chunk):
+            written.append(len(chunk))
+            assert sum(written) <= worker_mod.MAX_COPY_BACK_BYTES
+            return self.file.write(chunk)
+
+    def observe_open(path, mode="r", *args, **kwargs):
+        file = real_open(path, mode, *args, **kwargs)
+        if mode == "wb" and path.is_relative_to(worker_env["runs"]):
+            return CountingWriter(file)
+        return file
+
+    monkeypatch.setattr(Path, "open", observe_open)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    assert written == expected_writes  # neither an individual file nor their sum crosses the cap
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+def _worker_reconcile_operation(tmp_path, monkeypatch, **fields):
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_999)
+    journal.heartbeat(
+        operation_id,
+        attempts=1,
+        descendant_sweep_clean=None,
+        descendant_sweep_attempt=1,
+        **fields,
+    )
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_process_alive", lambda pid: False)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+    return journal, operation_id
+
+
+def test_reconcile_worker_sweeps_exact_wrapper_argv_before_owner_check(
+    worker_env, tmp_path, monkeypatch
+):
+    run_root = worker_env["runs"] / ("a" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+    )
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv == worker_mod.sweep_argv(run_root, [])
+        assert kwargs == {
+            "cwd": "/",
+            "env": worker_mod.LAUNCH_ENV,
+            "stdin": subprocess.DEVNULL,
+            "capture_output": True,
+            "text": True,
+            "timeout": worker_mod.SWEEP_TIMEOUT_SECONDS,
+            "check": False,
+        }
+        return subprocess.CompletedProcess(argv, 0, "diagnostic\nAGY_WORKER_SWEEP clean\n", "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    real_reconcile = journal.reconcile
+
+    def owner_reconcile(operation_id):
+        assert calls == [worker_mod.sweep_argv(run_root, [])]
+        return real_reconcile(operation_id)
+
+    monkeypatch.setattr(journal, "reconcile", owner_reconcile)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"] == {
+        "result": "CLEAN",
+        "run_root": str(run_root),
+    }
+    assert journal.read(operation_id)["reconciliation"] == record["reconciliation"]
+
+
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("gone", "RUN_ROOT_GONE"),
+        ("wrong_user", "RECORD_INVALID"),
+        ("outside", "RECORD_INVALID"),
+        ("parent", "RECORD_INVALID"),
+        ("nested", "RECORD_INVALID"),
+        ("dotdot", "RECORD_INVALID"),
+        ("symlink", "RECORD_INVALID"),
+        ("missing_root", "RECORD_INVALID"),
+    ],
+)
+def test_reconcile_worker_validates_record_without_sudo(
+    worker_env, tmp_path, monkeypatch, case, expected
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("b" * 32)
+    user = "root" if case == "wrong_user" else worker_mod.WORKER_USER
+    raw_root = str(run_root)
+    if case == "outside":
+        raw_root = str(tmp_path.resolve() / ("b" * 32))
+    elif case == "parent":
+        raw_root = str(runs)
+    elif case == "nested":
+        raw_root = str(run_root / "work")
+    elif case == "dotdot":
+        raw_root = f"{runs}/../worker-runs/{run_root.name}"
+    elif case == "symlink":
+        run_root.symlink_to(worker_env["target"], target_is_directory=True)
+    elif case == "missing_root":
+        raw_root = None
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path, monkeypatch, worker_run_as_user=user, worker_run_root=raw_root
+    )
+
+    def no_sudo(*args, **kwargs):
+        pytest.fail("invalid or missing worker run must not invoke sudo")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", no_sudo)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"] == {
+        "result": expected,
+        "run_root": raw_root,
+    }
+
+
+@pytest.mark.parametrize(
+    "stdout, returncode, error, expected",
+    [
+        ("AGY_WORKER_SWEEP unclean 42\n", 0, None, "UNCLEAN"),
+        ("AGY_WORKER_SWEEP clean\n", 1, None, "UNCLEAN"),
+        ("AGY_WORKER_SWEEP clean\nlater diagnostic\n", 0, None, "UNCLEAN"),
+        ("", 0, OSError("sudo unavailable"), "SWEEP_ERROR"),
+        ("", 0, subprocess.TimeoutExpired("stub-sudo", 30), "SWEEP_ERROR"),
+    ],
+)
+@pytest.mark.parametrize("provider_alive_after", [True, False, None])
+def test_reconcile_worker_sweep_failure_preserves_provider_truth_and_blocks_retry(
+    worker_env, tmp_path, monkeypatch, stdout, returncode, error, expected, provider_alive_after
+):
+    run_root = worker_env["runs"] / ("c" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+    )
+    # Exercise the completed-provider projection too: it must preserve the
+    # existing provider truth when the worker sweep cannot confirm cleanup.
+    journal.update(
+        operation_id,
+        status="COMPLETED",
+        phase="TERMINAL",
+        exit_code=0,
+        provider_process_state="EXITED",
+        has_unresolved_external_effect=False,
+        reconciliation={"provider_alive_after": provider_alive_after, "retry_permitted": True},
+    )
+
+    def run(argv, **kwargs):
+        assert argv == worker_mod.sweep_argv(run_root, [])
+        if error is not None:
+            raise error
+        return subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    reconciliation = record["reconciliation"]
+    assert reconciliation["worker_sweep"] == {"result": expected, "run_root": str(run_root)}
+    assert reconciliation["provider_alive_after"] is provider_alive_after
+    assert reconciliation["retry_permitted"] is False
+
+
+def test_reconcile_non_worker_never_calls_worker_sweep(tmp_path, monkeypatch):
+    journal, operation_id = _worker_reconcile_operation(tmp_path, monkeypatch)
+
+    def no_sweep(record):
+        pytest.fail("non-worker operation must not sweep the worker uid")
+
+    monkeypatch.setattr(dispatch, "_run_worker_sweep", no_sweep)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert "worker_sweep" not in record["reconciliation"]
+
+
+@pytest.mark.parametrize("run_as_user", [None, worker_mod.WORKER_USER])
+@pytest.mark.usefixtures("worker_preflight")
+def test_background_pending_marker_records_worker_fields_only_for_worker_runs(
+    worker_env, tmp_path, monkeypatch, run_as_user
+):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    for module in (worker_mod, boundary_mod):
+        monkeypatch.setattr(module, "_prepare_run_home_keychain", lambda home: "NOT_APPLICABLE")
+    journal, operation_id = _worker_reconcile_operation(tmp_path, monkeypatch)
+    # Start with a fresh marker, as a newly queued background operation would.
+    journal.update(operation_id, descendant_sweep_clean=True)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "edit")
+    seen = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        record = journal.read(operation_id)  # the marker is durable before launch
+        assert record["descendant_sweep_clean"] is None
+        if run_as_user is not None:
+            assert record["worker_run_as_user"] == worker_mod.WORKER_USER
+            assert record["worker_run_root"] == str(write_boundary.run_root)
+        else:
+            assert "worker_run_as_user" not in record
+            assert "worker_run_root" not in record
+        seen.append(record)
+        return 0, "done", "", False, 1
+
+    monkeypatch.setattr(
+        dispatch,
+        "dispatch_run",
+        functools.partial(
+            dispatch.dispatch_run,
+            coordinator=_Coordinator(worker_env["home"]),
+            run_agy_fn=runner,
+        ),
+    )
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(worker_env["target"]),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=journal.root,
+        write_paths=[str(worker_env["target"] / "src" / "a.py")],
+        run_as_user=run_as_user,
+    )
+    assert code == 0
+    assert len(seen) == 1
