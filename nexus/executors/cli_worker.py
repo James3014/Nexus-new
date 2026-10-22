@@ -605,6 +605,31 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+_UNPROVEN_EXIT_GRACE_SECONDS = 1.0
+
+
+def _pid_live_resident(pid: int) -> bool:
+    """True when ``pid`` exists and is not a zombie (fails closed: unknown = live)."""
+    if not _pid_alive(pid):
+        return False
+    proc_entry = Path("/proc") / str(pid)
+    if proc_entry.exists():
+        return not _proc_is_zombie(proc_entry)
+    try:
+        state = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if not state:
+        return False
+    return not state.startswith("Z")
+
+
 def _pids_with_cwd_under(
     roots: Tuple[str, ...], baseline: Optional[_SweepBaseline] = None
 ) -> Optional[set[int]]:
@@ -688,7 +713,15 @@ def _sweep_clean(
     killed = _kill_and_confirm(tracked)
     if cwd_pids is None:
         return False
-    unproven = {pid for pid in cwd_pids - tracked if _pid_alive(pid)}
+    # A process the tag sweep just SIGKILLed can still sit in the cwd scan as
+    # an unreaped zombie for a moment; a zombie cannot write, so give exiting
+    # matches a short grace and never count a zombie as a live resident.
+    deadline = time.monotonic() + _UNPROVEN_EXIT_GRACE_SECONDS
+    while True:
+        unproven = {pid for pid in cwd_pids - tracked if _pid_live_resident(pid)}
+        if not unproven or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
     if unproven:
         _logger.warning(
             "descendant sweep unproven: %d untracked, untagged process(es) with a cwd "

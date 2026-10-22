@@ -196,25 +196,25 @@ def test_sweep_clean_kills_only_tracked_and_reports_other_cwd_matches(monkeypatc
     monkeypatch.setattr(
         cli_worker, "_kill_and_confirm", lambda pids: killed.append(set(pids)) or True
     )
-    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli_worker, "_pid_live_resident", lambda pid: True)
     assert cli_worker._sweep_clean({11, 12}, {12, 99}, kill_unproven=False) is False
     assert killed == [{11, 12}]  # 99 is reported, never signalled
 
 
 def test_sweep_clean_ignores_a_reported_pid_that_already_exited(monkeypatch):
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
-    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(cli_worker, "_pid_live_resident", lambda pid: False)
     assert cli_worker._sweep_clean({11}, {11, 99}, kill_unproven=False) is True
 
 
 def test_sweep_clean_is_clean_when_every_cwd_match_is_tracked(monkeypatch):
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
-    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli_worker, "_pid_live_resident", lambda pid: True)
     assert cli_worker._sweep_clean({11, 12}, {11}, kill_unproven=False) is True
 
 
 def test_sweep_clean_unknown_scan_and_failed_kill_are_unclean(monkeypatch):
-    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli_worker, "_pid_live_resident", lambda pid: True)
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
     assert cli_worker._sweep_clean({11}, None, kill_unproven=False) is False
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: False)
@@ -296,3 +296,40 @@ def test_agy_dispatch_boundary_opts_into_report_not_kill(tmp_path, monkeypatch):
     boundary._swept = None
     assert boundary.sweep() is False
     assert seen == {"kill_unproven_cwd_matches": False}
+
+
+def test_report_mode_does_not_count_an_unreaped_zombie_as_resident(target):
+    """A SIGKILLed child that its parent has not reaped yet is not a live writer."""
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(target),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        os.kill(child.pid, signal.SIGKILL)
+        time.sleep(0.3)  # dead but not reaped: a zombie of this test process
+        assert cli_worker._pid_alive(child.pid) is True
+        assert cli_worker._pid_live_resident(child.pid) is False
+        assert cli_worker._sweep_clean(set(), {child.pid}, kill_unproven=False) is True
+    finally:
+        child.wait(timeout=5)
+
+
+def test_report_mode_still_flags_a_live_resident(target):
+    """Positive control: a live untracked process in the target keeps the sweep unclean."""
+    resident = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(target),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(0.2)
+        assert cli_worker._pid_live_resident(resident.pid) is True
+        assert cli_worker._sweep_clean(set(), {resident.pid}, kill_unproven=False) is False
+        assert resident.poll() is None
+    finally:
+        _kill(resident.pid)
+        resident.wait(timeout=5)
