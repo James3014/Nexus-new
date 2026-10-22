@@ -974,20 +974,14 @@ def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str)
                              outcome={"error": _port_error("learn_scheduler.LearnSchedulerService")})
     try:
         from pathlib import Path
-        constraints = dict(plan.constraints or {})
         # The checkout only provides the CLI script; the policy is evaluated on the
-        # process learn store, not on the checkout's data.  The store is a trusted
-        # ``workspace_root`` constraint (direct callers, tests) else the process state
-        # root, as in _resolve_learn_store.  The main-chain invoker passes no request
-        # context here (#2829): the gate reads slo_readiness from this store, so a
-        # context-chosen root would let the caller pick the report that flips it.
+        # process learn store (the state root on the live layout, else the cwd), not on
+        # the checkout's data.  The gate reads slo_readiness from this store, so it never
+        # comes from plan constraints (#2829): nexus-runtime's own invoker still forwards
+        # a request-context ``workspace_root``, and a caller-chosen root would let it
+        # pick the report that flips the gate.
         repo_root = Path(__file__).resolve().parents[2]
-        raw_root = str(constraints.get("workspace_root") or "").strip()
-        report_root = (
-            Path(raw_root).expanduser().resolve()
-            if raw_root
-            else persistent_state_root(Path.cwd().resolve())
-        )
+        report_root = persistent_state_root(Path.cwd().resolve())
         inst = cls(repo_root=repo_root, report_root=report_root, project_root=report_root)
         if not hasattr(inst, "run_scheduler"):
             raise RuntimeError("run_scheduler missing")

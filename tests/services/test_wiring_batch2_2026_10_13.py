@@ -144,12 +144,11 @@ def test_learn_scheduler_evaluates_request_workspace(tmp_path: Path, monkeypatch
     )
     not_ready = tmp_path / "not_ready"
     not_ready.mkdir()
-    ok = EXECUTOR_REGISTRY["learn_scheduler_service"](
-        _plan("sched-a", workspace_root=str(ready)), "schedule"
-    )
-    blocked = EXECUTOR_REGISTRY["learn_scheduler_service"](
-        _plan("sched-b", workspace_root=str(not_ready)), "schedule"
-    )
+    # The store is the process store (cwd here, no state root), never a constraint (#2829).
+    monkeypatch.chdir(ready)
+    ok = EXECUTOR_REGISTRY["learn_scheduler_service"](_plan("sched-a"), "schedule")
+    monkeypatch.chdir(not_ready)
+    blocked = EXECUTOR_REGISTRY["learn_scheduler_service"](_plan("sched-b"), "schedule")
     assert ok.gate_passed, ok.outcome
     assert ok.outcome["result"]["exit_code"] == 0
     assert str(ready.resolve()) in ok.outcome["result"]["policy_command"]

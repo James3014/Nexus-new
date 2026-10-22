@@ -5,8 +5,9 @@
 passed a request-context ``workspace_root`` into its plan, the caller would choose the
 report the gate reads, e.g. a candidate-writable directory holding a passing report.
 The invoker therefore allowlists no constraints for ``learn_scheduler`` (as #2826 did for
-``learn_mode`` / ``learn_phase_slo``), and the executor resolves the store from the
-process: the state root on the live layout, else the cwd.
+``learn_mode`` / ``learn_phase_slo``), and the executor ignores plan constraints for the
+store (nexus-runtime's own invoker still forwards ``workspace_root``): it is always the
+process store, the state root on the live layout, else the cwd.
 """
 
 from __future__ import annotations
@@ -124,3 +125,25 @@ def test_without_state_root_the_cwd_is_the_store(
     receipt = cer.EXECUTOR_REGISTRY["learn_scheduler_service"](plan, "schedule")
     assert _FakeScheduler.roots == [tmp_path.resolve()]
     assert receipt.gate_passed is True
+
+
+def test_executor_ignores_a_workspace_root_constraint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nexus-runtime's own invoker still forwards a context ``workspace_root``; the executor
+    must not use it, whoever built the plan."""
+    import nexus.core.capability_executor_registry as cer
+
+    store = tmp_path / "store"
+    attacker = tmp_path / "target"
+    _write_report(store, 0.1)
+    _write_report(attacker, 1.0)
+    monkeypatch.chdir(store)
+    _FakeScheduler.roots = []
+    monkeypatch.setattr(cer, "_try_port", lambda name: _FakeScheduler)
+    plan = CapabilityExecutionPlan(
+        plan_id="p", task_id="t", phases=["R"], constraints={"workspace_root": str(attacker)}
+    )
+    receipt = cer.EXECUTOR_REGISTRY["learn_scheduler_service"](plan, "schedule")
+    assert _FakeScheduler.roots == [store.resolve()]
+    assert receipt.gate_passed is False
