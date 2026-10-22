@@ -19,6 +19,7 @@ from nexus.engine.canonical_task_seam import (
 )
 from nexus.services.eia_source_excerpt import ExcerptError, validate_symbol_names
 from nexus.services.external_intelligence import (
+    DIAGNOSIS_STATUSES,
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
@@ -1124,6 +1125,25 @@ class ExternalIntelligenceAutomation:
             units.append(unit_data)
         return units
 
+    def _envelope_diagnosis_status(self, intelligence: Mapping[str, Any]) -> str | None:
+        """The envelope's diagnosis status, or None when it declares no diagnosis (v1).
+
+        An unreadable or malformed diagnosis reads as "INVALID" (never PROVEN)."""
+        request = intelligence.get("request")
+        request_sha = (
+            str(request.get("request_sha256") or "") if isinstance(request, Mapping) else ""
+        )
+        envelope_path = self.intelligence_store.root / "envelopes" / f"{request_sha}.json"
+        try:
+            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return "INVALID"
+        if not isinstance(envelope, Mapping) or "diagnosis" not in envelope:
+            return None
+        diagnosis = envelope["diagnosis"]
+        status = diagnosis.get("status") if isinstance(diagnosis, Mapping) else None
+        return status if status in DIAGNOSIS_STATUSES else "INVALID"
+
     def _core_authority_inputs(self, item: IssueWorkItem) -> dict[str, Any] | None:
         """Issue contract + Task Card + worker binding inputs for Core binding minting.
 
@@ -1643,6 +1663,29 @@ class ExternalIntelligenceAutomation:
                     **self._carry_forward(item),
                     stage="FANOUT",
                     error="FANOUT_RECONCILIATION_BINDING_DRIFT",
+                    semantic_dispatched=True,
+                )
+            resuming_fanout = legacy_fanout_recovery or (
+                previous is not None
+                and previous.get("state") == "RECONCILIATION_REQUIRED"
+                and previous.get("prior_state") == "FANOUT_DISPATCHING"
+            )
+            diagnosis_status = self._envelope_diagnosis_status(intelligence)
+            if (
+                not resuming_fanout
+                and any("core_authority" in unit for unit in units)
+                and diagnosis_status not in (None, "PROVEN")
+            ):
+                # The runtime binds Core only for a PROVEN diagnosis; any other diagnosis
+                # runs unbound, which a Core-bound attempt rejects as OUTCOME_UNKNOWN and
+                # reconciliation can never clear (#2895).  Escalate instead of dispatching.
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    **self._carry_forward(item),
+                    stage="INTELLIGENCE",
+                    error="INTELLIGENCE_DIAGNOSIS_NOT_PROVEN",
+                    diagnosis_status=diagnosis_status,
                     semantic_dispatched=True,
                 )
             self.state_store.save(

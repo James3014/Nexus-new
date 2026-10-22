@@ -3346,3 +3346,56 @@ def test_2854_failure_after_this_runs_dispatching_save_keeps_that_record(tmp_pat
     second = automation.run_issue("o/r", 58, "title", body)
     assert second["state"] == "COMPLETE"
     assert len(sidecar.calls) == 2
+
+
+class _DiagnosisSidecar(FakeSidecar):
+    def __init__(self, store, diagnosis):
+        super().__init__(store)
+        self.diagnosis = diagnosis
+
+    def analyze(self, record, sources, selected_worker=None):
+        result = super().analyze(record, sources, selected_worker)
+        envelope = {"schema": "external_execution_envelope.v2", "diagnosis": self.diagnosis}
+        text = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+        (self.store.root / "envelopes" / f"{'b' * 64}.json").write_text(text, encoding="utf-8")
+        result["envelope_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+        return result
+
+
+@pytest.mark.parametrize(
+    ("diagnosis", "status"),
+    [
+        ({"status": "UNKNOWN", "hypothesis": "h", "next_probe": "p"}, "UNKNOWN"),
+        ({"status": "LIKELY", "hypothesis": "h", "next_probe": "p"}, "LIKELY"),
+        ({"status": "proven"}, "INVALID"),
+        ("PROVEN", "INVALID"),
+    ],
+)
+def test_core_bound_fanout_is_not_dispatched_on_unproven_diagnosis(tmp_path, diagnosis, status):
+    """#2895: the runtime binds Core only for PROVEN, so anything else would loop unbound."""
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    automation = _automation(
+        tmp_path, repo, store, sidecar=_DiagnosisSidecar(store, diagnosis), c=c
+    )
+    result = automation.run_issue("o/r", 79, "title", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["stage"] == "INTELLIGENCE"
+    assert result["error"] == "INTELLIGENCE_DIAGNOSIS_NOT_PROVEN"
+    assert result["diagnosis_status"] == status
+    assert result["semantic_dispatched"] is True
+    assert c.calls == []
+
+
+def test_core_bound_fanout_is_dispatched_on_proven_diagnosis(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    sidecar = _DiagnosisSidecar(store, {"status": "PROVEN", "hypothesis": "", "next_probe": ""})
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 80, "title", body
+    )
+
+    assert result["state"] == "COMPLETE"
+    units, _lease = c.calls[0]
+    assert all("core_authority" in unit for unit in units)
