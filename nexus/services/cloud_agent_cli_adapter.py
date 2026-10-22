@@ -163,6 +163,10 @@ class GeminiCliCloudAgentAdapter(SubprocessCloudAgentAdapter):
         )
 
     def _build_command(self, request: CloudAgentRequest) -> tuple[Sequence[str], str | None]:
+        from nexus.orchestrator.unified_mcp_gateway import (
+            GEMINI_NO_MCP_SERVER_SENTINEL,
+            GEMINI_READ_ONLY_POLICY_PATH,
+        )
         from nexus.services.gemini_cli import build_gemini_cli_invocation
 
         prompt = (
@@ -182,10 +186,21 @@ class GeminiCliCloudAgentAdapter(SubprocessCloudAgentAdapter):
             gemini_entry=self.gemini_entry,
             env=dict(self.env or os.environ),
             cwd=self.cwd or "/tmp",
-            approval_mode="plan",
+            approval_mode="default",
             transport="inline",
         )
-        return invocation.command, invocation.prompt_stdin
+        # #2868: `--approval-mode plan` lets headless Gemini call exit_plan_mode and
+        # switch to YOLO. Run in `default` mode under the default-deny read-only
+        # policy and keep MCP servers from connecting (same as the Gateway, #2867).
+        command = list(invocation.command)
+        at = command.index("-m")
+        command[at:at] = [
+            "--policy",
+            str(GEMINI_READ_ONLY_POLICY_PATH),
+            "--allowed-mcp-server-names",
+            GEMINI_NO_MCP_SERVER_SENTINEL,
+        ]
+        return command, invocation.prompt_stdin
 
 
 class AgyCliCloudAgentAdapter(SubprocessCloudAgentAdapter):

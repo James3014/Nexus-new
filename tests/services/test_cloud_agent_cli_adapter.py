@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import sys
 
-from nexus.services.cloud_agent_cli_adapter import AgyCliCloudAgentAdapter, SubprocessCloudAgentAdapter
+from nexus.services.cloud_agent_cli_adapter import (
+    AgyCliCloudAgentAdapter,
+    SubprocessCloudAgentAdapter,
+)
 from nexus.services.cloud_agent_contract import CloudAgentRequest, invoke_cloud_agent
 
 
@@ -91,3 +94,25 @@ def test_agy_adapter_builds_bounded_plan_command_without_api_key() -> None:
     assert "GEMINI_API_KEY" not in str(command)
     assert "GOOGLE_API_KEY" not in str(command)
     assert adapter.env == {"PATH": "/bin"}
+
+
+def test_gemini_adapter_argv_is_default_deny_read_only() -> None:
+    # #2868: plan mode can be left via exit_plan_mode in headless runs.
+    from nexus.orchestrator.unified_mcp_gateway import (
+        GEMINI_NO_MCP_SERVER_SENTINEL,
+        GEMINI_READ_ONLY_POLICY_PATH,
+    )
+    from nexus.services.cloud_agent_cli_adapter import GeminiCliCloudAgentAdapter
+
+    adapter = GeminiCliCloudAgentAdapter(
+        model="gemini-test",
+        cwd="/tmp",
+        gemini_entry="/tmp/gemini",
+        env={"PATH": "/usr/bin", "HOME": "/tmp"},
+    )
+    command, _stdin = adapter._build_command(_request())
+    assert command[command.index("--approval-mode") + 1] == "default"
+    assert "plan" not in command and "auto_edit" not in command and "yolo" not in command
+    assert command[command.index("--policy") + 1] == str(GEMINI_READ_ONLY_POLICY_PATH)
+    assert command[command.index("--allowed-mcp-server-names") + 1] == GEMINI_NO_MCP_SERVER_SENTINEL
+    assert command[command.index("-m") + 1] == "gemini-test"
