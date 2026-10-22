@@ -1482,6 +1482,7 @@ def test_reconcile_worker_sweeps_exact_wrapper_argv_before_owner_check(
         monkeypatch,
         worker_run_as_user=worker_mod.WORKER_USER,
         worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
     )
     worker_mod.write_operation_marker(run_root, operation_id)
     calls = []
@@ -1586,6 +1587,7 @@ def test_reconcile_worker_sweep_failure_holds_and_blocks_retry(
         monkeypatch,
         worker_run_as_user=worker_mod.WORKER_USER,
         worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
     )
     worker_mod.write_operation_marker(run_root, operation_id)
     # Exercise the completed-provider projection too: it must preserve the
@@ -1723,6 +1725,7 @@ def test_reconcile_refuses_another_operations_valid_run_root(worker_env, tmp_pat
         monkeypatch,
         worker_run_as_user=worker_mod.WORKER_USER,
         worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
     )
     worker_mod.write_operation_marker(run_root, "someone-elses-operation")
     monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: pytest.fail("no sudo"))
@@ -1769,3 +1772,41 @@ def test_copy_in_refuses_an_ancestor_swapped_for_a_symlink_after_the_walk(worker
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_changed_during_copy"):
         _prepare(worker_env)
     assert list(worker_env["runs"].iterdir()) == []
+
+
+def test_reconcile_refuses_a_transplanted_marker_and_a_replaced_root(
+    worker_env, tmp_path, monkeypatch
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    root_a, root_b = runs / ("a" * 32), runs / ("b" * 32)
+    root_a.mkdir()
+    root_b.mkdir()
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(root_a),
+        worker_run_root_id=[root_a.lstat().st_dev, root_a.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(root_a, operation_id)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "AGY_WORKER_SWEEP clean\n", "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    # The record now points at B, the marker is renamed in from A.
+    (root_a / worker_mod.OPERATION_MARKER).rename(root_b / worker_mod.OPERATION_MARKER)
+    journal.update(operation_id, worker_run_root=str(root_b))
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    # A new directory under the original name has another inode.
+    journal.update(operation_id, worker_run_root=str(root_a))
+    shutil.rmtree(root_a)
+    root_a.mkdir()
+    worker_mod.write_operation_marker(root_a, operation_id)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    assert calls == []

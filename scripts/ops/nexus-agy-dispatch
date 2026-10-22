@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -2598,7 +2599,7 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
 
 
 _DESCENDANT_SWEEP_KEYS = _agy_operation_journal.DESCENDANT_SWEEP_KEYS
-_WORKER_SWEEP_KEYS = ("worker_run_as_user", "worker_run_root")
+_WORKER_SWEEP_KEYS = ("worker_run_as_user", "worker_run_root", "worker_run_root_id")
 _descendant_sweep_unproven = _agy_operation_journal.descendant_sweep_unproven
 
 
@@ -5262,6 +5263,9 @@ def dispatch_run(
                         {
                             "worker_run_as_user": run_as_user,
                             "worker_run_root": str(write_boundary.run_root),
+                            # (st_dev, st_ino) of the run root: the journal is
+                            # owner-only, so the worker cannot rewrite it.
+                            "worker_run_root_id": _path_identity(write_boundary.run_root),
                         }
                         if run_as_user is not None else {}
                     )
@@ -6629,6 +6633,11 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
             lock_obj.close()
 
 
+def _path_identity(path: Path) -> list[int]:
+    info = os.lstat(path)
+    return [info.st_dev, info.st_ino]
+
+
 def _run_worker_sweep(record: dict[str, Any], operation_id: str) -> dict[str, Any]:
     """Validate journal data before invoking the whitelisted worker sweep."""
     worker = _agy_worker_account()
@@ -6657,6 +6666,21 @@ def _run_worker_sweep(record: dict[str, Any], operation_id: str) -> dict[str, An
             "RUN_ROOT_GONE_UNPROVEN" if _descendant_sweep_unproven(record) else "RUN_ROOT_GONE"
         )
         return outcome
+    # Identity check: no symlink, a directory we own, the very inode recorded at
+    # creation (a same-named replacement or a renamed-in directory differs).
+    # What remains between this check and sudo is closed by the wrapper's own
+    # validation: a 32-hex direct child of worker-runs, canonical, no symlink.
+    try:
+        info = os.lstat(run_root)
+    except OSError:
+        return outcome
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or record.get("worker_run_root_id") != [info.st_dev, info.st_ino]
+    ):
+        return outcome
+    # Second factor: the Owner-written marker names this operation.
     if not worker.operation_marker_matches(run_root, operation_id):
         return outcome  # not this operation's run root
     outcome["result"] = worker.sweep_run_root(run_root)
