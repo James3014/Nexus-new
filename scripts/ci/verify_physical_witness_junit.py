@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed verifier for the DSH Seatbelt physical witness (#1607).
+"""Fail-closed verifier for macOS Seatbelt physical witness suites (#1607).
 
 The two physical Seatbelt tests in ``tests/ops/test_nexus_dsh_linked_worktree.py``
 are not collected where Seatbelt cannot run, so a Linux pytest run is green
@@ -10,8 +10,8 @@ macOS pytest run into a physical-witness receipt:
   ``/usr/bin/sandbox-exec`` (the one the tests resolve via ``PATH``), and a live
   canary in which Seatbelt denies an out-of-temp write and leaves it unchanged.
 * ``verify`` repeats the preflight, binds the exact clean Git subject, and
-  requires a fresh JUnit report in which exactly the expected two physical
-  nodes PASSED with zero skips, errors or failures for the file.
+  requires a fresh JUnit report in which every declared physical witness
+  PASSED with zero skips, errors or failures for the file.
 
 Nothing is inferred from runner prose; every missing or ambiguous fact fails.
 """
@@ -97,6 +97,20 @@ EIA_CLOSURE_SUBJECT_FILES = {
     "verifier": "scripts/ci/verify_physical_witness_junit.py",
     "ci_workflow": ".github/workflows/pytest.yml",
 }
+CLAUDE_MEASUREMENT_TEST_FILE = "tests/nexus/executors/test_claude_measurement_worker.py"
+CLAUDE_MEASUREMENT_TEST_CLASSNAME = "tests.nexus.executors.test_claude_measurement_worker"
+CLAUDE_MEASUREMENT_EXPECTED_WITNESSES = (
+    "test_seatbelt_denies_reads_writes_network_and_helper_tools",
+    "test_seatbelt_denies_signals_to_processes_outside_the_sandbox",
+    "test_git_status_works_alike_in_a_standalone_repo_and_a_p1_worktree",
+)
+CLAUDE_MEASUREMENT_SUBJECT_FILES = {
+    "test_file": CLAUDE_MEASUREMENT_TEST_FILE,
+    "driver": "tests/nexus/executors/_claude_measurement_live_driver.py",
+    "worker": "nexus/executors/claude_measurement_worker.py",
+    "verifier": "scripts/ci/verify_physical_witness_junit.py",
+    "ci_workflow": ".github/workflows/pytest.yml",
+}
 # suite name -> (test file, junit classname, expected witness nodes, subject files)
 SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
     "dsh": (TEST_FILE, TEST_CLASSNAME, EXPECTED_WITNESSES, SUBJECT_FILES),
@@ -117,6 +131,12 @@ SUITES: dict[str, tuple[str, str, tuple[str, ...], dict[str, str]]] = {
         EIA_CLOSURE_TEST_CLASSNAME,
         EIA_CLOSURE_EXPECTED_WITNESSES,
         EIA_CLOSURE_SUBJECT_FILES,
+    ),
+    "claude-measurement": (
+        CLAUDE_MEASUREMENT_TEST_FILE,
+        CLAUDE_MEASUREMENT_TEST_CLASSNAME,
+        CLAUDE_MEASUREMENT_EXPECTED_WITNESSES,
+        CLAUDE_MEASUREMENT_SUBJECT_FILES,
     ),
 }
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")

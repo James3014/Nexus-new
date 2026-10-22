@@ -108,6 +108,7 @@ def test_suites_name_existing_files_and_subject_files() -> None:
         "agy-dispatch",
         "sandbox-runner-rundir",
         "eia-closure-verifier",
+        "claude-measurement",
     }
     for test_file, classname, witnesses, subject in v.SUITES.values():
         assert (ROOT / test_file).is_file()

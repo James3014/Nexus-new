@@ -2725,7 +2725,8 @@ def prepare_standalone_clone(
         raise DshWorkflowError(
             "STANDALONE_SOURCE_EXPOSED_UNDER_DSH_TEMP_GRANT",
             "source repository checkouts under the DSH temp grant would stay writable from "
-            f"the clone: {', '.join(exposed)}",
+            f"the clone: {', '.join(exposed)}; prepare from a dedicated independent source "
+            "clone outside the temp grant with --source-repo",
         )
     if any(_within(dest, root) or _within(root, dest) for root in (source, common_dir)):
         raise DshWorkflowError(
@@ -4718,7 +4719,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     p_clone = sub.add_parser("prepare-standalone")
     p_clone.add_argument("--repository", required=True)
-    p_clone.add_argument("--source-repo-root", required=True)
+    p_clone.add_argument(
+        "--source-repo",
+        "--source-repo-root",
+        dest="source_repo_root",
+        required=True,
+        help="exact source Git toplevel; use a dedicated independent clone if its worktree family enters the DSH temp grant",
+    )
     p_clone.add_argument("--base-revision", required=True)
     p_clone.add_argument("--target", required=True)
 
