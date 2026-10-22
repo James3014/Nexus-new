@@ -5309,6 +5309,8 @@ def dispatch_run(
                 # its edits could not be copied back.  Not an account fault:
                 # never rotate or retry.  A failed copy-back may have left the
                 # target partly written, so it needs reconciliation.
+                # Only a partly applied copy-back (AGY_WORKER_COPY_BACK_FAILED)
+                # touched the target; a refusal (..._REFUSED) applied nothing.
                 copy_back_failed = worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED")
                 last_kind = worker_failure
                 _operation_hook(

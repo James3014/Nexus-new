@@ -43,6 +43,11 @@ Trust and limits (#2885 review r1):
 
 * The Owner-side caller is trusted for the profile content; the wrapper only
   checks where the profile lives.
+* ``--sweep`` finds untracked worker processes by run tag through ``ps -E``;
+  macOS hides the environment of Apple system binaries (``/bin/sleep``,
+  ``/bin/sh`` ...), so a tagged system binary is only found by the tracker or
+  by its cwd.  Copy-back does not trust the run dir, so this is not a safety
+  hole.
 * A clean sweep does not prove that no worker process survived (one that
   clears its environment, leaves the run directory and was never seen by the
   tracker is not found).  Copy-back therefore re-opens the workdir with
@@ -109,7 +114,8 @@ LAUNCH_ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8"}
 
 AGY_WORKER_ACCOUNT_REFUSED = "AGY_WORKER_ACCOUNT_REFUSED"
 AGY_WORKER_LAUNCH_FAILED = "AGY_WORKER_LAUNCH_FAILED"
-AGY_WORKER_COPY_BACK_FAILED = "AGY_WORKER_COPY_BACK_FAILED"
+AGY_WORKER_COPY_BACK_FAILED = "AGY_WORKER_COPY_BACK_FAILED"  # target partly written
+AGY_WORKER_COPY_BACK_REFUSED = "AGY_WORKER_COPY_BACK_REFUSED"  # nothing applied
 
 # The wrapper this module speaks to: the installed copy must equal this file.
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
@@ -160,6 +166,9 @@ def cross_run_profile(
         ";; Cairnwork #19 Phase B: other runs share this uid; only this run's subpath is visible\n"
         f'(deny file-read* file-write* (subpath "{runs}"))\n'
         f'(allow file-read* (subpath "{root}"))\n'
+        # stat of worker-runs itself (not a listing): cd/mkdir -p/git resolve
+        # absolute paths through it; without this they fail with ENOTDIR/EPERM.
+        f'(allow file-read-metadata (literal "{runs}"))\n'
     )
     signals = "(deny signal)\n(allow signal (target same-sandbox))\n"
     pinned = [f'  (literal "{_sbpl_path(path)}")' for path in pinned_entries]
@@ -305,6 +314,10 @@ class CopyBackRefused(Exception):
     """The worker copy cannot be trusted for copy-back; nothing was applied."""
 
 
+class CopyBackPartial(Exception):
+    """Copy-back stopped after it had already changed the target."""
+
+
 def _hash_fd(fd: int) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
@@ -379,6 +392,17 @@ def _walk_tree(root: Path, *, strict: bool = False) -> dict[str, tuple]:
         return _walk_fd(fd, strict=strict)
     finally:
         os.close(fd)
+
+
+def _check_copy_caps(manifest: Mapping[str, tuple], workdir: Path) -> None:
+    """Refuse before agy runs when the copy-back caps would already be exceeded."""
+    if len(manifest) > MAX_COPY_BACK_ENTRIES:
+        raise _refuse("target_too_large")
+    total = sum(
+        os.lstat(workdir / rel).st_size for rel, entry in manifest.items() if entry[0] == "file"
+    )
+    if total > MAX_COPY_BACK_BYTES:
+        raise _refuse("target_too_large")
 
 
 def _copy_in(source: Path, workdir: Path) -> dict[str, tuple]:
@@ -545,7 +569,10 @@ def copy_back(
     ``CopyBackRefused`` (nothing applied) or ``OSError``.
     """
     target_real = Path(os.path.realpath(target))
-    root_fd = os.open(run_root, _DIR_FLAGS)
+    try:
+        root_fd = os.open(run_root, _DIR_FLAGS)
+    except OSError as exc:
+        raise CopyBackRefused("run_root_unreadable") from exc
     try:
         try:
             work_fd = os.open(workdir_name, _DIR_FLAGS, dir_fd=root_fd)
@@ -565,8 +592,12 @@ def copy_back(
         ops = _plan(manifest, current, target_real)
         if not ops:
             return
-        staging = target_real / f"{_STAGING_PREFIX}{secrets.token_hex(8)}"
-        staging.mkdir(mode=0o700)
+        candidate = target_real / f"{_STAGING_PREFIX}{secrets.token_hex(8)}"
+        try:
+            candidate.mkdir(mode=0o700)
+        except OSError as exc:
+            raise CopyBackRefused(f"staging_unavailable:{type(exc).__name__}") from exc
+        staging = candidate  # only a directory this call created is ever removed
         staged: dict[str, Path] = {}
         for index, (op, rel, sha) in enumerate(ops):
             if op == "write":
@@ -575,13 +606,41 @@ def copy_back(
                     staged[rel] = _stage(work_fd, rel, sha, staging, index)
                 except OSError as exc:
                     raise CopyBackRefused(f"entry_replaced:{rel}") from exc
-        for op, rel, _sha in ops:
-            destination = target_real / rel
+        _commit(ops, manifest, current, staged, target_real)
+    finally:
+        os.close(work_fd)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def _commit(
+    ops: list[tuple[str, str, Optional[str]]],
+    manifest: Mapping[str, tuple],
+    current: Mapping[str, tuple],
+    staged: Mapping[str, Path],
+    target_real: Path,
+) -> None:
+    """Apply staged changes; each destination is re-checked against its baseline first.
+
+    Before the first change a mismatch is a ``CopyBackRefused``; after it,
+    ``CopyBackPartial`` (the target is partly written and needs reconciliation).
+    """
+    applied = 0
+    for op, rel, _sha in ops:
+        destination = target_real / rel
+        expected = None if op == "mkdir" else manifest.get(rel)
+        try:
+            unchanged = _target_entry(destination) == expected
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            reason = f"target_changed:{rel}"
+            raise CopyBackPartial(reason) if applied else CopyBackRefused(reason)
+        try:
             if op == "mkdir":
                 destination.mkdir()
             elif op == "write":
-                before = manifest.get(rel)
-                if before is not None:
+                if expected is not None:
                     mode = stat.S_IMODE(os.lstat(destination).st_mode)
                 else:
                     mode = 0o755 if current[rel][2] else 0o644
@@ -594,10 +653,10 @@ def copy_back(
                     pass  # not empty in the target: leave it
             else:
                 destination.unlink()
-    finally:
-        os.close(work_fd)
-        if staging is not None:
-            shutil.rmtree(staging, ignore_errors=True)
+        except OSError as exc:
+            reason = f"apply_failed:{rel}:{type(exc).__name__}"
+            raise CopyBackPartial(reason) if applied else CopyBackRefused(reason) from exc
+        applied += 1
 
 
 def _group_share_tree(root: Path, gid: int, read_only: Iterable[Path] = ()) -> None:
@@ -745,6 +804,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                     self.source_target,
                 )
         except CopyBackRefused as exc:
+            self.worker_failure = f"{AGY_WORKER_COPY_BACK_REFUSED}:{exc}"
+        except CopyBackPartial as exc:
             self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
         except OSError as exc:
             self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
@@ -806,6 +867,7 @@ def prepare_worker_account_boundary(
             os.chown(run_root, -1, gid)
         workdir = run_root / WORKDIR_NAME
         manifest = _copy_in(source_target, workdir)
+        _check_copy_caps(manifest, workdir)
         _git_snapshot(workdir)
         work_info = os.lstat(workdir)
         workdir_identity = (work_info.st_dev, work_info.st_ino)

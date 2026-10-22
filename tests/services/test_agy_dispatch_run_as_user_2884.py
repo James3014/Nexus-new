@@ -70,7 +70,9 @@ def _effective(profile: str, op: str, path: Path) -> str:
             continue
         ops = [item for item in form[1:] if isinstance(item, str)]
         filters = [item for item in form[1:] if isinstance(item, list)]
-        if "default" not in ops and op not in ops:
+        if "default" not in ops and not any(
+            o == op or (o.endswith("*") and op.startswith(o[:-1])) for o in ops
+        ):
             continue
         if not filters:
             verdict = form[0]
@@ -788,7 +790,7 @@ def test_copy_back_refuses_symlinks_and_applies_nothing(worker_env, monkeypatch,
         (target / "src" / "c.py").symlink_to(target / "README.md")
     boundary.cleanup()
     assert boundary.worker_failure is not None
-    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED")
+    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_REFUSED")
     assert (target / "src" / "a.py").read_text() == "print('a')\n"
     assert (target / "README.md").read_text() == "readme\n"
     assert not boundary.run_root.exists()
@@ -1116,7 +1118,7 @@ def test_swapped_workdir_is_refused_and_target_untouched(worker_env, monkeypatch
         (work / "id_ed25519").write_text("PRIVATE KEY\n", encoding="utf-8")
     assert boundary.sweep() is True
     boundary.cleanup()
-    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:workdir_replaced"
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_REFUSED:workdir_replaced"
     _assert_target_untouched(worker_env["target"])
     assert not os.path.lexists(boundary.run_root)
 
@@ -1145,7 +1147,7 @@ def test_source_swapped_between_plan_and_apply_is_refused(worker_env, monkeypatc
     monkeypatch.setattr(worker_mod, "_plan", plan_then_swap)
     boundary.cleanup()
     assert boundary.worker_failure is not None
-    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED:")
+    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_REFUSED:")
     assert "a.py" in boundary.worker_failure
     _assert_target_untouched(worker_env["target"])
     assert not any(
@@ -1158,7 +1160,7 @@ def test_hard_linked_worker_file_is_refused(worker_env, monkeypatch, tmp_path):
     _launched(boundary, monkeypatch)
     os.link(_secret_dir(tmp_path) / "id_ed25519", boundary.target / "src" / "key.txt")
     boundary.cleanup()
-    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:hard_link:src/key.txt"
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_REFUSED:hard_link:src/key.txt"
     _assert_target_untouched(worker_env["target"])
 
 
@@ -1169,7 +1171,7 @@ def test_target_changed_meanwhile_is_not_overwritten(worker_env, monkeypatch):
     (boundary.target / "README.md").write_text("worker readme\n", encoding="utf-8")
     (worker_env["target"] / "src" / "a.py").write_text("someone else\n", encoding="utf-8")
     boundary.cleanup()
-    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:target_changed:src/a.py"
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_REFUSED:target_changed:src/a.py"
     assert (worker_env["target"] / "src" / "a.py").read_text() == "someone else\n"
     assert (worker_env["target"] / "README.md").read_text() == "readme\n"  # all or nothing
 
@@ -1192,12 +1194,12 @@ def test_nested_git_is_neither_copied_in_nor_back(worker_env, monkeypatch):
 
 
 def test_copy_back_size_cap(worker_env, monkeypatch):
-    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", 8)
     boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
     _launched(boundary, monkeypatch)
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", 32)
     (boundary.target / "src" / "a.py").write_text("x" * 64, encoding="utf-8")
     boundary.cleanup()
-    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:copy_back_too_large"
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_REFUSED:copy_back_too_large"
     _assert_target_untouched(worker_env["target"])
 
 
@@ -1230,3 +1232,146 @@ def test_leftover_run_dir_is_reported(worker_env, monkeypatch, capsys):
     assert f"worker run dir left behind: {boundary.run_root}" in capsys.readouterr().err
     monkeypatch.undo()
     shutil.rmtree(boundary.run_root)
+
+
+# ---------------------------------------------------------------------------
+# review r2 (#2885)
+# ---------------------------------------------------------------------------
+
+
+def _seatbelt_usable() -> bool:
+    if not admission.seatbelt_available():
+        return False
+    probe = subprocess.run(
+        [admission.SANDBOX_EXEC_PATH, "-p", "(version 1) (allow default)", "/usr/bin/true"],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+def test_absolute_cd_and_mkdir_p_work_under_the_full_profile(worker_env):
+    """stat of worker-runs itself is allowed; its listing and other runs stay denied."""
+    boundary = _prepare(worker_env)
+    runs = worker_env["runs"]
+    other = runs / ("0" * 32)
+    other.mkdir()
+    (other / "secret").write_text("S", encoding="utf-8")
+    try:
+        profile, work = boundary.profile, boundary.target
+        assert f'(allow file-read-metadata (literal "{runs}"))' in profile.splitlines()
+        assert _effective(profile, "file-read-metadata", runs) == "allow"
+        assert _effective(profile, "file-read-data", runs) == "deny"
+        assert _effective(profile, "file-read-metadata", other) == "deny"
+        assert _effective(profile, "file-read-data", other / "secret") == "deny"
+        if not _seatbelt_usable():
+            return  # off macOS the rules above are the witness
+        script = (
+            f"cd '{work}' && echo CD_OK; "
+            f"mkdir -p '{work}/deep/er/dir' && echo MKDIR_OK; "
+            f"ls '{runs}' >/dev/null 2>&1 && echo LIST_LEAK || echo LIST_DENIED; "
+            f"cat '{other}/secret' 2>/dev/null && echo OTHER_LEAK || echo OTHER_DENIED"
+        )
+        done = subprocess.run(
+            [
+                admission.SANDBOX_EXEC_PATH,
+                "-f",
+                str(boundary.profile_path),
+                "/bin/sh",
+                "-c",
+                script,
+            ],
+            cwd="/",
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert done.stdout.split() == ["CD_OK", "MKDIR_OK", "LIST_DENIED", "OTHER_DENIED"], (
+            done.stderr
+        )
+        assert (work / "deep" / "er" / "dir").is_dir()
+    finally:
+        boundary.cleanup()
+
+
+def test_existing_staging_name_is_never_removed(worker_env, monkeypatch):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    (boundary.target / "src" / "a.py").write_text("edited\n", encoding="utf-8")
+    clash = worker_env["target"] / (worker_mod._STAGING_PREFIX + "ab" * 8)
+    clash.mkdir()
+    (clash / "keep.txt").write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(worker_mod.secrets, "token_hex", lambda n=16: "ab" * n)
+    boundary.cleanup()
+    assert (
+        boundary.worker_failure
+        == "AGY_WORKER_COPY_BACK_REFUSED:staging_unavailable:FileExistsError"
+    )
+    assert (clash / "keep.txt").read_text() == "keep"
+    assert (worker_env["target"] / "src" / "a.py").read_text() == "print('a')\n"
+
+
+def test_caps_are_checked_before_agy_runs(worker_env, monkeypatch):
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", 4)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", 2 << 30)
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_ENTRIES", 2)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "changed, expected",
+    [
+        ("README.md", "AGY_WORKER_COPY_BACK_REFUSED:target_changed:README.md"),
+        ("src/a.py", "AGY_WORKER_COPY_BACK_FAILED:target_changed:src/a.py"),
+    ],
+)
+def test_target_rechecked_before_each_replace(worker_env, monkeypatch, changed, expected):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    (boundary.target / "README.md").write_text("worker readme\n", encoding="utf-8")
+    (boundary.target / "src" / "a.py").write_text("worker\n", encoding="utf-8")
+    real_plan = worker_mod._plan
+
+    def plan_then_other_writer(*args, **kwargs):
+        ops = real_plan(*args, **kwargs)
+        (worker_env["target"] / changed).write_text("other writer\n", encoding="utf-8")
+        return ops
+
+    monkeypatch.setattr(worker_mod, "_plan", plan_then_other_writer)
+    boundary.cleanup()
+    assert boundary.worker_failure == expected
+    assert (worker_env["target"] / changed).read_text() == "other writer\n"  # never overwritten
+
+
+def test_dispatch_copy_back_refusal_needs_no_reconciliation(worker_env, monkeypatch, capsys):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        (write_boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("")
+        (Path(cwd) / "src" / "link").symlink_to("/etc/passwd")
+        return 0, "done", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+    )
+    meta = _metas(capsys.readouterr().err)[-1]
+    assert code == 1
+    assert meta["failure_kind"] == "AGY_WORKER_COPY_BACK_REFUSED:symlink_created:src/link"
+    assert meta["reconciliation_required"] is False and meta["provider_effect"] is False
+    assert meta["rotations"] == 0
