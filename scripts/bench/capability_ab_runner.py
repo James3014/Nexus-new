@@ -5155,6 +5155,8 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
         cmd = [
             codex_bin,
             "exec",
+            "--sandbox",
+            "read-only",
             "resume",
             "--last",
             "--skip-git-repo-check",
@@ -5182,7 +5184,7 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
         if not session_meta["enabled"]:
             cmd.insert(2, "--ephemeral")
     if str(os.environ.get("NEXUS_CODEX_IGNORE_USER_CONFIG", "")).lower() in {"1", "true", "yes"}:
-        cmd.insert(3 if session_meta["enabled"] and session_meta["resume"] else 2, "--ignore-user-config")
+        cmd.insert(5 if session_meta["enabled"] and session_meta["resume"] else 2, "--ignore-user-config")
     invocation_sec = round(time.monotonic() - invocation_start, 4)
 
     def attach_gateway_timing(payload: dict[str, Any], *, process_sec: float = 0.0, parse_sec: float = 0.0) -> dict[str, Any]:

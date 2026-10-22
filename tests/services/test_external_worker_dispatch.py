@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -27,6 +29,248 @@ exit {exit_code}
 """
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+@pytest.mark.parametrize(("mode", "sweep_ready"), [("act", True), ("plan", True), ("act", False)])
+def test_codex_operation_has_run_boundary_and_sweeps_setsid_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, sweep_ready: bool
+) -> None:
+    fake = tmp_path / "codex"
+    marker = tmp_path / "escaped-child"
+    observed = tmp_path / "codex-env"
+    child_pid = tmp_path / "child-pid"
+    child_ready = tmp_path / "child-ready"
+    child_code = (
+        "import os,time; os.setsid(); "
+        f"open({str(child_ready)!r}, 'w').close(); "
+        f"time.sleep(1.5); open({str(marker)!r}, 'w').write('escaped')"
+    )
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "if '--version' in sys.argv:\n"
+        "    print('codex-cli test')\n"
+        "    sys.exit(0)\n"
+        f"Path({str(observed)!r}).write_text(json.dumps({{'HOME': os.environ.get('HOME'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'LEAK': os.environ.get('NEXUS_PRIVATE_TOKEN'), 'argv': sys.argv}}))\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"Path({str(child_pid)!r}).write_text(str(child.pid))\n"
+        f"while not Path({str(child_ready)!r}).exists(): time.sleep(0.01)\n"
+        "print(json.dumps({'type': 'thread.started', 'thread_id': 'thread-1'}))\n"
+        "print(json.dumps({'type': 'turn.started'}))\n"
+        "print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'OK'}}))\n"
+        "print(json.dumps({'type': 'turn.completed'}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+    monkeypatch.setenv("HOME", str(tmp_path / "host-home"))
+    work = tmp_path / "wt"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    monkeypatch.setenv("NEXUS_PRIVATE_TOKEN", "must-not-reach-child")
+    # The test sandbox denies ps/lsof; exercise the dispatch-to-sweep facade
+    # with a real detached child and a deterministic process probe.
+    monkeypatch.setattr(
+        dispatch._cli_worker, "sweep_baseline", lambda: object() if sweep_ready else None
+    )
+    monkeypatch.setattr(dispatch._cli_worker, "track_run", lambda tag, pid: (tag, pid))
+
+    def sweep_detached_child(tag, tracker, baseline, roots):
+        assert tag == tracker[0]
+        assert str(work) in roots
+        pid = int(child_pid.read_text(encoding="utf-8"))
+        os.kill(pid, signal.SIGKILL)
+        return True
+
+    monkeypatch.setattr(dispatch._cli_worker, "sweep_run", sweep_detached_child)
+
+    root = tmp_path / "ops"
+    journal = dispatch._journal("codex", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(work),
+        provider="codex",
+        model="gpt-5.6-luna",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+        initial_fields={"mode": mode, "auto_approve": False, "require_free": False},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "Reply exactly OK")
+    code = dispatch._run_operation(
+        operation_id=operation_id,
+        provider="codex",
+        model="gpt-5.6-luna",
+        prompt_file=str(prompt_path),
+        cwd=str(work),
+        mode=mode,
+        auto_approve=False,
+        timeout_seconds=5,
+        require_free=False,
+        thinking="medium",
+        operation_root=root,
+    )
+    if not sweep_ready:
+        assert code == 1
+        assert journal.read(operation_id)["failure_kind"] == "CODEX_DESCENDANT_SWEEP_UNAVAILABLE"
+        assert not observed.exists()
+        return
+    assert code == 0, journal.read(operation_id).get("failure_kind")
+    assert journal.read(operation_id)["status"] == "COMPLETED"
+    command = journal.read(operation_id)
+    assert command["mode"] == mode
+    env = json.loads(observed.read_text(encoding="utf-8"))
+    assert env["HOME"] != str(tmp_path / "host-home")
+    assert env["CODEX_HOME"] == str(Path(env["HOME"]) / ".codex")
+    assert env["LEAK"] is None
+    assert env["argv"][env["argv"].index("--sandbox") + 1] == (
+        "workspace-write" if mode == "act" else "read-only"
+    )
+    time.sleep(1.7)
+    assert not marker.exists()
+
+
+def _codex_op(tmp_path: Path, cwd: Path, root_name: str = "ops"):
+    root = tmp_path / root_name
+    journal = dispatch._journal("codex", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(cwd),
+        provider="codex",
+        model="gpt-5.6-luna",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+        initial_fields={"mode": "act", "auto_approve": False, "require_free": False},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "x")
+    kwargs = dict(
+        operation_id=operation_id,
+        provider="codex",
+        model="gpt-5.6-luna",
+        prompt_file=str(prompt_path),
+        cwd=str(cwd),
+        mode="act",
+        auto_approve=False,
+        timeout_seconds=5,
+        require_free=False,
+        thinking="medium",
+        operation_root=root,
+    )
+    return journal, operation_id, kwargs
+
+
+@pytest.mark.parametrize(
+    ("inner_code", "clean", "expect_write_back"),
+    [(0, True, True), (1, True, False), (0, False, False)],
+)
+def test_codex_refreshed_auth_written_back_only_on_clean_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    inner_code: int,
+    clean: bool,
+    expect_write_back: bool,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "host-home"))
+    work = tmp_path / "wt"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    _journal, _op, kwargs = _codex_op(tmp_path, work)
+    calls: list[Path] = []
+    monkeypatch.setattr(dispatch._codex_boundary, "materialize_codex_home", lambda home: None)
+    monkeypatch.setattr(
+        dispatch._codex_boundary, "write_back_refreshed_auth", lambda home: calls.append(home)
+    )
+    monkeypatch.setattr(dispatch, "_run_operation_inner", lambda **_kw: inner_code)
+    monkeypatch.setattr(dispatch, "_codex_run_clean", lambda *_a: clean)
+    assert dispatch._run_operation(**kwargs) == inner_code
+    assert bool(calls) is expect_write_back
+
+
+def test_codex_cwd_home_and_main_clone_refused_linked_worktree_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "host-home"
+    (home / "workspace").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    git = lambda *a, cwd: subprocess.run(  # noqa: E731
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+    main = home / "workspace" / "repo"
+    main.mkdir()
+    git("init", "-q", cwd=main)
+    git("commit", "-q", "--allow-empty", "-m", "i", cwd=main)
+    linked = home / "workspace" / "wt-linked"
+    git("worktree", "add", "-q", str(linked), cwd=main)
+    scratch = tmp_path / "scratch-clone"
+    scratch.mkdir()
+    git("init", "-q", cwd=scratch)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    refused = "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    assert dispatch._codex_cwd_refusal(str(home)) == refused
+    assert dispatch._codex_cwd_refusal(str(tmp_path)) == refused
+    assert dispatch._codex_cwd_refusal(str(plain)) == refused
+    assert dispatch._codex_cwd_refusal(str(main)) == refused
+    assert dispatch._codex_cwd_refusal(str(linked)) is None
+    assert dispatch._codex_cwd_refusal(str(scratch)) is None
+
+    journal, op, kwargs = _codex_op(tmp_path, main, "ops2")
+    monkeypatch.setattr(
+        dispatch, "_run_operation_inner", lambda **_kw: pytest.fail("provider must not start")
+    )
+    assert dispatch._run_operation(**kwargs) == 1
+    assert journal.read(op)["failure_kind"] == refused
+
+
+def test_codex_cwd_case_variant_paths_are_judged_by_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "host-home"
+    (home / "workspace").mkdir(parents=True)
+    if not (home / "Workspace").exists():
+        # Case-sensitive filesystem (Linux CI): emulate the alias spelling with
+        # a symlink so the identity checks are exercised on every platform.
+        (home / "Workspace").symlink_to(home / "workspace", target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    def git(*a: str, cwd: Path) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    main = home / "workspace" / "repo"
+    main.mkdir()
+    git("init", "-q", cwd=main)
+    git("commit", "-q", "--allow-empty", "-m", "i", cwd=main)
+    linked = home / "workspace" / "wt-linked"
+    git("worktree", "add", "-q", str(linked), cwd=main)
+    refused = "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    assert dispatch._codex_cwd_refusal(str(home / "Workspace" / "repo")) == refused
+    assert dispatch._codex_cwd_refusal(str(home / "Workspace" / "wt-linked")) is None
+    assert dispatch._canonical_path(str(home / "Workspace" / "wt-linked")) == str(linked.resolve())
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(dispatch._codex_boundary, "materialize_codex_home", lambda h: None)
+    monkeypatch.setattr(dispatch, "_run_operation_inner", lambda **kw: seen.update(kw) or 0)
+    monkeypatch.setattr(dispatch, "_codex_run_clean", lambda *_a: False)
+    _journal, _op, kwargs = _codex_op(tmp_path, linked, "ops3")
+    kwargs["cwd"] = str(home / "Workspace" / "wt-linked")
+    assert dispatch._run_operation(**kwargs) == 0
+    assert seen["cwd"] == str(linked.resolve())
 
 
 def test_background_cline_operation_reaches_terminal_receipt(
