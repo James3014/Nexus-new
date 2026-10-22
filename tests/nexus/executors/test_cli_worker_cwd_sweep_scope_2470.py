@@ -1,9 +1,13 @@
-"""#2470 item 1: the cwd sweep reports, and never kills, processes it cannot prove are the run's.
+"""#2470 item 1: on the Agy write boundary the cwd sweep reports, and never kills,
+processes it cannot prove are the run's.
 
+With ``kill_unproven_cwd_matches=False`` (only ``AgyDispatchBoundary`` passes it)
 ``sweep_run`` kills tracked descendants and run-tagged processes only. Any
 other same-uid process that started after the baseline with a cwd inside the
 target (an Owner shell or editor that ``cd``-ed into the disposable worktree)
-is left running and makes the sweep unclean, so the caller reconciles.
+is left running and makes the sweep unclean, so the caller reconciles. Every
+other caller (``run_cli_worker``: codex executor, Claude measurement worker,
+the Agy worker adapter) keeps main's behaviour and kills such processes.
 
 The physical tests start real processes and only ever signal them by PID.
 """
@@ -103,7 +107,9 @@ def test_unrelated_same_uid_process_in_worktree_survives_and_sweep_is_unclean(ta
     child = None
     try:
         _worker, child, tracker = _launch_run(target, tag)
-        clean = cli_worker.sweep_run(tag, tracker, baseline, [str(target)])
+        clean = cli_worker.sweep_run(
+            tag, tracker, baseline, [str(target)], kill_unproven_cwd_matches=False
+        )
         assert clean is False  # reported, fail closed
         assert bystander.poll() is None  # and not killed
         assert _alive(bystander.pid)
@@ -125,7 +131,12 @@ def test_positive_control_real_descendant_is_killed_and_sweep_is_clean(target):
     try:
         _worker, child, tracker = _launch_run(target, tag)
         assert _alive(child)
-        assert cli_worker.sweep_run(tag, tracker, baseline, [str(target)]) is True
+        assert (
+            cli_worker.sweep_run(
+                tag, tracker, baseline, [str(target)], kill_unproven_cwd_matches=False
+            )
+            is True
+        )
         assert _wait_dead(child)
     finally:
         cli_worker.release_run(tag)
@@ -159,7 +170,12 @@ def test_run_tagged_process_in_worktree_is_killed(target):
             def stop(self):
                 return set()
 
-        assert cli_worker.sweep_run(tag, _Empty(), baseline, [str(target)]) is True
+        assert (
+            cli_worker.sweep_run(
+                tag, _Empty(), baseline, [str(target)], kill_unproven_cwd_matches=False
+            )
+            is True
+        )
         tagged.wait(timeout=5)
         assert tagged.returncode == -signal.SIGKILL
     finally:
@@ -175,25 +191,102 @@ def test_sweep_clean_kills_only_tracked_and_reports_other_cwd_matches(monkeypatc
         cli_worker, "_kill_and_confirm", lambda pids: killed.append(set(pids)) or True
     )
     monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
-    assert cli_worker._sweep_clean({11, 12}, {12, 99}) is False
+    assert cli_worker._sweep_clean({11, 12}, {12, 99}, kill_unproven=False) is False
     assert killed == [{11, 12}]  # 99 is reported, never signalled
 
 
 def test_sweep_clean_ignores_a_reported_pid_that_already_exited(monkeypatch):
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
     monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: False)
-    assert cli_worker._sweep_clean({11}, {11, 99}) is True
+    assert cli_worker._sweep_clean({11}, {11, 99}, kill_unproven=False) is True
 
 
 def test_sweep_clean_is_clean_when_every_cwd_match_is_tracked(monkeypatch):
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
     monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
-    assert cli_worker._sweep_clean({11, 12}, {11}) is True
+    assert cli_worker._sweep_clean({11, 12}, {11}, kill_unproven=False) is True
 
 
 def test_sweep_clean_unknown_scan_and_failed_kill_are_unclean(monkeypatch):
     monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
-    assert cli_worker._sweep_clean({11}, None) is False
+    assert cli_worker._sweep_clean({11}, None, kill_unproven=False) is False
     monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: False)
-    assert cli_worker._sweep_clean({11}, set()) is False
+    assert cli_worker._sweep_clean({11}, set(), kill_unproven=False) is False
+
+
+def test_default_sweep_clean_still_kills_every_cwd_match(monkeypatch):
+    killed: list[set[int]] = []
+    monkeypatch.setattr(
+        cli_worker, "_kill_and_confirm", lambda pids: killed.append(set(pids)) or True
+    )
+    assert cli_worker._sweep_clean({11}, {11, 99}) is True
+    assert killed == [{11, 99}]
+    assert cli_worker._sweep_clean({11}, None) is False
+
+
+@needs_lsof
+def test_default_run_cli_worker_still_kills_a_cwd_matching_process(target):
+    """The codex / measurement path (run_cli_worker + sweep_roots) is unchanged:
+    a post-baseline process cd-ed into the sweep root is killed, sweep clean."""
+    from nexus.executors.cli_worker import CliWorkerRequest, run_cli_worker
+
+    holder: dict = {}
+
+    def start_bystander():
+        time.sleep(0.5)  # after the worker's baseline
+        holder["p"] = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            cwd=str(target),
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    import threading
+
+    starter = threading.Thread(target=start_bystander)
+    starter.start()
+    try:
+        result = run_cli_worker(
+            CliWorkerRequest(
+                executable=sys.executable,
+                argv=("-c", "import time; time.sleep(1.5)"),
+                cwd=str(target),
+                sweep_descendants_on_exit=True,
+                sweep_roots=(str(target),),
+            )
+        )
+        starter.join()
+        bystander = holder["p"]
+        assert result.descendants_swept is True
+        bystander.wait(timeout=5)
+        assert bystander.returncode == -signal.SIGKILL
+    finally:
+        starter.join()
+        if "p" in holder and holder["p"].poll() is None:
+            _kill(holder["p"].pid)
+            holder["p"].wait(timeout=5)
+
+
+def test_agy_dispatch_boundary_opts_into_report_not_kill(tmp_path, monkeypatch):
+    from nexus.executors import agy_dispatch_boundary as boundary_mod
+
+    seen: dict = {}
+
+    def fake_sweep_run(tag, tracker, baseline, roots, **kwargs):
+        seen.update(kwargs)
+        return False
+
+    monkeypatch.setattr(boundary_mod.cli_worker, "sweep_run", fake_sweep_run)
+    boundary = object.__new__(boundary_mod.AgyDispatchBoundary)
+    boundary.target = tmp_path
+    boundary.run_root = tmp_path
+    boundary.run_tag = "t"
+    boundary._baseline = None
+    boundary._tracker = object()
+    boundary._launched = True
+    boundary._swept = None
+    assert boundary.sweep() is False
+    assert seen == {"kill_unproven_cwd_matches": False}

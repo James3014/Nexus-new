@@ -18,7 +18,6 @@ import os
 import pwd
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -1353,12 +1352,8 @@ def test_sweep_kills_env_cleared_setsid_child(tmp_path):
     assert _wait_dead(pid)
 
 
-def test_double_forked_child_resident_in_sweep_root_is_reported_not_killed(tmp_path):
-    """Immediate double fork (parent gone before any poll) is found by its cwd.
-
-    It is neither tracked nor tagged, so nothing proves it is the run's: it is
-    left running and the sweep is reported unclean (#2470).
-    """
+def test_sweep_kills_double_forked_child_resident_in_sweep_root(tmp_path):
+    """Immediate double fork (parent gone before any poll) is caught by its cwd."""
     work = (tmp_path / "work").resolve()
     work.mkdir()
     code = (
@@ -1387,19 +1382,13 @@ def test_double_forked_child_resident_in_sweep_root_is_reported_not_killed(tmp_p
         )
     )
     pid = int(result.stdout.strip())
-    try:
-        assert result.descendants_swept is False
-        assert not _wait_dead(pid, seconds=0.5)
-    finally:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    assert result.descendants_swept is True
+    assert _wait_dead(pid)
 
 
 def test_cwd_sweep_spares_processes_that_predate_the_worker(tmp_path):
-    """A process resident in the sweep root before the worker started survives
-    and does not make the sweep unclean."""
+    """A process resident in the sweep root before the worker started survives;
+    one the worker leaves behind there is killed."""
     work = (tmp_path / "work").resolve()
     work.mkdir()
     bystander = subprocess.Popen(
@@ -1411,16 +1400,34 @@ def test_cwd_sweep_spares_processes_that_predate_the_worker(tmp_path):
     )
     try:
         time.sleep(1.2)  # older than the worker beyond the lstart margin
+        code = (
+            "import os, sys\n"
+            "r, w = os.pipe()\n"
+            "if os.fork() == 0:\n"
+            "    os.setsid()\n"
+            "    if os.fork() == 0:\n"
+            "        os.chdir(sys.argv[1])\n"
+            "        os.write(w, str(os.getpid()).encode())\n"
+            "        null = os.open(os.devnull, os.O_RDWR)\n"
+            "        for fd in (0, 1, 2):\n"
+            "            os.dup2(null, fd)\n"
+            "        os.execve(sys.executable, [sys.executable, '-c', 'import time; time.sleep(60)'], {})\n"
+            "    os._exit(0)\n"
+            "os.close(w)\n"
+            "print(os.read(r, 32).decode(), flush=True)\n"
+        )
         result = run_cli_worker(
             CliWorkerRequest(
                 executable=sys.executable,
-                argv=("-c", "print('ok')"),
-                cwd=str(work),
+                argv=("-c", code, str(work)),
+                cwd=str(tmp_path),
                 sweep_descendants_on_exit=True,
                 sweep_roots=(str(work),),
             )
         )
+        leftover = int(result.stdout.strip())
         assert result.descendants_swept is True
+        assert _wait_dead(leftover)
         assert bystander.poll() is None  # pre-existing resident was not killed
     finally:
         bystander.kill()

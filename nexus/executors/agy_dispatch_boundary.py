@@ -193,7 +193,14 @@ class AgyDispatchBoundary:
         if tracker is None:
             self._swept = False
             return False
-        self._swept = cli_worker.sweep_run(self.run_tag, tracker, self._baseline, self.sweep_roots)
+        # #2470: report, never kill, a cwd match the run cannot be proven to own.
+        self._swept = cli_worker.sweep_run(
+            self.run_tag,
+            tracker,
+            self._baseline,
+            self.sweep_roots,
+            kill_unproven_cwd_matches=False,
+        )
         return self._swept
 
     def cleanup(self) -> None:

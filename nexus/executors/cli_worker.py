@@ -669,19 +669,22 @@ def _pids_with_cwd_under(
     return _started_after_by_us(found, baseline.started_at)
 
 
-def _sweep_clean(tracked: set[int], cwd_pids: Optional[set[int]]) -> bool:
-    """Kill the tracked descendants; report, never kill, other cwd matches (#2470).
+def _sweep_clean(
+    tracked: set[int], cwd_pids: Optional[set[int]], *, kill_unproven: bool = True
+) -> bool:
+    """Kill tracked and cwd-matched pids; unknown cwd scan never counts as clean.
 
-    Only processes the run provably owns are killed: the tracked descendants
-    here, and the run-tagged processes in ``_sweep_tagged_processes``, which
-    callers run before the cwd scan. A process whose cwd lies inside a sweep
-    root but that is neither tracked nor tagged may be an Owner shell or
-    editor that ``cd``-ed into the disposable worktree, or a descendant that
-    escaped both mechanisms (double fork plus a cleared environment). Neither
-    can be told apart, so it is left running and the sweep is reported
-    unclean: the caller then needs reconciliation instead of a false kill.
-    An unknown cwd scan never counts as clean.
+    ``kill_unproven=False`` (#2470, Agy dispatch write boundary only): kill the
+    tracked descendants but only *report* the other cwd matches. Such a
+    process is neither tracked nor (the caller swept tags first) run-tagged,
+    so it may be an Owner shell or editor that ``cd``-ed into the disposable
+    worktree; it is left running and the sweep is unclean, so the run needs
+    reconciliation instead of a false kill. Every other caller keeps the
+    default.
     """
+    if kill_unproven:
+        killed = _kill_and_confirm(tracked | (cwd_pids or set()))
+        return killed and cwd_pids is not None
     killed = _kill_and_confirm(tracked)
     if cwd_pids is None:
         return False
@@ -815,23 +818,28 @@ def sweep_run(
     tracker: Any,
     baseline: Optional[_SweepBaseline],
     roots: Iterable[str],
+    *,
+    kill_unproven_cwd_matches: bool = True,
 ) -> bool:
     """Stop ``tracker`` and SIGKILL every surviving descendant of the run.
 
-    Kills only tracked descendants and processes carrying the run tag. True
-    only when the sweep is provably clean: those are dead, no other process
-    the run could have started has a cwd under ``roots`` (such a process is
-    reported, not killed; #2470), the baseline was readable and no
-    process-table poll failed.
+    With ``kill_unproven_cwd_matches=False`` (#2470) only tracked descendants
+    and run-tagged processes are killed; any other process with a cwd under
+    ``roots`` is reported, left running, and makes the sweep unclean.
+
+    True only when the sweep is provably clean: tracked descendants and
+    processes with a cwd under ``roots`` are dead, no process still carries the
+    run tag, the baseline was readable and no process-table poll failed.
     """
     tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
     tagged_clean = _sweep_tagged_processes(run_tag)
-    return bool(
-        _sweep_clean(tracked, _pids_with_cwd_under(tuple(roots), baseline))
-        and tagged_clean
-        and baseline is not None
-        and not tracker.probe_failed
+    cwd_pids = _pids_with_cwd_under(tuple(roots), baseline)
+    swept = (
+        _sweep_clean(tracked, cwd_pids)
+        if kill_unproven_cwd_matches
+        else _sweep_clean(tracked, cwd_pids, kill_unproven=False)
     )
+    return bool(swept and tagged_clean and baseline is not None and not tracker.probe_failed)
 
 
 def release_run(run_tag: str) -> None:
@@ -1049,24 +1057,19 @@ def run_cli_worker(
                 )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
-            tracked = (
-                tracker.stop() - (baseline.preexisting if baseline else frozenset())
-                if tracker is not None
-                else set()
-            )
-            # Descendants that called setsid() left the group; find them by the
-            # per-run tag in their environment and kill them too.  A receipt may
-            # only claim a clean kill when no tagged process survives.  This
-            # runs before the cwd scan, which only reports what is left (#2470).
-            if not _sweep_tagged_processes(run_tag):
-                group_killed = False
             if tracker is not None:
+                tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
                 if (
                     not _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
                     or baseline is None
                     or tracker.probe_failed
                 ):
                     group_killed = False
+            # Descendants that called setsid() left the group; find them by the
+            # per-run tag in their environment and kill them too.  A receipt may
+            # only claim a clean kill when no tagged process survives.
+            if not _sweep_tagged_processes(run_tag):
+                group_killed = False
             try:
                 stdout, stderr = process.communicate(timeout=_POST_KILL_DRAIN_SECONDS)
             except subprocess.TimeoutExpired as drain_exc:

@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -660,7 +661,7 @@ class _SweepSpy:
             cli_worker, "_sweep_tagged_processes", lambda _tag: self.work.append("tagged") or True
         )
         monkeypatch.setattr(cli_worker, "_pids_with_cwd_under", lambda *_a: frozenset())
-        monkeypatch.setattr(cli_worker, "_sweep_clean", lambda *_a: clean)
+        monkeypatch.setattr(cli_worker, "_sweep_clean", lambda *_a, **_k: clean)
 
     def launch(self, boundary) -> None:
         """Mark ``boundary`` launched with a fake live tracker (no real pid)."""
@@ -1395,7 +1396,7 @@ def _interrupted(sweep_clean, exc):
         hook = kwargs["operation_hook"]
         hook({"phase": "EXECUTING", "attempts": 1, "rotations": 0, "provider_pid": 999999})
         if sweep_clean is not None:
-            hook({"descendant_sweep_clean": sweep_clean})
+            hook({"descendant_sweep_clean": sweep_clean, "descendant_sweep_attempt": 1})
         raise exc
 
     return fake_dispatch
@@ -1649,3 +1650,191 @@ def test_pending_marker_alone_makes_the_signal_guard_reconcile(tmp_path, monkeyp
     record = journal.read(operation_id)
     assert record["phase"] == "RECONCILE_REQUIRED"
     assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_DESCENDANT_SWEEP_UNCLEAN"
+
+
+# ---------------------------------------------------------------------------
+# #2470 round 3: a stale heartbeat cannot resurrect an earlier attempt's verdict
+# ---------------------------------------------------------------------------
+
+
+class _CleanBoundary:
+    def sweep(self):
+        return True
+
+
+def test_stale_heartbeat_after_next_pending_marker_cannot_prove_the_sweep(tmp_path, monkeypatch):
+    """Attempt 1 records True; a heartbeat snapshot taken before attempt 2's pending
+    marker is written after it; attempt 2's verdict write fails. Must reconcile."""
+    import threading
+
+    real_heartbeat = dispatch.AgyOperationJournal.heartbeat
+    hold = threading.Event()
+    pending2_written = threading.Event()
+    stale_written = threading.Event()
+    held_changes: list[dict] = []
+
+    def heartbeat(self, operation_id, **changes):
+        main = threading.current_thread() is threading.main_thread()
+        if not main and hold.is_set() and not stale_written.is_set():
+            # This periodic snapshot was taken before attempt 2's marker.
+            pending2_written.wait(timeout=10)
+            held_changes.append(dict(changes))
+            try:
+                return real_heartbeat(self, operation_id, **changes)
+            finally:
+                stale_written.set()
+        if (
+            main
+            and changes.get("descendant_sweep_attempt") == 2
+            and changes.get("descendant_sweep_clean") is not None
+        ):
+            raise dispatch._SupervisorSignalError(15)  # the verdict write is interrupted
+        return real_heartbeat(self, operation_id, **changes)
+
+    monkeypatch.setattr(dispatch.AgyOperationJournal, "heartbeat", heartbeat)
+
+    def racing_dispatch(**kw):
+        hook = kw["operation_hook"]
+        hook({"phase": "EXECUTING", "attempts": 1, "rotations": 0})
+        hook({"descendant_sweep_clean": None, "descendant_sweep_attempt": 1})
+        hook({"descendant_sweep_clean": True, "descendant_sweep_attempt": 1})
+        hold.set()  # the next periodic heartbeat snapshot is now "stale"
+        time.sleep(1.5)  # let the heartbeat thread take that snapshot and block
+        hook({"phase": "EXECUTING", "attempts": 2, "rotations": 1})
+        hook({"descendant_sweep_clean": None, "descendant_sweep_attempt": 2})
+        pending2_written.set()
+        assert stale_written.wait(timeout=10)
+        dispatch._record_descendant_sweep(hook, _CleanBoundary(), 2)  # write fails
+        raise dispatch._SupervisorSignalError(15)
+
+    journal, operation_id, kwargs = _background_operation(tmp_path, monkeypatch, racing_dispatch)
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(**kwargs)
+    assert held_changes, "the stale heartbeat write never happened"
+    assert all("descendant_sweep_clean" not in c for c in held_changes)
+    record = journal.read(operation_id)
+    assert record["descendant_sweep_clean"] is None
+    assert record["descendant_sweep_attempt"] == 2
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_DESCENDANT_SWEEP_UNCLEAN"
+    assert dispatch._cleanup_reconciled_lease(record) == {"result": "NOT_SAFE_TO_CLEAN"}
+
+
+@pytest.mark.parametrize(
+    "record,unproven",
+    [
+        ({}, False),
+        ({"descendant_sweep_clean": None, "descendant_sweep_attempt": 2, "attempts": 2}, True),
+        ({"descendant_sweep_clean": False, "descendant_sweep_attempt": 2, "attempts": 2}, True),
+        ({"descendant_sweep_clean": True, "descendant_sweep_attempt": 2, "attempts": 2}, False),
+        ({"descendant_sweep_clean": True, "descendant_sweep_attempt": 1, "attempts": 2}, True),
+        ({"descendant_sweep_clean": True, "attempts": 1}, True),
+        ({"descendant_sweep_clean": True, "descendant_sweep_attempt": True, "attempts": 1}, True),
+    ],
+)
+def test_sweep_verdict_counts_only_for_the_latest_attempt(record, unproven):
+    assert dispatch._descendant_sweep_unproven(record) is unproven
+
+
+# ---------------------------------------------------------------------------
+# #2470 review: --reconcile / --finalize-no-effect keep an unproven sweep held
+# ---------------------------------------------------------------------------
+
+
+_REAL_CWD_SCAN = boundary_mod.cli_worker._pids_with_cwd_under
+
+
+def _held_operation(tmp_path, monkeypatch):
+    spy = _SweepSpy(monkeypatch, clean=False)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        spy.launch(write_boundary)
+        write_boundary.sweep()
+        return 0, "", f"\n{dispatch.DESCENDANT_SWEEP_FAILED_MARKER}\n", False, 5
+
+    journal, operation_id, kwargs = _background_accept_edits(tmp_path, monkeypatch, runner)
+    dispatch._run_background_operation(**kwargs)
+    # The background supervisor ran in this process; a real one has exited.
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=10)
+    journal.update(operation_id, pid=gone.pid)
+    return journal, operation_id, kwargs
+
+
+def test_reconcile_keeps_an_unproven_sweep_reconcile_required(tmp_path, monkeypatch, seatbelt_on):
+    journal, operation_id, _ = _held_operation(tmp_path, monkeypatch)
+    for _ in range(2):  # repeated automatic reconciles never wash it out
+        record = dispatch._reconcile_operation(journal, operation_id)
+        assert record["status"] == "RUNNING"
+        assert record["phase"] == "RECONCILE_REQUIRED"
+        assert record["finished_at"] is None
+        reconciliation = record["reconciliation"]
+        assert reconciliation["result"] == "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+        assert reconciliation["provider_alive_after"] is None
+        assert reconciliation["descendant_sweep_clean"] is False
+        assert reconciliation["lease_cleanup"] == {"result": "NOT_SAFE_TO_CLEAN"}
+
+
+def test_finalize_no_effect_refuses_an_unproven_sweep(tmp_path, monkeypatch, seatbelt_on):
+    journal, operation_id, _ = _held_operation(tmp_path, monkeypatch)
+    with pytest.raises(
+        dispatch.AgyOperationJournalError, match="NO_EFFECT_DESCENDANT_SWEEP_UNPROVEN"
+    ):
+        dispatch._finalize_no_effect_operation(journal, operation_id)
+    assert journal.read(operation_id)["phase"] == "RECONCILE_REQUIRED"
+
+
+def test_reconcile_does_not_hold_a_live_wrapper_with_a_pending_marker(tmp_path):
+    journal = dispatch.AgyOperationJournal(tmp_path / "ops")
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    journal.mark_started(operation_id, pid=os.getpid())  # the wrapper is alive
+    journal.heartbeat(operation_id, descendant_sweep_clean=None, descendant_sweep_attempt=1)
+    record = journal.reconcile(operation_id)
+    result = (record.get("reconciliation") or {}).get("result")
+    assert result != "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+
+
+def test_ack_unclean_sweep_refuses_while_a_process_lives_in_the_target(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    journal, operation_id, kwargs = _held_operation(tmp_path, monkeypatch)
+    target = kwargs["cwd"]
+    # _SweepSpy faked the cwd scan for the run; the operator re-check is real.
+    monkeypatch.setattr(boundary_mod.cli_worker, "_pids_with_cwd_under", _REAL_CWD_SCAN)
+    resident = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=target,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(0.3)
+        with pytest.raises(dispatch.AgyOperationJournalError, match="ACK_UNCLEAN_SWEEP_RESIDENTS"):
+            dispatch._ack_unclean_sweep_operation(journal, operation_id)
+        assert resident.poll() is None  # the ack only checks, never kills
+        assert journal.read(operation_id)["descendant_sweep_clean"] is False
+    finally:
+        os.kill(resident.pid, 9)
+        resident.wait(timeout=5)
+    record = dispatch._ack_unclean_sweep_operation(journal, operation_id)
+    assert record["descendant_sweep_clean"] is True
+    assert record["descendant_sweep_acknowledged"]["method"] == "OPERATOR_CWD_RESCAN"
+    assert record["reconciliation"]["result"] != "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+
+
+def test_ack_unclean_sweep_is_refused_when_not_needed(tmp_path, monkeypatch):
+    journal, operation_id, kwargs = _background_operation(tmp_path, monkeypatch, lambda **_kw: 0)
+    with pytest.raises(dispatch.AgyOperationJournalError, match="ACK_UNCLEAN_SWEEP_NOT_REQUIRED"):
+        dispatch._ack_unclean_sweep_operation(journal, operation_id)

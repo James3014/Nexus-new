@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fcntl
 import functools
 import hashlib
@@ -2561,16 +2562,11 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
         callback(payload)
 
 
-def _descendant_sweep_unproven(record: dict[str, Any]) -> bool:
-    """True when a boundary attempt's sweep is not proven clean (#2470).
-
-    Runs without a write boundary never carry the field. Once an attempt has
-    written its pending marker, only a recorded ``True`` counts as clean.
-    """
-    return "descendant_sweep_clean" in record and record["descendant_sweep_clean"] is not True
+_DESCENDANT_SWEEP_KEYS = _agy_operation_journal.DESCENDANT_SWEEP_KEYS
+_descendant_sweep_unproven = _agy_operation_journal.descendant_sweep_unproven
 
 
-def _record_descendant_sweep(callback: Any, write_boundary: Any) -> None:
+def _record_descendant_sweep(callback: Any, write_boundary: Any, attempt: int) -> None:
     """Record the attempt's sweep verdict while an exception propagates (#2470).
 
     The sweep runs once; a recorded result is reused. A sweep that cannot
@@ -2584,7 +2580,7 @@ def _record_descendant_sweep(callback: Any, write_boundary: Any) -> None:
     except BaseException:
         clean = False
     try:
-        _operation_hook(callback, descendant_sweep_clean=clean)
+        _operation_hook(callback, descendant_sweep_clean=clean, descendant_sweep_attempt=attempt)
     except BaseException as exc:
         sys.stderr.write(
             f"nexus-agy-dispatch: could not record descendant_sweep_clean={clean}: "
@@ -5201,7 +5197,11 @@ def dispatch_run(
                     # completion path treat the attempt's sweep as unclean, so
                     # a verdict write that fails (or a second signal during
                     # it) never reads as clean.
-                    _operation_hook(operation_hook, descendant_sweep_clean=None)
+                    _operation_hook(
+                        operation_hook,
+                        descendant_sweep_clean=None,
+                        descendant_sweep_attempt=attempts,
+                    )
                 try:
                     code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
                 except Exception as runner_exc:
@@ -5222,7 +5222,7 @@ def dispatch_run(
                 # first so the supervisor guard terminalizes an unclean sweep
                 # as RECONCILE_REQUIRED.
                 if write_boundary is not None:
-                    _record_descendant_sweep(operation_hook, write_boundary)
+                    _record_descendant_sweep(operation_hook, write_boundary, attempts)
                 raise
             finally:
                 try:
@@ -5234,7 +5234,9 @@ def dispatch_run(
                 # #2470: the attempt ended normally; replace the pending marker
                 # with the (already recorded, run-once) sweep verdict.
                 _operation_hook(
-                    operation_hook, descendant_sweep_clean=bool(write_boundary.sweep())
+                    operation_hook,
+                    descendant_sweep_clean=bool(write_boundary.sweep()),
+                    descendant_sweep_attempt=attempts,
                 )
             total_wall_ms += wall_ms
 
@@ -6093,6 +6095,7 @@ def _run_background_operation(
         "effective_permissions": None,
     }
     state_lock = threading.Lock()
+    sweep_write_lock = threading.Lock()
 
     def _heartbeat_snapshot(snapshot: dict[str, Any]) -> None:
         journal.heartbeat(
@@ -6125,12 +6128,8 @@ def _run_background_operation(
             resolved_model=snapshot.get("resolved_model"),
             model_catalog=snapshot.get("model_catalog"),
             pool_queue=snapshot.get("pool_queue"),
-            # #2470: only an attempt that ended by exception records its sweep.
-            **(
-                {"descendant_sweep_clean": snapshot["descendant_sweep_clean"]}
-                if "descendant_sweep_clean" in snapshot
-                else {}
-            ),
+            # #2470: never the descendant-sweep keys. A periodic snapshot can be
+            # older than the latest pending marker; only on_event writes them.
         )
 
     def on_event(event: dict[str, Any]) -> None:
@@ -6162,6 +6161,16 @@ def _run_background_operation(
                 })
                 state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             snapshot = dict(state)
+            sweep_changes = {
+                key: event[key] for key in _DESCENDANT_SWEEP_KEYS if key in event
+            }
+        if sweep_changes:
+            # #2470: the sweep marker/verdict is written on its own, in the
+            # order the attempt emits it, before the general heartbeat; no
+            # snapshot write carries these keys, so none can overwrite a newer
+            # marker with an older verdict.
+            with sweep_write_lock:
+                journal.heartbeat(operation_id, **sweep_changes)
         _heartbeat_snapshot(snapshot)
 
     def heartbeat_loop() -> None:
@@ -6253,7 +6262,7 @@ def _run_background_operation(
             )
             return int(exit_code if exit_code not in (None, 0) else 1)
 
-        if _descendant_sweep_unproven(snapshot):
+        if _descendant_sweep_unproven(snapshot, bind_attempt=False):
             # #2470: dispatch returned, but a writer of this run may survive
             # (e.g. an env-cleared double fork the sweep could only report).
             # Never terminal and never "provider gone", so no lease cleanup.
@@ -6276,6 +6285,7 @@ def _run_background_operation(
                 first_effect_at=snapshot.get("first_effect_at"),
                 tool_event_count=int(snapshot.get("tool_event_count") or 0),
                 descendant_sweep_clean=snapshot.get("descendant_sweep_clean"),
+                descendant_sweep_attempt=snapshot.get("descendant_sweep_attempt"),
                 reconciliation={
                     "at": _agy_operation_journal.utc_now(),
                     "result": "DESCENDANT_SWEEP_UNCLEAN_AFTER_DISPATCH",
@@ -6541,7 +6551,12 @@ def _finalize_no_effect_operation(
     ):
         return existing
 
+    if _descendant_sweep_unproven(existing):
+        # #2470: a writer of this run may survive; no source proof can bind it.
+        raise AgyOperationJournalError("NO_EFFECT_DESCENDANT_SWEEP_UNPROVEN")
     record = _reconcile_operation(journal, operation_id)
+    if _descendant_sweep_unproven(record):
+        raise AgyOperationJournalError("NO_EFFECT_DESCENDANT_SWEEP_UNPROVEN")
     if record.get("status") != "OUTCOME_UNKNOWN":
         raise AgyOperationJournalError("NO_EFFECT_FINALIZATION_REQUIRES_OUTCOME_UNKNOWN")
 
@@ -6573,6 +6588,57 @@ def _finalize_no_effect_operation(
         cwd=record.get("cwd"),
         reconciliation=reconciliation,
     )
+
+
+def _ack_unclean_sweep_operation(
+    journal: AgyOperationJournal,
+    operation_id: str,
+) -> dict[str, Any]:
+    """Operator step that clears an unproven descendant sweep (#2470).
+
+    Refuses while the wrapper or provider lives, or while any process of this
+    uid (other than this one and its ancestors) has a cwd under the
+    operation's target; an unreadable scan also refuses. On success the
+    sweep verdict for the latest attempt is recorded as clean (with the
+    acknowledgement) and the ordinary reconcile runs.
+    """
+    record = journal.read(operation_id)
+    if not _descendant_sweep_unproven(record):
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_NOT_REQUIRED")
+    if _agy_operation_journal._process_alive(record.get("pid")) or (
+        _agy_operation_journal._process_alive(record.get("provider_pid"))
+    ):
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_PROCESS_ALIVE")
+    target = record.get("cwd")
+    if not isinstance(target, str) or not target:
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_TARGET_UNKNOWN")
+    cli_worker = import_module("nexus.executors.cli_worker")
+    baseline = cli_worker.sweep_baseline()
+    if baseline is None:
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_SCAN_UNAVAILABLE")
+    # Every process of this uid counts, however old: the escaped writer may
+    # predate this command.
+    everything = dataclasses.replace(baseline, started_at=0.0, preexisting=frozenset())
+    residents = cli_worker._pids_with_cwd_under((target,), everything)
+    if residents is None:
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_SCAN_UNAVAILABLE")
+    if residents:
+        raise AgyOperationJournalError(
+            "ACK_UNCLEAN_SWEEP_RESIDENTS:" + ",".join(str(pid) for pid in sorted(residents))
+        )
+    journal.update(
+        operation_id,
+        descendant_sweep_clean=True,
+        descendant_sweep_attempt=int(record.get("attempts") or 0),
+        descendant_sweep_acknowledged={
+            "at": _agy_operation_journal.utc_now(),
+            "method": "OPERATOR_CWD_RESCAN",
+            "target": target,
+            "previous_clean": record.get("descendant_sweep_clean"),
+            "previous_attempt": record.get("descendant_sweep_attempt"),
+        },
+    )
+    return _reconcile_operation(journal, operation_id)
 
 
 def _print_operation(record: dict[str, Any]) -> None:
@@ -6716,6 +6782,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument(
+        "--ack-unclean-sweep",
+        metavar="OPERATION_ID",
+        help=(
+            "Operator step for an operation held by an unproven descendant sweep: "
+            "re-check that no process has its cwd under the operation's target, "
+            "then record the sweep as clean and reconcile"
+        ),
+    )
     ap.add_argument("--hcom-collab", action="store_true")
     ap.add_argument(
         "--exclude-account",
@@ -6756,6 +6831,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.finalize_no_effect:
         _print_operation(_finalize_no_effect_operation(journal, args.finalize_no_effect))
+        return 0
+
+    if args.ack_unclean_sweep:
+        _print_operation(_ack_unclean_sweep_operation(journal, args.ack_unclean_sweep))
         return 0
 
     cwd = str(Path(args.cwd).expanduser().resolve())
