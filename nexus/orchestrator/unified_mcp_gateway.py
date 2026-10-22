@@ -381,6 +381,35 @@ PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
 AGY_PRINT_TIMEOUT = "25s"
 AGY_MODEL_PROBE_PRINT_TIMEOUT = "300s"
+# #2859: Gemini assist/probe runs are read-only. `plan` mode is not safe headless
+# (the built-in policy allows exit_plan_mode when non-interactive and the CLI then
+# switches to YOLO), so run in `default` mode, where headless ask_user is denied,
+# and load a policy that denies the plan-mode transitions and the write/shell tools.
+# The policy is default-deny with a read-only allowlist. MCP servers are also kept
+# from connecting: a non-empty --allowed-mcp-server-names list blocks every server
+# not named in it, and this sentinel names no real server.
+GEMINI_READ_ONLY_POLICY_PATH = Path(__file__).resolve().with_name("gemini_read_only_policy.toml")
+GEMINI_NO_MCP_SERVER_SENTINEL = "nexus-no-mcp-servers"
+GEMINI_READ_ONLY_ALLOWED_TOOLS = frozenset({"read_file", "read_many_files", "list_directory", "glob", "grep_search"})
+
+
+def _gemini_read_only_command(*, executable: str, model: str, prompt: str) -> list[str]:
+    return [
+        executable,
+        "--skip-trust",
+        "--approval-mode",
+        "default",
+        "--policy",
+        str(GEMINI_READ_ONLY_POLICY_PATH),
+        "--allowed-mcp-server-names",
+        GEMINI_NO_MCP_SERVER_SENTINEL,
+        "-m",
+        model,
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+    ]
 
 
 def _agy_effort_tier(model: str) -> str:
@@ -1159,7 +1188,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 print_timeout=agy_print_timeout,
             )
         if provider == "gemini":
-            return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
+            return _gemini_read_only_command(executable=executable, model=model, prompt=prompt)
         if provider == "opencode":
             return [executable, "run", "--model", model, prompt]
         if provider == "mimo":
@@ -3145,8 +3174,9 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             command = [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", cline_model, prompt]
         elif requested == "gemini":
             # #2635 SEC-010: the assist contract is read-only (return a patch
-            # as JSON), so Gemini runs in plan mode and cannot edit files.
-            command = [executable, "--skip-trust", "--approval-mode", "plan", "-m", selected_model, "-p", prompt, "--output-format", "json"]
+            # as JSON), so Gemini must not edit files; see #2859 for why this
+            # is `default` mode plus a deny policy rather than plan mode.
+            command = _gemini_read_only_command(executable=executable, model=selected_model, prompt=prompt)
         elif requested == "opencode":
             command = [executable, "run", "--model", selected_model, prompt]
         elif requested == "codex":
