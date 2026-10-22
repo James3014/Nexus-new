@@ -1400,15 +1400,14 @@ def test_prepare_refuses_a_missing_wrapper_reference(worker_env, tmp_path):
 @pytest.mark.usefixtures("worker_preflight")
 def test_oversized_copy_in_is_refused_before_creating_files(worker_env, monkeypatch, cap):
     monkeypatch.setattr(worker_mod, cap, 2)
-    real_open = Path.open
+    real_write = os.write
     writes = []
 
-    def observe_open(path, mode="r", *args, **kwargs):
-        if mode == "wb" and path.is_relative_to(worker_env["runs"]):
-            writes.append(path)
-        return real_open(path, mode, *args, **kwargs)
+    def observe_write(fd, data):
+        writes.append(len(data))
+        return real_write(fd, data)
 
-    monkeypatch.setattr(Path, "open", observe_open)
+    monkeypatch.setattr(worker_mod.os, "write", observe_write)
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
         _prepare(worker_env)
     assert writes == []
@@ -1431,31 +1430,15 @@ def test_copy_in_counts_actual_bytes_when_a_source_file_grows(
         (source / "src" / "a.py").write_bytes(b"x" * grown_size)
 
     monkeypatch.setattr(worker_mod, "_check_copy_caps", grow_after_preflight)
-    real_open = Path.open
+    real_write = os.write
     written = []
 
-    class CountingWriter:
-        def __init__(self, file):
-            self.file = file
+    def observe_write(fd, data):
+        written.append(len(data))
+        assert sum(written) <= worker_mod.MAX_COPY_BACK_BYTES
+        return real_write(fd, data)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            self.file.close()
-
-        def write(self, chunk):
-            written.append(len(chunk))
-            assert sum(written) <= worker_mod.MAX_COPY_BACK_BYTES
-            return self.file.write(chunk)
-
-    def observe_open(path, mode="r", *args, **kwargs):
-        file = real_open(path, mode, *args, **kwargs)
-        if mode == "wb" and path.is_relative_to(worker_env["runs"]):
-            return CountingWriter(file)
-        return file
-
-    monkeypatch.setattr(Path, "open", observe_open)
+    monkeypatch.setattr(worker_mod.os, "write", observe_write)
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
         _prepare(worker_env)
     assert written == expected_writes  # neither an individual file nor their sum crosses the cap
@@ -1500,6 +1483,7 @@ def test_reconcile_worker_sweeps_exact_wrapper_argv_before_owner_check(
         worker_run_as_user=worker_mod.WORKER_USER,
         worker_run_root=str(run_root),
     )
+    worker_mod.write_operation_marker(run_root, operation_id)
     calls = []
 
     def run(argv, **kwargs):
@@ -1535,7 +1519,7 @@ def test_reconcile_worker_sweeps_exact_wrapper_argv_before_owner_check(
 @pytest.mark.parametrize(
     "case, expected",
     [
-        ("gone", "RUN_ROOT_GONE"),
+        ("gone", "RUN_ROOT_GONE_UNPROVEN"),
         ("wrong_user", "RECORD_INVALID"),
         ("outside", "RECORD_INVALID"),
         ("parent", "RECORD_INVALID"),
@@ -1591,7 +1575,7 @@ def test_reconcile_worker_validates_record_without_sudo(
     ],
 )
 @pytest.mark.parametrize("provider_alive_after", [True, False, None])
-def test_reconcile_worker_sweep_failure_preserves_provider_truth_and_blocks_retry(
+def test_reconcile_worker_sweep_failure_holds_and_blocks_retry(
     worker_env, tmp_path, monkeypatch, stdout, returncode, error, expected, provider_alive_after
 ):
     run_root = worker_env["runs"] / ("c" * 32)
@@ -1603,6 +1587,7 @@ def test_reconcile_worker_sweep_failure_preserves_provider_truth_and_blocks_retr
         worker_run_as_user=worker_mod.WORKER_USER,
         worker_run_root=str(run_root),
     )
+    worker_mod.write_operation_marker(run_root, operation_id)
     # Exercise the completed-provider projection too: it must preserve the
     # existing provider truth when the worker sweep cannot confirm cleanup.
     journal.update(
@@ -1625,8 +1610,10 @@ def test_reconcile_worker_sweep_failure_preserves_provider_truth_and_blocks_retr
     record = dispatch._reconcile_operation(journal, operation_id)
     reconciliation = record["reconciliation"]
     assert reconciliation["worker_sweep"] == {"result": expected, "run_root": str(run_root)}
-    assert reconciliation["provider_alive_after"] is provider_alive_after
+    assert reconciliation["result"] == "WORKER_SWEEP_UNPROVEN_HELD"
+    assert reconciliation["provider_alive_after"] is None  # never releasable
     assert reconciliation["retry_permitted"] is False
+    assert record["phase"] == "RECONCILE_REQUIRED"
 
 
 def test_reconcile_non_worker_never_calls_worker_sweep(tmp_path, monkeypatch):
@@ -1696,3 +1683,89 @@ def test_background_pending_marker_records_worker_fields_only_for_worker_runs(
     )
     assert code == 0
     assert len(seen) == 1
+
+
+def test_reconcile_vanished_run_root_is_proven_only_by_a_recorded_clean_sweep(
+    worker_env, tmp_path, monkeypatch
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("d" * 32)
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+    )
+    real_run = subprocess.run
+
+    def no_sudo(argv, *a, **k):
+        assert "sudo" not in str(argv[0]), "no sudo for a vanished run root"
+        return real_run(argv, *a, **k)
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", no_sudo)
+    held = dispatch._reconcile_operation(journal, operation_id)
+    assert held["reconciliation"]["worker_sweep"]["result"] == "RUN_ROOT_GONE_UNPROVEN"
+    assert held["reconciliation"]["retry_permitted"] is False
+    assert held["reconciliation"]["provider_alive_after"] is None
+    journal.heartbeat(operation_id, descendant_sweep_clean=True, descendant_sweep_attempt=1)
+    proven = dispatch._reconcile_operation(journal, operation_id)
+    assert proven["reconciliation"]["worker_sweep"]["result"] == "RUN_ROOT_GONE"
+
+
+def test_reconcile_refuses_another_operations_valid_run_root(worker_env, tmp_path, monkeypatch):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("e" * 32)
+    run_root.mkdir()
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+    )
+    worker_mod.write_operation_marker(run_root, "someone-elses-operation")
+    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: pytest.fail("no sudo"))
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    assert record["reconciliation"]["provider_alive_after"] is None
+    # No marker at all is refused too.
+    (run_root / worker_mod.OPERATION_MARKER).unlink()
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_refuses_a_file_swapped_for_a_symlink_after_the_walk(worker_env, monkeypatch):
+    secret = worker_env["home"] / "secret.txt"
+    secret.write_text("top secret")
+    real_check = worker_mod._check_copy_caps
+
+    def swap_after_manifest(manifest, source):
+        real_check(manifest, source)
+        victim = source / "src" / "a.py"
+        victim.unlink()
+        victim.symlink_to(secret)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", swap_after_manifest)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_changed_during_copy"):
+        _prepare(worker_env)
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_refuses_an_ancestor_swapped_for_a_symlink_after_the_walk(worker_env, monkeypatch):
+    real_dir = worker_env["home"] / "elsewhere"
+    real_dir.mkdir()
+    (real_dir / "a.py").write_text(worker_env["target"].joinpath("src", "a.py").read_text())
+    real_check = worker_mod._check_copy_caps
+
+    def swap_dir(manifest, source):
+        real_check(manifest, source)
+        shutil.rmtree(source / "src")
+        (source / "src").symlink_to(real_dir, target_is_directory=True)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", swap_dir)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_changed_during_copy"):
+        _prepare(worker_env)
+    assert list(worker_env["runs"].iterdir()) == []

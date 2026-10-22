@@ -443,26 +443,50 @@ def _copy_in(source: Path, workdir: Path) -> dict[str, tuple]:
     _check_copy_caps(manifest, source)
     workdir.mkdir()
     copied = 0
+    source_fd = os.open(source, _DIR_FLAGS)
     try:
         for rel, entry in sorted(manifest.items()):
-            src, dst = source / rel, workdir / rel
+            dst = workdir / rel
             kind = entry[0]
             if kind == "dir":
                 dst.mkdir()
             elif kind == "symlink":
                 os.symlink(entry[1], dst)
             elif kind == "file":
-                with src.open("rb") as reader, dst.open("wb") as writer:
-                    # Read at most one byte beyond the remaining allowance to
-                    # detect growth since the manifest without writing past it.
-                    while chunk := reader.read(min(1 << 20, MAX_COPY_BACK_BYTES - copied + 1)):
-                        if copied + len(chunk) > MAX_COPY_BACK_BYTES:
-                            raise _refuse("target_too_large")
-                        writer.write(chunk)
-                        copied += len(chunk)
+                # Every ancestor and the file itself are opened with O_NOFOLLOW
+                # relative to the verified source fd, so an entry swapped for a
+                # symlink after the walk is refused instead of followed.
+                try:
+                    src = _open_source(source_fd, rel)
+                except OSError as exc:
+                    raise _refuse("target_changed_during_copy") from exc
+                try:
+                    if not stat.S_ISREG(os.fstat(src).st_mode):
+                        raise _refuse("target_changed_during_copy")
+                    digest = hashlib.sha256()
+                    out = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+                    try:
+                        # Read at most one byte beyond the remaining allowance to
+                        # detect growth since the manifest without writing past it.
+                        while chunk := os.read(src, min(1 << 20, MAX_COPY_BACK_BYTES - copied + 1)):
+                            if copied + len(chunk) > MAX_COPY_BACK_BYTES:
+                                raise _refuse("target_too_large")
+                            digest.update(chunk)
+                            view = memoryview(chunk)
+                            while view:
+                                view = view[os.write(out, view) :]
+                            copied += len(chunk)
+                    finally:
+                        os.close(out)
+                    if digest.hexdigest() != entry[1]:
+                        raise _refuse("target_changed_during_copy")
+                finally:
+                    os.close(src)
     except BaseException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
+    finally:
+        os.close(source_fd)
     return {rel: entry for rel, entry in manifest.items() if entry[0] != "other"}
 
 
@@ -567,6 +591,48 @@ def _open_source(work_fd: int, rel: str) -> int:
     finally:
         for fd in opened:
             os.close(fd)
+
+
+OPERATION_MARKER = ".operation-id"
+
+
+def write_operation_marker(run_root: Path, operation_id: str) -> None:
+    """Bind ``run_root`` to one journal operation (written by the Owner, never the worker)."""
+    root_fd = os.open(run_root, _DIR_FLAGS)
+    try:
+        fd = os.open(
+            OPERATION_MARKER,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o440,
+            dir_fd=root_fd,
+        )
+        try:
+            os.write(fd, operation_id.encode("utf-8"))
+        finally:
+            os.close(fd)
+    finally:
+        os.close(root_fd)
+
+
+def operation_marker_matches(run_root: Path, operation_id: str) -> bool:
+    """True only when ``run_root`` holds an Owner-written marker naming ``operation_id``."""
+    try:
+        root_fd = os.open(run_root, _DIR_FLAGS)
+    except OSError:
+        return False
+    try:
+        fd = os.open(OPERATION_MARKER, _FILE_FLAGS, dir_fd=root_fd)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > 256:
+                return False
+            return os.read(fd, 257).decode("utf-8", "replace") == operation_id
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+    finally:
+        os.close(root_fd)
 
 
 def _stage(work_fd: int, rel: str, sha256: str, staging: Path, index: int) -> Path:

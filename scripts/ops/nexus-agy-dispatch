@@ -6290,6 +6290,12 @@ def _run_background_operation(
             # snapshot write carries these keys, so none can overwrite a newer
             # marker with an older verdict.
             with sweep_write_lock:
+                if "worker_run_root" in sweep_changes:
+                    # Bind the run root to this operation before the record
+                    # names it; a failure here stops the launch (fail closed).
+                    _agy_worker_account().write_operation_marker(
+                        Path(sweep_changes["worker_run_root"]), operation_id
+                    )
                 journal.heartbeat(operation_id, **sweep_changes)
         _heartbeat_snapshot(snapshot)
 
@@ -6623,7 +6629,7 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
             lock_obj.close()
 
 
-def _run_worker_sweep(record: dict[str, Any]) -> dict[str, Any]:
+def _run_worker_sweep(record: dict[str, Any], operation_id: str) -> dict[str, Any]:
     """Validate journal data before invoking the whitelisted worker sweep."""
     worker = _agy_worker_account()
     raw_root = record.get("worker_run_root")
@@ -6643,9 +6649,17 @@ def _run_worker_sweep(record: dict[str, Any]) -> dict[str, Any]:
     except (OSError, ValueError, RuntimeError):
         return outcome
     if not os.path.lexists(run_root):
-        outcome["result"] = "RUN_ROOT_GONE"
-    else:
-        outcome["result"] = worker.sweep_run_root(run_root)
+        # A vanished run root proves nothing: a surviving worker can keep an
+        # unlinked cwd and the wrapper refuses a missing root. Only the
+        # wrapper's own recorded clean sweep verdict for the latest attempt
+        # counts as evidence that no worker process is alive.
+        outcome["result"] = (
+            "RUN_ROOT_GONE_UNPROVEN" if _descendant_sweep_unproven(record) else "RUN_ROOT_GONE"
+        )
+        return outcome
+    if not worker.operation_marker_matches(run_root, operation_id):
+        return outcome  # not this operation's run root
+    outcome["result"] = worker.sweep_run_root(run_root)
     return outcome
 
 
@@ -6655,7 +6669,7 @@ def _reconcile_operation(
 ) -> dict[str, Any]:
     existing = journal.read(operation_id)
     worker_sweep = (
-        _run_worker_sweep(existing)
+        _run_worker_sweep(existing, operation_id)
         if any(key in existing for key in _WORKER_SWEEP_KEYS) else None
     )
     record = journal.reconcile(operation_id)
@@ -6668,7 +6682,18 @@ def _reconcile_operation(
     if worker_sweep is not None:
         reconciliation["worker_sweep"] = worker_sweep
         if worker_sweep_failed:
-            reconciliation["retry_permitted"] = False
+            # No positive evidence that no worker-uid process of this run is
+            # alive: hold, and never let provider_alive_after read False.
+            reconciliation.update({
+                "result": "WORKER_SWEEP_UNPROVEN_HELD",
+                "provider_alive_after": None,
+                "retry_permitted": False,
+            })
+            return journal.update(
+                operation_id,
+                phase="RECONCILE_REQUIRED",
+                reconciliation=reconciliation,
+            )
     if _completed_provider_exit_proven(record) and not worker_sweep_failed:
         reconciliation.update({
             "provider_alive_before": False,
