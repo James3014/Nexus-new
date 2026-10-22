@@ -2887,7 +2887,8 @@ def test_carry_automation_error_after_dispatching_keeps_binding(tmp_path):
     automation._validate_source_lineage = lineage_fails
     result = automation.run_issue("o/r", 32, "title", body)
     assert result["error"] == "SOURCE_LINEAGE_FAILED"
-    assert result["state"] == "BLOCKED"
+    # #2854: a resumed dispatch record stays reconcile-only instead of a fresh-able BLOCKED.
+    assert result["state"] == "RECONCILIATION_REQUIRED"
     _assert_kept(result, binding, effect_id)
 
 
@@ -2952,3 +2953,187 @@ def test_transition_log_records_error_codes_not_error_text(tmp_path):
     assert line["error"] == "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID"
     assert line["error_code"] == "UNPRINTABLE_ERROR"
     assert "ghp_secretvalue" not in (tmp_path / "state" / "transitions.jsonl").read_text()
+
+
+# --- #2854: transient error while resuming a dispatched record -------------
+
+
+def _fail_lineage_once(automation, code="SOURCE_LINEAGE_FAILED"):
+    """Make the next run fail before dispatch, then restore the real check."""
+
+    def lineage_fails(*args, **kwargs):
+        del automation._validate_source_lineage
+        raise AutomationError(code)
+
+    automation._validate_source_lineage = lineage_fails
+
+
+def _assert_reconcile_only(result, prior_state, error="SOURCE_LINEAGE_FAILED"):
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["prior_state"] == prior_state
+    assert result["semantic_dispatched"] is True
+    assert result["reconcile_only"] is True
+    assert result["error"] == error
+
+
+def test_resumed_intelligence_dispatching_transient_error_is_reconcile_only(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 40
+    )
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 40, "title", body)
+    _assert_reconcile_only(first, "INTELLIGENCE_DISPATCHING")
+    _assert_kept(first, binding, effect_id)
+    assert automation.state_store.load(item)["state"] == "RECONCILIATION_REQUIRED"
+    # The next run keeps the replay guard: a changed context is refused, not re-dispatched.
+    changed_body = body.replace("issue prose", "changed issue prose and context")
+    second = automation.run_issue("o/r", 40, "title", changed_body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_resumed_dispatch_transient_error_keeps_dispatched_binding_for_replay_guard(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 41
+    )
+    dispatched = {**binding, "profile_id": "dispatched-profile"}
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        worker_binding=dispatched,
+        intelligence_effect_id=effect_id,
+    )
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 41, "title", body)
+    _assert_reconcile_only(first, "INTELLIGENCE_DISPATCHING")
+    _assert_kept(first, dispatched, effect_id)
+    second = automation.run_issue("o/r", 41, "title", body)
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_resumed_dispatch_transient_error_without_binding_does_not_invent_one(tmp_path):
+    automation, item, body, _, _, _, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 42)
+    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 42, "title", body)
+    _assert_reconcile_only(first, "INTELLIGENCE_DISPATCHING")
+    assert "worker_binding" not in first
+    second = automation.run_issue("o/r", 42, "title", body)
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert automation.sidecar.calls == []
+
+
+def test_resumed_fanout_dispatching_transient_error_is_reconcile_only(tmp_path):
+    c = FakeC()
+    d = FakeD()
+    automation, item, body, card, store, binding, effect_id = _seed(
+        tmp_path, "FANOUT_DISPATCHING", 43, c=c, d=d
+    )
+    _install_completed_receipt(automation, item, card, store)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 43, "title", body)
+    _assert_reconcile_only(first, "FANOUT_DISPATCHING")
+    _assert_kept(first, binding, effect_id)
+    second = automation.run_issue("o/r", 43, "title", body)
+    assert second["state"] == "BLOCKED"
+    assert second["error"] == "FANOUT_RECONCILIATION_BINDING_DRIFT"
+    assert second["semantic_dispatched"] is True
+    assert automation.sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+@pytest.mark.parametrize("state", ["INTELLIGENCE_COMPLETED", "FANOUT_COMPLETED"])
+def test_resumed_completed_stage_transient_error_is_reconcile_only(tmp_path, state):
+    c = FakeC()
+    d = FakeD()
+    automation, item, body, _, _, binding, effect_id = _seed(tmp_path, state, 44, c=c, d=d)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 44, "title", body)
+    _assert_reconcile_only(first, state)
+    _assert_kept(first, binding, effect_id)
+    second = automation.run_issue("o/r", 44, "title", body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert automation.sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+def test_resumed_reconciliation_required_transient_error_stays_reconcile_only(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "RECONCILIATION_REQUIRED", 45, prior_state="INTELLIGENCE_DISPATCHING"
+    )
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 45, "title", body)
+    _assert_reconcile_only(first, "INTELLIGENCE_DISPATCHING")
+    _assert_kept(first, binding, effect_id)
+    changed_body = body.replace("issue prose", "changed issue prose and context")
+    second = automation.run_issue("o/r", 45, "title", changed_body)
+    assert second["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_legacy_semantic_dispatched_record_transient_error_is_reconcile_only(tmp_path):
+    automation, c, sidecar, body = _legacy_blocked_automation(tmp_path)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 402, "title", body)
+    _assert_reconcile_only(first, "FANOUT_DISPATCHING")
+    second = automation.run_issue("o/r", 402, "title", body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert sidecar.calls == [] and c.calls == []
+
+
+def test_fresh_record_transient_error_still_blocks_retryably(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 46, "title", body)
+    assert first["state"] == "BLOCKED"
+    assert first["semantic_dispatched"] is False
+    assert first["error"] == "SOURCE_LINEAGE_FAILED"
+    assert "reconcile_only" not in first
+    second = automation.run_issue("o/r", 46, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
+
+
+def _fail_transport_once(automation):
+    def transport_fails(*args, **kwargs):
+        del automation._validate_worker_transport_binding
+        raise RuntimeError("transport probe crashed")
+
+    automation._validate_worker_transport_binding = transport_fails
+
+
+def test_generic_exception_reconcile_keeps_persisted_binding(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 47
+    )
+    dispatched = {**binding, "profile_id": "dispatched-profile"}
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        worker_binding=dispatched,
+        intelligence_effect_id=effect_id,
+    )
+    _fail_transport_once(automation)
+    first = automation.run_issue("o/r", 47, "title", body)
+    assert first["state"] == "RECONCILIATION_REQUIRED"
+    assert first["error"] == "RuntimeError"
+    _assert_kept(first, dispatched, effect_id)
+    second = automation.run_issue("o/r", 47, "title", body)
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_generic_exception_reconcile_does_not_invent_missing_binding(tmp_path):
+    automation, item, body, _, _, _, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 48)
+    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
+    _fail_transport_once(automation)
+    first = automation.run_issue("o/r", 48, "title", body)
+    assert first["state"] == "RECONCILIATION_REQUIRED"
+    assert first["error"] == "RuntimeError"
+    assert "worker_binding" not in first
+    second = automation.run_issue("o/r", 48, "title", body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert automation.sidecar.calls == []

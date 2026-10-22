@@ -1425,6 +1425,14 @@ class ExternalIntelligenceAutomation:
             self.state_store.save(item, "DISCOVERED")
         elif not resume_from:
             self.state_store.save(item, "DISCOVERED")
+        # #2854: a record resumed from a dispatch state (or one already marked
+        # semantic_dispatched) may have reached ChatGPT before this run. If this run
+        # fails before it dispatches, the record must stay reconcile-only; a
+        # BLOCKED/semantic_dispatched=False save would be treated as fresh by the
+        # next run and re-dispatched past the replay guard.
+        resumed_dispatch = resume_from in recoverable_states or bool(
+            previous is not None and previous.get("semantic_dispatched") is True
+        )
         dispatched = False
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
@@ -1692,6 +1700,25 @@ class ExternalIntelligenceAutomation:
                 semantic_dispatched=True,
             )
         except AutomationError as exc:
+            if resumed_dispatch and not dispatched:
+                # #2854: carry only what the resumed record persisted. This run's
+                # binding is never written: a missing binding must stay missing so
+                # the next resume still refuses with CANONICAL_WORKFORCE_BINDING_MISSING.
+                kept: dict[str, Any] = {}
+                persisted_binding = previous.get("worker_binding") if previous else None
+                if isinstance(persisted_binding, Mapping):
+                    kept["worker_binding"] = dict(persisted_binding)
+                if previous and previous.get("intelligence_effect_id"):
+                    kept["intelligence_effect_id"] = previous["intelligence_effect_id"]
+                return self.state_store.save(
+                    item,
+                    "RECONCILIATION_REQUIRED",
+                    prior_state=resume_from,
+                    **kept,
+                    error=str(exc),
+                    reconcile_only=True,
+                    semantic_dispatched=True,
+                )
             return self.state_store.save(
                 item,
                 "BLOCKED",
@@ -1702,12 +1729,20 @@ class ExternalIntelligenceAutomation:
         except Exception as exc:
             current = self.state_store.load(item) or {}
             if current.get("state") in AMBIGUOUS_STATES:
+                # #2854: only the persisted binding is kept. If this run wrote the
+                # ambiguous state, its binding is already persisted there. If the
+                # record on disk has no binding, nothing is written: substituting this
+                # run's binding would turn the next resume's BINDING_MISSING refusal
+                # into a matching comparison and let it replay the dispatch.
+                reconcile_binding: dict[str, Any] = {}
+                if isinstance(current.get("worker_binding"), Mapping):
+                    reconcile_binding["worker_binding"] = dict(current["worker_binding"])
                 return self.state_store.save(
                     item,
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
                     intelligence_effect_id=current.get("intelligence_effect_id"),
-                    worker_binding=self._worker_binding or current.get("worker_binding"),
+                    **reconcile_binding,
                     error=type(exc).__name__,
                     **_error_reason_fields(exc),
                     reconcile_only=True,
