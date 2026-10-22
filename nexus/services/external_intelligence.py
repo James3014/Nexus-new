@@ -1991,6 +1991,8 @@ class ExternalIntelligenceStore:
             "transport_status": transport_status,
             "finished_at": _now(),
         })
+        # A later finish (e.g. a reconcile) must not keep an earlier attempt's code (#2889).
+        value.pop("transport_error_code", None)
         if transport_error_code:
             value["transport_error_code"] = transport_error_code
         _atomic_json(self._attempt_path(value["request_sha256"]), value)

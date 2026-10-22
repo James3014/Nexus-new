@@ -3364,5 +3364,10 @@ def test_error_reason_fields_carries_only_bounded_transport_error_code():
         "INTELLIGENCE_RECONCILIATION_REQUIRED", detail={"transport_error_code": "free text"}
     )
     assert _error_reason_fields(bad) == {"error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"}
+    for almost in ("OPENCLI_WEB_BUSY\n", "OPENCLI_" + "A" * 81, "OPENCLI_web_busy"):
+        near = ExternalIntelligenceError(
+            "INTELLIGENCE_RECONCILIATION_REQUIRED", detail={"transport_error_code": almost}
+        )
+        assert _error_reason_fields(near) == {"error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"}
     plain = ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
     assert _error_reason_fields(plain) == {"error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"}
