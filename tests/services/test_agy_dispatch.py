@@ -3410,7 +3410,9 @@ def test_run_agy_plan_mode_exempt_from_pre_effect_budget_even_if_expect_coding_p
         effort=None,
         timeout=5,
         expect_coding_progress=True,
-        provider_stall_seconds=0.05,
+        # #2887: read-only runs now honour the provider-start deadline too; keep it
+        # realistic here so this test keeps proving the pre-effect exemption only.
+        provider_stall_seconds=5,
         stream_no_progress_seconds=0.05,
         pre_effect_max_seconds=0.05,
         pre_effect_max_tool_events=1,
