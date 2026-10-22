@@ -1,0 +1,179 @@
+#!/bin/sh
+# agy-worker-exec: the only command the Owner may start as the Cairnwork worker account
+# (Cairnwork #19 Phase B; Nexus-new #2884). Installed by install_agy_worker_exec.sh to
+# /Users/Shared/cairnwork-worker/bin/agy-worker-exec (owner james, 0755); the sudoers rule
+#   james ALL=(_cairnwork_worker) NOPASSWD: /Users/Shared/cairnwork-worker/bin/agy-worker-exec
+# names that path. nexus-agy-dispatch --run-as-user runs it with `sudo -n -u _cairnwork_worker`.
+#
+# Two forms, nothing else:
+#   agy-worker-exec <run_root> <workdir> <profile> -- <agy> [agy args...]
+#       Validate, set umask 007, then exec agy under `sandbox-exec -f <profile>` with a fixed
+#       environment built here (sudo's own environment is discarded).
+#   agy-worker-exec --sweep <run_root> [pid...]
+#       Kill this run's worker processes (the listed pids, plus every worker process whose
+#       environment carries the run tag or whose cwd is inside <run_root>), then make the run
+#       tree group-accessible so the dispatcher can read results back and delete it.
+#       Prints one line "AGY_WORKER_SWEEP clean" (exit 0) or "AGY_WORKER_SWEEP unclean <pids>"
+#       (exit 3). Running as the worker, it can only ever signal worker-owned processes.
+#
+# <run_root> must be a real directory (no symlink, canonical path) directly inside worker-runs,
+# named by 32 lowercase hex digits (the dispatcher's 128-bit run tag). <workdir> must be a real
+# directory strictly inside <run_root>; <profile> a regular file strictly inside <run_root>.
+# argv[0] after "--" must be exactly the installed agy copy. Any other input is refused (exit 64).
+set -eu
+
+RUNS=/Users/Shared/cairnwork-worker/worker-runs
+AGY=/Users/Shared/cairnwork-worker/bin/agy
+SANDBOX_EXEC=/usr/bin/sandbox-exec
+PS=/bin/ps
+LSOF=/usr/sbin/lsof
+TAG_ENV=NEXUS_CLI_WORKER_RUN_TAG
+WORKER_PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+refuse() {
+  printf 'agy-worker-exec: refusing: %s\n' "$*" >&2
+  exit 64
+}
+
+# Print the physical (symlink-free) path of directory $1, or fail.
+physical_dir() {
+  (CDPATH= cd -P -- "$1" 2>/dev/null && pwd -P)
+}
+
+# $1 must be an absolute, canonical, real directory (not a symlink).
+require_real_dir() {
+  case "$1" in
+    /*) ;;
+    *) refuse "$2 is not an absolute path" ;;
+  esac
+  [ ! -L "$1" ] || refuse "$2 is a symlink"
+  [ -d "$1" ] || refuse "$2 is not a directory"
+  real=$(physical_dir "$1") || refuse "$2 cannot be resolved"
+  [ "$real" = "$1" ] || refuse "$2 is not a canonical path"
+}
+
+# Validate the run root: canonical, a direct child of worker-runs, named by the run tag.
+require_run_root() {
+  require_real_dir "$1" run_root
+  [ "$(physical_dir "$RUNS")" = "$RUNS" ] || refuse "worker-runs is not canonical"
+  parent=${1%/*}
+  name=${1##*/}
+  [ "$parent" = "$RUNS" ] || refuse "run_root is not directly inside worker-runs"
+  case "$name" in
+    *[!0-9a-f]*) refuse "run_root name is not a run tag" ;;
+  esac
+  [ "${#name}" -eq 32 ] || refuse "run_root name is not a run tag"
+}
+
+# $1 strictly inside run root $2 (the run root itself is not accepted).
+require_inside() {
+  case "$1" in
+    "$2"/*) ;;
+    *) refuse "$3 is not inside run_root" ;;
+  esac
+}
+
+[ "$#" -ge 1 ] || refuse "no arguments"
+
+if [ "$1" = "--sweep" ]; then
+  [ "$#" -ge 2 ] || refuse "--sweep needs a run_root"
+  RUN_ROOT=$2
+  shift 2
+  require_run_root "$RUN_ROOT"
+  for pid in "$@"; do
+    case "$pid" in
+      '' | *[!0-9]*) refuse "pid '$pid' is not a number" ;;
+    esac
+  done
+  TAG=${RUN_ROOT##*/}
+  ME=$$
+  UID_SELF=$(id -u)
+  cd /
+
+  # Worker-owned pids of this run: run-tagged environment or cwd inside the run root.
+  run_pids() {
+    "$PS" -E -ww -U "$UID_SELF" -o pid= -o command= 2>/dev/null | while read -r p rest; do
+      case " $rest " in
+        *" $TAG_ENV=$TAG "*) printf '%s\n' "$p" ;;
+      esac
+    done
+    "$LSOF" -nP -a -u "$UID_SELF" -d cwd -Fpn 2>/dev/null | while read -r line; do
+      case "$line" in
+        p*) p=${line#p} ;;
+        n"$RUN_ROOT" | n"$RUN_ROOT"/*) printf '%s\n' "$p" ;;
+      esac
+    done
+  }
+  # A listed pid counts only while it is a live, non-zombie worker-owned process.
+  worker_owned_live() {
+    row=$("$PS" -o uid= -o stat= -p "$1" 2>/dev/null) || return 1
+    set -- $row
+    [ "${1:-}" = "$UID_SELF" ] || return 1
+    case "${2:-}" in Z*) return 1 ;; esac
+    return 0
+  }
+  kill_round() {
+    for p in "$@" $(run_pids); do
+      [ "$p" = "$ME" ] && continue
+      worker_owned_live "$p" && kill -9 "$p" 2>/dev/null || true
+    done
+  }
+  i=0
+  left=""
+  while [ "$i" -lt 30 ]; do
+    kill_round "$@"
+    sleep 0.1
+    left=""
+    for p in "$@" $(run_pids); do
+      [ "$p" = "$ME" ] && continue
+      if worker_owned_live "$p"; then left="$left $p"; fi
+    done
+    [ -z "$left" ] && break
+    i=$((i + 1))
+  done
+  # Hand the tree back to the run group (worker-created files may be 0600/0700).
+  # chmod -R never follows symlinks found while walking (BSD: -P is the default).
+  chmod -R g+rwX -- "$RUN_ROOT" 2>/dev/null || true
+  if [ -n "$left" ]; then
+    printf 'AGY_WORKER_SWEEP unclean%s\n' "$left"
+    exit 3
+  fi
+  printf 'AGY_WORKER_SWEEP clean\n'
+  exit 0
+fi
+
+[ "$#" -ge 5 ] || refuse "usage: agy-worker-exec <run_root> <workdir> <profile> -- <agy> [args...]"
+RUN_ROOT=$1
+WORKDIR=$2
+PROFILE=$3
+[ "$4" = "--" ] || refuse "missing -- before the agy argv"
+shift 4
+require_run_root "$RUN_ROOT"
+require_real_dir "$WORKDIR" workdir
+require_inside "$WORKDIR" "$RUN_ROOT" workdir
+case "$PROFILE" in
+  /*) ;;
+  *) refuse "profile is not an absolute path" ;;
+esac
+[ ! -L "$PROFILE" ] || refuse "profile is a symlink"
+[ -f "$PROFILE" ] || refuse "profile is not a regular file"
+require_inside "$PROFILE" "$RUN_ROOT" profile
+profile_dir=$(physical_dir "${PROFILE%/*}") || refuse "profile directory cannot be resolved"
+[ "$profile_dir/${PROFILE##*/}" = "$PROFILE" ] || refuse "profile is not a canonical path"
+[ "$1" = "$AGY" ] || refuse "only $AGY may run"
+[ ! -L "$AGY" ] && [ -f "$AGY" ] && [ -x "$AGY" ] || refuse "$AGY is not a regular executable"
+
+umask 007
+cd -- "$WORKDIR"
+: > "$RUN_ROOT/.worker-exec-started"
+exec /usr/bin/env -i \
+  HOME="$RUN_ROOT/home" \
+  TMPDIR="$RUN_ROOT/tmp" \
+  PATH="$WORKER_PATH" \
+  LANG=en_US.UTF-8 \
+  USER="$(id -un)" \
+  LOGNAME="$(id -un)" \
+  SHELL=/bin/sh \
+  TERM=dumb \
+  "$TAG_ENV=${RUN_ROOT##*/}" \
+  "$SANDBOX_EXEC" -f "$PROFILE" "$@"

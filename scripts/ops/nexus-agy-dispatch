@@ -1939,7 +1939,9 @@ def run_agy(
         process = subprocess.Popen(
             launch_argv,
             cwd=cwd,
-            env=env,
+            # #2884: the worker-account boundary launches sudo with a fixed
+            # minimal environment; the wrapper builds agy's own.
+            env=_popen_env(write_boundary, env),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -2329,6 +2331,11 @@ def run_agy(
             time.sleep(0.05)
 
         if process.poll() is None:
+            # #2884: a worker-account agy runs under another uid that the
+            # process-group stop above cannot signal; stop it as the worker.
+            terminate_worker = getattr(write_boundary, "terminate_worker", None)
+            if terminate_worker is not None:
+                terminate_worker()
             try:
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
@@ -2509,6 +2516,34 @@ DESCENDANT_SWEEP_FAILED_MARKER = "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"
 def _agy_dispatch_boundary() -> Any:
     """The #2202 boundary module, loaded from the snapshot on first use."""
     return import_module("nexus.executors.agy_dispatch_boundary")
+
+
+def _agy_worker_account() -> Any:
+    """The #2884 worker-account boundary module, loaded from the snapshot on first use."""
+    return import_module("nexus.executors.agy_worker_account")
+
+
+RUN_AS_USER_REQUIRES_ACCEPT_EDITS = "RUN_AS_USER_REQUIRES_ACCEPT_EDITS"
+
+
+def _remap_rules_to_workdir(rules: list[str], cwd: str, workdir: str) -> list[str]:
+    """Rewrite path rules naming ``cwd`` (or a path inside it) to the worker copy (#2884)."""
+    root = str(Path(cwd).expanduser().resolve())
+    remapped: list[str] = []
+    for rule in rules:
+        match = re.fullmatch(r"(?P<kind>[a-z_]+)\((?P<path>.*)\)", rule)
+        if match is not None:
+            path = match.group("path")
+            if path == root or path.startswith(root + "/"):
+                rule = f"{match.group('kind')}({workdir}{path[len(root):]})"
+        if rule not in remapped:
+            remapped.append(rule)
+    return remapped
+
+
+def _popen_env(write_boundary: Any, env: dict[str, str]) -> dict[str, str]:
+    launch_env = getattr(write_boundary, "launch_env", None)
+    return dict(launch_env) if launch_env else env
 
 
 def _write_boundary_available() -> bool:
@@ -4268,6 +4303,7 @@ def dispatch_run(
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
+    run_as_user: str | None = None,
 ) -> int:
     total_budget_seconds = max(1, int(timeout))
     total_deadline = _monotonic() + total_budget_seconds
@@ -4406,7 +4442,10 @@ def dispatch_run(
     # refused here too rather than after a lease.
     needs_write_boundary = mode == "accept-edits"
     boundary_refusal = None
-    if needs_write_boundary and not _runner_accepts(runner, "write_boundary"):
+    if run_as_user is not None and not needs_write_boundary:
+        # #2884: the worker account only ever runs inside the accept-edits boundary.
+        boundary_refusal = RUN_AS_USER_REQUIRES_ACCEPT_EDITS
+    elif needs_write_boundary and not _runner_accepts(runner, "write_boundary"):
         boundary_refusal = AGY_WRITE_BOUNDARY_RUNNER_UNSUPPORTED
     elif needs_write_boundary and not _write_boundary_available():
         boundary_refusal = AGY_WRITE_BOUNDARY_UNAVAILABLE
@@ -5108,10 +5147,20 @@ def dispatch_run(
                     # relays agy's --log-file through a FIFO in the run root.
                     boundary_module = _agy_dispatch_boundary()
                     try:
-                        write_boundary = boundary_module.prepare_accept_edits_boundary(
-                            source_env=env,
-                            target=cwd,
-                        )
+                        if run_as_user is not None:
+                            # #2884: agy runs as the worker account in a per-run
+                            # copy of the target under worker-runs.
+                            write_boundary = _agy_worker_account().prepare_worker_account_boundary(
+                                source_env=env,
+                                target=cwd,
+                                worker_user=run_as_user,
+                                source_agy=shutil.which("agy"),
+                            )
+                        else:
+                            write_boundary = boundary_module.prepare_accept_edits_boundary(
+                                source_env=env,
+                                target=cwd,
+                            )
                     except boundary_module.AgyWriteBoundaryError as exc:
                         # Typed, non-rotating contract rejection; the boundary
                         # already removed its run root and the outer finally
@@ -5150,6 +5199,17 @@ def dispatch_run(
                     or permission_profile_kind == "NO_TOOL_PACKET"
                 )
                 allow_unsafe_legacy = bool(temp_command_permissions or "command(*)" in allow_rules)
+                installed_profile_sha256 = permission_profile_sha256
+                agent_cwd = cwd
+                if run_as_user is not None and write_boundary is not None:
+                    # #2884: agy sees the per-run copy, so its path rules name it.
+                    agent_cwd = str(write_boundary.target)
+                    allow_rules = _remap_rules_to_workdir(allow_rules, cwd, agent_cwd)
+                    deny_rules = _remap_rules_to_workdir(deny_rules, cwd, agent_cwd)
+                    installed_profile_sha256 = permission_profile_digest({
+                        "allow": allow_rules,
+                        "deny": deny_rules,
+                    })
                 if allow_rules or deny_rules or replace_allow_deny:
                     permission_token = install_temp_permissions(
                         env,
@@ -5158,12 +5218,12 @@ def dispatch_run(
                         allow_unsafe_legacy=allow_unsafe_legacy,
                         replace_allow_deny=replace_allow_deny,
                         mode=mode,
-                        expected_profile_sha256=permission_profile_sha256,
+                        expected_profile_sha256=installed_profile_sha256,
                     )
                 runner_kwargs = {
                     "env": env,
                     "prompt": prompt,
-                    "cwd": cwd,
+                    "cwd": agent_cwd,
                     "mode": mode,
                     "model": model,
                     "effort": effort,
@@ -5242,6 +5302,46 @@ def dispatch_run(
                     descendant_sweep_attempt=attempts,
                 )
             total_wall_ms += wall_ms
+
+            worker_failure = getattr(write_boundary, "worker_failure", None)
+            if worker_failure and DESCENDANT_SWEEP_FAILED_MARKER not in (err or ""):
+                # #2884: the worker never started (sudo or wrapper refused), or
+                # its edits could not be copied back.  Not an account fault:
+                # never rotate or retry.  A failed copy-back may have left the
+                # target partly written, so it needs reconciliation.
+                copy_back_failed = worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED")
+                last_kind = worker_failure
+                _operation_hook(
+                    operation_hook,
+                    phase="CLASSIFYING_FAILURE",
+                    attempts=attempts,
+                    rotations=rotations,
+                    failure_kind=last_kind,
+                    timed_out=bool(timed_out),
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                    provider_effect=None if copy_back_failed else False,
+                    reconciliation_required=copy_back_failed,
+                )
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": None if copy_back_failed else False,
+                    "reconciliation_required": copy_back_failed,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
 
             if write_boundary is not None and DESCENDANT_SWEEP_FAILED_MARKER in (err or ""):
                 # Descendants of this attempt may still be running: never
@@ -5737,6 +5837,7 @@ def _spawn_background_operation(
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
     evidence_refs: list[str] | None = None,
+    run_as_user: str | None = None,
 ) -> dict[str, Any]:
     resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
@@ -5831,6 +5932,8 @@ def _spawn_background_operation(
         argv += ["--write-path", write_path]
     for account_hash in resolved_exclude_hashes:
         argv += ["--exclude-account", account_hash]
+    if run_as_user is not None:
+        argv += ["--run-as-user", run_as_user]
 
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
@@ -6055,6 +6158,7 @@ def _run_background_operation(
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
+    run_as_user: str | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -6216,6 +6320,7 @@ def _run_background_operation(
             pre_effect_max_seconds=pre_effect_max_seconds,
             pre_effect_max_tool_events=pre_effect_max_tool_events,
             exclude_accounts=exclude_accounts,
+            **({"run_as_user": run_as_user} if run_as_user is not None else {}),
         )
         with state_lock:
             snapshot = dict(state)
@@ -6861,6 +6966,15 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Bounded non-secret operation evidence reference; repeatable",
     )
+    ap.add_argument(
+        "--run-as-user",
+        choices=("_cairnwork_worker",),
+        help=(
+            "Run agy as this worker account (Cairnwork #19 Phase B, #2884): a per-run copy "
+            "of --cwd under /Users/Shared/cairnwork-worker/worker-runs, launched through "
+            "sudo and agy-worker-exec; accept-edits only"
+        ),
+    )
     ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
@@ -6899,6 +7013,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("INVALID_CWD")
 
     if args.hcom_collab:
+        if args.run_as_user:
+            raise SystemExit("RUN_AS_USER_NOT_SUPPORTED_FOR_HCOM_COLLAB")
         if args.background or args.operation_run:
             raise SystemExit("HCOM_COLLAB_FOREGROUND_ONLY")
         try:
@@ -6964,6 +7080,7 @@ def main(argv: list[str] | None = None) -> int:
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
             exclude_accounts=args.exclude_account,
+            **({"run_as_user": args.run_as_user} if args.run_as_user else {}),
         )
 
     if args.background:
@@ -6986,6 +7103,7 @@ def main(argv: list[str] | None = None) -> int:
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
             exclude_accounts=args.exclude_account,
+            **({"run_as_user": args.run_as_user} if args.run_as_user else {}),
             evidence_refs=args.evidence_ref,
         )
         _print_operation(record)
@@ -7010,6 +7128,7 @@ def main(argv: list[str] | None = None) -> int:
         pre_effect_max_seconds=args.pre_effect_max_seconds,
         pre_effect_max_tool_events=args.pre_effect_max_tool_events,
         exclude_accounts=args.exclude_account,
+        **({"run_as_user": args.run_as_user} if args.run_as_user else {}),
     )
 
 

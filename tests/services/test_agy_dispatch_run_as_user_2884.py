@@ -1,0 +1,1052 @@
+"""#2884 (Cairnwork #19 Phase B): ``nexus-agy-dispatch --run-as-user _cairnwork_worker``.
+
+Covers the sudo/wrapper argv, the wrapper's refusals (run with its constants
+pointed at a temporary layout, so nothing here needs sudo or the worker
+account), the cross-run Seatbelt rules, that the leased account HOME is never
+modified, copy-in/copy-back, the cross-uid sweep, and that a dispatch without
+``--run-as-user`` takes the unchanged path.
+"""
+
+from __future__ import annotations
+
+import functools
+import grp
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from nexus.executors import agy_dispatch_boundary as boundary_mod
+from nexus.executors import agy_worker_account as worker_mod
+from nexus.executors import agy_write_admission as admission
+from nexus.executors import cli_worker
+
+ROOT = Path(__file__).resolve().parents[2]
+DISPATCH_PATH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
+WRAPPER = ROOT / "scripts" / "ops" / "agy-worker-exec"
+INSTALLER = ROOT / "scripts" / "ops" / "install_agy_worker_exec.sh"
+
+os.environ["NEXUS_AGY_SNAPSHOT"] = str(ROOT)
+dispatch = SourceFileLoader("nexus_agy_dispatch_run_as_user_2884", str(DISPATCH_PATH)).load_module()
+
+TOKEN = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
+INSTALLATION_ID = Path(".gemini") / "antigravity-cli" / "installation_id"
+
+
+# ---------------------------------------------------------------------------
+# a tiny SBPL evaluator (last matching rule wins), enough for these profiles
+# ---------------------------------------------------------------------------
+
+
+def _sexprs(text: str) -> list:
+    tokens = re.findall(r'#?"(?:[^"\\]|\\.)*"|[()]|[^\s()]+', re.sub(r";[^\n]*", "", text))
+    stack: list[list] = [[]]
+    for token in tokens:
+        if token == "(":
+            stack.append([])
+        elif token == ")":
+            done = stack.pop()
+            stack[-1].append(done)
+        else:
+            stack[-1].append(token)
+    assert len(stack) == 1
+    return stack[0]
+
+
+def _effective(profile: str, op: str, path: Path) -> str:
+    verdict = "deny"
+    target = str(path)
+    for form in _sexprs(profile):
+        if not form or form[0] not in ("allow", "deny"):
+            continue
+        ops = [item for item in form[1:] if isinstance(item, str)]
+        filters = [item for item in form[1:] if isinstance(item, list)]
+        if "default" not in ops and op not in ops:
+            continue
+        if not filters:
+            verdict = form[0]
+            continue
+        for kind, *args in filters:
+            value = args[0].strip('"') if args and args[0].startswith('"') else None
+            if value is None:
+                continue
+            if (kind == "literal" and target == value) or (
+                kind == "subpath" and (target == value or target.startswith(value + "/"))
+            ):
+                verdict = form[0]
+    return verdict
+
+
+# ---------------------------------------------------------------------------
+# layout fixtures
+# ---------------------------------------------------------------------------
+
+
+def _layout(tmp_path: Path) -> dict[str, Any]:
+    base = tmp_path.resolve()
+    runs = base / "worker-runs"
+    runs.mkdir()
+    os.chmod(runs, 0o2710)
+    bin_dir = base / "bin"
+    bin_dir.mkdir()
+    os.chmod(bin_dir, 0o755)
+    wrapper = bin_dir / "agy-worker-exec"
+    shutil.copyfile(WRAPPER, wrapper)
+    os.chmod(wrapper, 0o755)
+    source_agy = base / "owner-bin" / "agy"
+    source_agy.parent.mkdir()
+    source_agy.write_text("#!/bin/sh\necho agy\n", encoding="utf-8")
+    os.chmod(source_agy, 0o755)
+    worker_agy = bin_dir / "agy"
+    shutil.copyfile(source_agy, worker_agy)
+    os.chmod(worker_agy, 0o755)
+    home = base / "pool" / "google-07" / "home"
+    for rel, text in ((TOKEN, "token"), (INSTALLATION_ID, "install-id")):
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text(text, encoding="utf-8")
+    (home / ".gemini" / "antigravity-cli" / "settings.json").write_text("{}\n", encoding="utf-8")
+    target = base / "attempt"
+    (target / "src").mkdir(parents=True)
+    (target / "src" / "a.py").write_text("print('a')\n", encoding="utf-8")
+    (target / "README.md").write_text("readme\n", encoding="utf-8")
+    (target / ".git").mkdir()
+    (target / ".git" / "HEAD").write_text("ref: refs/heads/cwt-hidden\n", encoding="utf-8")
+    (target / ".agents").mkdir()
+    (target / ".agents" / "hooks.json").write_text("{}\n", encoding="utf-8")
+    return {
+        "runs": runs,
+        "bin": bin_dir,
+        "wrapper": wrapper,
+        "source_agy": source_agy,
+        "worker_agy": worker_agy,
+        "home": home,
+        "pool": base / "pool",
+        "target": target,
+    }
+
+
+@pytest.fixture
+def worker_env(tmp_path, monkeypatch):
+    """A temporary worker layout; the worker user and run group map to ourselves."""
+    layout = _layout(tmp_path)
+    gid = os.getgid()
+    monkeypatch.setattr(worker_mod.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(worker_mod.os, "getgroups", lambda: [gid])
+    if not admission.seatbelt_available():
+        monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: True)
+    # The run group is ours, so the boundary's chgrp calls are no-ops.
+    os.chown(layout["runs"], -1, gid)
+    os.chmod(layout["runs"], 0o2710)  # chown clears setgid
+    layout["group"] = grp.getgrgid(gid).gr_name
+    layout["gid"] = gid
+    return layout
+
+
+def _prepare(layout: dict, **overrides):
+    kwargs: dict[str, Any] = dict(
+        source_env={"HOME": str(layout["home"]), "PATH": "/usr/bin:/bin", "GH_TOKEN": "x"},
+        target=layout["target"],
+        worker_user=worker_mod.WORKER_USER,
+        source_agy=str(layout["source_agy"]),
+        runs_dir=layout["runs"],
+        wrapper=layout["wrapper"],
+        worker_agy=layout["worker_agy"],
+        run_group=layout["group"],
+        repo_wrapper=WRAPPER,
+    )
+    kwargs.update(overrides)
+    return worker_mod.prepare_worker_account_boundary(**kwargs)
+
+
+def _tree_state(root: Path) -> dict[str, tuple]:
+    state = {}
+    for path in sorted(root.rglob("*")):
+        info = os.lstat(path)
+        content = path.read_bytes() if stat.S_ISREG(info.st_mode) else b""
+        state[str(path)] = (info.st_mode, info.st_uid, info.st_gid, info.st_mtime_ns, content)
+    return state
+
+
+# ---------------------------------------------------------------------------
+# argv construction
+# ---------------------------------------------------------------------------
+
+
+def test_worker_argv_is_the_exact_sudo_wrapper_form(tmp_path):
+    run_root = Path("/Users/Shared/cairnwork-worker/worker-runs/" + "a" * 32)
+    argv = worker_mod.worker_argv(
+        ["/Users/james/.local/bin/agy", "--new-project", "--add-dir", str(run_root / "work")],
+        run_root=run_root,
+        workdir=run_root / "work",
+        profile_path=run_root / "agy-dispatch.sb",
+    )
+    assert argv == [
+        "/usr/bin/sudo",
+        "-n",
+        "-u",
+        "_cairnwork_worker",
+        "/Users/Shared/cairnwork-worker/bin/agy-worker-exec",
+        str(run_root),
+        str(run_root / "work"),
+        str(run_root / "agy-dispatch.sb"),
+        "--",
+        "/Users/Shared/cairnwork-worker/bin/agy",
+        "--new-project",
+        "--add-dir",
+        str(run_root / "work"),
+    ]
+
+
+def test_sweep_argv_lists_sorted_unique_pids_above_one():
+    run_root = Path("/Users/Shared/cairnwork-worker/worker-runs/" + "b" * 32)
+    assert worker_mod.sweep_argv(run_root, [42, 7, 42, 1, 0]) == [
+        "/usr/bin/sudo",
+        "-n",
+        "-u",
+        "_cairnwork_worker",
+        "/Users/Shared/cairnwork-worker/bin/agy-worker-exec",
+        "--sweep",
+        str(run_root),
+        "7",
+        "42",
+    ]
+
+
+def test_cli_accepts_only_the_cairnwork_worker_user(capsys):
+    with pytest.raises(SystemExit):
+        dispatch.main(["--run-as-user", "root", "--cwd", "/", "x"])
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_remap_rules_rewrites_only_paths_inside_cwd(tmp_path):
+    cwd = str(tmp_path.resolve())
+    rules = [
+        f"write_file({cwd}/src/a.py)",
+        f"read_file({cwd}/**)",
+        f"write_file({cwd}-other/x)",
+        "command(*)",
+    ]
+    assert dispatch._remap_rules_to_workdir(rules, cwd, "/runs/t/work") == [
+        "write_file(/runs/t/work/src/a.py)",
+        "read_file(/runs/t/work/**)",
+        f"write_file({cwd}-other/x)",
+        "command(*)",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# the wrapper (run as ourselves, constants pointed at a temporary layout)
+# ---------------------------------------------------------------------------
+
+
+def _wrapper_copy(tmp_path: Path, *, ps: str | None = None, lsof: str | None = None) -> dict:
+    base = tmp_path.resolve()
+    runs = base / "wr-runs"
+    runs.mkdir()
+    bin_dir = base / "wr-bin"
+    bin_dir.mkdir()
+    agy = bin_dir / "agy"
+    agy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    os.chmod(agy, 0o755)
+    record = base / "sandbox-record.txt"
+    sandbox = bin_dir / "fake-sandbox-exec"
+    sandbox.write_text(
+        "#!/bin/sh\n"
+        f'{{ echo "cwd=$(pwd -P)"; echo "umask=$(umask)"; printf "arg=%s\\n" "$@"; env | sort; }} > "{record}"\n',
+        encoding="utf-8",
+    )
+    os.chmod(sandbox, 0o755)
+    text = WRAPPER.read_text(encoding="utf-8")
+    replacements = {
+        "RUNS=/Users/Shared/cairnwork-worker/worker-runs": f"RUNS={runs}",
+        "AGY=/Users/Shared/cairnwork-worker/bin/agy": f"AGY={agy}",
+        "SANDBOX_EXEC=/usr/bin/sandbox-exec": f"SANDBOX_EXEC={sandbox}",
+        "PS=/bin/ps": f"PS={ps or shutil.which('ps')}",
+        "LSOF=/usr/sbin/lsof": f"LSOF={lsof or '/nonexistent/lsof'}",
+    }
+    for old, new in replacements.items():
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    wrapper = bin_dir / "agy-worker-exec"
+    wrapper.write_text(text, encoding="utf-8")
+    os.chmod(wrapper, 0o755)
+    run_root = runs / ("c" * 32)
+    (run_root / "work").mkdir(parents=True)
+    (run_root / "home").mkdir()
+    (run_root / "tmp").mkdir()
+    profile = run_root / "agy-dispatch.sb"
+    profile.write_text("(version 1)\n", encoding="utf-8")
+    return {
+        "runs": runs,
+        "agy": agy,
+        "wrapper": wrapper,
+        "record": record,
+        "run_root": run_root,
+        "work": run_root / "work",
+        "profile": profile,
+    }
+
+
+def _run_wrapper(w: dict, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["/bin/sh", str(w["wrapper"]), *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={"PATH": "/usr/bin:/bin", "SECRET_FROM_SUDO": "leak", "HOME": "/owner/home"},
+        check=False,
+    )
+
+
+def test_wrapper_execs_sandbox_with_umask_and_fixed_env(tmp_path):
+    w = _wrapper_copy(tmp_path)
+    done = _run_wrapper(
+        w,
+        str(w["run_root"]),
+        str(w["work"]),
+        str(w["profile"]),
+        "--",
+        str(w["agy"]),
+        "--print",
+        "hi",
+    )
+    assert done.returncode == 0, done.stderr
+    lines = w["record"].read_text(encoding="utf-8").splitlines()
+    assert lines[0] == f"cwd={w['work']}"
+    assert lines[1] in ("umask=0007", "umask=007")
+    args = [line[4:] for line in lines if line.startswith("arg=")]
+    assert args == ["-f", str(w["profile"]), str(w["agy"]), "--print", "hi"]
+    env = dict(
+        line.split("=", 1) for line in lines[2:] if "=" in line and not line.startswith("arg=")
+    )
+    env.pop("PWD", None)
+    env.pop("SHLVL", None)
+    env.pop("_", None)
+    assert env == {
+        "HOME": f"{w['run_root']}/home",
+        "TMPDIR": f"{w['run_root']}/tmp",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "en_US.UTF-8",
+        "USER": env["USER"],
+        "LOGNAME": env["USER"],
+        "SHELL": "/bin/sh",
+        "TERM": "dumb",
+        "NEXUS_CLI_WORKER_RUN_TAG": "c" * 32,
+    }
+    assert (w["run_root"] / ".worker-exec-started").is_file()
+
+
+def _refused(done: subprocess.CompletedProcess, w: dict) -> bool:
+    return done.returncode == 64 and "refusing" in done.stderr and not w["record"].exists()
+
+
+def test_wrapper_refuses_paths_outside_worker_runs_symlinks_and_other_binaries(tmp_path):
+    w = _wrapper_copy(tmp_path)
+    run_root, work, profile, agy = w["run_root"], w["work"], w["profile"], w["agy"]
+    outside = tmp_path.resolve() / "outside" / ("d" * 32)
+    (outside / "work").mkdir(parents=True)
+    (outside / "agy-dispatch.sb").write_text("(version 1)\n", encoding="utf-8")
+    link_run = w["runs"] / ("e" * 32)
+    link_run.symlink_to(run_root)
+    nested = run_root / ("f" * 32)
+    (nested / "work").mkdir(parents=True)
+    badname = w["runs"] / "not-a-run-tag"
+    (badname / "work").mkdir(parents=True)
+    link_work = run_root / "work-link"
+    link_work.symlink_to(work)
+    escape_work = run_root / "escape"
+    escape_work.symlink_to(outside / "work")
+    link_profile = run_root / "profile-link.sb"
+    link_profile.symlink_to(outside / "agy-dispatch.sb")
+    other_bin = shutil.which("true") or "/bin/true"
+    agy_link = w["agy"].parent / "agy-link"
+    agy_link.symlink_to(agy)
+    cases = {
+        "run_root outside worker-runs": [
+            str(outside),
+            str(outside / "work"),
+            str(outside / "agy-dispatch.sb"),
+        ],
+        "run_root symlink": [
+            str(link_run),
+            str(link_run / "work"),
+            str(link_run / "agy-dispatch.sb"),
+        ],
+        "run_root nested": [str(nested), str(nested / "work"), str(profile)],
+        "run_root bad name": [str(badname), str(badname / "work"), str(profile)],
+        "run_root non-canonical": [f"{w['runs']}/../wr-runs/{'c' * 32}", str(work), str(profile)],
+        "run_root relative": [os.path.relpath(run_root), str(work), str(profile)],
+        "worker-runs itself": [str(w["runs"]), str(work), str(profile)],
+        "workdir outside run_root": [str(run_root), str(outside / "work"), str(profile)],
+        "workdir is run_root": [str(run_root), str(run_root), str(profile)],
+        "workdir symlink": [str(run_root), str(link_work), str(profile)],
+        "workdir symlink escape": [str(run_root), str(escape_work), str(profile)],
+        "profile outside run_root": [str(run_root), str(work), str(outside / "agy-dispatch.sb")],
+        "profile symlink": [str(run_root), str(work), str(link_profile)],
+        "profile is a directory": [str(run_root), str(work), str(work)],
+    }
+    for name, paths in cases.items():
+        done = _run_wrapper(w, *paths, "--", str(agy))
+        assert _refused(done, w), (name, done.returncode, done.stderr)
+    for name, argv in {
+        "other binary": [other_bin, "-c", "id"],
+        "agy via symlink": [str(agy_link)],
+        "shell": ["/bin/sh", "-c", "cat /etc/passwd"],
+    }.items():
+        done = _run_wrapper(w, str(run_root), str(work), str(profile), "--", *argv)
+        assert _refused(done, w), (name, done.stderr)
+    for args in (
+        [],
+        [str(run_root), str(work), str(profile), str(agy)],  # no "--"
+        [str(run_root), str(work), str(profile), "--"],
+        ["--sweep"],
+        ["--sweep", str(outside)],
+        ["--sweep", str(link_run)],
+        ["--sweep", str(run_root), "12x"],
+        ["--sweep", str(run_root), "-9"],
+    ):
+        done = _run_wrapper(w, *args)
+        assert _refused(done, w), (args, done.stderr)
+
+
+def _fake_ps(tmp_path: Path, tagged_lines: str) -> str:
+    listing = tmp_path / "ps-listing.txt"
+    listing.write_text(tagged_lines, encoding="utf-8")
+    fake = tmp_path / "fake-ps"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do [ "$a" = "-E" ] && exec cat ' + f'"{listing}"; done\n'
+        f'exec {shutil.which("ps")} "$@"\n',
+        encoding="utf-8",
+    )
+    os.chmod(fake, 0o755)
+    return str(fake)
+
+
+def _spawn_sleeper() -> subprocess.Popen:
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def _dead(proc: subprocess.Popen) -> bool:
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def test_wrapper_sweep_kills_listed_tagged_and_run_cwd_processes(tmp_path):
+    listed, tagged, in_cwd, bystander = (_spawn_sleeper() for _ in range(4))
+    try:
+        tag = "c" * 32
+        ps = _fake_ps(
+            tmp_path.resolve(),
+            f"{tagged.pid} python -c x NEXUS_CLI_WORKER_RUN_TAG={tag} HOME=/x\n"
+            f"{bystander.pid} python -c x NEXUS_CLI_WORKER_RUN_TAG={tag}0 HOME=/y\n",
+        )
+        lsof = tmp_path.resolve() / "fake-lsof"
+        w_root = tmp_path.resolve() / "wr-runs" / tag
+        lsof.write_text(
+            "#!/bin/sh\n"
+            f"printf 'p{in_cwd.pid}\\nfcwd\\nn{w_root}/work\\np{bystander.pid}\\nfcwd\\nn{w_root}-other\\n'\n",
+            encoding="utf-8",
+        )
+        os.chmod(lsof, 0o755)
+        w = _wrapper_copy(tmp_path, ps=ps, lsof=str(lsof))
+        private = w["work"] / "private"
+        private.mkdir(mode=0o700)
+        done = _run_wrapper(w, "--sweep", str(w["run_root"]), str(listed.pid))
+        assert done.returncode == 0, (done.stdout, done.stderr)
+        assert done.stdout.strip() == "AGY_WORKER_SWEEP clean"
+        assert _dead(listed) and _dead(tagged) and _dead(in_cwd)
+        assert bystander.poll() is None  # a longer tag and a sibling path are not this run
+        assert stat.S_IMODE(private.stat().st_mode) & 0o070 == 0o070  # handed back to the group
+    finally:
+        for proc in (listed, tagged, in_cwd, bystander):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# boundary preparation, profile, pool untouched
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_builds_private_run_dir_with_copy_home_and_profile(worker_env):
+    boundary = _prepare(worker_env)
+    try:
+        run_root = boundary.run_root
+        assert run_root.parent == worker_env["runs"]
+        assert re.fullmatch(r"[0-9a-f]{32}", run_root.name)
+        assert run_root.name == boundary.run_tag
+        assert stat.S_IMODE(run_root.stat().st_mode) == 0o2770
+        assert run_root.stat().st_gid == worker_env["gid"]
+        work = boundary.target
+        assert work == run_root / "work"
+        assert (work / "src" / "a.py").read_text() == "print('a')\n"
+        assert not (work / ".agents").exists()
+        # a fresh one-commit snapshot: no ref or history of the target's .git
+        assert not (work / ".git" / "refs" / "heads" / "cwt-hidden").exists()
+        log = subprocess.run(
+            ["git", "-C", str(work), "log", "--oneline"], capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        assert len(log) == 1
+        status = subprocess.run(
+            ["git", "-C", str(work), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert status == ""
+        # only the leased account's session files cross into the per-run HOME
+        assert (boundary.run_home / TOKEN).read_text() == "token"
+        assert (boundary.run_home / INSTALLATION_ID).read_text() == "install-id"
+        settings = json.loads((boundary.run_home / admission.AGY_RUN_HOME_SETTINGS).read_text())
+        assert settings["permissions"]["deny"] == ["command(*)"]
+        assert boundary.env["HOME"] == str(boundary.run_home)
+        assert "GH_TOKEN" not in boundary.env
+        assert boundary.launch_env == {
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "en_US.UTF-8",
+        }
+        assert boundary.profile_path == run_root / "agy-dispatch.sb"
+        assert boundary.profile_path.read_text() == boundary.profile
+        assert boundary.sweep_roots == (str(work), str(run_root))
+    finally:
+        boundary.cleanup()
+    assert not boundary.run_root.exists()
+
+
+def test_profile_denies_other_runs_and_keeps_the_existing_denies(worker_env):
+    boundary = _prepare(worker_env)
+    try:
+        profile = boundary.profile
+        runs, run_root, work = worker_env["runs"], boundary.run_root, boundary.target
+        other = runs / ("0" * 32)
+        assert f'(deny file-read* file-write* (subpath "{runs}"))' in profile.splitlines()
+        assert "(allow signal (target same-sandbox))" in profile.splitlines()
+        for op in ("file-read*", "file-write*"):
+            assert _effective(profile, op, other / "work" / "secret.py") == "deny", op
+            assert _effective(profile, op, other) == "deny", op
+            assert _effective(profile, op, runs) == "deny", op
+        assert _effective(profile, "file-read*", work / "src" / "a.py") == "allow"
+        assert _effective(profile, "file-write*", work / "src" / "a.py") == "allow"
+        assert _effective(profile, "file-read*", run_root / "home" / TOKEN) == "allow"
+        # the #2202/#2470 write denies inside this run still win
+        for path in (
+            work / ".git" / "config",
+            work / ".agents" / "hooks.json",
+            boundary.run_home / admission.AGY_RUN_HOME_SETTINGS,
+            worker_env["home"] / TOKEN,
+        ):
+            assert _effective(profile, "file-write*", path) == "deny", path
+        # the normal profile follows the cross-run block unchanged (#2861/#2869/#2875 rules)
+        normal = admission.build_seatbelt_profile(
+            run_root=run_root,
+            writable_target=work,
+            run_home=boundary.run_home,
+            source_home=worker_env["home"],
+        )
+        assert normal[len("(version 1)\n(allow default)\n") :] in profile
+        for line in admission.LAUNCH_SERVICES_DENY_LINES:
+            assert line in profile
+    finally:
+        boundary.cleanup()
+
+
+def test_the_account_pool_is_never_modified(worker_env, monkeypatch):
+    pool = worker_env["pool"]
+    before = _tree_state(pool)
+    pool_mode = stat.S_IMODE(pool.stat().st_mode)
+    touched: list[str] = []
+    real_chmod, real_chown = os.chmod, os.chown
+
+    def guard(real):
+        def call(path, *args, **kwargs):
+            if str(path).startswith(str(pool)):
+                touched.append(str(path))
+            return real(path, *args, **kwargs)
+
+        return call
+
+    monkeypatch.setattr(worker_mod.os, "chmod", guard(real_chmod))
+    monkeypatch.setattr(worker_mod.os, "chown", guard(real_chown))
+    boundary = _prepare(worker_env)
+    boundary.before_launch()
+    boundary.cleanup()
+    assert touched == []
+    assert _tree_state(pool) == before
+    assert stat.S_IMODE(pool.stat().st_mode) == pool_mode
+
+
+def test_before_launch_shares_the_run_tree_with_the_group(worker_env):
+    boundary = _prepare(worker_env)
+    try:
+        boundary.before_launch()
+        for path in [boundary.run_root, *boundary.run_root.rglob("*")]:
+            info = os.lstat(path)
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISDIR(info.st_mode):
+                assert mode == 0o2770, path
+            elif path in (
+                boundary.profile_path,
+                boundary.run_home / admission.AGY_RUN_HOME_SETTINGS,
+            ):
+                assert mode == 0o640, path
+            else:
+                assert mode in (0o660, 0o770), (path, oct(mode))
+            assert info.st_gid == worker_env["gid"], path
+    finally:
+        boundary.cleanup()
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        ({"worker_user": "root"}, "worker_user_not_allowed"),
+        ({"source_agy": None}, "worker_agy_stale"),
+    ],
+)
+def test_prepare_refusals(worker_env, overrides, reason):
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match=reason):
+        _prepare(worker_env, **overrides)
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+def test_prepare_refuses_a_bad_layout(worker_env, monkeypatch):
+    runs = worker_env["runs"]
+    os.chmod(runs, 0o2770)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_runs_wrong_mode"):
+        _prepare(worker_env)
+    os.chmod(runs, 0o2710)
+    worker_env["wrapper"].write_text('#!/bin/sh\nexec "$@"\n', encoding="utf-8")
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="wrapper_stale"):
+        _prepare(worker_env)
+    shutil.copyfile(WRAPPER, worker_env["wrapper"])
+    worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale"):
+        _prepare(worker_env)
+    shutil.copyfile(worker_env["worker_agy"], worker_env["source_agy"])
+    monkeypatch.setattr(worker_mod.os, "getgroups", lambda: [])
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="owner_not_in_run_group"):
+        _prepare(worker_env)
+    link = worker_env["runs"].parent / "runs-link"
+    link.symlink_to(runs)
+    monkeypatch.setattr(worker_mod.os, "getgroups", lambda: [worker_env["gid"]])
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_runs_missing"):
+        _prepare(worker_env, runs_dir=link)
+    assert list(runs.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# sweep across the uid boundary, copy-back, cleanup
+# ---------------------------------------------------------------------------
+
+
+class _Tracker:
+    probe_failed = False
+
+    def __init__(self, pids):
+        self.pids = set(pids)
+
+    def stop(self):
+        return set(self.pids)
+
+
+class _Run:
+    def __init__(self, stdout: str, returncode: int = 0):
+        self.calls: list[list[str]] = []
+        self.stdout, self.returncode = stdout, returncode
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(list(argv))
+        assert kwargs["cwd"] == "/"
+        assert kwargs["env"] == worker_mod.LAUNCH_ENV
+        return subprocess.CompletedProcess(argv, self.returncode, self.stdout, "")
+
+
+def _launched(boundary, monkeypatch, *, owner_clean=True, tracked=(4242, 4343)):
+    boundary.before_launch()
+    boundary._launched = True
+    boundary._tracker = _Tracker(tracked)
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: owner_clean)
+    (boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("", encoding="utf-8")
+
+
+def test_sweep_kills_through_the_wrapper_and_needs_both_sides_clean(worker_env, monkeypatch):
+    run = _Run("AGY_WORKER_SWEEP clean\n")
+    boundary = _prepare(worker_env, run_command=run)
+    _launched(boundary, monkeypatch)
+    assert boundary.sweep() is True
+    assert run.calls == [
+        worker_mod.sweep_argv(boundary.run_root, [4242, 4343], wrapper=worker_env["wrapper"])
+    ]
+    assert boundary.sweep() is True and len(run.calls) == 1  # runs once
+    boundary.cleanup()
+
+    for stdout, code, owner_clean in (
+        ("AGY_WORKER_SWEEP unclean 4242\n", 3, True),
+        ("AGY_WORKER_SWEEP clean\n", 0, False),
+        ("", 1, True),  # sudo refused: never clean
+    ):
+        boundary = _prepare(worker_env, run_command=_Run(stdout, code))
+        _launched(boundary, monkeypatch, owner_clean=owner_clean)
+        (boundary.target / "src" / "a.py").write_text("worker edit\n", encoding="utf-8")
+        assert boundary.sweep() is False
+        boundary.cleanup()
+        # an unclean sweep never copies anything back
+        assert (worker_env["target"] / "src" / "a.py").read_text() == "print('a')\n"
+        assert not boundary.run_root.exists()
+
+
+def test_terminate_worker_sweeps_as_the_worker(worker_env, monkeypatch):
+    run = _Run("AGY_WORKER_SWEEP clean\n")
+    boundary = _prepare(worker_env, run_command=run)
+    boundary.terminate_worker()
+    assert run.calls == []  # nothing launched yet
+    _launched(boundary, monkeypatch)
+    boundary.terminate_worker()
+    assert run.calls == [
+        worker_mod.sweep_argv(boundary.run_root, [], wrapper=worker_env["wrapper"])
+    ]
+    boundary.cleanup()
+
+
+def test_clean_run_copies_changes_back_and_removes_the_run_dir(worker_env, monkeypatch):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    work = boundary.target
+    (work / "src" / "a.py").write_text("print('edited')\n", encoding="utf-8")
+    (work / "src" / "new").mkdir()
+    (work / "src" / "new" / "b.py").write_text("b\n", encoding="utf-8")
+    (work / "README.md").unlink()
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    target = worker_env["target"]
+    assert boundary.worker_failure is None
+    assert (target / "src" / "a.py").read_text() == "print('edited')\n"
+    assert (target / "src" / "new" / "b.py").read_text() == "b\n"
+    assert not (target / "README.md").exists()
+    # the target's own .git and customizations are never replaced from the copy
+    assert (target / ".git" / "HEAD").read_text() == "ref: refs/heads/cwt-hidden\n"
+    assert (target / ".agents" / "hooks.json").is_file()
+    assert not boundary.run_root.exists()
+
+
+@pytest.mark.parametrize("planted", ["symlink", "destination_symlink"])
+def test_copy_back_refuses_symlinks_and_applies_nothing(worker_env, monkeypatch, planted):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    work, target = boundary.target, worker_env["target"]
+    (work / "src" / "a.py").write_text("edited\n", encoding="utf-8")
+    if planted == "symlink":
+        (work / "src" / "link").symlink_to("/etc/passwd")
+    else:
+        (work / "src" / "c.py").write_text("c\n", encoding="utf-8")
+        (target / "src" / "c.py").symlink_to(target / "README.md")
+    boundary.cleanup()
+    assert boundary.worker_failure is not None
+    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED")
+    assert (target / "src" / "a.py").read_text() == "print('a')\n"
+    assert (target / "README.md").read_text() == "readme\n"
+    assert not boundary.run_root.exists()
+
+
+@pytest.mark.parametrize("owner_clean", [True, False])
+def test_launch_without_the_wrapper_marker_is_a_launch_failure(
+    worker_env, monkeypatch, owner_clean
+):
+    boundary = _prepare(worker_env, run_command=_Run("", 1))
+    _launched(boundary, monkeypatch, owner_clean=owner_clean)
+    (boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).unlink()
+    # no worker process can exist, so only the Owner-side check decides
+    assert boundary.sweep() is owner_clean
+    boundary.cleanup()
+    assert boundary.worker_failure == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
+    assert not boundary.run_root.exists()
+
+
+# ---------------------------------------------------------------------------
+# dispatcher integration
+# ---------------------------------------------------------------------------
+
+
+class _Claim:
+    def __init__(self, home: Path) -> None:
+        self.account_alias_hash = "worker"
+        self.lease_id_hash = "lease-worker"
+        self.internal_id = "worker-account"
+        self.lease = type(
+            "Lease", (), {"execution_env": {"HOME": str(home), "PATH": "/usr/bin:/bin"}}
+        )()
+        self.released = False
+
+    def release(self) -> None:
+        self.released = True
+
+
+class _Coordinator:
+    def __init__(self, home: Path) -> None:
+        self.claim = _Claim(home)
+        self.acquire_count = 0
+
+    def acquire_claim(self, **_kwargs):
+        self.acquire_count += 1
+        return self.claim
+
+
+def _metas(err: str) -> list[dict]:
+    prefix = "NEXUS_AGY_DISPATCH "
+    return [json.loads(line[len(prefix) :]) for line in err.splitlines() if line.startswith(prefix)]
+
+
+def _patch_prepare(monkeypatch, layout, run):
+    monkeypatch.setattr(
+        worker_mod,
+        "prepare_worker_account_boundary",
+        functools.partial(
+            worker_mod.prepare_worker_account_boundary,
+            runs_dir=layout["runs"],
+            wrapper=layout["wrapper"],
+            worker_agy=layout["worker_agy"],
+            run_group=layout["group"],
+            repo_wrapper=WRAPPER,
+            run_command=run,
+        ),
+    )
+    real_which = shutil.which
+    monkeypatch.setattr(
+        dispatch.shutil,
+        "which",
+        lambda name, *a, **k: (
+            str(layout["source_agy"]) if name == "agy" else real_which(name, *a, **k)
+        ),
+    )
+
+
+def test_dispatch_run_as_user_runs_agy_in_the_worker_copy(worker_env, monkeypatch, capsys):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    coordinator = _Coordinator(worker_env["home"])
+    seen: dict = {}
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        seen["cwd"] = cwd
+        seen["boundary"] = write_boundary
+        seen["permissions"] = json.loads(
+            (write_boundary.run_home / admission.AGY_RUN_HOME_SETTINGS).read_text()
+        )["permissions"]
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        (write_boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("")
+        (Path(cwd) / "src" / "a.py").write_text("print('worker')\n", encoding="utf-8")
+        return 0, "edited", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+    )
+    meta = _metas(capsys.readouterr().err)[-1]
+    assert code == 0, meta
+    boundary = seen["boundary"]
+    assert isinstance(boundary, worker_mod.AgyWorkerAccountBoundary)
+    assert seen["cwd"] == str(boundary.target) != str(target)
+    work = boundary.target
+    assert f"write_file({work}/src/a.py)" in seen["permissions"]["allow"]
+    assert f"read_file({work}/**)" in seen["permissions"]["allow"]
+    assert not any(str(target) in rule for rule in seen["permissions"]["allow"])
+    # the edit came back into the real target and the run dir is gone
+    assert (target / "src" / "a.py").read_text() == "print('worker')\n"
+    assert not boundary.run_root.exists()
+    assert list(worker_env["runs"].iterdir()) == []
+    assert coordinator.claim.released is True
+
+
+def test_dispatch_worker_launch_failure_does_not_rotate(worker_env, monkeypatch, capsys):
+    # sudo refuses both the launch and the sweep: "a password is required"
+    _patch_prepare(monkeypatch, worker_env, _Run("", 1))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    coordinator = _Coordinator(worker_env["home"])
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        return 1, "", "sudo: a password is required\n", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+        max_calls=3,
+    )
+    meta = _metas(capsys.readouterr().err)[-1]
+    assert code == 1
+    assert meta["failure_kind"] == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
+    assert meta["rotations"] == 0 and coordinator.acquire_count == 1
+    assert meta["reconciliation_required"] is False
+
+
+def test_run_as_user_requires_accept_edits(tmp_path, capsys):
+    code = dispatch.dispatch_run(
+        prompt="plan",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=_Coordinator(tmp_path),
+        run_agy_fn=lambda **_k: (0, "", "", False, 1),
+        run_as_user="_cairnwork_worker",
+    )
+    assert code == 64
+    assert _metas(capsys.readouterr().err)[-1]["failure_kind"] == (
+        "DISPATCH_CONTRACT_REJECTED:RUN_AS_USER_REQUIRES_ACCEPT_EDITS"
+    )
+
+
+# ---------------------------------------------------------------------------
+# without --run-as-user nothing changes
+# ---------------------------------------------------------------------------
+
+
+def test_default_dispatch_uses_the_unchanged_boundary(tmp_path, monkeypatch, capsys):
+    if not admission.seatbelt_available():
+        monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: True)
+    worker_calls: list = []
+    monkeypatch.setattr(
+        worker_mod, "prepare_worker_account_boundary", lambda **k: worker_calls.append(k)
+    )
+    home = tmp_path.resolve() / "home"
+    (home / TOKEN).parent.mkdir(parents=True)
+    (home / TOKEN).write_text("token", encoding="utf-8")
+    target = tmp_path.resolve() / "work"
+    target.mkdir()
+    seen: dict = {}
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        seen["cwd"] = cwd
+        seen["boundary"] = write_boundary
+        seen["argv"] = write_boundary.wrap_argv(["agy", "--x"])
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=_Coordinator(home),
+        run_agy_fn=runner,
+    )
+    assert code == 0
+    assert worker_calls == []
+    assert type(seen["boundary"]) is boundary_mod.AgyDispatchBoundary
+    assert seen["cwd"] == str(target)
+    assert seen["argv"] == [
+        admission.SANDBOX_EXEC_PATH,
+        "-f",
+        str(seen["boundary"].profile_path),
+        "agy",
+        "--x",
+    ]
+    assert not hasattr(seen["boundary"], "launch_env")
+    assert "worker-runs" not in seen["boundary"].profile
+    assert dispatch._popen_env(seen["boundary"], {"A": "1"}) == {"A": "1"}
+    assert dispatch._popen_env(None, {"A": "1"}) == {"A": "1"}
+
+
+def test_background_argv_carries_run_as_user_only_when_set(tmp_path, monkeypatch):
+    captured: list[list[str]] = []
+
+    class _Proc:
+        pid = 4321
+
+    real_popen = subprocess.Popen
+
+    def fake_popen(argv, **kwargs):
+        if "--operation-run" not in argv:
+            return real_popen(argv, **kwargs)
+        captured.append(list(argv))
+        return _Proc()
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", fake_popen)
+    common = dict(
+        prompt="p",
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=60,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=tmp_path / "ops",
+    )
+    dispatch._spawn_background_operation(**common)
+    dispatch._spawn_background_operation(**common, run_as_user="_cairnwork_worker")
+    assert "--run-as-user" not in captured[0]
+    assert captured[1][-2:] == ["--run-as-user", "_cairnwork_worker"]
+
+
+def test_installer_copies_wrapper_and_agy_owner_0755(tmp_path):
+    bin_dir = tmp_path.resolve() / "bin"
+    bin_dir.mkdir()
+    os.chmod(bin_dir, 0o755)
+    agy = tmp_path.resolve() / "agy"
+    agy.write_text("#!/bin/sh\necho agy\n", encoding="utf-8")
+    os.chmod(agy, 0o755)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "NEXUS_AGY_WORKER_BIN": str(bin_dir),
+        "NEXUS_AGY_SOURCE_BINARY": str(agy),
+    }
+    done = subprocess.run(
+        ["bash", str(INSTALLER)], env=env, capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stderr
+    for name, source in (("agy-worker-exec", WRAPPER), ("agy", agy)):
+        installed = bin_dir / name
+        assert installed.read_bytes() == source.read_bytes()
+        assert stat.S_IMODE(installed.stat().st_mode) == 0o755
+        assert installed.stat().st_uid == os.getuid()
+    os.chmod(bin_dir, 0o775)
+    done = subprocess.run(
+        ["bash", str(INSTALLER)], env=env, capture_output=True, text=True, check=False
+    )
+    assert done.returncode != 0 and "bin_mode_775" in done.stderr
+
+
+def test_wrapper_sweep_waits_out_zombies(tmp_path):
+    """A killed child of ours lingers as a zombie until reaped; it never counts as live."""
+    zombie = _spawn_sleeper()
+    try:
+        w = _wrapper_copy(tmp_path)
+        zombie.kill()
+        time.sleep(0.2)  # killed, not yet reaped: a zombie
+        done = _run_wrapper(w, "--sweep", str(w["run_root"]), str(zombie.pid))
+        assert done.stdout.strip() == "AGY_WORKER_SWEEP clean", done.stderr
+    finally:
+        zombie.wait()
