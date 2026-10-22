@@ -5201,6 +5201,9 @@ def dispatch_run(
                         operation_hook,
                         descendant_sweep_clean=None,
                         descendant_sweep_attempt=attempts,
+                        # roots the operator ack re-checks (the run root is
+                        # removed at cleanup unless kept for diagnostics)
+                        descendant_sweep_roots=list(getattr(write_boundary, "sweep_roots", ())),
                     )
                 try:
                     code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
@@ -6590,17 +6593,56 @@ def _finalize_no_effect_operation(
     )
 
 
+_ACK_OPEN_FILE_SCAN_TIMEOUT_SECONDS = 120
+
+
+def _open_file_holders(roots: list[str], exclude: set[int]) -> set[int] | None:
+    """Same-uid pids holding any open file (cwd included) under ``roots``.
+
+    ``lsof +D`` per root, bounded by a timeout; None when a scan cannot run,
+    prints diagnostics or returns a record it cannot parse.
+    """
+    found: set[int] = set()
+    for root in roots:
+        try:
+            completed = subprocess.run(
+                ["lsof", "-nPw", "-a", "-u", str(os.getuid()), "-F", "p", "+D", root],
+                env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C", "LANG": "C"},
+                capture_output=True,
+                text=True,
+                timeout=_ACK_OPEN_FILE_SCAN_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # lsof exits 1 both for "nothing found" and (with -a on macOS) for a
+        # partial match, so the exit code alone proves nothing: any diagnostic
+        # or a malformed record makes the scan unknown.
+        if completed.returncode not in (0, 1) or completed.stderr.strip():
+            return None
+        for line in completed.stdout.splitlines():
+            if not line:
+                continue
+            if line[:1] == "p" and line[1:].isdigit():
+                found.add(int(line[1:]))
+            elif line[:1] != "f":
+                return None
+    return found - exclude
+
+
 def _ack_unclean_sweep_operation(
     journal: AgyOperationJournal,
     operation_id: str,
 ) -> dict[str, Any]:
-    """Operator step that clears an unproven descendant sweep (#2470).
+    """Operator attestation for an operation held by an unproven sweep (#2470).
 
-    Refuses while the wrapper or provider lives, or while any process of this
-    uid (other than this one and its ancestors) has a cwd under the
-    operation's target; an unreadable scan also refuses. On success the
-    sweep verdict for the latest attempt is recorded as clean (with the
-    acknowledgement) and the ordinary reconcile runs.
+    This is not proof that the run's writers are gone: an escaped process
+    could still come back. It refuses while the wrapper or provider lives,
+    while any process of this uid (other than this one and its ancestors) has
+    its cwd or any open file under the target or the run's sweep roots, and
+    when a scan cannot run. On success it records
+    ``descendant_sweep_operator_ack`` for the latest attempt (the sweep
+    verdict itself is left as it was, never set True) and reconciles.
     """
     record = journal.read(operation_id)
     if not _descendant_sweep_unproven(record):
@@ -6612,6 +6654,10 @@ def _ack_unclean_sweep_operation(
     target = record.get("cwd")
     if not isinstance(target, str) or not target:
         raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_TARGET_UNKNOWN")
+    roots = [target]
+    for root in record.get("descendant_sweep_roots") or []:
+        if isinstance(root, str) and root not in roots and os.path.isdir(root):
+            roots.append(root)
     cli_worker = import_module("nexus.executors.cli_worker")
     baseline = cli_worker.sweep_baseline()
     if baseline is None:
@@ -6619,23 +6665,33 @@ def _ack_unclean_sweep_operation(
     # Every process of this uid counts, however old: the escaped writer may
     # predate this command.
     everything = dataclasses.replace(baseline, started_at=0.0, preexisting=frozenset())
-    residents = cli_worker._pids_with_cwd_under((target,), everything)
+    residents = cli_worker._pids_with_cwd_under(tuple(roots), everything)
     if residents is None:
         raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_SCAN_UNAVAILABLE")
     if residents:
         raise AgyOperationJournalError(
             "ACK_UNCLEAN_SWEEP_RESIDENTS:" + ",".join(str(pid) for pid in sorted(residents))
         )
+    holders = _open_file_holders(roots, set(baseline.protected) | {os.getpid()})
+    if holders is None:
+        raise AgyOperationJournalError("ACK_UNCLEAN_SWEEP_SCAN_UNAVAILABLE")
+    if holders:
+        raise AgyOperationJournalError(
+            "ACK_UNCLEAN_SWEEP_OPEN_FILES:" + ",".join(str(pid) for pid in sorted(holders))
+        )
     journal.update(
         operation_id,
-        descendant_sweep_clean=True,
-        descendant_sweep_attempt=int(record.get("attempts") or 0),
-        descendant_sweep_acknowledged={
+        descendant_sweep_operator_ack={
+            "attempt": int(record.get("attempts") or 0),
             "at": _agy_operation_journal.utc_now(),
-            "method": "OPERATOR_CWD_RESCAN",
-            "target": target,
-            "previous_clean": record.get("descendant_sweep_clean"),
-            "previous_attempt": record.get("descendant_sweep_attempt"),
+            "kind": "OPERATOR_ATTESTATION_NOT_PROOF",
+            "operator_check": {
+                "roots": roots,
+                "cwd_residents": [],
+                "open_file_holders": [],
+                "sweep_clean_at_ack": record.get("descendant_sweep_clean"),
+                "sweep_attempt_at_ack": record.get("descendant_sweep_attempt"),
+            },
         },
     )
     return _reconcile_operation(journal, operation_id)
@@ -6786,9 +6842,10 @@ def main(argv: list[str] | None = None) -> int:
         "--ack-unclean-sweep",
         metavar="OPERATION_ID",
         help=(
-            "Operator step for an operation held by an unproven descendant sweep: "
-            "re-check that no process has its cwd under the operation's target, "
-            "then record the sweep as clean and reconcile"
+            "Operator attestation (not proof) for an operation held by an unproven "
+            "descendant sweep: refuse while any same-uid process has its cwd or an "
+            "open file under the target or run root, else record an operator ack "
+            "for the latest attempt (the sweep stays unproven) and reconcile"
         ),
     )
     ap.add_argument("--hcom-collab", action="store_true")

@@ -1829,9 +1829,86 @@ def test_ack_unclean_sweep_refuses_while_a_process_lives_in_the_target(
         os.kill(resident.pid, 9)
         resident.wait(timeout=5)
     record = dispatch._ack_unclean_sweep_operation(journal, operation_id)
-    assert record["descendant_sweep_clean"] is True
-    assert record["descendant_sweep_acknowledged"]["method"] == "OPERATOR_CWD_RESCAN"
+    _assert_acknowledged_not_proven(record)
+    # reconcile accepts the operator ack for the latest attempt
     assert record["reconciliation"]["result"] != "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["result"] != "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+    _assert_acknowledged_not_proven(record)
+
+
+def _assert_acknowledged_not_proven(record):
+    assert record["descendant_sweep_clean"] is not True  # never proven by an ack
+    ack = record["descendant_sweep_operator_ack"]
+    assert ack["attempt"] == record["attempts"]
+    assert ack["kind"] == "OPERATOR_ATTESTATION_NOT_PROOF"
+    assert ack["operator_check"]["open_file_holders"] == []
+    assert ack["operator_check"]["cwd_residents"] == []
+    assert dispatch._descendant_sweep_unproven(record) is False
+    # an ack for an earlier attempt would not count
+    stale = {**record, "attempts": record["attempts"] + 1}
+    assert dispatch._descendant_sweep_unproven(stale) is True
+
+
+def test_ack_unclean_sweep_refuses_an_open_file_in_the_target_from_elsewhere(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    """An escaped writer whose cwd is elsewhere but holds a file in the target."""
+    journal, operation_id, kwargs = _held_operation(tmp_path, monkeypatch)
+    monkeypatch.setattr(boundary_mod.cli_worker, "_pids_with_cwd_under", _REAL_CWD_SCAN)
+    victim = Path(kwargs["cwd"]) / "a.py"
+    writer = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; f = open(sys.argv[1], 'a'); time.sleep(60)",
+            str(victim),
+        ],
+        cwd="/",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not victim.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.2)
+        with pytest.raises(
+            dispatch.AgyOperationJournalError, match=f"ACK_UNCLEAN_SWEEP_OPEN_FILES:{writer.pid}"
+        ):
+            dispatch._ack_unclean_sweep_operation(journal, operation_id)
+        assert writer.poll() is None  # only checked, never killed
+        record = journal.read(operation_id)
+        assert "descendant_sweep_operator_ack" not in record
+        assert record["phase"] == "RECONCILE_REQUIRED"
+    finally:
+        os.kill(writer.pid, 9)
+        writer.wait(timeout=5)
+
+
+def test_ack_unclean_sweep_refuses_when_the_open_file_scan_cannot_run(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    journal, operation_id, _ = _held_operation(tmp_path, monkeypatch)
+    monkeypatch.setattr(boundary_mod.cli_worker, "_pids_with_cwd_under", _REAL_CWD_SCAN)
+    monkeypatch.setattr(dispatch, "_open_file_holders", lambda roots, exclude: None)
+    with pytest.raises(
+        dispatch.AgyOperationJournalError, match="ACK_UNCLEAN_SWEEP_SCAN_UNAVAILABLE"
+    ):
+        dispatch._ack_unclean_sweep_operation(journal, operation_id)
+    assert "descendant_sweep_operator_ack" not in journal.read(operation_id)
+
+
+def test_finalize_no_effect_accepts_the_operator_ack(tmp_path, monkeypatch, seatbelt_on):
+    journal, operation_id, _ = _held_operation(tmp_path, monkeypatch)
+    monkeypatch.setattr(boundary_mod.cli_worker, "_pids_with_cwd_under", _REAL_CWD_SCAN)
+    dispatch._ack_unclean_sweep_operation(journal, operation_id)
+    try:
+        dispatch._finalize_no_effect_operation(journal, operation_id)
+    except dispatch.AgyOperationJournalError as exc:
+        # later, unrelated proofs may still refuse; the sweep hold does not
+        assert "DESCENDANT_SWEEP" not in str(exc)
 
 
 def test_ack_unclean_sweep_is_refused_when_not_needed(tmp_path, monkeypatch):
