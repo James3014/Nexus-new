@@ -28,7 +28,10 @@ This module reads, in order of trust:
    e.g. ``"authentication failed or timed out"`` or ``"Individual quota
    reached ..."``.
 
-3. Only when neither exists: agy's stderr text (agy's diagnostics channel; the
+3. Headless tool permission denials are work failures, never account failures.
+   Their tool/path diagnostics come only from stderr or result envelopes.
+
+4. Only when neither exists: agy's stderr text (agy's diagnostics channel; the
    model's reply never goes there).  stdout is never scanned.
 
 A structured error decides alone: when one is present, stderr prose is not
@@ -49,6 +52,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from nexus.services.external_account_pool import AccountFailureKind
@@ -98,6 +102,95 @@ _UNAVAILABLE_MARKERS = ("unavailable", "503", "service unavailable")
 _DISABLED_MARKERS = ("disabled",)
 
 _HTTP_CODE_KINDS = (None, "", "http")
+
+
+HEADLESS_TOOL_PERMISSION_DENIED = "HEADLESS_TOOL_PERMISSION_DENIED"
+_HEADLESS_TOOL_RE = re.compile(
+    r'a tool required the "([^"]+)" permission that headless mode cannot prompt for'
+)
+
+
+@dataclass(frozen=True)
+class AgyHeadlessDenial:
+    tool: str
+    path: Optional[str]
+    source: str
+
+    def describe(self) -> str:
+        return f"tool={self.tool} path={self.path or 'unknown'}"
+
+
+def _target_arg(args: dict[str, Any], *, absolute: bool) -> Optional[str]:
+    for key, value in args.items():
+        lowered = key.lower()
+        if (
+            (
+                any(part in lowered for part in ("path", "file", "dir"))
+                or lowered in ("target", "cwd")
+            )
+            and isinstance(value, str)
+            and value
+            and (not absolute or value.startswith("/"))
+        ):
+            return value
+    return None
+
+
+def agy_headless_denial(
+    stdout: str, stderr: str, *, stdout_is_envelope: bool
+) -> Optional[AgyHeadlessDenial]:
+    """Read only agy's diagnostics, never its model response prose."""
+    from nexus.executors.agy_write_admission import (
+        _AGY_HEADLESS_PERMISSION_DENIAL_MARKERS,
+        top_level_json_objects,
+    )
+
+    match = _HEADLESS_TOOL_RE.search(stderr or "")
+    denial = None
+    if match or any(marker in (stderr or "") for marker in _AGY_HEADLESS_PERMISSION_DENIAL_MARKERS):
+        denial = AgyHeadlessDenial(match.group(1) if match else "unknown", None, "stderr")
+    if stdout_is_envelope:
+        for value in top_level_json_objects(stdout or ""):
+            if "conversation_id" not in value or "status" not in value:
+                continue
+            actions = value.get("denied_actions")
+            if not isinstance(actions, list) or not actions:
+                continue
+            action = actions[-1] if isinstance(actions[-1], dict) else {}
+            tool = action.get("action") or action.get("display_name")
+            tool = tool if isinstance(tool, str) and tool else "unknown"
+            return AgyHeadlessDenial(
+                denial.tool if denial and denial.tool != "unknown" else tool,
+                _target_arg(action, absolute=False),
+                "envelope",
+            )
+    return denial
+
+
+def last_tool_call_target(transcript_text: str) -> tuple[Optional[str], Optional[str]]:
+    """Best-effort last tool call in transcript_full.jsonl, including malformed logs."""
+    last: tuple[Optional[str], Optional[str]] = (None, None)
+    for line in transcript_text.splitlines():
+        try:
+            step = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(step, dict) or not isinstance(step.get("tool_calls"), list):
+            continue
+        for call in step["tool_calls"]:
+            if not isinstance(call, dict):
+                continue
+            name = call.get("name")
+            args = call.get("args")
+            last = (
+                name if isinstance(name, str) else None,
+                _target_arg(args, absolute=True) if isinstance(args, dict) else None,
+            )
+    return last
+
+
+def format_headless_denial_reason(denial: AgyHeadlessDenial) -> str:
+    return f"agy_permission_denied: {denial.describe()}"
 
 
 def max_account_retirements() -> int:
@@ -243,6 +336,8 @@ def classify_agy_account_failure(
     structured, kind = agy_structured_failure(stdout, stderr, stdout_is_envelope=stdout_is_envelope)
     if structured:
         return kind
+    if agy_headless_denial(stdout, stderr, stdout_is_envelope=stdout_is_envelope) is not None:
+        return None
     return agy_stderr_account_failure(stderr)
 
 

@@ -88,6 +88,9 @@ is_account_failover_failure = _external_account_pool.is_account_failover_failure
 ACCOUNT_FAILOVER_FAILURES = _external_account_pool.ACCOUNT_FAILOVER_FAILURES
 
 _agy_failure_signals = import_module("nexus.services.agy_failure_signals")
+agy_headless_denial = _agy_failure_signals.agy_headless_denial
+last_tool_call_target = _agy_failure_signals.last_tool_call_target
+HEADLESS_TOOL_PERMISSION_DENIED = _agy_failure_signals.HEADLESS_TOOL_PERMISSION_DENIED
 agy_structured_failure = _agy_failure_signals.agy_structured_failure
 agy_stderr_account_failure = _agy_failure_signals.agy_stderr_account_failure
 is_account_global_retirement = _agy_failure_signals.is_account_global_retirement
@@ -5140,6 +5143,7 @@ def dispatch_run(
             write_boundary = None
             attempt_tool_event_count = 0
             attempt_provider_session_id = None
+            attempt_last_tool_target = (None, None)
             try:
                 if needs_write_boundary:
                     # Disposable HOME + exact env + Seatbelt profile; the permission
@@ -5304,6 +5308,16 @@ def dispatch_run(
                 try:
                     restore_temp_permissions(permission_token)
                 finally:
+                    # #2783: cleanup deletes the transcript with the run HOME.
+                    # Keep only the last tool name/path, never copied credentials.
+                    transcript = _agy_transcript_path(env, attempt_provider_session_id)
+                    if transcript is not None:
+                        try:
+                            attempt_last_tool_target = last_tool_call_target(
+                                transcript.read_text(encoding="utf-8", errors="replace")
+                            )
+                        except OSError:
+                            pass
                     if write_boundary is not None:
                         write_boundary.cleanup()
             if write_boundary is not None:
@@ -5527,13 +5541,25 @@ def dispatch_run(
             provider_effect_observed: bool | None = False
             reconciliation_required = False
 
+            denial_fields: dict[str, Any] = {}
             if no_tool_violation:
                 # Quarantine: a no-tool packet must not report success after tool use.
                 last_kind = NO_TOOL_PROFILE_VIOLATION
                 provider_effect_observed = True if attempt_changed_paths else None
                 reconciliation_required = True
             elif permission_blocked and (provider_headless_denial or semantic_headless_denial):
-                last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
+                last_kind = HEADLESS_TOOL_PERMISSION_DENIED
+                denial = agy_headless_denial(out, err, stdout_is_envelope=False)
+                if denial is None:
+                    denial = agy_headless_denial("", provider_log_text, stdout_is_envelope=False)
+                transcript_tool, transcript_path = attempt_last_tool_target
+                denied_tool = denial.tool if denial is not None else "unknown"
+                if denied_tool == "unknown" and transcript_tool:
+                    denied_tool = transcript_tool
+                denial_fields = {
+                    "denied_tool": denied_tool,
+                    "denied_path": (denial.path if denial is not None else None) or transcript_path,
+                }
                 if attempt_changed_paths:
                     provider_effect_observed = True
                     reconciliation_required = True
@@ -5583,6 +5609,7 @@ def dispatch_run(
                 lease_id_hash=claim.lease_id_hash,
                 provider_effect=provider_effect_observed,
                 reconciliation_required=reconciliation_required,
+                **denial_fields,
             )
 
             if reconciliation_required:
@@ -5595,6 +5622,7 @@ def dispatch_run(
                     "attempts": attempts,
                     "rotations": rotations,
                     "failure_kind": last_kind,
+                    **denial_fields,
                     "provider_effect": provider_effect_observed,
                     "reconciliation_required": True,
                     "account_alias_hash": claim.account_alias_hash,
@@ -5616,6 +5644,7 @@ def dispatch_run(
                     "attempts": attempts,
                     "rotations": rotations,
                     "failure_kind": last_kind,
+                    **denial_fields,
                     "provider_effect": False,
                     "account_alias_hash": claim.account_alias_hash,
                     "lease_id_hash": claim.lease_id_hash,
@@ -6278,6 +6307,14 @@ def _run_background_operation(
                     "attempts": int(state.get("attempts") or 0),
                     "rotations": int(state.get("rotations") or 0),
                     "failure_kind": failure_kind,
+                    **(
+                        {
+                            "denied_tool": event.get("denied_tool"),
+                            "denied_path": event.get("denied_path"),
+                        }
+                        if failure_kind == HEADLESS_TOOL_PERMISSION_DENIED
+                        else {}
+                    ),
                     "account_alias_hash": state.get("account_alias_hash"),
                     "lease_id_hash": state.get("lease_id_hash"),
                 })

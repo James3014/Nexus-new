@@ -72,10 +72,14 @@ from nexus.executors.worker_contract import (
 )
 from nexus.services.agy_failure_signals import (
     AGY_UPSTREAM_UNAVAILABLE,
+    AgyHeadlessDenial,
     agy_error_text,
+    agy_headless_denial,
     agy_login_required,
     classify_agy_account_failure,
+    format_headless_denial_reason,
     is_account_global_retirement,
+    last_tool_call_target,
     max_account_retirements,
 )
 from nexus.services.external_account_pool import (
@@ -864,9 +868,22 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
 def _agy_result_failure(result: CliWorkerResult) -> Optional[str]:
     """Non-delivery reason for an Agy process that exited 0, else ``None``."""
     reason = agy_delivery_failure(result.stdout, result.stderr)
+    if reason == "agy_permission_denied":
+        denial = _agy_result_denial(result)
+        return format_headless_denial_reason(
+            denial or AgyHeadlessDenial("unknown", None, "delivery")
+        )
     if reason is None and result.descendants_swept is False:
         reason = "agy_descendant_sweep_failed"
     return reason
+
+
+def _agy_result_denial(result: CliWorkerResult) -> Optional[AgyHeadlessDenial]:
+    return agy_headless_denial(
+        result.stdout.decode("utf-8", errors="replace"),
+        result.stderr.decode("utf-8", errors="replace"),
+        stdout_is_envelope=True,
+    )
 
 
 # #2403: agy's interactive OAuth login prompt markers live in
@@ -1303,6 +1320,41 @@ class AgyWorkerAdapter:
                 sweep_roots=(str(run_tmp),) if read_only else (str(target_path), str(run_tmp)),
                 model_family=_agy_model_family(selected_model),
             )
+            # Recover only the denied call before the disposable HOME is removed.
+            if (
+                receipt.failure_reason
+                and receipt.failure_reason.startswith("agy_permission_denied:")
+                and receipt.failure_reason.endswith(" path=unknown")
+            ):
+                try:
+                    transcripts = [
+                        path
+                        for home, _ in run_homes
+                        for path in home.glob(
+                            ".gemini/antigravity-cli/brain/*/"
+                            ".system_generated/logs/transcript_full.jsonl"
+                        )
+                    ]
+                    if transcripts:
+                        newest = max(transcripts, key=lambda path: path.stat().st_mtime_ns)
+                        tool, path = last_tool_call_target(
+                            newest.read_text(encoding="utf-8", errors="replace")
+                        )
+                        known_tool = receipt.failure_reason.split("tool=", 1)[1].rsplit(
+                            " path=", 1
+                        )[0]
+                        receipt = replace(
+                            receipt,
+                            failure_reason=format_headless_denial_reason(
+                                AgyHeadlessDenial(
+                                    tool if known_tool == "unknown" and tool else known_tool,
+                                    path,
+                                    "transcript",
+                                )
+                            ),
+                        )
+                except OSError:
+                    pass
             profile_tampered = any(
                 run_home_settings_sha256(home) != digest for home, digest in run_homes
             )
@@ -1498,6 +1550,8 @@ class AgyWorkerAdapter:
                 outcome = WorkerOutcome.FAILED
                 if result.stderr == b"seatbelt_unavailable":
                     delivery_failure = "agy_seatbelt_unavailable"
+                elif (denial := _agy_result_denial(result)) is not None:
+                    delivery_failure = format_headless_denial_reason(denial)
                 elif _agy_login_required(result):
                     delivery_failure = AGY_AUTHENTICATION_REQUIRED
             else:
@@ -1687,7 +1741,12 @@ class AgyWorkerAdapter:
                                 break
                         else:
                             # Non-eligible failures abort execution loop directly without rotation
-                            failure_reason = f"non-eligible account failure: {failure_kind.value}"
+                            denial = _agy_result_denial(result)
+                            failure_reason = (
+                                format_headless_denial_reason(denial)
+                                if denial is not None
+                                else f"non-eligible account failure: {failure_kind.value}"
+                            )
                             break
             finally:
                 if has_lease_api and pool is not None and current_lease is not None:
@@ -1733,7 +1792,7 @@ class AgyWorkerAdapter:
                 outcome_val = WorkerOutcome.EXECUTION_COMPLETED.value
         else:
             outcome_val = WorkerOutcome.FAILED.value
-            if _agy_login_required(last_result):
+            if _agy_result_denial(last_result) is None and _agy_login_required(last_result):
                 failure_reason = (
                     f"{AGY_AUTHENTICATION_REQUIRED}: {failure_reason}"
                     if failure_reason
@@ -1960,7 +2019,12 @@ class AgyWorkerAdapter:
                     break
                 if not is_rotation_eligible(kind):
                     real_calls += 1
-                    failure_reason = f"non-eligible account failure: {kind.value}"
+                    denial = _agy_result_denial(result)
+                    failure_reason = (
+                        format_headless_denial_reason(denial)
+                        if denial is not None
+                        else f"non-eligible account failure: {kind.value}"
+                    )
                     break
                 # A rate limit is transient: rotate away for this run without
                 # retiring the account for everyone else.  (#2433 N2: unlike
@@ -2028,8 +2092,12 @@ class AgyWorkerAdapter:
             failure_reason = AGY_ACCOUNT_RETIREMENT_UNSAFE
 
         if outcome != WorkerOutcome.EXECUTION_COMPLETED.value and last_result is not None:
-            if _agy_login_required(last_result) and failure_reason and not failure_reason.startswith(
-                AGY_AUTHENTICATION_REQUIRED
+            if (
+                _agy_login_required(last_result)
+                and failure_reason
+                and not failure_reason.startswith(
+                    ("agy_permission_denied", AGY_AUTHENTICATION_REQUIRED)
+                )
             ):
                 failure_reason = f"{AGY_AUTHENTICATION_REQUIRED}: {failure_reason}"
         return _agy_claim_receipt(
