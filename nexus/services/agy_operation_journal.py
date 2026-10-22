@@ -390,6 +390,50 @@ def _stop_operation_processes(
     return had_alive_before, alive_after, has_unverified_conflict
 
 
+DESCENDANT_SWEEP_KEYS = (
+    "descendant_sweep_clean",
+    "descendant_sweep_attempt",
+    "descendant_sweep_roots",
+)
+DESCENDANT_SWEEP_UNPROVEN_HELD = "DESCENDANT_SWEEP_UNPROVEN_RECONCILE_HELD"
+
+
+def descendant_sweep_unproven(record: dict[str, Any], *, bind_attempt: bool = True) -> bool:
+    """True when a boundary attempt's descendant sweep is not proven clean (#2470).
+
+    Runs without a write boundary never carry the field. Once an attempt has
+    written its pending marker (``None``), only a recorded ``True`` counts as
+    clean, and (``bind_attempt``) only when it is the verdict of the latest
+    attempt the record knows of: a True left by an earlier attempt proves
+    nothing about a later one whose own marker or verdict was lost. An
+    operator ack for the latest attempt (``descendant_sweep_operator_ack``)
+    also releases it, without making the sweep clean.
+    """
+    if "descendant_sweep_clean" not in record:
+        return False
+    try:
+        latest = int(record.get("attempts") or 0)
+    except (TypeError, ValueError):
+        latest = None
+
+    def _for_latest(attempt: object) -> bool:
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or latest is None:
+            return False
+        return attempt >= latest
+
+    # An operator attestation (--ack-unclean-sweep) for the latest attempt
+    # releases the hold; it is recorded apart from the verdict, which stays
+    # unproven.
+    ack = record.get("descendant_sweep_operator_ack")
+    if isinstance(ack, dict) and _for_latest(ack.get("attempt")):
+        return False
+    if record["descendant_sweep_clean"] is not True:
+        return True
+    if not bind_attempt:
+        return False
+    return not _for_latest(record.get("descendant_sweep_attempt"))
+
+
 class AgyOperationJournal(DirectOperationJournal):
     """Preserve the existing Agy journal contract while sharing the core."""
 
@@ -616,6 +660,26 @@ class AgyOperationJournal(DirectOperationJournal):
         provider_pid = record.get("provider_pid")
         provider_pgid = record.get("provider_pgid")
         provider_alive = _process_alive(provider_pid)
+
+        if not wrapper_alive and descendant_sweep_unproven(record):
+            # #2470: the run's descendant sweep never proved its writers gone
+            # (e.g. an escaped double fork the sweep could only report). A dead
+            # wrapper and provider say nothing about them: hold the operation
+            # for an explicit operator step (--ack-unclean-sweep).
+            reconciliation = dict(record.get("reconciliation") or {})
+            reconciliation.update({
+                "at": utc_now(),
+                "result": DESCENDANT_SWEEP_UNPROVEN_HELD,
+                "pid_alive": False,
+                "provider_alive_after": None,
+                "descendant_sweep_clean": False,
+                "retry_permitted": False,
+            })
+            return self.update(
+                operation_id,
+                phase="RECONCILE_REQUIRED",
+                reconciliation=reconciliation,
+            )
 
         if wrapper_alive:
             if status == "OUTCOME_UNKNOWN":

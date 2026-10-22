@@ -605,6 +605,34 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+_UNPROVEN_EXIT_GRACE_SECONDS = 1.0
+
+
+def _pid_live_resident(pid: int) -> bool:
+    """True when ``pid`` exists and is not a zombie (fails closed: unknown = live)."""
+    if not _pid_alive(pid):
+        return False
+    proc_entry = Path("/proc") / str(pid)
+    if proc_entry.exists():
+        return not _proc_is_zombie(proc_entry)
+    try:
+        probe = subprocess.run(
+            ["/bin/ps", "-o", "stat=", "-p", str(pid)],
+            env=_probe_env(),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    state = probe.stdout.strip()
+    if not state:
+        # Exited between the checks, or ps failed: trust the kernel, not ps.
+        return _pid_alive(pid)
+    return not state.startswith("Z")
+
+
 def _pids_with_cwd_under(
     roots: Tuple[str, ...], baseline: Optional[_SweepBaseline] = None
 ) -> Optional[set[int]]:
@@ -669,10 +697,43 @@ def _pids_with_cwd_under(
     return _started_after_by_us(found, baseline.started_at)
 
 
-def _sweep_clean(tracked: set[int], cwd_pids: Optional[set[int]]) -> bool:
-    """Kill tracked and cwd-matched pids; unknown cwd scan never counts as clean."""
-    killed = _kill_and_confirm(tracked | (cwd_pids or set()))
-    return killed and cwd_pids is not None
+def _sweep_clean(
+    tracked: set[int], cwd_pids: Optional[set[int]], *, kill_unproven: bool = True
+) -> bool:
+    """Kill tracked and cwd-matched pids; unknown cwd scan never counts as clean.
+
+    ``kill_unproven=False`` (#2470, Agy dispatch write boundary only): kill the
+    tracked descendants but only *report* the other cwd matches. Such a
+    process is neither tracked nor (the caller swept tags first) run-tagged,
+    so it may be an Owner shell or editor that ``cd``-ed into the disposable
+    worktree; it is left running and the sweep is unclean, so the run needs
+    reconciliation instead of a false kill. Every other caller keeps the
+    default.
+    """
+    if kill_unproven:
+        killed = _kill_and_confirm(tracked | (cwd_pids or set()))
+        return killed and cwd_pids is not None
+    killed = _kill_and_confirm(tracked)
+    if cwd_pids is None:
+        return False
+    # A process the tag sweep just SIGKILLed can still sit in the cwd scan as
+    # an unreaped zombie for a moment; a zombie cannot write, so give exiting
+    # matches a short grace and never count a zombie as a live resident.
+    deadline = time.monotonic() + _UNPROVEN_EXIT_GRACE_SECONDS
+    while True:
+        unproven = {pid for pid in cwd_pids - tracked if _pid_live_resident(pid)}
+        if not unproven or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    if unproven:
+        _logger.warning(
+            "descendant sweep unproven: %d untracked, untagged process(es) with a cwd "
+            "inside the sweep roots were left running (pids %s)",
+            len(unproven),
+            sorted(unproven),
+        )
+        return False
+    return killed
 
 
 def _kill_and_confirm(pids: set[int]) -> bool:
@@ -793,8 +854,14 @@ def sweep_run(
     tracker: Any,
     baseline: Optional[_SweepBaseline],
     roots: Iterable[str],
+    *,
+    kill_unproven_cwd_matches: bool = True,
 ) -> bool:
     """Stop ``tracker`` and SIGKILL every surviving descendant of the run.
+
+    With ``kill_unproven_cwd_matches=False`` (#2470) only tracked descendants
+    and run-tagged processes are killed; any other process with a cwd under
+    ``roots`` is reported, left running, and makes the sweep unclean.
 
     True only when the sweep is provably clean: tracked descendants and
     processes with a cwd under ``roots`` are dead, no process still carries the
@@ -802,12 +869,13 @@ def sweep_run(
     """
     tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
     tagged_clean = _sweep_tagged_processes(run_tag)
-    return bool(
-        _sweep_clean(tracked, _pids_with_cwd_under(tuple(roots), baseline))
-        and tagged_clean
-        and baseline is not None
-        and not tracker.probe_failed
+    cwd_pids = _pids_with_cwd_under(tuple(roots), baseline)
+    swept = (
+        _sweep_clean(tracked, cwd_pids)
+        if kill_unproven_cwd_matches
+        else _sweep_clean(tracked, cwd_pids, kill_unproven=False)
     )
+    return bool(swept and tagged_clean and baseline is not None and not tracker.probe_failed)
 
 
 def release_run(run_tag: str) -> None:

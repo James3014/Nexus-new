@@ -12,14 +12,17 @@ adapter gets from ``run_cli_worker``:
 * a Seatbelt profile (``build_seatbelt_profile``) that denies every file
   write except the target worktree (minus ``.git``/``.agents``) and the
   per-run root, plus any literal files a caller must let Agy append to;
-* a post-exit descendant sweep over the process tree, the run tag and the
-  processes whose cwd is inside the target or the run root; it runs exactly
-  once per launched run, also when the launch frame raised.
+* a post-exit descendant sweep that kills the tracked process tree and the
+  run-tagged processes; any other process whose cwd is inside the target or
+  the run root is reported, not killed, and makes the sweep unclean (#2470:
+  it may be an Owner shell in the worktree). It runs exactly once per
+  launched run, also when the launch frame raised.
 
 Limitation: the run-tag part of the sweep finds processes through ``ps -E``,
 which on macOS hides the environment of SIP-protected system binaries (for
-example ``/bin/sleep``); such a process is only caught by the descendant
-tracker or the cwd sweep. Agy's own descendants (node/go) are not restricted.
+example ``/bin/sleep``); such a process is only killed when the descendant
+tracker saw it, otherwise the cwd scan reports it and the run needs
+reconciliation. Agy's own descendants (node/go) are not restricted.
 
 The dispatcher no longer grants the ``--log-file`` attestation log (#2314):
 agy writes a relay FIFO in the run root, which the dispatcher unlinks once agy
@@ -190,7 +193,14 @@ class AgyDispatchBoundary:
         if tracker is None:
             self._swept = False
             return False
-        self._swept = cli_worker.sweep_run(self.run_tag, tracker, self._baseline, self.sweep_roots)
+        # #2470: report, never kill, a cwd match the run cannot be proven to own.
+        self._swept = cli_worker.sweep_run(
+            self.run_tag,
+            tracker,
+            self._baseline,
+            self.sweep_roots,
+            kill_unproven_cwd_matches=False,
+        )
         return self._swept
 
     def cleanup(self) -> None:
