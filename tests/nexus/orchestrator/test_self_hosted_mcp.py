@@ -557,3 +557,87 @@ def test_dispose_candidate_supersede_requires_successor_and_uses_supersede_actio
     )
     assert ok["result"]["isError"] is False
     assert ok["result"]["structuredContent"]["owner_authority"]["action"] == "CANDIDATE_SUPERSEDE"
+
+
+def _supersede_grant(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_SUPERSEDE],
+    )
+    return {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+
+
+def test_dispose_candidate_uses_the_normalized_successor_for_authority_and_state(monkeypatch, tmp_path):
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+
+    class Recording(DisposeService):
+        def dispose_candidate(self, task_id, **kwargs):
+            self.kwargs = kwargs
+            return super().dispose_candidate(task_id, **kwargs)
+
+    service = Recording()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="  t2  ", **auth_args,
+    )
+    assert response["result"]["isError"] is False
+    assert service.kwargs["superseded_by"] == "t2"
+    assert response["result"]["structuredContent"]["owner_authority"]["effect"]["superseded_by"] == "t2"
+
+
+def test_dispose_candidate_refuses_an_unsafe_successor_before_any_effect(monkeypatch, tmp_path):
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="../escape", **auth_args,
+    )
+    assert "superseded_by must be a stable bounded slug" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_runs_pre_action_guard_with_gateway_inputs(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    seen = {}
+
+    def guard(envelope, *, request, current_head, tool_manifest_hash):
+        seen.update(envelope=envelope, request=request, head=current_head, manifest=tool_manifest_hash)
+        return {"guard": "ok"}
+
+    monkeypatch.setattr(gateway, "pre_action_guard", guard)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="t2", **auth_args,
+    )
+    assert response["result"]["structuredContent"]["guard_receipt"] == {"guard": "ok"}
+    envelope = seen["envelope"]
+    assert envelope.action_type.value == "CANDIDATE_DISPOSE"
+    assert envelope.mutation is True
+    assert envelope.expected_head == "a" * 40 == seen["head"]
+    assert seen["request"] == {}
+    assert seen["manifest"] == gateway.TOOL_MANIFEST_REVISION
+    assert envelope.task_id == "t1"
+
+
+def test_dispose_candidate_refused_when_pre_action_guard_rejects(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway
+    from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+
+    def reject(*_args, **_kwargs):
+        raise LifecycleGuardError("EXPECTED_HEAD_MISMATCH", "mutation expected a different repository HEAD")
+
+    monkeypatch.setattr(gateway, "pre_action_guard", reject)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="t2", **auth_args,
+    )
+    assert "EXPECTED_HEAD_MISMATCH" in _error_text(response)
+    assert service.disposed == []
