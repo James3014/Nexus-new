@@ -30,6 +30,10 @@ command is retired (#1928): it always exits 1 with a retirement message and neve
 approves. Approve a candidate through the gateway approve path
 (`candidate_approve`) with a bound approval grant.
 
+The CLI `self-hosted dispose` command requires the same Owner standing grant (#2870):
+`nexus self-hosted dispose --task-id <id> --disposition REJECTED|SUPERSEDED [--superseded-by <id>] --authority-goal-id <goal> --authority-coordination-scope-id <scope>`.
+Without both authority arguments it exits 1 with `OWNER_AUTHORITY_KEY_REQUIRED`; without a matching grant it exits 1 with `OWNER_AUTHORITY_REQUIRED:<reason>`. Nothing is disposed in either case.
+
 Before Target cleanup, verify that the candidate commit, candidate tree,
 candidate packet, verified receipt, and exact durable candidate ref all
 resolve. Cleanup must fail closed for an active process, an unprotected

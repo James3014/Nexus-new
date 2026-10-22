@@ -398,18 +398,44 @@ def run_self_hosted_dispose(
     task_id: str,
     disposition: str,
     superseded_by: str | None = None,
+    authority_goal_id: str | None = None,
+    authority_coordination_scope_id: str | None = None,
     state_dir: str | Path | None = None,
     service: SelfHostedTaskService | None = None,
 ) -> dict[str, Any]:
+    """Dispose a Candidate only under an Owner standing grant (#2870).
+
+    Uses the exact admission the MCP tool applies (#2865, #2767): closed
+    argument set, keyed durable standing grant for CANDIDATE_REJECT /
+    CANDIDATE_SUPERSEDE bound to this task's own Candidate, then
+    ``pre_action_guard``. It fails closed before any effect, with
+    ``OWNER_AUTHORITY_KEY_REQUIRED`` or ``OWNER_AUTHORITY_REQUIRED:<reason>``.
+    """
+    from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+
     if not task_id or not str(task_id).strip():
         raise NexusCliActionError("task_id is required", exit_code=1)
     svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    arguments: dict[str, Any] = {
+        "task_id": task_id,
+        "disposition": disposition,
+        "authority_goal_id": authority_goal_id,
+        "authority_coordination_scope_id": authority_coordination_scope_id,
+    }
+    if superseded_by is not None:
+        arguments["superseded_by"] = superseded_by
     try:
-        return svc.dispose_candidate(
+        admitted = NexusSelfHostedMCPServer._admit_dispose_candidate(svc, task_id, arguments)
+        result = svc.dispose_candidate(
             task_id,
-            disposition=disposition,
-            superseded_by=superseded_by,
+            disposition=admitted["disposition"],
+            superseded_by=admitted["superseded_by"],
         )
+        return {
+            **dict(result),
+            "guard_receipt": admitted["guard_receipt"],
+            "owner_authority": admitted["owner_authority"],
+        }
     except (ValueError, KeyError, RuntimeError, TypeError) as exc:
         if isinstance(exc, NexusCliActionError):
             raise
