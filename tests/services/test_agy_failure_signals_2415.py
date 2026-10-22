@@ -422,3 +422,137 @@ def test_dispatch_stderr_only_outage_is_capped_too(pool_env) -> None:
     assert len(calls) == DEFAULT_MAX_ACCOUNT_RETIREMENTS
     assert len(_retired(pool_env)) == DEFAULT_MAX_ACCOUNT_RETIREMENTS
     assert pool_env.metas[-1]["failure_kind"] == "AGY_UPSTREAM_UNAVAILABLE"
+
+
+# --- #2866: "not logged into Antigravity" -------------------------------------
+
+# agy's own wording (agy --log-file, 2026-10-22, every operation since 2026-09-28).
+NOT_LOGGED_IN_STDERR = "error getting token source: You are not logged into Antigravity.\n"
+
+# agyop_7a2645a9…: the stderr of the #2866 report.  agy logged in and streamed
+# model turns; the run failed because a ReadFile tool was soft-denied.  The
+# "not logged into" lines exist only in agy's --log-file startup output.
+HEADLESS_DENIED_STDERR = (
+    'jetski: no output produced — a tool required the "read_file" permission that '
+    "headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under "
+    "permissions.allow in settings.json (e.g. read_file(<target>)). Alternatively, "
+    "re-run with --dangerously-skip-permissions to auto-approve all tools.\n"
+)
+
+
+def test_not_logged_in_on_agy_error_channel_is_account_auth_failure_2866() -> None:
+    assert classify_agy_account_failure("", NOT_LOGGED_IN_STDERR, stdout_is_envelope=False) is (
+        AccountFailureKind.AUTH_OR_SESSION_INVALID
+    )
+    envelope = _envelope("", status="ERROR", error=NOT_LOGGED_IN_STDERR.strip())
+    assert classify_agy_account_failure(envelope, "", stdout_is_envelope=True) is (
+        AccountFailureKind.AUTH_OR_SESSION_INVALID
+    )
+    assert dispatch.classify_failure(1, "", NOT_LOGGED_IN_STDERR, False) is (
+        AccountFailureKind.AUTH_OR_SESSION_INVALID
+    )
+    assert is_account_global_retirement(AccountFailureKind.AUTH_OR_SESSION_INVALID, "gemini")
+
+
+def test_headless_denial_stderr_of_2866_report_is_not_an_account_failure() -> None:
+    assert (
+        classify_agy_account_failure("", HEADLESS_DENIED_STDERR, stdout_is_envelope=False) is None
+    )
+
+
+def test_dispatch_not_logged_in_rotates_and_marks_account_2866(pool_env) -> None:
+    coordinator = pool_env.make(["a", "b"])
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        if len(calls) == 1:
+            return 1, "", NOT_LOGGED_IN_STDERR, False, 5
+        return 0, "done", "", False, 5
+
+    code = _run(pool_env, coordinator, runner)
+
+    assert code == 0
+    assert len(calls) == 2 and calls[0] != calls[1]
+    # max_calls=1: the account failover did not consume the model-call budget.
+    assert _retired(pool_env) == {_hash(calls[0])}
+    final = pool_env.metas[-1]
+    assert final["status"] == "completed"
+    assert final["rotations"] == 1
+    assert final["account_alias_hash"] == _hash(calls[1])
+
+
+def test_dispatch_not_logged_in_account_is_skipped_by_later_dispatch_2866(pool_env) -> None:
+    coordinator = pool_env.make(["a", "b"])
+    first: list[str] = []
+
+    def failing_then_ok(**kwargs):
+        first.append(_account_of(kwargs["env"]))
+        if len(first) == 1:
+            return 1, "", NOT_LOGGED_IN_STDERR, False, 5
+        return 0, "done", "", False, 5
+
+    assert _run(pool_env, coordinator, failing_then_ok) == 0
+    bad = first[0]
+    later: list[str] = []
+
+    def ok(**kwargs):
+        later.append(_account_of(kwargs["env"]))
+        return 0, "done", "", False, 5
+
+    for _ in range(3):
+        assert _run(pool_env, coordinator, ok) == 0
+    assert bad not in later
+
+
+def test_dispatch_every_account_not_logged_in_ends_bounded_2866(pool_env) -> None:
+    names = [f"n{i}" for i in range(6)]
+    coordinator = pool_env.make(names)
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        return 1, "", NOT_LOGGED_IN_STDERR, False, 5
+
+    code = _run(pool_env, coordinator, runner)
+
+    assert code == 75
+    assert len(calls) == DEFAULT_MAX_ACCOUNT_RETIREMENTS == len(set(calls))
+    final = pool_env.metas[-1]
+    assert final["status"] == "failed"
+    assert final["failure_kind"] == "AGY_UPSTREAM_UNAVAILABLE"
+    assert final["last_account_failure_kind"] == "AUTH_OR_SESSION_INVALID"
+
+
+def test_dispatch_every_account_not_logged_in_small_pool_terminates_2866(pool_env) -> None:
+    pool_env.monkeypatch.setenv("NEXUS_AGY_MAX_ACCOUNT_RETIREMENTS", "10")
+    pool_env.monkeypatch.setenv("NEXUS_AGY_POOL_WAIT_TIMEOUT", "1")
+    coordinator = pool_env.make(["x", "y"])
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        return 1, "", NOT_LOGGED_IN_STDERR, False, 5
+
+    code = _run(pool_env, coordinator, runner)
+
+    assert code != 0
+    assert sorted(calls) == ["x", "y"]
+    assert _retired(pool_env) == {_hash("x"), _hash("y")}
+    assert pool_env.metas[-1]["status"] != "completed"
+
+
+def test_dispatch_task_failure_does_not_rotate_2866(pool_env) -> None:
+    coordinator = pool_env.make(["a", "b"])
+    calls: list[str] = []
+
+    def runner(**kwargs):
+        calls.append(_account_of(kwargs["env"]))
+        return 1, "", HEADLESS_DENIED_STDERR, False, 5
+
+    code = _run(pool_env, coordinator, runner)
+
+    assert code != 0
+    assert len(calls) == 1
+    assert _retired(pool_env) == set()
+    assert pool_env.metas[-1]["rotations"] == 0
