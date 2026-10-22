@@ -84,6 +84,13 @@ BOT_NAME = "james3014-nexus-agent[bot]"
 BOT_EMAIL = "341779647+james3014-nexus-agent[bot]@users.noreply.github.com"
 TASK_FENCE_RE = re.compile(r"```eia-task[ \t]*\n(.*?)\n```", re.DOTALL)
 CONTRACT_MARKER = "<!-- eia-nightly:contract -->"
+# Exactly the trailing block ``body_with_contract`` appends (#2611): marker, heading and one
+# fenced contract, with nothing of anyone else's after it.
+OWN_CONTRACT_RE = re.compile(
+    r"\n\n" + re.escape(CONTRACT_MARKER) + r"\n## EIA nightly contract \(attempt [1-9][0-9]*\)"
+    r"\n\n```nexus-external-intelligence\n((?:(?!```).)*)\n```\Z",
+    re.DOTALL,
+)
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
 # Paths an overnight worker must never change: CI, governance, dependencies, the EIA daemon and
@@ -151,6 +158,19 @@ WAIT_STATES = {
     "CLOSURE_DISPATCHING",
 }
 RESUMABLE_PRIOR = {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}
+# A ``reconcile_only`` RECONCILIATION_REQUIRED record with one of these errors cannot clear by
+# itself: every daemon pass refuses it again until the per-Issue cap fires (#2611, night
+# 20261021 lost 3 x 2.5 h on #2837).
+# error_code INTELLIGENCE_RECONCILIATION_REQUIRED is deliberately not listed: the transport's
+# read-only reconcile can still resolve it, so it is left to the per-Issue cap.
+STUCK_RECONCILIATION_ERRORS = {
+    "CANONICAL_WORKFORCE_BINDING_MISSING",
+    "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH",
+    "INTELLIGENCE_DISPATCH_BINDING_MISSING",
+    "INTELLIGENCE_DISPATCH_BINDING_MISMATCH",
+}
+# Bodies the scheduler wrote, kept per Issue in the cross-night ledger (newest last).
+MAX_LEDGER_BODY_SHAS = 32
 INFRA_MARKERS = ("OPENCLI_", "TRANSPORT", "OUTCOME_UNKNOWN", "REMOTE_MAIN_REFRESH_FAILED")
 MODEL_MARKERS = ("WORKER_BLOCKED", "REPAIR", "SCOPE_DELTA", "VERIFICATION_FAIL", "VERIFIER_FAIL")
 PUBLICATION_GRACE_MIN = 15
@@ -492,6 +512,24 @@ def strip_contract(body: str) -> str:
     return (body or "").split(f"\n\n{CONTRACT_MARKER}", 1)[0].rstrip()
 
 
+def strip_own_contract(body: str, issue: int) -> str | None:
+    """The body without the scheduler's own trailing contract block, or None when the body
+    does not end in exactly that block for this Issue.  Never removes anything else."""
+    match = OWN_CONTRACT_RE.search(body or "")
+    if not match:
+        return None
+    try:
+        contract = json.loads(match.group(1))
+    except ValueError:
+        return None
+    task_id = contract.get("task_id") if isinstance(contract, dict) else None
+    if not isinstance(task_id, str) or not re.fullmatch(
+        rf"eia-nightly-[0-9]{{8}}-i{int(issue)}", task_id
+    ):
+        return None
+    return (body or "")[: match.start()].rstrip()
+
+
 def body_with_contract(body: str, contract: Mapping[str, Any], attempt: int) -> str:
     fence = json.dumps(dict(contract), indent=2, sort_keys=True)
     return (
@@ -569,6 +607,15 @@ def publication_tokens(record: Mapping[str, Any]) -> dict[str, str]:
     return {**tokens, **workers}  # type: ignore[dict-item]
 
 
+def _stuck_reconciliation(daemon_state: Mapping[str, Any]) -> str:
+    """The error of a ``reconcile_only`` record that cannot clear by itself ("" otherwise).
+    A record restored with ``last_transient_error`` (#2862) can still progress: not stuck."""
+    if daemon_state.get("reconcile_only") is not True or daemon_state.get("last_transient_error"):
+        return ""
+    error = daemon_state.get("error")
+    return error if isinstance(error, str) and error in STUCK_RECONCILIATION_ERRORS else ""
+
+
 def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
     """Return (kind, reason) with kind in wait|complete|infra|model.  Unknown -> model."""
     state = str(daemon_state.get("state") or "")
@@ -586,6 +633,9 @@ def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
     if state == "RECONCILIATION_REQUIRED":
         prior = _token(daemon_state.get("prior_state"))
         if prior in RESUMABLE_PRIOR:
+            stuck = _stuck_reconciliation(daemon_state)
+            if stuck:
+                return "infra", f"{state}:RECONCILE_ONLY:{prior}:{stuck}"
             return "wait", f"{state}:{prior}"
         return "infra", f"{state}:RECONCILE_ONLY:{prior}"
     if state == "BLOCKED":
@@ -1036,6 +1086,14 @@ class Nightly:
                     f"EIA nightly stopped scheduling this Issue: {MAX_NIGHTS_WITHOUT_CANDIDATE} "
                     "nights attempted without a candidate PR.",
                 )
+                # Trusted above; only a body the scheduler itself wrote loses its block.
+                ours = set(ledger.get(str(number), {}).get("body_sha256") or [])
+                try:
+                    outcome = self._restore_own_body(number, str(row.get("body") or ""), ours)
+                    self._event(night, "body_restore", issue=number, outcome=outcome)
+                except (NightlyError, ValueError, OSError) as exc:  # retried next prepare
+                    error = _one_line(exc, 200)
+                    self._event(night, "body_restore_failed", issue=number, error=error)
                 continue
             try:
                 task = parse_task_block(str(row.get("body") or ""))
@@ -1266,6 +1324,13 @@ class Nightly:
         for number in night.get("order", []):
             entry = night["issues"][str(number)]
             row = ledger.setdefault(str(number), {"nights": []})
+            shas = [s for s in row.get("body_sha256") or [] if isinstance(s, str)]
+            for att in entry.get("attempts") or []:
+                sha = att.get("body_sha256")
+                if isinstance(sha, str) and sha not in shas:
+                    shas.append(sha)
+            if shas:
+                row["body_sha256"] = shas[-MAX_LEDGER_BODY_SHAS:]
             if entry["status"] == "CANDIDATE_PR":
                 row["nights"] = []
             elif counted_attempts(entry) and night["night"] not in row["nights"]:
@@ -1635,7 +1700,11 @@ class Nightly:
                 self._event(night, "arming_recovered", issue=issue, attempt=att.get("attempt"))
                 return
             return self._escalate(
-                night, entry, "model", f"ARMING_RECOVERY_REFUSED:{why or 'ISSUE_CHANGED'}"
+                night,
+                entry,
+                "model",
+                f"ARMING_RECOVERY_REFUSED:{why or 'ISSUE_CHANGED'}",
+                restore=trusted,
             )
         reason = self._arm_gate(night, entry)
         if reason:
@@ -1799,7 +1868,9 @@ class Nightly:
             ran = has_label or bool(record.get("label_requested_at"))
             return self._withdraw(night, entry, blocked, has_label=has_label, ran=ran)
         if not trusted or not self._issue_matches(view, record):
-            return self._escalate(night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}")
+            return self._escalate(
+                night, entry, "model", f"ARM_RACE:{why or 'ISSUE_CHANGED'}", restore=trusted
+            )
         if L_EIA not in view["label_names"]:
             # Persisted first: after a crash past this point the daemon may already have
             # picked the Issue up, so recovery must count the attempt even if the label is
@@ -1905,7 +1976,9 @@ class Nightly:
             return
         trusted, why = self._queue_trusted(issue)
         if not trusted:
-            return self._escalate(night, entry, "model", f"UNTRUSTED_AFTER_ARMING:{why}")
+            return self._escalate(
+                night, entry, "model", f"UNTRUSTED_AFTER_ARMING:{why}", restore=False
+            )
         record = self._daemon_record(issue, att["identity_hash"])
         age = self._minutes_since(att["armed_at"])
         if record is None:
@@ -1933,6 +2006,10 @@ class Nightly:
             except CandidateRefused as exc:
                 return self._escalate(night, entry, "model", f"CANDIDATE_REJECTED:{exc}")
         elif kind == "wait":
+            if record.get("last_transient_error"):
+                att["note"] = (
+                    f"last_transient_error={_one_line(record['last_transient_error'], 200)}"
+                )
             if age > self.issue_cap_min:
                 self._infra(night, entry, f"ISSUE_CAP_EXCEEDED:{reason}")
         elif kind == "infra":
@@ -1954,8 +2031,16 @@ class Nightly:
             self._escalate(night, entry, "infra", f"INFRA_RETRIES_EXHAUSTED:{reason}")
 
     def _escalate(
-        self, night: dict[str, Any], entry: dict[str, Any], kind: str, reason: str
+        self,
+        night: dict[str, Any],
+        entry: dict[str, Any],
+        kind: str,
+        reason: str,
+        *,
+        restore: bool = True,
     ) -> None:
+        """``restore=False`` for trust failures: the body of an Issue someone untrusted
+        touched is never edited."""
         issue = _issue_number(entry["issue"])
         if entry["attempts"]:
             entry["attempts"][-1].setdefault("finished_at", self._iso())
@@ -1967,8 +2052,50 @@ class Nightly:
             f"EIA nightly escalated this Issue ({kind}): `{_one_line(reason, 400)}`.\n\n"
             f"Attempts: {len(entry['attempts'])}. Night state: `{self.path(night['night'])}`.",
         )
+        if restore:
+            self._restore_body(night, entry)
+        else:
+            entry["body_restore"] = "SKIPPED:TRUST_FAILURE"
         entry.update(status="ESCALATED", escalation={"kind": kind, "reason": reason})
         self._event(night, "escalated", issue=issue, kind=kind, reason=reason)
+
+    def _restore_body(self, night: dict[str, Any], entry: dict[str, Any]) -> None:
+        """After disarming, put back the body as it was before our contract was appended, so
+        a re-queued Issue is not refused with TASK_BODY_HAS_FOREIGN_CONTRACT (#2611).  Only
+        bytes we wrote ourselves (an attempt's recorded body) are touched; best effort."""
+        issue = _issue_number(entry["issue"])
+        ours = {a.get("body_sha256") for a in entry.get("attempts") or []} - {None}
+        try:
+            trusted, why = self._queue_trusted(issue)
+            if not trusted:
+                outcome = f"SKIPPED:UNTRUSTED:{why}"
+            else:
+                body = str(self._view_issue(issue).get("body") or "")
+                outcome = self._restore_own_body(issue, body, ours)
+        except (NightlyError, ValueError, OSError) as exc:
+            entry["body_restore_error"] = _one_line(exc, 200)
+            self._event(
+                night, "body_restore_failed", issue=issue, error=entry["body_restore_error"]
+            )
+            return
+        entry.pop("body_restore_error", None)
+        entry["body_restore"] = _one_line(outcome, 200)
+        self._event(night, "body_restore", issue=issue, outcome=entry["body_restore"])
+
+    def _restore_own_body(self, issue: int, body: str, ours: set[Any]) -> str:
+        """Remove our trailing contract block from ``body`` only if ``body`` is bytes the
+        scheduler wrote (sha256 in ``ours``).  GitHub has no conditional update, so the body
+        is re-read right before the edit and the edit is skipped if it changed."""
+        original = strip_own_contract(body, issue)
+        if original is None:
+            return "SKIPPED:NO_OWN_CONTRACT"
+        expected = self._text_sha(body)
+        if expected not in ours:
+            return "SKIPPED:NOT_SCHEDULER_BYTES"
+        if self._text_sha(self._view_issue(issue).get("body")) != expected:
+            return "SKIPPED:CHANGED_BEFORE_EDIT"
+        self._gh_file(["issue", "edit", str(issue), "--repo", REPOSITORY], original)
+        return "RESTORED"
 
     def _verify_candidate(
         self, entry: Mapping[str, Any], record: Mapping[str, Any]
@@ -2223,7 +2350,7 @@ class Nightly:
         if pid and self._is_caffeinate(pid):
             with contextlib.suppress(ProcessLookupError):
                 self.kill(int(pid), signal.SIGTERM)
-        report = self.report(night)
+        report = self.report(night, status="FINISHED")
         self._update_ledger(night)
         report_path = self.state_dir / f"{night['night']}-report.md"
         report_path.write_text(report, encoding="utf-8")
@@ -2245,13 +2372,14 @@ class Nightly:
         self._notify(summary)
         self._event(night, "finalized")
 
-    def report(self, night: dict[str, Any]) -> str:
+    def report(self, night: dict[str, Any], status: str | None = None) -> str:
+        """``status`` is the night's final status when the report is written at finalize."""
         lines = [
             f"# EIA nightly report {night['night']}",
             "",
             f"- Card PR: #{(night.get('card_pr') or {}).get('number')} "
             f"(merged: {(night.get('card_pr') or {}).get('merged')})",
-            f"- Night status: {night.get('status')}",
+            f"- Night status: {status or night.get('status')}",
             f"- Start: {_one_line((night.get('started') or {}).get('error') or 'ok', 200)}",
             f"- Arming blocked: {_one_line(night.get('arm_blocked') or 'no', 200)}",
             "",
