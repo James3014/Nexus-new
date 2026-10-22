@@ -239,7 +239,9 @@ def test_codex_cwd_case_variant_paths_are_judged_by_identity(
     home = tmp_path / "host-home"
     (home / "workspace").mkdir(parents=True)
     if not (home / "Workspace").exists():
-        pytest.skip("case-sensitive filesystem")
+        # Case-sensitive filesystem (Linux CI): emulate the alias spelling with
+        # a symlink so the identity checks are exercised on every platform.
+        (home / "Workspace").symlink_to(home / "workspace", target_is_directory=True)
     monkeypatch.setenv("HOME", str(home))
 
     def git(*a: str, cwd: Path) -> None:
