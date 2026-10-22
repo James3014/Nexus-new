@@ -2561,12 +2561,23 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
         callback(payload)
 
 
+def _descendant_sweep_unproven(record: dict[str, Any]) -> bool:
+    """True when a boundary attempt's sweep is not proven clean (#2470).
+
+    Runs without a write boundary never carry the field. Once an attempt has
+    written its pending marker, only a recorded ``True`` counts as clean.
+    """
+    return "descendant_sweep_clean" in record and record["descendant_sweep_clean"] is not True
+
+
 def _record_descendant_sweep(callback: Any, write_boundary: Any) -> None:
     """Record the attempt's sweep verdict while an exception propagates (#2470).
 
     The sweep runs once; a recorded result is reused. A sweep that cannot
     finish (it raised, or a second signal interrupted it) counts as unclean.
-    Recording never replaces the propagating exception.
+    Recording never replaces the propagating exception. When the write itself
+    fails, the durable pending marker (``descendant_sweep_clean=None``) written
+    before launch stays, and readers treat it as unclean.
     """
     try:
         clean = bool(write_boundary.sweep())
@@ -5184,6 +5195,13 @@ def dispatch_run(
                         runner_kwargs["lease_fd"] = int(lease_lock_obj.fileno())
                     except (OSError, ValueError, TypeError):
                         pass
+                if write_boundary is not None:
+                    # #2470: durable "sweep pending" marker before launch. Until
+                    # a verdict replaces it, the supervisor guard and the
+                    # completion path treat the attempt's sweep as unclean, so
+                    # a verdict write that fails (or a second signal during
+                    # it) never reads as clean.
+                    _operation_hook(operation_hook, descendant_sweep_clean=None)
                 try:
                     code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
                 except Exception as runner_exc:
@@ -5212,6 +5230,12 @@ def dispatch_run(
                 finally:
                     if write_boundary is not None:
                         write_boundary.cleanup()
+            if write_boundary is not None:
+                # #2470: the attempt ended normally; replace the pending marker
+                # with the (already recorded, run-once) sweep verdict.
+                _operation_hook(
+                    operation_hook, descendant_sweep_clean=bool(write_boundary.sweep())
+                )
             total_wall_ms += wall_ms
 
             if write_boundary is not None and DESCENDANT_SWEEP_FAILED_MARKER in (err or ""):
@@ -5882,9 +5906,10 @@ def _supervisor_terminal_guard(func):
                 grace_seconds=2.0,
             )
             had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
-            # #2470: an attempt that ended by exception with an unclean (or
-            # unfinished) descendant sweep may have left workers running.
-            sweep_unclean = record.get("descendant_sweep_clean") is False
+            # #2470: an attempt whose descendant sweep is unclean, unfinished
+            # or still pending (None: its verdict was never durably written)
+            # may have left workers running.
+            sweep_unclean = _descendant_sweep_unproven(record)
             provider_state = (
                 "RUNNING"
                 if alive_after
@@ -6222,6 +6247,41 @@ def _run_background_operation(
                     "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
                     "provider_alive_before": True,
                     "provider_alive_after": True,
+                    "retry_permitted": False,
+                },
+                **attestation,
+            )
+            return int(exit_code if exit_code not in (None, 0) else 1)
+
+        if _descendant_sweep_unproven(snapshot):
+            # #2470: dispatch returned, but a writer of this run may survive
+            # (e.g. an env-cleared double fork the sweep could only report).
+            # Never terminal and never "provider gone", so no lease cleanup.
+            attestation = _parse_agy_attestation(
+                attestation_log_path,
+                requested_model=model,
+            )
+            journal.update(
+                operation_id,
+                status="RUNNING",
+                phase="RECONCILE_REQUIRED",
+                failure_kind=failure_kind or AGY_DESCENDANT_SWEEP_FAILED,
+                attempts=int(snapshot.get("attempts") or 0),
+                rotations=int(snapshot.get("rotations") or 0),
+                account_alias_hash=snapshot.get("account_alias_hash"),
+                lease_id_hash=snapshot.get("lease_id_hash"),
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                provider_started_at=snapshot.get("provider_started_at"),
+                first_effect_at=snapshot.get("first_effect_at"),
+                tool_event_count=int(snapshot.get("tool_event_count") or 0),
+                descendant_sweep_clean=snapshot.get("descendant_sweep_clean"),
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": "DESCENDANT_SWEEP_UNCLEAN_AFTER_DISPATCH",
+                    "provider_alive_before": bool(provider_pid or provider_pgid),
+                    "provider_alive_after": None,
+                    "descendant_sweep_clean": False,
                     "retry_permitted": False,
                 },
                 **attestation,
