@@ -499,6 +499,29 @@ def _credential_homes(source_home: Optional[Path]) -> list[Path]:
     return homes
 
 
+def _run_home_protected_ancestors(
+    run_root: Path, run_home: Path, entries: tuple[Path, ...]
+) -> list[Path]:
+    """Directories from each protected entry up to the run root, inclusive (#2470 item 2).
+
+    The run root is included: ``(subpath run_root)`` also matches the root
+    itself, so it could otherwise be renamed away and back around a planted
+    file. Intermediate dirs (e.g. ``attempt-XXX``) are included so a sibling
+    swap is blocked too. If ``run_home`` lies outside the run root the walk
+    stops at ``run_home``. Order is stable and de-duplicated.
+    """
+    found: list[Path] = []
+    for entry in entries:
+        parent = entry.parent
+        while parent != parent.parent:
+            if parent not in found:
+                found.append(parent)
+            if parent == run_root or parent == run_home and not _is_within(run_home, run_root):
+                break
+            parent = parent.parent
+    return found
+
+
 def build_seatbelt_profile(
     *,
     run_root: Path,
@@ -556,6 +579,15 @@ def build_seatbelt_profile(
         settings = _sbpl_path(run_home / AGY_RUN_HOME_SETTINGS)
         config = _sbpl_path(run_home / ".gemini" / "config")
         deny += [f'  (literal "{settings}")', f'  (literal "{config}")', f'  (subpath "{config}")']
+        # Denying the files is not enough: their parent directories sit inside
+        # the writable run root, so a worker could rename a parent and plant a
+        # fresh settings.json/config at the original path (#2470 item 2).
+        # ``literal`` on each ancestor, run root included, blocks rename/rmdir
+        # of the directory itself while file creation inside it stays allowed.
+        for parent in _run_home_protected_ancestors(
+            run_root, run_home, (run_home / AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config")
+        ):
+            deny.append(f'  (literal "{_sbpl_path(parent)}")')
         reallow.append(f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")')
     credential_denies: list[str] = []
     for home in _credential_homes(source_home):
