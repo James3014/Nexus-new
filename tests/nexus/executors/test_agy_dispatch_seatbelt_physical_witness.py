@@ -214,6 +214,90 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
         brain = gemini / "antigravity-cli" / "brain" / "b.txt"
         brain.parent.mkdir(parents=True, exist_ok=True)
         assert _write_attempt(boundary, brain, cwd=target).returncode == 0
+        # #2863: Launch Services is closed, so a confined shell cannot start an
+        # app (Terminal, via ``open -a Terminal x.command``) outside the profile.
+        # ``-g -j`` keeps any app hidden should the deny ever regress.
+        opened = _run(
+            boundary, '/usr/bin/open -g -j -a TextEdit "$1"', checkout / "tracked.py", cwd=target
+        )
+        print(
+            "WITNESS open -a TextEdit (full profile) rc=", opened.returncode, opened.stderr.strip()
+        )
+        assert opened.returncode != 0 and DENIED in opened.stderr
+        # Independent of the exec rules: the mach-lookup deny alone must stop
+        # LSOpen.  A control profile without it must LAUNCH the app, so the
+        # failure is the Launch Services denial and not a missing app.
+        ls_lines = list(admission.LAUNCH_SERVICES_DENY_LINES)
+        mach_lines = ls_lines[:4]
+        assert mach_lines[0].startswith("(deny mach-lookup") and mach_lines[-1].endswith("))")
+        profile_lines = boundary.profile.splitlines()
+        without_ls = [line for line in profile_lines if line not in ls_lines]
+        assert len(without_ls) == len(profile_lines) - len(ls_lines)
+        document = target / "ls-probe.txt"
+        document.write_text("probe\n", encoding="utf-8")
+
+        def _open_under(name: str, lines: list[str]) -> subprocess.CompletedProcess[str]:
+            sb = tmp_path / f"{name}.sb"
+            sb.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return subprocess.run(
+                [
+                    boundary_mod.SANDBOX_EXEC_PATH,
+                    "-f",
+                    str(sb),
+                    "/usr/bin/open",
+                    "-g",
+                    "-j",
+                    "-a",
+                    "TextEdit",
+                    str(document),
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=20,
+            )
+
+        def _textedit_pids() -> set[int]:
+            out = subprocess.run(
+                ["/usr/bin/pgrep", "-x", "TextEdit"], capture_output=True, text=True, check=False
+            ).stdout
+            return {int(x) for x in out.split()}
+
+        preexisting = _textedit_pids()
+        via_lsd = _open_under("mach-only", without_ls + mach_lines)
+        print(
+            "WITNESS open -a TextEdit (mach-lookup deny only) rc=",
+            via_lsd.returncode,
+            via_lsd.stderr.strip(),
+        )
+        assert via_lsd.returncode != 0
+        assert "Unable to find application" in via_lsd.stderr
+        assert _textedit_pids() <= preexisting, "TextEdit launched despite the mach deny"
+        control = _open_under("control", without_ls)
+        launched = _textedit_pids() - preexisting
+        print("WITNESS open -a TextEdit (control, no Launch Services deny) rc=", control.returncode)
+        for pid in launched:
+            os.kill(pid, signal.SIGTERM)
+        assert control.returncode == 0, control.stderr
+        assert launched or preexisting, "control open did not reach TextEdit"
+        # Apple Events route: osascript is not executable and fails fast.
+        started = time.monotonic()
+        osa = _run(boundary, '/usr/bin/osascript -e "return 1"', cwd=target)
+        print("WITNESS osascript (full profile) rc=", osa.returncode, osa.stderr.strip())
+        assert osa.returncode != 0 and DENIED in osa.stderr
+        assert time.monotonic() - started < 10
+        # Normal Python still runs and writes under the profile.
+        py_out = target / "py-ok.txt"
+        py = _run(
+            boundary,
+            'exec "$2" -c "import sys, pathlib; pathlib.Path(sys.argv[1]).write_text(\'ok\')" "$1"',
+            py_out,
+            Path(sys.executable),
+            cwd=target,
+        )
+        assert py.returncode == 0, py.stderr
+        assert py_out.read_text(encoding="utf-8") == "ok"
     finally:
         boundary.cleanup()
 
