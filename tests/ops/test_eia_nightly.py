@@ -2150,3 +2150,186 @@ def test_prepare_sends_no_bridge_warning_when_connected(env) -> None:
     env["app"].prepare()
     assert not [m for m in env["sys"].coord() if "Browser Bridge" in m]
     assert any(c[0].endswith("opencli") for c in env["sys"].calls)
+
+
+# ------------------------------------------------------------- #2611 night-1 follow-ups
+
+
+def _own_contract_body(body: str, issue: int, night: str = "20261015", attempt: int = 1) -> str:
+    contract = {"task_id": f"eia-nightly-{night}-i{issue}", "revision": f"n{night}-a{attempt}"}
+    return en.body_with_contract(body, contract, attempt)
+
+
+def test_strip_own_contract_only_removes_the_schedulers_trailing_block() -> None:
+    original = task_body()
+    assert en.strip_own_contract(_own_contract_body(original, 11), 11) == original.rstrip()
+    assert en.strip_own_contract(original, 11) is None  # nothing of ours to strip
+    assert en.strip_own_contract(_own_contract_body(original, 12), 11) is None  # other Issue
+    trailing = _own_contract_body(original, 11) + "\n\nsomeone else's note"
+    assert en.strip_own_contract(trailing, 11) is None
+    nested = _own_contract_body(original, 11).replace(
+        "```nexus-external-intelligence\n", "```nexus-external-intelligence\n```\n"
+    )
+    assert en.strip_own_contract(nested, 11) is None
+
+
+def test_model_escalation_restores_the_original_body(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    assert en.CONTRACT_MARKER in env["gh"].issues[11]["body"]
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(env, 11, att["identity_hash"], state="UNIT_REPAIR_REQUIRED")
+    night = _dispatch(env, "2026-10-17T01:00:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    issue = env["gh"].issues[11]
+    assert issue["body"] == task_body().rstrip()
+    assert "nexus:external-intelligence" not in issue["labels"]
+    en.parse_task_block(issue["body"])  # re-queueable: no TASK_BODY_HAS_FOREIGN_CONTRACT
+    # the body edit happens only after the daemon label is gone
+    writes = env["gh"].writes
+    removed = max(i for i, w in enumerate(writes) if "nexus:external-intelligence" in w)
+    restored = [
+        i for i, w in enumerate(writes) if w[:2] == ["issue", "edit"] and "--body-file" in w
+    ]
+    assert restored[-1] > removed
+
+
+def test_infra_exhausted_escalation_restores_the_original_body(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    for minute in range(3):
+        att = night["issues"]["11"]["attempts"][-1]
+        _write_daemon_state(
+            env,
+            11,
+            att["identity_hash"],
+            state="BLOCKED",
+            error="ExternalIntelligenceError",
+            semantic_dispatched=False,
+        )
+        night = _dispatch(env, f"2026-10-17T01:0{minute}:00")
+    assert night["issues"]["11"]["status"] == "ESCALATED"
+    assert env["gh"].issues[11]["body"] == task_body().rstrip()
+
+
+def test_escalation_keeps_a_body_someone_else_edited(env) -> None:
+    _started(env)
+    _dispatch(env, "2026-10-17T00:30:00")
+    edited = env["gh"].issues[11]["body"].replace("Original problem", "Edited problem")
+    env["gh"].issues[11]["body"] = edited
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    assert "ISSUE_CHANGED_AFTER_ARMING" in night["issues"]["11"]["escalation"]["reason"]
+    assert env["gh"].issues[11]["body"] == edited  # not bytes we wrote: left alone
+
+
+def test_cross_night_cap_restores_the_original_body(env) -> None:
+    ledger = env["tmp"] / "nightly" / "issues.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(
+        json.dumps({
+            "11": {"nights": ["20261013", "20261014", "20261015"]},
+            "12": {"nights": ["20261013", "20261014", "20261015"]},
+        })
+    )
+    env["gh"].add_issue(11, _own_contract_body(task_body(), 11))
+    foreign = _own_contract_body(task_body(), 99)
+    env["gh"].add_issue(12, foreign)
+    night = env["app"].prepare()
+    assert night["status"] == "NO_TASKS"
+    assert "eia:escalate" in env["gh"].issues[11]["labels"]
+    assert env["gh"].issues[11]["body"] == task_body().rstrip()
+    assert env["gh"].issues[12]["body"] == foreign  # not this Issue's own block
+    env["gh"].writes.clear()
+    env["app"].prepare()  # idempotent: nothing left to strip
+    assert not [w for w in env["gh"].writes if "--body-file" in w and w[0] == "issue"]
+
+
+STUCK = [
+    {"error": "CANONICAL_WORKFORCE_BINDING_MISSING"},
+    {"error": "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"},
+    {"error": "INTELLIGENCE_DISPATCH_BINDING_MISSING"},
+    {"error": "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"},
+    {"error": "ExternalIntelligenceError", "error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"},
+]
+
+
+@pytest.mark.parametrize("fields", STUCK)
+def test_stuck_reconciliation_is_infra_at_the_first_tick(env, fields) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(
+        env,
+        11,
+        att["identity_hash"],
+        state="RECONCILIATION_REQUIRED",
+        prior_state="INTELLIGENCE_DISPATCHING",
+        reconcile_only=True,
+        semantic_dispatched=True,
+        **fields,
+    )
+    night = _dispatch(env, "2026-10-17T00:35:00")  # well inside the 150-min cap
+    first = night["issues"]["11"]["attempts"][0]
+    code = fields.get("error_code") or fields["error"]
+    assert first["result"] == "infra"
+    assert first["reason"] == (
+        f"RECONCILIATION_REQUIRED:RECONCILE_ONLY:INTELLIGENCE_DISPATCHING:{code}"
+    )
+    assert len(night["issues"]["11"]["attempts"]) == 2  # the retry budget applies
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"state": "INTELLIGENCE_DISPATCHING"},
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": True,
+            "error": "SOMETHING_ELSE",
+        },
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "error": "CANONICAL_WORKFORCE_BINDING_MISSING",
+        },
+    ],
+)
+def test_progressing_dispatch_records_still_wait(env, fields) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(env, 11, att["identity_hash"], **fields)
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "ARMED" and len(entry["attempts"]) == 1
+    assert "result" not in entry["attempts"][0]
+
+
+def test_restored_record_with_transient_error_waits_and_is_noted(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(
+        env,
+        11,
+        att["identity_hash"],
+        state="RECONCILIATION_REQUIRED",
+        prior_state="INTELLIGENCE_DISPATCHING",
+        reconcile_only=True,
+        error="CANONICAL_WORKFORCE_BINDING_MISSING",
+        last_transient_error="OPENCLI_TIMEOUT",
+    )
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    entry = night["issues"]["11"]
+    assert entry["status"] == "ARMED" and len(entry["attempts"]) == 1
+    assert entry["attempts"][0]["note"] == "last_transient_error=OPENCLI_TIMEOUT"
+
+
+def test_finalized_report_shows_the_final_night_status(env) -> None:
+    _started(env)
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
+    night = env["app"].stop()
+    assert night["status"] == "FINISHED"
+    report = Path(night["finalized"]["report"]).read_text()
+    assert "- Night status: FINISHED" in report and "RUNNING" not in report
