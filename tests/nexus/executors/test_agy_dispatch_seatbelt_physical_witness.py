@@ -147,6 +147,23 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
             assert after == before, f"{label} changed on disk"
         assert (checkout / "tracked.py").read_text(encoding="utf-8") == "original\n"
         assert not (checkout / "planted.py").exists()
+        # #2470 item 2: a parent of a protected entry cannot be renamed away
+        # (which would let a worker plant a fresh settings.json/config).
+        gemini = run_home / ".gemini"
+        for label, parent in {
+            "run HOME": run_home,
+            ".gemini": gemini,
+            ".gemini/antigravity-cli": gemini / "antigravity-cli",
+        }.items():
+            moved = parent.with_name(parent.name + ".moved")
+            result = _run(boundary, 'mv "$1" "$2"', parent, moved, cwd=target)
+            assert result.returncode != 0, f"{label} was renamable: {parent}"
+            assert DENIED in result.stderr, f"{label}: {result.stderr!r}"
+            assert parent.is_dir() and not moved.exists(), f"{label} moved on disk"
+        # Normal agy state writes under those parents still work.
+        brain = gemini / "antigravity-cli" / "brain" / "b.txt"
+        brain.parent.mkdir(parents=True, exist_ok=True)
+        assert _write_attempt(boundary, brain, cwd=target).returncode == 0
     finally:
         boundary.cleanup()
 

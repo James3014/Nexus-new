@@ -2887,3 +2887,44 @@ def test_git_config_fingerprint_fails_closed(tmp_path):
     with (canonical / ".git" / "config").open("a", encoding="utf-8") as handle:
         handle.write('[branch "unterminated\n\tmerge = x\n')
     assert admission.git_config_fingerprint(canonical) is None
+
+
+def test_seatbelt_denies_rename_of_every_protected_ancestor_2470(tmp_path):
+    """#2470 item 2: parents of the protected files must not be renamable."""
+    run_root = (tmp_path / "run").resolve()
+    run_home = run_root / "attempt" / "home"
+    profile = admission.build_seatbelt_profile(
+        run_root=run_root, writable_target=None, run_home=run_home
+    )
+    ancestors = [
+        run_home,
+        run_home / ".gemini",
+        run_home / ".gemini" / "antigravity-cli",
+    ]
+    for parent in ancestors:
+        assert f'(literal "{parent}")' in profile
+    # The run root itself is the writable root (its parent is not writable).
+    assert f'(literal "{run_root}")' not in profile
+    assert f'(literal "{run_home.parent}")' not in profile
+    deny_block = profile.split("(deny file-write*\n", 2)[-1]
+    # Each ancestor literal sits in the deny block, not in the allow block.
+    assert all(f'(literal "{parent}")' in deny_block for parent in ancestors)
+    # The writable project registry is still re-allowed afterwards.
+    assert (
+        f'(subpath "{run_home / admission.AGY_RUN_HOME_PROJECTS}")'
+        in profile.split("(allow file-write*\n")[-1]
+    )
+
+
+def test_run_home_protected_ancestors_stop_at_run_root_2470(tmp_path):
+    run_root = tmp_path / "run"
+    run_home = run_root / "h"
+    got = admission._run_home_protected_ancestors(
+        run_root,
+        run_home,
+        (
+            run_home / ".gemini" / "antigravity-cli" / "settings.json",
+            run_home / ".gemini" / "config",
+        ),
+    )
+    assert got == [run_home / ".gemini" / "antigravity-cli", run_home / ".gemini", run_home]
