@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from nexus.executors import agy_dispatch_boundary as boundary_mod
+from nexus.executors import agy_write_admission as admission
 from nexus.executors.agy_write_admission import (
     AGY_RUN_HOME_PROJECTS,
     AGY_RUN_HOME_SETTINGS,
@@ -147,6 +148,72 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
             assert after == before, f"{label} changed on disk"
         assert (checkout / "tracked.py").read_text(encoding="utf-8") == "original\n"
         assert not (checkout / "planted.py").exists()
+        # #2470 item 2: a parent of a protected entry cannot be renamed away
+        # (which would let a worker plant a fresh settings.json/config).
+        gemini = run_home / ".gemini"
+        for label, parent in {
+            "run HOME": run_home,
+            ".gemini": gemini,
+            ".gemini/antigravity-cli": gemini / "antigravity-cli",
+        }.items():
+            moved = parent.with_name(parent.name + ".moved")
+            result = _run(boundary, 'mv "$1" "$2"', parent, moved, cwd=target)
+            assert result.returncode != 0, f"{label} was renamable: {parent}"
+            assert DENIED in result.stderr, f"{label}: {result.stderr!r}"
+            assert parent.is_dir() and not moved.exists(), f"{label} moved on disk"
+        # Run-root round trip (nexus-agy-dispatch layout): rename the root away,
+        # plant a settings file, rename it back. Must fail at the first step.
+        rr_moved = target / "rr"
+        attack = (
+            'mv "$1" "$2" && echo PLANTED > "$2/home/.gemini/antigravity-cli/settings.json"'
+            ' && mv "$2" "$1"'
+        )
+        before = (run_home / AGY_RUN_HOME_SETTINGS).read_bytes()
+        result = _run(boundary, attack, boundary.run_root, rr_moved, cwd=target)
+        print("WITNESS run-root round trip rc=", result.returncode, result.stderr.strip())
+        assert result.returncode != 0 and DENIED in result.stderr
+        assert boundary.run_root.is_dir() and not rr_moved.exists()
+        assert (run_home / AGY_RUN_HOME_SETTINGS).read_bytes() == before
+        # Sibling swap (worker_registry layout: run_tmp/attempt-XXX/home).
+        reg_root = Path(os.path.realpath(tmp_path)) / "reg-run"
+        reg_home = reg_root / "attempt-x" / "home"
+        reg_settings = reg_home / AGY_RUN_HOME_SETTINGS
+        reg_settings.parent.mkdir(parents=True)
+        reg_settings.write_text("orig", encoding="utf-8")
+        stage = reg_root / "stage"
+        (stage / "home" / AGY_RUN_HOME_SETTINGS.parent).mkdir(parents=True)
+        (stage / "home" / AGY_RUN_HOME_SETTINGS).write_text("PLANTED", encoding="utf-8")
+        reg_profile = tmp_path / "reg.sb"
+        reg_profile.write_text(
+            admission.build_seatbelt_profile(
+                run_root=reg_root, writable_target=None, run_home=reg_home
+            ),
+            encoding="utf-8",
+        )
+        swap = subprocess.run(
+            [
+                boundary_mod.SANDBOX_EXEC_PATH,
+                "-f",
+                str(reg_profile),
+                "/bin/sh",
+                "-c",
+                'mv "$1/attempt-x" "$1/old" && mv "$1/stage" "$1/attempt-x"',
+                "sh",
+                str(reg_root),
+            ],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
+        print("WITNESS sibling swap rc=", swap.returncode, swap.stderr.strip())
+        assert swap.returncode != 0 and DENIED in swap.stderr
+        assert reg_settings.read_text(encoding="utf-8") == "orig"
+        # Normal agy state writes under those parents still work.
+        brain = gemini / "antigravity-cli" / "brain" / "b.txt"
+        brain.parent.mkdir(parents=True, exist_ok=True)
+        assert _write_attempt(boundary, brain, cwd=target).returncode == 0
     finally:
         boundary.cleanup()
 
