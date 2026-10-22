@@ -522,6 +522,17 @@ def _run_home_protected_ancestors(
     return found
 
 
+# Launch Services denies (#2863).  Appended to every profile; agy and Python
+# never call Launch Services (``open``/LSOpen), so nothing legitimate is lost.
+LAUNCH_SERVICES_DENY_LINES: tuple[str, ...] = (
+    "(deny mach-lookup",
+    '  (global-name "com.apple.coreservices.launchservicesd")',
+    '  (global-name "com.apple.coreservices.quarantine-resolver")',
+    '  (global-name-prefix "com.apple.lsd."))',
+    '(deny process-exec (literal "/usr/bin/open"))',
+)
+
+
 def build_seatbelt_profile(
     *,
     run_root: Path,
@@ -631,6 +642,11 @@ def build_seatbelt_profile(
     # any process: a shell tool fails with EPERM whatever cline's settings say.
     if deny_process_fork:
         lines.append("(deny process-fork)")
+    # Launch Services (#2863): a confined shell must not start an app such as
+    # Terminal through open(1)/LSOpen, because that app runs outside this
+    # profile.  ``com.apple.lsd.*`` (mapdb, open, modifydb) is the app and
+    # document lookup; probes showed denying it alone makes ``open -a`` fail.
+    lines += list(LAUNCH_SERVICES_DENY_LINES)
     return "\n".join(lines) + "\n"
 
 

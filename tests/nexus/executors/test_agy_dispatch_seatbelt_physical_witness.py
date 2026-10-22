@@ -214,6 +214,57 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
         brain = gemini / "antigravity-cli" / "brain" / "b.txt"
         brain.parent.mkdir(parents=True, exist_ok=True)
         assert _write_attempt(boundary, brain, cwd=target).returncode == 0
+        # #2863: Launch Services is closed, so a confined shell cannot start an
+        # app (Terminal, via ``open -a Terminal x.command``) outside the profile.
+        # ``-g -j`` keeps any app hidden should the deny ever regress.
+        opened = _run(
+            boundary, '/usr/bin/open -g -j -a TextEdit "$1"', checkout / "tracked.py", cwd=target
+        )
+        print("WITNESS open -a TextEdit (full profile) rc=", opened.returncode, opened.stderr.strip())
+        assert opened.returncode != 0 and DENIED in opened.stderr
+        # Independent of the process-exec rule: with only the mach-lookup deny
+        # (profile minus the /usr/bin/open exec line) LSOpen still fails.
+        mach_only = "\n".join(
+            line for line in boundary.profile.splitlines() if "/usr/bin/open" not in line
+        )
+        assert "com.apple.lsd." in mach_only and "/usr/bin/open" not in mach_only
+        mach_profile = tmp_path / "mach-only.sb"
+        mach_profile.write_text(mach_only + "\n", encoding="utf-8")
+        via_lsd = subprocess.run(
+            [
+                boundary_mod.SANDBOX_EXEC_PATH,
+                "-f",
+                str(mach_profile),
+                "/usr/bin/open",
+                "-g",
+                "-j",
+                "-a",
+                "TextEdit",
+                str(checkout / "tracked.py"),
+            ],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
+        print(
+            "WITNESS open -a TextEdit (mach-lookup deny only) rc=",
+            via_lsd.returncode,
+            via_lsd.stderr.strip(),
+        )
+        assert via_lsd.returncode != 0
+        # Normal Python still runs and writes under the profile.
+        py_out = target / "py-ok.txt"
+        py = _run(
+            boundary,
+            'exec "$2" -c "import sys, pathlib; pathlib.Path(sys.argv[1]).write_text(\'ok\')" "$1"',
+            py_out,
+            Path(sys.executable),
+            cwd=target,
+        )
+        assert py.returncode == 0, py.stderr
+        assert py_out.read_text(encoding="utf-8") == "ok"
     finally:
         boundary.cleanup()
 
