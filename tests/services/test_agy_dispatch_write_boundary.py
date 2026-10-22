@@ -1249,3 +1249,226 @@ def test_boundary_refuses_a_target_inside_a_credential_path(tmp_path, seatbelt_o
             extra_writable_files=[],
             extra_writable_roots=[],
         )
+
+
+# ---------------------------------------------------------------------------
+# #2470 item 3: a BaseException leaving an attempt keeps the sweep verdict
+# ---------------------------------------------------------------------------
+
+
+def _signal_after_launch(spy, exc_factory):
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        spy.launch(write_boundary)
+        raise exc_factory()
+
+    return runner
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [lambda: dispatch._SupervisorSignalError(15), KeyboardInterrupt],
+    ids=["supervisor-signal", "keyboard-interrupt"],
+)
+@pytest.mark.parametrize("clean", [False, True])
+def test_base_exception_records_the_sweep_result_through_the_hook(
+    tmp_path, monkeypatch, seatbelt_on, exc_factory, clean
+):
+    spy = _SweepSpy(monkeypatch, clean=clean)
+    events: list[dict] = []
+    target = _target(tmp_path)
+    expected = type(exc_factory())
+    with pytest.raises(expected):
+        dispatch.dispatch_run(
+            prompt="edit",
+            cwd=str(target),
+            mode="accept-edits",
+            write_paths=[str(target / "a.py")],
+            coordinator=_Coordinator(_source_home(tmp_path)),
+            run_agy_fn=_signal_after_launch(spy, exc_factory),
+            operation_hook=events.append,
+        )
+    recorded = [e["descendant_sweep_clean"] for e in events if "descendant_sweep_clean" in e]
+    assert recorded == [clean]
+    # swept exactly once: cleanup() reused the recorded result
+    assert spy.work == ["tracker.stop", "tagged"]
+
+
+def test_base_exception_with_an_interrupted_sweep_records_unclean(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    def interrupted_sweep(_boundary):
+        raise dispatch._SupervisorSignalError(15)  # a second signal mid-sweep
+
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", interrupted_sweep)
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "cleanup", lambda _b: None)
+    events: list[dict] = []
+    target = _target(tmp_path)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary._launched = True
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):  # the original exception survives
+        dispatch.dispatch_run(
+            prompt="edit",
+            cwd=str(target),
+            mode="accept-edits",
+            write_paths=[str(target / "a.py")],
+            coordinator=_Coordinator(_source_home(tmp_path)),
+            run_agy_fn=runner,
+            operation_hook=events.append,
+        )
+    assert [e["descendant_sweep_clean"] for e in events if "descendant_sweep_clean" in e] == [False]
+
+
+def test_normal_attempt_records_no_sweep_verdict_through_the_hook(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    _SweepSpy(monkeypatch, clean=True)
+    events: list[dict] = []
+    target = _target(tmp_path)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        return 0, '{"status": "SUCCESS", "response": "ok"}', "", False, 5
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=_Coordinator(_source_home(tmp_path)),
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+    assert isinstance(code, int)
+    assert not any("descendant_sweep_clean" in e for e in events)
+
+
+def _background_operation(tmp_path, monkeypatch, fake_dispatch, *, provider_alive_after=False):
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "sweep verdict probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch)
+    stopped: list = []
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_a, **_k: stopped.append(1) or (True, provider_alive_after, False),
+    )
+    kwargs = dict(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+    return journal, operation_id, kwargs
+
+
+def _interrupted(sweep_clean, exc):
+    def fake_dispatch(**kwargs):
+        hook = kwargs["operation_hook"]
+        hook({"phase": "EXECUTING", "attempts": 1, "rotations": 0, "provider_pid": 999999})
+        if sweep_clean is not None:
+            hook({"descendant_sweep_clean": sweep_clean})
+        raise exc
+
+    return fake_dispatch
+
+
+@pytest.mark.parametrize(
+    "exc,prefix",
+    [
+        (dispatch._SupervisorSignalError(15), "SUPERVISOR_SIGNAL"),
+        (KeyboardInterrupt(), "WRAPPER_EXCEPTION"),
+    ],
+    ids=["sigterm", "keyboard-interrupt"],
+)
+def test_signal_with_unclean_sweep_terminalizes_as_reconcile_required(
+    tmp_path, monkeypatch, exc, prefix
+):
+    journal, operation_id, kwargs = _background_operation(
+        tmp_path, monkeypatch, _interrupted(False, exc)
+    )
+    with pytest.raises(type(exc)):
+        dispatch._run_background_operation(**kwargs)
+    record = journal.read(operation_id)
+    assert record["descendant_sweep_clean"] is False
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"].startswith(prefix)
+    reconciliation = record["reconciliation"]
+    assert reconciliation["result"] == f"{prefix}_DESCENDANT_SWEEP_UNCLEAN"
+    assert reconciliation["descendant_sweep_clean"] is False
+    # never "provider gone": that would let lease cleanup run
+    assert reconciliation["provider_alive_after"] is None
+    assert reconciliation["retry_permitted"] is False
+    assert dispatch._cleanup_reconciled_lease(record) == {"result": "NOT_SAFE_TO_CLEAN"}
+
+
+def test_signal_with_unclean_sweep_and_live_provider_keeps_the_orphan_result(tmp_path, monkeypatch):
+    journal, operation_id, kwargs = _background_operation(
+        tmp_path,
+        monkeypatch,
+        _interrupted(False, dispatch._SupervisorSignalError(15)),
+        provider_alive_after=True,
+    )
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(**kwargs)
+    record = journal.read(operation_id)
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING"
+    assert record["reconciliation"]["descendant_sweep_clean"] is False
+
+
+@pytest.mark.parametrize("sweep_clean", [True, None], ids=["clean-sweep", "no-boundary"])
+def test_signal_with_clean_or_absent_sweep_keeps_the_terminal_outcome(
+    tmp_path, monkeypatch, sweep_clean
+):
+    journal, operation_id, kwargs = _background_operation(
+        tmp_path, monkeypatch, _interrupted(sweep_clean, dispatch._SupervisorSignalError(15))
+    )
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(**kwargs)
+    record = journal.read(operation_id)
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["phase"] == "TERMINAL"
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT"
+    assert record.get("descendant_sweep_clean") is sweep_clean
+
+
+def test_normal_path_completes_without_a_sweep_verdict(tmp_path, monkeypatch):
+    def fake_dispatch(**kwargs):
+        kwargs["operation_hook"]({"phase": "EXECUTING", "attempts": 1, "rotations": 0})
+        return 0
+
+    journal, operation_id, kwargs = _background_operation(tmp_path, monkeypatch, fake_dispatch)
+    assert dispatch._run_background_operation(**kwargs) == 0
+    record = journal.read(operation_id)
+    assert record["status"] == "COMPLETED"
+    assert record["phase"] == "TERMINAL"
+    assert "descendant_sweep_clean" not in record

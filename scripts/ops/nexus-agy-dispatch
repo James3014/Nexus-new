@@ -2561,6 +2561,26 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
         callback(payload)
 
 
+def _record_descendant_sweep(callback: Any, write_boundary: Any) -> None:
+    """Record the attempt's sweep verdict while an exception propagates (#2470).
+
+    The sweep runs once; a recorded result is reused. A sweep that cannot
+    finish (it raised, or a second signal interrupted it) counts as unclean.
+    Recording never replaces the propagating exception.
+    """
+    try:
+        clean = bool(write_boundary.sweep())
+    except BaseException:
+        clean = False
+    try:
+        _operation_hook(callback, descendant_sweep_clean=clean)
+    except BaseException as exc:
+        sys.stderr.write(
+            f"nexus-agy-dispatch: could not record descendant_sweep_clean={clean}: "
+            f"{type(exc).__name__}\n"
+        )
+
+
 TEMP_COMMAND_DENY = [
     "command(git push)",
     "command(git reset --hard)",
@@ -5177,6 +5197,15 @@ def dispatch_run(
                         f"{type(runner_exc).__name__}: {runner_exc}\n"
                         f"{DESCENDANT_SWEEP_FAILED_MARKER}\n"
                     )
+            except BaseException:
+                # #2470: a signal (_SupervisorSignalError, KeyboardInterrupt) or
+                # any other exception leaving the attempt skips the result check
+                # above; cleanup() would sweep and drop the verdict. Record it
+                # first so the supervisor guard terminalizes an unclean sweep
+                # as RECONCILE_REQUIRED.
+                if write_boundary is not None:
+                    _record_descendant_sweep(operation_hook, write_boundary)
+                raise
             finally:
                 try:
                     restore_temp_permissions(permission_token)
@@ -5818,6 +5847,7 @@ def _supervisor_terminal_guard(func):
             known_result: str,
             unresolved_running_result: str,
             unresolved_unverified_result: str,
+            unresolved_sweep_unclean_result: str,
         ) -> None:
             record = journal.read(operation_id)
             phase = str(record.get("phase") or "QUEUED")
@@ -5852,6 +5882,9 @@ def _supervisor_terminal_guard(func):
                 grace_seconds=2.0,
             )
             had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
+            # #2470: an attempt that ended by exception with an unclean (or
+            # unfinished) descendant sweep may have left workers running.
+            sweep_unclean = record.get("descendant_sweep_clean") is False
             provider_state = (
                 "RUNNING"
                 if alive_after
@@ -5891,6 +5924,26 @@ def _supervisor_terminal_guard(func):
                         "provider_alive_before": had_before,
                         "provider_alive_after": True,
                         "retry_permitted": False,
+                        **({"descendant_sweep_clean": False} if sweep_unclean else {}),
+                    },
+                    **telemetry,
+                    **attestation,
+                )
+            elif sweep_unclean:
+                # The provider is gone but its descendants are not proven
+                # gone: never terminal, never a lease cleanup.
+                journal.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    failure_kind=unknown_failure_kind,
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": unresolved_sweep_unclean_result,
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": None,
+                        "descendant_sweep_clean": False,
+                        "retry_permitted": False,
                     },
                     **telemetry,
                     **attestation,
@@ -5928,6 +5981,7 @@ def _supervisor_terminal_guard(func):
                 known_result="SUPERVISOR_SIGNAL_BEFORE_PROVIDER",
                 unresolved_running_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
                 unresolved_unverified_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED",
+                unresolved_sweep_unclean_result="SUPERVISOR_SIGNAL_DESCENDANT_SWEEP_UNCLEAN",
             )
             raise
         except BaseException as exc:
@@ -5938,6 +5992,7 @@ def _supervisor_terminal_guard(func):
                 known_result="WRAPPER_EXCEPTION_BEFORE_PROVIDER",
                 unresolved_running_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_STILL_RUNNING",
                 unresolved_unverified_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED",
+                unresolved_sweep_unclean_result="WRAPPER_EXCEPTION_DESCENDANT_SWEEP_UNCLEAN",
             )
             raise
         finally:
@@ -6045,6 +6100,12 @@ def _run_background_operation(
             resolved_model=snapshot.get("resolved_model"),
             model_catalog=snapshot.get("model_catalog"),
             pool_queue=snapshot.get("pool_queue"),
+            # #2470: only an attempt that ended by exception records its sweep.
+            **(
+                {"descendant_sweep_clean": snapshot["descendant_sweep_clean"]}
+                if "descendant_sweep_clean" in snapshot
+                else {}
+            ),
         )
 
     def on_event(event: dict[str, Any]) -> None:

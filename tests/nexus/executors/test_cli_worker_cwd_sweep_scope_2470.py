@@ -1,0 +1,199 @@
+"""#2470 item 1: the cwd sweep reports, and never kills, processes it cannot prove are the run's.
+
+``sweep_run`` kills tracked descendants and run-tagged processes only. Any
+other same-uid process that started after the baseline with a cwd inside the
+target (an Owner shell or editor that ``cd``-ed into the disposable worktree)
+is left running and makes the sweep unclean, so the caller reconciles.
+
+The physical tests start real processes and only ever signal them by PID.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from nexus.executors import cli_worker
+
+needs_lsof = pytest.mark.skipif(shutil.which("lsof") is None, reason="cwd scan needs lsof")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    stat = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    return bool(stat) and not stat.startswith("Z")
+
+
+def _wait_dead(pid: int, seconds: float = 5.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _kill(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+_SPAWN_CHILD = (
+    "import subprocess, sys, time\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+    "    cwd=sys.argv[1], env={}, start_new_session=True,\n"
+    "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+    "print(child.pid, flush=True)\n"
+    "time.sleep(0.6)\n"
+)
+
+
+def _launch_run(target: Path, tag: str):
+    """A worker whose env-cleared, setsid child sits in ``target``; returns (worker, child, tracker)."""
+    worker = subprocess.Popen(
+        [sys.executable, "-c", _SPAWN_CHILD, str(target)],
+        cwd=str(target),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    tracker = cli_worker.track_run(tag, worker.pid)
+    assert worker.stdout is not None
+    child = int(worker.stdout.readline().strip())
+    worker.wait(timeout=10)
+    return worker, child, tracker
+
+
+@pytest.fixture
+def target(tmp_path: Path) -> Path:
+    path = (tmp_path / "worktree").resolve()
+    path.mkdir()
+    return path
+
+
+@needs_lsof
+def test_unrelated_same_uid_process_in_worktree_survives_and_sweep_is_unclean(target):
+    tag = "scope2470unrelated"
+    baseline = cli_worker.sweep_baseline()
+    assert baseline is not None
+    # An Owner shell that cd-ed into the worktree while the run was active:
+    # same uid, started after the baseline, no run tag, not a descendant.
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(target),
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    child = None
+    try:
+        _worker, child, tracker = _launch_run(target, tag)
+        clean = cli_worker.sweep_run(tag, tracker, baseline, [str(target)])
+        assert clean is False  # reported, fail closed
+        assert bystander.poll() is None  # and not killed
+        assert _alive(bystander.pid)
+        assert _wait_dead(child)  # the run's own descendant is still killed
+    finally:
+        cli_worker.release_run(tag)
+        _kill(bystander.pid)
+        bystander.wait(timeout=5)
+        if child is not None:
+            _kill(child)
+
+
+@needs_lsof
+def test_positive_control_real_descendant_is_killed_and_sweep_is_clean(target):
+    tag = "scope2470descendant"
+    baseline = cli_worker.sweep_baseline()
+    assert baseline is not None
+    child = None
+    try:
+        _worker, child, tracker = _launch_run(target, tag)
+        assert _alive(child)
+        assert cli_worker.sweep_run(tag, tracker, baseline, [str(target)]) is True
+        assert _wait_dead(child)
+    finally:
+        cli_worker.release_run(tag)
+        if child is not None:
+            _kill(child)
+
+
+@needs_lsof
+def test_run_tagged_process_in_worktree_is_killed(target):
+    """A process carrying the run tag is the run's even when the tracker missed it."""
+    tag = "scope2470tagged"
+    baseline = cli_worker.sweep_baseline()
+    assert baseline is not None
+    tagged = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(target),
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            cli_worker.RUN_TAG_ENV: tag,
+        },
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(0.2)
+
+        class _Empty:  # the tracker saw nothing: only the tag can find it
+            probe_failed = False
+
+            def stop(self):
+                return set()
+
+        assert cli_worker.sweep_run(tag, _Empty(), baseline, [str(target)]) is True
+        tagged.wait(timeout=5)
+        assert tagged.returncode == -signal.SIGKILL
+    finally:
+        cli_worker.release_run(tag)
+        if tagged.poll() is None:
+            _kill(tagged.pid)
+            tagged.wait(timeout=5)
+
+
+def test_sweep_clean_kills_only_tracked_and_reports_other_cwd_matches(monkeypatch):
+    killed: list[set[int]] = []
+    monkeypatch.setattr(
+        cli_worker, "_kill_and_confirm", lambda pids: killed.append(set(pids)) or True
+    )
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    assert cli_worker._sweep_clean({11, 12}, {12, 99}) is False
+    assert killed == [{11, 12}]  # 99 is reported, never signalled
+
+
+def test_sweep_clean_ignores_a_reported_pid_that_already_exited(monkeypatch):
+    monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: False)
+    assert cli_worker._sweep_clean({11}, {11, 99}) is True
+
+
+def test_sweep_clean_is_clean_when_every_cwd_match_is_tracked(monkeypatch):
+    monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    assert cli_worker._sweep_clean({11, 12}, {11}) is True
+
+
+def test_sweep_clean_unknown_scan_and_failed_kill_are_unclean(monkeypatch):
+    monkeypatch.setattr(cli_worker, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: True)
+    assert cli_worker._sweep_clean({11}, None) is False
+    monkeypatch.setattr(cli_worker, "_kill_and_confirm", lambda pids: False)
+    assert cli_worker._sweep_clean({11}, set()) is False

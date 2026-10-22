@@ -670,9 +670,31 @@ def _pids_with_cwd_under(
 
 
 def _sweep_clean(tracked: set[int], cwd_pids: Optional[set[int]]) -> bool:
-    """Kill tracked and cwd-matched pids; unknown cwd scan never counts as clean."""
-    killed = _kill_and_confirm(tracked | (cwd_pids or set()))
-    return killed and cwd_pids is not None
+    """Kill the tracked descendants; report, never kill, other cwd matches (#2470).
+
+    Only processes the run provably owns are killed: the tracked descendants
+    here, and the run-tagged processes in ``_sweep_tagged_processes``, which
+    callers run before the cwd scan. A process whose cwd lies inside a sweep
+    root but that is neither tracked nor tagged may be an Owner shell or
+    editor that ``cd``-ed into the disposable worktree, or a descendant that
+    escaped both mechanisms (double fork plus a cleared environment). Neither
+    can be told apart, so it is left running and the sweep is reported
+    unclean: the caller then needs reconciliation instead of a false kill.
+    An unknown cwd scan never counts as clean.
+    """
+    killed = _kill_and_confirm(tracked)
+    if cwd_pids is None:
+        return False
+    unproven = {pid for pid in cwd_pids - tracked if _pid_alive(pid)}
+    if unproven:
+        _logger.warning(
+            "descendant sweep unproven: %d untracked, untagged process(es) with a cwd "
+            "inside the sweep roots were left running (pids %s)",
+            len(unproven),
+            sorted(unproven),
+        )
+        return False
+    return killed
 
 
 def _kill_and_confirm(pids: set[int]) -> bool:
@@ -796,9 +818,11 @@ def sweep_run(
 ) -> bool:
     """Stop ``tracker`` and SIGKILL every surviving descendant of the run.
 
-    True only when the sweep is provably clean: tracked descendants and
-    processes with a cwd under ``roots`` are dead, no process still carries the
-    run tag, the baseline was readable and no process-table poll failed.
+    Kills only tracked descendants and processes carrying the run tag. True
+    only when the sweep is provably clean: those are dead, no other process
+    the run could have started has a cwd under ``roots`` (such a process is
+    reported, not killed; #2470), the baseline was readable and no
+    process-table poll failed.
     """
     tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
     tagged_clean = _sweep_tagged_processes(run_tag)
@@ -1025,19 +1049,24 @@ def run_cli_worker(
                 )
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
+            tracked = (
+                tracker.stop() - (baseline.preexisting if baseline else frozenset())
+                if tracker is not None
+                else set()
+            )
+            # Descendants that called setsid() left the group; find them by the
+            # per-run tag in their environment and kill them too.  A receipt may
+            # only claim a clean kill when no tagged process survives.  This
+            # runs before the cwd scan, which only reports what is left (#2470).
+            if not _sweep_tagged_processes(run_tag):
+                group_killed = False
             if tracker is not None:
-                tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
                 if (
                     not _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
                     or baseline is None
                     or tracker.probe_failed
                 ):
                     group_killed = False
-            # Descendants that called setsid() left the group; find them by the
-            # per-run tag in their environment and kill them too.  A receipt may
-            # only claim a clean kill when no tagged process survives.
-            if not _sweep_tagged_processes(run_tag):
-                group_killed = False
             try:
                 stdout, stderr = process.communicate(timeout=_POST_KILL_DRAIN_SECONDS)
             except subprocess.TimeoutExpired as drain_exc:
