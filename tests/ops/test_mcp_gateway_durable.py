@@ -1824,6 +1824,41 @@ def test_r1_shallow_mirror_bundle_identity_substitution_fails_closed(
     assert observed["host_calls"] == []
 
 
+def test_r1_git_subprocess_disables_background_maintenance(monkeypatch):
+    """A detached gc/maintenance child must not outlive a scratch repo command (#2883)."""
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen[command[0]] = kwargs.get("env")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(g.subprocess, "run", fake_run)
+    g._r1_run("git", "--version")
+    g._r1_run("true")
+    env = seen["git"]
+    assert env["GIT_CONFIG_KEY_0"] == "gc.auto" and env["GIT_CONFIG_VALUE_0"] == "0"
+    assert env["GIT_CONFIG_KEY_1"] == "maintenance.auto"
+    assert env["GIT_CONFIG_VALUE_1"] == "false"
+    assert seen["true"] is None
+
+
+def test_r1_scratch_removal_failure_is_not_swallowed(tmp_path, monkeypatch):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    def boom(path):
+        raise OSError(errno.ENOTEMPTY, "Directory not empty")
+
+    monkeypatch.setattr(g.shutil, "rmtree", boom)
+    monkeypatch.setattr(g.time, "sleep", lambda _s: None)
+    with pytest.raises(g.GatewayContractError, match="scratch cleanup failed"):
+        g._r1_remove_scratch(scratch)
+    monkeypatch.undo()
+    g._r1_remove_scratch(scratch)
+    assert not scratch.exists()
+    g._r1_remove_scratch(scratch)
+
+
 @pytest.mark.parametrize(
     ("role", "mutation"),
     (

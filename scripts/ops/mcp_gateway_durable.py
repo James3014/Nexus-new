@@ -1001,10 +1001,42 @@ class _RecoveryAdapters:
     ] | None = None
 
 
+_R1_GIT_NO_BACKGROUND_ENV = {
+    # A successful fetch may otherwise leave a detached `git maintenance`/`gc
+    # --auto` child writing into the scratch repository after the command
+    # returned, racing the scratch removal (#2883).
+    "GIT_CONFIG_COUNT": "2",
+    "GIT_CONFIG_KEY_0": "gc.auto",
+    "GIT_CONFIG_VALUE_0": "0",
+    "GIT_CONFIG_KEY_1": "maintenance.auto",
+    "GIT_CONFIG_VALUE_1": "false",
+}
+
+
+def _r1_remove_scratch(path: Path) -> None:
+    """Remove a manager scratch tree, failing closed if it cannot be removed."""
+    last: OSError | None = None
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.05 * (attempt + 1))
+        else:
+            return
+    raise _gateway_error("R1 scratch cleanup failed", last)
+
+
 def _r1_run(*command: str, bytes_output: bool = False, timeout: int = 60) -> str | bytes:
+    env = None
+    if command and command[0] == "git":
+        env = {**os.environ, **_R1_GIT_NO_BACKGROUND_ENV}
     try:
         result = subprocess.run(
             command,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=not bytes_output,
@@ -1444,8 +1476,16 @@ def _r1_create_or_verify_bundle(
         os.chmod(candidate, 0o600)
         if not bundle_exists:
             os.replace(candidate, bundle)
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+    except BaseException as exc:
+        # Fail closed on a leftover scratch, but keep the original error as
+        # the reported one: a masked "remote main moved" would be misleading.
+        try:
+            _r1_remove_scratch(scratch)
+        except GatewayContractError as cleanup_exc:
+            exc.add_note(f"R1 scratch cleanup also failed: {cleanup_exc}")
+        raise
+    else:
+        _r1_remove_scratch(scratch)
     if bundle.exists() or bundle.is_symlink():
         info = os.lstat(bundle)
         if (
