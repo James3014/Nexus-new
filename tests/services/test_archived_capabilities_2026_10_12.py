@@ -137,7 +137,7 @@ def test_no_live_code_imports_archived_modules():
     archived_files |= {
         ROOT / "nexus/federation" / name
         for name in ("__init__.py", "config.py", "node_launcher.py", "node_registry.py")
-    } | {ROOT / "nexus/oracle/promote.py"}
+    }
     archived_files |= {
         ROOT / "scripts/ops/federated_engine_v09.py",
         ROOT / "scripts/ops/evolution_engine_v08.py",

@@ -123,8 +123,6 @@ artifacts/external_sources/
 !scripts/benchmarks/
 !scripts/benchmarks/*.py
 !scripts/benchmarks/*.c
-!nexus/benchmarks/
-!nexus/benchmarks/replay_dashboard.py
 !tests/fixtures/s2t_memory_sidecar/**/*.log
 
 # Nexus Core local evidence/bindings

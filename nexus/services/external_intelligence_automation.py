@@ -5,9 +5,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
@@ -52,6 +54,14 @@ AMBIGUOUS_STATES = {
     "FANOUT_DISPATCHING",
     "CLOSURE_DISPATCHING",
 }
+_CARRY_STATES = frozenset({
+    "INTELLIGENCE_DISPATCHING",
+    "INTELLIGENCE_COMPLETED",
+    "FANOUT_DISPATCHING",
+    "FANOUT_COMPLETED",
+    "CLOSURE_DISPATCHING",
+    "RECONCILIATION_REQUIRED",
+})
 TERMINAL_DISPOSITIONS = {
     "REPAIR_BUDGET_EXHAUSTED",
     "UNIT_REPAIR_REQUIRED",
@@ -465,6 +475,31 @@ def _error_reason_fields(exc: BaseException) -> dict[str, Any]:
     return fields
 
 
+TRANSITION_LOG_NAME = "transitions.jsonl"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _save_caller(frame: Any) -> str:
+    """Return "<relative file>:<line> <function>" for the frame that called save."""
+    try:
+        filename = frame.f_code.co_filename
+        try:
+            filename = str(Path(filename).resolve().relative_to(_REPO_ROOT))
+        except ValueError:
+            filename = Path(filename).name
+        return f"{filename}:{frame.f_lineno} {frame.f_code.co_name}"
+    except Exception:
+        return "unknown"
+
+
+def _log_code(value: Any) -> str | None:
+    """The leading code of an error value (text before the first ":"), capped."""
+    if value is None:
+        return None
+    code = str(value).split(":", 1)[0].strip()
+    return code[:120] if re.fullmatch(r"[A-Za-z0-9_.\-]+", code) else "UNPRINTABLE_ERROR"
+
+
 class AutomationStateStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -495,8 +530,59 @@ class AutomationStateStore:
             "state": state,
             **extra,
         }
-        _atomic_json(self.path_for(item), value)
+        path = self.path_for(item)
+        from_state = self._persisted_state(path)
+        caller = _save_caller(sys._getframe(1))
+        _atomic_json(path, value)
+        self._append_transition(item, from_state, value, caller)
         return value
+
+    @staticmethod
+    def _persisted_state(path: Path) -> str | None:
+        try:
+            state = json.loads(path.read_text(encoding="utf-8")).get("state")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return state if isinstance(state, str) else None
+
+    def _append_transition(
+        self,
+        item: IssueWorkItem,
+        from_state: str | None,
+        value: Mapping[str, Any],
+        caller: str,
+    ) -> None:
+        """Append one audit line per save (#2852); never lets a log failure break the save."""
+        try:
+            line = {
+                "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                "repository": item.repository,
+                "issue_number": item.issue_number,
+                "identity_hash": item.identity_hash,
+                "from_state": from_state,
+                "to_state": value.get("state"),
+                # Codes only: error text can carry transport detail (tokens, URLs).
+                "error": _log_code(value.get("error")),
+                "error_code": _log_code(value.get("error_code")),
+                "has_worker_binding": isinstance(value.get("worker_binding"), Mapping),
+                "semantic_dispatched": value.get("semantic_dispatched"),
+                "caller": caller,
+            }
+            data = (json.dumps(line, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+            self.root.mkdir(parents=True, exist_ok=True)
+            fd = os.open(
+                self.root / TRANSITION_LOG_NAME,
+                os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+                0o600,
+            )
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view) :]
+            finally:
+                os.close(fd)
+        except (OSError, TypeError, ValueError):
+            return
 
     def update_publication_record(
         self,
@@ -1127,6 +1213,34 @@ class ExternalIntelligenceAutomation:
             attempts[str(unit["unit_id"])] = dict(attempt)
         return attempts
 
+    def _carry_forward(self, item: IssueWorkItem) -> dict[str, Any]:
+        """Fields a BLOCKED / terminal save must not drop (#2852).
+
+        Returns the worker binding and intelligence effect id of the record
+        currently on disk; only when nothing is persisted and that record is in
+        a dispatch state is this run's binding used. A persisted binding always
+        wins. Not used on the RECONCILIATION_REQUIRED saves that detect a
+        missing or mismatched binding / effect id: those keep base behaviour
+        (no binding carried), because a carried binding would let a later
+        resume replay a dispatch that base refuses. Persistence only.
+        """
+        try:
+            current = self.state_store.load(item) or {}
+        except (OSError, ValueError, AutomationError):
+            current = {}
+        persisted = current.get("worker_binding")
+        persisted = dict(persisted) if isinstance(persisted, Mapping) else None
+        own = None
+        if current.get("state") in _CARRY_STATES and self._worker_binding is not None:
+            own = dict(self._worker_binding)
+        binding = persisted or own
+        carried: dict[str, Any] = {}
+        if binding is not None:
+            carried["worker_binding"] = binding
+        if current.get("intelligence_effect_id"):
+            carried["intelligence_effect_id"] = current["intelligence_effect_id"]
+        return carried
+
     def _save_fanout_reconciliation(
         self,
         item: IssueWorkItem,
@@ -1152,6 +1266,7 @@ class ExternalIntelligenceAutomation:
                 stage="FANOUT",
                 error="FANOUT_RECONCILIATION_BINDING_INVALID",
                 semantic_dispatched=True,
+                **{k: extra[k] for k in ("worker_binding", "intelligence_effect_id") if k in extra},
             )
         extra["fanout_attempts"] = attempts
         return self.state_store.save(item, "RECONCILIATION_REQUIRED", **extra)
@@ -1408,6 +1523,7 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         "BLOCKED",
+                        **self._carry_forward(item),
                         error="INTELLIGENCE_RECEIPT_MISSING",
                         semantic_dispatched=True,
                     )
@@ -1430,6 +1546,7 @@ class ExternalIntelligenceAutomation:
                 return self.state_store.save(
                     item,
                     "BLOCKED",
+                    **self._carry_forward(item),
                     stage="INTELLIGENCE",
                     result=dict(intelligence),
                     semantic_dispatched=False,
@@ -1454,6 +1571,7 @@ class ExternalIntelligenceAutomation:
                 return self.state_store.save(
                     item,
                     "BLOCKED",
+                    **self._carry_forward(item),
                     error="FANOUT_LEGACY_RECONCILIATION_INVALID",
                     semantic_dispatched=True,
                 )
@@ -1466,6 +1584,7 @@ class ExternalIntelligenceAutomation:
                 return self.state_store.save(
                     item,
                     "BLOCKED",
+                    **self._carry_forward(item),
                     stage="FANOUT",
                     error="FANOUT_RECONCILIATION_BINDING_DRIFT",
                     semantic_dispatched=True,
@@ -1499,6 +1618,7 @@ class ExternalIntelligenceAutomation:
                 return self.state_store.save(
                     item,
                     "BLOCKED",
+                    **self._carry_forward(item),
                     stage="FANOUT",
                     error=str(exc),
                     semantic_dispatched=True,
@@ -1536,6 +1656,7 @@ class ExternalIntelligenceAutomation:
                     return self.state_store.save(
                         item,
                         closure_status,
+                        **self._carry_forward(item),
                         closure_status=closure_status,
                         closure_run_id=closure.get("run_id"),
                         semantic_dispatched=True,
@@ -1543,6 +1664,7 @@ class ExternalIntelligenceAutomation:
                 return self.state_store.save(
                     item,
                     "BLOCKED",
+                    **self._carry_forward(item),
                     stage="CLOSURE",
                     closure_status=closure.get("status"),
                     semantic_dispatched=True,
@@ -1571,7 +1693,11 @@ class ExternalIntelligenceAutomation:
             )
         except AutomationError as exc:
             return self.state_store.save(
-                item, "BLOCKED", error=str(exc), semantic_dispatched=dispatched
+                item,
+                "BLOCKED",
+                error=str(exc),
+                semantic_dispatched=dispatched,
+                **self._carry_forward(item),
             )
         except Exception as exc:
             current = self.state_store.load(item) or {}
@@ -1590,6 +1716,7 @@ class ExternalIntelligenceAutomation:
             return self.state_store.save(
                 item,
                 "BLOCKED",
+                **self._carry_forward(item),
                 error=type(exc).__name__,
                 **_error_reason_fields(exc),
                 semantic_dispatched=dispatched,

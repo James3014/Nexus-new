@@ -1,7 +1,19 @@
 import unittest
 from nexus.calibration.tuner import TemperatureScaler
+from nexus.verifiers.contracts import VerifierVerdict
+from nexus.verifiers.packs.base import VerifierPack
 from nexus.verifiers.packs.registry import PackRegistry
-from nexus.verifiers.packs.astropy_pack import AstropyPack
+
+
+class _StubAstropyPack(VerifierPack):
+    """Test-local stand-in for AstropyPack, retired in Phase-2 batch C (#2584)."""
+
+    name = "stub_astropy_pack"
+    domain_tags = ["astropy", "science", "ffi"]
+
+    def evaluate_all(self, candidate_id: str, patch: str) -> list[VerifierVerdict]:
+        return []
+
 
 class TestCalibrationAndPacks(unittest.TestCase):
     def test_temperature_scaling_effect(self):
@@ -15,12 +27,12 @@ class TestCalibrationAndPacks(unittest.TestCase):
     def test_pack_registry_activation(self):
         """[T7] 驗證：能根據 domain tags 正確啟動 Pack"""
         PackRegistry.clear()
-        PackRegistry.register(AstropyPack())
+        PackRegistry.register(_StubAstropyPack())
         
         # 匹配標籤
         enabled = PackRegistry.get_enabled_packs(["astropy"])
         self.assertEqual(len(enabled), 1)
-        self.assertEqual(enabled[0].name, "astropy_pack")
+        self.assertEqual(enabled[0].name, "stub_astropy_pack")
         
         # 不匹配標籤
         none_enabled = PackRegistry.get_enabled_packs(["web_frontend"])

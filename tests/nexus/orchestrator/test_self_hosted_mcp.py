@@ -9,6 +9,17 @@ sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer  # noqa: E402
 
+RETIRED_COMPETITION_TOOLS = frozenset({
+    "nexus_self_hosted_compete_task",
+    "nexus_self_hosted_get_competition",
+    "nexus_self_hosted_integrate_competition",
+    "nexus_self_hosted_create_refactor_campaign",
+    "nexus_self_hosted_advance_refactor_campaign",
+    "nexus_self_hosted_get_refactor_campaign",
+    "nexus_self_hosted_rollback_refactor_campaign",
+    "nexus_self_hosted_push_competition",
+})
+
 
 class FakeService:
     def submit_task(self, arguments):
@@ -113,14 +124,6 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     assert {
         "nexus_self_hosted_submit_task",
         "nexus_self_hosted_direct_complete",
-        "nexus_self_hosted_compete_task",
-        "nexus_self_hosted_get_competition",
-        "nexus_self_hosted_integrate_competition",
-        "nexus_self_hosted_create_refactor_campaign",
-        "nexus_self_hosted_advance_refactor_campaign",
-        "nexus_self_hosted_get_refactor_campaign",
-        "nexus_self_hosted_rollback_refactor_campaign",
-        "nexus_self_hosted_push_competition",
         "nexus_self_hosted_get_task",
         "nexus_self_hosted_wait_task",
         "nexus_self_hosted_list_actionable_tasks",
@@ -140,29 +143,14 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_cancel_task",
         "nexus_self_hosted_recover_verified_uncommitted_candidate",
     } <= names
+    # Retired 2026-10-21 (#2584 Phase-2 batch B) with worker_competition / refactor_campaign.
+    assert not names & RETIRED_COMPETITION_TOOLS
     specs = {item["name"]: item for item in response["result"]["tools"]}
     submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]
-    compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
-    campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
-    push_schema = specs["nexus_self_hosted_push_competition"]["inputSchema"]
-    compete_schema = specs["nexus_self_hosted_compete_task"]["inputSchema"]
-    assert {"authority_goal_id", "authority_coordination_scope_id"} <= set(
-        compete_schema["required"]
-    )
-    assert set(push_schema["required"]) == {
-        "competition_id",
-        "remote",
-        "authority_goal_id",
-        "authority_coordination_scope_id",
-    }
-    assert "authorized" not in push_schema["properties"]
-    assert push_schema["additionalProperties"] is False
     assert "agy" in submit_properties["worker"]["enum"]
     assert "agy" in submit_properties["worker_order"]["items"]["enum"]
     assert "agy" in submit_properties["fallback_worker"]["enum"]
     assert submit_properties["execution_lane"]["enum"] == ["DIRECT_CANONICAL", "ISOLATED_TARGET"]
-    assert "agy" in compete_properties["workers"]["items"]["enum"]
-    assert "agy" in campaign_properties["workers"]["items"]["enum"]
 
 
 def test_compete_task_missing_authority_binding_is_zero_dispatch():
@@ -176,11 +164,15 @@ def test_compete_task_missing_authority_binding_is_zero_dispatch():
 
     service = CountingService()
     server = NexusSelfHostedMCPServer(service=service)
-    response = server.handle({
-        "jsonrpc": "2.0", "id": 25, "method": "tools/call",
-        "params": {"name": "nexus_self_hosted_compete_task", "arguments": {"workers": ["codex", "opencode"]}},
-    })
-    assert response["result"]["isError"] is True
+    # The competition tools are retired (#2584 Phase-2 batch B): each is now an
+    # unknown tool and still dispatches nothing.
+    for name in sorted(RETIRED_COMPETITION_TOOLS):
+        response = server.handle({
+            "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+            "params": {"name": name, "arguments": {"workers": ["codex", "opencode"]}},
+        })
+        assert response["result"]["isError"] is True
+        assert "unknown tool" in response["result"]["content"][0]["text"]
     assert service.calls == 0
 
 

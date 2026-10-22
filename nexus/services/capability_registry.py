@@ -2342,7 +2342,9 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     _SANDBOX_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "sandbox_command", "sandbox_timeout_sec", "sandbox_forbidden_paths"}
     )
-    _SCHEDULER_CONSTRAINT_KEYS = frozenset({"workspace_root"})
+    # learn_scheduler gates on slo_readiness from its learn store, so the store must come
+    # from the process (state root or cwd), never from request context (#2829, as #2826).
+    _SCHEDULER_CONSTRAINT_KEYS: frozenset[str] = frozenset()
     _METABOLISM_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "metabolism_token_usage", "metabolism_token_limit"}
     )

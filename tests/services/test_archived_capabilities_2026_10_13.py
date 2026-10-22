@@ -64,7 +64,6 @@ ARCHIVED_MODULES = {
     "nexus.core.web_dom_mapper": "nexus/core/web_dom_mapper.py",
     "nexus.core.web_action_executor": "nexus/core/web_action_executor.py",
     "nexus.engine.replay_runner": "nexus/engine/replay_runner.py",
-    "nexus.core.planner_auditor": "nexus/core/planner_auditor.py",
     "nexus.core.capability_gate": "nexus/core/capability_gate.py",
     "nexus.orchestrator.integration_manager": "nexus/orchestrator/integration_manager.py",
 }
@@ -75,6 +74,9 @@ DELETED_MODULES = {
     "nexus.services.local_heal.linear_replay_runner": (
         "nexus/services/local_heal/linear_replay_runner.py"
     ),
+    # Physically deleted 2026-10-21 (#2584, Phase-2 batch B,
+    # ARCHIVED_2026-10-21_phase2_batch_B.md).
+    "nexus.core.planner_auditor": "nexus/core/planner_auditor.py",
 }
 
 # Already-archived first-batch files that still import a second-batch module.
