@@ -1810,3 +1810,65 @@ def test_reconcile_refuses_a_transplanted_marker_and_a_replaced_root(
     record = dispatch._reconcile_operation(journal, operation_id)
     assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "stdout, error, receipt_survives, sweep_result",
+    [
+        ("AGY_WORKER_SWEEP unclean 42\n", None, True, "UNCLEAN"),
+        ("", OSError("sudo unavailable"), True, "SWEEP_ERROR"),
+        ("AGY_WORKER_SWEEP clean\n", None, False, "CLEAN"),
+    ],
+)
+def test_reconcile_keeps_the_lease_receipt_unless_the_worker_sweep_is_clean(
+    worker_env, tmp_path, monkeypatch, stdout, error, receipt_survives, sweep_result
+):
+    run_root = worker_env["runs"] / ("f" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(run_root, operation_id)
+    alias_hash, lease_hash, owner_pid = "a" * 12, "b" * 12, 999_999_999
+    journal.update(
+        operation_id,
+        account_alias_hash=alias_hash,
+        lease_id_hash=lease_hash,
+        status="COMPLETED",
+        phase="TERMINAL",
+        exit_code=0,
+        provider_process_state="EXITED",
+        has_unresolved_external_effect=False,
+    )
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    receipt = leases / f"{alias_hash}.receipt.json"
+    receipt.write_text(
+        json.dumps({
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_hash,
+            "consumer_id": "agy-operation",
+            "claimed_at": 1.0,
+            "pid": owner_pid,
+        })
+    )
+
+    def run(argv, **kwargs):
+        if error is not None:
+            raise error
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == sweep_result
+    assert receipt.exists() is receipt_survives
+    lease_result = record["reconciliation"]["lease_cleanup"]["result"]
+    if receipt_survives:
+        assert lease_result == "WORKER_SWEEP_UNPROVEN_PRESERVED"
+    else:
+        assert lease_result == "LEASE_RECEIPT_REMOVED"

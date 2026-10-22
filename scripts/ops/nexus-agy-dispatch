@@ -6697,12 +6697,16 @@ def _reconcile_operation(
         if any(key in existing for key in _WORKER_SWEEP_KEYS) else None
     )
     record = journal.reconcile(operation_id)
-    lease_cleanup = _cleanup_reconciled_lease(record)
-    reconciliation = dict(record.get("reconciliation") or {})
-    reconciliation["lease_cleanup"] = lease_cleanup
     worker_sweep_failed = worker_sweep is not None and worker_sweep["result"] not in (
         "CLEAN", "RUN_ROOT_GONE",
     )
+    if worker_sweep_failed:
+        # A worker agy may still hold this account's token: never free the lease.
+        lease_cleanup = {"result": "WORKER_SWEEP_UNPROVEN_PRESERVED"}
+    else:
+        lease_cleanup = _cleanup_reconciled_lease(record)
+    reconciliation = dict(record.get("reconciliation") or {})
+    reconciliation["lease_cleanup"] = lease_cleanup
     if worker_sweep is not None:
         reconciliation["worker_sweep"] = worker_sweep
         if worker_sweep_failed:
