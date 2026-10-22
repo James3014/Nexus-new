@@ -28,11 +28,12 @@ Validation fails closed with a stable ``EXTERNAL_TARGET_*`` code:
 * the work tree is clean (tracked and untracked).  The Target lease refuses a
   dirty Controller anyway (``WorktreeManager._verify_controller``), so a dirty
   external repository is refused here, before any planner or provider work;
-* no submodule (``.gitmodules``, a gitlink, or a non-empty ``modules/``)
-  and no git filter can run (#2749): the repository config defines no
-  ``filter.*`` driver (nor a ``diff.*.textconv``/``command`` driver), no
-  ``.gitattributes`` in the base tree declares ``filter=`` and no
-  ``info/attributes`` file is non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
+* no submodule (a gitlink, a declared submodule in ``.gitmodules``, or a
+  non-empty ``modules/``) and no git filter can run (#2749, #2813): the
+  repository config defines no ``filter.*`` driver (nor a
+  ``diff.*.textconv``/``command`` driver), no ``.gitattributes`` in the
+  base tree declares ``filter=`` and no ``info/attributes`` file is
+  non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
   This is checked before the first ``git status``, since status runs clean
   filters.
 
@@ -92,6 +93,7 @@ GIT_DRIVER_CONFIG_REGEX = r"^filter\.|^diff\..*\.(textconv|command)$"
 FILTER_DRIVER_PRESENT = "EXTERNAL_TARGET_FILTER_DRIVER_PRESENT"
 SUBMODULE_PRESENT = "EXTERNAL_TARGET_SUBMODULE_PRESENT"
 _ATTRIBUTE_FILTER = re.compile(rb"(?:^|\s)filter=", re.MULTILINE)
+_SUBMODULE_SECTION_HEADER = re.compile(rb"^submodule(?:\s|\.|\"|'|$)", re.IGNORECASE)
 
 
 class ExternalTargetError(ValueError):
@@ -602,13 +604,32 @@ def _hardened_output(repo_root: Path, *args: str) -> bytes:
     return result.stdout
 
 
+def _gitmodules_declares_submodule(blob: bytes) -> bool:
+    """True when a .gitmodules blob declares at least one submodule.*.path."""
+    in_submodule = False
+    for raw_line in blob.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith((b"#", b";")):
+            continue
+        if line.startswith(b"["):
+            header = line[1:].split(b"]", 1)[0].strip()
+            in_submodule = bool(_SUBMODULE_SECTION_HEADER.match(header))
+            continue
+        if in_submodule:
+            key = line.split(b"=", 1)[0].strip().lower()
+            if key == b"path":
+                return True
+    return False
+
+
 def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
     """A refusal code when a git filter could run, else ``None``.
 
-    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a
-    ``.gitmodules`` or a gitlink, or the common dir has a non-empty
-    ``modules/`` (a submodule's own config and attributes are not checked
-    here, so a repository with submodules is refused outright).
+    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a gitlink
+    or a non-empty ``.gitmodules`` that declares at least one submodule, or
+    the common dir has a non-empty ``modules/`` (a submodule's own config
+    and attributes are not checked here, so a repository with submodules is
+    refused outright).
     ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` otherwise, as follows.
 
     The repository refuses when its config defines a ``filter.*`` (or diff
@@ -643,10 +664,24 @@ def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
         for entry in listing.split(b"\0"):
             meta, _, name = entry.partition(b"\t")
             fields = meta.split()
-            # A gitlink or a .gitmodules: git would recurse into a submodule
-            # and run that repository's filters (#2749 review B2).
-            if (len(fields) == 3 and fields[1] == b"commit") or name == b".gitmodules":
+            # A gitlink (mode 160000 / commit) or a declared submodule in
+            # .gitmodules (#2749, #2813): git would recurse into a submodule
+            # and run that repository's filters.  An empty .gitmodules (no
+            # gitlink) declares no submodule and is accepted.
+            if len(fields) == 3 and (fields[1] == b"commit" or fields[0] == b"160000"):
                 return SUBMODULE_PRESENT
+            if name == b".gitmodules":
+                if len(fields) != 3 or fields[1] != b"blob":
+                    return SUBMODULE_PRESENT
+                try:
+                    blob = _hardened_output(
+                        repo_root, "cat-file", "blob", fields[2].decode("ascii")
+                    )
+                except (ExternalGitRefused, OSError, UnicodeDecodeError):
+                    return SUBMODULE_PRESENT
+                if _gitmodules_declares_submodule(blob):
+                    return SUBMODULE_PRESENT
+                continue
             if name.rsplit(b"/", 1)[-1] != b".gitattributes":
                 continue
             if len(fields) != 3 or fields[1] != b"blob":
