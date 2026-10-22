@@ -20,7 +20,7 @@ nexus_self_hosted_reconcile_tasks
 nexus_self_hosted_cleanup
 nexus_self_hosted_archive_state
 nexus_self_hosted_integrate_approved
-nexus_self_hosted_dispose_candidate
+nexus_self_hosted_dispose_candidate   (needs authority_goal_id + authority_coordination_scope_id and an Owner standing grant, #2767)
 nexus_self_hosted_cancel_task
 ```
 

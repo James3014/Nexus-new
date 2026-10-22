@@ -236,8 +236,8 @@ class NexusSelfHostedMCPServer:
             },
             {
                 "name": "nexus_self_hosted_dispose_candidate",
-                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
-                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt. Requires Owner standing-grant authority (G3, #571, #2767).",
+                "inputSchema": {"type": "object", "required": ["task_id", "disposition", "authority_goal_id", "authority_coordination_scope_id"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}, "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128}}},
             },
             {
                 "name": "nexus_self_hosted_close_retained_without_candidate",
@@ -307,6 +307,44 @@ class NexusSelfHostedMCPServer:
             },
         }
 
+    @staticmethod
+    def _require_dispose_owner_authority(task_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Fail closed unless an Owner standing grant authorizes this disposition (#2767).
+
+        Same authority as the Gateway ``nexus_candidate_dispose``: the durable
+        keyed standing-grant store, with CANDIDATE_REJECT / CANDIDATE_SUPERSEDE.
+        """
+        from nexus.contracts.autonomy_goal import AutonomyActionClass
+        from nexus.orchestrator import standing_grant_store
+        from nexus.orchestrator.unified_mcp_gateway import GITHUB_REPOSITORY
+
+        disposition = str(arguments.get("disposition") or "").strip().upper()
+        if disposition not in {"REJECTED", "SUPERSEDED"}:
+            raise ValueError("disposition must be REJECTED or SUPERSEDED")
+        superseded_by = str(arguments.get("superseded_by") or "").strip() or None
+        try:
+            goal_id = str(arguments.get("authority_goal_id") or "").strip()
+            scope_id = str(arguments.get("authority_coordination_scope_id") or "").strip()
+            if not goal_id or not scope_id or len(goal_id) > 128 or len(scope_id) > 128:
+                raise ValueError("authority_goal_id and authority_coordination_scope_id are required")
+            key = standing_grant_store.StandingGrantKey(GITHUB_REPOSITORY, goal_id, scope_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
+        action = (
+            AutonomyActionClass.CANDIDATE_REJECT
+            if disposition == "REJECTED"
+            else AutonomyActionClass.CANDIDATE_SUPERSEDE
+        )
+        try:
+            return standing_grant_store.authorize_durable_standing_grant_effect(
+                repository=GITHUB_REPOSITORY,
+                action=action,
+                effect={"task_id": task_id, "disposition": disposition, "superseded_by": superseded_by},
+                key=key,
+            )
+        except standing_grant_store.StandingGrantReceiptError as exc:
+            raise RuntimeError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if name == "nexus_self_hosted_submit_task":
             return self.service.submit_task(arguments)
@@ -370,6 +408,7 @@ class NexusSelfHostedMCPServer:
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration/main")),
             )
         if name == "nexus_self_hosted_dispose_candidate":
+            self._require_dispose_owner_authority(task_id, arguments)
             return self.service.dispose_candidate(
                 task_id,
                 disposition=str(arguments["disposition"]),
