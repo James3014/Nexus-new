@@ -5,7 +5,7 @@ description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = [{name = "Nexus Engineers", email = "eng@nexus-singularity.os"}]
 dependencies = [
     "aiohttp>=3.14.3,<4.0.0",
-    "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@e17f2bf99996dc1f86340c969e162cdfe9a0a431",
+    "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@6684bb644a507780cdad2c84920de087f7ba402e",
     "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@a48bd876b758069f4dd15c24d0d32f1f2486d319",
 ]
 requires-python = ">=3.11"
