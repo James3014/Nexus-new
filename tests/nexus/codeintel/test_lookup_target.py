@@ -370,6 +370,9 @@ def test_directory_scope_test_exclusion_ignores_case(tmp_path: Path) -> None:
         "pkg/Conftest.py",
         "pkg/Test_foo.py",
         "pkg/foo_TEST.py",
+        "pkg/Test.py",
+        "pkg/Tests.py",
+        "pkg/foo_Tests.py",
     ):
         _write(tmp_path, rel, "def secret_parser():\n    return 1\n")
 
@@ -452,3 +455,46 @@ def test_explicit_file_is_read_before_a_large_directory_fills_the_budget(
     found = derive_codeintel_lookup("parse widget config", ["pkg/", "target.py"], tmp_path)
 
     assert found == {"target_symbol": "target.parse_widget_config", "search_paths": ["target.py"]}
+
+
+def test_fifo_is_rejected_before_reading_for_file_and_directory_scope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import os
+
+    from nexus.services.codeintel import lookup_target
+
+    (tmp_path / "pkg").mkdir()
+    os.mkfifo(tmp_path / "pkg/fifo.py")
+    real_open = lookup_target.os.open
+
+    def guarded_open(path, flags, *args, **kwargs):
+        if path == "fifo.py":
+            assert flags & os.O_NONBLOCK
+        return real_open(path, flags, *args, **kwargs)
+
+    def unexpected_read(*args, **kwargs):
+        raise AssertionError("FIFO must be rejected before read")
+
+    monkeypatch.setattr(lookup_target.os, "open", guarded_open)
+    monkeypatch.setattr(lookup_target.os, "read", unexpected_read)
+
+    assert lookup_target.derive_codeintel_lookup("fifo", ["pkg/fifo.py"], tmp_path) == {}
+    assert lookup_target.derive_codeintel_lookup("fifo", ["pkg/"], tmp_path) == {}
+
+
+def test_directory_entry_cap_accepts_limit_and_rejects_overflow(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    assert lookup_target.MAX_DIR_ENTRIES == 4096
+    monkeypatch.setattr(lookup_target, "MAX_DIR_ENTRIES", 2)
+    _write(tmp_path, "pkg/a.py", "def alpha():\n    return 1\n")
+    _write(tmp_path, "pkg/b.py", "def bravo():\n    return 2\n")
+
+    found = lookup_target.derive_codeintel_lookup("alpha", ["pkg/"], tmp_path)
+    assert found["target_symbol"] == "pkg.a.alpha"
+
+    _write(tmp_path, "pkg/c.py", "def charlie():\n    return 3\n")
+    assert lookup_target.derive_codeintel_lookup("alpha", ["pkg/"], tmp_path) == {}

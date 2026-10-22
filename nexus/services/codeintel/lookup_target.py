@@ -109,7 +109,9 @@ def _skipped_file(name: str) -> bool:
         folded.startswith(".")
         or not name.endswith(".py")
         or folded.startswith("test_")
+        or folded in {"test.py", "tests.py"}
         or folded.endswith("_test.py")
+        or folded.endswith("_tests.py")
         or folded == "conftest.py"
     )
 
@@ -194,7 +196,9 @@ def _read_inside(
         fds.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
         for part in parts[:-1]:
             fds.append(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1]))
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fds[-1])
+        fd = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fds[-1]
+        )
         fds.append(fd)
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
