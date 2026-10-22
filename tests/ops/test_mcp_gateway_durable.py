@@ -1833,30 +1833,84 @@ def test_r1_git_subprocess_disables_background_maintenance(monkeypatch):
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(g.subprocess, "run", fake_run)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     g._r1_run("git", "--version")
     g._r1_run("true")
     env = seen["git"]
+    assert env["GIT_CONFIG_COUNT"] == "2"
     assert env["GIT_CONFIG_KEY_0"] == "gc.auto" and env["GIT_CONFIG_VALUE_0"] == "0"
     assert env["GIT_CONFIG_KEY_1"] == "maintenance.auto"
     assert env["GIT_CONFIG_VALUE_1"] == "false"
     assert seen["true"] is None
+    # A caller's own GIT_CONFIG_* entries are kept, ours are appended after them.
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
+    g._r1_run("git", "--version")
+    env = seen["git"]
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("protocol.file.allow", "always")
+    assert (env["GIT_CONFIG_KEY_1"], env["GIT_CONFIG_VALUE_1"]) == ("gc.auto", "0")
+    assert (env["GIT_CONFIG_KEY_2"], env["GIT_CONFIG_VALUE_2"]) == ("maintenance.auto", "false")
 
 
 def test_r1_scratch_removal_failure_is_not_swallowed(tmp_path, monkeypatch):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
+    calls = []
 
     def boom(path):
+        calls.append(path)
         raise OSError(errno.ENOTEMPTY, "Directory not empty")
 
+    sleeps = []
     monkeypatch.setattr(g.shutil, "rmtree", boom)
-    monkeypatch.setattr(g.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(g.time, "sleep", sleeps.append)
     with pytest.raises(g.GatewayContractError, match="scratch cleanup failed"):
         g._r1_remove_scratch(scratch)
-    monkeypatch.undo()
+    assert len(calls) == 10 and len(sleeps) == 9  # no sleep after the last attempt
+
+
+def test_r1_scratch_removal_retries_a_transient_failure(tmp_path, monkeypatch):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    real_rmtree = g.shutil.rmtree
+    attempts = []
+
+    def flaky(path):
+        attempts.append(path)
+        if len(attempts) < 3:
+            raise OSError(errno.ENOTEMPTY, "Directory not empty")
+        real_rmtree(path)
+
+    monkeypatch.setattr(g.shutil, "rmtree", flaky)
+    monkeypatch.setattr(g.time, "sleep", lambda _s: None)
+    g._r1_remove_scratch(scratch)
+    assert len(attempts) == 3 and not scratch.exists()
+
+
+def test_r1_scratch_removal_is_idempotent(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
     g._r1_remove_scratch(scratch)
     assert not scratch.exists()
-    g._r1_remove_scratch(scratch)
+    g._r1_remove_scratch(scratch)  # already gone: FileNotFoundError is success
+
+
+def test_r1_bundle_error_path_keeps_the_original_error_when_cleanup_fails(tmp_path, monkeypatch):
+    fixture, fresh_main, _, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    predecessor_store = tmp_path / "empty-predecessor.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(predecessor_store)], check=True)
+
+    def refuse(path):
+        raise g._gateway_error("R1 scratch cleanup failed")
+
+    monkeypatch.setattr(g, "_r1_remove_scratch", refuse)
+    with pytest.raises(g.GatewayContractError, match="fixed subprocess rejected") as info:
+        _r1_bundle_call(fixture, fresh_main, fixture["receipt"], predecessor_store)
+    assert any("scratch cleanup also failed" in note for note in info.value.__notes__)
+    assert observed["bundle_create_refs"] is None
 
 
 @pytest.mark.parametrize(
