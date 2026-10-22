@@ -983,7 +983,9 @@ def _observed_receipt(operation_id, revision=_OBSERVED_MODEL):
     }
 
 
-def _invoke_opencli_semantic(tmp_path, monkeypatch, receipts, *, status="INTELLIGENCE_COMPLETED"):
+def _invoke_opencli_semantic(
+    tmp_path, monkeypatch, receipts, *, status="INTELLIGENCE_COMPLETED", extra=None
+):
     module = _module()
 
     def runtime_call(_executable, payload, **_kwargs):
@@ -999,6 +1001,7 @@ def _invoke_opencli_semantic(tmp_path, monkeypatch, receipts, *, status="INTELLI
             "process_started": True,
             "outcome_unknown": False,
             "retry_safe": False,
+            **(extra or {}),
         }
         made = receipts(payload["operation_id"])
         if made is not None:
@@ -1093,3 +1096,54 @@ def test_semantic_expected_observed_model_pin_is_validated(tmp_path, provider, v
             expected_artifact_sha256=_RUNTIME_HASH,
             **kwargs,
         )
+
+
+_UNKNOWN_EXTRA = {"error": "OpenCLIWebModelError", "outcome_unknown": True}
+
+
+def test_runtime_error_code_is_carried_on_the_transport_result(tmp_path, monkeypatch):
+    result = _invoke_opencli_semantic(
+        tmp_path,
+        monkeypatch,
+        lambda op: [_observed_receipt(op)],
+        status="OPEN_SWE_OUTCOME_UNKNOWN",
+        extra={**_UNKNOWN_EXTRA, "error_code": "OPENCLI_WEB_DURABLE_STATE_UNSAFE"},
+    )
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.outcome_unknown is True
+    assert result.error_code == "OPENCLI_WEB_DURABLE_STATE_UNSAFE"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param("opencli_web_error", id="lowercase"),
+        pytest.param("OPENCLI_x y", id="free-text"),
+        pytest.param("SOMETHING_ELSE", id="wrong-prefix"),
+        pytest.param("OPENCLI_", id="empty-suffix"),
+        pytest.param("OPENCLI_" + "A" * 81, id="too-long"),
+        pytest.param("OPENCLI_A\n", id="trailing-newline"),
+        pytest.param(["OPENCLI_A"], id="not-a-string"),
+    ],
+)
+def test_invalid_runtime_error_code_is_dropped(tmp_path, monkeypatch, bad):
+    result = _invoke_opencli_semantic(
+        tmp_path,
+        monkeypatch,
+        lambda op: [_observed_receipt(op)],
+        status="OPEN_SWE_OUTCOME_UNKNOWN",
+        extra={**_UNKNOWN_EXTRA, "error_code": bad},
+    )
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.error_code == ""
+
+
+def test_missing_runtime_error_code_leaves_result_unchanged(tmp_path, monkeypatch):
+    result = _invoke_opencli_semantic(
+        tmp_path,
+        monkeypatch,
+        lambda op: [_observed_receipt(op)],
+        status="OPEN_SWE_OUTCOME_UNKNOWN",
+        extra=_UNKNOWN_EXTRA,
+    )
+    assert result.error_code == ""

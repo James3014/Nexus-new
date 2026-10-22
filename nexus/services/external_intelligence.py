@@ -1338,6 +1338,16 @@ def build_prompt(request: Mapping[str, Any], context_pack: Mapping[str, Any]) ->
     )
 
 
+_RUNTIME_ERROR_CODE_RE = re.compile(r"(?:OPENCLI|OPEN_SWE)_[A-Z0-9_]{1,80}")
+
+
+def _bounded_runtime_error_code(value: Any) -> str:
+    """Return ``value`` only if it is a well-formed runtime error code, else ""."""
+    if isinstance(value, str) and _RUNTIME_ERROR_CODE_RE.fullmatch(value):
+        return value
+    return ""
+
+
 @dataclass(frozen=True)
 class TransportResult:
     status: str
@@ -1349,6 +1359,8 @@ class TransportResult:
     finished_at: str = ""
     safe_argv: tuple[str, ...] = ()
     model_invocation_receipts: tuple[dict[str, Any], ...] = ()
+    # Bounded runtime error code (OPENCLI_*/OPEN_SWE_*); diagnostics only, never free text.
+    error_code: str = ""
 
 
 # Providers whose physical model is chosen outside Nexus (a ChatGPT web session):
@@ -1963,7 +1975,12 @@ class ExternalIntelligenceStore:
         return value
 
     def finish_attempt(
-        self, attempt: Mapping[str, Any], *, state: str, transport_status: str
+        self,
+        attempt: Mapping[str, Any],
+        *,
+        state: str,
+        transport_status: str,
+        transport_error_code: str = "",
     ) -> dict[str, Any]:
         if state not in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
             raise ExternalIntelligenceError("INVALID_ATTEMPT_TERMINAL_STATE")
@@ -1974,6 +1991,8 @@ class ExternalIntelligenceStore:
             "transport_status": transport_status,
             "finished_at": _now(),
         })
+        if transport_error_code:
+            value["transport_error_code"] = transport_error_code
         _atomic_json(self._attempt_path(value["request_sha256"]), value)
         return value
 
@@ -2046,10 +2065,19 @@ class ExternalIntelligenceSidecar:
             raise ExternalIntelligenceError("INTELLIGENCE_REPLAY_FORBIDDEN")
         if result.status != "INTELLIGENCE_COMPLETED":
             terminal = "OUTCOME_UNKNOWN" if result.outcome_unknown else "FAILED"
-            self.store.finish_attempt(attempt, state=terminal, transport_status=result.status)
+            error_code = _bounded_runtime_error_code(getattr(result, "error_code", ""))
+            self.store.finish_attempt(
+                attempt,
+                state=terminal,
+                transport_status=result.status,
+                transport_error_code=error_code,
+            )
+            detail = {"transport_error_code": error_code} if error_code else None
             if result.outcome_unknown or not result.retry_safe:
-                raise ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
-            raise ExternalIntelligenceError(result.status)
+                raise ExternalIntelligenceError(
+                    "INTELLIGENCE_RECONCILIATION_REQUIRED", detail=detail
+                )
+            raise ExternalIntelligenceError(result.status, detail=detail)
         try:
             envelope = parse_external_execution_envelope(result.raw, context_pack=context_pack)
         except ExternalIntelligenceError:

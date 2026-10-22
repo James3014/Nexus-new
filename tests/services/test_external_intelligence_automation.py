@@ -3346,3 +3346,23 @@ def test_2854_failure_after_this_runs_dispatching_save_keeps_that_record(tmp_pat
     second = automation.run_issue("o/r", 58, "title", body)
     assert second["state"] == "COMPLETE"
     assert len(sidecar.calls) == 2
+
+
+def test_error_reason_fields_carries_only_bounded_transport_error_code():
+    from nexus.services.external_intelligence import ExternalIntelligenceError
+    from nexus.services.external_intelligence_automation import _error_reason_fields
+
+    good = ExternalIntelligenceError(
+        "INTELLIGENCE_RECONCILIATION_REQUIRED",
+        detail={"transport_error_code": "OPENCLI_WEB_DURABLE_STATE_UNSAFE"},
+    )
+    assert _error_reason_fields(good) == {
+        "error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED",
+        "transport_error_code": "OPENCLI_WEB_DURABLE_STATE_UNSAFE",
+    }
+    bad = ExternalIntelligenceError(
+        "INTELLIGENCE_RECONCILIATION_REQUIRED", detail={"transport_error_code": "free text"}
+    )
+    assert _error_reason_fields(bad) == {"error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"}
+    plain = ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
+    assert _error_reason_fields(plain) == {"error_code": "INTELLIGENCE_RECONCILIATION_REQUIRED"}
