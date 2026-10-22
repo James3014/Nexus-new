@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Mapping, Optional
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
@@ -236,8 +237,8 @@ class NexusSelfHostedMCPServer:
             },
             {
                 "name": "nexus_self_hosted_dispose_candidate",
-                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
-                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt. Requires Owner standing-grant authority (G3, #571, #2767).",
+                "inputSchema": {"type": "object", "required": ["task_id", "disposition", "authority_goal_id", "authority_coordination_scope_id"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}, "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128}}},
             },
             {
                 "name": "nexus_self_hosted_close_retained_without_candidate",
@@ -307,6 +308,114 @@ class NexusSelfHostedMCPServer:
             },
         }
 
+    @staticmethod
+    def _admit_dispose_candidate(service: Any, task_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Fail closed unless an Owner standing grant authorizes this disposition (#2767).
+
+        Same admission as the Gateway ``nexus_candidate_dispose``: normalized
+        and slug-validated inputs, the durable keyed standing-grant store with
+        CANDIDATE_REJECT / CANDIDATE_SUPERSEDE, then ``pre_action_guard``. The
+        normalized values returned here are what the caller must dispose with.
+        """
+        from nexus.contracts.autonomy_goal import AutonomyActionClass
+        from nexus.contracts.lifecycle_action import (
+            LifecycleActionType,
+            MutationDomain,
+            PermissionProfile,
+            build_action_envelope,
+        )
+        from nexus.orchestrator import standing_grant_store
+        from nexus.orchestrator import unified_mcp_gateway as gateway
+        from nexus.orchestrator.self_hosted_task_service import (
+            candidate_dispose_effect,
+            candidate_dispose_unknown_arguments,
+            resolve_contract_identity,
+        )
+
+        # Same closed argument set as the Gateway (shared helper), checked
+        # before any authority lookup or disposal.
+        unknown_keys = candidate_dispose_unknown_arguments(arguments)
+        if unknown_keys:
+            raise ValueError(f"unknown arguments: {', '.join(unknown_keys)}")
+        disposition = str(arguments.get("disposition") or "").strip().upper()
+        if disposition not in {"REJECTED", "SUPERSEDED"}:
+            raise ValueError("disposition must be REJECTED or SUPERSEDED")
+        superseded_by = str(arguments.get("superseded_by") or "").strip() or None
+        try:
+            goal_id = str(arguments.get("authority_goal_id") or "").strip()
+            scope_id = str(arguments.get("authority_coordination_scope_id") or "").strip()
+            if not goal_id or not scope_id or len(goal_id) > 128 or len(scope_id) > 128:
+                raise ValueError("authority_goal_id and authority_coordination_scope_id are required")
+            key = standing_grant_store.StandingGrantKey(gateway.GITHUB_REPOSITORY, goal_id, scope_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
+        if disposition == "SUPERSEDED" and not superseded_by:
+            raise ValueError("superseded_by is required for SUPERSEDED")
+        if superseded_by is not None:
+            superseded_by = gateway.UnifiedMCPGateway._safe_slug(superseded_by, "superseded_by")
+        action = (
+            AutonomyActionClass.CANDIDATE_REJECT
+            if disposition == "REJECTED"
+            else AutonomyActionClass.CANDIDATE_SUPERSEDE
+        )
+        # Bind the authorization to this task's own Candidate, exactly as the
+        # Gateway nexus_candidate_dispose does (shared candidate_dispose_effect).
+        state = service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise RuntimeError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise RuntimeError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        contract_identity = resolve_contract_identity(state, expected_task_id=task_id, expected_head=base)
+        effect = candidate_dispose_effect(
+            state,
+            task_id=task_id,
+            controller_revision=base,
+            contract_identity=contract_identity,
+            disposition=disposition,
+            superseded_by=superseded_by,
+        )
+        try:
+            owner_authority = standing_grant_store.authorize_durable_standing_grant_effect(
+                repository=gateway.GITHUB_REPOSITORY,
+                action=action,
+                effect=effect,
+                key=key,
+            )
+        except standing_grant_store.StandingGrantReceiptError as exc:
+            raise RuntimeError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+        action_request = {
+            **dict(arguments),
+            "source_attempt_id": state.get("attempt_id"),
+            "candidate_binding": {
+                name: effect[name]
+                for name in (
+                    "candidate_commit_sha", "candidate_tree_sha",
+                    "candidate_state_hash", "verified_receipt_hash",
+                )
+            },
+        }
+        envelope = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.CANDIDATE_DISPOSE,
+            request=action_request,
+            tool_manifest_hash=gateway.TOOL_MANIFEST_REVISION,
+            expected_head=base,
+            allowed_paths=[],
+            mutation=True,
+            permission_profile=PermissionProfile.CANDIDATE,
+            mutation_domain=MutationDomain.CANDIDATE_REF,
+        )
+        guard_receipt = gateway.pre_action_guard(
+            envelope, request={}, current_head=base, tool_manifest_hash=gateway.TOOL_MANIFEST_REVISION
+        )
+        return {
+            "disposition": disposition,
+            "superseded_by": superseded_by,
+            "owner_authority": owner_authority,
+            "guard_receipt": guard_receipt,
+        }
+
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if name == "nexus_self_hosted_submit_task":
             return self.service.submit_task(arguments)
@@ -370,11 +479,17 @@ class NexusSelfHostedMCPServer:
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration/main")),
             )
         if name == "nexus_self_hosted_dispose_candidate":
-            return self.service.dispose_candidate(
+            admitted = self._admit_dispose_candidate(self.service, task_id, arguments)
+            result = self.service.dispose_candidate(
                 task_id,
-                disposition=str(arguments["disposition"]),
-                superseded_by=arguments.get("superseded_by"),
+                disposition=admitted["disposition"],
+                superseded_by=admitted["superseded_by"],
             )
+            return {
+                **dict(result),
+                "guard_receipt": admitted["guard_receipt"],
+                "owner_authority": admitted["owner_authority"],
+            }
         if name == "nexus_self_hosted_close_retained_without_candidate":
             return self.service.close_retained_without_candidate(
                 task_id,

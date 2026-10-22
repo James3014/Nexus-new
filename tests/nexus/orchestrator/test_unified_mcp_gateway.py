@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+import tomllib
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -34,6 +35,9 @@ from nexus.orchestrator.standing_grant_store import StandingGrantReceipt  # noqa
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
+    GEMINI_NO_MCP_SERVER_SENTINEL,
+    GEMINI_READ_ONLY_ALLOWED_TOOLS,
+    GEMINI_READ_ONLY_POLICY_PATH,
     LIFECYCLE_REVISION,
     PERMISSION_POLICY_HASH,
     PUBLIC_TOOL_NAMES,
@@ -2061,10 +2065,7 @@ def test_gemini_assist_runner_uses_read_only_plan_mode(monkeypatch, tmp_path):
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
     UnifiedMCPGateway._run_agy_plan(prompt="Return a patch", allowed_files=["a"], provider="gemini", model="gemini-3.6-flash")
 
-    command = captured["command"]
-    assert command[command.index("--approval-mode") + 1] == "plan"
-    assert "auto_edit" not in command
-    assert "--yolo" not in command and "-y" not in command
+    _assert_gemini_read_only_argv(captured["command"])
 
 
 def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_path):
@@ -2399,6 +2400,54 @@ def test_codex_probe_command_is_isolated_and_not_full_auto():
     assert "--skip-git-repo-check" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert "--full-auto" not in command
+
+
+def _assert_gemini_read_only_argv(command):
+    """#2859: headless Gemini must not be able to edit or run shell.
+
+    `plan` is unsafe headless (exit_plan_mode is auto-allowed and switches to
+    YOLO), so the argv must pin `default` mode plus the read-only deny policy.
+    """
+    assert command[command.index("--approval-mode") + 1] == "default"
+    for loose in ("auto_edit", "autoEdit", "yolo", "plan"):
+        assert loose not in command
+    assert "--yolo" not in command and "-y" not in command
+    policy = Path(command[command.index("--policy") + 1])
+    assert policy == GEMINI_READ_ONLY_POLICY_PATH
+    rules = tomllib.loads(policy.read_text(encoding="utf-8"))["rule"]
+    for rule in rules:
+        # Unconditional rules only: no mode/interactive/args/MCP scoping that could switch them off.
+        assert set(rule) <= {"toolName", "decision", "priority", "denyMessage"}
+        assert rule["decision"] in {"allow", "deny"}
+
+    def names(rule):
+        return [rule["toolName"]] if isinstance(rule["toolName"], str) else rule["toolName"]
+
+    # Default-deny: a catch-all deny above every settings-derived allow (tools.allowed is 4.3 -> priority >= 400).
+    catch_all = [rule for rule in rules if names(rule) == ["*"]]
+    assert len(catch_all) == 1 and catch_all[0]["decision"] == "deny" and catch_all[0]["priority"] >= 400
+    floor = catch_all[0]["priority"]
+    allows = [rule for rule in rules if rule["decision"] == "allow"]
+    allowed = {name for rule in allows for name in names(rule)}
+    assert allowed and allowed <= GEMINI_READ_ONLY_ALLOWED_TOOLS
+    assert "*" not in allowed and not any(name.startswith("mcp_") for name in allowed)
+    assert all(rule["priority"] > floor for rule in allows)
+    explicit = [rule for rule in rules if rule["decision"] == "deny" and rule is not catch_all[0]]
+    denied = {name for rule in explicit for name in names(rule)}
+    assert {"enter_plan_mode", "exit_plan_mode", "write_file", "replace", "run_shell_command"} <= denied
+    assert not denied & allowed
+    assert all(rule["priority"] == 999 for rule in explicit)
+    mcp = command[command.index("--allowed-mcp-server-names") + 1]
+    assert mcp == GEMINI_NO_MCP_SERVER_SENTINEL and mcp and "," not in mcp
+    assert command[command.index("--output-format") + 1] == "json"
+
+
+def test_gemini_assist_command_is_read_only_default_mode_with_deny_policy():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    command = gateway._assist_command(executable="/usr/local/bin/gemini", provider="gemini", model="gemini-3.6-flash", prompt="probe")
+    _assert_gemini_read_only_argv(command)
+    assert command[command.index("-p") + 1] == "probe"
+    assert command[command.index("-m") + 1] == "gemini-3.6-flash"
 
 
 def test_codex_jsonl_agent_message_decoder_extracts_payload():

@@ -1369,6 +1369,51 @@ class ExternalIntelligenceAutomation:
             "envelope_sha256": envelope_sha,
         }
 
+    _RECORD_IDENTITY_KEYS = frozenset({
+        "schema",
+        "repository",
+        "issue_number",
+        "identity_hash",
+        "state",
+    })
+
+    def _restore_resumed_record(
+        self,
+        item: IssueWorkItem,
+        record: Mapping[str, Any],
+        error: str,
+        reason_fields: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Write a resumed record back unchanged, plus a diagnostic (#2854).
+
+        Used when a run that resumed a dispatched record fails before its own
+        dispatch completes. ``record`` is the record loaded at the start of the
+        run or, when this run already saved INTELLIGENCE_DISPATCHING (after the
+        persisted binding and effect id were checked equal to its own), that more
+        recent ambiguous record. Its state and every field (prior_state,
+        worker_binding, intelligence_effect_id, fanout_attempts,
+        semantic_dispatched, reconcile_only, ...) are written back unchanged, so
+        the next run resumes exactly as it would have without this attempt, with
+        every binding, effect-id and fanout snapshot check intact. Only
+        last_transient_error* fields are added; this run's binding is never
+        substituted, so a missing binding still ends in
+        CANONICAL_WORKFORCE_BINDING_MISSING. On a resume no DISCOVERED save
+        happens (resume_from is a recoverable state), so nothing else this run
+        wrote is lost.
+        """
+        fields = {
+            key: value for key, value in record.items() if key not in self._RECORD_IDENTITY_KEYS
+        }
+        fields["last_transient_error"] = error
+        if reason_fields:
+            fields["last_transient_error_reason"] = dict(reason_fields)
+        else:
+            fields.pop("last_transient_error_reason", None)
+        fields["last_transient_error_at"] = datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds"
+        )
+        return self.state_store.save(item, str(record.get("state") or ""), **fields)
+
     def run_issue(
         self, repository: str, issue_number: int, title: str, body: str
     ) -> dict[str, Any]:
@@ -1425,6 +1470,17 @@ class ExternalIntelligenceAutomation:
             self.state_store.save(item, "DISCOVERED")
         elif not resume_from:
             self.state_store.save(item, "DISCOVERED")
+        # #2854: a record resumed from a dispatch state (or one already marked
+        # semantic_dispatched) may have reached ChatGPT before this run. If this run
+        # fails before its own dispatch completes, the loaded record is restored
+        # (see _restore_resumed_record); a BLOCKED/semantic_dispatched=False save
+        # would be treated as fresh by the next run and re-dispatched past the
+        # replay guard.
+        resumed_dispatch = resume_from in recoverable_states or bool(
+            previous is not None and previous.get("semantic_dispatched") is True
+        )
+        # The record this run wrote before its dispatch completed, if any (#2854).
+        own_dispatch_record: dict[str, Any] | None = None
         dispatched = False
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
@@ -1528,7 +1584,7 @@ class ExternalIntelligenceAutomation:
                         semantic_dispatched=True,
                     )
             else:
-                self.state_store.save(
+                own_dispatch_record = self.state_store.save(
                     item,
                     "INTELLIGENCE_DISPATCHING",
                     worker_binding=self._worker_binding,
@@ -1692,6 +1748,10 @@ class ExternalIntelligenceAutomation:
                 semantic_dispatched=True,
             )
         except AutomationError as exc:
+            if resumed_dispatch and not dispatched and previous is not None:
+                return self._restore_resumed_record(
+                    item, own_dispatch_record or previous, str(exc), {}
+                )
             return self.state_store.save(
                 item,
                 "BLOCKED",
@@ -1700,14 +1760,29 @@ class ExternalIntelligenceAutomation:
                 **self._carry_forward(item),
             )
         except Exception as exc:
+            if resumed_dispatch and not dispatched and previous is not None:
+                return self._restore_resumed_record(
+                    item,
+                    own_dispatch_record or previous,
+                    type(exc).__name__,
+                    _error_reason_fields(exc),
+                )
             current = self.state_store.load(item) or {}
             if current.get("state") in AMBIGUOUS_STATES:
+                # #2854: only the persisted binding is kept. If this run wrote the
+                # ambiguous state, its binding is already persisted there. If the
+                # record on disk has no binding, nothing is written: substituting this
+                # run's binding would turn the next resume's BINDING_MISSING refusal
+                # into a matching comparison and let it replay the dispatch.
+                reconcile_binding: dict[str, Any] = {}
+                if isinstance(current.get("worker_binding"), Mapping):
+                    reconcile_binding["worker_binding"] = dict(current["worker_binding"])
                 return self.state_store.save(
                     item,
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
                     intelligence_effect_id=current.get("intelligence_effect_id"),
-                    worker_binding=self._worker_binding or current.get("worker_binding"),
+                    **reconcile_binding,
                     error=type(exc).__name__,
                     **_error_reason_fields(exc),
                     reconcile_only=True,

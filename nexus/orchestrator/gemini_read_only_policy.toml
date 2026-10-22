@@ -1,0 +1,43 @@
+# Gemini CLI policy for read-only gateway assist / model-probe runs (#2859).
+#
+# Loaded with `--policy`, which puts these rules in the user tier (final
+# priority 4 + priority/1000) and replaces ~/.gemini/policies. Rules are
+# evaluated highest priority first; the first match decides.
+#
+# - 999 (4.999): explicit deny for the plan-mode transitions (headless,
+#   plan.toml allows enter/exit_plan_mode and exiting switches to YOLO) and
+#   for the write and shell tools.
+# - 950 (4.950): allow only the read-only built-ins the assist needs.
+# - 900 (4.900): default-deny everything else, built-in or MCP. This outranks
+#   every settings-derived allow (tools.allowed 4.3, MCP trust=true 4.2,
+#   mcp.allowed / autoAllowInHeadless 4.1, "always allow" 3.95), so trusted
+#   MCP servers or allowed tools in the user's settings cannot widen it.
+
+[[rule]]
+toolName = [
+  "enter_plan_mode",
+  "exit_plan_mode",
+  "write_file",
+  "replace",
+  "run_shell_command"
+]
+decision = "deny"
+priority = 999
+denyMessage = "Nexus gateway assist runs are read-only: return the patch as text instead."
+
+[[rule]]
+toolName = [
+  "read_file",
+  "read_many_files",
+  "list_directory",
+  "glob",
+  "grep_search"
+]
+decision = "allow"
+priority = 950
+
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 900
+denyMessage = "Nexus gateway assist runs only allow read-only file tools."

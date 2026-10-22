@@ -2886,8 +2886,9 @@ def test_carry_automation_error_after_dispatching_keeps_binding(tmp_path):
 
     automation._validate_source_lineage = lineage_fails
     result = automation.run_issue("o/r", 32, "title", body)
-    assert result["error"] == "SOURCE_LINEAGE_FAILED"
-    assert result["state"] == "BLOCKED"
+    # #2854: the resumed dispatch record is restored instead of a fresh-able BLOCKED.
+    assert result["last_transient_error"] == "SOURCE_LINEAGE_FAILED"
+    assert result["state"] == "INTELLIGENCE_DISPATCHING"
     _assert_kept(result, binding, effect_id)
 
 
@@ -2952,3 +2953,396 @@ def test_transition_log_records_error_codes_not_error_text(tmp_path):
     assert line["error"] == "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID"
     assert line["error_code"] == "UNPRINTABLE_ERROR"
     assert "ghp_secretvalue" not in (tmp_path / "state" / "transitions.jsonl").read_text()
+
+
+# --- #2854: transient error while resuming a dispatched record -------------
+
+_DIAGNOSTIC_KEYS = {
+    "last_transient_error",
+    "last_transient_error_reason",
+    "last_transient_error_at",
+}
+
+
+def _fail_lineage_once(automation, code="SOURCE_LINEAGE_FAILED"):
+    """Make the next run fail before dispatch, then restore the real check."""
+
+    def lineage_fails(*args, **kwargs):
+        del automation._validate_source_lineage
+        raise AutomationError(code)
+
+    automation._validate_source_lineage = lineage_fails
+
+
+def _fail_transport_once(automation, exc=None):
+    """Fail once AFTER _canonical_worker_binding has set this run's binding."""
+
+    def transport_fails(*args, **kwargs):
+        del automation._validate_worker_transport_binding
+        raise exc if exc is not None else RuntimeError("transport probe crashed")
+
+    automation._validate_worker_transport_binding = transport_fails
+
+
+def _fail_lineage_once_with(automation, kind):
+    """kind 'automation' -> AutomationError, 'generic' -> RuntimeError; returns the code."""
+    if kind == "automation":
+        _fail_lineage_once(automation)
+        return "SOURCE_LINEAGE_FAILED"
+
+    def lineage_crashes(*args, **kwargs):
+        del automation._validate_source_lineage
+        raise RuntimeError("git crashed")
+
+    automation._validate_source_lineage = lineage_crashes
+    return "RuntimeError"
+
+
+def _assert_restored(automation, item, before, result, error="SOURCE_LINEAGE_FAILED"):
+    """The record is the one loaded before the failed run, plus diagnostics only."""
+    after = automation.state_store.load(item)
+    assert after == result
+    assert {k: v for k, v in after.items() if k not in _DIAGNOSTIC_KEYS} == before
+    assert after["last_transient_error"] == error
+    assert after["last_transient_error_at"]
+
+
+class _ReusingSidecar(FakeSidecar):
+    """Like the real sidecar: an existing receipt is reused, not dispatched again."""
+
+    def __init__(self, store):
+        super().__init__(store)
+        self.reused = []
+
+    def analyze(self, record, sources, selected_worker=None):
+        loader = getattr(self.store, "existing_receipt", None)
+        result = super().analyze(record, sources, selected_worker)
+        if loader is not None and loader({}) is not None:
+            self.calls.pop()
+            self.reused.append(selected_worker)
+        return result
+
+
+def _fanout_reconciliation_automation(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+
+    class UnknownThenComplete(FakeC):
+        def __init__(self):
+            super().__init__()
+            self.runs = 0
+            self.store = FanoutStore(tmp_path / "fanout")
+            self.first_attempts = {}
+            self.reconciled_attempts = {}
+
+        def run(self, units, lease):
+            self.runs += 1
+            if self.runs == 1:
+                self.calls.append((units, lease))
+                for unit_data in units:
+                    unit = ExecutionUnit.from_mapping(unit_data)
+                    workspace = tmp_path / f"workspace-{unit.unit_id}"
+                    workspace.mkdir()
+                    attempt = self.store.prepare_initial(
+                        unit,
+                        WorkspaceLease(
+                            workspace_id=f"ws-{unit.unit_id}",
+                            path=str(workspace),
+                            expected_base_sha=unit.expected_base_sha,
+                        ),
+                    )
+                    attempt = self.store.bind_operation_id(attempt, "a" * 64)
+                    self.first_attempts[unit.unit_id] = self.store.mark_dispatching(attempt)
+                return {
+                    "receipts": {},
+                    "errors": {unit["unit_id"]: "FANOUT_RECONCILIATION_REQUIRED" for unit in units},
+                    "run_sha256": "c" * 64,
+                }
+            for unit_data in units:
+                unit = ExecutionUnit.from_mapping(unit_data)
+                self.reconciled_attempts[unit.unit_id] = self.store.existing_initial_attempt(unit)
+            return super().run(units, lease)
+
+    class ConsistentSidecar(FakeSidecar):
+        def analyze(self, record, sources, selected_worker=None):
+            self.calls.append((record, list(sources)))
+            request = build_request(
+                normalize_intake(record),
+                build_context_pack(sources),
+                selected_worker=selected_worker,
+            )
+            envelope = {"schema": "external_execution_envelope.v1", "x": 1}
+            envelope_text = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+            path = self.store.root / "envelopes" / f"{request['request_sha256']}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(envelope_text, encoding="utf-8")
+            return {
+                "status": "COMPLETED",
+                "receipt_id": "receipt-1",
+                "request": {"request_sha256": request["request_sha256"]},
+                "envelope_sha256": hashlib.sha256(envelope_text.encode()).hexdigest(),
+            }
+
+    c = UnknownThenComplete()
+    sidecar = ConsistentSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    item = IssueWorkItem("o/r", 401, "title", body, contract)
+    return automation, item, body, store, sidecar, c
+
+
+def test_2854_fanout_reconciliation_record_restored_and_snapshot_still_matches(tmp_path):
+    automation, item, body, store, sidecar, c = _fanout_reconciliation_automation(tmp_path)
+    first = automation.run_issue("o/r", 401, "title", body)
+    assert first["state"] == "RECONCILIATION_REQUIRED"
+    assert set(first["fanout_attempts"]) == {"u1", "u2"}
+    envelope_bytes = next((store.root / "envelopes").glob("*.json")).read_bytes()
+    envelope_path = store.root / "envelopes" / f"{first['intelligence_effect_id']}.json"
+    envelope_path.write_bytes(envelope_bytes)
+    store.existing_receipt = lambda request: {
+        "receipt_id": "receipt-1",
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+    before = automation.state_store.load(item)
+
+    _fail_lineage_once(automation)
+    failed = automation.run_issue("o/r", 401, "title", body)
+    _assert_restored(automation, item, before, failed)
+
+    snapshot_checked = []
+    real_matches = automation._fanout_snapshot_matches
+
+    def recording_matches(previous, units):
+        snapshot_checked.append(real_matches(previous, units))
+        return snapshot_checked[-1]
+
+    automation._fanout_snapshot_matches = recording_matches
+    second = automation.run_issue("o/r", 401, "title", body)
+    assert snapshot_checked == [True]
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
+    assert len(c.calls) == 2
+    assert {a["attempt_id"] for a in c.first_attempts.values()} == {
+        a["attempt_id"] for a in c.reconciled_attempts.values()
+    }
+
+
+@pytest.mark.parametrize("kind", ["automation", "generic"])
+@pytest.mark.parametrize("state", ["INTELLIGENCE_COMPLETED", "FANOUT_COMPLETED"])
+def test_2854_completed_stage_restored_and_resumes_without_new_dispatch(tmp_path, state, kind):
+    sidecar = _ReusingSidecar(ExternalIntelligenceStore(tmp_path / "intel"))
+    automation, item, body, card, store, binding, effect_id = _seed(
+        tmp_path, state, 50, sidecar=sidecar
+    )
+    sidecar.store = store
+    _install_completed_receipt(automation, item, card, store)
+    before = automation.state_store.load(item)
+
+    error = _fail_lineage_once_with(automation, kind)
+    failed = automation.run_issue("o/r", 50, "title", body)
+    _assert_restored(automation, item, before, failed, error=error)
+    assert failed["state"] == state
+
+    second = automation.run_issue("o/r", 50, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert sidecar.calls == []
+    assert sidecar.reused == [binding]
+
+
+@pytest.mark.parametrize("where", ["lineage", "transport"])
+def test_2854_reconciliation_required_generic_exception_restored_not_fresh(tmp_path, where):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "RECONCILIATION_REQUIRED", 51, prior_state="INTELLIGENCE_DISPATCHING"
+    )
+    before = automation.state_store.load(item)
+
+    if where == "lineage":
+        _fail_lineage_once_with(automation, "generic")
+    else:
+        _fail_transport_once(automation)
+    failed = automation.run_issue("o/r", 51, "title", body)
+    _assert_restored(automation, item, before, failed, error="RuntimeError")
+    assert failed["state"] == "RECONCILIATION_REQUIRED"
+    assert failed["prior_state"] == "INTELLIGENCE_DISPATCHING"
+    _assert_kept(failed, binding, effect_id)
+
+    changed_body = body.replace("issue prose", "changed issue prose and context")
+    second = automation.run_issue("o/r", 51, "title", changed_body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_2854_intelligence_dispatching_automation_error_restored_keeps_replay_guard(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 52
+    )
+    before = automation.state_store.load(item)
+
+    _fail_lineage_once(automation)
+    failed = automation.run_issue("o/r", 52, "title", body)
+    _assert_restored(automation, item, before, failed)
+    assert failed["state"] == "INTELLIGENCE_DISPATCHING"
+    _assert_kept(failed, binding, effect_id)
+
+    changed_body = body.replace("issue prose", "changed issue prose and context")
+    second = automation.run_issue("o/r", 52, "title", changed_body)
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+def test_2854_fresh_record_automation_error_still_blocks_retryably(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    _fail_lineage_once(automation)
+    first = automation.run_issue("o/r", 53, "title", body)
+    assert first["state"] == "BLOCKED"
+    assert first["semantic_dispatched"] is False
+    assert first["error"] == "SOURCE_LINEAGE_FAILED"
+    assert "last_transient_error" not in first
+    second = automation.run_issue("o/r", 53, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
+
+
+def test_2854_restored_dispatched_binding_still_refuses_replay_mismatch(tmp_path):
+    automation, item, body, _, _, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_DISPATCHING", 54
+    )
+    dispatched = {**binding, "profile_id": "dispatched-profile"}
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        worker_binding=dispatched,
+        intelligence_effect_id=effect_id,
+    )
+    before = automation.state_store.load(item)
+    _fail_lineage_once(automation)
+    failed = automation.run_issue("o/r", 54, "title", body)
+    _assert_restored(automation, item, before, failed)
+    second = automation.run_issue("o/r", 54, "title", body)
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH"
+    assert automation.sidecar.calls == []
+
+
+@pytest.mark.parametrize("kind", ["automation", "generic"])
+def test_2854_restored_record_without_binding_still_refuses_binding_missing(tmp_path, kind):
+    """The failure comes after this run computed its binding; it must not be written."""
+    automation, item, body, _, _, _, effect_id = _seed(tmp_path, "INTELLIGENCE_DISPATCHING", 55)
+    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id)
+    before = automation.state_store.load(item)
+    if kind == "automation":
+        _fail_transport_once(automation, AutomationError("CANONICAL_WORKER_TRANSPORT_FLAKE"))
+        error = "CANONICAL_WORKER_TRANSPORT_FLAKE"
+    else:
+        _fail_transport_once(automation)
+        error = "RuntimeError"
+    failed = automation.run_issue("o/r", 55, "title", body)
+    assert automation._worker_binding is not None
+    _assert_restored(automation, item, before, failed, error=error)
+    assert "worker_binding" not in failed
+    second = automation.run_issue("o/r", 55, "title", body)
+    assert second["error"] == "CANONICAL_WORKFORCE_BINDING_MISSING"
+    assert automation.sidecar.calls == []
+
+
+def test_2854_fanout_dispatching_restored_and_resumes_without_sidecar(tmp_path):
+    c = FakeC()
+    d = FakeD()
+    automation, item, body, card, store, binding, effect_id = _seed(
+        tmp_path, "FANOUT_DISPATCHING", 56, c=c, d=d
+    )
+    _install_completed_receipt(automation, item, card, store)
+    before = automation.state_store.load(item)
+    _fail_lineage_once(automation)
+    failed = automation.run_issue("o/r", 56, "title", body)
+    _assert_restored(automation, item, before, failed)
+    second = automation.run_issue("o/r", 56, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert automation.sidecar.calls == []
+    assert len(c.calls) == len(d.calls) == 1
+
+
+@pytest.mark.parametrize("kind", ["automation", "generic"])
+def test_2854_legacy_semantic_dispatched_record_restored(tmp_path, kind):
+    automation, c, sidecar, body = _legacy_blocked_automation(tmp_path)
+    item = IssueWorkItem("o/r", 402, "title", body, parse_issue_contract(body))
+    before = automation.state_store.load(item)
+    error = _fail_lineage_once_with(automation, kind)
+    failed = automation.run_issue("o/r", 402, "title", body)
+    _assert_restored(automation, item, before, failed, error=error)
+    assert failed["state"] == "BLOCKED" and failed["semantic_dispatched"] is True
+    second = automation.run_issue("o/r", 402, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert sidecar.calls == []
+    assert len(c.calls) == 1
+
+
+def test_2854_fresh_run_ambiguous_reconcile_keeps_on_disk_binding_only(tmp_path):
+    """Non-restore path: the reconcile save writes the binding on disk, never this run's."""
+    repo, _, contract, body, store = _setup(tmp_path)
+    item = IssueWorkItem("o/r", 57, "title", body, contract)
+
+    class RewritingSidecar(FakeSidecar):
+        def __init__(self, store, replacement):
+            super().__init__(store)
+            self.replacement = replacement
+
+        def analyze(self, record, sources, selected_worker=None):
+            self.calls.append((record, list(sources)))
+            current = automation.state_store.load(item)
+            fields = {
+                k: v
+                for k, v in current.items()
+                if k not in {"schema", "repository", "issue_number", "identity_hash", "state"}
+            }
+            fields.pop("worker_binding", None)
+            if self.replacement is not None:
+                fields["worker_binding"] = self.replacement
+            automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", **fields)
+            raise RuntimeError("process exited after start")
+
+    on_disk = {"profile_id": "on-disk-profile"}
+    for replacement in (on_disk, None):
+        state_dir = tmp_path / "state"
+        if state_dir.exists():
+            for path in state_dir.rglob("*.json"):
+                path.unlink()
+        sidecar = RewritingSidecar(store, replacement)
+        automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+        result = automation.run_issue("o/r", 57, "title", body)
+        assert result["state"] == "RECONCILIATION_REQUIRED"
+        assert result["prior_state"] == "INTELLIGENCE_DISPATCHING"
+        assert result.get("worker_binding") == replacement
+
+
+@pytest.mark.parametrize("kind", ["automation", "generic"])
+def test_2854_failure_after_this_runs_dispatching_save_keeps_that_record(tmp_path, kind):
+    """This run already wrote INTELLIGENCE_DISPATCHING (checked binding and effect id)
+    before the sidecar failed: that more recent ambiguous record is kept, not the older
+    INTELLIGENCE_COMPLETED one, and the next run resumes it."""
+
+    class FailingOnceSidecar(FakeSidecar):
+        def analyze(self, record, sources, selected_worker=None):
+            if not self.calls:
+                self.calls.append((record, list(sources)))
+                if kind == "automation":
+                    raise AutomationError("SIDECAR_TRANSIENT")
+                raise RuntimeError("process exited after start")
+            return super().analyze(record, sources, selected_worker)
+
+    sidecar = FailingOnceSidecar(ExternalIntelligenceStore(tmp_path / "intel"))
+    automation, item, body, _, store, binding, effect_id = _seed(
+        tmp_path, "INTELLIGENCE_COMPLETED", 58, sidecar=sidecar
+    )
+    sidecar.store = store
+    failed = automation.run_issue("o/r", 58, "title", body)
+    assert failed["state"] == "INTELLIGENCE_DISPATCHING"
+    assert failed["last_transient_error"] == (
+        "SIDECAR_TRANSIENT" if kind == "automation" else "RuntimeError"
+    )
+    _assert_kept(failed, binding, effect_id)
+    assert automation.state_store.load(item) == failed
+    second = automation.run_issue("o/r", 58, "title", body)
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 2

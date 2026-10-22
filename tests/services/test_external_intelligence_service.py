@@ -2756,3 +2756,46 @@ def test_expected_observed_model_is_passed_to_both_open_swe_transports(tmp_path,
     )
     build_automation(loaded, "o/r")
     assert [call["expected_observed_model"] for call in calls] == ["gpt-5-6-thinking"] * 2
+
+
+@pytest.mark.parametrize(
+    "restored",
+    [
+        {"state": "INTELLIGENCE_DISPATCHING", "intelligence_effect_id": "e" * 64},
+        {"state": "INTELLIGENCE_COMPLETED", "intelligence_effect_id": "e" * 64},
+        {"state": "FANOUT_DISPATCHING", "intelligence_effect_id": "e" * 64},
+        {"state": "FANOUT_COMPLETED", "intelligence_effect_id": "e" * 64},
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": True,
+            "semantic_dispatched": True,
+        },
+    ],
+)
+def test_run_once_never_publishes_a_restored_resume_record(tmp_path, restored):
+    """#2854: a record restored after a transient error is not finished: no publication
+    and never reported COMPLETE; the next poll resumes it."""
+    config = _config(tmp_path)
+    calls = []
+    restored = {
+        **restored,
+        "last_transient_error": "SOURCE_LINEAGE_FAILED",
+        "last_transient_error_at": "2026-10-22T00:00:00.000+00:00",
+    }
+
+    class SequencedAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            return dict(restored)
+
+    gh = FakeGh({"o/r": [{"number": 1, "title": "restored", "body": "a"}]})
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1]
+    assert result["status"] != "COMPLETE"
+    assert gh.comments == []

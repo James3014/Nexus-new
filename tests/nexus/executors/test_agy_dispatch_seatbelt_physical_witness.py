@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from nexus.executors import agy_dispatch_boundary as boundary_mod
+from nexus.executors import agy_write_admission as admission
 from nexus.executors.agy_write_admission import (
     AGY_RUN_HOME_PROJECTS,
     AGY_RUN_HOME_SETTINGS,
@@ -147,6 +148,156 @@ def test_dispatcher_profile_confines_writes_under_real_sandbox_exec(tmp_path, mo
             assert after == before, f"{label} changed on disk"
         assert (checkout / "tracked.py").read_text(encoding="utf-8") == "original\n"
         assert not (checkout / "planted.py").exists()
+        # #2470 item 2: a parent of a protected entry cannot be renamed away
+        # (which would let a worker plant a fresh settings.json/config).
+        gemini = run_home / ".gemini"
+        for label, parent in {
+            "run HOME": run_home,
+            ".gemini": gemini,
+            ".gemini/antigravity-cli": gemini / "antigravity-cli",
+        }.items():
+            moved = parent.with_name(parent.name + ".moved")
+            result = _run(boundary, 'mv "$1" "$2"', parent, moved, cwd=target)
+            assert result.returncode != 0, f"{label} was renamable: {parent}"
+            assert DENIED in result.stderr, f"{label}: {result.stderr!r}"
+            assert parent.is_dir() and not moved.exists(), f"{label} moved on disk"
+        # Run-root round trip (nexus-agy-dispatch layout): rename the root away,
+        # plant a settings file, rename it back. Must fail at the first step.
+        rr_moved = target / "rr"
+        attack = (
+            'mv "$1" "$2" && echo PLANTED > "$2/home/.gemini/antigravity-cli/settings.json"'
+            ' && mv "$2" "$1"'
+        )
+        before = (run_home / AGY_RUN_HOME_SETTINGS).read_bytes()
+        result = _run(boundary, attack, boundary.run_root, rr_moved, cwd=target)
+        print("WITNESS run-root round trip rc=", result.returncode, result.stderr.strip())
+        assert result.returncode != 0 and DENIED in result.stderr
+        assert boundary.run_root.is_dir() and not rr_moved.exists()
+        assert (run_home / AGY_RUN_HOME_SETTINGS).read_bytes() == before
+        # Sibling swap (worker_registry layout: run_tmp/attempt-XXX/home).
+        reg_root = Path(os.path.realpath(tmp_path)) / "reg-run"
+        reg_home = reg_root / "attempt-x" / "home"
+        reg_settings = reg_home / AGY_RUN_HOME_SETTINGS
+        reg_settings.parent.mkdir(parents=True)
+        reg_settings.write_text("orig", encoding="utf-8")
+        stage = reg_root / "stage"
+        (stage / "home" / AGY_RUN_HOME_SETTINGS.parent).mkdir(parents=True)
+        (stage / "home" / AGY_RUN_HOME_SETTINGS).write_text("PLANTED", encoding="utf-8")
+        reg_profile = tmp_path / "reg.sb"
+        reg_profile.write_text(
+            admission.build_seatbelt_profile(
+                run_root=reg_root, writable_target=None, run_home=reg_home
+            ),
+            encoding="utf-8",
+        )
+        swap = subprocess.run(
+            [
+                boundary_mod.SANDBOX_EXEC_PATH,
+                "-f",
+                str(reg_profile),
+                "/bin/sh",
+                "-c",
+                'mv "$1/attempt-x" "$1/old" && mv "$1/stage" "$1/attempt-x"',
+                "sh",
+                str(reg_root),
+            ],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
+        print("WITNESS sibling swap rc=", swap.returncode, swap.stderr.strip())
+        assert swap.returncode != 0 and DENIED in swap.stderr
+        assert reg_settings.read_text(encoding="utf-8") == "orig"
+        # Normal agy state writes under those parents still work.
+        brain = gemini / "antigravity-cli" / "brain" / "b.txt"
+        brain.parent.mkdir(parents=True, exist_ok=True)
+        assert _write_attempt(boundary, brain, cwd=target).returncode == 0
+        # #2863: Launch Services is closed, so a confined shell cannot start an
+        # app (Terminal, via ``open -a Terminal x.command``) outside the profile.
+        # ``-g -j`` keeps any app hidden should the deny ever regress.
+        opened = _run(
+            boundary, '/usr/bin/open -g -j -a TextEdit "$1"', checkout / "tracked.py", cwd=target
+        )
+        print(
+            "WITNESS open -a TextEdit (full profile) rc=", opened.returncode, opened.stderr.strip()
+        )
+        assert opened.returncode != 0 and DENIED in opened.stderr
+        # Independent of the exec rules: the mach-lookup deny alone must stop
+        # LSOpen.  A control profile without it must LAUNCH the app, so the
+        # failure is the Launch Services denial and not a missing app.
+        ls_lines = list(admission.LAUNCH_SERVICES_DENY_LINES)
+        mach_lines = ls_lines[:4]
+        assert mach_lines[0].startswith("(deny mach-lookup") and mach_lines[-1].endswith("))")
+        profile_lines = boundary.profile.splitlines()
+        without_ls = [line for line in profile_lines if line not in ls_lines]
+        assert len(without_ls) == len(profile_lines) - len(ls_lines)
+        document = target / "ls-probe.txt"
+        document.write_text("probe\n", encoding="utf-8")
+
+        def _open_under(name: str, lines: list[str]) -> subprocess.CompletedProcess[str]:
+            sb = tmp_path / f"{name}.sb"
+            sb.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return subprocess.run(
+                [
+                    boundary_mod.SANDBOX_EXEC_PATH,
+                    "-f",
+                    str(sb),
+                    "/usr/bin/open",
+                    "-g",
+                    "-j",
+                    "-a",
+                    "TextEdit",
+                    str(document),
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=20,
+            )
+
+        def _textedit_pids() -> set[int]:
+            out = subprocess.run(
+                ["/usr/bin/pgrep", "-x", "TextEdit"], capture_output=True, text=True, check=False
+            ).stdout
+            return {int(x) for x in out.split()}
+
+        preexisting = _textedit_pids()
+        via_lsd = _open_under("mach-only", without_ls + mach_lines)
+        print(
+            "WITNESS open -a TextEdit (mach-lookup deny only) rc=",
+            via_lsd.returncode,
+            via_lsd.stderr.strip(),
+        )
+        assert via_lsd.returncode != 0
+        assert "Unable to find application" in via_lsd.stderr
+        assert _textedit_pids() <= preexisting, "TextEdit launched despite the mach deny"
+        control = _open_under("control", without_ls)
+        launched = _textedit_pids() - preexisting
+        print("WITNESS open -a TextEdit (control, no Launch Services deny) rc=", control.returncode)
+        for pid in launched:
+            os.kill(pid, signal.SIGTERM)
+        assert control.returncode == 0, control.stderr
+        assert launched or preexisting, "control open did not reach TextEdit"
+        # Apple Events route: osascript is not executable and fails fast.
+        started = time.monotonic()
+        osa = _run(boundary, '/usr/bin/osascript -e "return 1"', cwd=target)
+        print("WITNESS osascript (full profile) rc=", osa.returncode, osa.stderr.strip())
+        assert osa.returncode != 0 and DENIED in osa.stderr
+        assert time.monotonic() - started < 10
+        # Normal Python still runs and writes under the profile.
+        py_out = target / "py-ok.txt"
+        py = _run(
+            boundary,
+            'exec "$2" -c "import sys, pathlib; pathlib.Path(sys.argv[1]).write_text(\'ok\')" "$1"',
+            py_out,
+            Path(sys.executable),
+            cwd=target,
+        )
+        assert py.returncode == 0, py.stderr
+        assert py_out.read_text(encoding="utf-8") == "ok"
     finally:
         boundary.cleanup()
 
