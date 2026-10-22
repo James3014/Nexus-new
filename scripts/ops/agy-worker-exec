@@ -9,10 +9,11 @@
 #   agy-worker-exec <run_root> <workdir> <profile> -- <agy> [agy args...]
 #       Validate, set umask 007, then exec agy under `sandbox-exec -f <profile>` with a fixed
 #       environment built here (sudo's own environment is discarded).
-#   agy-worker-exec --sweep <run_root> [pid...]
-#       Kill this run's worker processes (the listed pids, plus every worker process whose
-#       environment carries the run tag or whose cwd is inside <run_root>), then make the run
-#       tree group-accessible so the dispatcher can read results back and delete it.
+#   agy-worker-exec --sweep <run_root> [<pid>:<start>...]
+#       Kill this run's worker processes (each listed pid while its `ps -o lstart=` start time,
+#       blanks as "_", still equals <start>, so a reused pid is spared; plus every worker process
+#       whose environment carries the run tag or whose cwd is inside <run_root>), then make the
+#       run tree group-accessible so the dispatcher can read results back and delete it.
 #       Prints one line "AGY_WORKER_SWEEP clean" (exit 0) or "AGY_WORKER_SWEEP unclean <pids>"
 #       (exit 3). Running as the worker, it can only ever signal worker-owned processes.
 #
@@ -20,6 +21,14 @@
 # named by 32 lowercase hex digits (the dispatcher's 128-bit run tag). <workdir> must be a real
 # directory strictly inside <run_root>; <profile> a regular file strictly inside <run_root>.
 # argv[0] after "--" must be exactly the installed agy copy. Any other input is refused (exit 64).
+#
+# Trust: the caller is the Owner's dispatcher, which writes <profile>; the wrapper does not judge
+# the profile's content (anything running as the Owner could write a weaker one, and gains nothing
+# the Owner does not already have). The wrapper protects the worker uid from being used outside a
+# worker-runs run directory, with any binary but agy, or without Seatbelt.
+# A clean sweep does not prove that no worker process survived: a process that clears its
+# environment, leaves the run directory and was never seen by the dispatcher's tracker is not
+# found. The dispatcher's copy-back therefore trusts nothing in the run directory it cannot verify.
 set -eu
 
 RUNS=/Users/Shared/cairnwork-worker/worker-runs
@@ -80,9 +89,18 @@ if [ "$1" = "--sweep" ]; then
   RUN_ROOT=$2
   shift 2
   require_run_root "$RUN_ROOT"
-  for pid in "$@"; do
-    case "$pid" in
-      '' | *[!0-9]*) refuse "pid '$pid' is not a number" ;;
+  LC_ALL=C
+  export LC_ALL
+  for arg in "$@"; do
+    case "$arg" in
+      [0-9]*:?*) ;;
+      *) refuse "pid argument '$arg' is not <pid>:<start>" ;;
+    esac
+    case "${arg%%:*}" in
+      *[!0-9]*) refuse "pid argument '$arg' is not <pid>:<start>" ;;
+    esac
+    case "${arg#*:}" in
+      *[!A-Za-z0-9_:]*) refuse "pid argument '$arg' is not <pid>:<start>" ;;
     esac
   done
   TAG=${RUN_ROOT##*/}
@@ -112,6 +130,21 @@ if [ "$1" = "--sweep" ]; then
     case "${2:-}" in Z*) return 1 ;; esac
     return 0
   }
+  start_token() {
+    set -- $("$PS" -o lstart= -p "$1" 2>/dev/null)
+    [ "$#" -gt 0 ] || return 1
+    tok=$1
+    shift
+    for field in "$@"; do tok="${tok}_$field"; done
+    printf '%s' "$tok"
+  }
+  # Listed pids whose start time still matches; a reused pid is left alone.
+  LISTED=""
+  for arg in "$@"; do
+    pid=${arg%%:*}
+    if [ "$(start_token "$pid" || true)" = "${arg#*:}" ]; then LISTED="$LISTED $pid"; fi
+  done
+  set -- $LISTED
   kill_round() {
     for p in "$@" $(run_pids); do
       [ "$p" = "$ME" ] && continue

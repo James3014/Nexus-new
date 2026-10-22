@@ -206,9 +206,10 @@ def test_worker_argv_is_the_exact_sudo_wrapper_form(tmp_path):
     ]
 
 
-def test_sweep_argv_lists_sorted_unique_pids_above_one():
+def test_sweep_argv_lists_sorted_unique_pid_tokens():
     run_root = Path("/Users/Shared/cairnwork-worker/worker-runs/" + "b" * 32)
-    assert worker_mod.sweep_argv(run_root, [42, 7, 42, 1, 0]) == [
+    tokens = ["7:Thu_Oct_22_21:17:38_2026", "42:Thu_Oct_22_21:17:39_2026"]
+    assert worker_mod.sweep_argv(run_root, [tokens[1], tokens[0], tokens[1]]) == [
         "/usr/bin/sudo",
         "-n",
         "-u",
@@ -216,9 +217,23 @@ def test_sweep_argv_lists_sorted_unique_pids_above_one():
         "/Users/Shared/cairnwork-worker/bin/agy-worker-exec",
         "--sweep",
         str(run_root),
-        "7",
-        "42",
+        *tokens,
     ]
+
+
+def test_pid_start_tokens_keep_only_live_pids_started_since():
+    proc = _spawn_sleeper()
+    try:
+        (token,) = worker_mod.pid_start_tokens([proc.pid, 1, 0], since=None)
+        pid, start = token.split(":", 1)
+        assert pid == str(proc.pid) and re.fullmatch(
+            r"[A-Z][a-z]{2}_[A-Z][a-z]{2}_\d+_[\d:]+_\d{4}", start
+        )
+        assert worker_mod.pid_start_tokens([proc.pid], since=time.time() + 3600) == []
+    finally:
+        proc.kill()
+        proc.wait()
+    assert worker_mod.pid_start_tokens([proc.pid], since=None) == []
 
 
 def test_cli_accepts_only_the_cairnwork_worker_user(capsys):
@@ -412,6 +427,8 @@ def test_wrapper_refuses_paths_outside_worker_runs_symlinks_and_other_binaries(t
         ["--sweep", str(outside)],
         ["--sweep", str(link_run)],
         ["--sweep", str(run_root), "12x"],
+        ["--sweep", str(run_root), "123"],  # a bare pid has no start time
+        ["--sweep", str(run_root), "123:Thu Oct"],
         ["--sweep", str(run_root), "-9"],
     ):
         done = _run_wrapper(w, *args)
@@ -464,7 +481,9 @@ def test_wrapper_sweep_kills_listed_tagged_and_run_cwd_processes(tmp_path):
         w = _wrapper_copy(tmp_path, ps=ps, lsof=str(lsof))
         private = w["work"] / "private"
         private.mkdir(mode=0o700)
-        done = _run_wrapper(w, "--sweep", str(w["run_root"]), str(listed.pid))
+        (listed_token,) = worker_mod.pid_start_tokens([listed.pid], since=None)
+        stale_token = f"{bystander.pid}:Mon_Jan_1_00:00:00_2001"  # pid reused since: spared
+        done = _run_wrapper(w, "--sweep", str(w["run_root"]), listed_token, stale_token)
         assert done.returncode == 0, (done.stdout, done.stderr)
         assert done.stdout.strip() == "AGY_WORKER_SWEEP clean"
         assert _dead(listed) and _dead(tagged) and _dead(in_cwd)
@@ -677,7 +696,7 @@ class _Run:
         return subprocess.CompletedProcess(argv, self.returncode, self.stdout, "")
 
 
-def _launched(boundary, monkeypatch, *, owner_clean=True, tracked=(4242, 4343)):
+def _launched(boundary, monkeypatch, *, owner_clean=True, tracked=()):
     boundary.before_launch()
     boundary._launched = True
     boundary._tracker = _Tracker(tracked)
@@ -688,10 +707,21 @@ def _launched(boundary, monkeypatch, *, owner_clean=True, tracked=(4242, 4343)):
 def test_sweep_kills_through_the_wrapper_and_needs_both_sides_clean(worker_env, monkeypatch):
     run = _Run("AGY_WORKER_SWEEP clean\n")
     boundary = _prepare(worker_env, run_command=run)
+    early = _spawn_sleeper()  # started before the run: never listed
+    time.sleep(2.5)  # ps start times have 1 s resolution and a 1 s margin
     _launched(boundary, monkeypatch)
-    assert boundary.sweep() is True
+    child = _spawn_sleeper()
+    boundary._tracker = _Tracker((child.pid, early.pid, 99999999))
+    try:
+        assert boundary.sweep() is True
+        expected = worker_mod.pid_start_tokens([child.pid], since=None)
+        assert len(expected) == 1
+    finally:
+        for proc in (early, child):
+            proc.kill()
+            proc.wait()
     assert run.calls == [
-        worker_mod.sweep_argv(boundary.run_root, [4242, 4343], wrapper=worker_env["wrapper"])
+        worker_mod.sweep_argv(boundary.run_root, expected, wrapper=worker_env["wrapper"])
     ]
     assert boundary.sweep() is True and len(run.calls) == 1  # runs once
     boundary.cleanup()
@@ -1044,9 +1074,159 @@ def test_wrapper_sweep_waits_out_zombies(tmp_path):
     zombie = _spawn_sleeper()
     try:
         w = _wrapper_copy(tmp_path)
+        (token,) = worker_mod.pid_start_tokens([zombie.pid], since=None)
         zombie.kill()
         time.sleep(0.2)  # killed, not yet reaped: a zombie
-        done = _run_wrapper(w, "--sweep", str(w["run_root"]), str(zombie.pid))
+        done = _run_wrapper(w, "--sweep", str(w["run_root"]), token)
         assert done.stdout.strip() == "AGY_WORKER_SWEEP clean", done.stderr
     finally:
         zombie.wait()
+
+
+# ---------------------------------------------------------------------------
+# review r1 (#2885): a swapped workdir or source file never reaches the target
+# ---------------------------------------------------------------------------
+
+
+def _secret_dir(tmp_path: Path) -> Path:
+    secret = tmp_path.resolve() / "owner-secret"
+    secret.mkdir()
+    (secret / "id_ed25519").write_text("PRIVATE KEY\n", encoding="utf-8")
+    return secret
+
+
+def _assert_target_untouched(target: Path) -> None:
+    assert sorted(p.name for p in target.iterdir()) == [".agents", ".git", "README.md", "src"]
+    assert (target / "src" / "a.py").read_text() == "print('a')\n"
+    assert (target / "README.md").read_text() == "readme\n"
+    assert not (target / "id_ed25519").exists()
+
+
+@pytest.mark.parametrize("swap", ["symlink", "renamed_away", "new_directory"])
+def test_swapped_workdir_is_refused_and_target_untouched(worker_env, monkeypatch, tmp_path, swap):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    work = boundary.target
+    (work / "src" / "a.py").write_text("edited\n", encoding="utf-8")
+    work.rename(work.with_name("w2"))
+    if swap == "symlink":
+        work.symlink_to(_secret_dir(tmp_path))
+    elif swap == "new_directory":
+        shutil.copytree(work.with_name("w2"), work, symlinks=True)
+        (work / "id_ed25519").write_text("PRIVATE KEY\n", encoding="utf-8")
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:workdir_replaced"
+    _assert_target_untouched(worker_env["target"])
+    assert not os.path.lexists(boundary.run_root)
+
+
+@pytest.mark.parametrize("swap", ["symlink", "rewritten", "hard_link"])
+def test_source_swapped_between_plan_and_apply_is_refused(worker_env, monkeypatch, tmp_path, swap):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    work = boundary.target
+    (work / "src" / "a.py").write_text("edited\n", encoding="utf-8")
+    secret = _secret_dir(tmp_path) / "id_ed25519"
+    real_plan = worker_mod._plan
+
+    def plan_then_swap(*args, **kwargs):
+        ops = real_plan(*args, **kwargs)
+        victim = work / "src" / "a.py"
+        victim.unlink()
+        if swap == "symlink":
+            victim.symlink_to(secret)
+        elif swap == "rewritten":
+            victim.write_text("something else\n", encoding="utf-8")
+        else:
+            os.link(secret, victim)
+        return ops
+
+    monkeypatch.setattr(worker_mod, "_plan", plan_then_swap)
+    boundary.cleanup()
+    assert boundary.worker_failure is not None
+    assert boundary.worker_failure.startswith("AGY_WORKER_COPY_BACK_FAILED:")
+    assert "a.py" in boundary.worker_failure
+    _assert_target_untouched(worker_env["target"])
+    assert not any(
+        p.name.startswith(".agy-worker-staging-") for p in worker_env["target"].iterdir()
+    )
+
+
+def test_hard_linked_worker_file_is_refused(worker_env, monkeypatch, tmp_path):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    os.link(_secret_dir(tmp_path) / "id_ed25519", boundary.target / "src" / "key.txt")
+    boundary.cleanup()
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:hard_link:src/key.txt"
+    _assert_target_untouched(worker_env["target"])
+
+
+def test_target_changed_meanwhile_is_not_overwritten(worker_env, monkeypatch):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    (boundary.target / "src" / "a.py").write_text("worker\n", encoding="utf-8")
+    (boundary.target / "README.md").write_text("worker readme\n", encoding="utf-8")
+    (worker_env["target"] / "src" / "a.py").write_text("someone else\n", encoding="utf-8")
+    boundary.cleanup()
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:target_changed:src/a.py"
+    assert (worker_env["target"] / "src" / "a.py").read_text() == "someone else\n"
+    assert (worker_env["target"] / "README.md").read_text() == "readme\n"  # all or nothing
+
+
+def test_nested_git_is_neither_copied_in_nor_back(worker_env, monkeypatch):
+    nested = worker_env["target"] / "vendor" / "lib" / ".git"
+    nested.mkdir(parents=True)
+    (nested / "config").write_text("[core]\n", encoding="utf-8")
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    work = boundary.target
+    assert (work / "vendor" / "lib").is_dir() and not (work / "vendor" / "lib" / ".git").exists()
+    (work / "vendor" / "lib" / ".git").mkdir()
+    (work / "vendor" / "lib" / ".git" / "hooks").mkdir()
+    (work / "vendor" / "lib" / ".git" / "hooks" / "post-checkout").write_text("#!/bin/sh\n")
+    boundary.cleanup()
+    assert boundary.worker_failure is None
+    assert not (nested / "hooks").exists()
+    assert (nested / "config").read_text() == "[core]\n"
+
+
+def test_copy_back_size_cap(worker_env, monkeypatch):
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", 8)
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    (boundary.target / "src" / "a.py").write_text("x" * 64, encoding="utf-8")
+    boundary.cleanup()
+    assert boundary.worker_failure == "AGY_WORKER_COPY_BACK_FAILED:copy_back_too_large"
+    _assert_target_untouched(worker_env["target"])
+
+
+def test_profile_pins_the_run_entries_against_rename(worker_env):
+    boundary = _prepare(worker_env)
+    try:
+        profile, run_root = boundary.profile, boundary.run_root
+        for entry in (
+            boundary.target,
+            boundary.run_home,
+            boundary.run_tmp,
+            boundary.profile_path,
+            run_root,
+        ):
+            assert _effective(profile, "file-write*", entry) == "deny", entry
+        # files inside them stay writable for agy
+        assert _effective(profile, "file-write*", boundary.target / "src" / "new.py") == "allow"
+        assert _effective(profile, "file-write*", boundary.run_tmp / "x") == "allow"
+        # a new entry next to them in the run root is harmless and still allowed
+        assert _effective(profile, "file-write*", run_root / "scratch") == "allow"
+    finally:
+        boundary.cleanup()
+
+
+def test_leftover_run_dir_is_reported(worker_env, monkeypatch, capsys):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(worker_mod.shutil, "rmtree", lambda *a, **k: None)
+    boundary.cleanup()
+    assert boundary.leftover_run_root == str(boundary.run_root)
+    assert f"worker run dir left behind: {boundary.run_root}" in capsys.readouterr().err
+    monkeypatch.undo()
+    shutil.rmtree(boundary.run_root)

@@ -36,7 +36,21 @@ The Seatbelt profile is the normal #1912/#2202 profile (including the #2863
 Launch Services and #2470 run-HOME denies) plus a cross-run deny: no read or
 write anywhere under worker-runs except this run's own subpath, and no signal
 to any process outside this run's sandbox instance.  All runs share one uid, so
-only Seatbelt separates them.
+only Seatbelt separates them.  The workdir, run HOME, TMPDIR and profile are
+pinned against rename/replace inside the otherwise writable run root.
+
+Trust and limits (#2885 review r1):
+
+* The Owner-side caller is trusted for the profile content; the wrapper only
+  checks where the profile lives.
+* A clean sweep does not prove that no worker process survived (one that
+  clears its environment, leaves the run directory and was never seen by the
+  tracker is not found).  Copy-back therefore re-opens the workdir with
+  ``O_NOFOLLOW`` and requires the same (device, inode) the dispatcher created,
+  walks it only through directory fds, refuses symlinks, special files and
+  hard-linked files, stages every file and re-checks its hash against the
+  plan before anything in the target changes, refuses when the target itself
+  changed since the copy (three-way), and caps entry count and total size.
 """
 
 from __future__ import annotations
@@ -49,6 +63,8 @@ import secrets
 import shutil
 import stat
 import subprocess
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
@@ -82,6 +98,8 @@ WORKER_WRAPPER = WORKER_BIN / "agy-worker-exec"
 WORKER_AGY = WORKER_BIN / "agy"
 SUDO_PATH = "/usr/bin/sudo"
 SWEEP_FLAG = "--sweep"
+WORKDIR_NAME = "work"
+PROFILE_NAME = "agy-dispatch.sb"
 WRAPPER_STARTED_MARKER = ".worker-exec-started"
 WORKER_RUNS_MODE = 0o2710
 RUN_DIR_MODE = 0o2770
@@ -111,7 +129,13 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def cross_run_profile(base_profile: str, *, runs_dir: Path, run_root: Path) -> str:
+def cross_run_profile(
+    base_profile: str,
+    *,
+    runs_dir: Path,
+    run_root: Path,
+    pinned_entries: Iterable[Path] = (),
+) -> str:
     """Add the cross-run rules to the normal profile.
 
     The read/write deny on ``runs_dir`` and the read re-allow of ``run_root``
@@ -121,6 +145,12 @@ def cross_run_profile(base_profile: str, *, runs_dir: Path, run_root: Path) -> s
     (``.git``, the run-HOME settings) still come last and win.  Signals are
     limited to this sandbox instance (separate ``sandbox-exec`` runs never
     share one, probed on macOS 27).
+
+    ``pinned_entries`` (the workdir, the run HOME, TMPDIR, the profile) get a
+    final ``literal`` write deny: the run root is writable, so without it the
+    worker could rename one of them away and plant a symlink or a fresh
+    directory under the name the dispatcher later reads back.  Creating and
+    editing files inside them stays allowed.
     """
     head = "(version 1)\n(allow default)\n"
     if not base_profile.startswith(head):
@@ -132,7 +162,9 @@ def cross_run_profile(base_profile: str, *, runs_dir: Path, run_root: Path) -> s
         f'(allow file-read* (subpath "{root}"))\n'
     )
     signals = "(deny signal)\n(allow signal (target same-sandbox))\n"
-    return head + cross_run + base_profile[len(head) :] + signals
+    pinned = [f'  (literal "{_sbpl_path(path)}")' for path in pinned_entries]
+    tail = "\n".join(["(deny file-write*", *pinned, ")"]) + "\n" if pinned else ""
+    return head + cross_run + base_profile[len(head) :] + signals + tail
 
 
 def worker_argv(
@@ -169,12 +201,17 @@ def worker_argv(
 
 def sweep_argv(
     run_root: Path,
-    pids: Iterable[int],
+    pid_tokens: Iterable[str],
     *,
     user: str = WORKER_USER,
     wrapper: Path = WORKER_WRAPPER,
 ) -> list[str]:
-    """``sudo -n -u <user> <wrapper> --sweep <run_root> <pid>...``."""
+    """``sudo -n -u <user> <wrapper> --sweep <run_root> <pid>:<start>...``.
+
+    Each token is ``pid:<ps lstart with "_" for blanks>``; the wrapper kills a
+    listed pid only while its start time still matches, so a pid reused by
+    another run's process after the tracker saw it is never killed.
+    """
     return [
         SUDO_PATH,
         "-n",
@@ -183,8 +220,47 @@ def sweep_argv(
         str(wrapper),
         SWEEP_FLAG,
         str(run_root),
-        *[str(pid) for pid in sorted({int(p) for p in pids if int(p) > 1})],
+        *sorted(set(pid_tokens), key=lambda token: int(token.split(":", 1)[0])),
     ]
+
+
+_PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+
+
+def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str]:
+    """``pid:<lstart>`` for each live pid started at/after ``since`` (1 s margin).
+
+    A pid ps does not report has exited and is dropped; ``since=None`` keeps
+    every reported pid.
+    """
+    wanted = sorted({int(p) for p in pids if int(p) > 1})
+    lines: list[str] = []
+    # One pid per call: ps rejects the whole list when one pid is out of range.
+    for pid in wanted:
+        try:
+            completed = subprocess.run(
+                ["ps", "-o", "pid=,lstart=", "-p", str(pid)],
+                env=_PS_ENV,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        lines += completed.stdout.splitlines()
+    tokens: list[str] = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) != 6 or not parts[0].isdigit() or int(parts[0]) not in wanted:
+            continue
+        try:
+            started = time.mktime(time.strptime(" ".join(parts[1:]), "%a %b %d %H:%M:%S %Y"))
+        except ValueError:
+            continue
+        if since is None or started >= since - 1.0:
+            tokens.append(f"{parts[0]}:{'_'.join(parts[1:])}")
+    return tokens
 
 
 def _check_runs_dir(runs_dir: Path, group_gid: int) -> Path:
@@ -214,40 +290,103 @@ def _check_owner_executable(path: Path, reason: str) -> None:
 # copy-in / copy-back
 # ---------------------------------------------------------------------------
 
-_SKIPPED_TOP_LEVEL = frozenset({".git", *TARGET_AGY_CUSTOMIZATION_PATHS})
+_SKIPPED_TOP_LEVEL = frozenset(TARGET_AGY_CUSTOMIZATION_PATHS)
+# Git metadata never crosses, at any depth (a nested repo's hooks or config
+# written back into the target would run later as the Owner).
+_SKIPPED_ANYWHERE = frozenset({".git"})
+MAX_COPY_BACK_ENTRIES = 50_000
+MAX_COPY_BACK_BYTES = 2 << 30
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+_STAGING_PREFIX = ".agy-worker-staging-"
 
 
-def _walk_tree(root: Path) -> dict[str, tuple]:
+class CopyBackRefused(Exception):
+    """The worker copy cannot be trusted for copy-back; nothing was applied."""
+
+
+def _hash_fd(fd: int) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    while chunk := os.read(fd, 1 << 20):
+        digest.update(chunk)
+        size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _same_inode(fd: int, info: os.stat_result) -> bool:
+    now = os.fstat(fd)
+    return (now.st_dev, now.st_ino) == (info.st_dev, info.st_ino)
+
+
+def _walk_fd(root_fd: int, *, strict: bool) -> dict[str, tuple]:
     """``relpath -> ("dir",) | ("file", sha256, exec) | ("symlink", target) | ("other",)``.
 
-    Never follows symlinks; skips the top-level ``.git`` and agy customization
-    entries, which never cross into or out of the worker copy.
+    Walks through directory file descriptors opened with ``O_NOFOLLOW``, so a
+    directory or file swapped for a symlink during the walk fails instead of
+    redirecting it.  ``.git`` (any depth) and the top-level agy customization
+    entries are skipped.  ``strict`` (the worker copy) also refuses hard-linked
+    files and caps the entry count and total size.
     """
     entries: dict[str, tuple] = {}
-    for current, dirs, files in os.walk(root, followlinks=False):
-        rel_dir = os.path.relpath(current, root)
-        if rel_dir == ".":
-            dirs[:] = [d for d in dirs if d not in _SKIPPED_TOP_LEVEL]
-            files = [f for f in files if f not in _SKIPPED_TOP_LEVEL]
-        for name in list(dirs) + list(files):
-            path = Path(current) / name
-            rel = os.path.normpath(os.path.join(rel_dir, name))
-            info = os.lstat(path)
+    total = 0
+
+    def visit(dir_fd: int, prefix: str) -> None:
+        nonlocal total
+        with os.scandir(dir_fd) as listing:
+            names = sorted(entry.name for entry in listing)
+        for name in names:
+            if name in _SKIPPED_ANYWHERE or (not prefix and name in _SKIPPED_TOP_LEVEL):
+                continue
+            rel = prefix + name
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
             if stat.S_ISLNK(info.st_mode):
-                entries[rel] = ("symlink", os.readlink(path))
+                entries[rel] = ("symlink", os.readlink(name, dir_fd=dir_fd))
             elif stat.S_ISDIR(info.st_mode):
                 entries[rel] = ("dir",)
+                sub = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+                try:
+                    if not _same_inode(sub, info):
+                        raise CopyBackRefused(f"entry_replaced:{rel}")
+                    visit(sub, rel + "/")
+                finally:
+                    os.close(sub)
             elif stat.S_ISREG(info.st_mode):
-                entries[rel] = ("file", _sha256_file(path), bool(info.st_mode & 0o100))
+                fd = os.open(name, _FILE_FLAGS, dir_fd=dir_fd)
+                try:
+                    opened = os.fstat(fd)
+                    if not stat.S_ISREG(opened.st_mode) or not _same_inode(fd, info):
+                        raise CopyBackRefused(f"entry_replaced:{rel}")
+                    if strict and opened.st_nlink != 1:
+                        raise CopyBackRefused(f"hard_link:{rel}")
+                    digest, size = _hash_fd(fd)
+                    total += size
+                    entries[rel] = ("file", digest, bool(opened.st_mode & 0o100))
+                finally:
+                    os.close(fd)
             else:
                 entries[rel] = ("other",)
-        # os.walk lists symlinked directories in ``dirs``; never descend into them.
-        dirs[:] = [d for d in dirs if not (Path(current) / d).is_symlink()]
+            if strict and (len(entries) > MAX_COPY_BACK_ENTRIES or total > MAX_COPY_BACK_BYTES):
+                raise CopyBackRefused("copy_back_too_large")
+
+    visit(root_fd, "")
     return entries
 
 
+def _walk_tree(root: Path, *, strict: bool = False) -> dict[str, tuple]:
+    fd = os.open(root, _DIR_FLAGS)
+    try:
+        return _walk_fd(fd, strict=strict)
+    finally:
+        os.close(fd)
+
+
 def _copy_in(source: Path, workdir: Path) -> dict[str, tuple]:
-    """Copy ``source`` (without .git / customizations / special files) into ``workdir``."""
+    """Copy ``source`` (without .git / customizations / special files) into ``workdir``.
+
+    ``source`` is the Owner's own target; the manifest is the baseline the
+    copy-back compares both the worker copy and the target against.
+    """
     manifest = _walk_tree(source)
     workdir.mkdir()
     for rel, entry in sorted(manifest.items()):
@@ -294,80 +433,171 @@ def _git_snapshot(workdir: Path) -> None:
             raise _refuse("workdir_snapshot_failed")
 
 
-def plan_copy_back(
-    manifest: Mapping[str, tuple], workdir: Path, target: Path
-) -> tuple[list[tuple[str, str]], Optional[str]]:
-    """Changes to apply to ``target``: ``[(op, relpath)]`` or a refusal reason.
+def _target_entry(path: Path) -> Optional[tuple]:
+    """The target's current entry in manifest form (``None`` when absent)."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(info.st_mode):
+        return ("symlink", os.readlink(path))
+    if stat.S_ISDIR(info.st_mode):
+        return ("dir",)
+    if stat.S_ISREG(info.st_mode):
+        fd = os.open(path, _FILE_FLAGS)
+        try:
+            return ("file", _hash_fd(fd)[0], bool(os.fstat(fd).st_mode & 0o100))
+        finally:
+            os.close(fd)
+    return ("other",)
 
-    ``op`` is ``mkdir``, ``write`` or ``delete``.  A new or changed symlink, a
-    special file, a type change, or a destination whose parent is not a real
-    directory inside the target is refused (nothing is applied).
+
+def _plan(
+    manifest: Mapping[str, tuple], current: Mapping[str, tuple], target_real: Path
+) -> list[tuple[str, str, Optional[str]]]:
+    """``[(op, relpath, sha256)]`` to bring the target to ``current``; raises on refusal.
+
+    Three-way: every path the worker changed must still be in its baseline
+    state in the target (another writer's change is never overwritten).
     """
-    current = _walk_tree(workdir)
-    ops: list[tuple[str, str]] = []
+    ops: list[tuple[str, str, Optional[str]]] = []
     for rel in sorted(current):
         entry, before = current[rel], manifest.get(rel)
         kind = entry[0]
         if kind == "other":
-            return [], f"special_file:{rel}"
+            raise CopyBackRefused(f"special_file:{rel}")
         if kind == "symlink":
             if before != entry:
-                return [], f"symlink_created:{rel}"
+                raise CopyBackRefused(f"symlink_created:{rel}")
             continue
         if before is not None and before[0] != kind:
-            return [], f"type_changed:{rel}"
+            raise CopyBackRefused(f"type_changed:{rel}")
         if kind == "dir" and before is None:
-            ops.append(("mkdir", rel))
+            ops.append(("mkdir", rel, None))
         elif kind == "file" and before != entry:
-            ops.append(("write", rel))
+            ops.append(("write", rel, entry[1]))
     for rel in sorted(set(manifest) - set(current), reverse=True):
-        ops.append(("delete", rel))
-    target_real = os.path.realpath(target)
-    for _op, rel in ops:
-        # ``rel`` comes from os.walk (no ``..``); any symlink on the way to the
-        # destination's parent in the target would redirect the write.
-        parent = os.path.dirname(os.path.join(target_real, rel))
-        if os.path.realpath(parent) != parent:
-            return [], f"destination_through_symlink:{rel}"
-        if (Path(target_real) / rel).is_symlink():
-            return [], f"destination_is_symlink:{rel}"
-    return ops, None
-
-
-def apply_copy_back(
-    ops: list[tuple[str, str]], manifest: Mapping[str, tuple], workdir: Path, target: Path
-) -> None:
-    target_real = Path(os.path.realpath(target))
-    for op, rel in ops:
+        ops.append(("delete", rel, None))
+    for op, rel, _sha in ops:
         destination = target_real / rel
-        if op == "mkdir":
-            destination.mkdir(exist_ok=True)
-        elif op == "write":
-            source = workdir / rel
-            executable = bool(os.lstat(source).st_mode & 0o100)
-            mode = 0o755 if executable else 0o644
-            if destination.exists() and not destination.is_symlink():
-                mode = stat.S_IMODE(destination.stat().st_mode)
-            temporary = destination.with_name(
-                f".{destination.name}.agy-worker-{secrets.token_hex(4)}"
-            )
-            with open(source, "rb") as src_fh:
-                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "wb") as dst_fh:
-                    shutil.copyfileobj(src_fh, dst_fh)
-            os.chmod(temporary, mode)
-            os.replace(temporary, destination)
-        elif op == "delete":
-            if manifest.get(rel, ("",))[0] == "dir":
+        # ``rel`` has no ``..``; a symlink on the way would redirect the write.
+        parent = os.path.dirname(destination)
+        if os.path.realpath(parent) != parent:
+            raise CopyBackRefused(f"destination_through_symlink:{rel}")
+        if _target_entry(destination) != (None if op == "mkdir" else manifest.get(rel)):
+            raise CopyBackRefused(f"target_changed:{rel}")
+    return ops
+
+
+def _open_source(work_fd: int, rel: str) -> int:
+    """Open ``rel`` under the verified workdir fd, never following a symlink."""
+    parts = rel.split("/")
+    dir_fd = work_fd
+    opened: list[int] = []
+    try:
+        for part in parts[:-1]:
+            dir_fd = os.open(part, _DIR_FLAGS, dir_fd=dir_fd)
+            opened.append(dir_fd)
+        return os.open(parts[-1], _FILE_FLAGS, dir_fd=dir_fd)
+    finally:
+        for fd in opened:
+            os.close(fd)
+
+
+def _stage(work_fd: int, rel: str, sha256: str, staging: Path, index: int) -> Path:
+    """Copy one worker file into ``staging``; refuse unless it is the planned content."""
+    staged = staging / str(index)
+    src = _open_source(work_fd, rel)
+    try:
+        info = os.fstat(src)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise CopyBackRefused(f"entry_replaced:{rel}")
+        digest = hashlib.sha256()
+        dst = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            while chunk := os.read(src, 1 << 20):
+                digest.update(chunk)
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(dst, view) :]
+        finally:
+            os.close(dst)
+    finally:
+        os.close(src)
+    if digest.hexdigest() != sha256:
+        raise CopyBackRefused(f"content_changed_after_plan:{rel}")
+    return staged
+
+
+def copy_back(
+    manifest: Mapping[str, tuple],
+    run_root: Path,
+    workdir_name: str,
+    workdir_identity: tuple[int, int],
+    target: Path,
+) -> None:
+    """Apply the worker's changes to ``target``, all or nothing up to the final renames.
+
+    The workdir is re-opened by name under the run root with ``O_NOFOLLOW`` and
+    must be the same directory (device, inode) the dispatcher created; every
+    read goes through that verified fd.  Files are staged (hash re-checked
+    against the plan) before anything in the target changes.  Raises
+    ``CopyBackRefused`` (nothing applied) or ``OSError``.
+    """
+    target_real = Path(os.path.realpath(target))
+    root_fd = os.open(run_root, _DIR_FLAGS)
+    try:
+        try:
+            work_fd = os.open(workdir_name, _DIR_FLAGS, dir_fd=root_fd)
+        except OSError as exc:
+            raise CopyBackRefused("workdir_replaced") from exc
+    finally:
+        os.close(root_fd)
+    staging: Optional[Path] = None
+    try:
+        info = os.fstat(work_fd)
+        if (info.st_dev, info.st_ino) != tuple(workdir_identity):
+            raise CopyBackRefused("workdir_replaced")
+        try:
+            current = _walk_fd(work_fd, strict=True)
+        except OSError as exc:
+            raise CopyBackRefused(f"workdir_walk_failed:{type(exc).__name__}") from exc
+        ops = _plan(manifest, current, target_real)
+        if not ops:
+            return
+        staging = target_real / f"{_STAGING_PREFIX}{secrets.token_hex(8)}"
+        staging.mkdir(mode=0o700)
+        staged: dict[str, Path] = {}
+        for index, (op, rel, sha) in enumerate(ops):
+            if op == "write":
+                assert sha is not None
+                try:
+                    staged[rel] = _stage(work_fd, rel, sha, staging, index)
+                except OSError as exc:
+                    raise CopyBackRefused(f"entry_replaced:{rel}") from exc
+        for op, rel, _sha in ops:
+            destination = target_real / rel
+            if op == "mkdir":
+                destination.mkdir()
+            elif op == "write":
+                before = manifest.get(rel)
+                if before is not None:
+                    mode = stat.S_IMODE(os.lstat(destination).st_mode)
+                else:
+                    mode = 0o755 if current[rel][2] else 0o644
+                os.chmod(staged[rel], mode)
+                os.replace(staged[rel], destination)
+            elif manifest.get(rel, ("",))[0] == "dir":
                 try:
                     destination.rmdir()
                 except OSError:
                     pass  # not empty in the target: leave it
             else:
-                try:
-                    destination.unlink()
-                except FileNotFoundError:
-                    pass
+                destination.unlink()
+    finally:
+        os.close(work_fd)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def _group_share_tree(root: Path, gid: int, read_only: Iterable[Path] = ()) -> None:
@@ -411,7 +641,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     worker_agy: Path = WORKER_AGY
     run_gid: int = -1
     manifest: dict = field(default_factory=dict)
+    workdir_identity: tuple[int, int] = (-1, -1)
     worker_failure: Optional[str] = None
+    leftover_run_root: Optional[str] = None
     run_command: Callable[..., Any] = field(default=subprocess.run, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
 
@@ -444,9 +676,11 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         super().before_launch()
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
+        baseline = self._baseline
+        tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
         try:
             completed = self.run_command(
-                sweep_argv(self.run_root, pids, user=self.worker_user, wrapper=self.wrapper),
+                sweep_argv(self.run_root, tokens, user=self.worker_user, wrapper=self.wrapper),
                 cwd="/",
                 env=dict(LAUNCH_ENV),
                 stdin=subprocess.DEVNULL,
@@ -499,16 +733,29 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             if self._launched and not (self.run_root / WRAPPER_STARTED_MARKER).exists():
                 self.worker_failure = f"{AGY_WORKER_LAUNCH_FAILED}:wrapper_did_not_start"
             elif self._launched and self._swept:
-                ops, refusal = plan_copy_back(self.manifest, self.target, self.source_target)
-                if refusal is not None:
-                    self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{refusal}"
-                else:
-                    apply_copy_back(ops, self.manifest, self.target, self.source_target)
+                # A clean sweep does not prove no worker process survived (one
+                # that cleared its env, left the run cwd and escaped the
+                # tracker is not found); copy_back therefore trusts nothing in
+                # the run dir beyond the verified workdir fd and the plan hashes.
+                copy_back(
+                    self.manifest,
+                    self.run_root,
+                    self.target.name,
+                    self.workdir_identity,
+                    self.source_target,
+                )
+        except CopyBackRefused as exc:
+            self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
         except OSError as exc:
             self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
         finally:
             if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
                 shutil.rmtree(self.run_root, ignore_errors=True)
+                if os.path.lexists(self.run_root):
+                    self.leftover_run_root = str(self.run_root)
+                    sys.stderr.write(
+                        f"nexus-agy-dispatch: worker run dir left behind: {self.run_root}\n"
+                    )
 
 
 def prepare_worker_account_boundary(
@@ -557,9 +804,11 @@ def prepare_worker_account_boundary(
         os.chmod(run_root, RUN_DIR_MODE)
         if run_root.stat().st_gid != gid:
             os.chown(run_root, -1, gid)
-        workdir = run_root / "work"
+        workdir = run_root / WORKDIR_NAME
         manifest = _copy_in(source_target, workdir)
         _git_snapshot(workdir)
+        work_info = os.lstat(workdir)
+        workdir_identity = (work_info.st_dev, work_info.st_ino)
         run_home = run_root / "home"
         run_tmp = run_root / "tmp"
         run_tmp.mkdir()
@@ -580,6 +829,7 @@ def prepare_worker_account_boundary(
                 ),
                 runs_dir=runs_dir,
                 run_root=run_root,
+                pinned_entries=(workdir, run_home, run_tmp, run_root / PROFILE_NAME),
             )
         except CredentialPathOverlapError as exc:
             raise AgyWriteBoundaryError(
@@ -589,7 +839,7 @@ def prepare_worker_account_boundary(
             raise AgyWriteBoundaryError(
                 f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:profile_unrepresentable"
             ) from exc
-        profile_path = run_root / "agy-dispatch.sb"
+        profile_path = run_root / PROFILE_NAME
         profile_path.write_text(profile, encoding="utf-8")
         # The env the dispatcher itself uses (permission install, transcript
         # lookup); the wrapper builds the worker's own fixed environment.
@@ -616,5 +866,6 @@ def prepare_worker_account_boundary(
         worker_agy=Path(worker_agy),
         run_gid=gid,
         manifest=manifest,
+        workdir_identity=workdir_identity,
         run_command=run_command,
     )
