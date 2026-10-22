@@ -164,6 +164,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "nexus/services/workflow_doctor.py",
         ),
         *[(ROOT / rel, rel) for rel in _EXECUTORS_RUNTIME_PATHS],
+        (ROOT / "nexus/executors/codex_run_boundary.py", "nexus/executors/codex_run_boundary.py"),
         (
             CANONICAL_SOURCE_ROOT,
             "nexus/orchestrator/canonical_source_root.py",

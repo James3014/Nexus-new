@@ -136,6 +136,10 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/executors/codex_run_boundary.py",
+      "mode": "0644"
+    },
+    {
       "path": "nexus/executors/agy_write_admission.py",
       "mode": "0644"
     },
