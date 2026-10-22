@@ -21,6 +21,7 @@ from nexus.services.external_intelligence import (
     OBSERVED_MODEL_ATTESTATION_MISMATCH,
     ExternalIntelligenceError,
     TransportResult,
+    _bounded_runtime_error_code,
     model_invocation_receipts_from,
     normalize_expected_observed_model,
     observed_model_violation,
@@ -573,6 +574,7 @@ class OpenSWEExternalIntelligenceTransport:
             finished_at=str(value.get("finished_at") or _now()),
             safe_argv=safe,
             model_invocation_receipts=receipts,
+            error_code=_bounded_runtime_error_code(value.get("error_code")),
         )
 
     def _ensure_runtime_identity(self) -> bool:
