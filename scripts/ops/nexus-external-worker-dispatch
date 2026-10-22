@@ -8,12 +8,15 @@ only owns execution observation and bounded process supervision.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from importlib import import_module
 from pathlib import Path
@@ -50,6 +53,8 @@ get_execution_adapter = _runtime_module.get_execution_adapter
 get_account_adapter = _runtime_module.get_account_adapter
 is_rotation_eligible = import_module("nexus.services.external_account_pool").is_rotation_eligible
 AccountFailureKind = import_module("nexus.services.external_account_pool").AccountFailureKind
+_codex_boundary = import_module("nexus.executors.codex_run_boundary")
+_cli_worker = import_module("nexus.executors.cli_worker")
 
 OPERATION_SCHEMA = "nexus.external_worker_operation.v1"
 OPERATION_ROOT = Path(
@@ -294,6 +299,61 @@ def _run_operation(
     heartbeat_interval: float = 15.0,
     outer_grace_seconds: float = 15.0,
 ) -> int:
+    kwargs = dict(
+        operation_id=operation_id,
+        provider=provider,
+        model=model,
+        prompt_file=prompt_file,
+        cwd=cwd,
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=timeout_seconds,
+        require_free=require_free,
+        thinking=thinking,
+        operation_root=operation_root,
+        heartbeat_interval=heartbeat_interval,
+        outer_grace_seconds=outer_grace_seconds,
+    )
+    if provider != "codex":
+        return _run_operation_inner(**kwargs)
+    with tempfile.TemporaryDirectory(prefix="nexus-codex-home-") as home_name:
+        run_home = Path(home_name)
+        refusal = _codex_boundary.materialize_codex_home(run_home)
+        if refusal is not None:
+            Path(prompt_file).unlink(missing_ok=True)
+            _journal(provider, operation_root).mark_terminal(
+                operation_id,
+                status="FAILED",
+                exit_code=None,
+                failure_kind=refusal,
+                cwd=cwd,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "NO_PROVIDER_PROCESS_STARTED",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
+        return _run_operation_inner(**kwargs, codex_home=run_home)
+
+
+def _run_operation_inner(
+    *,
+    operation_id: str,
+    provider: str,
+    model: str,
+    prompt_file: str,
+    cwd: str,
+    mode: str,
+    auto_approve: bool,
+    timeout_seconds: int,
+    require_free: bool,
+    thinking: str,
+    operation_root: Path,
+    heartbeat_interval: float = 15.0,
+    outer_grace_seconds: float = 15.0,
+    codex_home: Path | None = None,
+) -> int:
     journal = _journal(provider, operation_root)
     prompt_path = Path(prompt_file)
     try:
@@ -347,6 +407,13 @@ def _run_operation(
         attempts += 1
         try:
             command = adapter.compile(request, binding=binding)
+            if codex_home is not None:
+                command = dataclasses.replace(
+                    command,
+                    env=_codex_boundary.codex_child_env(
+                        command.env, home=codex_home, tmpdir=codex_home / "tmp"
+                    ),
+                )
         except BaseException as exc:
             try:
                 account_adapter.release(binding)
@@ -468,6 +535,51 @@ def _run_operation(
             return 1
 
         started_children: list[subprocess.Popen[bytes]] = []
+        run_tag = secrets.token_hex(16) if codex_home is not None else None
+        launch_env = dict(command.env)
+        sweep_baseline = None
+        tracker = None
+        codex_sweep_clean = True
+        if run_tag is not None:
+            launch_env[_cli_worker.RUN_TAG_ENV] = run_tag
+            sweep_baseline = _cli_worker.sweep_baseline()
+            if sweep_baseline is None:
+                account_adapter.release(binding)
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=None,
+                    failure_kind="CODEX_DESCENDANT_SWEEP_UNAVAILABLE",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "NO_PROVIDER_PROCESS_STARTED",
+                        "retry_permitted": False,
+                    },
+                )
+                return 1
+
+        def sweep_codex() -> bool:
+            nonlocal tracker
+            if run_tag is None:
+                return True
+            try:
+                if started_children:
+                    _kill_process_group(started_children[0])
+                if tracker is None and started_children:
+                    tracker = _cli_worker.track_run(run_tag, started_children[0].pid)
+                if tracker is None:
+                    return True
+                return _cli_worker.sweep_run(
+                    run_tag, tracker, sweep_baseline, (cwd, str(codex_home))
+                )
+            except Exception:
+                return False
+            finally:
+                _cli_worker.release_run(run_tag)
+
         try:
             with (
                 stdout_path.open("ab", buffering=0) as out_fh,
@@ -476,7 +588,7 @@ def _run_operation(
                 proc = _TrackedPopen(
                     list(command.argv),
                     cwd=cwd,
-                    env=dict(command.env),
+                    env=launch_env,
                     stdin=subprocess.DEVNULL,
                     stdout=out_fh,
                     stderr=err_fh,
@@ -484,6 +596,8 @@ def _run_operation(
                     close_fds=True,
                     started=started_children,
                 )
+                if run_tag is not None:
+                    tracker = _cli_worker.track_run(run_tag, proc.pid)
                 attach = getattr(account_adapter, "attach_provider", None)
                 if attach is not None:
                     attach(binding, proc.pid)
@@ -527,7 +641,7 @@ def _run_operation(
                 # never release, record OUTCOME_UNKNOWN.
                 proc = started_children[0]
                 return _fail_closed_after_start(exc)
-            if proc is not None and mark_pending is not None:
+            if proc is not None and (mark_pending is not None or codex_home is not None):
                 return _fail_closed_after_start(exc)
             # No child exists (Popen never succeeded): known pre-effect failure.
             confirm_start_failure = getattr(account_adapter, "confirm_terminal", None)
@@ -549,6 +663,26 @@ def _run_operation(
                 reconciliation={
                     "at": utc_now(),
                     "result": "NO_CONFIRMED_PROVIDER_PROCESS",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
+        finally:
+            codex_sweep_clean = sweep_codex()
+
+        if not codex_sweep_clean:
+            account_adapter.release(binding)
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN",
+                exit_code=None,
+                failure_kind="CODEX_DESCENDANT_SWEEP_UNPROVEN",
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "CODEX_DESCENDANT_SWEEP_UNPROVEN",
                     "retry_permitted": False,
                 },
             )

@@ -11109,6 +11109,42 @@ def test_direct_codex_session_worker_avoids_resume_last_by_default(tmp_path: Pat
     assert second["codex_session_turn_index"] == 2
 
 
+def test_direct_codex_resume_is_explicitly_read_only(tmp_path: Path, monkeypatch):
+    codex_bin = tmp_path / "codex"
+    codex_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner.shutil.which", lambda _name: str(codex_bin)
+    )
+    monkeypatch.setattr(
+        capability_ab_runner,
+        "_codex_benchmark_session_meta",
+        lambda: {"enabled": True, "resume": True, "session_id": "test", "turn_index": 2},
+    )
+    monkeypatch.setenv("NEXUS_CODEX_IGNORE_USER_CONFIG", "1")
+
+    def fake_run_process_group(cmd, **_kwargs):
+        commands.append(list(cmd))
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(
+            json.dumps({"status": "SUCCESS", "patch": "patched"}), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="tokens used 1", stderr="")
+
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group
+    )
+    _ask_direct_codex_patch(prompt="task", timeout_sec=10)
+    assert commands[0][:7] == [
+        str(codex_bin),
+        "exec",
+        "--sandbox",
+        "read-only",
+        "resume",
+        "--ignore-user-config",
+        "--last",
+    ]
+
+
 def test_codex_fresh_no_resume_session_policy_is_not_contamination():
     rows = [
         {

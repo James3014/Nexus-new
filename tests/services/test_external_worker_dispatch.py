@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -27,6 +29,106 @@ exit {exit_code}
 """
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+@pytest.mark.parametrize(("mode", "sweep_ready"), [("act", True), ("plan", True), ("act", False)])
+def test_codex_operation_has_run_boundary_and_sweeps_setsid_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, sweep_ready: bool
+) -> None:
+    fake = tmp_path / "codex"
+    marker = tmp_path / "escaped-child"
+    observed = tmp_path / "codex-env"
+    child_pid = tmp_path / "child-pid"
+    child_ready = tmp_path / "child-ready"
+    child_code = (
+        "import os,time; os.setsid(); "
+        f"open({str(child_ready)!r}, 'w').close(); "
+        f"time.sleep(1.5); open({str(marker)!r}, 'w').write('escaped')"
+    )
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "if '--version' in sys.argv:\n"
+        "    print('codex-cli test')\n"
+        "    sys.exit(0)\n"
+        f"Path({str(observed)!r}).write_text(json.dumps({{'HOME': os.environ.get('HOME'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'LEAK': os.environ.get('NEXUS_PRIVATE_TOKEN'), 'argv': sys.argv}}))\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"Path({str(child_pid)!r}).write_text(str(child.pid))\n"
+        f"while not Path({str(child_ready)!r}).exists(): time.sleep(0.01)\n"
+        "print(json.dumps({'type': 'thread.started', 'thread_id': 'thread-1'}))\n"
+        "print(json.dumps({'type': 'turn.started'}))\n"
+        "print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'OK'}}))\n"
+        "print(json.dumps({'type': 'turn.completed'}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+    monkeypatch.setenv("HOME", str(tmp_path / "host-home"))
+    monkeypatch.setenv("NEXUS_PRIVATE_TOKEN", "must-not-reach-child")
+    # The test sandbox denies ps/lsof; exercise the dispatch-to-sweep facade
+    # with a real detached child and a deterministic process probe.
+    monkeypatch.setattr(
+        dispatch._cli_worker, "sweep_baseline", lambda: object() if sweep_ready else None
+    )
+    monkeypatch.setattr(dispatch._cli_worker, "track_run", lambda tag, pid: (tag, pid))
+
+    def sweep_detached_child(tag, tracker, baseline, roots):
+        assert tag == tracker[0]
+        assert str(tmp_path) in roots
+        pid = int(child_pid.read_text(encoding="utf-8"))
+        os.kill(pid, signal.SIGKILL)
+        return True
+
+    monkeypatch.setattr(dispatch._cli_worker, "sweep_run", sweep_detached_child)
+
+    root = tmp_path / "ops"
+    journal = dispatch._journal("codex", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="codex",
+        model="gpt-5.6-luna",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+        initial_fields={"mode": mode, "auto_approve": False, "require_free": False},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "Reply exactly OK")
+    code = dispatch._run_operation(
+        operation_id=operation_id,
+        provider="codex",
+        model="gpt-5.6-luna",
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode=mode,
+        auto_approve=False,
+        timeout_seconds=5,
+        require_free=False,
+        thinking="medium",
+        operation_root=root,
+    )
+    if not sweep_ready:
+        assert code == 1
+        assert journal.read(operation_id)["failure_kind"] == "CODEX_DESCENDANT_SWEEP_UNAVAILABLE"
+        assert not observed.exists()
+        return
+    assert code == 0, journal.read(operation_id).get("failure_kind")
+    assert journal.read(operation_id)["status"] == "COMPLETED"
+    command = journal.read(operation_id)
+    assert command["mode"] == mode
+    env = json.loads(observed.read_text(encoding="utf-8"))
+    assert env["HOME"] != str(tmp_path / "host-home")
+    assert env["CODEX_HOME"] == str(Path(env["HOME"]) / ".codex")
+    assert env["LEAK"] is None
+    assert env["argv"][env["argv"].index("--sandbox") + 1] == (
+        "workspace-write" if mode == "act" else "read-only"
+    )
+    time.sleep(1.7)
+    assert not marker.exists()
 
 
 def test_background_cline_operation_reaches_terminal_receipt(
