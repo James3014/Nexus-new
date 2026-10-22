@@ -4389,6 +4389,16 @@ def dispatch_run(
     except ValueError as exc:
         failure_kind = str(exc)
         contract_failure = f"DISPATCH_CONTRACT_REJECTED:{failure_kind}"
+        # No profile kind: report the explicit limits, mark the rest unresolved.
+        limits = {
+            "timeout_seconds": timeout,
+            "timeout_source": "explicit" if timeout is not None else "unresolved",
+            "provider_stall_seconds": provider_stall_seconds,
+            "provider_stall_source": (
+                "explicit" if provider_stall_seconds is not None else "unresolved"
+            ),
+            "empty_output_min_bytes": empty_output_min_bytes,
+        }
         _operation_hook(
             operation_hook,
             phase="CONTRACT_REJECTED",
@@ -5681,8 +5691,10 @@ def dispatch_run(
                 return code if isinstance(code, int) and code != 0 else 1
 
             if last_kind == AGY_EMPTY_OUTPUT:
-                # This is dispatch-local: do not cool down a healthy account
-                # globally just because it returned a short model answer.
+                # Dispatch-local: the account is healthy, so it is only excluded
+                # for this dispatch. It is released and another account is leased
+                # with acquire_claim; rotate_claim / retire_failed_claim are never
+                # called, so no cooldown or family retirement is persisted.
                 exclude_hashes.add(claim.account_alias_hash)
                 claim.release()
                 if empty_output_failovers >= 1 or rotations >= max_failovers:
@@ -5699,11 +5711,9 @@ def dispatch_run(
                     return 1
                 if _budget_exhausted():
                     return _emit_total_deadline_exhausted()
-                failed_claim = claim
                 try:
-                    claim = _queued_claim(first_pass=lambda: coordinator.rotate_claim(
-                        current_claim=failed_claim,
-                        failure_kind=_DispatchFailureKind.EMPTY_OUTPUT,
+                    claim = _queued_claim(first_pass=lambda: coordinator.acquire_claim(
+                        consumer_id=consumer_id,
                         exclude_hashes=exclude_hashes,
                         wait_timeout=0.0,
                         model_family=scoped_model_family,
@@ -5728,6 +5738,8 @@ def dispatch_run(
                     })
                     return 75
                 empty_output_failovers += 1
+                # One account switch: it counts toward the failover cap (bounded by
+                # the pool size) but not toward --max-calls (work_failures).
                 rotations += 1
                 _operation_hook(
                     operation_hook,
@@ -6374,6 +6386,25 @@ def _run_background_operation(
         "permission_profile_kind": None,
         "effective_permissions": None,
     }
+    # #2887: resolve the limits here too, so a heartbeat written before dispatch_run's
+    # first event carries the same values the parent recorded instead of nulls.
+    try:
+        _, _seed_profile_kind, _ = build_effective_permission_profile(
+            cwd=cwd,
+            mode=mode,
+            write_paths=write_paths,
+            allow_rules=allow,
+            deny_rules=deny,
+            temp_command_permissions=temp_command_permissions,
+        )
+    except ValueError:
+        _seed_profile_kind = "INVALID"
+    state.update(
+        _resolve_dispatch_limits(
+            _seed_profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+        )
+    )
+    state["empty_output_failovers"] = 0
     state_lock = threading.Lock()
     sweep_write_lock = threading.Lock()
 

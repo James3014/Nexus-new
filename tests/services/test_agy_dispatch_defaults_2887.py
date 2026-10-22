@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import sys
+import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
@@ -136,7 +137,7 @@ def test_empty_output_rotates_once_without_consuming_max_calls(
     summary = _summary(capsys)
     assert calls == ["a", "b"]
     assert coordinator.exclusions == [set(), {"hash-a"}]
-    assert coordinator.retired == [("a", "AGY_EMPTY_OUTPUT")]
+    assert coordinator.retired == []  # acquire_claim only: nothing retired
     assert all(c.released for c in coordinator.claims[:2])
     assert not coordinator.claims[2].released
     assert summary["empty_output_failovers"] == 1
@@ -171,13 +172,46 @@ def test_threshold_counts_stripped_utf8_bytes(tmp_path, capsys, output):
     assert len(coordinator.exclusions) == 1
 
 
-def test_empty_output_pool_rotation_does_not_persist_account_cooldown(tmp_path, capsys):
+def test_empty_output_failover_never_retires_or_cools_down_the_account(tmp_path, capsys):
+    """The blank-answer failover must release the healthy account and lease another
+    one through acquire_claim only: rotate_claim / retire_failed_claim and every
+    pool-manager cooldown write are forbidden (Gemini r1 BLOCKER on #2894)."""
+
+    class Manager:
+        def mark_account_bad(self, *_a, **_k):
+            raise AssertionError("empty output must not persist a cooldown")
+
+        def mark_family_unavailable(self, *_a, **_k):
+            raise AssertionError("empty output must not retire a model family")
+
+        def quarantine_account(self, *_a, **_k):
+            raise AssertionError("empty output must not quarantine")
+
+    order: list[str] = []
+
     class Coordinator(FakeCoordinator):
-        rotate_claim = dispatch.CrossProcessLeaseCoordinator.rotate_claim
-        retire_failed_claim = dispatch.CrossProcessLeaseCoordinator.retire_failed_claim
+        manager = Manager()
+
+        def acquire_claim(self, *, exclude_hashes, **kwargs):
+            claim = super().acquire_claim(exclude_hashes=exclude_hashes, **kwargs)
+            order.append(f"lease:{claim.internal_id}")
+            return claim
+
+        def rotate_claim(self, **_kwargs):
+            raise AssertionError("empty output must not go through rotate_claim")
+
+        def retire_failed_claim(self, *_a, **_k):
+            raise AssertionError("empty output must not retire the claim")
 
     coordinator = Coordinator(tmp_path)
-    # The real pool rotation's retirement method must not touch a manager.
+    for fake in coordinator.claims:
+        original_release = fake.release
+
+        def _release(_orig=original_release, _name=fake.internal_id):
+            order.append(f"release:{_name}")
+            _orig()
+
+        fake.release = _release
     calls = []
 
     def runner(*, env, **_kwargs):
@@ -195,7 +229,12 @@ def test_empty_output_pool_rotation_does_not_persist_account_cooldown(tmp_path, 
         == 0
     )
     assert calls == ["a", "b"]
-    assert _summary(capsys)["empty_output_failovers"] == 1
+    assert coordinator.retired == []
+    # The healthy account is released exactly once, before the next lease.
+    assert order == ["lease:a", "release:a", "lease:b", "release:b"]
+    summary = _summary(capsys)
+    assert summary["empty_output_failovers"] == 1
+    assert summary["rotations"] == 1
 
 
 def test_empty_output_obeys_total_deadline(tmp_path, monkeypatch, capsys):
@@ -386,3 +425,79 @@ def test_background_journal_records_empty_output_failover(tmp_path, monkeypatch,
     assert record["timeout_source"] == "default:NO_TOOL_PACKET"
     assert record["provider_stall_seconds"] == 45
     assert record["failure_kind"] == (None if second_output else "AGY_EMPTY_OUTPUT")
+
+
+def test_empty_output_kind_never_marks_the_shared_pool_account_bad():
+    kind = dispatch._DispatchFailureKind.EMPTY_OUTPUT
+    assert dispatch.is_agy_rotation_eligible(kind) is False
+
+    class Manager:
+        def mark_account_bad(self, *_a, **_k):
+            raise AssertionError("dispatch-local empty output must never persist a cooldown")
+
+    class Pool:
+        manager = Manager()
+
+        def retire_failed_claim(self, claim, failure_kind, **kwargs):
+            return dispatch.CrossProcessLeaseCoordinator.retire_failed_claim(
+                self, claim, failure_kind, **kwargs
+            )
+
+    claim = SimpleNamespace(
+        released=False, account_alias_hash="hash-a", lease=SimpleNamespace(execution_env={})
+    )
+    # An un-released claim with the dispatch-local kind: returns before any pool write.
+    Pool().retire_failed_claim(claim, kind)
+
+
+def test_background_child_seeds_limits_before_first_event(tmp_path, monkeypatch):
+    # Codex review of #2894: a heartbeat written before dispatch_run's first event used to
+    # overwrite the parent's recorded limits with nulls. The child now seeds them itself.
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model=None,
+        effort=None,
+        prompt_sha256="a" * 64,
+        runtime_revision=None,
+        initial_fields={
+            **dispatch._resolve_dispatch_limits("NO_TOOL_PACKET", None, None),
+            "empty_output_failovers": 0,
+        },
+    )
+    prompt = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt, "read")
+    observed = {}
+
+    def slow_dispatch(**_kwargs):
+        time.sleep(0.3)  # several heartbeats pass before any dispatch event
+        observed["mid_run"] = journal.read(operation_id)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", slow_dispatch)
+    monkeypatch.setattr(dispatch, "_parse_agy_attestation", lambda *_a, **_kw: {})
+    dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt),
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=None,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=tmp_path / "operations",
+        heartbeat_interval=0.05,
+    )
+    mid = observed["mid_run"]
+    assert mid["timeout_seconds"] == 300
+    assert mid["timeout_source"] == "default:NO_TOOL_PACKET"
+    assert mid["provider_stall_seconds"] == 45
+    assert mid["empty_output_failovers"] == 0
