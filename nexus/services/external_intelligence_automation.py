@@ -1125,20 +1125,19 @@ class ExternalIntelligenceAutomation:
             units.append(unit_data)
         return units
 
-    def _envelope_diagnosis_status(self, intelligence: Mapping[str, Any]) -> str | None:
-        """The envelope's diagnosis status, or None when it declares no diagnosis (v1).
-
-        An unreadable or malformed diagnosis reads as "INVALID" (never PROVEN)."""
-        request = intelligence.get("request")
-        request_sha = (
-            str(request.get("request_sha256") or "") if isinstance(request, Mapping) else ""
-        )
-        envelope_path = self.intelligence_store.root / "envelopes" / f"{request_sha}.json"
+    @staticmethod
+    def _envelope_diagnosis_status(units: list[dict[str, Any]]) -> str | None:
+        """The diagnosis status of the envelope ``_c_units`` verified, or None when the
+        envelope declares no diagnosis (v1).  Unreadable or malformed reads as "INVALID"."""
+        if not units:
+            return None
         try:
-            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, ValueError):
+            envelope = json.loads(Path(units[0]["envelope_ref"]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError, KeyError):
             return "INVALID"
-        if not isinstance(envelope, Mapping) or "diagnosis" not in envelope:
+        if not isinstance(envelope, Mapping):
+            return "INVALID"
+        if "diagnosis" not in envelope:
             return None
         diagnosis = envelope["diagnosis"]
         status = diagnosis.get("status") if isinstance(diagnosis, Mapping) else None
@@ -1670,13 +1669,18 @@ class ExternalIntelligenceAutomation:
                 and previous.get("state") == "RECONCILIATION_REQUIRED"
                 and previous.get("prior_state") == "FANOUT_DISPATCHING"
             )
-            diagnosis_status = self._envelope_diagnosis_status(intelligence)
+            diagnosis_status = self._envelope_diagnosis_status(units)
             if (
                 not resuming_fanout
                 and any("core_authority" in unit for unit in units)
+                and getattr(
+                    getattr(self.c_runtime, "transport", None),
+                    "supports_core_mutation_binding",
+                    False,
+                )
                 and diagnosis_status not in (None, "PROVEN")
             ):
-                # The runtime binds Core only for a PROVEN diagnosis; any other diagnosis
+                # The Open SWE runtime binds Core only for a PROVEN diagnosis; any other diagnosis
                 # runs unbound, which a Core-bound attempt rejects as OUTCOME_UNKNOWN and
                 # reconciliation can never clear (#2895).  Escalate instead of dispatching.
                 return self.state_store.save(
