@@ -393,6 +393,55 @@ def resolve_contract_identity(
     }
 
 
+CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS = frozenset({
+    "task_id",
+    "disposition",
+    "superseded_by",
+    "authority_goal_id",
+    "authority_coordination_scope_id",
+})
+"""The only arguments a Candidate disposition accepts, on the Gateway
+``nexus_candidate_dispose`` and the self-hosted MCP
+``nexus_self_hosted_dispose_candidate`` alike (#2767)."""
+
+
+def candidate_dispose_unknown_arguments(arguments: Mapping[str, Any]) -> tuple[str, ...]:
+    """Sorted argument names outside :data:`CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS`."""
+    return tuple(sorted(str(name) for name in set(arguments) - CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS))
+
+
+def candidate_dispose_effect(
+    state: Mapping[str, Any],
+    *,
+    task_id: str,
+    controller_revision: str,
+    contract_identity: Mapping[str, Any],
+    disposition: str,
+    superseded_by: Optional[str],
+) -> dict[str, Any]:
+    """The exact effect an Owner authorization binds for a Candidate disposition.
+
+    Single source for the Gateway ``nexus_candidate_dispose`` and the self-hosted
+    MCP ``nexus_self_hosted_dispose_candidate`` (#2767): attempt, controller
+    revision, contract, and the exact Candidate commit/tree/state/receipt.
+    """
+    packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+    return {
+        "task_id": task_id,
+        "attempt_id": str(state.get("attempt_id") or ""),
+        "controller_revision": controller_revision,
+        "contract_kind": contract_identity["contract_kind"],
+        "contract_hash": contract_identity["contract_hash"],
+        "task_card_hash": contract_identity["task_card_hash"],
+        "disposition": disposition,
+        "superseded_by": superseded_by,
+        "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),  # pyright: ignore[reportOptionalMemberAccess]
+        "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),  # pyright: ignore[reportOptionalMemberAccess]
+        "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),  # pyright: ignore[reportOptionalMemberAccess]
+        "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),  # pyright: ignore[reportOptionalMemberAccess]
+    }
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value

@@ -379,3 +379,311 @@ def test_unknown_tool_is_jsonrpc_error():
 
     assert response["result"]["isError"] is True
     assert "unknown tool" in response["result"]["content"][0]["text"]
+
+
+SHA_C = "c" * 40
+SHA_D = "d" * 40
+
+
+def _snapshot(task_id, *, attempt="attempt-1", commit=SHA_C):
+    return {
+        "task_id": task_id,
+        "attempt_id": attempt,
+        "controller_revision": "a" * 40,
+        "contract_kind": "TRACKED_TASK_CARD",
+        "task_card_hash": "b" * 64,
+        "contract_hash": "b" * 64,
+        "promotion_packet": {
+            "candidate_commit_sha": commit,
+            "candidate_tree_sha": "e" * 40,
+            "candidate_state_hash": "1" * 64,
+            "verified_receipt_hash": "2" * 64,
+        },
+    }
+
+
+class DisposeService(FakeService):
+    def __init__(self, **snapshot_kwargs):
+        self.snapshot_kwargs = snapshot_kwargs
+        self.disposed = []
+
+    def get_task_snapshot(self, task_id, include_details=False):
+        return _snapshot(task_id, **self.snapshot_kwargs)
+
+    def dispose_candidate(self, task_id, **kwargs):
+        self.disposed.append(task_id)
+        return super().dispose_candidate(task_id, **kwargs)
+
+
+def _dispose_call(server, **extra):
+    arguments = {"task_id": "t1", "disposition": "REJECTED", **extra}
+    return server.handle({
+        "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": "nexus_self_hosted_dispose_candidate", "arguments": arguments},
+    })
+
+
+def _issue_grant(monkeypatch, tmp_path, *, goal, scope, actions):
+    from datetime import datetime, timedelta, timezone
+
+    import nexus.orchestrator.standing_grant_store as sg_store
+    from nexus.contracts.autonomy_goal import RepositoryIdentity, StandingGrantContext
+    from nexus.orchestrator.standing_grant_store import StandingGrantReceipt
+
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id=scope,
+        goal_id=goal,
+        allowed_actions=tuple(actions),
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=30),
+    )
+    sg_store.write_keyed_standing_grant_receipt(
+        StandingGrantReceipt.issue(grant_id=f"grant-{goal}", context=context)
+    )
+
+
+def _error_text(response):
+    assert response["result"]["isError"] is True
+    return json.dumps(response)
+
+
+def test_dispose_candidate_refused_without_owner_authority_args():
+    service = DisposeService()
+    response = _dispose_call(NexusSelfHostedMCPServer(service=service))
+    assert "OWNER_AUTHORITY_KEY_REQUIRED" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_refused_for_agent_identity_without_standing_grant(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", tmp_path / "no-receipt.json")
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        authority_goal_id="agent-goal", authority_coordination_scope_id="agent-thread",
+    )
+    assert "OWNER_AUTHORITY_REQUIRED" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_refused_for_grant_under_another_goal_or_scope(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_REJECT],
+    )
+    for goal, scope in (("goal-b", "scope-a"), ("goal-a", "scope-b")):
+        service = DisposeService()
+        response = _dispose_call(
+            NexusSelfHostedMCPServer(service=service),
+            authority_goal_id=goal, authority_coordination_scope_id=scope,
+        )
+        assert "OWNER_AUTHORITY_REQUIRED" in _error_text(response)
+        assert service.disposed == []
+
+
+def test_dispose_candidate_refused_when_grant_lacks_the_action_class(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_SUPERSEDE],
+    )
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        authority_goal_id="goal-a", authority_coordination_scope_id="scope-a",
+    )
+    assert "OWNER_AUTHORITY_REQUIRED" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_succeeds_with_owner_grant_and_binds_exact_candidate(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_REJECT, AutonomyActionClass.CANDIDATE_SUPERSEDE],
+    )
+    auth_args = {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+    service = DisposeService()
+    response = _dispose_call(NexusSelfHostedMCPServer(service=service), **auth_args)
+    assert response["result"]["isError"] is False
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "REJECTED"
+    assert service.disposed == ["t1"]
+    authorization = payload["owner_authority"]
+    assert authorization["action"] == "CANDIDATE_REJECT"
+    effect = authorization["effect"]
+    assert effect["attempt_id"] == "attempt-1"
+    assert effect["candidate_commit_sha"] == SHA_C
+    assert effect["candidate_state_hash"] == "1" * 64
+    assert effect["verified_receipt_hash"] == "2" * 64
+    assert effect["contract_hash"] == "b" * 64
+
+    # A different Candidate or attempt yields a different bound effect hash.
+    other = _dispose_call(NexusSelfHostedMCPServer(service=DisposeService(commit=SHA_D)), **auth_args)
+    other_attempt = _dispose_call(NexusSelfHostedMCPServer(service=DisposeService(attempt="attempt-2")), **auth_args)
+    hashes = {
+        r["result"]["structuredContent"]["owner_authority"]["effect_hash"]
+        for r in (response, other, other_attempt)
+    }
+    assert len(hashes) == 3
+
+
+def test_dispose_candidate_supersede_requires_successor_and_uses_supersede_action(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_SUPERSEDE],
+    )
+    auth_args = {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+    service = DisposeService()
+    missing = _dispose_call(NexusSelfHostedMCPServer(service=service), disposition="SUPERSEDED", **auth_args)
+    assert "superseded_by is required" in _error_text(missing)
+    ok = _dispose_call(
+        NexusSelfHostedMCPServer(service=service), disposition="SUPERSEDED", superseded_by="t2", **auth_args
+    )
+    assert ok["result"]["isError"] is False
+    assert ok["result"]["structuredContent"]["owner_authority"]["action"] == "CANDIDATE_SUPERSEDE"
+
+
+def _supersede_grant(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_SUPERSEDE],
+    )
+    return {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+
+
+def test_dispose_candidate_uses_the_normalized_successor_for_authority_and_state(monkeypatch, tmp_path):
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+
+    class Recording(DisposeService):
+        def dispose_candidate(self, task_id, **kwargs):
+            self.kwargs = kwargs
+            return super().dispose_candidate(task_id, **kwargs)
+
+    service = Recording()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="  t2  ", **auth_args,
+    )
+    assert response["result"]["isError"] is False
+    assert service.kwargs["superseded_by"] == "t2"
+    assert response["result"]["structuredContent"]["owner_authority"]["effect"]["superseded_by"] == "t2"
+
+
+def test_dispose_candidate_refuses_an_unsafe_successor_before_any_effect(monkeypatch, tmp_path):
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="../escape", **auth_args,
+    )
+    assert "superseded_by must be a stable bounded slug" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_runs_pre_action_guard_with_gateway_inputs(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    seen = {}
+
+    def guard(envelope, *, request, current_head, tool_manifest_hash):
+        seen.update(envelope=envelope, request=request, head=current_head, manifest=tool_manifest_hash)
+        return {"guard": "ok"}
+
+    monkeypatch.setattr(gateway, "pre_action_guard", guard)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="t2", **auth_args,
+    )
+    assert response["result"]["structuredContent"]["guard_receipt"] == {"guard": "ok"}
+    envelope = seen["envelope"]
+    assert envelope.action_type.value == "CANDIDATE_DISPOSE"
+    assert envelope.mutation is True
+    assert envelope.expected_head == "a" * 40 == seen["head"]
+    assert seen["request"] == {}
+    assert seen["manifest"] == gateway.TOOL_MANIFEST_REVISION
+    assert envelope.task_id == "t1"
+
+
+def test_dispose_candidate_refused_when_pre_action_guard_rejects(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway
+    from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+
+    def reject(*_args, **_kwargs):
+        raise LifecycleGuardError("EXPECTED_HEAD_MISMATCH", "mutation expected a different repository HEAD")
+
+    monkeypatch.setattr(gateway, "pre_action_guard", reject)
+    service = DisposeService()
+    response = _dispose_call(
+        NexusSelfHostedMCPServer(service=service),
+        disposition="SUPERSEDED", superseded_by="t2", **auth_args,
+    )
+    assert "EXPECTED_HEAD_MISMATCH" in _error_text(response)
+    assert service.disposed == []
+
+
+def test_dispose_candidate_rejects_unknown_arguments_before_any_effect(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_REJECT],
+    )
+    auth_args = {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+    for extra in ({"force": True}, {"owner_override": "yes"}, {"candidate_commit_sha": SHA_D}):
+        service = DisposeService()
+        response = _dispose_call(NexusSelfHostedMCPServer(service=service), **auth_args, **extra)
+        text = _error_text(response)
+        assert "unknown arguments" in text
+        assert next(iter(extra)) in text
+        assert service.disposed == []
+
+
+def test_dispose_candidate_accepts_exactly_the_five_allowed_arguments(monkeypatch, tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    service = DisposeService()
+    arguments = {"disposition": "SUPERSEDED", "superseded_by": "t2", **auth_args}
+    assert set(arguments) | {"task_id"} == CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    response = _dispose_call(NexusSelfHostedMCPServer(service=service), **arguments)
+    assert response["result"]["isError"] is False
+    assert service.disposed == ["t1"]
+
+
+def test_dispose_candidate_allowed_arguments_match_the_tool_schema_and_gateway():
+    import inspect
+
+    from nexus.orchestrator.self_hosted_task_service import CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    from nexus.orchestrator.unified_mcp_gateway_parts import candidate_ops
+
+    spec = next(
+        tool for tool in NexusSelfHostedMCPServer(service=DisposeService())._tool_specs()
+        if tool["name"] == "nexus_self_hosted_dispose_candidate"
+    )
+    assert set(spec["inputSchema"]["properties"]) == CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    # The Gateway uses the same shared helper rather than its own copy.
+    assert "candidate_dispose_unknown_arguments(arguments)" in inspect.getsource(
+        candidate_ops._CandidateOpsMixin._candidate_dispose
+    )
