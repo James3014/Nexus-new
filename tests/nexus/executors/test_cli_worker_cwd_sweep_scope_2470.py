@@ -168,6 +168,13 @@ def test_run_tagged_process_in_worktree_is_killed(target):
     reaper = threading.Thread(target=tagged.wait, daemon=True)
     reaper.start()
     try:
+        # A real run always registers its start tick (track_run). Without it the
+        # tag scan cannot prove that a same-uid process whose /proc environ is
+        # unreadable (a non-dumpable runner service on GitHub's ubuntu image)
+        # predates the run, so it aborts the sweep as unknown before killing
+        # anything. Register the tick, as production does, and drop the tracker
+        # (it would otherwise track the tagged pid itself: only the tag may find it).
+        cli_worker.track_run(tag, tagged.pid).stop()
         time.sleep(0.2)
 
         class _Empty:  # the tracker saw nothing: only the tag can find it
