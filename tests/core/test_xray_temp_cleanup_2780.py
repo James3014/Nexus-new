@@ -75,3 +75,26 @@ def test_symlinked_private_parent_fails_without_touching_target(tmp_path, monkey
     assert receipt.gate_passed is False
     assert sentinel.read_text() == "unchanged"
     assert list(target.iterdir()) == [sentinel]
+
+
+def test_prune_errors_never_break_run_root_creation(tmp_path, monkeypatch):
+    """Cleanup is best effort: an OSError while pruning still yields a run root."""
+    import nexus.core.capability_executor_registry as registry
+
+    monkeypatch.setattr(registry.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    def boom(_fd):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(registry, "_xray_prune_completed", boom)
+    root = registry._xray_temp_run_root()
+    assert root.is_dir()
+
+
+def test_prune_is_skipped_not_fatal_without_symlink_safe_rmtree(tmp_path, monkeypatch):
+    import nexus.core.capability_executor_registry as registry
+
+    monkeypatch.setattr(registry.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(registry.shutil.rmtree, "avoids_symlink_attacks", False, raising=False)
+    root = registry._xray_temp_run_root()
+    assert root.is_dir()

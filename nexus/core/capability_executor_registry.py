@@ -54,7 +54,8 @@ def _xray_private_dir(name: str, *, parent_fd: int | None = None, create: bool =
 def _xray_prune_completed(parent_fd: int) -> None:
     """Delete only old, marked runs beneath verified private Gateway dirs."""
     if not shutil.rmtree.avoids_symlink_attacks:
-        raise RuntimeError("xray_safe_prune_unavailable")
+        logger.warning("xray temp prune skipped: platform rmtree is not symlink-safe")
+        return
     cutoff = time.time() - _XRAY_RETENTION_SECONDS
     for gateway_name in os.listdir(parent_fd):
         if not gateway_name.startswith("gateway-"):
@@ -102,7 +103,10 @@ def _xray_temp_run_root() -> Path:
     parent = Path(tempfile.gettempdir()) / f"nexus-xray-runs-{os.getuid()}"
     parent_fd = _xray_private_dir(str(parent))
     try:
-        _xray_prune_completed(parent_fd)
+        try:
+            _xray_prune_completed(parent_fd)
+        except OSError as exc:  # best effort: cleanup must never break a scan
+            logger.warning("xray temp prune skipped: %s", exc)
         gateway_name = f"gateway-{os.getpid()}"
         gateway_fd = _xray_private_dir(gateway_name, parent_fd=parent_fd)
         try:
