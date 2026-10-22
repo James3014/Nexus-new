@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -161,6 +162,11 @@ def test_run_tagged_process_in_worktree_is_killed(target):
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    # Reap the child as soon as it dies, as init does for a real escaped
+    # descendant: on Linux an unreaped zombie child of the test process keeps
+    # its /proc entry and would read as a surviving tagged process.
+    reaper = threading.Thread(target=tagged.wait, daemon=True)
+    reaper.start()
     try:
         time.sleep(0.2)
 
@@ -176,7 +182,7 @@ def test_run_tagged_process_in_worktree_is_killed(target):
             )
             is True
         )
-        tagged.wait(timeout=5)
+        reaper.join(timeout=5)
         assert tagged.returncode == -signal.SIGKILL
     finally:
         cli_worker.release_run(tag)
