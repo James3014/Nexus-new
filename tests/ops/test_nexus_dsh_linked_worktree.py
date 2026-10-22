@@ -109,7 +109,14 @@ def _sandboxed(workspace: Path, *argv: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _prepare(source: Path, target: Path, base: str, *, repository: str = REPO):
+def _prepare(
+    source: Path,
+    target: Path,
+    base: str,
+    *,
+    repository: str = REPO,
+    source_flag: str = "--source-repo-root",
+):
     return subprocess.run(
         [
             sys.executable,
@@ -117,7 +124,7 @@ def _prepare(source: Path, target: Path, base: str, *, repository: str = REPO):
             "prepare-standalone",
             "--repository",
             repository,
-            "--source-repo-root",
+            source_flag,
             str(source),
             "--base-revision",
             base,
@@ -444,6 +451,53 @@ def test_prepare_standalone_rejects_temp_targets_and_temp_exposed_sources(
         "STANDALONE_SOURCE_EXPOSED_UNDER_DSH_TEMP_GRANT"
     )
     assert not (dsh_non_temp_path / "c2").exists() and not (dsh_non_temp_path / "c3").exists()
+
+
+def test_prepare_standalone_accepts_dedicated_source_despite_other_temp_worktree(
+    tmp_path: Path, dsh_non_temp_path: Path
+) -> None:
+    help_text = subprocess.run(
+        [sys.executable, str(SCRIPT), "prepare-standalone", "--help"],
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert "--source-repo SOURCE_REPO_ROOT" in help_text
+
+    lay = _layout(dsh_non_temp_path)
+    main, base = Path(lay["main"]), str(lay["base"])
+    temp_wt = tmp_path / "other-session"
+    _git(main, "worktree", "add", "-q", "--detach", str(temp_wt), base)
+    dedicated = dsh_non_temp_path / "dedicated-source"
+    _git(dsh_non_temp_path, "clone", "-q", "--no-local", str(main), str(dedicated))
+    _git(dedicated, "remote", "set-url", "origin", ORIGIN)
+    target = dsh_non_temp_path / "standalone"
+
+    blocked = _prepare(main, target, base)
+    assert _blocked_code(blocked) == "STANDALONE_SOURCE_EXPOSED_UNDER_DSH_TEMP_GRANT"
+    assert str(temp_wt.resolve()) in _last_json(blocked)["detail"]
+    assert not target.exists()
+
+    proc = _prepare(dedicated, target, base, source_flag="--source-repo")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    receipt = _last_json(proc)
+    assert receipt["source_repo_root"] == str(dedicated.resolve())
+    assert str(temp_wt.resolve()) not in receipt["source_family_paths"]
+    assert (target / ".git").is_dir()
+    assert _git(target, "rev-parse", "HEAD").stdout.strip() == base
+
+
+def test_prepare_standalone_original_source_flag_remains_supported(
+    dsh_non_temp_path: Path,
+) -> None:
+    lay = _layout(dsh_non_temp_path)
+    target = dsh_non_temp_path / "standalone"
+
+    proc = _prepare(Path(lay["active"]), target, str(lay["base"]))
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _last_json(proc)["source_repo_root"] == str(Path(lay["active"]).resolve())
 
 
 def test_git_identity_environment_override_fails_closed(
