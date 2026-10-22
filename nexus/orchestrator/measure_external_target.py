@@ -28,11 +28,12 @@ Validation fails closed with a stable ``EXTERNAL_TARGET_*`` code:
 * the work tree is clean (tracked and untracked).  The Target lease refuses a
   dirty Controller anyway (``WorktreeManager._verify_controller``), so a dirty
   external repository is refused here, before any planner or provider work;
-* no submodule (``.gitmodules``, a gitlink, or a non-empty ``modules/``)
-  and no git filter can run (#2749): the repository config defines no
-  ``filter.*`` driver (nor a ``diff.*.textconv``/``command`` driver), no
-  ``.gitattributes`` in the base tree declares ``filter=`` and no
-  ``info/attributes`` file is non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
+* no submodule (a gitlink, a ``.gitmodules`` that is not empty, or a
+  non-empty ``modules/``) and no git filter can run (#2749, #2813): the
+  repository config defines no ``filter.*`` driver (nor a
+  ``diff.*.textconv``/``command`` driver), no ``.gitattributes`` in the
+  base tree declares ``filter=`` and no ``info/attributes`` file is
+  non-empty (``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT``).
   This is checked before the first ``git status``, since status runs clean
   filters.
 
@@ -605,10 +606,11 @@ def _hardened_output(repo_root: Path, *args: str) -> bytes:
 def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
     """A refusal code when a git filter could run, else ``None``.
 
-    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a
-    ``.gitmodules`` or a gitlink, or the common dir has a non-empty
-    ``modules/`` (a submodule's own config and attributes are not checked
-    here, so a repository with submodules is refused outright).
+    ``EXTERNAL_TARGET_SUBMODULE_PRESENT`` when the base tree has a gitlink
+    or a ``.gitmodules`` with any content other than whitespace, or
+    the common dir has a non-empty ``modules/`` (a submodule's own config
+    and attributes are not checked here, so a repository with submodules is
+    refused outright).
     ``EXTERNAL_TARGET_FILTER_DRIVER_PRESENT`` otherwise, as follows.
 
     The repository refuses when its config defines a ``filter.*`` (or diff
@@ -643,10 +645,26 @@ def filter_driver_finding(repo_root: Path, base_revision: str) -> Optional[str]:
         for entry in listing.split(b"\0"):
             meta, _, name = entry.partition(b"\t")
             fields = meta.split()
-            # A gitlink or a .gitmodules: git would recurse into a submodule
-            # and run that repository's filters (#2749 review B2).
-            if (len(fields) == 3 and fields[1] == b"commit") or name == b".gitmodules":
+            # A gitlink (mode 160000 / commit) or a .gitmodules with content
+            # (#2749, #2813): git would recurse into a submodule and run that
+            # repository's filters.  Only an empty or whitespace-only
+            # .gitmodules is accepted: parsing git config syntax by hand
+            # misses inline keys, continuations, bare CRs and a BOM (#2856
+            # review), and without a gitlink nothing more is worth allowing.
+            if len(fields) == 3 and (fields[1] == b"commit" or fields[0] == b"160000"):
                 return SUBMODULE_PRESENT
+            if name == b".gitmodules":
+                if len(fields) != 3 or fields[1] != b"blob":
+                    return SUBMODULE_PRESENT
+                try:
+                    blob = _hardened_output(
+                        repo_root, "cat-file", "blob", fields[2].decode("ascii")
+                    )
+                except (ExternalGitRefused, OSError, UnicodeDecodeError):
+                    return SUBMODULE_PRESENT
+                if blob.strip():
+                    return SUBMODULE_PRESENT
+                continue
             if name.rsplit(b"/", 1)[-1] != b".gitattributes":
                 continue
             if len(fields) != 3 or fields[1] != b"blob":
