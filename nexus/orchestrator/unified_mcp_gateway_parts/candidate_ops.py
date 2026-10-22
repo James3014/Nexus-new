@@ -38,7 +38,10 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
 )
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
-from nexus.orchestrator.self_hosted_task_service import candidate_dispose_effect
+from nexus.orchestrator.self_hosted_task_service import (
+    candidate_dispose_effect,
+    candidate_dispose_unknown_arguments,
+)
 
 if TYPE_CHECKING:
     # Typing only: the mutation-admission (and, through it, worker-candidate / model-probe /
@@ -501,13 +504,9 @@ class _CandidateOpsMixin(_CandidateOpsBase):
         return payload
 
     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        allowed_keys = {
-            "task_id", "disposition", "superseded_by",
-            "authority_goal_id", "authority_coordination_scope_id",
-        }
-        unknown_keys = set(arguments) - allowed_keys
+        unknown_keys = candidate_dispose_unknown_arguments(arguments)
         if unknown_keys:
-            raise _gateway().GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+            raise _gateway().GatewayInputError(f"unknown arguments: {', '.join(unknown_keys)}")
         owner_key = self._owner_effect_key(arguments)
         task_id = _gateway()._text(arguments.get("task_id"), "task_id")
         disposition = str(arguments.get("disposition") or "").strip().upper()

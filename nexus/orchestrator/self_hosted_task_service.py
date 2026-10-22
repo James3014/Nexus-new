@@ -393,6 +393,23 @@ def resolve_contract_identity(
     }
 
 
+CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS = frozenset({
+    "task_id",
+    "disposition",
+    "superseded_by",
+    "authority_goal_id",
+    "authority_coordination_scope_id",
+})
+"""The only arguments a Candidate disposition accepts, on the Gateway
+``nexus_candidate_dispose`` and the self-hosted MCP
+``nexus_self_hosted_dispose_candidate`` alike (#2767)."""
+
+
+def candidate_dispose_unknown_arguments(arguments: Mapping[str, Any]) -> tuple[str, ...]:
+    """Sorted argument names outside :data:`CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS`."""
+    return tuple(sorted(str(name) for name in set(arguments) - CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS))
+
+
 def candidate_dispose_effect(
     state: Mapping[str, Any],
     *,

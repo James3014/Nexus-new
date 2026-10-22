@@ -328,9 +328,15 @@ class NexusSelfHostedMCPServer:
         from nexus.orchestrator import unified_mcp_gateway as gateway
         from nexus.orchestrator.self_hosted_task_service import (
             candidate_dispose_effect,
+            candidate_dispose_unknown_arguments,
             resolve_contract_identity,
         )
 
+        # Same closed argument set as the Gateway (shared helper), checked
+        # before any authority lookup or disposal.
+        unknown_keys = candidate_dispose_unknown_arguments(arguments)
+        if unknown_keys:
+            raise ValueError(f"unknown arguments: {', '.join(unknown_keys)}")
         disposition = str(arguments.get("disposition") or "").strip().upper()
         if disposition not in {"REJECTED", "SUPERSEDED"}:
             raise ValueError("disposition must be REJECTED or SUPERSEDED")

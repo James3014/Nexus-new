@@ -641,3 +641,49 @@ def test_dispose_candidate_refused_when_pre_action_guard_rejects(monkeypatch, tm
     )
     assert "EXPECTED_HEAD_MISMATCH" in _error_text(response)
     assert service.disposed == []
+
+
+def test_dispose_candidate_rejects_unknown_arguments_before_any_effect(monkeypatch, tmp_path):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass
+
+    _issue_grant(
+        monkeypatch, tmp_path, goal="goal-a", scope="scope-a",
+        actions=[AutonomyActionClass.CANDIDATE_REJECT],
+    )
+    auth_args = {"authority_goal_id": "goal-a", "authority_coordination_scope_id": "scope-a"}
+    for extra in ({"force": True}, {"owner_override": "yes"}, {"candidate_commit_sha": SHA_D}):
+        service = DisposeService()
+        response = _dispose_call(NexusSelfHostedMCPServer(service=service), **auth_args, **extra)
+        text = _error_text(response)
+        assert "unknown arguments" in text
+        assert next(iter(extra)) in text
+        assert service.disposed == []
+
+
+def test_dispose_candidate_accepts_exactly_the_five_allowed_arguments(monkeypatch, tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+
+    auth_args = _supersede_grant(monkeypatch, tmp_path)
+    service = DisposeService()
+    arguments = {"disposition": "SUPERSEDED", "superseded_by": "t2", **auth_args}
+    assert set(arguments) | {"task_id"} == CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    response = _dispose_call(NexusSelfHostedMCPServer(service=service), **arguments)
+    assert response["result"]["isError"] is False
+    assert service.disposed == ["t1"]
+
+
+def test_dispose_candidate_allowed_arguments_match_the_tool_schema_and_gateway():
+    import inspect
+
+    from nexus.orchestrator.self_hosted_task_service import CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    from nexus.orchestrator.unified_mcp_gateway_parts import candidate_ops
+
+    spec = next(
+        tool for tool in NexusSelfHostedMCPServer(service=DisposeService())._tool_specs()
+        if tool["name"] == "nexus_self_hosted_dispose_candidate"
+    )
+    assert set(spec["inputSchema"]["properties"]) == CANDIDATE_DISPOSE_ALLOWED_ARGUMENTS
+    # The Gateway uses the same shared helper rather than its own copy.
+    assert "candidate_dispose_unknown_arguments(arguments)" in inspect.getsource(
+        candidate_ops._CandidateOpsMixin._candidate_dispose
+    )
