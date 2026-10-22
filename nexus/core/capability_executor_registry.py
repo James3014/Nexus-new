@@ -7,6 +7,9 @@ import json
 import logging
 import os
 import re
+import secrets
+import shutil
+import stat
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -19,6 +22,102 @@ from nexus.core.layer_ports import registered_ports, resolve_port
 from nexus.core.state_root import persistent_state_root
 
 logger = logging.getLogger(__name__)
+
+_XRAY_RETENTION_SECONDS = 7 * 24 * 60 * 60
+
+
+def _xray_private_dir(name: str, *, parent_fd: int | None = None, create: bool = True) -> int:
+    """Open an owned, private directory without following its final component."""
+    if create:
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(name, flags, dir_fd=parent_fd)
+    try:
+        mode = os.fstat(fd)
+        entry = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(entry.st_mode)
+            or (entry.st_dev, entry.st_ino) != (mode.st_dev, mode.st_ino)
+            or mode.st_uid != os.getuid()
+            or stat.S_IMODE(mode.st_mode) != 0o700
+        ):
+            raise RuntimeError("unsafe_xray_run_root")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _xray_prune_completed(parent_fd: int) -> None:
+    """Delete only old, marked runs beneath verified private Gateway dirs."""
+    if not shutil.rmtree.avoids_symlink_attacks:
+        logger.warning("xray temp prune skipped: platform rmtree is not symlink-safe")
+        return
+    cutoff = time.time() - _XRAY_RETENTION_SECONDS
+    for gateway_name in os.listdir(parent_fd):
+        if not gateway_name.startswith("gateway-"):
+            continue
+        try:
+            gateway_fd = _xray_private_dir(gateway_name, parent_fd=parent_fd, create=False)
+        except (OSError, RuntimeError):
+            continue
+        try:
+            for run_name in os.listdir(gateway_fd):
+                if not run_name.startswith("run-"):
+                    continue
+                try:
+                    run_fd = _xray_private_dir(run_name, parent_fd=gateway_fd, create=False)
+                except (OSError, RuntimeError):
+                    continue
+                try:
+                    marker = os.stat("done", dir_fd=run_fd, follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(marker.st_mode)
+                        or marker.st_uid != os.getuid()
+                        or marker.st_mtime > cutoff
+                    ):
+                        continue
+                    # The rename and inode check bind the marker check to the directory
+                    # subsequently removed. Other Gateway runs never use the prune name.
+                    prune_name = f"prune-{secrets.token_hex(16)}"
+                    os.rename(run_name, prune_name, src_dir_fd=gateway_fd, dst_dir_fd=gateway_fd)
+                    renamed = os.stat(prune_name, dir_fd=gateway_fd, follow_symlinks=False)
+                    opened = os.fstat(run_fd)
+                    if (renamed.st_dev, renamed.st_ino) != (opened.st_dev, opened.st_ino):
+                        continue
+                    shutil.rmtree(prune_name, dir_fd=gateway_fd)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    logger.warning("xray old run could not be pruned", exc_info=True)
+                finally:
+                    os.close(run_fd)
+        finally:
+            os.close(gateway_fd)
+
+
+def _xray_temp_run_root() -> Path:
+    parent = Path(tempfile.gettempdir()) / f"nexus-xray-runs-{os.getuid()}"
+    parent_fd = _xray_private_dir(str(parent))
+    try:
+        try:
+            _xray_prune_completed(parent_fd)
+        except OSError as exc:  # best effort: cleanup must never break a scan
+            logger.warning("xray temp prune skipped: %s", exc)
+        gateway_name = f"gateway-{os.getpid()}"
+        gateway_fd = _xray_private_dir(gateway_name, parent_fd=parent_fd)
+        try:
+            run_name = f"run-{secrets.token_hex(16)}"
+            os.mkdir(run_name, 0o700, dir_fd=gateway_fd)
+            return parent / gateway_name / run_name
+        finally:
+            os.close(gateway_fd)
+    finally:
+        os.close(parent_fd)
+
 
 CapabilityExecutor = Callable[[CapabilityExecutionPlan, str], CapabilityReceipt]
 
@@ -4097,6 +4196,7 @@ def _xray_findings(scanned: Any) -> list[str]:
 
 def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
+    temp_run_root: Path | None = None
     try:
         from nexus.services.xray_service import XRayService
 
@@ -4106,7 +4206,8 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
             # file in a candidate worktree fails the candidate's allowed-scope check (#2688).
             updated = {**constraints, "project_root": constraints["workspace_root"]}
             if not (constraints.get("run_root") or constraints.get("runtime_root")):
-                updated["run_root"] = tempfile.mkdtemp(prefix="nexus-xray-")
+                temp_run_root = _xray_temp_run_root()
+                updated["run_root"] = str(temp_run_root)
             plan = dataclasses.replace(plan, constraints=updated)
         project_root, run_root, run_id = _resolve_run_root(plan)
         report_path = run_root / "xray_report_full.md"
@@ -4172,6 +4273,17 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
                 error=str(exc)[:300],
             ),
         )
+    finally:
+        if temp_run_root is not None:
+            try:
+                marker_fd = os.open(
+                    temp_run_root / "done",
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                )
+                os.close(marker_fd)
+            except OSError:
+                logger.warning("xray completion marker could not be written", exc_info=True)
 
 
 def _exec_swarm_quiet_moment(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
