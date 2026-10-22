@@ -1887,6 +1887,44 @@ def test_ack_unclean_sweep_refuses_an_open_file_in_the_target_from_elsewhere(
         writer.wait(timeout=5)
 
 
+def test_ack_unclean_sweep_refuses_when_an_unreadable_subdir_hides_a_writer(
+    tmp_path, monkeypatch, seatbelt_on
+):
+    """A chmod-000 subdirectory makes lsof skip it; its warning must refuse the ack."""
+    journal, operation_id, kwargs = _held_operation(tmp_path, monkeypatch)
+    monkeypatch.setattr(boundary_mod.cli_worker, "_pids_with_cwd_under", _REAL_CWD_SCAN)
+    hidden_dir = Path(kwargs["cwd"]) / "hidden"
+    hidden_dir.mkdir()
+    victim = hidden_dir / "hidden.log"
+    writer = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; f = open(sys.argv[1], 'a'); time.sleep(60)",
+            str(victim),
+        ],
+        cwd="/",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not victim.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.2)
+        hidden_dir.chmod(0)
+        with pytest.raises(dispatch.AgyOperationJournalError, match="ACK_UNCLEAN_SWEEP_"):
+            dispatch._ack_unclean_sweep_operation(journal, operation_id)
+        record = journal.read(operation_id)
+        assert "descendant_sweep_operator_ack" not in record
+        assert record["phase"] == "RECONCILE_REQUIRED"
+    finally:
+        hidden_dir.chmod(0o755)
+        os.kill(writer.pid, 9)
+        writer.wait(timeout=5)
+
+
 def test_ack_unclean_sweep_refuses_when_the_open_file_scan_cannot_run(
     tmp_path, monkeypatch, seatbelt_on
 ):

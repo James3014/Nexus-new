@@ -6606,7 +6606,7 @@ def _open_file_holders(roots: list[str], exclude: set[int]) -> set[int] | None:
     for root in roots:
         try:
             completed = subprocess.run(
-                ["lsof", "-nPw", "-a", "-u", str(os.getuid()), "-F", "p", "+D", root],
+                ["lsof", "-nP", "-a", "-u", str(os.getuid()), "-F", "p", "+D", root],
                 env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C", "LANG": "C"},
                 capture_output=True,
                 text=True,
