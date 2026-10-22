@@ -316,6 +316,24 @@ def _run_operation(
     )
     if provider != "codex":
         return _run_operation_inner(**kwargs)
+    # TODO(#2875): once kill_unproven_cwd_matches lands, also pass
+    # kill_unproven_cwd_matches=False to the sweep.
+    cwd_refusal = _codex_cwd_refusal(cwd)
+    if cwd_refusal is not None:
+        Path(prompt_file).unlink(missing_ok=True)
+        _journal(provider, operation_root).mark_terminal(
+            operation_id,
+            status="FAILED",
+            exit_code=None,
+            failure_kind=cwd_refusal,
+            cwd=cwd,
+            reconciliation={
+                "at": utc_now(),
+                "result": "NO_PROVIDER_PROCESS_STARTED",
+                "retry_permitted": False,
+            },
+        )
+        return 1
     with tempfile.TemporaryDirectory(prefix="nexus-codex-home-") as home_name:
         run_home = Path(home_name)
         refusal = _codex_boundary.materialize_codex_home(run_home)
@@ -334,7 +352,60 @@ def _run_operation(
                 },
             )
             return 1
-        return _run_operation_inner(**kwargs, codex_home=run_home)
+        code = _run_operation_inner(**kwargs, codex_home=run_home)
+        # Codex refresh tokens rotate: copy a refreshed auth.json back to the
+        # host, only on a clean run (same conditions as CodexCliExecutor.invoke).
+        if code == 0 and _codex_run_clean(provider, operation_id, operation_root):
+            _codex_boundary.write_back_refreshed_auth(run_home)
+        return code
+
+
+def _git_out(cwd: Path, *args: str) -> str | None:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _codex_cwd_refusal(cwd: str) -> str | None:
+    """Refuse a codex cwd that the descendant sweep could not safely own.
+
+    The sweep kills processes whose cwd is under ``cwd``; only a linked git
+    worktree (or scratch clone) is disposable.  HOME, its ancestors, non-git
+    directories and main clones are refused.
+    """
+    path = Path(cwd).resolve()
+    home = Path.home().resolve()
+    if path == home or path in home.parents:
+        return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    if _git_out(path, "rev-parse", "--show-toplevel") is None:
+        return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    git_dir = _git_out(path, "rev-parse", "--path-format=absolute", "--git-dir")
+    common = _git_out(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if git_dir is None or common is None:
+        return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    if Path(git_dir).resolve() == Path(common).resolve():
+        # Main clone (not a linked worktree) unless it lives outside ~/workspace
+        # as an explicit scratch clone.
+        workspace = (home / "workspace").resolve()
+        if workspace == path or workspace in path.parents:
+            return "CODEX_CWD_NOT_DISPOSABLE_WORKTREE"
+    return None
+
+
+def _codex_run_clean(provider: str, operation_id: str, operation_root: Path) -> bool:
+    try:
+        stdout = _journal(provider, operation_root).stdout_path(operation_id).read_bytes()
+    except OSError:
+        return False
+    return not _codex_boundary.jsonl_denial(stdout)
 
 
 def _run_operation_inner(
