@@ -447,6 +447,7 @@ def compute_publication_id(
 
 
 _REASON_CODE_RE = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
+_TRANSPORT_ERROR_CODE_RE = re.compile(r"(?:OPENCLI|OPEN_SWE)_[A-Z0-9_]{1,80}")
 _REASON_DETAIL_KEYS = ("kind", "ref", "source_bytes", "remaining_bytes", "max_bytes", "reason")
 
 
@@ -472,6 +473,9 @@ def _error_reason_fields(exc: BaseException) -> dict[str, Any]:
     }
     if detail:
         fields["error_detail"] = detail
+    transport_code = exc.detail.get("transport_error_code")
+    if isinstance(transport_code, str) and _TRANSPORT_ERROR_CODE_RE.fullmatch(transport_code):
+        fields["transport_error_code"] = transport_code
     return fields
 
 

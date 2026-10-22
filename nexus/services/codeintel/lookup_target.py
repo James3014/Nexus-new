@@ -20,7 +20,8 @@ Directory scopes (#2721, #2786).  An allowed entry ending in exactly one ``/``
 * hidden names (``.*``), ``__pycache__`` and test code are never entered or read
   (names compared case-insensitively, since APFS is case-insensitive).
   Test code is a directory named ``tests``, ``test`` or ``testing`` and a file
-  named ``test_*.py``, ``*_test.py`` or ``conftest.py``; a directory entry that
+  named ``test_*.py``, ``test.py``, ``tests.py``, ``*_test.py``, ``*_tests.py`` or
+  ``conftest.py``; a directory entry that
   itself names such a directory is ignored.  Tests are not the lookup target,
   and hidden tests must never be read even when present;
 * the walk stops at ``MAX_WALK_FILES`` candidate files and ``MAX_WALK_DIRS``
@@ -109,7 +110,9 @@ def _skipped_file(name: str) -> bool:
         folded.startswith(".")
         or not name.endswith(".py")
         or folded.startswith("test_")
+        or folded in {"test.py", "tests.py"}
         or folded.endswith("_test.py")
+        or folded.endswith("_tests.py")
         or folded == "conftest.py"
     )
 
@@ -194,7 +197,7 @@ def _read_inside(
         fds.append(os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
         for part in parts[:-1]:
             fds.append(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1]))
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fds[-1])
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fds[-1])
         fds.append(fd)
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:

@@ -503,6 +503,45 @@ def test_sidecar_transport_uncertainty_is_reconciliation_not_retry(tmp_path):
     assert attempt["retry_safe"] is False
 
 
+def _unknown_attempt(tmp_path, error_code):
+    class UnknownTransport:
+        def invoke(self, prompt):
+            return TransportResult(
+                "OPEN_SWE_OUTCOME_UNKNOWN",
+                outcome_unknown=True,
+                retry_safe=False,
+                error_code=error_code,
+            )
+
+    sidecar = ExternalIntelligenceSidecar(
+        transport=UnknownTransport(), store=ExternalIntelligenceStore(tmp_path)
+    )
+    with pytest.raises(ExternalIntelligenceError) as excinfo:
+        sidecar.analyze(record(), sources())
+    request, _ = request_and_pack()
+    attempt = json.loads((tmp_path / "attempts" / f"{request['request_sha256']}.json").read_text())
+    return attempt, excinfo.value
+
+
+def test_sidecar_keeps_bounded_transport_error_code_in_attempt(tmp_path):
+    attempt, exc = _unknown_attempt(tmp_path, "OPENCLI_WEB_DURABLE_STATE_UNSAFE")
+    assert str(exc) == "INTELLIGENCE_RECONCILIATION_REQUIRED"
+    assert exc.detail == {"transport_error_code": "OPENCLI_WEB_DURABLE_STATE_UNSAFE"}
+    assert attempt["transport_error_code"] == "OPENCLI_WEB_DURABLE_STATE_UNSAFE"
+    assert attempt["transport_status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["retry_safe"] is False
+
+
+@pytest.mark.parametrize("bad", ["free text here", "lowercase_code", "OTHER_PREFIX_X", ""])
+def test_sidecar_drops_invalid_transport_error_code(tmp_path, bad):
+    attempt, exc = _unknown_attempt(tmp_path, bad)
+    assert "transport_error_code" not in attempt
+    assert exc.detail == {}
+    assert attempt["state"] == "OUTCOME_UNKNOWN"
+    assert attempt["transport_status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+
+
 def test_prompt_requires_required_properties_and_forbidden_behavior():
     request, pack = request_and_pack()
     prompt = build_prompt(request, pack)

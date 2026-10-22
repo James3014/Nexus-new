@@ -370,6 +370,9 @@ def test_directory_scope_test_exclusion_ignores_case(tmp_path: Path) -> None:
         "pkg/Conftest.py",
         "pkg/Test_foo.py",
         "pkg/foo_TEST.py",
+        "pkg/Test.py",
+        "pkg/Tests.py",
+        "pkg/foo_Tests.py",
     ):
         _write(tmp_path, rel, "def secret_parser():\n    return 1\n")
 
@@ -452,3 +455,96 @@ def test_explicit_file_is_read_before_a_large_directory_fills_the_budget(
     found = derive_codeintel_lookup("parse widget config", ["pkg/", "target.py"], tmp_path)
 
     assert found == {"target_symbol": "target.parse_widget_config", "search_paths": ["target.py"]}
+
+
+def _call_with_timeout(fn, fifo: Path, timeout: float = 5.0):
+    """Run ``fn`` in a thread; a blocked FIFO open is released by a writer afterwards."""
+    import os
+    import threading
+
+    box: dict[str, object] = {}
+
+    def run() -> None:
+        box["value"] = fn()
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    blocked = worker.is_alive()
+    if blocked:  # free the stuck reader so the test process does not leak a thread
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+        worker.join(2)
+    assert not blocked, "opening a FIFO blocked: O_NONBLOCK is missing"
+    return box["value"]
+
+
+def test_fifo_in_allowed_files_does_not_block(tmp_path: Path) -> None:
+    import os
+
+    from nexus.services.codeintel import lookup_target
+
+    (tmp_path / "pkg").mkdir()
+    fifo = tmp_path / "pkg/fifo.py"
+    os.mkfifo(fifo)
+
+    found = _call_with_timeout(
+        lambda: lookup_target.derive_codeintel_lookup("fifo", ["pkg/fifo.py"], tmp_path), fifo
+    )
+
+    assert found == {}
+
+
+def test_fifo_swapped_in_after_directory_listing_does_not_block(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The listing only returns regular files, so simulate the scandir->open swap race:
+    the listing reports ``fifo.py`` although the entry is a FIFO when it is opened."""
+    import os
+
+    from nexus.services.codeintel import lookup_target
+
+    (tmp_path / "pkg").mkdir()
+    fifo = tmp_path / "pkg/fifo.py"
+    os.mkfifo(fifo)
+    monkeypatch.setattr(lookup_target, "_list_inside", lambda root, parts: ([], ["fifo.py"]))
+
+    found = _call_with_timeout(
+        lambda: lookup_target.derive_codeintel_lookup("fifo", ["pkg/"], tmp_path), fifo
+    )
+
+    assert found == {}
+
+
+def test_directory_entry_cap_boundary_at_4096(tmp_path: Path) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    assert lookup_target.MAX_DIR_ENTRIES == 4096
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    for number in range(4096):
+        (pkg / f"m{number:04d}.py").touch()
+
+    at_limit = lookup_target._list_inside(tmp_path, ("pkg",))
+    assert at_limit is not None and len(at_limit[1]) == 4096
+
+    (pkg / "m4096.py").touch()
+    assert lookup_target._list_inside(tmp_path, ("pkg",)) is None
+
+
+def test_directory_entry_cap_skips_an_oversized_directory_in_a_scope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from nexus.services.codeintel import lookup_target
+
+    monkeypatch.setattr(lookup_target, "MAX_DIR_ENTRIES", 2)
+    _write(tmp_path, "pkg/a.py", "def alpha():\n    return 1\n")
+    _write(tmp_path, "pkg/b.py", "def bravo():\n    return 2\n")
+
+    found = lookup_target.derive_codeintel_lookup("alpha", ["pkg/"], tmp_path)
+    assert found["target_symbol"] == "pkg.a.alpha"
+
+    _write(tmp_path, "pkg/c.py", "def charlie():\n    return 3\n")
+    assert lookup_target.derive_codeintel_lookup("alpha", ["pkg/"], tmp_path) == {}
