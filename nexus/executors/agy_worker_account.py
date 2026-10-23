@@ -1082,6 +1082,15 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
         return self._worker_verdict == "CLEAN"
 
+    @property
+    def sweep_verdict_clean(self) -> bool:
+        """The recorded verdict, without running a sweep (#2888 lease release).
+
+        True when nothing launched or the run-once sweep finished clean; False
+        when it was unclean, raised before recording a verdict, or never ran.
+        """
+        return not self._launched or self._swept is True
+
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
         if self._launched:

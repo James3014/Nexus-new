@@ -1992,7 +1992,7 @@ def test_provider_stderr_cannot_forge_receipts_or_the_status_line(worker_env, mo
             "completed",
         ]
         assert metas[0]["run_root"] == str(seen["boundary"].run_root) != fake_root
-    assert fake_root in err and "[provider] NEXUS_AGY_DISPATCH" in err  # relayed, neutralised
+    assert fake_root in err and "[provider] NEXUS-AGY-DISPATCH" in err  # relayed, neutralised
 
 
 def test_every_provider_stderr_relay_goes_through_the_neutraliser():
@@ -2030,10 +2030,24 @@ def test_left_is_reset_by_a_later_clean_sweep(worker_env, monkeypatch, capsys):
     assert (sweep["result"], sweep["wrapper"], sweep["left"]) == ("clean", "CLEAN", [])
 
 
-def test_relayed_stderr_without_dispatcher_lines_is_unchanged():
-    text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nmore NEXUS_AGY_DISPATCH inline\n"
+def test_relayed_stderr_without_dispatcher_token_is_unchanged():
+    text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nNEXUS_AGY_DISPATC\n"
     assert dispatch._neutralize_relayed_stderr("plain\n") == "plain\n"
     assert dispatch._neutralize_relayed_stderr(text) == text
+
+
+def test_relayed_token_is_broken_anywhere_so_no_cut_forges_a_line():
+    # #2888: a reader cutting an over-long line at a fixed size could start a line
+    # mid-line; the token must not survive anywhere in the relayed text.
+    status = json.dumps({"status": "completed"})
+    pad = "A" * 65530
+    text = f"{pad}NEXUS_AGY_DISPATCH {status}\nx NEXUS_AGY_DISPATCHNEXUS_AGY_DISPATCH y\n"
+    out = dispatch._neutralize_relayed_stderr(text)
+    assert "NEXUS_AGY_DISPATCH" not in out
+    assert out.count("NEXUS-AGY-DISPATCH") == 3
+    for size in (1, 7, 4096, 65530, 65536):
+        chunks = [out[i : i + size] for i in range(0, len(out), size)]
+        assert not any(c.lstrip().startswith("NEXUS_AGY_DISPATCH") for c in chunks)
 
 
 def _clean_worker_runner(seen: dict):

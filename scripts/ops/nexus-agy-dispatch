@@ -2605,13 +2605,20 @@ def _neutralize_relayed_stderr(err: str) -> str:
     receipts. Every piece that would start a line for any reader (split on any
     line boundary ``str.splitlines`` knows, leading blanks ignored) and begins
     like a dispatcher line gets a prefix. Classification still reads the raw text.
+
+    A reader that cuts an over-long line at a fixed buffer size can start a line
+    anywhere inside it, so the token is also broken wherever it appears
+    (``NEXUS_AGY_DISPATCH`` -> ``NEXUS-AGY-DISPATCH``, #2888): no cut of the
+    relayed text can begin like a dispatcher line.  One pass is complete: the
+    token has no self-overlap and the replacement cannot complete it.
     """
     if "NEXUS_AGY_DISPATCH" not in err:
         return err
-    return "".join(
+    prefixed = "".join(
         "[provider] " + piece if piece.lstrip().startswith("NEXUS_AGY_DISPATCH") else piece
         for piece in err.splitlines(keepends=True)
     )
+    return prefixed.replace("NEXUS_AGY_DISPATCH", "NEXUS-AGY-DISPATCH")
 
 
 def _agy_dispatch_boundary() -> Any:
@@ -5495,11 +5502,9 @@ def dispatch_run(
                                 # #2888: cleanup ran the (run-once) sweep.  Anything
                                 # but a proven clean verdict, including a sweep that
                                 # raised, keeps this lease claim unreleased.
-                                try:
-                                    worker_swept_clean = bool(write_boundary.sweep())
-                                except BaseException:
-                                    worker_swept_clean = False
-                                if not worker_swept_clean:
+                                # The recorded verdict only: calling sweep() here
+                                # would re-run a sweep that raised in cleanup().
+                                if getattr(write_boundary, "sweep_verdict_clean", None) is not True:
                                     worker_lease_unproven = True
             if write_boundary is not None:
                 # #2470: the attempt ended normally; replace the pending marker

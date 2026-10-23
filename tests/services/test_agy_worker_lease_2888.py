@@ -1015,6 +1015,35 @@ def test_a_sweep_that_raises_counts_as_unclean(worker_env, monkeypatch, capsys) 
     assert claim.released is False  # an unprovable sweep never frees the account
 
 
+def test_a_sweep_that_raised_in_cleanup_is_not_rerun_to_free_the_account(
+    worker_env, monkeypatch, capsys
+) -> None:
+    # The first wrapper sweep raises inside cleanup(); a second call would come
+    # back clean.  The release decision must read the recorded verdict (none)
+    # instead of running the sweep again.
+    _patch_prepare(monkeypatch, worker_env, _SweepRun(SWEEP_CLEAN))
+    claim = _Claim(worker_env["home"], [])
+    sweeps: list[int] = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        _launch(write_boundary)
+
+        def flaky(pids):
+            sweeps.append(1)
+            if len(sweeps) == 1:
+                raise RuntimeError("sweep interrupted")
+            return True
+
+        monkeypatch.setattr(write_boundary, "_worker_sweep", flaky)
+        return 0, "edited", "", False, 1
+
+    with pytest.raises(RuntimeError, match="sweep interrupted"):
+        _run_dispatch(worker_env, _Coordinator(claim), runner)
+    capsys.readouterr()
+    assert sweeps == [1]
+    assert claim.released is False
+
+
 def test_an_unlaunched_worker_attempt_still_releases(worker_env, monkeypatch, capsys) -> None:
     """A runner that fails before launching leaves nothing running: release as before."""
     _patch_prepare(monkeypatch, worker_env, _SweepRun(SWEEP_CLEAN))
