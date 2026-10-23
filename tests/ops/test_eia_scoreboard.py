@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -317,6 +318,59 @@ def test_markdown_and_jsonl_and_since(state_root: Path, capsys: pytest.CaptureFi
     since_rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     idents = {r["identity"][0] for r in since_rows}
     assert "f" in idents and not idents & {"c", "d"}
+
+
+def test_since_naive_datetime_is_utc_under_non_utc_timezone(
+    state_root: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is required for process-timezone regression coverage")
+    try:
+        with monkeypatch.context() as env:
+            env.setenv("TZ", "Asia/Taipei")
+            time.tzset()
+            assert (
+                sb.main([
+                    "--state-root",
+                    str(state_root),
+                    "--failure-log",
+                    "",
+                    "--since",
+                    "2026-10-14T01:30:00",
+                    "--format",
+                    "jsonl",
+                ])
+                == 0
+            )
+            naive_rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+            naive_idents = {r["identity"][0] for r in naive_rows}
+            assert "f" in naive_idents and not naive_idents & {"c", "d"}
+
+            assert (
+                sb.main([
+                    "--state-root",
+                    str(state_root),
+                    "--failure-log",
+                    "",
+                    "--since",
+                    "2026-10-14T09:30:00+08:00",
+                    "--format",
+                    "jsonl",
+                ])
+                == 0
+            )
+            offset_rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+            assert {r["identity"] for r in offset_rows} == {r["identity"] for r in naive_rows}
+    finally:
+        time.tzset()
+
+
+def test_filter_since_date_only_remains_utc_midnight() -> None:
+    runs = [
+        {"first_ts": "2026-10-19T23:59:59Z"},
+        {"first_ts": "2026-10-20T00:00:00Z"},
+    ]
+    assert sb.filter_since(runs, "2026-10-20") == [runs[1]]
 
 
 def test_read_only(state_root: Path) -> None:

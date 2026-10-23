@@ -501,3 +501,123 @@ def test_background_child_seeds_limits_before_first_event(tmp_path, monkeypatch)
     assert mid["timeout_source"] == "default:NO_TOOL_PACKET"
     assert mid["provider_stall_seconds"] == 45
     assert mid["empty_output_failovers"] == 0
+
+
+@pytest.mark.parametrize("busy", [True, False])
+def test_empty_output_pool_failure_reports_pool_status(tmp_path, monkeypatch, capsys, busy):
+    # Gemini r2 on #2894: the empty-output re-lease exit used status "failed" and sent no
+    # hook event; it now matches the quota-rotation pool exit.
+    coordinator = FakeCoordinator(tmp_path)
+    real_acquire = dispatch._acquire_claim_queued
+    leases = []
+
+    def acquire(*args, **kwargs):
+        leases.append(1)
+        if len(leases) > 1:
+            raise dispatch._PoolClaimFailure(busy=busy, waited_seconds=0.0, recovery={})
+        return real_acquire(*args, **kwargs)
+
+    monkeypatch.setattr(dispatch, "_acquire_claim_queued", acquire)
+    events = []
+    code = dispatch.dispatch_run(
+        prompt="read",
+        cwd=str(tmp_path),
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, " \n", "", False, 1),
+        operation_hook=events.append,
+    )
+    assert code == 75
+    summary = _summary(capsys)
+    assert summary["status"] == ("pool_busy" if busy else "pool_exhausted")
+    assert summary["failure_kind"] == ("AGY_ACCOUNT_POOL_BUSY" if busy else "AGY_EMPTY_OUTPUT")
+    assert "pool_queue" in events[-1]
+    assert events[-1].get("failure_kind") == ("AGY_ACCOUNT_POOL_BUSY" if busy else None)
+
+
+def test_terminal_empty_output_forwards_short_answer(tmp_path, capsys):
+    # A raised --empty-output-min-bytes can reject a short but real answer; the caller
+    # still gets the text, as on every other terminal exit.
+    coordinator = FakeCoordinator(tmp_path)
+    code = dispatch.dispatch_run(
+        prompt="read",
+        cwd=str(tmp_path),
+        coordinator=coordinator,
+        empty_output_min_bytes=100,
+        run_agy_fn=lambda **_kwargs: (0, "short answer", "provider note", False, 1),
+    )
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out.count("short answer") == 1
+    assert "provider note" in captured.err
+
+
+def test_background_invalid_contract_marks_limits_unresolved(tmp_path, monkeypatch):
+    # The parent and the child seed record the same "unresolved" labels as the
+    # foreground contract-rejection path, not "default:INVALID".
+    with pytest.raises(ValueError):
+        dispatch.build_effective_permission_profile(
+            cwd=str(tmp_path),
+            mode="plan",
+            write_paths=[],
+            allow_rules=[],
+            deny_rules=[],
+            temp_command_permissions=True,
+        )
+    monkeypatch.setattr(
+        dispatch,
+        "subprocess",
+        SimpleNamespace(
+            DEVNULL=dispatch.subprocess.DEVNULL,
+            Popen=lambda argv, **_kwargs: SimpleNamespace(pid=os.getpid()),
+        ),
+    )
+    record = dispatch._spawn_background_operation(
+        prompt="read",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=None,
+        provider_stall_seconds=None,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=True,
+        operation_root=tmp_path / "operations",
+    )
+    assert record["timeout_source"] == "unresolved"
+    assert record["provider_stall_source"] == "unresolved"
+    assert record["timeout_seconds"] is None
+    assert record["liveness_policy"]["provider_stall_seconds"] > 0
+
+    observed = {}
+
+    def slow_dispatch(**_kwargs):
+        time.sleep(0.3)
+        observed["mid_run"] = dispatch.AgyOperationJournal(tmp_path / "operations").read(
+            record["operation_id"]
+        )
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", slow_dispatch)
+    monkeypatch.setattr(dispatch, "_parse_agy_attestation", lambda *_a, **_kw: {})
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    dispatch._run_background_operation(
+        operation_id=record["operation_id"],
+        prompt_file=str(journal.prompt_path(record["operation_id"])),
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=None,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=True,
+        operation_root=tmp_path / "operations",
+        heartbeat_interval=0.05,
+    )
+    assert observed["mid_run"]["timeout_source"] == "unresolved"
+    assert observed["mid_run"]["provider_stall_source"] == "unresolved"
