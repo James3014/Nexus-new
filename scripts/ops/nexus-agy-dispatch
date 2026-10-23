@@ -2701,9 +2701,11 @@ def _runtime_revision() -> str | None:
 # One wall-clock budget (--timeout) covers every attempt and account rotation
 # of a single dispatch. No further attempt starts below this floor (#1216 V12).
 TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS = 5.0
-# #2905: the orphan run-root GC (up to three ps probes and two wrapper sweeps,
-# at most 90 s of subprocess timeouts) runs only when more than this much of
-# the dispatch budget remains.
+# #2905: the orphan run-root GC removes at most WORKER_GC_MAX_ROOTS roots per
+# pass (up to three ps probes and two wrapper sweeps, at most 90 s of
+# subprocess timeouts) and runs only when more than this much of the dispatch
+# budget remains.
+WORKER_GC_MAX_ROOTS = 2
 WORKER_GC_MIN_REMAINING_SECONDS = 120.0
 _monotonic = time.monotonic
 
@@ -5309,7 +5311,8 @@ def dispatch_run(
                                     _agy_worker_account().gc_unreferenced_worker_run_roots(
                                         _agy_account_pool.referenced_worker_run_roots(
                                             claim.receipt_path.parent
-                                        )
+                                        ),
+                                        limit=WORKER_GC_MAX_ROOTS,
                                     )
                                 except Exception:
                                     pass  # #2905: best-effort hygiene; never fails a dispatch

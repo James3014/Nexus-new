@@ -80,14 +80,14 @@ def referenced_worker_run_roots(leases_dir: Path) -> Optional[set[str]]:
                     return None
                 fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                 try:
-                    handle = os.fdopen(fd, "r", encoding="utf-8")
-                except BaseException:
-                    os.close(fd)
-                    raise
-                with handle:
-                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
                         return None
-                    receipt = json.load(handle)
+                    chunks = []
+                    while chunk := os.read(fd, 65536):
+                        chunks.append(chunk)
+                finally:
+                    os.close(fd)
+                receipt = json.loads(b"".join(chunks))
                 if not isinstance(receipt, dict):
                     return None
                 if "worker_run_root" in receipt:

@@ -96,6 +96,22 @@ def test_darwin_witness_nodes_are_declared_and_darwin_ci_must_collect_them() -> 
 
 
 @pytest.fixture(autouse=True)
+def _no_host_worker_gc(monkeypatch):
+    """#2905: a dispatch under test must never GC the host's real worker-runs.
+
+    The GC's defaults (the real worker-runs dir, ``subprocess.run``) are bound at
+    definition, so patching ``WORKER_RUNS`` does not redirect it; only calls
+    that name their own ``runs_dir`` reach the real function.
+    """
+    real = worker_mod.gc_unreferenced_worker_run_roots
+
+    def guarded(referenced, **kwargs):
+        return real(referenced, **kwargs) if "runs_dir" in kwargs else []
+
+    monkeypatch.setattr(worker_mod, "gc_unreferenced_worker_run_roots", guarded)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_worker_reap_cache():
     """The pool keeps a process-local negative cache of unproven worker receipts."""
     agy_pool._WORKER_REAP_UNPROVEN.clear()

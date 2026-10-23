@@ -140,6 +140,22 @@ def _layout(tmp_path: Path) -> dict[str, Any]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _no_host_worker_gc(monkeypatch):
+    """#2905: a dispatch under test must never GC the host's real worker-runs.
+
+    The GC's defaults (the real worker-runs dir, ``subprocess.run``) are bound at
+    definition, so patching ``WORKER_RUNS`` does not redirect it; only calls
+    that name their own ``runs_dir`` reach the real function.
+    """
+    real = worker_mod.gc_unreferenced_worker_run_roots
+
+    def guarded(referenced, **kwargs):
+        return real(referenced, **kwargs) if "runs_dir" in kwargs else []
+
+    monkeypatch.setattr(worker_mod, "gc_unreferenced_worker_run_roots", guarded)
+
+
 @pytest.fixture
 def worker_env(tmp_path, monkeypatch):
     """A temporary worker layout; the worker user and run group map to ourselves."""
@@ -1319,8 +1335,9 @@ def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
         events.append("references")
         return referenced
 
-    def gc(roots):
+    def gc(roots, **kwargs):
         assert roots is referenced
+        assert kwargs == {"limit": 2}  # bounds the pass to two sweeps
         events.append("gc")
         if gc_raises:
             raise RuntimeError("best-effort GC failed")
@@ -1392,7 +1409,9 @@ def test_dispatch_runs_gc_once_even_when_it_rotates(worker_env, monkeypatch, cap
         lambda leases_dir: events.append("references") or set(),
     )
     monkeypatch.setattr(
-        worker_mod, "gc_unreferenced_worker_run_roots", lambda roots: events.append("gc") or []
+        worker_mod,
+        "gc_unreferenced_worker_run_roots",
+        lambda roots, **kwargs: events.append("gc") or [],
     )
     monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
     # the first attempt provably changed nothing, so its quota failure rotates
@@ -1414,7 +1433,10 @@ def test_dispatch_runs_gc_once_even_when_it_rotates(worker_env, monkeypatch, cap
     assert events == ["references", "gc", "prepare", "runner", "prepare", "runner"]
 
 
-def test_dispatch_skips_gc_when_the_remaining_budget_is_short(worker_env, monkeypatch, capsys):
+@pytest.mark.parametrize(("elapsed", "gc_runs"), [(700.0, True), (800.0, False)])
+def test_dispatch_gc_gate_uses_the_remaining_budget(
+    worker_env, monkeypatch, capsys, elapsed, gc_runs
+):
     coordinator = _Coordinator(worker_env["home"])
     coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
     events = []
@@ -1435,14 +1457,19 @@ def test_dispatch_skips_gc_when_the_remaining_budget_is_short(worker_env, monkey
         events.append("runner")
         return 0, "edited", "", False, 1
 
-    monkeypatch.setattr(dispatch, "WORKER_GC_MIN_REMAINING_SECONDS", 10.0**9)
+    # 900 s budget: the dispatch starts at 0 and reaches the gate at 700 s (200 s
+    # left, GC runs) or 800 s (100 s left, below the 120 s floor, GC skipped).
+    ticks = iter([0.0])
+    monkeypatch.setattr(dispatch, "_monotonic", lambda: next(ticks, elapsed))
     monkeypatch.setattr(
         dispatch._agy_account_pool,
         "referenced_worker_run_roots",
         lambda leases_dir: events.append("references") or set(),
     )
     monkeypatch.setattr(
-        worker_mod, "gc_unreferenced_worker_run_roots", lambda roots: events.append("gc") or []
+        worker_mod,
+        "gc_unreferenced_worker_run_roots",
+        lambda roots, **kwargs: events.append("gc") or [],
     )
     monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
     target = worker_env["target"]
@@ -1454,9 +1481,11 @@ def test_dispatch_skips_gc_when_the_remaining_budget_is_short(worker_env, monkey
         coordinator=coordinator,
         run_agy_fn=runner,
         run_as_user=worker_mod.WORKER_USER,
+        timeout=900,
     )
     assert code == 0, capsys.readouterr().err
-    assert events == ["prepare", "runner"]
+    gc_events = ["references", "gc"] if gc_runs else []
+    assert events == [*gc_events, "prepare", "runner"]
 
 
 def test_dispatch_worker_launch_failure_does_not_rotate(worker_env, monkeypatch, capsys):
