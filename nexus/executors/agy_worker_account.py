@@ -560,7 +560,9 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
                         out.write(chunk)
                     out.flush()
                     os.fsync(out.fileno())
-                    os.fchmod(out.fileno(), 0o755)  # readable only once complete
+                    # 0755 on purpose: the worker account executes this copy;
+                    # set only once the bytes are complete.
+                    os.fchmod(out.fileno(), 0o755)  # nosec B103
                     os.fsync(out.fileno())  # and the mode durable before the rename
                 os.replace(tmp, worker_agy)
             except BaseException:
