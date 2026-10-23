@@ -5316,7 +5316,8 @@ def dispatch_run(
                             attempt_last_tool_target = last_tool_call_target(
                                 transcript.read_text(encoding="utf-8", errors="replace")
                             )
-                        except OSError:
+                        except Exception:
+                            # Best effort only: the run HOME cleanup below must run.
                             pass
                     if write_boundary is not None:
                         write_boundary.cleanup()

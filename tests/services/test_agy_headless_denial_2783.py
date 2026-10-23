@@ -340,3 +340,29 @@ def test_dispatch_real_account_failures_still_rotate(dispatch_pool_env, stderr):
         (env.tmp_path / "leases").glob("*.family-unavailable.gemini.json")
     )
     assert markers
+
+
+@pytest.mark.parametrize(
+    ("args", "absolute"),
+    [
+        ({"file_content": "#!/bin/sh\nexport TOKEN=secret", "file_path": "/w/a.sh"}, True),
+        ({"direction": "down"}, False),
+        ({"redirect": "https://example.com/x"}, False),
+        ({"path": "/w/a\n/w/b"}, True),
+        ({"path": "x" * 2000}, False),
+    ],
+)
+def test_target_arg_ignores_non_path_arguments(args, absolute):
+    from nexus.services.agy_failure_signals import _target_arg
+
+    value = _target_arg(args, absolute=absolute)
+    assert value == ("/w/a.sh" if "file_path" in args else None)
+
+
+def test_transcript_target_never_copies_file_bodies():
+    line = json.dumps({
+        "tool_calls": [
+            {"name": "write_file", "args": {"file_content": "/*secret*/", "file_path": "/w/b.c"}},
+        ]
+    })
+    assert last_tool_call_target(line) == ("write_file", "/w/b.c")

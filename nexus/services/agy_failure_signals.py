@@ -120,18 +120,30 @@ class AgyHeadlessDenial:
         return f"tool={self.tool} path={self.path or 'unknown'}"
 
 
+# Exact argument names that carry a path. A substring match ("file" in
+# "file_content", "dir" in "direction") would copy file bodies or free text
+# into receipts and journals, so only these names count.
+_TARGET_ARG_KEYS = frozenset({
+    "path", "paths", "file", "filepath", "file_path", "dir", "directory",
+    "dirpath", "dir_path", "directory_path", "target", "target_path",
+    "target_file", "target_dir", "cwd", "absolutepath", "absolute_path",
+    "abs_path", "source_path", "dest_path", "destination_path",
+})
+_TARGET_ARG_MAX_LEN = 1024
+
+
+def _path_like(value: Any, *, absolute: bool) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= _TARGET_ARG_MAX_LEN
+        and not any(ch in value for ch in "\n\r\x00")
+        and (not absolute or value.startswith("/"))
+    )
+
+
 def _target_arg(args: dict[str, Any], *, absolute: bool) -> Optional[str]:
     for key, value in args.items():
-        lowered = key.lower()
-        if (
-            (
-                any(part in lowered for part in ("path", "file", "dir"))
-                or lowered in ("target", "cwd")
-            )
-            and isinstance(value, str)
-            and value
-            and (not absolute or value.startswith("/"))
-        ):
+        if key.lower() in _TARGET_ARG_KEYS and _path_like(value, absolute=absolute):
             return value
     return None
 
@@ -337,6 +349,11 @@ def classify_agy_account_failure(
     if structured:
         return kind
     if agy_headless_denial(stdout, stderr, stdout_is_envelope=stdout_is_envelope) is not None:
+        # A denial is a work failure. The stderr marker classifier below is
+        # substring matching, and agy echoes the denied path next to the
+        # denial (a path can contain "401" or "authentication"), so it is
+        # not consulted here; a real account failure still arrives as a
+        # structured AGY_ERROR or envelope error and is decided above.
         return None
     return agy_stderr_account_failure(stderr)
 

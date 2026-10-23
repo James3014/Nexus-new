@@ -1340,9 +1340,8 @@ class AgyWorkerAdapter:
                         tool, path = last_tool_call_target(
                             newest.read_text(encoding="utf-8", errors="replace")
                         )
-                        known_tool = receipt.failure_reason.split("tool=", 1)[1].rsplit(
-                            " path=", 1
-                        )[0]
+                        _, _, known = receipt.failure_reason.partition("tool=")
+                        known_tool = known.rsplit(" path=", 1)[0] if known else "unknown"
                         receipt = replace(
                             receipt,
                             failure_reason=format_headless_denial_reason(
@@ -1353,7 +1352,7 @@ class AgyWorkerAdapter:
                                 )
                             ),
                         )
-                except OSError:
+                except Exception:  # best effort: never lose the receipt over the transcript
                     pass
             profile_tampered = any(
                 run_home_settings_sha256(home) != digest for home, digest in run_homes
