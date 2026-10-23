@@ -2013,21 +2013,32 @@ def run_agy(
         if write_boundary is not None:
             launch_argv = write_boundary.wrap_argv(argv)
             write_boundary.before_launch()
-        process = subprocess.Popen(
-            launch_argv,
-            cwd=cwd,
-            # #2884: the worker-account boundary launches sudo with a fixed
-            # minimal environment; the wrapper builds agy's own.
-            env=_popen_env(write_boundary, env),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-            # #2717: the provider inherits the per-account lease lock, so the
-            # account stays locked while any provider outlives this dispatcher.
-            pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd > 2 else (),
-        )
+        provider_env = _popen_env(write_boundary, env)
+        try:
+            process = subprocess.Popen(
+                launch_argv,
+                cwd=cwd,
+                # #2884: the worker-account boundary launches sudo with a fixed
+                # minimal environment; the wrapper builds agy's own.
+                env=provider_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+                # #2717: the provider inherits the per-account lease lock, so the
+                # account stays locked while any provider outlives this dispatcher.
+                pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd > 2 else (),
+            )
+        except OSError as exc:
+            # Only an error the child reported (exec or chdir, which carries a
+            # filename) proves no child is left: CPython reaps that child before
+            # raising.  An OSError in the parent after fork may leave sudo
+            # running, so the launch still counts as possibly started.
+            launch_failed = getattr(write_boundary, "launch_failed_before_spawn", None)
+            if launch_failed is not None and exc.filename is not None:
+                launch_failed()
+            raise
     except BaseException:
         if log_relay is not None:
             log_relay.finish(timeout=2.0)
@@ -5506,6 +5517,18 @@ def dispatch_run(
                                 # would re-run a sweep that raised in cleanup().
                                 if getattr(write_boundary, "sweep_verdict_clean", None) is not True:
                                     worker_lease_unproven = True
+                                    try:
+                                        # Always marked, even with no survivor
+                                        # identity: the marker alone makes the
+                                        # reaper wait for an idle worker account.
+                                        claim.mark_worker_unclean(
+                                            getattr(write_boundary, "unclean_tokens", ())
+                                        )
+                                    except Exception as exc:
+                                        sys.stderr.write(
+                                            "nexus-agy-dispatch: worker unclean lease mark failed: "
+                                            f"{type(exc).__name__}\n"
+                                        )
             if write_boundary is not None:
                 # #2470: the attempt ended normally; replace the pending marker
                 # with the (already recorded, run-once) sweep verdict.

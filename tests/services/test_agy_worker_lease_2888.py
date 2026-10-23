@@ -302,6 +302,101 @@ def test_mark_worker_run_refuses_after_release(tmp_path: Path) -> None:
     assert not claim.receipt_path.exists()  # nothing was resurrected
 
 
+def test_mark_worker_unclean_is_atomic_synced_nofollow_and_preserves_fields(
+    tmp_path, monkeypatch
+) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    claim = coordinator.acquire_claim("desktop-mark", wait_timeout=0)
+    _mark(claim)
+    before = _read(claim.receipt_path)
+    old_mode = claim.receipt_path.stat().st_mode
+    tokens = ["4242:Fri_Oct_23_12:34:56_2026"]
+    events = []
+    real_open, real_fsync, real_replace = os.open, os.fsync, os.replace
+
+    def open_file(path, flags, *args, **kwargs):
+        assert flags & os.O_EXCL and flags & os.O_NOFOLLOW
+        events.append("open")
+        return real_open(path, flags, *args, **kwargs)
+
+    def fsync(fd):
+        events.append("fsync")
+        return real_fsync(fd)
+
+    def replace(src, dst):
+        events.append("replace")
+        assert Path(src).parent == Path(dst).parent
+        assert _read(Path(src)) == {**before, "worker_unclean_tokens": tokens}
+        assert _read(Path(dst)) == before
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    try:
+        claim.mark_worker_unclean(tokens)
+        assert _read(claim.receipt_path) == {**before, "worker_unclean_tokens": tokens}
+        assert claim.receipt_path.stat().st_mode == old_mode
+        assert events == ["open", "fsync", "replace"]
+        assert not list(claim.receipt_path.parent.glob("*.tmp"))
+    finally:
+        claim.release()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        {"account_alias_hash": "other"},
+        {"lease_id_hash": "other"},
+        {"pid": 1},
+        {"pid": True},
+        {"pid": "1"},
+    ],
+)
+def test_mark_worker_unclean_refuses_mismatched_identity(tmp_path, tamper) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    claim = coordinator.acquire_claim("desktop-mark", wait_timeout=0)
+    try:
+        claim.receipt_path.write_text(json.dumps({**_read(claim.receipt_path), **tamper}))
+        before = claim.receipt_path.read_bytes()
+        with pytest.raises(AgyAccountPoolError, match="receipt_identity_mismatch"):
+            claim.mark_worker_unclean(["4242:Fri_Oct_23_12:34:56_2026"])
+        assert claim.receipt_path.read_bytes() == before
+        assert not list(claim.receipt_path.parent.glob("*.tmp"))
+    finally:
+        claim.release()
+
+
+def test_mark_worker_unclean_replace_failure_keeps_old_receipt(tmp_path, monkeypatch) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    claim = coordinator.acquire_claim("desktop-mark", wait_timeout=0)
+    before = claim.receipt_path.read_bytes()
+
+    def fail(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", fail)
+    try:
+        with pytest.raises(AgyAccountPoolError, match="AGY_WORKER_LEASE_MARK_FAILED:OSError"):
+            claim.mark_worker_unclean(["4242:Fri_Oct_23_12:34:56_2026"])
+        assert claim.receipt_path.read_bytes() == before
+        assert not list(claim.receipt_path.parent.glob("*.tmp"))
+    finally:
+        claim.release()
+
+
+def test_mark_worker_unclean_refuses_released_or_missing_receipt(tmp_path) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    claim = coordinator.acquire_claim("desktop-mark", wait_timeout=0)
+    claim.receipt_path.unlink()
+    with pytest.raises(AgyAccountPoolError, match="receipt_unreadable"):
+        claim.mark_worker_unclean([])
+    claim.release()
+    with pytest.raises(AgyAccountPoolError, match="claim_released"):
+        claim.mark_worker_unclean([])
+    assert not claim.receipt_path.exists()
+
+
 # ---------------------------------------------------------------------------
 # pool: reclaim of orphaned receipts
 # ---------------------------------------------------------------------------
@@ -375,6 +470,146 @@ def test_worker_receipt_is_removed_when_the_reaper_proves_the_run_gone(
         claim.release()
     assert "AGY_ORPHANED_DESKTOP_RECEIPT_RECLAIMED" in caplog.text
     assert "AGY_ORPHANED_WORKER_RECEIPT_PRESERVED" not in caplog.text
+
+
+def test_zero_wait_reaps_one_receipt_and_next_call_reaps_the_next(tmp_path, reaper) -> None:
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b", "c"))
+    receipts = [
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+        for account in coordinator.manager._accounts
+    ]
+    reaper.result = False
+    for count in (1, 2, 3):
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim("desktop-new", wait_timeout=0)
+        assert len(reaper.calls) == count
+        assert len({r["account_alias_hash"] for r in reaper.calls}) == count
+        assert all(p.exists() for p in receipts)
+
+
+def test_zero_wait_successful_single_reap_frees_account_in_same_call(tmp_path, reaper) -> None:
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b", "c"))
+    for account in coordinator.manager._accounts:
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+    claim = coordinator.acquire_claim("desktop-new", wait_timeout=0)
+    try:
+        assert len(reaper.calls) == 1
+        assert claim.account_alias_hash == reaper.calls[0]["account_alias_hash"]
+        assert _read(claim.receipt_path)["consumer_id"] == "desktop-new"
+        assert len(list(coordinator.leases_dir.glob("*.receipt.json"))) == 3
+    finally:
+        claim.release()
+
+
+def test_deferred_reap_does_not_start_after_deadline(tmp_path, reaper, monkeypatch) -> None:
+    coordinator, alias = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias, **_worker_fields())
+    monkeypatch.setattr("time.monotonic", lambda: 10.0)
+    assert (
+        coordinator._reap_deferred_worker_receipts(
+            [(alias, receipt, "deadbeef0001")], deadline=10.0
+        )
+        is False
+    )
+    assert reaper.calls == [] and receipt.exists()
+
+
+def test_a_reap_that_ends_past_the_deadline_starts_no_other(tmp_path, reaper, monkeypatch) -> None:
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b", "c"))
+    for account in coordinator.manager._accounts:
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+    clock = SimpleNamespace(now=10.0)
+    monkeypatch.setattr("time.monotonic", lambda: clock.now)
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt)
+        clock.now += 2.0  # a reap takes time: this one ends past the deadline
+        return False
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    with pytest.raises(AgyAccountPoolBusyError):
+        coordinator.acquire_claim("desktop-new", wait_timeout=1)
+    assert len(reaped) == 1
+
+
+def test_only_first_claim_pass_may_reap_past_deadline(
+    tmp_path, reaper, monkeypatch, reap_clock
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    clock = SimpleNamespace(now=10.0)
+    monkeypatch.setattr("time.monotonic", lambda: clock.now)
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt)
+        return False
+
+    def sleep(_seconds):
+        # The second pass starts past the deadline with the negative cache expired.
+        clock.now = 20.0
+        reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    monkeypatch.setattr("time.sleep", sleep)
+    with pytest.raises(AgyAccountPoolBusyError):
+        coordinator.acquire_claim("desktop-new", wait_timeout=1)
+    assert len(reaped) == 1
+
+
+def test_an_unproven_receipt_does_not_block_the_next_one_within_the_deadline(
+    tmp_path, reaper, monkeypatch
+) -> None:
+    # Gemini review of #2907: one unproven receipt must not stop the pass.
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b"))
+    for account in coordinator.manager._accounts:
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt["account_alias_hash"])
+        return len(reaped) == 2  # the first is unproven, the second is gone
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    # Within the same pass: a second poll would hide a pass that stopped at "a".
+    monkeypatch.setattr("time.sleep", lambda _s: pytest.fail("needed a second poll"))
+    claim = coordinator.acquire_claim("desktop-new", wait_timeout=5)
+    try:
+        assert len(reaped) == 2 and claim.account_alias_hash == reaped[1]
+    finally:
+        claim.release()
+
+
+def test_a_receipt_that_cannot_be_unlinked_is_skipped_not_retried_at_once(
+    tmp_path, reaper, monkeypatch
+) -> None:
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b"))
+    paths = [
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+        for account in coordinator.manager._accounts
+    ]
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt["account_alias_hash"])
+        return True
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self == paths[0]:
+            raise PermissionError("EPERM")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    deferred = [(p.name.split(".")[0], p, _read(p)["lease_id_hash"]) for p in paths]
+    assert coordinator._reap_deferred_worker_receipts(deferred) is True
+    assert paths[0].exists() and not paths[1].exists()
+    # Negative-cached: an immediate retry does not run the reaper again.
+    assert coordinator._reap_deferred_worker_receipts(deferred[:1]) is False
+    assert len(reaped) == 2 and paths[0].exists()
 
 
 @pytest.mark.parametrize(
@@ -475,6 +710,182 @@ def test_existing_root_with_a_clean_sweep_is_removed_and_proven(runs: Path) -> N
     assert not os.path.lexists(root)
     assert commands.sweeps == [worker_mod.sweep_argv(root, [])]
     assert commands.pses == []  # the sweep's own verdict is the evidence here
+
+
+@pytest.mark.parametrize("alive", [True, False], ids=["same-process", "pid-reused"])
+@pytest.mark.parametrize("clean", [True, False], ids=["clean-wrapper", "unclean-wrapper"])
+def test_unclean_tokens_must_be_gone_before_existing_reaper_proof(
+    runs, monkeypatch, alive, clean
+) -> None:
+    root, receipt = _run_root(runs)
+    token = "4242:Fri_Oct_23_12:34:56_2026"
+    receipt["worker_unclean_tokens"] = [token]
+    probes = []
+
+    def tokens(pids, *, since, strict):
+        probes.append((list(pids), since, strict))
+        return [token if alive else "4242:Fri_Oct_23_12:34:57_2026"]
+
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", tokens)
+    commands = _Commands(sweep=(0, SWEEP_CLEAN) if clean else (3, SWEEP_UNCLEAN))
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is (
+        not alive and clean
+    )
+    assert probes == [([4242], None, True)]
+    assert root.exists() is (alive or not clean)
+    assert len(commands.sweeps) == (0 if alive else 1)
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        None,
+        "4242:123",
+        ("4242:Fri_Oct_23_12:34:56_2026",),
+        [True],
+        [123],
+        ["4242:123"],
+        ["0:Fri_Oct_23_12:34:56_2026"],
+        ["04242:Fri_Oct_23_12:34:56_2026"],
+        ["12345678901:Fri_Oct_23_12:34:56_2026"],
+        ["4242:Fri_Oct_99_12:34:56_2026"],
+        ["4242:Fri_Oct_23_99:34:56_2026"],
+        ["4242:Fri_Oct_23_12:34:56_2026\n"],
+        ["٤٢:Fri_Oct_23_12:34:56_2026"],
+        ["4242:Fri_Oct_23_12:34:56_2026"] * 65,
+    ],
+)
+def test_malformed_unclean_tokens_keep_root_without_any_probe(runs, monkeypatch, tokens) -> None:
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = tokens
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("malformed tokens must be rejected before process probes")
+
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", unexpected)
+    commands = _Commands()
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is False
+    assert root.exists() and commands.calls == []
+
+
+@pytest.mark.parametrize("empty", [True, False], ids=["empty-list", "all-gone"])
+def test_gone_unclean_tokens_still_require_missing_root_process_proof(
+    runs, monkeypatch, empty
+) -> None:
+    receipt = _missing_root_receipt(runs)
+    receipt["worker_unclean_tokens"] = [] if empty else ["4242:Fri_Oct_23_12:34:56_2026"]
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", lambda *a, **k: [])
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is True
+    assert (
+        worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands(ps=(0, "42\n", "")))
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        OSError("ps denied"),
+        subprocess.TimeoutExpired("ps", 10),
+        (0, "", ""),
+        (2, "", ""),
+        (1, "", "ps denied"),
+        (0, "malformed", ""),
+    ],
+)
+def test_unclean_token_probe_errors_never_prove_exit(runs, monkeypatch, answer) -> None:
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = ["4242:Fri_Oct_23_12:34:56_2026"]
+
+    def ps(argv, **_kwargs):
+        if isinstance(answer, BaseException):
+            raise answer
+        code, out, err = answer
+        return subprocess.CompletedProcess(argv, code, out, err)
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", ps)
+    commands = _Commands()
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is False
+    assert root.exists() and commands.calls == []
+
+
+def test_unclean_tokens_allow_reap_when_ps_proves_exit(runs, monkeypatch) -> None:
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = ["4242:Fri_Oct_23_12:34:56_2026"]
+    monkeypatch.setattr(
+        worker_mod.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
+    )
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is True
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("tokens", [[], ["4242:Fri_Oct_23_12:34:56_2026"]], ids=["none", "gone"])
+def test_an_unclean_run_needs_an_idle_worker_account_even_with_its_tokens_gone(
+    runs, monkeypatch, tokens
+) -> None:
+    # Gemini review of #2907: a survivor may have forked and exited, or left
+    # the run's env and cwd; the marker alone makes the reaper wait for an
+    # idle worker account, whatever the tokens and the per-run sweep say.
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = tokens
+    monkeypatch.setattr(
+        worker_mod.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
+    )
+    busy = _Commands(ps=(0, "  777\n", ""))
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=busy) is False
+    assert root.exists() and busy.sweeps == []
+    idle = _Commands()
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=idle) is True
+    assert not root.exists() and len(idle.pses) == 1 and len(idle.sweeps) == 1
+
+
+@pytest.mark.parametrize("started", ["12:34:56", "12:34:57"], ids=["live", "pid-reused"])
+def test_strict_unclean_token_probe_compares_the_full_start_identity(
+    runs, monkeypatch, started
+) -> None:
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = ["4242:Fri_Oct_23_12:34:56_2026"]
+    monkeypatch.setattr(
+        worker_mod.subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(
+            argv, 0, f" 4242 Fri Oct 23 {started} 2026\n", ""
+        ),
+    )
+    commands = _Commands()
+    gone = started != "12:34:56"
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is gone
+    assert root.exists() is not gone
+    assert len(commands.sweeps) == int(gone)
+
+
+def test_live_unclean_token_keeps_lease_receipt_until_exit_proven(
+    tmp_path, runs, monkeypatch, reap_clock
+) -> None:
+    coordinator, alias = _coordinator(tmp_path)
+    root, fields = _run_root(runs)
+    token = "4242:Fri_Oct_23_12:34:56_2026"
+    receipt = _write_receipt(tmp_path, alias, **fields, worker_unclean_tokens=[token])
+    before = receipt.read_bytes()
+    alive = [token]
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", lambda *a, **k: list(alive))
+    commands = _Commands()
+    real_reaper = worker_mod.reap_orphaned_worker_run
+    monkeypatch.setattr(
+        worker_mod, "reap_orphaned_worker_run", lambda r: real_reaper(r, run_command=commands)
+    )
+    with pytest.raises(AgyAccountPoolBusyError):
+        coordinator.acquire_claim("desktop-next", wait_timeout=0)
+    assert receipt.read_bytes() == before and root.exists()
+    assert commands.calls == []
+    alive.clear()
+    reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
+    claim = coordinator.acquire_claim("desktop-next", wait_timeout=0)
+    try:
+        assert not root.exists()
+        assert _read(receipt)["consumer_id"] == "desktop-next"
+    finally:
+        claim.release()
 
 
 @pytest.mark.parametrize(
@@ -982,6 +1393,267 @@ def test_mark_happens_before_the_provider_popen(worker_env, monkeypatch, capsys)
 @pytest.mark.parametrize(
     "error",
     [
+        FileNotFoundError(2, "No such file or directory", "/usr/bin/sudo"),  # child-reported
+        OSError("parent side, after fork"),  # no filename: a child may exist
+        KeyboardInterrupt(),
+        RuntimeError("unknown"),
+    ],
+)
+def test_provider_popen_only_oserror_clears_launch_attempt_and_releases(
+    worker_env, monkeypatch, error
+) -> None:
+    # Host admission/keychain setup is outside this launch-error unit test.
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    _patch_prepare(monkeypatch, worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    claim = _Claim(worker_env["home"], [])
+    boundaries = []
+    real_before = worker_mod.AgyWorkerAccountBoundary.before_launch
+    real_popen = subprocess.Popen
+
+    def before(boundary):
+        boundaries.append(boundary)
+        real_before(boundary)
+
+    def popen(argv, *args, **kwargs):
+        if isinstance(argv, list) and argv[:1] == [worker_mod.SUDO_PATH]:
+            raise error
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(worker_mod.AgyWorkerAccountBoundary, "before_launch", before)
+    monkeypatch.setattr(dispatch.subprocess, "Popen", popen)
+    no_spawn = isinstance(error, OSError) and error.filename is not None
+    if no_spawn or isinstance(error, KeyboardInterrupt):
+        with pytest.raises(type(error)):
+            _run_dispatch(worker_env, _Coordinator(claim), None)
+    else:  # possibly launched: the unproven sweep ends the attempt with a failure
+        assert _run_dispatch(worker_env, _Coordinator(claim), None) != 0
+    (boundary,) = boundaries
+    assert boundary.sweep_verdict_clean is no_spawn
+    assert boundary._launch_attempted is not no_spawn
+    assert claim.released is no_spawn
+    assert boundary.run_root.exists() is not no_spawn
+
+
+def test_launch_failed_before_spawn_cannot_clear_a_launched_worker(worker_env, monkeypatch) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_CLEAN))
+    _launch(boundary)
+    boundary.launch_failed_before_spawn()
+    assert boundary._launch_attempted is True
+    assert boundary.sweep_verdict_clean is False
+    boundary.cleanup()
+
+
+@pytest.mark.parametrize("clean", [False, True], ids=["unclean", "clean"])
+def test_cleanup_scrubs_known_credentials_only_on_an_unclean_sweep(
+    worker_env, monkeypatch, capsys, clean
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(
+        worker_env, _SweepRun(SWEEP_CLEAN if clean else SWEEP_UNCLEAN, 0 if clean else 3)
+    )
+    boundary.receipt_context = {"attempt": 1}
+    keychain = boundary.run_home / agy_pool.AGY_ISOLATED_KEYCHAIN
+    keychain.parent.mkdir(parents=True, exist_ok=True)
+    keychain.write_text("keychain")
+    unrelated = boundary.run_home / "keep.txt"
+    unrelated.write_text("keep")
+    paths = [
+        boundary.run_home / p
+        for p in (
+            *admission.AGY_RUN_HOME_COPIED_FILES,
+            admission.AGY_RUN_HOME_SETTINGS,
+            agy_pool.AGY_ISOLATED_KEYCHAIN,
+        )
+    ]
+    assert all(p.is_file() for p in paths)
+    _launch(boundary)
+    boundary.cleanup()
+    receipts = _worker_receipts_in(capsys.readouterr().err)
+    cleanup = next(r for r in receipts if r["event"] == "WORKER_CLEANUP")
+    assert cleanup["credentials_scrubbed"] is (None if clean else True)
+    assert cleanup["run_root_removed"] is clean
+    assert not any(os.path.lexists(p) for p in paths)
+    if not clean:
+        assert boundary.run_root.is_dir() and unrelated.read_text() == "keep"
+        assert (worker_env["home"] / TOKEN).read_text() == "token"
+
+
+def test_kept_root_scrub_reports_a_renamed_credential_directory_as_not_scrubbed(
+    worker_env, monkeypatch, capsys
+) -> None:
+    # A surviving worker renamed .gemini (token inside): the known names are
+    # gone but the token is not, so the receipt must not claim a scrub.
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+    moved = boundary.run_home / ".gemini-moved"
+    (boundary.run_home / ".gemini").rename(moved)
+    boundary.cleanup()
+    cleanup = next(
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
+    )
+    assert cleanup["credentials_scrubbed"] is False
+    assert (moved / "antigravity-cli" / TOKEN.name).is_file()  # left for the reaper's rmtree
+
+
+def test_kept_root_scrub_reports_a_hard_linked_credential_as_not_scrubbed(
+    worker_env, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+    kept = boundary.run_root / "work" / "token-copy"
+    kept.parent.mkdir(exist_ok=True)
+    os.link(boundary.run_home / TOKEN, kept)
+    boundary.cleanup()
+    cleanup = next(
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
+    )
+    assert cleanup["credentials_scrubbed"] is False
+    assert not os.path.lexists(boundary.run_home / TOKEN)
+
+
+@pytest.mark.parametrize("swap", ["leaf", "parent", "home", "directory", "unlink-error"])
+def test_kept_root_scrub_never_follows_symlinks_or_removes_directories(
+    worker_env, tmp_path, monkeypatch, capsys, swap
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+    victim = tmp_path / "outside"
+    victim.mkdir()
+    outside = victim / TOKEN.name
+    outside.write_text("outside secret")
+    token = boundary.run_home / TOKEN
+    if swap == "leaf":
+        token.unlink()
+        token.symlink_to(outside)
+    elif swap in ("parent", "home"):
+        replaced = token.parent if swap == "parent" else boundary.run_home
+        replaced.rename(replaced.with_name(replaced.name + "-old"))
+        replaced.symlink_to(victim, target_is_directory=True)
+    elif swap == "directory":
+        token.unlink()
+        token.mkdir()
+        (token / "keep").write_text("keep")
+    else:
+        real_unlink = os.unlink
+
+        def unlink(path, *args, **kwargs):
+            if path == TOKEN.name:
+                raise PermissionError("cannot scrub token")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(worker_mod.os, "unlink", unlink)
+    boundary.cleanup()
+    cleanup = next(
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
+    )
+    assert cleanup["credentials_scrubbed"] is False  # a swapped-in symlink is not a scrub
+    assert boundary.run_root.exists()
+    assert outside.read_text() == "outside secret"
+    if swap == "leaf":
+        assert not os.path.lexists(token)
+    elif swap == "directory":
+        assert (token / "keep").read_text() == "keep"
+
+
+def test_unclean_sweep_records_tracked_and_wrapper_pids_with_no_since_filter(
+    worker_env, monkeypatch
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    _launch(boundary)
+    boundary._tracker = SimpleNamespace(stop=lambda: {4343, 4444})
+    captured = []
+    evidence = [f"{p}:Fri_Oct_23_12:34:56_2026" for p in range(100, 170)]
+
+    def tokens(pids, *, since):
+        captured.append((set(pids), since))
+        return list(evidence)
+
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", tokens)
+    boundary.cleanup()
+    assert captured[-1] == ({4242, 4343, 4444}, None)
+    assert boundary.unclean_tokens == evidence[:64]
+    returned = boundary.unclean_tokens
+    returned.clear()
+    assert boundary.unclean_tokens == evidence[:64]
+    with pytest.raises(AttributeError):
+        boundary.unclean_tokens = []
+
+
+@pytest.mark.parametrize("mark_fails", [False, True], ids=["marked", "mark-error"])
+def test_dispatcher_persists_unclean_tokens_and_keeps_claim_even_if_mark_fails(
+    worker_env, monkeypatch, capsys, mark_fails
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    _patch_prepare(monkeypatch, worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    token = "4242:Fri_Oct_23_12:34:56_2026"
+    monkeypatch.setattr(worker_mod, "pid_start_tokens", lambda *a, **k: [token])
+    claim = _Claim(worker_env["home"], [])
+    marks = []
+
+    def mark(tokens):
+        marks.append(list(tokens))
+        if mark_fails:
+            raise OSError("receipt disk full")
+
+    claim.mark_worker_unclean = mark
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        _launch(write_boundary)
+        return 0, "edited", "", False, 1
+
+    assert _run_dispatch(worker_env, _Coordinator(claim), runner) != 0
+    err = capsys.readouterr().err
+    assert marks == [[token]]
+    assert claim.released is False
+    assert "AGY_DESCENDANT_SWEEP_FAILED" in err
+    assert ("worker unclean lease mark failed: OSError" in err) is mark_fails
+
+
+def test_cleanup_scrubs_credentials_even_if_sweep_raises(worker_env, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_CLEAN))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+
+    def interrupted(_pids):
+        raise RuntimeError("sweep interrupted")
+
+    monkeypatch.setattr(boundary, "_worker_sweep", interrupted)
+    with pytest.raises(RuntimeError, match="sweep interrupted"):
+        boundary.cleanup()
+    cleanup = next(
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
+    )
+    assert boundary.run_root.exists() and boundary.sweep_verdict_clean is False
+    assert not (boundary.run_home / TOKEN).exists()
+    assert cleanup["credentials_scrubbed"] is True
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
         AgyAccountPoolError("AGY_WORKER_LEASE_MARK_FAILED:OSError"),
         OSError("disk full"),
         AttributeError("claim cannot mark"),
@@ -1221,7 +1893,10 @@ def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
     receipt = claim.receipt_path
     try:
         assert claim.released is False
-        assert _read(receipt) == during  # still there, unchanged
+        after = _read(receipt)
+        # #2905: the unclean end adds its marker (survivor tokens, possibly none)
+        assert isinstance(after.pop("worker_unclean_tokens"), list)
+        assert after == during  # still there, otherwise unchanged
         # The dispatcher exits: its lock fd closes, the pid is gone, the receipt stays.
         # The next claimer must ask the reaper; it keeps the account until proven gone.
         claim.lock_file_obj.close()
@@ -1240,7 +1915,11 @@ def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
         with pytest.raises(AgyAccountPoolBusyError):
             real_acquire(consumer_id="desktop-next", wait_timeout=0)
         assert receipt.exists() and run_root.exists()
-        assert commands.sweeps == [worker_mod.sweep_argv(run_root, [])] and commands.pses == []
+        assert commands.sweeps == [worker_mod.sweep_argv(run_root, [])]
+        # #2905: the unclean marker also needs an idle worker account (one ps -U)
+        assert [argv[:3] for argv, _ in commands.pses] == [
+            [worker_mod.PS_PATH, "-U", worker_mod.WORKER_USER]
+        ]
         commands.sweep = (0, SWEEP_CLEAN)
         reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
         next_claim = real_acquire(consumer_id="desktop-next", wait_timeout=0)

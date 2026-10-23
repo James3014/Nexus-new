@@ -72,6 +72,7 @@ import json
 import logging
 import os
 import pwd
+import re
 import secrets
 import shutil
 import stat
@@ -93,6 +94,7 @@ from nexus.executors.agy_dispatch_boundary import (
     boundary_available,
 )
 from nexus.executors.agy_write_admission import (
+    AGY_RUN_HOME_COPIED_FILES,
     AGY_RUN_HOME_SETTINGS,
     TARGET_AGY_CUSTOMIZATION_PATHS,
     CredentialPathOverlapError,
@@ -102,6 +104,10 @@ from nexus.executors.agy_write_admission import (
     materialize_run_home,
     worker_home,
 )
+from nexus.services.agy_account_pool import AGY_ISOLATED_KEYCHAIN
+
+# Credentials the dispatcher may place in a run HOME (scrubbed from a kept root).
+_RUN_HOME_CREDENTIALS = (*AGY_RUN_HOME_COPIED_FILES, AGY_RUN_HOME_SETTINGS, AGY_ISOLATED_KEYCHAIN)
 
 WORKER_USER = "_cairnwork_worker"
 WORKER_RUN_GROUP = "_cairnwork_wrun"
@@ -406,6 +412,32 @@ def reap_orphaned_worker_run(
         validated = _valid_receipt_run_root(receipt)
         if validated is None:
             return False
+        if "worker_unclean_tokens" in receipt:
+            tokens = receipt["worker_unclean_tokens"]
+            if not isinstance(tokens, list) or len(tokens) > 64:
+                return False
+            for token in tokens:
+                if not isinstance(token, str) or not re.fullmatch(
+                    r"[1-9][0-9]{0,9}:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)_"
+                    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)_"
+                    r"[0-9]{1,2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{4}",
+                    token,
+                ):
+                    return False
+                pid, started = token.split(":", 1)
+                if int(pid) <= 1:
+                    return False
+                time.strptime(started, "%a_%b_%d_%H:%M:%S_%Y")
+            alive = pid_start_tokens(
+                (int(t.split(":", 1)[0]) for t in tokens), since=None, strict=True
+            )
+            if set(tokens).intersection(alive):
+                return False
+            # The run ended unclean: a survivor may have forked and exited, or
+            # cleared its env and left the run cwd, beyond both the tokens and
+            # the per-run sweep.  Only an idle worker account proves it gone.
+            if not _worker_user_has_no_process(WORKER_USER, run_command):
+                return False
         root, root_id = validated
         if not _run_root_is_the_recorded_directory(root, root_id):
             return _worker_user_has_no_process(WORKER_USER, run_command)
@@ -419,14 +451,18 @@ def reap_orphaned_worker_run(
         return False
 
 
-def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str]:
+def pid_start_tokens(
+    pids: Iterable[int], *, since: Optional[float], strict: bool = False
+) -> list[str]:
     """``pid:<lstart>`` for each live pid started at/after ``since`` (1 s margin).
 
     A pid ps does not report has exited and is dropped; ``since=None`` keeps
-    every reported pid.
+    every reported pid. ``strict`` refuses errors or incomplete ps output instead
+    of treating an uncertain probe as an exited process (orphan-reap proof).
     """
     wanted = sorted({int(p) for p in pids if int(p) > 1})
     lines: list[str] = []
+    reported: set[int] = set()
     # One pid per call: ps rejects the whole list when one pid is out of range.
     for pid in wanted:
         try:
@@ -439,19 +475,36 @@ def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):
+            if strict:
+                raise
             continue
+        if strict:
+            if (
+                completed.stderr.strip()
+                or completed.returncode not in (0, 1)
+                or (completed.returncode == 1 and completed.stdout.strip())
+            ):
+                raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
+            if completed.returncode == 0:
+                reported.add(pid)
         lines += completed.stdout.splitlines()
     tokens: list[str] = []
     for line in lines:
         parts = line.split()
         if len(parts) != 6 or not parts[0].isdigit() or int(parts[0]) not in wanted:
+            if strict:
+                raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
             continue
         try:
             started = time.mktime(time.strptime(" ".join(parts[1:]), "%a %b %d %H:%M:%S %Y"))
         except ValueError:
+            if strict:
+                raise
             continue
         if since is None or started >= since - 1.0:
             tokens.append(f"{parts[0]}:{'_'.join(parts[1:])}")
+    if strict and {int(token.split(":", 1)[0]) for token in tokens} != reported:
+        raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
     return tokens
 
 
@@ -1085,6 +1138,10 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     _worker_reported_unclean: bool = field(default=False, repr=False)
     _worker_left: list = field(default_factory=list, repr=False)
     _receipt_events: set = field(default_factory=set, repr=False)
+    # None: no scrub ran (nothing launched, or the sweep was clean).
+    _credentials_scrubbed: Optional[bool] = field(default=None, repr=False)
+    _scrub_paths: tuple = field(default=(), repr=False)
+    _unclean_tokens: list[str] = field(default_factory=list, repr=False)
 
     launch_env = LAUNCH_ENV
 
@@ -1178,11 +1235,17 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         self._emit_receipt(
             "WORKER_CLEANUP",
             run_root_removed=not os.path.lexists(self.run_root),
+            credentials_scrubbed=self._credentials_scrubbed,
             # kind:reason only; later segments may name worker-chosen files
             worker_failure=":".join(failure.split(":", 2)[:2]) if failure else None,
         )
 
     def before_launch(self) -> None:
+        # Recorded before any worker process exists: what a kept root's scrub
+        # must find and remove (#2905 N2).
+        self._scrub_paths = tuple(
+            rel for rel in _RUN_HOME_CREDENTIALS if os.path.lexists(self.run_home / rel)
+        )
         # Everything the dispatcher wrote (copied session files, settings,
         # keychain, permission profile, workdir copy) becomes usable by the
         # run group; the agy settings and the profile stay read-only.
@@ -1196,11 +1259,17 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         # Last: nothing before this can have started a worker process.
         self._launch_attempted = True
 
+    def launch_failed_before_spawn(self) -> None:
+        """A provider Popen OSError proves no child was spawned."""
+        if not self._launched:
+            self._launch_attempted = False
+
     @property
     def _possibly_launched(self) -> bool:
         return self._launched or self._launch_attempted
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
+        pids = tuple(pids)
         baseline = self._baseline
         tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
         self._worker_verdict, last = sweep_run_root_report(
@@ -1217,6 +1286,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             if self._worker_reported_unclean
             else []
         )
+        if self._worker_verdict != "CLEAN":
+            self._record_unclean_tokens(pids)
         return self._worker_verdict == "CLEAN"
 
     @property
@@ -1228,6 +1299,22 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         launch that was attempted (``before_launch`` ran) counts as launched.
         """
         return not self._possibly_launched or self._swept is True
+
+    @property
+    def unclean_tokens(self) -> list[str]:
+        """A copy of the survivor identities captured by an unclean sweep."""
+        return list(self._unclean_tokens)
+
+    def _record_unclean_tokens(self, tracked: Iterable[int]) -> None:
+        try:
+            tokens = pid_start_tokens(
+                [*tracked, *(int(pid) for pid in self._worker_left)], since=None
+            )
+            # Keep evidence from an earlier timeout/termination sweep even if
+            # a later wrapper report loses sight of that surviving process.
+            self._unclean_tokens = list(dict.fromkeys([*self._unclean_tokens, *tokens]))[:64]
+        except Exception:
+            _LOG.exception("AGY_WORKER_UNCLEAN_TOKENS_FAILED")
 
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
@@ -1250,6 +1337,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         # and a sudo that refuses the launch refuses the sweep too; the
         # Owner-side check of the tracked descendants still has to be clean.
         started = (self.run_root / WRAPPER_STARTED_MARKER).exists()
+        tracked: Iterable[int] = ()
         try:
             # stop() takes a final snapshot; the Owner-side sweep below calls it again.
             tracked = self._tracker.stop() if self._tracker is not None else set()
@@ -1268,40 +1356,46 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             # ``_swept`` before the combined verdict exists: an interrupt after it
             # must never leave that half verdict standing as "clean".
             self._swept = None
+            self._record_unclean_tokens(tracked)
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
             raise
+        if not self._swept:
+            self._record_unclean_tokens(tracked)
         self._emit_sweep_receipt(self._sweep_result(started))
         return self._swept
 
     def cleanup(self) -> None:
-        if self._possibly_launched and self._swept is None:
-            self.sweep()
-        tracker, self._tracker = self._tracker, None
-        if tracker is not None:
-            tracker.stop()
-        cli_worker.release_run(self.run_tag)
         try:
-            if self._launched and not (self.run_root / WRAPPER_STARTED_MARKER).exists():
-                self.worker_failure = f"{AGY_WORKER_LAUNCH_FAILED}:wrapper_did_not_start"
-            elif self._launched and self._swept:
-                # A clean sweep does not prove no worker process survived (one
-                # that cleared its env, left the run cwd and escaped the
-                # tracker is not found); copy_back therefore trusts nothing in
-                # the run dir beyond the verified workdir fd and the plan hashes.
-                copy_back(
-                    self.manifest,
-                    self.run_root,
-                    self.target.name,
-                    self.workdir_identity,
-                    self.source_target,
-                )
-        except CopyBackRefused as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_REFUSED}:{exc}"
-        except CopyBackPartial as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
-        except OSError as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
+            if self._possibly_launched and self._swept is None:
+                self.sweep()
+            tracker, self._tracker = self._tracker, None
+            if tracker is not None:
+                tracker.stop()
+            cli_worker.release_run(self.run_tag)
+            try:
+                if self._launched and not (self.run_root / WRAPPER_STARTED_MARKER).exists():
+                    self.worker_failure = f"{AGY_WORKER_LAUNCH_FAILED}:wrapper_did_not_start"
+                elif self._launched and self._swept:
+                    # A clean sweep does not prove no worker process survived (one
+                    # that cleared its env, left the run cwd and escaped the
+                    # tracker is not found); copy_back therefore trusts nothing in
+                    # the run dir beyond the verified workdir fd and the plan hashes.
+                    copy_back(
+                        self.manifest,
+                        self.run_root,
+                        self.target.name,
+                        self.workdir_identity,
+                        self.source_target,
+                    )
+            except CopyBackRefused as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_REFUSED}:{exc}"
+            except CopyBackPartial as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
+            except OSError as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
         finally:
+            if self._possibly_launched and self._swept is not True:
+                self._credentials_scrubbed = self._scrub_run_home_credentials()
             if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
                 # An unproven worker sweep keeps the run root (#2888): the lease
                 # receipt stays too, and the pool's reaper can then prove this
@@ -1315,6 +1409,47 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                         f"nexus-agy-dispatch: worker run dir left behind: {self.run_root}\n"
                     )
             self._emit_cleanup_receipt()
+
+    def _scrub_run_home_credentials(self) -> bool:
+        """Unlink only known HOME files, without following worker-controlled symlinks.
+
+        Open each directory relative to an already open parent with O_NOFOLLOW:
+        lstat on just the leaf would still follow a swapped parent symlink.
+        True only if every credential name present at launch still holds a
+        regular file with no other hard link and is unlinked ("the known names
+        were scrubbed"; files agy wrote under other names are not seen).  A
+        missing file or directory (a surviving worker may have renamed it), a
+        symlink or directory in its place, a file with other hard links, or an
+        I/O failure all report False.  Best effort against leftovers only: a
+        surviving worker could read these files while it ran and may hold a
+        copy anywhere (or swap names under this scrub), which no scrub can
+        rule out; the lease, not this field, keeps such a run fail-closed.
+        """
+        clean = True
+        for relative in self._scrub_paths:
+            fds: list[int] = []
+            try:
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                fds.append(os.open(self.run_root, flags))
+                fds.append(os.open(self.run_home.name, flags, dir_fd=fds[-1]))
+                for part in relative.parts[:-1]:
+                    fds.append(os.open(part, flags, dir_fd=fds[-1]))
+                info = os.lstat(relative.name, dir_fd=fds[-1])
+                if stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                    os.unlink(relative.name, dir_fd=fds[-1])
+                    if stat.S_ISLNK(info.st_mode) or info.st_nlink > 1:
+                        clean = False  # the credential bytes live on elsewhere
+                else:
+                    clean = False
+            except OSError:
+                clean = False
+            finally:
+                for fd in reversed(fds):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        clean = False
+        return clean
 
 
 def prepare_worker_account_boundary(
