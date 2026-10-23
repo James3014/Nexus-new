@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
-SCORER_VERSION = "1.3.1"
+SCORER_VERSION = "1.3.2"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -162,6 +162,14 @@ class ScratchInfraAbort(RuntimeError):
     ``INFRA_ABORT_EXIT_CODE`` so the driver reruns the task."""
 
 
+class ScratchRecoveredWithoutReap(ScratchInfraAbort):
+    """1.3.2 (H3): after a run the disk read below the floor, the reap killed nothing and
+    the disk then recovered. The run is discarded and rerun (``H3_MAX_RERUNS`` times);
+    when reruns are used up it surfaces as the plain infra abort it always was."""
+
+
+# 1.3.2: how often a run discarded as ``post_run_recovered_without_reap`` is rerun.
+H3_MAX_RERUNS = 2
 # A11: the CLI's exit code for ScratchInfraAbort (2-7 are already used).
 INFRA_ABORT_EXIT_CODE = 8
 # A11: free space the scratch filesystem must keep before every "os" pytest run: at least
@@ -1780,11 +1788,21 @@ class PytestRunner:
         # so a confined process can only re-create its own dir, never rename one).
         if self.task_dir is None:
             self.task_dir = self.runs / uuid.uuid4().hex[:12]
-        run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
-        try:
-            return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
-        finally:
-            self._remove_run_dir(run_dir)
+        reruns = 0
+        while True:
+            run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
+            try:
+                return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
+            except ScratchRecoveredWithoutReap as exc:
+                # 1.3.2 (H3): a survivor that dropped its files before lsof looked made the
+                # disk recover without a kill. Rerun the discarded run; if the shortfall
+                # comes back, the single host-disk rule decides (charge or infra) as usual.
+                if reruns >= H3_MAX_RERUNS:
+                    raise
+                reruns += 1
+                self.log(f"  H3 rerun {reruns}/{H3_MAX_RERUNS} after: {exc}")
+            finally:
+                self._remove_run_dir(run_dir)
 
     def begin_task(self, task_key: str) -> None:
         """A11: start a task scoring: its run dirs go under a fresh runs/<uuid12> parent
@@ -1883,6 +1901,10 @@ class PytestRunner:
         self.reaped_pids += reaped
         return reaped
 
+    def _reap_after_candidate_run(self) -> list[int]:
+        """1.3.2 (#2740): the per-run reap, a separate step from the shortfall reap."""
+        return self._reap_candidate_scope()
+
     def _candidate_bytes(self, current: Path | None) -> int:
         """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
         (``current`` counts as candidate when given as None by a candidate run) plus its
@@ -1944,9 +1966,16 @@ class PytestRunner:
             # Post-run: the run may have run on an exhausted disk, so its result is not
             # used. The candidate's survivor caused it iff its reaped space covers the
             # shortfall that was there; otherwise the space came back for another reason.
-            if reclaimed >= shortfall_before:
+            # 1.3.2: also only when the candidate's bytes account for at least half of the
+            # drop since free_start (a shared host's other users must not be charged to it).
+            if (
+                reclaimed >= shortfall_before
+                and self.free_start is not None
+                and self.free_start >= floor
+                and 2 * (cand + reclaimed) >= self.free_start - free_before
+            ):
                 self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
-            raise ScratchInfraAbort(
+            raise ScratchRecoveredWithoutReap(
                 f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
                 f" reclaimed={reclaimed}B floor={floor}B"
             )
@@ -2102,6 +2131,11 @@ class PytestRunner:
             # #2740) makes any failure of this run an infra abort, never a refusal (or the
             # candidate's, when it explains the drop).
             self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=False)
+            if role == CAND_ROLE:
+                # 1.3.2: reap this scoring's candidate scope after EVERY candidate run, so a
+                # survivor cannot fill an unlinked file during a later run. Fails closed
+                # (ScratchInfraAbort, nothing cached) if a killed PID does not go away.
+                self._reap_after_candidate_run()
         # A6: what this run left in scratch (its own junit report excluded).
         junit_bytes = (
             allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0
