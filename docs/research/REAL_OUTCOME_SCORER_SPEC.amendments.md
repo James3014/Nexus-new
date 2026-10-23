@@ -24,7 +24,7 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
 | `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, cap or host-disk trips caused by the candidate (its runs, its trees' growth, its survivors' leftover run directories) are `NOT_RUNNABLE`, so that task stays in the denominator. Host disk that is low for other reasons, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). Survivors are reaped after each scoring. A version string too long for Python's int parser is `version_invalid` |
-| `1.3.2` | os-mode hardening follow-ups (#2740), A12 below | unchanged from 1.3.1. Under `--sandbox none` nothing changes. Under `--sandbox os` one case moves from a charge to an infra abort (a recovered disk when other users took most of the drop); see A12 |
+| `1.3.2` | os-mode hardening follow-ups (#2740), A12 below | unchanged from 1.3.1. Under `--sandbox none` nothing changes. Under `--sandbox os` one case moves from a charge to an infra abort (a recovered disk when other users took most of the drop), and the candidate scope is reaped after every candidate run; see A12 |
 
 Current scorer: `SCORER_VERSION = "1.3.2"`. Receipts record the version that wrote them.
 
@@ -485,18 +485,22 @@ Issue #2751 came from the #2724 post-merge review and Codex round 3 on #2764.
 
 Scorer version 1.3.2. Every change below applies to `--sandbox os` only (plus one CLI
 refusal in `--sandbox os`). `--sandbox none` is unchanged: no run directories, no reaper,
-no disk check, no rerun loop; receipts, labels and exit codes are the same as 1.3.1 (a
+no disk check; receipts, labels and exit codes are the same as 1.3.1 (a
 test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
 
-- **Clean refusal without a store (`--sandbox os`).** If `--store` is not an existing
-  directory, the CLI prints one line and exits 7, the same code as the no-OS-barrier
-  refusal. Before, it ended in an uncaught `SandboxError: store_required` traceback
-  (exit 1). Nothing is scored either way. The runner itself still raises
+- **Clean refusal without a store directory (`--sandbox os`).** If `--store` is given
+  but is not an existing directory, the CLI prints one line and exits 7, the same code
+  as the no-OS-barrier refusal. Before, it ended in an uncaught
+  `SandboxError: store_required` traceback (exit 1). An omitted `--store` still exits 2
+  (usage error), as in 1.3.1. Nothing is scored either way. The runner itself still raises
   `SandboxError("store_required")`.
 - **Reap after every candidate-role run.** After each candidate-role run whose
   post-run disk check passed, the scorer reaps this scoring's candidate scope, the same
   scope and the same by-PID reaper as in A11 (a PID found by lsof under this scoring's
-  candidate run directories or candidate trees; never by name). This narrows the race
+  candidate run directories or candidate trees; never by name). The candidate tree
+  paths are used exactly as recorded (resolved) before any candidate code ran; they are
+  not resolved again, so a candidate that replaces its tree root with a symlink cannot
+  move the scope to another directory. This narrows the race
   in which a survivor fills an unlinked file during a later GOLD_REF or BASE run and
   closes it before the next check. When the post-run check itself finds a shortfall,
   the existing shortfall reap runs there, as before. The reaper still re-checks every
@@ -510,16 +514,18 @@ test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
   4): `reclaimed >= shortfall_before` alone no longer charges the candidate. It is
   charged (`NOT_RUNNABLE` / `HOST_DISK_LOW`) only if `free_start >= floor` and
   `visible + reclaimed >= 0.5 * (free_start - free_before)`, the same proportion as
-  rule 5. Otherwise it is an infra abort. Another process that took most of the
-  disk between candidate runs is therefore never charged to the candidate. The
-  sub-reason `HOST_DISK_LOW` is kept for every charged case.
-- **H3 rerun.** When a post-run check ends as `post_run_recovered_without_reap` (the
-  disk read below the floor, the reap killed nothing, the disk recovered: a survivor may
-  have dropped its files in time), the discarded run is rerun in a fresh run directory,
-  up to 2 times (`H3_MAX_RERUNS`). A rerun is judged by the single host-disk rule like
-  any other run: if the shortfall comes back and the rule charges the candidate, it is
-  charged; if the reruns are used up with the same recovered-without-reap outcome, it is
-  an infra abort as before, and nothing is cached. The pre-registered list of
+  rule 5. Otherwise it is an infra abort (`post_run_recovered_not_charged` when the reap
+  killed something, `post_run_recovered_without_reap` when it killed nothing). This
+  narrows, but does not close, the case of another process taking disk between
+  candidate runs: `reclaimed` is all space that came back after a kill, so external
+  space released at that moment still counts toward the candidate (the attribution
+  limit of A11, unchanged). The sub-reason `HOST_DISK_LOW` is kept for every charged
+  case.
+- **No in-place rerun (H3 not adopted).** A run discarded as
+  `post_run_recovered_without_reap` stays an infra abort (exit 8, nothing cached), as in
+  1.3.1; the driver reruns the whole task with a fresh tree. Rerunning only the run in
+  place was rejected in review: the candidate's tree is mutable, so a candidate could
+  record that it already attacked and pass the rerun cleanly. The pre-registered list of
   `host_disk_low` infra aborts after a candidate run (#2721 S4.2) still applies.
 - Not changed: the lsof-based matching, the LOW findings (an operator process with its
   cwd in the scoring's trees under `--keep-trees`; the PID-reuse window between lsof and

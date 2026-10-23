@@ -162,14 +162,6 @@ class ScratchInfraAbort(RuntimeError):
     ``INFRA_ABORT_EXIT_CODE`` so the driver reruns the task."""
 
 
-class ScratchRecoveredWithoutReap(ScratchInfraAbort):
-    """1.3.2 (H3): after a run the disk read below the floor, the reap killed nothing and
-    the disk then recovered. The run is discarded and rerun (``H3_MAX_RERUNS`` times);
-    when reruns are used up it surfaces as the plain infra abort it always was."""
-
-
-# 1.3.2: how often a run discarded as ``post_run_recovered_without_reap`` is rerun.
-H3_MAX_RERUNS = 2
 # A11: the CLI's exit code for ScratchInfraAbort (2-7 are already used).
 INFRA_ABORT_EXIT_CODE = 8
 # A11: free space the scratch filesystem must keep before every "os" pytest run: at least
@@ -1788,21 +1780,11 @@ class PytestRunner:
         # so a confined process can only re-create its own dir, never rename one).
         if self.task_dir is None:
             self.task_dir = self.runs / uuid.uuid4().hex[:12]
-        reruns = 0
-        while True:
-            run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
-            try:
-                return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
-            except ScratchRecoveredWithoutReap as exc:
-                # 1.3.2 (H3): a survivor that dropped its files before lsof looked made the
-                # disk recover without a kill. Rerun the discarded run; if the shortfall
-                # comes back, the single host-disk rule decides (charge or infra) as usual.
-                if reruns >= H3_MAX_RERUNS:
-                    raise
-                reruns += 1
-                self.log(f"  H3 rerun {reruns}/{H3_MAX_RERUNS} after: {exc}")
-            finally:
-                self._remove_run_dir(run_dir)
+        run_dir = self.task_dir / f"{_role_slug(role)}-{key[:16]}-{uuid.uuid4().hex[:12]}"
+        try:
+            return self._execute(env, tree, target, ignores, run_idx, role, key, run_dir)
+        finally:
+            self._remove_run_dir(run_dir)
 
     def begin_task(self, task_key: str) -> None:
         """A11: start a task scoring: its run dirs go under a fresh runs/<uuid12> parent
@@ -1835,18 +1817,26 @@ class PytestRunner:
         return trash
 
     def reap_survivors(
-        self, prefixes: Iterable[Path], name_prefixes: Iterable[str] = ()
+        self,
+        prefixes: Iterable[Path],
+        name_prefixes: Iterable[str] = (),
+        *,
+        resolved: bool = False,
     ) -> list[int]:
         """A11 ("os"): SIGKILL, by PID, every process of this user that still has its cwd
         or an open file (deleted ones included) under ``prefixes`` (this scoring's trees,
         run dirs and their trash: the path itself or below it) or whose lsof name starts
         with one of ``name_prefixes`` (plain string match, for paths whose directory may
         no longer exist). Returns the reaped PIDs. Fails closed (ScratchInfraAbort) when
-        no lsof exists at a fixed location."""
+        no lsof exists at a fixed location. With ``resolved`` the prefixes are taken as
+        already-resolved absolute paths and are NOT resolved again (1.3.2: a candidate
+        that swaps its tree root for a symlink must not redirect the scope elsewhere)."""
         lsof = next((p for p in LSOF_CANDIDATES if os.path.isfile(p)), None)
         if lsof is None:
             raise ScratchInfraAbort("lsof_unavailable: cannot reap sandbox survivors")
-        roots = sorted({str(Path(p).resolve()) for p in prefixes if str(p)})
+        roots = sorted(
+            {str(p) if resolved else str(Path(p).resolve()) for p in prefixes if str(p)}
+        )
         raw = sorted({p for p in name_prefixes if p})
         if not roots and not raw:
             return []
@@ -1896,8 +1886,10 @@ class PytestRunner:
         names = []
         if self.task_dir is not None:
             names.append(f"{Path(self.task_dir).resolve()}/{_role_slug(CAND_ROLE)}-")
+        # The keys were resolved when each tree was first seen (before any candidate code
+        # ran); use them as recorded so a later symlink swap cannot move the scope.
         trees = [Path(t) for t in self._cand_tree_base]
-        reaped = self.reap_survivors(trees, name_prefixes=names)
+        reaped = self.reap_survivors(trees, name_prefixes=names, resolved=True)
         self.reaped_pids += reaped
         return reaped
 
@@ -1976,9 +1968,7 @@ class PytestRunner:
             ):
                 self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
             if not killed:
-                # H3: nothing was killed, yet the disk came back (a survivor may have
-                # dropped its files before lsof looked): discard and rerun the run.
-                raise ScratchRecoveredWithoutReap(
+                raise ScratchInfraAbort(
                     f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
                     f" reclaimed={reclaimed}B floor={floor}B"
                 )
