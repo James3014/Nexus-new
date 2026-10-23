@@ -336,6 +336,15 @@
 | tests/nexus/orchestrator/test_target_integration_git_canary.py | tests/nexus/orchestrator/test_target_integration_git_canary.py | active | low | retired_phase2_batch_a_guard_2584 |
 | tests/architecture/test_effect_owner_uniqueness.py | tests/architecture/test_effect_owner_uniqueness.py | active | low | retired_phase2_batch_a_guard_2584 |
 | tests/services/test_archived_phase2_batch_a_2026_10_24.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py | active | low | retired_phase2_batch_a_guard_2584 |
+| nexus/research/experiment_effect_controller.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| nexus/research/experiment_run_guard.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/research/test_experiment_effect_controller.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/research/test_experiment_effect_fail_closed_2454.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/research/test_experiment_run_guard.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/contracts/test_fail_closed_inventory.py | tests/contracts/test_fail_closed_inventory.py, tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/golden_behavior/corpus.py | tests/golden_behavior, tests/nexus/orchestrator/test_gateway_convergence.py | active | low | retired_phase2_item3_guard_2584 |
+| ARCHIVED_2026-10-24_phase2_item3.md | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
+| tests/services/test_archived_phase2_item3_2026_10_24.py | tests/services/test_archived_phase2_item3_2026_10_24.py | active | low | retired_phase2_item3_guard_2584 |
 | nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
 | nexus/evaluation/eval_harness.py | tests/services/test_archived_legacy_engine_2026_10_13.py | active | medium | archived_legacy_engine_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
