@@ -220,6 +220,27 @@ def _safe_error(exc: Exception) -> dict[str, str]:
     return {"type": type(exc).__name__, "code": code}
 
 
+def transient_status_error(value: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """The ``last_error`` a poll reports for a record restored after a transient error (#2864).
+
+    The poll itself succeeded (the record waits fail-closed), so readiness is unchanged; only
+    ``last_error`` names the error so a persistent one is visible in ``status``."""
+    if not isinstance(value, Mapping):
+        return None
+    listed = value.get("transient_errors")
+    if isinstance(listed, list) and listed and isinstance(listed[0], Mapping):
+        error = listed[0].get("error")
+    else:
+        result = value.get("result")
+        error = result.get("last_transient_error") if isinstance(result, Mapping) else None
+    if not error:
+        return None
+    code = str(error)
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", code):
+        code = "TRANSIENT_ERROR"
+    return {"type": "TransientError", "code": code}
+
+
 def _process_snapshot() -> list[tuple[int, str]]:
     result = subprocess.run(
         ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=False, timeout=5
@@ -1045,6 +1066,22 @@ def run_once(
     automation_factory=build_automation,
     refresh_fn=refresh_remote_main,
 ) -> dict[str, Any]:
+    """One poll.  Every restored record seen with a transient error is also listed under
+    ``transient_errors`` (#2864), so a later Issue's result cannot hide it."""
+    transient: list[dict[str, Any]] = []
+    value = _run_once(config, gh, automation_factory, refresh_fn, transient)
+    if transient:
+        value = {**value, "transient_errors": transient}
+    return value
+
+
+def _run_once(
+    config: ServiceConfig,
+    gh: GhIssueTransport | Any | None,
+    automation_factory,
+    refresh_fn,
+    transient: list[dict[str, Any]],
+) -> dict[str, Any]:
     if gh is None:
         gh = GhIssueTransport()
     last: dict[str, Any] | None = None
@@ -1081,6 +1118,14 @@ def run_once(
                 str(issue.get("title") or ""),
                 str(issue.get("body") or ""),
             )
+            if result.get("last_transient_error"):
+                # #2864: listed for every state (also RECONCILIATION_REQUIRED / BLOCKED), so
+                # no later Issue's result can hide it.
+                transient.append({
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "error": result.get("last_transient_error"),
+                })
             if (
                 result.get("state") in TERMINAL_DISPOSITIONS
                 or result.get("state") == "RECONCILIATION_REQUIRED"
@@ -1129,6 +1174,16 @@ def run_once(
                     "issue_number": int(issue["number"]),
                     "result": pub_result,
                 }
+            if result.get("last_transient_error"):
+                # #2864: a record restored after a transient error is still waiting, but the
+                # error must be visible in run-once output and the daemon status.
+                last = {
+                    "status": result.get("state"),
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "result": result,
+                }
+                continue
             if result.get("reuse"):
                 last = {
                     "status": result.get("state"),
@@ -1371,12 +1426,13 @@ def daemon(config: ServiceConfig, config_path: Path | None = None) -> None:
     write_status(ServiceReadiness.STARTING)
     while not stopping:
         try:
-            run_once(config)
+            value = run_once(config)
             successful_polls += 1
             write_status(
                 ServiceReadiness.READY
                 if successful_polls >= READINESS_SUCCESS_THRESHOLD
-                else ServiceReadiness.STARTING
+                else ServiceReadiness.STARTING,
+                error=transient_status_error(value),
             )
         except Exception as exc:
             successful_polls = 0

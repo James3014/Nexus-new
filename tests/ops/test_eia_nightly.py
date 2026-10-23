@@ -2352,6 +2352,136 @@ def test_restored_record_with_transient_error_waits_and_is_noted(env) -> None:
     assert entry["attempts"][0]["note"] == "last_transient_error=OPENCLI_TIMEOUT"
 
 
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        ({"state": "FANOUT_DISPATCHING"}, "FANOUT_DISPATCHING:TRANSIENT:SOURCE_LINEAGE_FAILED"),
+        (
+            {
+                "state": "RECONCILIATION_REQUIRED",
+                "prior_state": "INTELLIGENCE_DISPATCHING",
+                "reconcile_only": True,
+                "error": "CANONICAL_WORKFORCE_BINDING_MISSING",
+            },
+            "RECONCILIATION_REQUIRED:INTELLIGENCE_DISPATCHING:TRANSIENT:SOURCE_LINEAGE_FAILED",
+        ),
+    ],
+)
+def test_classify_names_the_transient_error_of_a_waiting_record(fields, reason) -> None:
+    """#2864: a restored record still waits, but its reason names the transient error."""
+    state = {**fields, "last_transient_error": "SOURCE_LINEAGE_FAILED"}
+    assert en.classify(state) == ("wait", reason)
+    # a daemon string that is not a safe token is never echoed
+    assert en.classify({**fields, "last_transient_error": "bad `x`"})[1].endswith(
+        ":TRANSIENT:INVALID"
+    )
+
+
+def test_classify_without_a_transient_error_is_unchanged() -> None:
+    assert en.classify({"state": "FANOUT_DISPATCHING"}) == ("wait", "FANOUT_DISPATCHING")
+
+
+def _transient(env, att: dict[str, Any], at: str, error: str = "SOURCE_LINEAGE_FAILED") -> None:
+    _write_daemon_state(
+        env,
+        11,
+        att["identity_hash"],
+        state="INTELLIGENCE_DISPATCHING",
+        last_transient_error=error,
+        last_transient_error_reason={"reason_code": "LINEAGE"},
+        last_transient_error_at=at,
+    )
+
+
+def test_repeated_transient_error_is_counted_and_reported_as_such(env) -> None:
+    """#2864: each new occurrence counts once; at the cap a repeated error is named."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _transient(env, att, "2026-10-17T00:31:00.000+00:00")
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    night = _dispatch(env, "2026-10-17T00:40:00")  # same occurrence polled twice
+    seen = night["issues"]["11"]["attempts"][0]["transient_error"]
+    assert seen["count"] == 1 and seen["error"] == "SOURCE_LINEAGE_FAILED"
+    assert seen["reason"] == '{"reason_code": "LINEAGE"}'
+    for minute in ("41", "46"):
+        _transient(env, att, f"2026-10-17T00:{minute}:00.000+00:00")
+        night = _dispatch(env, f"2026-10-17T00:{minute}:30")
+    assert night["issues"]["11"]["attempts"][0]["transient_error"]["count"] == 3
+    report = env["app"].report(night)
+    assert "Transient errors (last attempt; record restored after the error):" in report
+    assert "- #11: SOURCE_LINEAGE_FAILED x3" in report
+    night = _dispatch(env, "2026-10-17T03:01:00")
+    reason = night["issues"]["11"]["attempts"][0]["reason"]
+    assert reason == "TRANSIENT_ERROR_REPEATED:SOURCE_LINEAGE_FAILED:x3"
+
+
+def test_a_different_transient_error_restarts_the_count(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    for minute in ("31", "36"):
+        _transient(env, att, f"2026-10-17T00:{minute}:00.000+00:00")
+        night = _dispatch(env, f"2026-10-17T00:{minute}:30")
+    _transient(env, att, "2026-10-17T00:41:00.000+00:00", error="OPENCLI_TIMEOUT")
+    night = _dispatch(env, "2026-10-17T00:41:30")
+    seen = night["issues"]["11"]["attempts"][0]["transient_error"]
+    assert (seen["error"], seen["count"]) == ("OPENCLI_TIMEOUT", 1)
+
+
+def test_a_clean_poll_between_transient_errors_restarts_the_count(env) -> None:
+    """Codex r1 on #2914: only consecutive occurrences count toward REPEATED."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    for minute in ("31", "36"):
+        _transient(env, att, f"2026-10-17T00:{minute}:00.000+00:00")
+        night = _dispatch(env, f"2026-10-17T00:{minute}:30")
+    _write_daemon_state(env, 11, att["identity_hash"], state="INTELLIGENCE_DISPATCHING")
+    night = _dispatch(env, "2026-10-17T00:40:00")
+    assert "transient_error" not in night["issues"]["11"]["attempts"][0]
+    _transient(env, att, "2026-10-17T00:41:00.000+00:00")
+    night = _dispatch(env, "2026-10-17T00:41:30")
+    assert night["issues"]["11"]["attempts"][0]["transient_error"]["count"] == 1
+
+
+def test_transient_error_text_cannot_inject_markdown_into_the_report(env) -> None:
+    """Codex r1 on #2914: daemon text in the report carries no link or emphasis syntax."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(
+        env,
+        11,
+        att["identity_hash"],
+        state="INTELLIGENCE_DISPATCHING",
+        last_transient_error="[click](https://evil.example) *x* !",
+        last_transient_error_reason={"r": "[a](b)"},
+        last_transient_error_at="[t](u)",
+    )
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    section = env["app"].report(night).split("Transient errors", 1)[1]
+    assert "- #11: clickhttps:evil.example" in section
+    for bad in ("[", "]", "](", "*", "!", "`"):
+        assert bad not in section
+
+
+def test_a_single_transient_error_at_the_cap_keeps_the_cap_reason(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _transient(env, att, "2026-10-17T00:31:00.000+00:00")
+    night = _dispatch(env, "2026-10-17T03:01:00")
+    reason = night["issues"]["11"]["attempts"][0]["reason"]
+    assert reason == "ISSUE_CAP_EXCEEDED:INTELLIGENCE_DISPATCHING:TRANSIENT:SOURCE_LINEAGE_FAILED"
+
+
+def test_report_has_no_transient_section_without_transient_errors(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    assert "Transient errors" not in env["app"].report(night)
+
+
 def test_finalized_report_shows_the_final_night_status(env) -> None:
     _started(env)
     env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
