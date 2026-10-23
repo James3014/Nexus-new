@@ -957,7 +957,10 @@ def test_sweep_kills_through_the_wrapper_and_needs_both_sides_clean(worker_env, 
         boundary.cleanup()
         # an unclean sweep never copies anything back
         assert (worker_env["target"] / "src" / "a.py").read_text() == "print('a')\n"
-        assert not boundary.run_root.exists()
+        # ... and keeps the run root (#2888): the lease reaper sweeps that run later
+        assert boundary.run_root.exists()
+        assert boundary.leftover_run_root == str(boundary.run_root)
+        shutil.rmtree(boundary.run_root)
 
 
 def test_terminate_worker_sweeps_as_the_worker(worker_env, monkeypatch):
@@ -1024,7 +1027,10 @@ def test_launch_without_the_wrapper_marker_is_a_launch_failure(
     assert boundary.sweep() is owner_clean
     boundary.cleanup()
     assert boundary.worker_failure == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
-    assert not boundary.run_root.exists()
+    # an unproven sweep keeps the run root for the lease reaper (#2888)
+    assert boundary.run_root.exists() is (not owner_clean)
+    if not owner_clean:
+        shutil.rmtree(boundary.run_root)
 
 
 # ---------------------------------------------------------------------------
@@ -1041,6 +1047,14 @@ class _Claim:
             "Lease", (), {"execution_env": {"HOME": str(home), "PATH": "/usr/bin:/bin"}}
         )()
         self.released = False
+        self.marks: list[dict[str, Any]] = []
+
+    def mark_worker_run(self, *, run_root: str, run_root_id: list[int], run_as_user: str) -> None:
+        self.marks.append({
+            "run_root": run_root,
+            "run_root_id": run_root_id,
+            "run_as_user": run_as_user,
+        })
 
     def release(self) -> None:
         self.released = True
@@ -1220,7 +1234,14 @@ def test_default_dispatch_uses_the_unchanged_boundary(tmp_path, monkeypatch, cap
         "--x",
     ]
     assert not hasattr(seen["boundary"], "launch_env")
-    assert "worker-runs" not in seen["boundary"].profile
+    # #2888: the Owner-uid profile denies the worker-runs tree right after the head
+    # (and never allows a path inside it); the worker profile has its own rules.
+    head = "(version 1)\n(allow default)\n"
+    deny = f'(deny file-read* file-write* (subpath "{boundary_mod.WORKER_RUNS_DIR}"))\n'
+    profile = seen["boundary"].profile
+    assert profile.startswith(head) and deny in profile
+    assert profile[len(head) :].splitlines(keepends=True)[1] == deny
+    assert profile.count(str(boundary_mod.WORKER_RUNS_DIR)) == 1
     assert dispatch._popen_env(seen["boundary"], {"A": "1"}) == {"A": "1"}
     assert dispatch._popen_env(None, {"A": "1"}) == {"A": "1"}
     # #2888: no worker receipt line without --run-as-user
@@ -2207,7 +2228,7 @@ def test_provider_stderr_cannot_forge_receipts_or_the_status_line(worker_env, mo
             "completed",
         ]
         assert metas[0]["run_root"] == str(seen["boundary"].run_root) != fake_root
-    assert fake_root in err and "[provider] NEXUS_AGY_DISPATCH" in err  # relayed, neutralised
+    assert fake_root in err and "[provider] NEXUS-AGY-DISPATCH" in err  # relayed, neutralised
 
 
 def test_every_provider_stderr_relay_goes_through_the_neutraliser():
@@ -2246,9 +2267,23 @@ def test_left_is_reset_by_a_later_clean_sweep(worker_env, monkeypatch, capsys):
 
 
 def test_relayed_stderr_without_dispatcher_lines_is_unchanged():
-    text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nmore NEXUS_AGY_DISPATCH inline\n"
+    text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nNEXUS_AGY_DISPATC\n"
     assert dispatch._neutralize_relayed_stderr("plain\n") == "plain\n"
     assert dispatch._neutralize_relayed_stderr(text) == text
+
+
+def test_relayed_token_is_broken_anywhere_so_no_cut_forges_a_line():
+    # #2888: a reader cutting an over-long line at a fixed size could start a line
+    # mid-line; the token must not survive anywhere in the relayed text.
+    status = json.dumps({"status": "completed"})
+    pad = "A" * 65530
+    text = f"{pad}NEXUS_AGY_DISPATCH {status}\nx NEXUS_AGY_DISPATCHNEXUS_AGY_DISPATCH y\n"
+    out = dispatch._neutralize_relayed_stderr(text)
+    assert "NEXUS_AGY_DISPATCH" not in out
+    assert out.count("NEXUS-AGY-DISPATCH") == 3
+    for size in (1, 7, 4096, 65530, 65536):
+        chunks = [out[i : i + size] for i in range(0, len(out), size)]
+        assert not any(c.lstrip().startswith("NEXUS_AGY_DISPATCH") for c in chunks)
 
 
 def _clean_worker_runner(seen: dict):
@@ -2471,7 +2506,9 @@ def test_wrapper_that_never_started_is_not_started_unless_the_owner_sweep_is_unc
     assert receipts[1]["result"] == ("not_started" if owner_clean else "unclean")
     assert receipts[1]["wrapper"] == "REFUSED"  # sudo refused: no wrapper report line
     assert receipts[2]["worker_failure"] == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
-    assert receipts[2]["run_root_removed"] is True
+    assert receipts[2]["run_root_removed"] is owner_clean  # unclean: kept (#2888)
+    if not owner_clean:
+        shutil.rmtree(boundary.run_root)
 
 
 def test_launch_that_never_happened_still_closes_with_not_started_and_cleanup(

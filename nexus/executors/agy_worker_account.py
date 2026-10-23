@@ -48,6 +48,11 @@ Trust and limits (#2885 review r1):
   ``/bin/sh`` ...), so a tagged system binary is only found by the tracker or
   by its cwd.  Copy-back does not trust the run dir, so this is not a safety
   hole.
+* ``sudo`` closes the inherited lease-lock descriptor (#2888), so only the dispatcher
+  holds the account flock.  Before launch it records the run in its lease receipt
+  (``AccountLeaseClaim.mark_worker_run``) and it never releases the claim after an
+  unclean worker sweep.  If the dispatcher dies, the pool removes the receipt only
+  after ``reap_orphaned_worker_run`` proves the run is gone.
 * A clean sweep does not prove that no worker process survived (one that
   clears its environment, leaves the run directory and was never seen by the
   tracker is not found).  Copy-back therefore re-opens the workdir with
@@ -60,9 +65,11 @@ Trust and limits (#2885 review r1):
 
 from __future__ import annotations
 
+import errno
 import grp
 import hashlib
 import json
+import logging
 import os
 import pwd
 import secrets
@@ -79,6 +86,7 @@ from nexus.executors import cli_worker
 from nexus.executors.agy_dispatch_boundary import (
     AGY_WRITE_BOUNDARY_UNAVAILABLE,
     KEEP_RUN_ROOT_ENV,
+    WORKER_RUNS_DIR,
     AgyDispatchBoundary,
     AgyWriteBoundaryError,
     _prepare_run_home_keychain,
@@ -97,8 +105,10 @@ from nexus.executors.agy_write_admission import (
 
 WORKER_USER = "_cairnwork_worker"
 WORKER_RUN_GROUP = "_cairnwork_wrun"
-WORKER_ROOT = Path("/Users/Shared/cairnwork-worker")
-WORKER_RUNS = WORKER_ROOT / "worker-runs"
+# One definition of the worker-runs path, owned by the boundary module so the
+# default (Owner-uid) profile can deny it without importing this module (#2888).
+WORKER_RUNS = WORKER_RUNS_DIR
+WORKER_ROOT = WORKER_RUNS.parent
 WORKER_BIN = WORKER_ROOT / "bin"
 WORKER_WRAPPER = WORKER_BIN / "agy-worker-exec"
 WORKER_AGY = WORKER_BIN / "agy"
@@ -125,6 +135,9 @@ RECEIPT_PREFIX = "NEXUS_AGY_DISPATCH "
 
 # The wrapper this module speaks to: this reference must exist and match the installed copy.
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
+
+
+_LOG = logging.getLogger(__name__)
 
 
 def _refuse(reason: str) -> AgyWriteBoundaryError:
@@ -287,6 +300,123 @@ def sweep_run_root_report(
 
 
 _PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+
+PS_PATH = "/bin/ps"
+PS_TIMEOUT_SECONDS = 10.0
+_RUN_TAG_DIGITS = frozenset("0123456789abcdef")
+
+
+def _worker_user_has_no_process(user: str, run_command: Callable[..., Any]) -> bool:
+    """True only when ``ps`` positively reports that ``user`` owns no process.
+
+    Observed on macOS 27: ``ps -U <user> -o pid=`` exits 0 and prints one pid per
+    line while the user owns a process; when the user exists and owns none it
+    exits 1 with empty stdout and empty stderr; for an unknown user it also exits
+    1 with empty stdout but names the user on stderr.  Only the first no-match
+    shape counts, so a missing user, a ``ps`` failure or an unexpected exit code
+    never reads as "nothing runs".
+    """
+    try:
+        completed = run_command(
+            [PS_PATH, "-U", user, "-o", "pid="],
+            cwd="/",
+            env=dict(_PS_ENV),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    pid_lines = [line for line in (completed.stdout or "").splitlines() if line.strip()]
+    return completed.returncode == 1 and not pid_lines and not (completed.stderr or "").strip()
+
+
+def _valid_receipt_run_root(receipt: Mapping[str, Any]) -> Optional[tuple[Path, list[int]]]:
+    """Validate the worker fields a lease receipt carries (same checks as the journal path)."""
+    if receipt.get("worker_run_as_user") != WORKER_USER:
+        return None
+    raw_root = receipt.get("worker_run_root")
+    if not isinstance(raw_root, str) or not raw_root or "\x00" in raw_root:
+        return None
+    root = Path(raw_root)
+    if (
+        ".." in root.parts
+        or str(root.resolve()) != raw_root
+        or root.parent != WORKER_RUNS.resolve()
+        or len(root.name) != 32
+        or not set(root.name) <= _RUN_TAG_DIGITS
+    ):
+        return None
+    root_id = receipt.get("worker_run_root_id")
+    if (
+        not isinstance(root_id, list)
+        or len(root_id) != 2
+        or not all(isinstance(item, int) and not isinstance(item, bool) for item in root_id)
+    ):
+        return None
+    return root, list(root_id)
+
+
+def _run_root_is_the_recorded_directory(root: Path, root_id: list[int]) -> bool:
+    """True when ``root`` is a real directory we own with the recorded device and inode.
+
+    False when it is gone or is anything else (a different inode after a reboot, a
+    replaced directory, a file, another owner); other ``OSError`` propagates.
+    """
+    try:
+        info = os.lstat(root)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+            return False
+        raise
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.getuid()
+        and [info.st_dev, info.st_ino] == root_id
+    )
+
+
+def reap_orphaned_worker_run(
+    receipt: Mapping[str, Any],
+    *,
+    run_command: Callable[..., Any] = subprocess.run,
+) -> bool:
+    """True only when the worker run named by an orphaned lease receipt is proven gone (#2888).
+
+    A ``--run-as-user`` agy runs through ``sudo``, which closes the inherited
+    lease lock, so a free lock and a dead dispatcher PID prove nothing about it.
+    The account pool keeps such a receipt unless this returns True; it never
+    raises (any error is "not proven").
+
+    * The recorded run root is still there (a real directory we own with the
+      recorded device and inode): the per-run wrapper sweep must report CLEAN;
+      then the run root is removed best-effort.  A leftover tree after a clean
+      sweep is logged but still proves the run gone, as the dispatcher's own
+      cleanup releases on a clean sweep regardless.
+    * The run root is gone, or is not the directory the dispatcher created (a
+      different inode after a reboot, a replaced directory): nothing is swept or
+      removed, and only "the worker account owns no process at all" counts (a
+      surviving worker keeps an unlinked cwd, and the wrapper refuses a missing
+      root).  That is stricter than needed while other worker runs are active,
+      which only delays reclaiming the account.
+    """
+    try:
+        validated = _valid_receipt_run_root(receipt)
+        if validated is None:
+            return False
+        root, root_id = validated
+        if not _run_root_is_the_recorded_directory(root, root_id):
+            return _worker_user_has_no_process(WORKER_USER, run_command)
+        if sweep_run_root(root, run_command=run_command) != "CLEAN":
+            return False
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.lexists(root):
+            _LOG.warning("AGY_WORKER_RUN_ROOT_LEFTOVER_AFTER_CLEAN_SWEEP root=%s", root)
+        return True
+    except Exception:
+        return False
 
 
 def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str]:
@@ -944,6 +1074,10 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     receipt_context: Optional[dict] = field(default=None, repr=False)
     receipts: list = field(default_factory=list, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
+    # Set by before_launch, which runs just before Popen: ``_launched`` only turns
+    # True in after_launch, so a signal in between would otherwise read as "never
+    # launched" while sudo/agy may already run.
+    _launch_attempted: bool = field(default=False, repr=False)
     _worker_verdict: Optional[str] = field(default=None, repr=False)
     # The wrapper itself reported survivors ("AGY_WORKER_SWEEP unclean <pids>").
     _worker_reported_unclean: bool = field(default=False, repr=False)
@@ -1037,7 +1171,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         if "WORKER_SWEEP" not in self._receipt_events:
             # Launch line written but no sweep ran: the launch frame raised
             # before the worker existed (not launched) or the sweep failed.
-            self._emit_sweep_receipt("error" if self._launched else "not_started")
+            self._emit_sweep_receipt("error" if self._possibly_launched else "not_started")
         failure = self.worker_failure
         self._emit_receipt(
             "WORKER_CLEANUP",
@@ -1057,6 +1191,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
         super().before_launch()
         self._emit_launch_receipt()
+        # Last: nothing before this can have started a worker process.
+        self._launch_attempted = True
+
+    @property
+    def _possibly_launched(self) -> bool:
+        return self._launched or self._launch_attempted
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
         baseline = self._baseline
@@ -1077,9 +1217,19 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
         return self._worker_verdict == "CLEAN"
 
+    @property
+    def sweep_verdict_clean(self) -> bool:
+        """The recorded verdict, without running a sweep (#2888 lease release).
+
+        True when nothing launched or the run-once sweep finished clean; False
+        when it was unclean, raised before recording a verdict, or never ran.  A
+        launch that was attempted (``before_launch`` ran) counts as launched.
+        """
+        return not self._possibly_launched or self._swept is True
+
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
-        if self._launched:
+        if self._possibly_launched:
             self._worker_sweep(())
 
     def sweep(self) -> bool:
@@ -1089,7 +1239,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         run-cwd or tracked worker process, and the Owner-side check confirms the
         tracked descendants are gone.
         """
-        if not self._launched:
+        if not self._possibly_launched:
             return True
         if self._swept is not None:
             return self._swept
@@ -1112,13 +1262,17 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             excused = not started and refused
             self._swept = bool(owner_clean and (self._worker_swept or excused))
         except BaseException:
+            # The Owner-side sweep inside the try stores its own result in
+            # ``_swept`` before the combined verdict exists: an interrupt after it
+            # must never leave that half verdict standing as "clean".
+            self._swept = None
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
             raise
         self._emit_sweep_receipt(self._sweep_result(started))
         return self._swept
 
     def cleanup(self) -> None:
-        if self._launched and self._swept is None:
+        if self._possibly_launched and self._swept is None:
             self.sweep()
         tracker, self._tracker = self._tracker, None
         if tracker is not None:
@@ -1147,7 +1301,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
         finally:
             if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
-                shutil.rmtree(self.run_root, ignore_errors=True)
+                # An unproven worker sweep keeps the run root (#2888): the lease
+                # receipt stays too, and the pool's reaper can then prove this
+                # run's processes gone with the per-run wrapper sweep instead of
+                # the coarse "the worker account owns no process" check.
+                if not (self._possibly_launched and self._swept is not True):
+                    shutil.rmtree(self.run_root, ignore_errors=True)
                 if os.path.lexists(self.run_root):
                     self.leftover_run_root = str(self.run_root)
                     sys.stderr.write(

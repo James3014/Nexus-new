@@ -57,12 +57,17 @@ from nexus.executors.agy_write_admission import (
     build_seatbelt_profile,
     materialize_run_home,
     path_inside,
+    paths_overlap,
     seatbelt_available,
     worker_home,
 )
 
 AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
 KEEP_RUN_ROOT_ENV = "NEXUS_AGY_KEEP_RUN_ROOT"
+# Per-run directories of the worker account (#2884).  ``agy_worker_account``
+# imports this module, so the one definition lives here and it re-exports it as
+# ``WORKER_RUNS``.
+WORKER_RUNS_DIR = Path("/Users/Shared/cairnwork-worker/worker-runs")
 
 
 class AgyWriteBoundaryError(RuntimeError):
@@ -133,6 +138,32 @@ def _prepare_run_home_keychain(run_home: Path) -> str:
     except AgyAccountPoolManagerError as exc:
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{exc}") from exc
     return KEYCHAIN_NOT_APPLICABLE if keychain is None else KEYCHAIN_ISOLATED
+
+
+_PROFILE_HEAD = "(version 1)\n(allow default)\n"
+
+
+def _deny_worker_runs(profile: str, runs_dir: Optional[Path] = None) -> str:
+    """Deny the default (Owner-uid) profile any access to the worker-runs tree (#2888).
+
+    The Owner is in the worker run group, so without this rule a sandboxed agy
+    running as the Owner could read the per-run HOMEs and work copies of
+    concurrent ``--run-as-user`` runs.  The rule goes right after the head like
+    ``cross_run_profile``'s; nothing later in this profile allows a path inside
+    worker-runs.  ``prepare_accept_edits_boundary`` refuses a target (or literal
+    write grant) that overlaps worker-runs, because the profile's later
+    ``(allow file-write* (subpath <target>))`` would re-open it.  The
+    ``--run-as-user`` profile is built elsewhere and has its own, narrower
+    cross-run rules.
+    """
+    if not profile.startswith(_PROFILE_HEAD):
+        raise ValueError("unexpected base profile shape")
+    runs = WORKER_RUNS_DIR if runs_dir is None else runs_dir
+    rule = (
+        ";; #2888: an Owner-uid run may not read or write the worker account's run directories\n"
+        f'(deny file-read* file-write* (subpath "{_sbpl_path(runs)}"))\n'
+    )
+    return _PROFILE_HEAD + rule + profile[len(_PROFILE_HEAD) :]
 
 
 def _with_literal_writes(profile: str, files: Iterable[Path]) -> str:
@@ -282,6 +313,10 @@ def prepare_accept_edits_boundary(
     target_real = Path(os.path.realpath(Path(target).expanduser()))
     if not target_real.is_dir():
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_missing")
+    # #2888: the profile denies worker-runs first and then allows writes to the
+    # target, so a target equal to, above or inside worker-runs would re-open it.
+    if paths_overlap(target_real, WORKER_RUNS_DIR):
+        raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_overlaps_worker_runs")
     roots = [Path(os.path.realpath(Path(root).expanduser())) for root in extra_writable_roots]
     extras = [
         _admit_extra_writable_file(
@@ -292,6 +327,8 @@ def prepare_accept_edits_boundary(
         )
         for raw in extra_writable_files
     ]
+    if any(path_inside(extra, WORKER_RUNS_DIR) for extra in extras):
+        raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:extra_path_in_worker_runs")
     run_root = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-run-")))
     profile_dir = Path(os.path.realpath(tempfile.mkdtemp(prefix="nexus-agy-dispatch-sb-")))
     try:
@@ -308,11 +345,13 @@ def prepare_accept_edits_boundary(
         keychain_state = _prepare_run_home_keychain(run_home)
         try:
             profile = _with_literal_writes(
-                build_seatbelt_profile(
-                    run_root=run_root,
-                    writable_target=target_real,
-                    run_home=run_home,
-                    source_home=worker_home(source_env),
+                _deny_worker_runs(
+                    build_seatbelt_profile(
+                        run_root=run_root,
+                        writable_target=target_real,
+                        run_home=run_home,
+                        source_home=worker_home(source_env),
+                    )
                 ),
                 extras,
             )

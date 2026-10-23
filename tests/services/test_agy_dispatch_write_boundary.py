@@ -156,7 +156,14 @@ def test_boundary_profile_env_and_home(tmp_path, seatbelt_on):
         assert not admission.path_inside(boundary.profile_path, run_root)
         assert boundary.sweep_roots == (str(target), str(run_root))
         profile = boundary.profile
-        assert profile.splitlines()[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
+        lines = profile.splitlines()
+        assert lines[:2] == ["(version 1)", "(allow default)"]
+        # #2888: the worker-runs deny (a comment line, then the rule) sits right after the head
+        assert lines[2].startswith(";; #2888")
+        assert lines[3] == (
+            f'(deny file-read* file-write* (subpath "{boundary_mod.WORKER_RUNS_DIR}"))'
+        )
+        assert lines[4] == "(deny file-write*)"
         for path in (target / "src" / "a.py", run_root / "tmp" / "x", log):
             assert _effective_write(profile, path) == "allow", path
         for path in (
