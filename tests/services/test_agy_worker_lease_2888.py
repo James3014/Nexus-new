@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import ast
 import fcntl
 import functools
 import grp
@@ -60,6 +61,38 @@ INSTALLATION_ID = Path(".gemini") / "antigravity-cli" / "installation_id"
 RUN_TAG = "ab" * 16
 SWEEP_CLEAN = "AGY_WORKER_SWEEP clean\n"
 SWEEP_UNCLEAN = "AGY_WORKER_SWEEP unclean 4242\n"
+
+# Real ``ps`` / ``sandbox-exec`` probes only exist as test nodes on macOS (same
+# convention as the #2795 Seatbelt witness file): a Linux skip would be an added
+# test id that never passes, which the impact gate rightly refuses.
+DARWIN_WITNESS_AVAILABLE = sys.platform == "darwin" and os.path.exists(admission.SANDBOX_EXEC_PATH)
+DARWIN_WITNESSES = (
+    "test_real_ps_unknown_user_and_busy_user_are_never_read_as_empty",
+    "test_real_ps_user_without_processes_is_empty",
+    "test_default_profile_blocks_a_real_listing_of_a_worker_runs_dir",
+    "test_default_profile_denies_real_writes_and_reads_under_worker_runs",
+)
+
+
+def darwin_witness(func, *, available: bool = DARWIN_WITNESS_AVAILABLE):
+    """Expose a macOS witness as a test node only where it can run."""
+    return func if available else None
+
+
+def test_darwin_witness_nodes_are_declared_and_darwin_ci_must_collect_them() -> None:
+    """Always collected (Linux included), so the impact gate sees a passing node."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    declared = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(isinstance(d, ast.Name) and d.id == "darwin_witness" for d in node.decorator_list)
+    }
+    assert declared == set(DARWIN_WITNESSES)
+    for name in DARWIN_WITNESSES:
+        assert (globals().get(name) is not None) is DARWIN_WITNESS_AVAILABLE
+    if os.environ.get("CI") and sys.platform == "darwin":
+        assert DARWIN_WITNESS_AVAILABLE, "macOS CI host has no sandbox-exec"
 
 
 @pytest.fixture(autouse=True)
@@ -656,7 +689,7 @@ def test_missing_root_with_any_sign_of_a_worker_process_or_error_is_unproven(
     )
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="ps -U exit codes observed on macOS 27")
+@darwin_witness  # ps -U exit codes observed on macOS 27
 def test_real_ps_unknown_user_and_busy_user_are_never_read_as_empty() -> None:
     # An unknown user exits 1 with empty stdout like "no process" but names the user on stderr.
     assert worker_mod._worker_user_has_no_process("nosuchuser_zz_2888", subprocess.run) is False
@@ -665,12 +698,9 @@ def test_real_ps_unknown_user_and_busy_user_are_never_read_as_empty() -> None:
     assert worker_mod._worker_user_has_no_process(me, subprocess.run) is False
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="ps -U exit codes observed on macOS 27")
+@darwin_witness  # ps -U exit codes observed on macOS 27
 def test_real_ps_user_without_processes_is_empty() -> None:
-    try:
-        pwd.getpwnam(worker_mod.WORKER_USER)
-    except KeyError:
-        pytest.skip("worker account not installed")
+    # Also holds where the worker account is not installed: ps then names it on stderr.
     listing = subprocess.run(
         ["/bin/ps", "-U", worker_mod.WORKER_USER, "-o", "pid="],
         capture_output=True,
@@ -1429,6 +1459,7 @@ def _seatbelt_usable() -> bool:
     return probe.returncode == 0
 
 
+@darwin_witness
 def test_default_profile_blocks_a_real_listing_of_a_worker_runs_dir(tmp_path, monkeypatch) -> None:
     """Live Seatbelt witness with a stand-in worker-runs dir (the real one needs the worker account)."""
     if not _seatbelt_usable():
@@ -1927,6 +1958,7 @@ def test_default_boundary_refuses_a_literal_write_grant_inside_worker_runs(stand
     assert list(stand_in.tmp.iterdir()) == []
 
 
+@darwin_witness
 def test_default_profile_denies_real_writes_and_reads_under_worker_runs(stand_in) -> None:
     if not _seatbelt_usable():
         pytest.skip("sandbox-exec not usable here")
