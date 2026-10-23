@@ -4850,6 +4850,8 @@ def dispatch_run(
     # Accounts this run already ran agy on; a capability rotation never
     # returns to one of them.
     attempted_accounts: set[str] = set()
+    # #2905: the orphan run-root GC runs at most once per dispatch, not per attempt.
+    worker_gc_attempted = False
     last_kind = None
     total_wall_ms = 0
     active_provider_pid: int | None = None
@@ -5298,7 +5300,11 @@ def dispatch_run(
                         if run_as_user is not None:
                             # #2884: agy runs as the worker account in a per-run
                             # copy of the target under worker-runs.
-                            if total_deadline - _monotonic() > WORKER_GC_MIN_REMAINING_SECONDS:
+                            if (
+                                not worker_gc_attempted
+                                and total_deadline - _monotonic() > WORKER_GC_MIN_REMAINING_SECONDS
+                            ):
+                                worker_gc_attempted = True
                                 try:
                                     _agy_worker_account().gc_unreferenced_worker_run_roots(
                                         _agy_account_pool.referenced_worker_run_roots(

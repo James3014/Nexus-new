@@ -1353,6 +1353,67 @@ def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
     assert coordinator.claim.released is True
 
 
+def test_dispatch_runs_gc_once_even_when_it_rotates(worker_env, monkeypatch, capsys):
+    leases = worker_env["pool"] / "leases"
+
+    class _Rotating(_Coordinator):
+        def rotate_claim(self, **kwargs):
+            kwargs["current_claim"].release()
+            self.claim = _Claim(worker_env["home"])
+            self.claim.account_alias_hash = "worker-2"
+            self.claim.receipt_path = leases / "b.receipt.json"
+            return self.claim
+
+    coordinator = _Rotating(worker_env["home"])
+    coordinator.claim.receipt_path = leases / "a.receipt.json"
+    events = []
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        events.append("runner")
+        if events.count("runner") == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 1
+        return 0, "edited", "", False, 1
+
+    monkeypatch.setattr(
+        dispatch._agy_account_pool,
+        "referenced_worker_run_roots",
+        lambda leases_dir: events.append("references") or set(),
+    )
+    monkeypatch.setattr(
+        worker_mod, "gc_unreferenced_worker_run_roots", lambda roots: events.append("gc") or []
+    )
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    # the first attempt provably changed nothing, so its quota failure rotates
+    journal = dispatch.direct_operation_journal
+    monkeypatch.setattr(journal, "capture_source_baseline", lambda cwd: object())
+    monkeypatch.setattr(journal, "observed_changed_paths_since", lambda cwd, baseline: [])
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+    )
+    assert code == 0, capsys.readouterr().err
+    assert coordinator.claim.account_alias_hash == "worker-2"
+    assert events == ["references", "gc", "prepare", "runner", "prepare", "runner"]
+
+
 def test_dispatch_skips_gc_when_the_remaining_budget_is_short(worker_env, monkeypatch, capsys):
     coordinator = _Coordinator(worker_env["home"])
     coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
