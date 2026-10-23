@@ -440,6 +440,7 @@ def run_benchmark(
     os.environ["NEXUS_RUN_REAL_LOCAL_MODEL_TESTS"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
+    os.environ["NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS"] = "1"  # un-skip red-by-design verifiers (#1923)
 
     # 1. Clear previous outputs (unless resume)
     completed_task_ids: set[str] = set()

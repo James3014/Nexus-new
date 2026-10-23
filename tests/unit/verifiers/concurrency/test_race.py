@@ -1,3 +1,4 @@
+import os
 import unittest
 import threading
 import time
@@ -8,6 +9,14 @@ from nexus.verifiers.domain.concurrency.buggy_targets_batch_b02 import (
 
 class TestBatchB02RaceFixed(unittest.TestCase):
 
+    # Red by design (#1923): repair-benchmark verifier for the intentionally broken
+    # BuggyIdempotentExecutor. Only runs when the benchmark opts in; normal and nightly
+    # runs skip it. The real invariant is covered by FixedIdempotentExecutor tests in
+    # test_concurrency_batch_b02.py.
+    @unittest.skipUnless(
+        os.environ.get("NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS") == "1",
+        "repair-benchmark verifier (red by design); set NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS=1",
+    )
     def test_idempotent_executor_green_stress(self):
         for _ in range(5):
             executor = BuggyIdempotentExecutor()
