@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 
 def _write_aligned_agent_report() -> None:
     head_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
@@ -37,6 +39,14 @@ def _write_aligned_agent_report() -> None:
     report_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    os.environ.get("NEXUS_STAGE_F_E2E") != "1",
+    reason=(
+        "opt-in end-to-end delivery gate (#1928): needs a local `main` branch, runs the functional "
+        "suite, and seals governance / writes .nexus state in the live checkout without restoring it; "
+        "set NEXUS_STAGE_F_E2E=1 to run it deliberately in a throwaway checkout"
+    ),
+)
 def test_stage_f():
     print("🧪 Running Stage F Validation...")
     

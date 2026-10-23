@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -184,8 +185,33 @@ def test_quick_payload_includes_openseeker_autodata_smoke(tmp_path: Path):
     assert not (tmp_path / ".nexus" / "reports" / "pre_flash_autodata_manifest.json").exists()
 
 
-def test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests():
-    check = nexus_pre_flash_gate.validate_benchmark_autodata_manifest_gate(Path(".").resolve())[0]
+def _synthetic_autodata_manifest(path: Path, tag: str) -> None:
+    rows = [
+        {
+            "task_id": f"{tag}-{index}",
+            "label": {"label": "GOLD"},
+            "eligible_for_training": True,
+            "hard_negative": True,
+            "evidence_refs": [f"EV-{tag}-{index}"],
+            "low_step_filter": {"filtered": False},
+        }
+        for index in range(3)
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"schema_version": "nexus_autodata_forge_manifest.v1", "rows": rows}),
+        encoding="utf-8",
+    )
+
+
+def test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests(tmp_path: Path):
+    # Hermetic (#1928): the real manifests are gitignored and absent from clean checkouts, so
+    # synthesize minimal valid flash/pro manifests at the gate's default paths under tmp_path.
+    autodata = tmp_path / ".nexus" / "reports" / "autodata"
+    _synthetic_autodata_manifest(autodata / "flash_8x1_autodata_manifest.json", "flash")
+    _synthetic_autodata_manifest(autodata / "pro_8x1_autodata_manifest.json", "pro")
+
+    check = nexus_pre_flash_gate.validate_benchmark_autodata_manifest_gate(tmp_path)[0]
 
     assert check["passed"] is True
     assert check["name"] == "benchmark_autodata_manifest_gate"
