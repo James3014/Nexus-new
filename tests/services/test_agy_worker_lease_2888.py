@@ -524,6 +524,7 @@ def test_only_first_claim_pass_may_reap_past_deadline(tmp_path, reaper, monkeypa
 
     def reap(receipt):
         reaped.append(receipt)
+        clock.now += 2.0  # a reap takes time: this one ends past the deadline
         return False
 
     monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
@@ -531,6 +532,49 @@ def test_only_first_claim_pass_may_reap_past_deadline(tmp_path, reaper, monkeypa
     with pytest.raises(AgyAccountPoolBusyError):
         coordinator.acquire_claim("desktop-new", wait_timeout=1)
     assert len(reaped) == 1
+
+
+def test_an_unproven_receipt_does_not_block_the_next_one_within_the_deadline(
+    tmp_path, reaper, monkeypatch
+) -> None:
+    # Gemini review of #2907: one unproven receipt must not stop the pass.
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b"))
+    for account in coordinator.manager._accounts:
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt["account_alias_hash"])
+        return len(reaped) == 2  # the first is unproven, the second is gone
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    claim = coordinator.acquire_claim("desktop-new", wait_timeout=5)
+    try:
+        assert len(reaped) == 2 and claim.account_alias_hash == reaped[1]
+    finally:
+        claim.release()
+
+
+def test_a_receipt_that_cannot_be_unlinked_is_skipped_not_retried_at_once(
+    tmp_path, reaper, monkeypatch
+) -> None:
+    coordinator, _ = _coordinator(tmp_path, aliases=("a", "b"))
+    paths = [
+        _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
+        for account in coordinator.manager._accounts
+    ]
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", lambda receipt: True)
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self == paths[0]:
+            raise PermissionError("EPERM")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    deferred = [(p.name.split(".")[0], p, _read(p)["lease_id_hash"]) for p in paths]
+    assert coordinator._reap_deferred_worker_receipts(deferred) is True
+    assert paths[0].exists() and not paths[1].exists()
 
 
 @pytest.mark.parametrize(
@@ -738,6 +782,26 @@ def test_unclean_tokens_allow_reap_when_ps_proves_exit(runs, monkeypatch) -> Non
     )
     assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is True
     assert not root.exists()
+
+
+@pytest.mark.parametrize("tokens", [[], ["4242:Fri_Oct_23_12:34:56_2026"]], ids=["none", "gone"])
+def test_an_unclean_run_needs_an_idle_worker_account_even_with_its_tokens_gone(
+    runs, monkeypatch, tokens
+) -> None:
+    # Gemini review of #2907: a survivor may have forked and exited, or left
+    # the run's env and cwd; the marker alone makes the reaper wait for an
+    # idle worker account, whatever the tokens and the per-run sweep say.
+    root, receipt = _run_root(runs)
+    receipt["worker_unclean_tokens"] = tokens
+    monkeypatch.setattr(
+        worker_mod.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
+    )
+    busy = _Commands(ps=(0, "  777\n", ""))
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=busy) is False
+    assert root.exists() and busy.sweeps == []
+    idle = _Commands()
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=idle) is True
+    assert not root.exists() and len(idle.pses) == 1 and len(idle.sweeps) == 1
 
 
 @pytest.mark.parametrize("started", ["12:34:56", "12:34:57"], ids=["live", "pid-reused"])
@@ -1798,7 +1862,10 @@ def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
     receipt = claim.receipt_path
     try:
         assert claim.released is False
-        assert _read(receipt) == during  # still there, unchanged
+        after = _read(receipt)
+        # #2905: the unclean end adds its marker (survivor tokens, possibly none)
+        assert isinstance(after.pop("worker_unclean_tokens"), list)
+        assert after == during  # still there, otherwise unchanged
         # The dispatcher exits: its lock fd closes, the pid is gone, the receipt stays.
         # The next claimer must ask the reaper; it keeps the account until proven gone.
         claim.lock_file_obj.close()
@@ -1817,7 +1884,11 @@ def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
         with pytest.raises(AgyAccountPoolBusyError):
             real_acquire(consumer_id="desktop-next", wait_timeout=0)
         assert receipt.exists() and run_root.exists()
-        assert commands.sweeps == [worker_mod.sweep_argv(run_root, [])] and commands.pses == []
+        assert commands.sweeps == [worker_mod.sweep_argv(run_root, [])]
+        # #2905: the unclean marker also needs an idle worker account (one ps -U)
+        assert [argv[:3] for argv, _ in commands.pses] == [
+            [worker_mod.PS_PATH, "-U", worker_mod.WORKER_USER]
+        ]
         commands.sweep = (0, SWEEP_CLEAN)
         reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
         next_claim = real_acquire(consumer_id="desktop-next", wait_timeout=0)

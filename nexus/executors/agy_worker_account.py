@@ -433,6 +433,11 @@ def reap_orphaned_worker_run(
             )
             if set(tokens).intersection(alive):
                 return False
+            # The run ended unclean: a survivor may have forked and exited, or
+            # cleared its env and left the run cwd, beyond both the tokens and
+            # the per-run sweep.  Only an idle worker account proves it gone.
+            if not _worker_user_has_no_process(WORKER_USER, run_command):
+                return False
         root, root_id = validated
         if not _run_root_is_the_recorded_directory(root, root_id):
             return _worker_user_has_no_process(WORKER_USER, run_command)
@@ -1415,7 +1420,10 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         were scrubbed"; files agy wrote under other names are not seen).  A
         missing file or directory (a surviving worker may have renamed it), a
         symlink or directory in its place, a file with other hard links, or an
-        I/O failure all report False.
+        I/O failure all report False.  Best effort against leftovers only: a
+        surviving worker could read these files while it ran and may hold a
+        copy anywhere (or swap names under this scrub), which no scrub can
+        rule out; the lease, not this field, keeps such a run fail-closed.
         """
         clean = True
         for relative in self._scrub_paths:

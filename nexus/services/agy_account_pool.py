@@ -1474,19 +1474,22 @@ class CrossProcessLeaseCoordinator:
         *,
         allow_expired: bool = False,
     ) -> bool:
-        """Try at most one worker reap; True if its receipt was removed.
+        """Reap deferred worker receipts until one is removed; True if one was.
 
         Runs outside the allocation lock and holds only the account's own flock
         (skipped when busy).  The receipt is re-read and its identity and dead
-        owner re-checked before the reaper runs.  An unproven receipt is not
-        re-reaped for ``WORKER_REAP_NEGATIVE_TTL_SECONDS`` and warns once per lease.
-        Only the first claim pass may start a reap past the deadline, so even
-        zero-wait callers can recover a stale account (``deadline=None``: no
-        deadline).  An ongoing reap may finish.
+        owner re-checked before the reaper runs.  An unproven receipt (or one
+        that cannot be unlinked) is skipped, not re-reaped for
+        ``WORKER_REAP_NEGATIVE_TTL_SECONDS``, and warns once per lease, so it
+        never blocks the receipts behind it.  No reap starts past the deadline,
+        except one on the first claim pass so that zero-wait callers can still
+        recover a stale account (``deadline=None``: no deadline).  An ongoing
+        reap may finish.
         """
         import fcntl
         import time
 
+        attempted = False
         for alias_hash, receipt_path, lease_hash in deferred:
             key = _worker_reap_key(alias_hash, lease_hash)
             if _worker_reap_recently_unproven(key):
@@ -1510,15 +1513,20 @@ class CrossProcessLeaseCoordinator:
                     or receipt.get("lease_id_hash") != lease_hash
                 ):
                     continue
-                if not allow_expired and deadline is not None and time.monotonic() >= deadline:
+                expired = deadline is not None and time.monotonic() >= deadline
+                if expired and (attempted or not allow_expired):
                     return False
+                attempted = True
                 if not worker_receipt_run_gone(receipt):
                     _note_worker_reap_unproven(key, alias_hash, lease_hash)
-                    return False
+                    continue
                 try:
                     receipt_path.unlink()
+                except FileNotFoundError:
+                    return True  # removed meanwhile: the account is free either way
                 except OSError:
-                    return False
+                    _note_worker_reap_unproven(key, alias_hash, lease_hash)
+                    continue
                 _WORKER_REAP_UNPROVEN.pop(key, None)
                 _LOG.warning(
                     "AGY_ORPHANED_DESKTOP_RECEIPT_RECLAIMED account=%s lease=%s",

@@ -5518,9 +5518,12 @@ def dispatch_run(
                                 if getattr(write_boundary, "sweep_verdict_clean", None) is not True:
                                     worker_lease_unproven = True
                                     try:
-                                        tokens = getattr(write_boundary, "unclean_tokens", ())
-                                        if tokens:
-                                            claim.mark_worker_unclean(tokens)
+                                        # Always marked, even with no survivor
+                                        # identity: the marker alone makes the
+                                        # reaper wait for an idle worker account.
+                                        claim.mark_worker_unclean(
+                                            getattr(write_boundary, "unclean_tokens", ())
+                                        )
                                     except Exception as exc:
                                         sys.stderr.write(
                                             "nexus-agy-dispatch: worker unclean lease mark failed: "
