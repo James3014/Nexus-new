@@ -2409,11 +2409,24 @@ def test_repeated_transient_error_is_counted_and_reported_as_such(env) -> None:
         night = _dispatch(env, f"2026-10-17T00:{minute}:30")
     assert night["issues"]["11"]["attempts"][0]["transient_error"]["count"] == 3
     report = env["app"].report(night)
-    assert "Transient errors (record restored and still waiting):" in report
+    assert "Transient errors (last attempt; record restored after the error):" in report
     assert "- #11: SOURCE_LINEAGE_FAILED x3" in report
     night = _dispatch(env, "2026-10-17T03:01:00")
     reason = night["issues"]["11"]["attempts"][0]["reason"]
     assert reason == "TRANSIENT_ERROR_REPEATED:SOURCE_LINEAGE_FAILED:x3"
+
+
+def test_a_different_transient_error_restarts_the_count(env) -> None:
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    for minute in ("31", "36"):
+        _transient(env, att, f"2026-10-17T00:{minute}:00.000+00:00")
+        night = _dispatch(env, f"2026-10-17T00:{minute}:30")
+    _transient(env, att, "2026-10-17T00:41:00.000+00:00", error="OPENCLI_TIMEOUT")
+    night = _dispatch(env, "2026-10-17T00:41:30")
+    seen = night["issues"]["11"]["attempts"][0]["transient_error"]
+    assert (seen["error"], seen["count"]) == ("OPENCLI_TIMEOUT", 1)
 
 
 def test_a_single_transient_error_at_the_cap_keeps_the_cap_reason(env) -> None:

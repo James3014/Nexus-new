@@ -230,7 +230,7 @@ def transient_status_error(value: Mapping[str, Any] | None) -> dict[str, str] | 
     if not error:
         return None
     code = str(error)
-    if not re.fullmatch(r"[A-Z0-9_:-]{1,120}", code):
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", code):
         code = "TRANSIENT_ERROR"
     return {"type": "TransientError", "code": code}
 

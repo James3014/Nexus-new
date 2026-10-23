@@ -2039,13 +2039,16 @@ class Nightly:
         """Record the restored record's transient error on the attempt; return its count.
 
         Each daemon poll that hits the error again writes a new ``last_transient_error_at``,
-        so a new timestamp (or a different error) counts one more occurrence (#2864)."""
+        so a new timestamp counts one more occurrence; a different error starts again at 1
+        (#2864)."""
         error = _one_line(record["last_transient_error"], 200)
         at = _one_line(record.get("last_transient_error_at") or "", 64)
         seen = att.get("transient_error")
         seen = seen if isinstance(seen, dict) else {}
         count = int(seen.get("count") or 0)
-        if seen.get("error") != error or seen.get("at") != at or not count:
+        if seen.get("error") != error:
+            count = 1
+        elif seen.get("at") != at or not count:
             count += 1
         reason = record.get("last_transient_error_reason")
         att["transient_error"] = {
@@ -2456,7 +2459,7 @@ class Nightly:
             if atts and isinstance(atts[-1].get("transient_error"), dict)
         ]
         if transient:
-            lines += ["Transient errors (record restored and still waiting):", ""]
+            lines += ["Transient errors (last attempt; record restored after the error):", ""]
             for number, err in transient:
                 detail = f" ({err['reason']})" if err.get("reason") else ""
                 lines.append(

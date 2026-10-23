@@ -2842,6 +2842,10 @@ def test_run_once_reports_a_restored_record_with_its_transient_error(tmp_path):
             {"status": "X", "result": {"last_transient_error": "weird text"}},
             {"type": "TransientError", "code": "TRANSIENT_ERROR"},
         ),
+        (
+            {"status": "X", "result": {"last_transient_error": "TimeoutError"}},
+            {"type": "TransientError", "code": "TimeoutError"},
+        ),
     ],
 )
 def test_transient_status_error_only_for_a_transient_record(value, expected):
