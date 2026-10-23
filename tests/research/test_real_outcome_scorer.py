@@ -4978,20 +4978,18 @@ def test_cli_sandbox_os_without_a_store_dir_refuses_cleanly_exit_7(tmp_path, mon
 
     monkeypatch.setattr(cli.ros, "score_task", no_scoring)
     monkeypatch.setattr(cli.ros, "PytestRunner", no_scoring)
-    rc = cli.main(
-        [
-            "--store",
-            str(tmp_path / "no-such-store"),
-            "--out",
-            str(tmp_path / "out"),
-            "--work",
-            str(tmp_path / "work"),
-            "--task",
-            "James3014__nexus-runtime--1",
-            "--sandbox",
-            "os",
-        ]
-    )
+    rc = cli.main([
+        "--store",
+        str(tmp_path / "no-such-store"),
+        "--out",
+        str(tmp_path / "out"),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+        "--sandbox",
+        "os",
+    ])
     err = capsys.readouterr().err
     assert rc == 7
     assert "--store must be an existing directory" in err
@@ -5204,7 +5202,9 @@ def test_tree_root_swap_between_runs_is_refused_before_confine_or_reap(tmp_path,
             runner.run(env, cand, "c", "tests", (), 1, role)
     assert confined == []
     assert set(runner._cand_tree_base) == bound
-    assert all(str(outside.resolve()) not in str(p) for call in runner.reaped_prefixes for p in call)
+    assert all(
+        str(outside.resolve()) not in str(p) for call in runner.reaped_prefixes for p in call
+    )
 
 
 def test_a_candidate_tree_that_is_a_symlink_at_first_sight_is_refused(tmp_path, monkeypatch):

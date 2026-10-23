@@ -1839,9 +1839,7 @@ class PytestRunner:
         lsof = next((p for p in LSOF_CANDIDATES if os.path.isfile(p)), None)
         if lsof is None:
             raise ScratchInfraAbort("lsof_unavailable: cannot reap sandbox survivors")
-        roots = sorted(
-            {str(p) if resolved else str(Path(p).resolve()) for p in prefixes if str(p)}
-        )
+        roots = sorted({str(p) if resolved else str(Path(p).resolve()) for p in prefixes if str(p)})
         raw = sorted({p for p in name_prefixes if p})
         if not roots and not raw:
             return []
