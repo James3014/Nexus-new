@@ -483,10 +483,10 @@ platform approval) fails closed and requires the corresponding new decision.
 substitutes for the verification gates. This GitHub action does not approve or
 integrate local Nexus lifecycle state.
 When the live MCP surface exposes `github_complete_pull_request`, governed
-protected-merge completion after independent acceptance uses that action. It binds
-`run_github_completion_loop()` to server-configured `NEXUS_CANONICAL_SOURCE_ROOT`
-and `NEXUS_PYTHON_BIN`; required checks still execute on the exact current
-integration subject; physical merge remains expected-head/CAS. Absence of the
+protected-merge completion after independent acceptance uses that action (none is
+implemented; its unwired loop was retired in #2584, see #2918); required checks
+still execute on the exact current integration subject; physical merge remains
+expected-head/CAS. Absence of the
 action is not a new Owner-approval boundary; fall back to the existing
 governed coordinator CAS path. The action cannot mint standing-grant or merge
 authority.

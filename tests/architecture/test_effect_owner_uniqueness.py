@@ -11,6 +11,7 @@ import ast
 import functools
 import hashlib
 import importlib.util
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -42,15 +43,21 @@ class Record:
         return f"{self.path}:{self.cls + '.' if self.cls else ''}{self.fn}"
 
 
+# Retired 2026-10-24 (#2584 Phase-2 item 6): github_completion_loop.py was never wired to
+# production and was deleted (design archived in knowledge). Kept as RETIRED records only; they
+# are not in DECLARED or EDGES, so the protected GitHub merge effect has no admitted owner in
+# nexus/ or scripts/ops/ and every ``cas_merge`` / ``merge_pull_request`` caller fails verify().
 MERGE_PORT = Ref(
     "nexus/orchestrator/github_completion_loop.py",
     "GitHubCompletionPort",
     "cas_merge",
+    "RETIRED",
 )
 MERGE_LOOP = Ref(
     "nexus/orchestrator/github_completion_loop.py",
     None,
     "run_github_completion_loop",
+    "RETIRED",
 )
 CANDIDATE_FACADE = Ref(
     "nexus/orchestrator/self_hosted_task_service.py",
@@ -150,8 +157,6 @@ NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
 })
 
 DECLARED = (
-    MERGE_PORT,
-    MERGE_LOOP,
     CANDIDATE_FACADE,
     CANDIDATE_SINK,
     COMPETITION_SINK,
@@ -164,7 +169,6 @@ DECLARED = (
 )
 
 EDGES = (
-    (MERGE_LOOP, "port.cas_merge"),
     (UNIFIED_CALLER, "self.service.integrate_approved"),
     (SELF_HOSTED_CALLER, "self.service.integrate_approved"),
     (CANDIDATE_FACADE, "ControlledIntegrationManager().integrate_authorized_task_state"),
@@ -296,6 +300,18 @@ def _raise(effect: str, reason: str, rows: Iterable[Record]) -> None:
         raise AssertionError(f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids))
 
 
+def _merge_callers(rows: Iterable[Record]) -> list[Record]:
+    # No admitted owner since #2584 item 6: the retired MERGE_LOOP id is not exempt either.
+    return [
+        row
+        for row in rows
+        if any(
+            _tail(call) in {"cas_merge", "merge_pull_request", "git_merge_pull_request"}
+            for call in _calls(row)
+        )
+    ]
+
+
 def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     root = root.resolve()
 
@@ -312,19 +328,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
 
     rows = _all(root, extra)
 
-    _raise(
-        "protected_github_merge",
-        "DIRECT_OR_SECOND_CAS_MERGE",
-        (
-            row
-            for row in rows
-            if (any(_tail(call) == "cas_merge" for call in _calls(row)) and row.id != MERGE_LOOP.id)
-            or any(
-                _tail(call) in {"merge_pull_request", "git_merge_pull_request"}
-                for call in _calls(row)
-            )
-        ),
-    )
+    _raise("protected_github_merge", "DIRECT_OR_SECOND_CAS_MERGE", _merge_callers(rows))
 
     allowed_candidate_callers = {
         CANDIDATE_FACADE.id
@@ -379,8 +383,10 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         "classification": "SINGLE_EFFECT_OWNER",
         "effects": {
             "protected_github_merge": {
-                "boundary": MERGE_PORT.id,
-                "physical_sink": "EXTERNAL_PORT_EFFECT",
+                "classification": "RETIRED",
+                "retired_boundary": MERGE_PORT.id,
+                "retired_owner": MERGE_LOOP.id,
+                "physical_sink": None,
             },
             "candidate_integration": {
                 "authority_facade": CANDIDATE_FACADE.id,
@@ -477,6 +483,49 @@ def test_new_different_named_direct_merge_fails(tmp_path):
         "def publish(client):\n    return client.git_merge_pull_request('repo', 1)\n",
         "protected_github_merge",
     )
+
+
+def test_github_merge_effect_is_retired():
+    result = verify(Path(__file__).resolve().parents[2])
+    merge = result["effects"]["protected_github_merge"]
+    assert importlib.util.find_spec("nexus.orchestrator.github_completion_loop") is None
+    assert merge == {
+        "classification": "RETIRED",
+        "retired_boundary": MERGE_PORT.id,
+        "retired_owner": MERGE_LOOP.id,
+        "physical_sink": None,
+    }
+    assert MERGE_PORT not in DECLARED and MERGE_LOOP not in DECLARED
+    assert MERGE_PORT.label == MERGE_LOOP.label == "RETIRED"
+    assert all(caller != MERGE_LOOP for caller, _ in EDGES)
+
+
+def test_recreated_retired_merge_loop_symbol_fails(tmp_path, monkeypatch):
+    # The exact retired path and symbol get no exemption (#2584 item 6 plan check). The rogue
+    # record is injected into the full verify() scan, so an exemption re-added either inside
+    # _merge_callers or at its verify() call site fails this control.
+    rogue = tmp_path / MERGE_LOOP.path
+    rogue.parent.mkdir(parents=True)
+    rogue.write_text(
+        "def run_github_completion_loop(*, port):\n"
+        "    return port.cas_merge(expected_base_sha='a', expected_head_sha='b')\n",
+        encoding="utf-8",
+    )
+    injected = _records(rogue, tmp_path)
+    assert [record.id for record in injected] == [MERGE_LOOP.id]
+    real_all = _all
+
+    def _all_with_rogue(root: Path, extra: Iterable[Path] = ()) -> tuple[Record, ...]:
+        return real_all(root, extra) + injected
+
+    monkeypatch.setattr(sys.modules[__name__], "_all", _all_with_rogue)
+    try:
+        verify(_REPO_ROOT)
+    except AssertionError as exc:
+        assert "DUPLICATE_EFFECT_IMPLEMENTATION:protected_github_merge" in str(exc)
+        assert MERGE_LOOP.id in str(exc)
+        return
+    raise AssertionError("recreated retired merge loop was not flagged")
 
 
 def test_fake_receiver_with_cas_merge_name_fails(tmp_path):
