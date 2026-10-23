@@ -1,16 +1,38 @@
-import unittest
+import os
+import random
 import threading
 import time
-import random
+import unittest
+
 from nexus.verifiers.domain.concurrency.buggy_targets_batch_b02 import (
-    BuggyIdempotentExecutor, BuggyTokenBucket, BuggyReadWriteRegistry, BuggyProducerConsumer, BuggyAsyncBarrier
+    BuggyAsyncBarrier,
+    BuggyIdempotentExecutor,
+    BuggyProducerConsumer,
+    BuggyReadWriteRegistry,
+    BuggyTokenBucket,
 )
+
 
 class TestBatchB02RaceFixed(unittest.TestCase):
 
     def test_idempotent_executor_green_stress(self):
+        """Stress execute() from 20 threads; it must run exactly once.
+
+        Two modes (#1923): with NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS=1 (set by the
+        m1 repair benchmark) this targets the intentionally broken
+        BuggyIdempotentExecutor, red until a candidate patches it. Otherwise it
+        stresses the reference FixedIdempotentExecutor, so normal and nightly runs
+        check the real invariant and pass.
+        """
+        if os.environ.get("NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS") == "1":
+            executor_cls = BuggyIdempotentExecutor
+        else:
+            from nexus.verifiers.domain.concurrency.fixed_targets_batch_b02 import (
+                FixedIdempotentExecutor,
+            )
+            executor_cls = FixedIdempotentExecutor
         for _ in range(5):
-            executor = BuggyIdempotentExecutor()
+            executor = executor_cls()
             def worker(): 
                 time.sleep(random.uniform(0.001, 0.005))
                 executor.execute()

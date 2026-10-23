@@ -233,6 +233,7 @@ def test_local_model_executor_concurrency_real_solve(monkeypatch):
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("NEXUS_RUN_REPAIR_BENCHMARK_VERIFIERS", "1")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b")
     monkeypatch.setenv("NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED", "1")
