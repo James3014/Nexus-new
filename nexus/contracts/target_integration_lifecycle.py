@@ -257,36 +257,6 @@ class CleanupDecision:
         return value
 
 
-@dataclass(frozen=True)
-class IntegrationExecutionReceipt:
-    schema: str
-    task_id: str
-    candidate_commit: str
-    staging_commit: str
-    integration_commit: str | None
-    staged: bool
-    applied: bool
-    canonical_head_before: str
-    canonical_head_after: str
-    canonical_status_before: str
-    canonical_status_after: str
-    verifier_passed: bool
-    cleanup: CleanupDecision
-
-    def __post_init__(self) -> None:
-        if self.schema != "nexus.transactional_integration_receipt.v1":
-            raise ValueError("unsupported integration receipt schema")
-        for value in (self.candidate_commit, self.staging_commit, self.canonical_head_before, self.canonical_head_after):
-            _sha(value)
-        if self.integration_commit is not None:
-            _sha(self.integration_commit)
-
-    def to_dict(self) -> dict[str, Any]:
-        value = dict(self.__dict__)
-        value["cleanup"] = self.cleanup.to_dict()
-        return value
-
-
 # Short aliases make the contract ergonomic without adding another authority.
 TargetResolution = TargetResolutionDecision
 AcceptanceReceipt = ExternalAcceptanceReceipt

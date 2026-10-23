@@ -13,7 +13,10 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.executors.cli_worker import bounded_environment_receipt
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
-from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
+from nexus.orchestrator.target_integration_lifecycle import (
+    TargetIntegrationLifecycle,
+    _render_command,
+)
 
 
 def git(root: Path, *args: str) -> str:
@@ -74,6 +77,45 @@ def authorization(root: Path, base: str, candidate: str, receipt: ExternalAccept
     )
 
 
+def integrate(
+    *, acceptance_receipt: ExternalAcceptanceReceipt, auth: IntegrationAuthorizationEnvelope,
+    staging_root: str, apply: bool = False, verifier_commands=(), lifecycle_state=None,
+    post_apply_commands=(),
+):
+    """Drive the live Git sink with an authorized task state (#2584 Phase-2 batch A).
+
+    The compatibility adapter ``TargetIntegrationLifecycle.transactional_integration``
+    that these canaries used to call had no production caller and was removed; the
+    state below is the one it built, handed to the same sink the live
+    ``SelfHostedTaskService.integrate_approved`` uses.
+    """
+    authorization_state = auth.to_dict()
+    authorization_state["authorization_hash"] = auth.authorization_hash
+    state = dict(lifecycle_state or {})
+    state.update({
+        "task_id": auth.task_id,
+        "external_acceptance": acceptance_receipt.to_dict(),
+        "integration_authorization": authorization_state,
+        "post_apply_commands": [list(command) for command in post_apply_commands],
+        "verifier_argv_commands": [list(command) for command in verifier_commands],
+        "promotion_packet": {
+            **dict(state.get("promotion_packet") or {}),
+            "candidate_commit_sha": auth.candidate_commit,
+        },
+        "contract": {
+            **dict(state.get("contract") or {}),
+            "controller_repo_root": auth.canonical_root,
+            "verifier_commands": [_render_command(command) for command in verifier_commands],
+        },
+    })
+    return ControlledIntegrationManager(
+        integration_root=auth.canonical_root
+    ).integrate_authorized_task_state(
+        state, integration_branch=auth.canonical_branch, staging_root=staging_root,
+        apply=apply, post_apply_commands=post_apply_commands,
+    )
+
+
 def _verifier_lifecycle_state(tmp_path: Path, exit_code: int) -> tuple[tuple[str, ...], dict]:
     """Sealed verifier evidence + admitted manifest, as the Candidate receipt would carry (a9a8a531e)."""
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -100,26 +142,22 @@ def test_real_git_staging_failure_and_success_do_not_fake_ancestry(tmp_path: Pat
     auth = authorization(root, base, candidate, receipt)
     failing_argv, failing_state = _verifier_lifecycle_state(tmp_path / "fail-ev", 1)
     with pytest.raises(RuntimeError, match="staging verifier failed"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base, expected_status_hash=status_hash(root),
+        integrate(
             staging_root=str(tmp_path / "failed-stage"),
             verifier_commands=(failing_argv,), lifecycle_state=failing_state,
-            external_acceptance=receipt, authorization=auth,
+            acceptance_receipt=receipt, auth=auth,
         )
     assert git(root, "rev-parse", "HEAD") == base
     assert not (tmp_path / "failed-stage" / "task-1").exists()
 
     good_argv, good_state = _verifier_lifecycle_state(tmp_path / "good-ev", 0)
-    staged = TargetIntegrationLifecycle.transactional_integration(
-        task_id="task-1", canonical_root=root, candidate_commit=candidate,
-        expected_canonical_head=base, expected_status_hash=status_hash(root),
+    staged = integrate(
         staging_root=str(tmp_path / "good-stage"),
         verifier_commands=(good_argv,), lifecycle_state=good_state,
-        external_acceptance=receipt, authorization=auth,
+        acceptance_receipt=receipt, auth=auth,
     )
-    assert staged.staged is True
-    assert staged.applied is False
+    assert staged.staging_commit_sha
+    assert staged.merge_performed is False
     assert git(root, "rev-parse", "HEAD") == base
 
 
@@ -129,21 +167,17 @@ def test_real_git_canary_detects_canonical_drift_and_applies_verified_result(tmp
     auth = authorization(root, base, candidate, receipt)
     (root / "unrelated.txt").write_text("dirty\n")
     with pytest.raises(RuntimeError, match="canonical.*clean"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base, expected_status_hash=status_hash(root),
+        integrate(
             staging_root=str(tmp_path / "drift-stage"), apply=True,
-            external_acceptance=receipt, authorization=auth,
+            acceptance_receipt=receipt, auth=auth,
         )
     (root / "unrelated.txt").unlink()
-    applied = TargetIntegrationLifecycle.transactional_integration(
-        task_id="task-1", canonical_root=root, candidate_commit=candidate,
-        expected_canonical_head=base, expected_status_hash=status_hash(root),
+    applied = integrate(
         staging_root=str(tmp_path / "apply-stage"), apply=True,
-        external_acceptance=receipt, authorization=auth,
+        acceptance_receipt=receipt, auth=auth,
     )
-    assert applied.applied is True
-    assert git(root, "rev-parse", "HEAD") == applied.integration_commit
+    assert applied.merge_performed is True
+    assert git(root, "rev-parse", "HEAD") == applied.integration_commit_sha
     assert git(root, "merge-base", "--is-ancestor", candidate, git(root, "rev-parse", "HEAD")) == ""
 
 
@@ -155,11 +189,9 @@ def test_real_git_conflict_and_forged_cleanup_are_fail_closed(tmp_path: Path):
     receipt = acceptance(candidate)
     auth = authorization(root, drifted_head, candidate, receipt)
     with pytest.raises(RuntimeError, match="git merge"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=drifted_head, expected_status_hash=status_hash(root),
+        integrate(
             staging_root=str(tmp_path / "conflict-stage"), apply=True,
-            external_acceptance=receipt, authorization=auth,
+            acceptance_receipt=receipt, auth=auth,
         )
     assert git(root, "rev-parse", "HEAD") == drifted_head
 
@@ -201,23 +233,19 @@ def test_verifier_argument_with_spaces_is_approved_when_it_matches_and_refused_o
     receipt = acceptance(candidate)
     auth = authorization(root, base, candidate, receipt)
     argv, state = _spaced_verifier_state(tmp_path / "match-ev", "assert 1 + 1 == 2")
-    staged = TargetIntegrationLifecycle.transactional_integration(
-        task_id="task-1", canonical_root=root, candidate_commit=candidate,
-        expected_canonical_head=base, expected_status_hash=status_hash(root),
+    staged = integrate(
         staging_root=str(tmp_path / "match-stage"),
         verifier_commands=(argv,), lifecycle_state=state,
-        external_acceptance=receipt, authorization=auth,
+        acceptance_receipt=receipt, auth=auth,
     )
-    assert staged.staged is True
+    assert staged.staging_commit_sha and staged.merge_performed is False
     # The approved argv is not the one the sealed evidence recorded: refuse.
     other_argv, _ = _spaced_verifier_state(tmp_path / "other-ev", "assert 1 + 1 == 3")
     with pytest.raises(RuntimeError, match="staging verifier (command|argv) mismatch"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base, expected_status_hash=status_hash(root),
+        integrate(
             staging_root=str(tmp_path / "mismatch-stage"),
             verifier_commands=(other_argv,), lifecycle_state=state,
-            external_acceptance=receipt, authorization=auth,
+            acceptance_receipt=receipt, auth=auth,
         )
     assert git(root, "rev-parse", "HEAD") == base
 
@@ -227,8 +255,6 @@ def test_verifier_argument_with_spaces_is_approved_when_it_matches_and_refused_o
     ["a#b", "#x", "&x", ";x", "a|b", "<in", "x>y", "", "a b", "it's", "\\", "$HOME", "*", "exit(1)", "a\"b"],
 )
 def test_rendered_verifier_command_round_trips_through_the_downstream_lexer(token: str):
-    from nexus.orchestrator.target_integration_lifecycle import _render_command
-
     argv = ("-c", token)  # the token after -c is exempt from the char denylist
     _executable, parsed, _env = ControlledIntegrationManager._command_intent(
         _render_command(("python3", *argv))

@@ -327,6 +327,15 @@
 | nexus/verifiers/packs/django_pack.py | tests/services/test_archived_phase2_batch_c_2026_10_21.py | active | low | retired_phase2_batch_c_guard_2584 |
 | ARCHIVED_2026-10-21_phase2_batch_C.md | tests/services/test_archived_phase2_batch_c_2026_10_21.py | active | low | retired_phase2_batch_c_manifest_2584 |
 | tests/services/test_archived_phase2_batch_c_2026_10_21.py | tests/services/test_archived_phase2_batch_c_2026_10_21.py | active | low | retired_phase2_batch_c_guard_2584 |
+| nexus/contracts/operator_outcome_receipt.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | low | retired_phase2_batch_a_guard_2584 |
+| nexus/orchestrator/self_hosted_task_service_parts/operator_outcome.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/contracts/test_operator_outcome_receipt.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/contracts/test_self_hosted_task_service_operator_outcome.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py, tests/nexus/orchestrator/test_self_hosted_task_service.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/contracts/test_self_hosted_task_service_checkpoint.py | tests/contracts/test_self_hosted_task_service_checkpoint.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/nexus/orchestrator/test_target_integration_authority_closure.py | tests/nexus/orchestrator/test_target_integration_authority_closure.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/nexus/orchestrator/test_target_integration_git_canary.py | tests/nexus/orchestrator/test_target_integration_git_canary.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/architecture/test_effect_owner_uniqueness.py | tests/architecture/test_effect_owner_uniqueness.py | active | low | retired_phase2_batch_a_guard_2584 |
+| tests/services/test_archived_phase2_batch_a_2026_10_24.py | tests/services/test_archived_phase2_batch_a_2026_10_24.py | active | low | retired_phase2_batch_a_guard_2584 |
 | nexus/cli | tests/services/test_archived_capabilities_2026_10_13.py | active | medium | archived_cli_commands_2026_10_13 |
 | nexus/evaluation/eval_harness.py | tests/services/test_archived_legacy_engine_2026_10_13.py | active | medium | archived_legacy_engine_2026_10_13 |
 | nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |

@@ -145,10 +145,6 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id, POSITIONAL_OR_KEYWORD:attempt_id, POSITIONAL_OR_KEYWORD:exc)"
    },
-   "_heartbeat": {
-    "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:attempt_id: str, POSITIONAL_OR_KEYWORD:stop: threading.Event) -> None"
-   },
    "_invalid_state_status": {
     "kind": "classmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:task_id: str, KEYWORD_ONLY:code: str, KEYWORD_ONLY:detail: str, KEYWORD_ONLY:source_path: Path, KEYWORD_ONLY:approval_requirements_reasons: Sequence[str] = ()) -> dict[str, Any]"
@@ -616,10 +612,6 @@
    "record_canonical_action_failure": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:blocker: str, POSITIONAL_OR_KEYWORD:error: str = '') -> Optional[dict[str, Any]]"
-   },
-   "record_operator_outcome": {
-    "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:receipt: OperatorOutcomeReceipt | Mapping[str, Any]) -> dict[str, Any]"
    },
    "recover_applied_integration_receipt": {
     "kind": "function",

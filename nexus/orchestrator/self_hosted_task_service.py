@@ -88,10 +88,6 @@ from nexus.contracts.lifecycle_action import (
     parse_historical_epb_task_card,
     validate_owner_inline_contract,
 )
-from nexus.contracts.operator_outcome_receipt import (
-    OperatorOutcomeReceipt,  # noqa: F401 - facade surface (its users moved to parts/operator_outcome.py)
-    validate_operator_outcome_receipt,  # noqa: F401 - facade surface, used by parts/operator_outcome.py
-)
 from nexus.contracts.self_hosted_state_root import LEGACY_PRESENT_CODE, raise_if_legacy_state
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
@@ -212,9 +208,6 @@ from nexus.orchestrator.self_hosted_task_service_parts.finalize_runtime import (
 )
 from nexus.orchestrator.self_hosted_task_service_parts.inventory import (
     _InventoryMixin as _InventoryMixin,
-)
-from nexus.orchestrator.self_hosted_task_service_parts.operator_outcome import (
-    _OperatorOutcomeMixin as _OperatorOutcomeMixin,
 )
 from nexus.orchestrator.self_hosted_task_service_parts.read_projection import (
     _ReadProjectionMixin as _ReadProjectionMixin,
@@ -1032,7 +1025,6 @@ class SelfHostedTaskService(
     _WorkerDispatchMixin,
     _TaskBuildMixin,
     _CheckpointMixin,
-    _OperatorOutcomeMixin,
     _StateStoreMixin,
     _ActionEnvelopeMixin,
     _EventsMixin,

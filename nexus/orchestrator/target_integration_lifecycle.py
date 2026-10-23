@@ -1,8 +1,14 @@
-"""Thin composition seam for Target reuse, transactional staging, and cleanup.
+"""Thin composition seam for Target reuse, integration authorization, and cleanup.
 
 The existing lifecycle service remains the authority for task state, candidate
 creation, verification, and promotion.  This module only binds those outputs
 and performs real Git checks for an explicitly supplied, task-owned canary.
+
+The unused compatibility entry for transactional staging and apply (and its
+receipt type) was removed in #2584 Phase-2 batch A
+(``ARCHIVED_2026-10-24_phase2_batch_A.md``). Integration runs only through
+``SelfHostedTaskService.integrate_approved`` ->
+``ControlledIntegrationManager.integrate_authorized_task_state``.
 """
 
 from __future__ import annotations
@@ -19,13 +25,11 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorization,
     IntegrationAuthorizationEnvelope,
-    IntegrationExecutionReceipt,
     IntegrationPreview,
     TargetResolution,
     TargetResolutionDecision,
     TargetResolutionMode,
 )
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 
 
 def _canonical_json(value: Any) -> str:
@@ -323,119 +327,6 @@ class TargetIntegrationLifecycle:
         if state is None or not isinstance(state.get(receipt_name), Mapping):
             raise KeyError(f"receipt not persisted: {task_id}/{receipt_name}")
         return dict(state[receipt_name])
-
-    @classmethod
-    def transactional_integration(
-        cls, *, task_id: str, canonical_root: str | None = None,
-        candidate_commit: str | None = None, expected_canonical_head: str | None = None,
-        expected_status_hash: str | None = None, staging_root: str | None = None,
-        verifier_commands: Sequence[Sequence[str]] = (), apply: bool = False,
-        cleanup: CleanupDecision | None = None,
-        external_acceptance: Mapping[str, Any] | ExternalAcceptanceReceipt | None = None,
-        authorization: Mapping[str, Any] | IntegrationAuthorizationEnvelope | None = None,
-        lifecycle_state: Mapping[str, Any] | None = None,
-        integration_manager: ControlledIntegrationManager | None = None,
-        post_apply_commands: Sequence[Sequence[str]] = (),
-        current_task_card_hash: str | None = None,
-        current_integration_plan_hash: str | None = None,
-    ) -> IntegrationExecutionReceipt:
-        """Validate authorization and delegate all Git execution to the manager."""
-        if external_acceptance is None:
-            raise RuntimeError("external acceptance is required before integration")
-        acceptance = external_acceptance if isinstance(external_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(external_acceptance))
-        if not acceptance.passed:
-            raise RuntimeError("external acceptance is required before integration")
-        if authorization is None:
-            raise RuntimeError("Owner authorization is required before integration")
-        auth = authorization if isinstance(authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**dict(authorization))
-        if not auth.cleanup_requested:
-            raise RuntimeError("authorization cleanup binding is incomplete")
-        if canonical_root is not None and str(auth.canonical_root) != str(canonical_root):
-            raise RuntimeError("authorization canonical root drift")
-        if expected_canonical_head is not None and auth.expected_canonical_head != expected_canonical_head:
-            raise RuntimeError("authorization canonical head drift")
-        if candidate_commit is not None and auth.candidate_commit != candidate_commit:
-            raise RuntimeError("authorization candidate drift")
-        if auth.acceptance_receipt_hash != acceptance.receipt_hash:
-            raise RuntimeError("authorization acceptance receipt drift")
-        if current_task_card_hash is not None and auth.task_card_hash != current_task_card_hash:
-            raise RuntimeError("authorization task card drift")
-        if current_integration_plan_hash is not None and auth.integration_plan_hash != current_integration_plan_hash:
-            raise RuntimeError("authorization integration plan drift")
-        current_universe = {
-            "task_id": task_id,
-            "campaign_id": auth.campaign_id,
-            "task_card_hash": current_task_card_hash if current_task_card_hash is not None else auth.task_card_hash,
-            "candidate_commit": candidate_commit if candidate_commit is not None else auth.candidate_commit,
-            "candidate_receipt_hash": auth.candidate_receipt_hash,
-            "acceptance_receipt_hash": acceptance.receipt_hash,
-            "canonical_root": str(canonical_root) if canonical_root is not None else auth.canonical_root,
-            "canonical_branch": auth.canonical_branch,
-            "expected_canonical_head": expected_canonical_head if expected_canonical_head is not None else auth.expected_canonical_head,
-            "canonical_dirty_baseline": auth.canonical_dirty_baseline,
-            "integration_plan_hash": current_integration_plan_hash if current_integration_plan_hash is not None else auth.integration_plan_hash,
-            "cleanup_target_id": auth.cleanup_target_id,
-            "cleanup_target_path": auth.cleanup_target_path,
-            "durable_ref": auth.durable_ref,
-            "attempt_id": auth.attempt_id,
-            "candidate_tree_sha": auth.candidate_tree_sha,
-            "candidate_state_hash": auth.candidate_state_hash,
-            "reviewer_id": acceptance.reviewer_id,
-            "verifier_artifact_hash": auth.verifier_artifact_hash,
-            "require_clean": auth.require_clean,
-            "strategy": auth.strategy,
-            "verification_commands_hash": auth.verification_commands_hash,
-            "post_apply_commands_hash": auth.post_apply_commands_hash,
-            "cleanup_requested": auth.cleanup_requested,
-            "approval_scope": auth.approval_scope,
-        }
-        try:
-            auth.validate_current(current_universe)
-        except ValueError as exc:
-            raise RuntimeError(f"authorization validation failed: {exc}") from exc
-        state = dict(lifecycle_state or {})
-        authorization_state = auth.to_dict()
-        authorization_state["authorization_hash"] = auth.authorization_hash
-        state.update({
-            "task_id": task_id,
-            "external_acceptance": acceptance.to_dict(),
-            "integration_authorization": authorization_state,
-            "post_apply_commands": [list(command) for command in post_apply_commands],
-            "verifier_argv_commands": [list(command) for command in verifier_commands],
-            "promotion_packet": {
-                **dict(state.get("promotion_packet") or {}),
-                "candidate_commit_sha": auth.candidate_commit,
-            },
-            "contract": {
-                **dict(state.get("contract") or {}),
-                "controller_repo_root": auth.canonical_root,
-                "verifier_commands": [_render_command(command) for command in verifier_commands],
-            },
-        })
-        manager = integration_manager or ControlledIntegrationManager(integration_root=auth.canonical_root)
-        receipt = manager.integrate_authorized_task_state(
-            state, integration_branch=auth.canonical_branch,
-            staging_root=staging_root or auth.canonical_root,
-            apply=apply, post_apply_commands=post_apply_commands,
-        )
-        after_head = receipt.integration_commit_sha if apply else auth.expected_canonical_head
-        return IntegrationExecutionReceipt(
-            schema="nexus.transactional_integration_receipt.v1", task_id=task_id,
-            candidate_commit=auth.candidate_commit,
-            staging_commit=receipt.staging_commit_sha or receipt.integration_commit_sha,
-            integration_commit=receipt.integration_commit_sha if apply else None,
-            staged=True, applied=apply,
-            canonical_head_before=auth.expected_canonical_head,
-            canonical_head_after=after_head,
-            canonical_status_before="",
-            canonical_status_after="",
-            verifier_passed=receipt.verifier_passed,
-            cleanup=cleanup or CleanupDecision(
-                schema="nexus.target_cleanup_decision.v1", decision="RETAIN",
-                task_id=task_id, target_id=auth.cleanup_target_id,
-                reasons=("cleanup requires fresh persisted lifecycle state",),
-            ),
-        )
 
     @classmethod
     def cleanup_target(

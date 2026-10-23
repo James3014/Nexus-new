@@ -10,7 +10,11 @@ Big-file split S8a (Issue #2579). ``_CheckpointMixin`` holds, moved out of
 * ``TERMINAL_CORE_RECORD_SCHEMA``, ``_TERMINAL_CORE_EXPECTED_HOST_REASONS``,
   ``_build_terminal_core_record`` and ``_record_terminal_core_not_covered``: Core's
   NOT_COVERED record for a declared-universe task that ended without a receipt (#2346);
-* ``_heartbeat`` and ``_touch_owned_state``: the worker heartbeat.
+* ``_touch_owned_state``: the ownership check and timestamp write of one worker
+  heartbeat. The heartbeat loop itself lives in nexus-runtime
+  (``execution_coordination/coordinator.py``), which reaches this through
+  ``runtime_coordination_bridge._State.heartbeat``. The unused in-repo loop
+  ``_heartbeat`` was removed in #2584 Phase-2 batch A.
 
 Their source lines are verbatim, except that the facade-module names they load
 (``TERMINAL_STATUSES``, ``_jsonable``, ``_parse_time``, ``_utc_now``, ``time``,
@@ -27,9 +31,7 @@ reached through ``self``.
 from __future__ import annotations
 
 import importlib
-import json
 import logging
-import threading
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 if TYPE_CHECKING:
@@ -362,16 +364,6 @@ class _CheckpointMixin:
                 "terminal Core record for %s not persisted: %s", task_id, type(exc).__name__
             )
             return
-
-    def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:
-        while not stop.wait(1.0):
-            try:
-                self._mutate_state(
-                    task_id,
-                    lambda state: self._touch_owned_state(state, attempt_id),
-                )
-            except (RuntimeError, OSError, json.JSONDecodeError):
-                return
 
     @staticmethod
     def _touch_owned_state(state: dict[str, Any], attempt_id: str) -> None:
