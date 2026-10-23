@@ -11,6 +11,7 @@ import ast
 import functools
 import hashlib
 import importlib.util
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -499,8 +500,10 @@ def test_github_merge_effect_is_retired():
     assert all(caller != MERGE_LOOP for caller, _ in EDGES)
 
 
-def test_recreated_retired_merge_loop_symbol_fails(tmp_path):
-    # The exact retired path and symbol get no exemption (#2584 item 6 plan check).
+def test_recreated_retired_merge_loop_symbol_fails(tmp_path, monkeypatch):
+    # The exact retired path and symbol get no exemption (#2584 item 6 plan check). The rogue
+    # record is injected into the full verify() scan, so an exemption re-added either inside
+    # _merge_callers or at its verify() call site fails this control.
     rogue = tmp_path / MERGE_LOOP.path
     rogue.parent.mkdir(parents=True)
     rogue.write_text(
@@ -508,11 +511,16 @@ def test_recreated_retired_merge_loop_symbol_fails(tmp_path):
         "    return port.cas_merge(expected_base_sha='a', expected_head_sha='b')\n",
         encoding="utf-8",
     )
-    records = _records(rogue, tmp_path)
-    assert [record.id for record in records] == [MERGE_LOOP.id]
-    assert [record.id for record in _merge_callers(records)] == [MERGE_LOOP.id]
+    injected = _records(rogue, tmp_path)
+    assert [record.id for record in injected] == [MERGE_LOOP.id]
+    real_all = _all
+
+    def _all_with_rogue(root: Path, extra: Iterable[Path] = ()) -> tuple[Record, ...]:
+        return real_all(root, extra) + injected
+
+    monkeypatch.setattr(sys.modules[__name__], "_all", _all_with_rogue)
     try:
-        _raise("protected_github_merge", "DIRECT_OR_SECOND_CAS_MERGE", _merge_callers(records))
+        verify(_REPO_ROOT)
     except AssertionError as exc:
         assert "DUPLICATE_EFFECT_IMPLEMENTATION:protected_github_merge" in str(exc)
         assert MERGE_LOOP.id in str(exc)

@@ -150,7 +150,7 @@ def test_retired_phase2_item6_not_named() -> None:
 
 
 def test_phase2_item6_live_neighbours_kept() -> None:
-    """What the retired loop imported stays live (production users outside the loop)."""
+    """What the retired loop imported stays importable (kept on purpose; see the manifest)."""
     from nexus.contracts.github_orchestration import (
         GitHubOrchestrationEvidence,
         MainMovementEvidence,
