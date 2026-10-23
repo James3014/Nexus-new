@@ -911,7 +911,14 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     def _emit_sweep_receipt(self, result: str) -> None:
         # left: the bare pids the wrapper reported as surviving (it does not
         # report pid:lstart tokens); [] unless the wrapper said "unclean".
-        self._emit_receipt("WORKER_SWEEP", result=result, left=list(self._worker_left))
+        # wrapper: the owner-side verdict of the last wrapper sweep, so a result
+        # the start marker decided ("not_started") can be told apart.
+        verdict = self._worker_verdict
+        if verdict == "UNCLEAN" and not self._worker_reported_unclean:
+            verdict = "REFUSED"  # no report line: sudo or the wrapper refused
+        self._emit_receipt(
+            "WORKER_SWEEP", result=result, left=list(self._worker_left), wrapper=verdict
+        )
 
     def _sweep_result(self, started: bool) -> str:
         """The receipt word for the verdict ``sweep`` just stored in ``_swept``.
@@ -962,7 +969,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         words = last.split()
         self._worker_reported_unclean = words[:2] == ["AGY_WORKER_SWEEP", "unclean"]
         self._worker_left = (
-            [w for w in words[2:] if w.isdigit() and len(w) <= 10][:64]
+            [w for w in words[2:] if w.isascii() and w.isdigit() and len(w) <= 10][:64]
             if self._worker_reported_unclean
             else []
         )
@@ -995,10 +1002,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             self._worker_swept = self._worker_sweep(tracked)
             owner_clean = super().sweep()
             # The marker lives in the run root, which the worker account can
-            # write, so its absence may excuse a refused sweep (sudo refuses the
-            # launch and the sweep alike) but never the wrapper's own report
-            # that worker processes of this run survived.
-            excused = not started and not self._worker_reported_unclean
+            # write, so its absence may excuse only a refused sweep (sudo
+            # refuses the launch and the sweep alike: non-zero, no report
+            # line), never the wrapper's own report that worker processes of
+            # this run survived and never a sweep that errored or timed out.
+            refused = self._worker_verdict == "UNCLEAN" and not self._worker_reported_unclean
+            excused = not started and refused
             self._swept = bool(owner_clean and (self._worker_swept or excused))
         except BaseException:
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean

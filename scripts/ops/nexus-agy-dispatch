@@ -2578,6 +2578,23 @@ AGY_DESCENDANT_SWEEP_FAILED = "AGY_DESCENDANT_SWEEP_FAILED"
 DESCENDANT_SWEEP_FAILED_MARKER = "NEXUS_AGY_DESCENDANT_SWEEP_FAILED"
 
 
+def _neutralize_relayed_stderr(err: str) -> str:
+    """The provider's stderr as relayed on ours: no part of it may pass for our lines.
+
+    The provider (with --run-as-user, a process of the worker account) can print
+    anything, including lines shaped like the status line or the WORKER_*
+    receipts. Every piece that would start a line for any reader (split on any
+    line boundary ``str.splitlines`` knows, leading blanks ignored) and begins
+    like a dispatcher line gets a prefix. Classification still reads the raw text.
+    """
+    if "NEXUS_AGY_DISPATCH" not in err:
+        return err
+    return "".join(
+        "[provider] " + piece if piece.lstrip().startswith("NEXUS_AGY_DISPATCH") else piece
+        for piece in err.splitlines(keepends=True)
+    )
+
+
 def _agy_dispatch_boundary() -> Any:
     """The #2202 boundary module, loaded from the snapshot on first use."""
     return import_module("nexus.executors.agy_dispatch_boundary")
@@ -5449,7 +5466,7 @@ def dispatch_run(
                 if out:
                     sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
@@ -5485,7 +5502,7 @@ def dispatch_run(
                 if out:
                     sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
@@ -5613,7 +5630,7 @@ def dispatch_run(
             ):
                 sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 completed_meta: dict[str, Any] = {
                     "status": "completed",
                     "attempts": attempts,
@@ -5722,7 +5739,7 @@ def dispatch_run(
                 if out:
                     sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
@@ -5808,7 +5825,7 @@ def dispatch_run(
                 if out:
                     sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
@@ -5856,7 +5873,7 @@ def dispatch_run(
                 if out:
                     sys.stdout.write(out)
                 if err:
-                    sys.stderr.write(err)
+                    sys.stderr.write(_neutralize_relayed_stderr(err))
                 emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
@@ -5891,7 +5908,7 @@ def dispatch_run(
                     except Exception:
                         pass
                     if err:
-                        sys.stderr.write(err)
+                        sys.stderr.write(_neutralize_relayed_stderr(err))
                     emit_run_meta({
                         "status": "failed",
                         "attempts": attempts,
