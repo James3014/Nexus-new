@@ -348,6 +348,49 @@ def _check_owner_executable(path: Path, reason: str) -> None:
         raise _refuse(f"{reason}_not_owner_0755")
 
 
+def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
+    """Replace the worker's stale agy copy with the Owner's agy (#2888 follow-up).
+
+    agy updates itself in the Owner's home, which the worker account cannot
+    enter, so the worker runs a copy in the Owner-owned worker bin.  A stale
+    copy used to refuse every ``--run-as-user`` run until someone re-ran
+    ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
+    the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
+    0755, fsync, ``os.replace``.  The source must be a regular file that only
+    its owner (the Owner or root) can write.  The caller re-checks the copy
+    against the source afterwards.  The wrapper, which the sudoers rule names,
+    is never replaced here.
+    """
+    try:
+        real = Path(os.path.realpath(source_agy))
+        info = os.stat(real)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid not in (os.getuid(), 0)
+            or info.st_mode & 0o022
+        ):
+            raise _refuse("worker_agy_stale_source_unsafe")
+        tmp = worker_agy.with_name(f".{worker_agy.name}.{secrets.token_hex(8)}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as out, open(real, "rb") as src:
+                shutil.copyfileobj(src, out, 1 << 20)
+                os.fchmod(out.fileno(), 0o755)
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(tmp, worker_agy)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+    except AgyWriteBoundaryError:
+        raise
+    except OSError as exc:
+        raise _refuse(f"worker_agy_stale_refresh_failed:{type(exc).__name__}") from exc
+
+
 # ---------------------------------------------------------------------------
 # copy-in / copy-back
 # ---------------------------------------------------------------------------
@@ -839,6 +882,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     # sha256 of the reference wrapper that prepare_worker_account_boundary
     # verified against the installed copy (receipt field only).
     wrapper_sha256: str = ""
+    # True when prepare replaced a stale worker agy copy before this run.
+    worker_agy_refreshed: bool = False
     # Set by the dispatcher ({"operation_id", "attempt"}); None = emit no receipts.
     receipt_context: Optional[dict] = field(default=None, repr=False)
     receipts: list = field(default_factory=list, repr=False)
@@ -903,6 +948,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 "pid": None,
                 "lstart": None,
                 "wrapper_sha256": self.wrapper_sha256,
+                "worker_agy_refreshed": self.worker_agy_refreshed,
             }
         except Exception:
             return  # no launch line: the caller rejects a run without one
@@ -1090,8 +1136,15 @@ def prepare_worker_account_boundary(
     if _sha256_file(Path(wrapper)) != wrapper_sha256:
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
-    if not source_agy or _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+    if not source_agy:
         raise _refuse("worker_agy_stale")
+    worker_agy_refreshed = False
+    if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+        _refresh_worker_agy(Path(source_agy), Path(worker_agy))
+        worker_agy_refreshed = True
+        _check_owner_executable(Path(worker_agy), "worker_agy")
+        if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+            raise _refuse("worker_agy_stale")  # the source changed during the copy
     source_target = Path(os.path.realpath(Path(target).expanduser()))
     if not source_target.is_dir():
         raise _refuse("target_missing")
@@ -1169,4 +1222,5 @@ def prepare_worker_account_boundary(
         workdir_identity=workdir_identity,
         run_command=run_command,
         wrapper_sha256=wrapper_sha256,
+        worker_agy_refreshed=worker_agy_refreshed,
     )

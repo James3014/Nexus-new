@@ -647,6 +647,60 @@ def test_prepare_refusals(worker_env, overrides, reason):
     assert list(worker_env["runs"].iterdir()) == []
 
 
+def test_prepare_refreshes_a_stale_worker_agy_copy(worker_env, capsys):
+    # agy updated itself in the Owner's home: the Owner-side copy is replaced, not refused.
+    worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    boundary = _prepare(worker_env)
+    try:
+        worker = worker_env["worker_agy"]
+        assert worker.read_bytes() == worker_env["source_agy"].read_bytes()
+        info = worker.lstat()
+        assert stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o755
+        assert info.st_uid == os.getuid()
+        assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+        assert boundary.worker_agy_refreshed is True
+    finally:
+        boundary.cleanup()
+    again = _prepare(worker_env)  # already current: nothing to refresh
+    try:
+        assert again.worker_agy_refreshed is False
+    finally:
+        again.cleanup()
+
+
+def test_prepare_refresh_failure_refuses_and_leaves_the_copy(worker_env):
+    before = worker_env["worker_agy"].read_bytes()
+    worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    os.chmod(worker_env["bin"], 0o555)  # the temp file cannot be created
+    try:
+        with pytest.raises(
+            boundary_mod.AgyWriteBoundaryError,
+            match="worker_agy_stale_refresh_failed:PermissionError",
+        ):
+            _prepare(worker_env)
+    finally:
+        os.chmod(worker_env["bin"], 0o755)
+    assert worker_env["worker_agy"].read_bytes() == before
+    assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+def test_prepare_refresh_follows_a_symlinked_source_but_never_replaces_the_wrapper(worker_env):
+    real = worker_env["source_agy"].with_name("agy-1.4.6")
+    real.write_text("#!/bin/sh\necho versioned agy\n", encoding="utf-8")
+    os.chmod(real, 0o755)
+    worker_env["source_agy"].unlink()
+    worker_env["source_agy"].symlink_to(real)
+    wrapper_before = worker_env["wrapper"].read_bytes()
+    boundary = _prepare(worker_env)
+    try:
+        assert not worker_env["worker_agy"].is_symlink()
+        assert worker_env["worker_agy"].read_bytes() == real.read_bytes()
+        assert worker_env["wrapper"].read_bytes() == wrapper_before
+    finally:
+        boundary.cleanup()
+
+
 def test_prepare_refuses_a_bad_layout(worker_env, monkeypatch):
     runs = worker_env["runs"]
     os.chmod(runs, 0o2770)
@@ -657,9 +711,12 @@ def test_prepare_refuses_a_bad_layout(worker_env, monkeypatch):
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="wrapper_stale"):
         _prepare(worker_env)
     shutil.copyfile(WRAPPER, worker_env["wrapper"])
+    # A stale copy is refreshed (below); one whose source anyone else can write is not.
     worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
-    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale"):
+    os.chmod(worker_env["source_agy"], 0o775)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_source_unsafe"):
         _prepare(worker_env)
+    os.chmod(worker_env["source_agy"], 0o755)
     shutil.copyfile(worker_env["worker_agy"], worker_env["source_agy"])
     monkeypatch.setattr(worker_mod.os, "getgroups", lambda: [])
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="owner_not_in_run_group"):
@@ -1901,6 +1958,7 @@ LAUNCH_KEYS = {
     "pid",
     "lstart",
     "wrapper_sha256",
+    "worker_agy_refreshed",
 }
 SWEEP_KEYS = {"event", "attempt", "result", "left", "wrapper"}
 CLEANUP_KEYS = {"event", "attempt", "run_root_removed", "worker_failure"}
