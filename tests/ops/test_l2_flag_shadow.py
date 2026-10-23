@@ -590,3 +590,17 @@ def test_clone_and_seed_probe_are_time_bounded(tmp_path: Path, monkeypatch) -> N
         shadow.ensure_clone("James3014/Nexus-new", tmp_path / "state/clone")
     assert [name for name, _ in timeouts] == ["remote", "clone"]
     assert all(isinstance(t, (int, float)) and t > 0 for _, t in timeouts)
+
+
+def test_timed_out_clone_leaves_no_partial_clone(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", tmp_path / "no-seeds")
+    root = tmp_path / "state/clone"
+
+    def partial_then_hang(cmd, *args, **kwargs):
+        (Path(cmd[-1]) / ".git").mkdir(parents=True)  # git had started writing dest
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
+
+    monkeypatch.setattr(shadow.subprocess, "run", partial_then_hang)
+    with pytest.raises(RuntimeError, match="timed out"):
+        shadow.ensure_clone("James3014/Nexus-new", root)
+    assert not (root / "James3014__Nexus-new").exists()

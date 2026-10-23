@@ -40,6 +40,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -363,6 +364,8 @@ def ensure_clone(repo: str, clone_root: Path) -> Path:
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
+        # The killed clone cannot clean up after itself; a partial dest would be reused next run.
+        shutil.rmtree(dest, ignore_errors=True)
         raise RuntimeError(f"clone of {repo} timed out after {exc.timeout}s") from exc
     if r.returncode != 0:
         raise RuntimeError(f"clone of {repo} failed: {r.stderr.strip()[:300]}")
