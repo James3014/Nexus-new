@@ -502,8 +502,8 @@ test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
   the existing shortfall reap runs there, as before. The reaper still re-checks every
   killed PID (`kill(pid, 0)`, zombies count as gone, up to 5 seconds) and, if one
   survives, fails closed: infra abort, exit 8, no receipt, nothing cached. Reaped PIDs
-  appear in `reaped_pids`, so an os-mode receipt can now list PIDs from the per-run
-  reaps (a diagnostic field).
+  appear in `reaped_pids` in the scorer's timing file (not the sealed receipt), which
+  can now list PIDs from the per-run reaps (a diagnostic field).
 - **Shared-host baseline.** The baseline `free_start` (free space at the pre-run check
   of the scoring's first candidate run) already decided the still-below case in 1.3.1
   (A11, rule 5). 1.3.2 applies the same baseline to the post-run recovered case (rule

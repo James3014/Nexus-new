@@ -1975,9 +1975,16 @@ class PytestRunner:
                 and 2 * (cand + reclaimed) >= self.free_start - free_before
             ):
                 self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
-            raise ScratchRecoveredWithoutReap(
-                f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
-                f" reclaimed={reclaimed}B floor={floor}B"
+            if not killed:
+                # H3: nothing was killed, yet the disk came back (a survivor may have
+                # dropped its files before lsof looked): discard and rerun the run.
+                raise ScratchRecoveredWithoutReap(
+                    f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
+                    f" reclaimed={reclaimed}B floor={floor}B"
+                )
+            raise ScratchInfraAbort(
+                f"host_disk_low:post_run_recovered_not_charged:free_before={free_before}B"
+                f" reclaimed={reclaimed}B floor={floor}B killed={len(killed)}"
             )
         # Still below the floor: charged iff the scoring started above the floor, the
         # candidate's visible bytes cover the shortfall, and they (plus reclaimed, for

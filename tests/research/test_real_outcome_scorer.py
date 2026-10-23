@@ -5090,8 +5090,43 @@ def test_recovered_disk_with_mostly_external_drop_is_not_charged(tmp_path, monke
     runner._check_disk_for_run(cand, "tests", 0, ros.CAND_ROLE, tmp_path / "rd", pre=True)
     assert runner.free_start == floor + 10 * 1024**3
     runner._candidate_ran = True
-    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_without_reap"):
+    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_not_charged") as exc:
         runner._check_disk_for_run(cand, "tests", 0, ros.CAND_ROLE, tmp_path / "rd", pre=False)
+    # the reap killed something, so this is a plain infra abort, never an H3 rerun
+    assert not isinstance(exc.value, ros.ScratchRecoveredWithoutReap)
+
+
+def test_uncharged_recovery_after_a_kill_is_infra_at_run_level_not_rerun(tmp_path, monkeypatch):
+    """#2908 review: H3 reruns only when the reap killed nothing (A12). A recovery after a
+    kill that is not charged ends the run as an infra abort, with nothing cached."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    state = {"reaped": False, "post": 0}
+
+    def reap():
+        state["reaped"] = True
+        return [4242]
+
+    monkeypatch.setattr(runner, "_reap_candidate_scope", reap)
+    monkeypatch.setattr(runner, "_reap_after_candidate_run", lambda: [])
+    calls = {"n": 0}
+
+    def disk(path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _usage(floor + 10 * 1024**3)  # pre-run: free_start
+        if not state["reaped"]:
+            state["post"] += 1
+            return _usage(floor - 1000)  # post-run: below the floor
+        return _usage(floor + 1024**2 - 1000)  # after the kill: recovered, small reclaim
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_not_charged"):
+        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert state["post"] == 1  # one run, no H3 rerun
+    assert not runner.cache.exists() or not list(runner.cache.iterdir())
 
 
 def test_h3_rerun_after_recovery_without_reap_then_normal_result(tmp_path, monkeypatch):
