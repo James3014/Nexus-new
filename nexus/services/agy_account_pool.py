@@ -147,13 +147,11 @@ class AccountLeaseClaim:
         process.  Any mismatch or I/O error raises ``AgyAccountPoolError``;
         the caller must then not launch.
         """
-        self._mark_worker_fields(
-            {
-                "worker_run_root": run_root,
-                "worker_run_root_id": list(run_root_id),
-                "worker_run_as_user": run_as_user,
-            }
-        )
+        self._mark_worker_fields({
+            "worker_run_root": run_root,
+            "worker_run_root_id": list(run_root_id),
+            "worker_run_as_user": run_as_user,
+        })
 
     def mark_worker_unclean(self, tokens: Sequence[str]) -> None:
         """Persist survivor identities without releasing this account (#2905)."""

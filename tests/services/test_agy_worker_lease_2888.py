@@ -1498,9 +1498,7 @@ def test_kept_root_scrub_reports_a_renamed_credential_directory_as_not_scrubbed(
     (boundary.run_home / ".gemini").rename(moved)
     boundary.cleanup()
     cleanup = next(
-        r
-        for r in _worker_receipts_in(capsys.readouterr().err)
-        if r["event"] == "WORKER_CLEANUP"
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
     )
     assert cleanup["credentials_scrubbed"] is False
     assert (moved / "antigravity-cli" / TOKEN.name).is_file()  # left for the reaper's rmtree
@@ -1520,9 +1518,7 @@ def test_kept_root_scrub_reports_a_hard_linked_credential_as_not_scrubbed(
     os.link(boundary.run_home / TOKEN, kept)
     boundary.cleanup()
     cleanup = next(
-        r
-        for r in _worker_receipts_in(capsys.readouterr().err)
-        if r["event"] == "WORKER_CLEANUP"
+        r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
     )
     assert cleanup["credentials_scrubbed"] is False
     assert not os.path.lexists(boundary.run_home / TOKEN)
