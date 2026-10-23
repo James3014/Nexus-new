@@ -2852,15 +2852,23 @@ def test_transient_status_error_only_for_a_transient_record(value, expected):
     assert transient_status_error(value) == expected
 
 
-def test_run_once_lists_a_transient_record_even_when_a_later_issue_is_last(tmp_path):
-    """Codex r1 on #2914: a later Issue's result cannot hide an earlier transient error."""
+@pytest.mark.parametrize(
+    "restored",
+    [
+        {"state": "FANOUT_DISPATCHING", "intelligence_effect_id": "e" * 64},
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": True,
+            "semantic_dispatched": True,
+        },
+    ],
+)
+def test_run_once_lists_a_transient_record_even_when_a_later_issue_is_last(tmp_path, restored):
+    """Codex r1/r2 on #2914: a later Issue's result cannot hide an earlier transient error."""
     config = _config(tmp_path)
     results = {
-        1: {
-            "state": "FANOUT_DISPATCHING",
-            "intelligence_effect_id": "e" * 64,
-            "last_transient_error": "SOURCE_LINEAGE_FAILED",
-        },
+        1: {**restored, "last_transient_error": "SOURCE_LINEAGE_FAILED"},
         2: {"state": "BLOCKED", "error": "SOMETHING"},
     }
 

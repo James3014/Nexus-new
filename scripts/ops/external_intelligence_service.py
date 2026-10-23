@@ -1118,6 +1118,14 @@ def _run_once(
                 str(issue.get("title") or ""),
                 str(issue.get("body") or ""),
             )
+            if result.get("last_transient_error"):
+                # #2864: listed for every state (also RECONCILIATION_REQUIRED / BLOCKED), so
+                # no later Issue's result can hide it.
+                transient.append({
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "error": result.get("last_transient_error"),
+                })
             if (
                 result.get("state") in TERMINAL_DISPOSITIONS
                 or result.get("state") == "RECONCILIATION_REQUIRED"
@@ -1169,11 +1177,6 @@ def _run_once(
             if result.get("last_transient_error"):
                 # #2864: a record restored after a transient error is still waiting, but the
                 # error must be visible in run-once output and the daemon status.
-                transient.append({
-                    "repository": repository,
-                    "issue_number": int(issue["number"]),
-                    "error": result.get("last_transient_error"),
-                })
                 last = {
                     "status": result.get("state"),
                     "repository": repository,
