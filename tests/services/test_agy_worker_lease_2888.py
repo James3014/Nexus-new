@@ -514,7 +514,7 @@ def test_deferred_reap_does_not_start_after_deadline(tmp_path, reaper, monkeypat
     assert reaper.calls == [] and receipt.exists()
 
 
-def test_only_first_claim_pass_may_reap_past_deadline(tmp_path, reaper, monkeypatch) -> None:
+def test_a_reap_that_ends_past_the_deadline_starts_no_other(tmp_path, reaper, monkeypatch) -> None:
     coordinator, _ = _coordinator(tmp_path, aliases=("a", "b", "c"))
     for account in coordinator.manager._accounts:
         _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
@@ -528,7 +528,31 @@ def test_only_first_claim_pass_may_reap_past_deadline(tmp_path, reaper, monkeypa
         return False
 
     monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
-    monkeypatch.setattr("time.sleep", lambda _seconds: setattr(clock, "now", 20.0))
+    with pytest.raises(AgyAccountPoolBusyError):
+        coordinator.acquire_claim("desktop-new", wait_timeout=1)
+    assert len(reaped) == 1
+
+
+def test_only_first_claim_pass_may_reap_past_deadline(
+    tmp_path, reaper, monkeypatch, reap_clock
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    clock = SimpleNamespace(now=10.0)
+    monkeypatch.setattr("time.monotonic", lambda: clock.now)
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt)
+        return False
+
+    def sleep(_seconds):
+        # The second pass starts past the deadline with the negative cache expired.
+        clock.now = 20.0
+        reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    monkeypatch.setattr("time.sleep", sleep)
     with pytest.raises(AgyAccountPoolBusyError):
         coordinator.acquire_claim("desktop-new", wait_timeout=1)
     assert len(reaped) == 1
@@ -548,6 +572,8 @@ def test_an_unproven_receipt_does_not_block_the_next_one_within_the_deadline(
         return len(reaped) == 2  # the first is unproven, the second is gone
 
     monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
+    # Within the same pass: a second poll would hide a pass that stopped at "a".
+    monkeypatch.setattr("time.sleep", lambda _s: pytest.fail("needed a second poll"))
     claim = coordinator.acquire_claim("desktop-new", wait_timeout=5)
     try:
         assert len(reaped) == 2 and claim.account_alias_hash == reaped[1]
@@ -563,7 +589,13 @@ def test_a_receipt_that_cannot_be_unlinked_is_skipped_not_retried_at_once(
         _write_receipt(tmp_path, account.alias_hash, **_worker_fields())
         for account in coordinator.manager._accounts
     ]
-    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", lambda receipt: True)
+    reaped = []
+
+    def reap(receipt):
+        reaped.append(receipt["account_alias_hash"])
+        return True
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", reap)
     real_unlink = Path.unlink
 
     def unlink(self, *args, **kwargs):
@@ -575,6 +607,9 @@ def test_a_receipt_that_cannot_be_unlinked_is_skipped_not_retried_at_once(
     deferred = [(p.name.split(".")[0], p, _read(p)["lease_id_hash"]) for p in paths]
     assert coordinator._reap_deferred_worker_receipts(deferred) is True
     assert paths[0].exists() and not paths[1].exists()
+    # Negative-cached: an immediate retry does not run the reaper again.
+    assert coordinator._reap_deferred_worker_receipts(deferred[:1]) is False
+    assert len(reaped) == 2 and paths[0].exists()
 
 
 @pytest.mark.parametrize(
