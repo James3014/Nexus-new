@@ -356,17 +356,28 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     copy used to refuse every ``--run-as-user`` run until someone re-ran
     ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
     the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
-    0755, fsync, ``os.replace``.  The source is opened once (``O_NOFOLLOW``)
-    and checked and copied through that descriptor, so a swap after the check
-    cannot change what is copied.  It must be a regular file that only its
-    owner (the Owner or root) can write and that everyone can already read and
-    execute: the worker copy is world-readable, so nothing else (a key file
-    swapped in, say) may ever be published there.  The caller re-checks the
-    copy against the source afterwards.  The wrapper, which the sudoers rule
-    names, is never replaced here.
+    0755, fsync, ``os.replace``.  Every directory on the resolved source path
+    must be owned by the Owner or root and not writable by others (a root-owned
+    sticky directory such as ``/tmp`` is allowed), so no other user can swap a
+    path component; the source is then opened once (``O_NOFOLLOW``) and checked
+    and copied through that descriptor.  It must be a regular file that only
+    its owner (the Owner or root) can write and that is marked readable and
+    executable by everyone: the worker copy is world-readable, so an
+    owner-only file is never published there.  The caller re-checks the copy
+    against the source afterwards.  The wrapper, which the sudoers rule names,
+    is never replaced here.
     """
     try:
         real = Path(os.path.realpath(source_agy))
+        for parent in real.parents:
+            dinfo = os.lstat(parent)
+            sticky_root = dinfo.st_uid == 0 and dinfo.st_mode & stat.S_ISVTX
+            if (
+                not stat.S_ISDIR(dinfo.st_mode)
+                or dinfo.st_uid not in (os.getuid(), 0)
+                or (dinfo.st_mode & 0o022 and not sticky_root)
+            ):
+                raise _refuse("worker_agy_stale_source_unsafe")
         src_fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             info = os.fstat(src_fd)

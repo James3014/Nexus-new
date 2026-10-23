@@ -712,6 +712,22 @@ def test_prepare_refresh_never_publishes_a_source_others_cannot_read(worker_env)
     assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
 
 
+def test_prepare_refresh_refuses_a_source_in_a_directory_others_can_write(worker_env):
+    # Another user could swap a path component there, so the path proves nothing.
+    before = worker_env["worker_agy"].read_bytes()
+    shared = worker_env["source_agy"].parent / "shared-dir"
+    shared.mkdir()
+    os.chmod(shared, 0o777)
+    real = shared / "agy"
+    real.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    os.chmod(real, 0o755)
+    worker_env["source_agy"].unlink()
+    worker_env["source_agy"].symlink_to(real)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_source_unsafe"):
+        _prepare(worker_env)
+    assert worker_env["worker_agy"].read_bytes() == before
+
+
 def _swap_source_on_open(monkeypatch, source: Path, swap, *, after_open: bool) -> None:
     """Run ``swap`` once, just before or just after the refresh opens the source."""
     real_open = os.open
