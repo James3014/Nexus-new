@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence, TypeGuard
 
-SCORER_VERSION = "1.3.1"
+SCORER_VERSION = "1.3.2"
 RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
 RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
 SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
@@ -1502,6 +1502,9 @@ class PytestRunner:
         # A11 ("os"): candidate trees of this scoring -> their allocated size before their
         # first candidate run; growth beyond it is the candidate's.
         self._cand_tree_base: dict[str, int] = {}
+        # 1.3.2: each candidate tree as given (absolute, not resolved) -> its resolved
+        # path at first sight, before any candidate code ran (#2908 review).
+        self._cand_tree_alias: dict[str, str] = {}
         # A11 ("os"): host free bytes at the pre-run check of this scoring's first
         # candidate run (before any candidate code ran); None until then.
         self.free_start: int | None = None
@@ -1593,6 +1596,7 @@ class PytestRunner:
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
         self.task_dir = None  # the next task scoring gets a fresh parent
         self._cand_tree_base.clear()
+        self._cand_tree_alias.clear()
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
@@ -1792,6 +1796,7 @@ class PytestRunner:
         del task_key  # the parent is random; the task key is not needed
         self.task_dir = None
         self._cand_tree_base.clear()
+        self._cand_tree_alias.clear()
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
@@ -1817,18 +1822,24 @@ class PytestRunner:
         return trash
 
     def reap_survivors(
-        self, prefixes: Iterable[Path], name_prefixes: Iterable[str] = ()
+        self,
+        prefixes: Iterable[Path],
+        name_prefixes: Iterable[str] = (),
+        *,
+        resolved: bool = False,
     ) -> list[int]:
         """A11 ("os"): SIGKILL, by PID, every process of this user that still has its cwd
         or an open file (deleted ones included) under ``prefixes`` (this scoring's trees,
         run dirs and their trash: the path itself or below it) or whose lsof name starts
         with one of ``name_prefixes`` (plain string match, for paths whose directory may
         no longer exist). Returns the reaped PIDs. Fails closed (ScratchInfraAbort) when
-        no lsof exists at a fixed location."""
+        no lsof exists at a fixed location. With ``resolved`` the prefixes are taken as
+        already-resolved absolute paths and are NOT resolved again (1.3.2: a candidate
+        that swaps its tree root for a symlink must not redirect the scope elsewhere)."""
         lsof = next((p for p in LSOF_CANDIDATES if os.path.isfile(p)), None)
         if lsof is None:
             raise ScratchInfraAbort("lsof_unavailable: cannot reap sandbox survivors")
-        roots = sorted({str(Path(p).resolve()) for p in prefixes if str(p)})
+        roots = sorted({str(p) if resolved else str(Path(p).resolve()) for p in prefixes if str(p)})
         raw = sorted({p for p in name_prefixes if p})
         if not roots and not raw:
             return []
@@ -1878,10 +1889,30 @@ class PytestRunner:
         names = []
         if self.task_dir is not None:
             names.append(f"{Path(self.task_dir).resolve()}/{_role_slug(CAND_ROLE)}-")
+        # The keys were resolved when each tree was first seen (before any candidate code
+        # ran); use them as recorded so a later symlink swap cannot move the scope.
         trees = [Path(t) for t in self._cand_tree_base]
-        reaped = self.reap_survivors(trees, name_prefixes=names)
+        reaped = self.reap_survivors(trees, name_prefixes=names, resolved=True)
         self.reaped_pids += reaped
         return reaped
+
+    def _check_cand_tree_binding(self, tree: Path, role: str) -> None:
+        """1.3.2: bind each candidate tree path to its resolved location the first time a
+        candidate run sees it; afterwards every os run (any role) refuses, as an infra
+        abort, when a bound tree root is a symlink or resolves somewhere else."""
+        if role == CAND_ROLE:
+            given = os.path.abspath(tree)
+            if given not in self._cand_tree_alias:
+                if Path(given).is_symlink():
+                    raise ScratchInfraAbort(f"candidate_tree_root_is_symlink: {given}")
+                self._cand_tree_alias[given] = str(Path(given).resolve())
+        for given, bound in self._cand_tree_alias.items():
+            if Path(given).is_symlink() or str(Path(given).resolve()) != bound:
+                raise ScratchInfraAbort(f"candidate_tree_root_changed: {given}")
+
+    def _reap_after_candidate_run(self) -> list[int]:
+        """1.3.2 (#2740): the per-run reap, a separate step from the shortfall reap."""
+        return self._reap_candidate_scope()
 
     def _candidate_bytes(self, current: Path | None) -> int:
         """A11: bytes this scoring's candidate is answerable for: its leftover run dirs
@@ -1944,11 +1975,23 @@ class PytestRunner:
             # Post-run: the run may have run on an exhausted disk, so its result is not
             # used. The candidate's survivor caused it iff its reaped space covers the
             # shortfall that was there; otherwise the space came back for another reason.
-            if reclaimed >= shortfall_before:
+            # 1.3.2: also only when the candidate's bytes account for at least half of the
+            # drop since free_start (a shared host's other users must not be charged to it).
+            if (
+                reclaimed >= shortfall_before
+                and self.free_start is not None
+                and self.free_start >= floor
+                and 2 * (cand + reclaimed) >= self.free_start - free_before
+            ):
                 self._charge_host_disk(tree, target, run_idx, role, shortfall_before)
+            if not killed:
+                raise ScratchInfraAbort(
+                    f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
+                    f" reclaimed={reclaimed}B floor={floor}B"
+                )
             raise ScratchInfraAbort(
-                f"host_disk_low:post_run_recovered_without_reap:free_before={free_before}B"
-                f" reclaimed={reclaimed}B floor={floor}B"
+                f"host_disk_low:post_run_recovered_not_charged:free_before={free_before}B"
+                f" reclaimed={reclaimed}B floor={floor}B killed={len(killed)}"
             )
         # Still below the floor: charged iff the scoring started above the floor, the
         # candidate's visible bytes cover the shortfall, and they (plus reclaimed, for
@@ -2030,6 +2073,10 @@ class PytestRunner:
             junit.parent.mkdir(parents=True, exist_ok=True)
             junit.unlink(missing_ok=True)
         else:
+            # 1.3.2 (#2908 review): a candidate tree whose root became a symlink, or now
+            # resolves elsewhere, would move the sandbox write grant and the reap scope
+            # to another directory. Check before anything is confined, measured or reaped.
+            self._check_cand_tree_binding(tree, role)
             # A11: before every "os" run (charged to the candidate or infra if low).
             self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=True)
             if self.runs.is_symlink() or run_dir.parent.is_symlink():
@@ -2066,7 +2113,8 @@ class PytestRunner:
         # A11: one walk per measurement point (total and candidate share together). A
         # candidate run's tree is measured too: its growth is that run's growth.
         if run_dir is not None and role == CAND_ROLE:
-            self._cand_tree_base.setdefault(str(Path(tree).resolve()), tree_bytes(tree))
+            resolved_tree = self._cand_tree_alias[os.path.abspath(tree)]
+            self._cand_tree_base.setdefault(resolved_tree, tree_bytes(Path(resolved_tree)))
         cand_trees = list(self._cand_tree_base) if run_dir is not None else []
         usage_before = self.measure(run_dir, cand_trees)
         before = usage_before.total
@@ -2102,6 +2150,11 @@ class PytestRunner:
             # #2740) makes any failure of this run an infra abort, never a refusal (or the
             # candidate's, when it explains the drop).
             self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=False)
+            if role == CAND_ROLE:
+                # 1.3.2: reap this scoring's candidate scope after EVERY candidate run, so a
+                # survivor cannot fill an unlinked file during a later run. Fails closed
+                # (ScratchInfraAbort, nothing cached) if a killed PID does not go away.
+                self._reap_after_candidate_run()
         # A6: what this run left in scratch (its own junit report excluded).
         junit_bytes = (
             allocated_bytes(junit.stat()) if junit.is_file() and not junit.is_symlink() else 0

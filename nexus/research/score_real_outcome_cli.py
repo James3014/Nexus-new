@@ -179,6 +179,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 7
+    if args.sandbox == ros.SANDBOX_OS and not args.store.is_dir():
+        # 1.3.2: same clean refusal and exit code as the no-barrier case (no traceback).
+        print(
+            "--sandbox os: --store must be an existing directory (every confined run is"
+            " denied the store); refusing to score",
+            file=sys.stderr,
+        )
+        return 7
     tasks_dir = args.store / "tasks"
     keys = args.task or sorted(d.name for d in tasks_dir.iterdir() if (d / "raw.json").exists())
     if args.dry_run:

@@ -1065,7 +1065,7 @@ def test_env_cache_keys_cover_interpreter_pythonpath_and_version(tmp_path, monke
 
 def test_scorer_version_is_recorded_in_spec_amendment():
     root = Path(__file__).resolve().parents[2]
-    assert ros.SCORER_VERSION == "1.3.1"
+    assert ros.SCORER_VERSION == "1.3.2"
     amendments = (root / "docs/research/REAL_OUTCOME_SCORER_SPEC.amendments.md").read_text()
     assert f'SCORER_VERSION = "{ros.SCORER_VERSION}"' in amendments
     spec = (root / ros.SPEC_RELATIVE_PATH).read_bytes()
@@ -3595,7 +3595,7 @@ def _unconfined_os_runner(scratch: Path, monkeypatch) -> ros.PytestRunner:
     # The reaper needs lsof; record its input instead (tested on its own below).
     reaped: list[list[Path]] = []
 
-    def record(prefixes, name_prefixes=()):
+    def record(prefixes, name_prefixes=(), *, resolved=False):
         reaped.append(list(prefixes))
         return []
 
@@ -3827,6 +3827,9 @@ def test_sandbox_os_survivor_cannot_recreate_its_dir_after_the_task_parent_is_go
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
+    # These scenarios need the survivor to outlive the candidate run; 1.3.2's per-run
+    # reap (tested on its own) would kill it at once, so it is switched off here.
+    monkeypatch.setattr(runner, "_reap_after_candidate_run", lambda: [])
     cand = work / "trees" / "a" / "cand"
     log = cand / "attempts.log"
     _survivor_tree(cand, _survivor_script(5000, log))
@@ -4701,6 +4704,9 @@ def test_survivor_that_removed_its_run_dir_is_still_reaped_and_charged(tmp_path,
     runner = _os_runner(work / "scratch")
     if runner is None:
         return
+    # These scenarios need the survivor to outlive the candidate run; 1.3.2's per-run
+    # reap (tested on its own) would kill it at once, so it is switched off here.
+    monkeypatch.setattr(runner, "_reap_after_candidate_run", lambda: [])
     cand = work / "trees" / "a" / "candt"
     ready = cand / "gone.ready"
     holder = (
@@ -4801,6 +4807,8 @@ def test_partial_recovery_by_the_reap_is_not_counted_twice(tmp_path, monkeypatch
                 state["cand_done"] = True
 
     def reap():
+        if not state["cand_done"]:
+            return []  # the survivor does not exist yet (1.3.2 reaps after every run)
         state["reaped"] = True  # the survivor's 1 MiB comes back
         return [4242]
 
@@ -4837,6 +4845,10 @@ def test_h2_pre_run_reap_recovers_the_disk_and_scoring_continues(tmp_path, monke
 
 def _simulated_reap(monkeypatch, runner, state, pid: int = 4242):
     def reap():
+        if "cand_done" in state and not state["cand_done"]:
+            return []  # the survivor does not exist yet (1.3.2 reaps after every run)
+        if state["reaped"]:
+            return []  # already killed: a later reap finds nothing
         state["reaped"] = True
         runner.reaped_pids.append(pid)
         return [pid]
@@ -4951,3 +4963,277 @@ def test_reclaimed_counts_toward_the_majority_term_only(tmp_path, monkeypatch):
         ros.SCRATCH_HOST_DISK_LOW,
         ros.CAND_ROLE,
     )
+
+
+# ---- 1.3.2 (#2740) -------------------------------------------------------------------
+
+
+def test_cli_sandbox_os_without_a_store_dir_refuses_cleanly_exit_7(tmp_path, monkeypatch, capsys):
+    from nexus.research import score_real_outcome_cli as cli
+
+    monkeypatch.setattr(cli, "os_sandbox_available", lambda: True)
+
+    def no_scoring(*a, **k):
+        raise AssertionError("scored without a store")
+
+    monkeypatch.setattr(cli.ros, "score_task", no_scoring)
+    monkeypatch.setattr(cli.ros, "PytestRunner", no_scoring)
+    rc = cli.main([
+        "--store",
+        str(tmp_path / "no-such-store"),
+        "--out",
+        str(tmp_path / "out"),
+        "--work",
+        str(tmp_path / "work"),
+        "--task",
+        "James3014__nexus-runtime--1",
+        "--sandbox",
+        "os",
+    ])
+    err = capsys.readouterr().err
+    assert rc == 7
+    assert "--store must be an existing directory" in err
+    assert "Traceback" not in err and "SandboxError" not in err
+    assert not (tmp_path / "work").exists()
+
+
+def test_cli_sandbox_none_without_store_dir_keeps_1_3_1_behaviour(tmp_path, capsys):
+    from nexus.research import score_real_outcome_cli as cli
+
+    rc = cli.main(["--out", str(tmp_path / "out"), "--work", str(tmp_path / "work")])
+    assert rc == 2 and "--store and --work are required" in capsys.readouterr().err
+
+
+def test_every_candidate_run_reaps_its_scope_oracle_runs_do_not(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    base = _leak_tree(tmp_path / "b", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(9 * 1024**4))
+    calls: list[int] = []
+    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda: calls.append(1) or [])
+    runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    runner.run(env, cand, "c", "tests", (), 1, ros.CAND_ROLE)
+    assert len(calls) == 2
+    runner.run(env, base, "b", "tests", (), 0)
+    assert len(calls) == 2
+
+
+def test_per_run_reap_failure_is_an_infra_abort_and_caches_nothing(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(9 * 1024**4))
+
+    def survives(prefixes, name_prefixes=(), *, resolved=False):
+        raise ros.ScratchInfraAbort("reap_failed: still alive after SIGKILL: [4242]")
+
+    monkeypatch.setattr(runner, "reap_survivors", survives)
+    with pytest.raises(ros.ScratchInfraAbort, match="reap_failed"):
+        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert list(runner.cache.iterdir()) == []
+
+
+def test_reaper_signals_only_pids_found_under_the_scope_and_checks_each_is_gone(
+    tmp_path, monkeypatch
+):
+    """The reaper kills by PID from the lsof listing, never by name, and re-checks every
+    killed PID with kill(pid, 0) semantics (_pid_alive) before returning."""
+    runner = ros.PytestRunner(tmp_path / "scratch", log=lambda m: None)
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    lsof = "/usr/sbin/lsof"
+    monkeypatch.setattr(ros, "LSOF_CANDIDATES", (lsof,))
+    monkeypatch.setattr(ros.os.path, "isfile", lambda p: p == lsof)
+    listing = f"p111\nfcwd\nn{scope.resolve()}\np222\nfcwd\nn/somewhere/else\n"
+
+    class Done:
+        stdout = listing
+
+    monkeypatch.setattr(ros.subprocess, "run", lambda *a, **k: Done())
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ros.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    gone: set[int] = set()
+    monkeypatch.setattr(ros, "_pid_alive", lambda pid: pid not in gone or gone.discard(pid))
+    gone.add(111)
+    assert runner.reap_survivors([scope]) == [111]
+    assert killed == [(111, ros.signal.SIGKILL)]
+
+
+def test_recovered_disk_with_mostly_external_drop_is_not_charged(tmp_path, monkeypatch):
+    """1.3.2: post-run, the disk recovered after the reap killed a small survivor whose
+    space covers the shortfall, but another process took most of the drop since
+    free_start: infra abort (not NOT_RUNNABLE)."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    floor = runner.min_free_disk_bytes
+    state = {"calls": 0, "reaped": False}
+
+    def reap():
+        state["reaped"] = True
+        return [4242]
+
+    monkeypatch.setattr(runner, "_reap_candidate_scope", reap)
+
+    def disk(path):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return _usage(floor + 10 * 1024**3)  # free_start
+        # below the floor by 1 kB; the 1 MiB survivor it held covers that, the 10 GiB
+        # drop is mostly someone else
+        return _usage(floor + 1024**2 - 1000 if state["reaped"] else floor - 1000)
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    runner._check_disk_for_run(cand, "tests", 0, ros.CAND_ROLE, tmp_path / "rd", pre=True)
+    assert runner.free_start == floor + 10 * 1024**3
+    runner._candidate_ran = True
+    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_not_charged") as exc:
+        runner._check_disk_for_run(cand, "tests", 0, ros.CAND_ROLE, tmp_path / "rd", pre=False)
+    assert "killed=1" in str(exc.value)
+
+
+def test_uncharged_recovery_after_a_kill_is_infra_at_run_level_not_rerun(tmp_path, monkeypatch):
+    """#2908 review: a recovery after a kill that is not charged ends the run as an infra
+    abort: one run, nothing cached."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    state = {"reaped": False, "post": 0}
+
+    def reap():
+        state["reaped"] = True
+        return [4242]
+
+    monkeypatch.setattr(runner, "_reap_candidate_scope", reap)
+    monkeypatch.setattr(runner, "_reap_after_candidate_run", lambda: [])
+    calls = {"n": 0}
+
+    def disk(path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _usage(floor + 10 * 1024**3)  # pre-run: free_start
+        if not state["reaped"]:
+            state["post"] += 1
+            return _usage(floor - 1000)  # post-run: below the floor
+        return _usage(floor + 1024**2 - 1000)  # after the kill: recovered, small reclaim
+
+    monkeypatch.setattr(ros, "_disk_usage", disk)
+    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_not_charged"):
+        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert state["post"] == 1  # one run, no rerun
+    assert not runner.cache.exists() or not list(runner.cache.iterdir())
+
+
+def test_recovery_without_reap_is_infra_with_no_in_place_rerun(tmp_path, monkeypatch):
+    """#2908 Codex review: 1.3.2 does not rerun a discarded run in place (the candidate's
+    tree is mutable, so a rerun could hide an attack). It stays the 1.3.1 infra abort;
+    the driver reruns the whole task with a fresh tree."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    floor = runner.min_free_disk_bytes
+    monkeypatch.setattr(runner, "_reap_candidate_scope", lambda: [])
+    executions = {"n": 0}
+    real_execute = runner._execute
+
+    def execute(*a, **k):
+        executions["n"] += 1
+        return real_execute(*a, **k)
+
+    monkeypatch.setattr(runner, "_execute", execute)
+    seq = iter([9 * 1024**4, floor - 1, 9 * 1024**4])  # pre, post (low), recheck (ok)
+    monkeypatch.setattr(ros, "_disk_usage", lambda path: _usage(next(seq, 9 * 1024**4)))
+    with pytest.raises(ros.ScratchInfraAbort, match="post_run_recovered_without_reap"):
+        runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert executions["n"] == 1
+    assert not runner.cache.exists() or list(runner.cache.iterdir()) == []
+    assert not hasattr(ros, "H3_MAX_RERUNS")
+
+
+def test_reap_scope_is_not_redirected_by_a_tree_root_symlink_swap(tmp_path, monkeypatch):
+    """#2908 Codex review: the candidate scope is the tree path recorded (resolved) before
+    candidate code ran. If the candidate replaces its tree root with a symlink to another
+    directory, a process holding files there is not a reap target."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    # the helper records instead of reaping; use the real reaper here
+    monkeypatch.setattr(runner, "reap_survivors", ros.PytestRunner.reap_survivors.__get__(runner))
+    tree = tmp_path / "trees" / "cand"
+    tree.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    runner._cand_tree_base[str(tree.resolve())] = 0
+    recorded = str(tree.resolve())
+    tree.rmdir()
+    tree.symlink_to(outside)  # the swap
+    lsof_out = f"p4242\nn{outside.resolve()}/held.bin\np4343\nn{recorded}/x.bin\n"
+    monkeypatch.setattr(ros.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(
+        ros.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=lsof_out, stderr=""),
+    )
+    killed: list[int] = []
+    monkeypatch.setattr(ros.os, "kill", lambda pid, sig: killed.append(pid) if sig else None)
+    monkeypatch.setattr(ros, "_pid_alive", lambda pid: False)
+    runner._reap_candidate_scope()
+    assert 4242 not in killed
+    assert 4343 in killed
+
+
+def test_tree_root_swap_between_runs_is_refused_before_confine_or_reap(tmp_path, monkeypatch):
+    """#2908 Codex review r2: after one candidate run the candidate replaces its tree root
+    with a symlink to another directory. The next run (e.g. a majority rerun) must not
+    register that directory as scope or confine into it: infra abort before anything."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
+    bound = set(runner._cand_tree_base)
+    assert bound == {str(cand.resolve())}
+    cand.rename(tmp_path / "c-moved")
+    cand.symlink_to(outside)
+    confined: list[Path] = []
+    monkeypatch.setattr(runner, "_confine", lambda env, tree, run_dir: confined.append(tree) or [])
+    for role in (ros.CAND_ROLE, "BASE+T"):
+        with pytest.raises(ros.ScratchInfraAbort, match="candidate_tree_root_changed"):
+            runner.run(env, cand, "c", "tests", (), 1, role)
+    assert confined == []
+    assert set(runner._cand_tree_base) == bound
+    assert all(
+        str(outside.resolve()) not in str(p) for call in runner.reaped_prefixes for p in call
+    )
+
+
+def test_a_candidate_tree_that_is_a_symlink_at_first_sight_is_refused(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    real = _leak_tree(tmp_path / "real", 0)
+    link = tmp_path / "c"
+    link.symlink_to(real)
+    env = LocalEnv().get("fixture-repo", link)
+    with pytest.raises(ros.ScratchInfraAbort, match="candidate_tree_root_is_symlink"):
+        runner.run(env, link, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert runner._cand_tree_base == {}
+
+
+def test_none_mode_is_unchanged_by_1_3_2(tmp_path, monkeypatch):
+    """--sandbox none goes through none of the 1.3.2 code: no disk check, no reap, no
+    rerun loop, even for a candidate-role run."""
+    assert ros.RUNNER_SANDBOX_MODES  # none stays a mode
+    runner = _runner(tmp_path)
+    tree = _leak_tree(tmp_path / "t", 0)
+    env = LocalEnv().get("fixture-repo", tree)
+
+    def boom(*a, **k):
+        raise AssertionError("1.3.2 os-only path reached in none mode")
+
+    monkeypatch.setattr(runner, "_check_disk_for_run", boom)
+    monkeypatch.setattr(runner, "_reap_candidate_scope", boom)
+    monkeypatch.setattr(runner, "reap_survivors", boom)
+    _fake_disk(monkeypatch, total=1000, free=1)
+    res = runner.run(env, tree, "t", "tests", (), 0, ros.CAND_ROLE)
+    assert res.outcomes and res.exit_code == 0 and not res.timed_out
+    assert runner.sandbox == ros.SANDBOX_NONE and not runner.runs.exists()
+    assert runner.reaped_pids == []
