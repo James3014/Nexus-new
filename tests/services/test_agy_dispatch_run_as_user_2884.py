@@ -720,6 +720,7 @@ def test_hash_probe_errors_refuse_and_close_the_descriptor(worker_env, monkeypat
     [
         (".agy.0123456789abcdef.tmp", "old"),
         (".agy.0123456789abcdef.tmp", "fresh"),
+        (".agy.0123456789abcdef.tmp", "half-hour"),
         (".agy.0123456789abcdef.tmp", "symlink"),
         (".agy.0123456789abcdef.tmp", "directory"),
         (".agy.0123456789abcde.tmp", "nonmatching"),
@@ -739,7 +740,8 @@ def test_prepare_sweeps_only_stale_worker_agy_temps(worker_env, monkeypatch, nam
     else:
         temp.write_text("partial copy")
     if kind != "fresh":
-        old = time.time() - 7200
+        age = 1800 if kind == "half-hour" else 7200  # the limit is one hour
+        old = time.time() - age
         os.utime(temp, (old, old), follow_symlinks=False)
     boundary = _prepare(worker_env)
     try:
@@ -791,16 +793,32 @@ def test_stale_worker_agy_temp_unlink_errors_are_best_effort(worker_env, monkeyp
         temp.write_text("partial copy")
         os.utime(temp, (old, old))
     real_unlink = Path.unlink
+    failed = []
 
     def unlink(path, *args, **kwargs):
-        if path == temps[0]:
+        if not failed:  # whichever temp the directory listing yields first
+            failed.append(path)
             raise PermissionError("cannot remove temp")
         return real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", unlink)
     worker_mod._sweep_stale_worker_agy_temps(worker_env["worker_agy"])
-    assert temps[0].exists() and not temps[1].exists()
+    assert [t for t in temps if t.exists()] == failed
     assert "AGY_WORKER_TEMP_SWEEP_FAILED" in caplog.text
+
+
+def test_stale_worker_agy_temp_sweep_skips_a_symlinked_or_missing_bin(worker_env, tmp_path):
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir(mode=0o755)
+    temp = real_bin / ".agy.0123456789abcdef.tmp"
+    temp.write_text("partial copy")
+    old = time.time() - 7200
+    os.utime(temp, (old, old))
+    linked_bin = tmp_path / "linked-bin"
+    linked_bin.symlink_to(real_bin)
+    worker_mod._sweep_stale_worker_agy_temps(linked_bin / "agy")
+    assert temp.read_text() == "partial copy"
+    worker_mod._sweep_stale_worker_agy_temps(tmp_path / "missing-bin" / "agy")  # must not raise
 
 
 def test_prepare_refresh_failure_refuses_and_leaves_the_copy(worker_env):
