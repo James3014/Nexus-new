@@ -174,6 +174,8 @@ MAX_LEDGER_BODY_SHAS = 32
 INFRA_MARKERS = ("OPENCLI_", "TRANSPORT", "OUTCOME_UNKNOWN", "REMOTE_MAIN_REFRESH_FAILED")
 MODEL_MARKERS = ("WORKER_BLOCKED", "REPAIR", "SCOPE_DELTA", "VERIFICATION_FAIL", "VERIFIER_FAIL")
 PUBLICATION_GRACE_MIN = 15
+# A transient error seen on this many daemon polls is reported as persistent at the cap (#2864).
+TRANSIENT_REPEAT_THRESHOLD = 3
 # The daemon runs from its own checkout that nothing updates (2026-10-21 it was 202 commits
 # behind main, so the closure-verifier hardening of #2794/#2808/#2815 was not in effect).
 # A checkout that misses a change to any of these paths would run the nightly with an old
@@ -616,13 +618,22 @@ def _stuck_reconciliation(daemon_state: Mapping[str, Any]) -> str:
     return error if isinstance(error, str) and error in STUCK_RECONCILIATION_ERRORS else ""
 
 
+def _transient_suffix(daemon_state: Mapping[str, Any]) -> str:
+    """``:TRANSIENT:<error>`` for a record restored after a transient error (#2864), else ""."""
+    error = daemon_state.get("last_transient_error")
+    return f":TRANSIENT:{_token(error)}" if error else ""
+
+
 def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
-    """Return (kind, reason) with kind in wait|complete|infra|model.  Unknown -> model."""
+    """Return (kind, reason) with kind in wait|complete|infra|model.  Unknown -> model.
+
+    A waiting record restored after a transient error (#2862) still waits, but its reason
+    names the error (#2864)."""
     state = str(daemon_state.get("state") or "")
     if state == "COMPLETE":
         return "complete", state
     if state in WAIT_STATES:
-        return "wait", state
+        return "wait", state + _transient_suffix(daemon_state)
     if state in TERMINAL_DISPOSITIONS:
         return "model", state
     result = daemon_state.get("result")
@@ -636,7 +647,7 @@ def classify(daemon_state: Mapping[str, Any]) -> tuple[str, str]:
             stuck = _stuck_reconciliation(daemon_state)
             if stuck:
                 return "infra", f"{state}:RECONCILE_ONLY:{prior}:{stuck}"
-            return "wait", f"{state}:{prior}"
+            return "wait", f"{state}:{prior}{_transient_suffix(daemon_state)}"
         return "infra", f"{state}:RECONCILE_ONLY:{prior}"
     if state == "BLOCKED":
         error = _token(daemon_state.get("error")) if daemon_state.get("error") else ""
@@ -2006,16 +2017,46 @@ class Nightly:
             except CandidateRefused as exc:
                 return self._escalate(night, entry, "model", f"CANDIDATE_REJECTED:{exc}")
         elif kind == "wait":
+            repeats = 0
             if record.get("last_transient_error"):
                 att["note"] = (
                     f"last_transient_error={_one_line(record['last_transient_error'], 200)}"
                 )
+                repeats = self._note_transient(att, record)
             if age > self.issue_cap_min:
-                self._infra(night, entry, f"ISSUE_CAP_EXCEEDED:{reason}")
+                if repeats >= TRANSIENT_REPEAT_THRESHOLD:
+                    error = _token(record["last_transient_error"])
+                    self._infra(night, entry, f"TRANSIENT_ERROR_REPEATED:{error}:x{repeats}")
+                else:
+                    self._infra(night, entry, f"ISSUE_CAP_EXCEEDED:{reason}")
         elif kind == "infra":
             self._infra(night, entry, reason)
         else:
             self._escalate(night, entry, "model", reason)
+
+    @staticmethod
+    def _note_transient(att: dict[str, Any], record: Mapping[str, Any]) -> int:
+        """Record the restored record's transient error on the attempt; return its count.
+
+        Each daemon poll that hits the error again writes a new ``last_transient_error_at``,
+        so a new timestamp (or a different error) counts one more occurrence (#2864)."""
+        error = _one_line(record["last_transient_error"], 200)
+        at = _one_line(record.get("last_transient_error_at") or "", 64)
+        seen = att.get("transient_error")
+        seen = seen if isinstance(seen, dict) else {}
+        count = int(seen.get("count") or 0)
+        if seen.get("error") != error or seen.get("at") != at or not count:
+            count += 1
+        reason = record.get("last_transient_error_reason")
+        att["transient_error"] = {
+            "error": error,
+            "reason": _one_line(json.dumps(reason, sort_keys=True, default=str), 200)
+            if reason
+            else "",
+            "at": at,
+            "count": count,
+        }
+        return count
 
     def _infra(self, night: dict[str, Any], entry: dict[str, Any], reason: str) -> None:
         entry["attempts"][-1].update(result="infra", reason=reason, finished_at=self._iso())
@@ -2408,6 +2449,20 @@ class Nightly:
             )
         night["totals"] = totals
         lines += ["", f"Totals: {totals}", ""]
+        transient = [
+            (number, atts[-1]["transient_error"])
+            for number in night.get("order", [])
+            for atts in [night["issues"][str(number)].get("attempts") or []]
+            if atts and isinstance(atts[-1].get("transient_error"), dict)
+        ]
+        if transient:
+            lines += ["Transient errors (record restored and still waiting):", ""]
+            for number, err in transient:
+                detail = f" ({err['reason']})" if err.get("reason") else ""
+                lines.append(
+                    f"- #{number}: {err['error']} x{err['count']}{detail}, last at {err['at']}"
+                )
+            lines.append("")
         return "\n".join(lines)
 
 

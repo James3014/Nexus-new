@@ -220,6 +220,21 @@ def _safe_error(exc: Exception) -> dict[str, str]:
     return {"type": type(exc).__name__, "code": code}
 
 
+def transient_status_error(value: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """The ``last_error`` a poll reports for a record restored after a transient error (#2864).
+
+    The poll itself succeeded (the record waits fail-closed), so readiness is unchanged; only
+    ``last_error`` names the error so a persistent one is visible in ``status``."""
+    result = value.get("result") if isinstance(value, Mapping) else None
+    error = result.get("last_transient_error") if isinstance(result, Mapping) else None
+    if not error:
+        return None
+    code = str(error)
+    if not re.fullmatch(r"[A-Z0-9_:-]{1,120}", code):
+        code = "TRANSIENT_ERROR"
+    return {"type": "TransientError", "code": code}
+
+
 def _process_snapshot() -> list[tuple[int, str]]:
     result = subprocess.run(
         ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=False, timeout=5
@@ -1129,6 +1144,16 @@ def run_once(
                     "issue_number": int(issue["number"]),
                     "result": pub_result,
                 }
+            if result.get("last_transient_error"):
+                # #2864: a record restored after a transient error is still waiting, but the
+                # error must be visible in run-once output and the daemon status.
+                last = {
+                    "status": result.get("state"),
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "result": result,
+                }
+                continue
             if result.get("reuse"):
                 last = {
                     "status": result.get("state"),
@@ -1371,12 +1396,13 @@ def daemon(config: ServiceConfig, config_path: Path | None = None) -> None:
     write_status(ServiceReadiness.STARTING)
     while not stopping:
         try:
-            run_once(config)
+            value = run_once(config)
             successful_polls += 1
             write_status(
                 ServiceReadiness.READY
                 if successful_polls >= READINESS_SUCCESS_THRESHOLD
-                else ServiceReadiness.STARTING
+                else ServiceReadiness.STARTING,
+                error=transient_status_error(value),
             )
         except Exception as exc:
             successful_polls = 0

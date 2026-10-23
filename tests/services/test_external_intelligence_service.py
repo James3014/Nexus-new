@@ -29,6 +29,7 @@ from scripts.ops.external_intelligence_service import (
     render_comment,
     run_once,
     service_status,
+    transient_status_error,
     write_service_receipt,
 )
 
@@ -2799,3 +2800,49 @@ def test_run_once_never_publishes_a_restored_resume_record(tmp_path, restored):
     assert calls == [1]
     assert result["status"] != "COMPLETE"
     assert gh.comments == []
+
+
+def test_run_once_reports_a_restored_record_with_its_transient_error(tmp_path):
+    """#2864: run-once output names the restored record and its transient error."""
+    config = _config(tmp_path)
+    restored = {
+        "state": "INTELLIGENCE_DISPATCHING",
+        "intelligence_effect_id": "e" * 64,
+        "last_transient_error": "SOURCE_LINEAGE_FAILED",
+        "last_transient_error_at": "2026-10-22T00:00:00.000+00:00",
+    }
+
+    class RestoredAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            return dict(restored)
+
+    gh = FakeGh({"o/r": [{"number": 7, "title": "restored", "body": "a"}]})
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: RestoredAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert result["status"] == "INTELLIGENCE_DISPATCHING"
+    assert result["issue_number"] == 7
+    assert result["result"]["last_transient_error"] == "SOURCE_LINEAGE_FAILED"
+    assert transient_status_error(result) == {
+        "type": "TransientError",
+        "code": "SOURCE_LINEAGE_FAILED",
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"status": "IDLE"}, None),
+        ({"status": "X", "result": {"state": "X"}}, None),
+        (None, None),
+        (
+            {"status": "X", "result": {"last_transient_error": "weird text"}},
+            {"type": "TransientError", "code": "TRANSIENT_ERROR"},
+        ),
+    ],
+)
+def test_transient_status_error_only_for_a_transient_record(value, expected):
+    assert transient_status_error(value) == expected
