@@ -79,14 +79,21 @@ def referenced_worker_run_roots(leases_dir: Path) -> Optional[set[str]]:
                 if entry.is_symlink():
                     return None
                 fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                try:
+                    handle = os.fdopen(fd, "r", encoding="utf-8")
+                except BaseException:
+                    os.close(fd)
+                    raise
+                with handle:
                     if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                         return None
                     receipt = json.load(handle)
                 if not isinstance(receipt, dict):
                     return None
-                root = receipt.get("worker_run_root")
-                if isinstance(root, str):
+                if "worker_run_root" in receipt:
+                    root = receipt["worker_run_root"]
+                    if not isinstance(root, str):
+                        return None
                     roots.add(root)
         return roots
     except Exception:

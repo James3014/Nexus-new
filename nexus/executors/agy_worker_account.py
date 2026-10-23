@@ -385,6 +385,11 @@ def gc_unreferenced_worker_run_roots(
                     continue
                 candidates.append((max(info.st_mtime, info.st_ctime), root, info))
         for _, root, info in sorted(candidates)[: max(0, limit)]:
+            # Probe again before each sweep: the wrapper sweep kills run-tagged
+            # and run-cwd processes, so a run that started after the first probe
+            # must stop the pass rather than be swept.
+            if not _worker_user_has_no_process(WORKER_USER, run_command):
+                break
             if sweep_run_root(root, run_command=run_command) != "CLEAN":
                 continue
             current = root.lstat()

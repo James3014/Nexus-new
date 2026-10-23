@@ -2701,6 +2701,9 @@ def _runtime_revision() -> str | None:
 # One wall-clock budget (--timeout) covers every attempt and account rotation
 # of a single dispatch. No further attempt starts below this floor (#1216 V12).
 TOTAL_DEADLINE_MIN_ATTEMPT_SECONDS = 5.0
+# #2905: the orphan run-root GC (a ps probe and up to two wrapper sweeps) runs
+# only when at least this much of the dispatch budget remains.
+WORKER_GC_MIN_REMAINING_SECONDS = 120.0
 _monotonic = time.monotonic
 
 MAX_FAILURE_HISTORY_ENTRIES = 16
@@ -5294,14 +5297,15 @@ def dispatch_run(
                         if run_as_user is not None:
                             # #2884: agy runs as the worker account in a per-run
                             # copy of the target under worker-runs.
-                            try:
-                                _agy_worker_account().gc_unreferenced_worker_run_roots(
-                                    _agy_account_pool.referenced_worker_run_roots(
-                                        claim.receipt_path.parent
+                            if total_deadline - _monotonic() > WORKER_GC_MIN_REMAINING_SECONDS:
+                                try:
+                                    _agy_worker_account().gc_unreferenced_worker_run_roots(
+                                        _agy_account_pool.referenced_worker_run_roots(
+                                            claim.receipt_path.parent
+                                        )
                                     )
-                                )
-                            except Exception:
-                                pass  # #2905: best-effort hygiene; never blocks or fails a dispatch
+                                except Exception:
+                                    pass  # #2905: best-effort hygiene; never fails a dispatch
                             write_boundary = _agy_worker_account().prepare_worker_account_boundary(
                                 source_env=env,
                                 target=cwd,

@@ -1353,6 +1353,51 @@ def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
     assert coordinator.claim.released is True
 
 
+def test_dispatch_skips_gc_when_the_remaining_budget_is_short(worker_env, monkeypatch, capsys):
+    coordinator = _Coordinator(worker_env["home"])
+    coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
+    events = []
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        events.append("runner")
+        return 0, "edited", "", False, 1
+
+    monkeypatch.setattr(dispatch, "WORKER_GC_MIN_REMAINING_SECONDS", 10.0**9)
+    monkeypatch.setattr(
+        dispatch._agy_account_pool,
+        "referenced_worker_run_roots",
+        lambda leases_dir: events.append("references") or set(),
+    )
+    monkeypatch.setattr(
+        worker_mod, "gc_unreferenced_worker_run_roots", lambda roots: events.append("gc") or []
+    )
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+    )
+    assert code == 0, capsys.readouterr().err
+    assert events == ["prepare", "runner"]
+
+
 def test_dispatch_worker_launch_failure_does_not_rotate(worker_env, monkeypatch, capsys):
     # sudo refuses both the launch and the sweep: "a password is required"
     _patch_prepare(monkeypatch, worker_env, _Run("", 1))

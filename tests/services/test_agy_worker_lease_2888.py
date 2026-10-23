@@ -738,8 +738,12 @@ def test_gc_removes_an_old_unreferenced_root_after_clean_sweep(orphan_gc, caplog
     assert orphan_gc.collect(set()) == [str(root)]
     assert not root.exists()
     assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(root, [])]
-    assert len(orphan_gc.commands.pses) == 1
-    assert orphan_gc.commands.calls[0][0][0] == worker_mod.PS_PATH
+    assert len(orphan_gc.commands.pses) == 2  # before the scan and before the sweep
+    assert [argv[0] for argv, _ in orphan_gc.commands.calls] == [
+        worker_mod.PS_PATH,
+        worker_mod.PS_PATH,
+        worker_mod.SUDO_PATH,
+    ]
     assert f"AGY_WORKER_ORPHAN_RUN_ROOT_REMOVED root={root}" in caplog.text
 
 
@@ -840,13 +844,18 @@ def test_gc_requires_a_positive_idle_worker_probe(orphan_gc, ps) -> None:
     assert len(orphan_gc.commands.pses) == 1
 
 
-def test_gc_skips_unclean_sweep_and_still_processes_the_next_root(orphan_gc) -> None:
+@pytest.mark.parametrize(
+    "failed_sweep",
+    [(3, SWEEP_UNCLEAN), subprocess.TimeoutExpired("sudo", 30), OSError("sudo")],
+    ids=["unclean", "sweep-timeout", "sweep-oserror"],
+)
+def test_gc_skips_unclean_sweep_and_still_processes_the_next_root(orphan_gc, failed_sweep) -> None:
     unclean = orphan_gc.root(age=90000)
     clean = orphan_gc.root("c" * 32)
     commands = orphan_gc.commands
 
     def run(argv, **kwargs):
-        commands.sweep = (3, SWEEP_UNCLEAN) if str(unclean) in argv else (0, SWEEP_CLEAN)
+        commands.sweep = failed_sweep if str(unclean) in argv else (0, SWEEP_CLEAN)
         return commands(argv, **kwargs)
 
     assert orphan_gc.collect(set(), run_command=run) == [str(clean)]
@@ -891,7 +900,8 @@ def test_gc_reports_a_leftover_without_counting_it(orphan_gc, monkeypatch, caplo
 
 def test_gc_stops_on_exception_and_returns_roots_already_removed(orphan_gc, monkeypatch) -> None:
     first = orphan_gc.root(age=90000)
-    second = orphan_gc.root("c" * 32)
+    second = orphan_gc.root("c" * 32, age=88000)
+    third = orphan_gc.root("d" * 32)
     real_sweep = worker_mod.sweep_run_root
 
     def sweep(path, **kwargs):
@@ -900,8 +910,23 @@ def test_gc_stops_on_exception_and_returns_roots_already_removed(orphan_gc, monk
         return real_sweep(path, **kwargs)
 
     monkeypatch.setattr(worker_mod, "sweep_run_root", sweep)
-    assert orphan_gc.collect(set()) == [str(first)]
+    assert orphan_gc.collect(set(), limit=3) == [str(first)]
+    assert not first.exists() and second.exists() and third.exists()
+
+
+def test_gc_probes_the_worker_account_again_before_each_sweep(orphan_gc) -> None:
+    first = orphan_gc.root(age=90000)
+    second = orphan_gc.root("c" * 32)
+    commands = orphan_gc.commands
+
+    def run(argv, **kwargs):
+        if argv[0] == worker_mod.PS_PATH and commands.sweeps:
+            commands.ps = (0, "4242\n", "")  # a worker run started after the first sweep
+        return commands(argv, **kwargs)
+
+    assert orphan_gc.collect(set(), run_command=run) == [str(first)]
     assert not first.exists() and second.exists()
+    assert commands.sweeps == [worker_mod.sweep_argv(first, [])]
 
 
 def test_referenced_worker_run_roots_collects_only_direct_visible_receipts(tmp_path) -> None:
@@ -910,7 +935,6 @@ def test_referenced_worker_run_roots_collects_only_direct_visible_receipts(tmp_p
     for name, data in {
         "a.receipt.json": {"worker_run_root": "/runs/a"},
         "b.receipt.json": {"worker_run_root": "/runs/b"},
-        "c.receipt.json": {"worker_run_root": 123},
         "d.receipt.json": {},
     }.items():
         (leases / name).write_text(json.dumps(data), encoding="utf-8")
@@ -919,6 +943,20 @@ def test_referenced_worker_run_roots_collects_only_direct_visible_receipts(tmp_p
     (leases / "nested").mkdir()
     (leases / "nested" / "bad.receipt.json").write_text("invalid", encoding="utf-8")
     assert agy_pool.referenced_worker_run_roots(leases) == {"/runs/a", "/runs/b"}
+
+
+@pytest.mark.parametrize("value", [123, None, ["/runs/a"]])
+def test_referenced_worker_run_roots_rejects_a_non_string_root(tmp_path, value) -> None:
+    (tmp_path / "a.receipt.json").write_text(json.dumps({"worker_run_root": value}), "utf-8")
+    assert agy_pool.referenced_worker_run_roots(tmp_path) is None
+
+
+def test_referenced_worker_run_roots_closes_the_fd_of_a_non_regular_receipt(tmp_path) -> None:
+    (tmp_path / "a.receipt.json").mkdir()
+    before = len(os.listdir("/dev/fd"))
+    for _ in range(5):
+        assert agy_pool.referenced_worker_run_roots(tmp_path) is None
+    assert len(os.listdir("/dev/fd")) == before
 
 
 def test_referenced_worker_run_roots_missing_directory_is_empty(tmp_path) -> None:
