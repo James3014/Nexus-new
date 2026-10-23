@@ -38,6 +38,7 @@ RETIRED_NAMES = (
     "ExperimentRunContract",
     "ExperimentRunLease",
     "RunEffectConflict",
+    "write_immutable_artifact",
 )
 
 
