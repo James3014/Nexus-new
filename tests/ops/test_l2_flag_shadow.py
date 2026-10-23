@@ -572,3 +572,21 @@ def test_seed_of_another_owner_is_never_used(clone: Path, tmp_path: Path, monkey
     shadow.ensure_clone("Other/Nexus-new", tmp_path / "state3/clone")
     assert calls and calls[0][-2] == "https://github.com/Other/Nexus-new.git"
     assert "--reference" not in calls[0]
+
+
+def test_clone_and_seed_probe_are_time_bounded(tmp_path: Path, monkeypatch) -> None:
+    # #2752 follow-up: a hung network clone or seed probe must not stall the daily run forever.
+    seed_root = tmp_path / "seeds"
+    (seed_root / "Nexus-new/.git").mkdir(parents=True)
+    monkeypatch.setattr(shadow, "SEED_CLONE_ROOT", seed_root)
+    timeouts: list[tuple[str, object]] = []
+
+    def hang(cmd, *args, **kwargs):
+        timeouts.append((cmd[1] if cmd[1] != "-C" else cmd[3], kwargs.get("timeout")))
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
+
+    monkeypatch.setattr(shadow.subprocess, "run", hang)
+    with pytest.raises(RuntimeError, match="timed out"):
+        shadow.ensure_clone("James3014/Nexus-new", tmp_path / "state/clone")
+    assert [name for name, _ in timeouts] == ["remote", "clone"]
+    assert all(isinstance(t, (int, float)) and t > 0 for _, t in timeouts)

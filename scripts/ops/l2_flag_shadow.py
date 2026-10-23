@@ -60,6 +60,7 @@ SEED_CLONE_ROOT = (
     Path.home() / "workspace"
 )  # read only: used as --reference object store, never fetched into
 MAX_DIFF_BYTES = 2_000_000
+CLONE_TIMEOUT_SECONDS = 1800
 FOLLOWUP_DAYS = 7
 FIX_WORD = re.compile(r"\b(revert\w*|fix\w*|hotfix\w*|regress\w*)\b", re.I)
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
@@ -334,21 +335,35 @@ def ensure_clone(repo: str, clone_root: Path) -> Path:
     url = repo_url(repo)
     use_seed = False
     if (seed / ".git").exists():
-        r = subprocess.run(
-            ["git", "-C", str(seed), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(seed), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            origin = r.stdout.strip()
+        except subprocess.TimeoutExpired:
+            origin = ""  # an unreadable seed is simply not used
+
         # The seed is only an object source, and only when it is a clone of the SAME owner/repo;
         # the clone URL is always the requested repository, never the seed's origin.
-        origin = r.stdout.strip()
         use_seed = origin == url or _same_repo(origin, repo)
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone", "-q", "--no-checkout"]
     if use_seed:
         cmd += ["--reference", str(seed), "--dissociate"]
-    r = subprocess.run([*cmd, url, str(dest)], capture_output=True, text=True, check=False)
+    try:
+        r = subprocess.run(
+            [*cmd, url, str(dest)],
+            capture_output=True,
+            text=True,
+            timeout=CLONE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"clone of {repo} timed out after {exc.timeout}s") from exc
     if r.returncode != 0:
         raise RuntimeError(f"clone of {repo} failed: {r.stderr.strip()[:300]}")
     return dest
