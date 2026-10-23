@@ -799,7 +799,10 @@ def test_blocked_empty_or_unparseable_run_is_non_delivery(
     assert agy_delivery_failure(stdout, stderr) == reason
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert receipt.evidence_complete is False
-    assert receipt.failure_reason == reason
+    if reason == "agy_permission_denied":
+        assert receipt.failure_reason.startswith(reason)
+    else:
+        assert receipt.failure_reason == reason
     assert receipt.provider_permission_mode == AGY_PERMISSION_MODE_ACCEPT_EDITS
 
 
@@ -826,7 +829,7 @@ def test_permission_denial_is_non_delivery_on_pool_path(monkeypatch, tmp_path, a
         AgyWorkerAdapter(account_pool=pool, canonical_root=_repo(tmp_path)), _target(tmp_path)
     )
 
-    assert receipt.failure_reason == "agy_permission_denied"
+    assert receipt.failure_reason.startswith("agy_permission_denied")
     assert receipt.provider_calls == 1
 
 

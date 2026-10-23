@@ -144,6 +144,8 @@ def test_worker_registry_contract_maps_exact_targets_without_fallback():
         "tests/nexus/executors/test_agy_worker_claim_rotation_2403.py",
         "tests/nexus/executors/test_agy_worker_pool_route_2403.py",
         "tests/nexus/executors/test_agy_worker_outage_cap_2415.py",
+        # #2783: headless tool-permission denial is a work failure, never a rotation
+        "tests/services/test_agy_headless_denial_2783.py",
         "tests/services/test_policy_gate.py",
     ]
     assert details.unmatched_paths == []
