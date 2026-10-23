@@ -1924,7 +1924,7 @@ LAUNCH_KEYS = {
     "wrapper_sha256",
 }
 SWEEP_KEYS = {"event", "attempt", "result", "left", "wrapper"}
-CLEANUP_KEYS = {"event", "attempt", "run_root_removed", "worker_failure"}
+CLEANUP_KEYS = {"event", "attempt", "run_root_removed", "worker_failure", "credentials_scrubbed"}
 
 
 def _worker_receipts(err: str) -> list[dict]:

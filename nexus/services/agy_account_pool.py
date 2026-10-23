@@ -147,6 +147,20 @@ class AccountLeaseClaim:
         process.  Any mismatch or I/O error raises ``AgyAccountPoolError``;
         the caller must then not launch.
         """
+        self._mark_worker_fields(
+            {
+                "worker_run_root": run_root,
+                "worker_run_root_id": list(run_root_id),
+                "worker_run_as_user": run_as_user,
+            }
+        )
+
+    def mark_worker_unclean(self, tokens: Sequence[str]) -> None:
+        """Persist survivor identities without releasing this account (#2905)."""
+        self._mark_worker_fields({"worker_unclean_tokens": list(tokens)})
+
+    def _mark_worker_fields(self, fields: dict[str, Any]) -> None:
+        """Identity-checked, atomic update shared by both worker receipt marks."""
         if self.released:
             raise AgyAccountPoolError("AGY_WORKER_LEASE_MARK_REFUSED:claim_released")
         receipt_path = Path(self.receipt_path)
@@ -165,9 +179,7 @@ class AccountLeaseClaim:
         ):
             raise AgyAccountPoolError("AGY_WORKER_LEASE_MARK_REFUSED:receipt_identity_mismatch")
         updated = dict(receipt)
-        updated["worker_run_root"] = run_root
-        updated["worker_run_root_id"] = list(run_root_id)
-        updated["worker_run_as_user"] = run_as_user
+        updated.update(fields)
         tmp_path = receipt_path.with_name(f".{receipt_path.name}.{secrets.token_hex(8)}.tmp")
         created = False
         try:
@@ -1255,6 +1267,7 @@ class CrossProcessLeaseCoordinator:
         self.leases_dir.mkdir(parents=True, exist_ok=True)
 
         excluded = set(exclude_hashes or ())
+        first_pass = True
 
         while True:
             claimed: Optional[AccountLeaseClaim] = None
@@ -1433,7 +1446,11 @@ class CrossProcessLeaseCoordinator:
             if claimed is not None:
                 return claimed
 
-            if deferred_reaps and self._reap_deferred_worker_receipts(deferred_reaps):
+            allow_expired = first_pass
+            first_pass = False
+            if deferred_reaps and self._reap_deferred_worker_receipts(
+                deferred_reaps, deadline, allow_expired=allow_expired
+            ):
                 # A proven reap freed an account: take another pass at once.
                 continue
 
@@ -1450,17 +1467,26 @@ class CrossProcessLeaseCoordinator:
 
             time.sleep(min(self.poll_interval, max(0.01, remaining)))
 
-    def _reap_deferred_worker_receipts(self, deferred: Sequence[tuple[str, Path, Any]]) -> bool:
-        """Reap worker-run receipts set aside by the claim loop; True if any was removed.
+    def _reap_deferred_worker_receipts(
+        self,
+        deferred: Sequence[tuple[str, Path, Any]],
+        deadline: Optional[float] = None,
+        *,
+        allow_expired: bool = False,
+    ) -> bool:
+        """Try at most one worker reap; True if its receipt was removed.
 
         Runs outside the allocation lock and holds only the account's own flock
         (skipped when busy).  The receipt is re-read and its identity and dead
         owner re-checked before the reaper runs.  An unproven receipt is not
         re-reaped for ``WORKER_REAP_NEGATIVE_TTL_SECONDS`` and warns once per lease.
+        Only the first claim pass may start a reap past the deadline, so even
+        zero-wait callers can recover a stale account (``deadline=None``: no
+        deadline).  An ongoing reap may finish.
         """
         import fcntl
+        import time
 
-        reaped_any = False
         for alias_hash, receipt_path, lease_hash in deferred:
             key = _worker_reap_key(alias_hash, lease_hash)
             if _worker_reap_recently_unproven(key):
@@ -1484,26 +1510,28 @@ class CrossProcessLeaseCoordinator:
                     or receipt.get("lease_id_hash") != lease_hash
                 ):
                     continue
+                if not allow_expired and deadline is not None and time.monotonic() >= deadline:
+                    return False
                 if not worker_receipt_run_gone(receipt):
                     _note_worker_reap_unproven(key, alias_hash, lease_hash)
-                    continue
+                    return False
                 try:
                     receipt_path.unlink()
                 except OSError:
-                    continue
+                    return False
                 _WORKER_REAP_UNPROVEN.pop(key, None)
                 _LOG.warning(
                     "AGY_ORPHANED_DESKTOP_RECEIPT_RECLAIMED account=%s lease=%s",
                     alias_hash,
                     lease_hash,
                 )
-                reaped_any = True
+                return True
             finally:
                 try:
                     fcntl.flock(lock_obj.fileno(), fcntl.LOCK_UN)
                 finally:
                     lock_obj.close()
-        return reaped_any
+        return False
 
     def reconcile_claim_receipt(
         self,
