@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -667,6 +668,157 @@ def test_prepare_refreshes_a_stale_worker_agy_copy(worker_env, capsys):
         assert again.worker_agy_refreshed is False
     finally:
         again.cleanup()
+
+
+@pytest.mark.parametrize("kind", ["fifo", "directory"])
+def test_prepare_refuses_non_regular_source_without_blocking(worker_env, monkeypatch, kind):
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    source = worker_env["source_agy"]
+    source.unlink()
+    if kind == "fifo":
+        os.mkfifo(source)
+    else:
+        source.mkdir()
+
+    def timed_out(_signum, _frame):
+        pytest.fail("hashing a non-regular source blocked")
+
+    previous = signal.signal(signal.SIGALRM, timed_out)
+    started = time.monotonic()
+    signal.setitimer(signal.ITIMER_REAL, 1)
+    try:
+        with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="hash_target_not_regular"):
+            _prepare(worker_env)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    assert time.monotonic() - started < 1
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize("operation", ["fstat", "read"])
+def test_hash_probe_errors_refuse_and_close_the_descriptor(worker_env, monkeypatch, operation):
+    closed = []
+    real_close = os.close
+
+    def close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    def fail(*args):
+        raise OSError("hash probe failed")
+
+    monkeypatch.setattr(worker_mod.os, operation, fail)
+    monkeypatch.setattr(worker_mod.os, "close", close)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="hash_target_unreadable:OSError"):
+        worker_mod._sha256_file(worker_env["source_agy"])
+    assert len(closed) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        (".agy.0123456789abcdef.tmp", "old"),
+        (".agy.0123456789abcdef.tmp", "fresh"),
+        (".agy.0123456789abcdef.tmp", "half-hour"),
+        (".agy.0123456789abcdef.tmp", "symlink"),
+        (".agy.0123456789abcdef.tmp", "directory"),
+        (".agy.0123456789abcde.tmp", "nonmatching"),
+        (".agy.0123456789abcdeF.tmp", "nonmatching"),
+        (".agy.0123456789abcdef.tmp.extra", "nonmatching"),
+        ("x.agy.0123456789abcdef.tmp", "nonmatching"),
+    ],
+)
+def test_prepare_sweeps_only_stale_worker_agy_temps(worker_env, monkeypatch, name, kind):
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    temp = worker_env["bin"] / name
+    if kind == "symlink":
+        temp.symlink_to(worker_env["worker_agy"])
+    elif kind == "directory":
+        temp.mkdir()
+    else:
+        temp.write_text("partial copy")
+    if kind != "fresh":
+        age = 1800 if kind == "half-hour" else 7200  # the limit is one hour
+        old = time.time() - age
+        os.utime(temp, (old, old), follow_symlinks=False)
+    boundary = _prepare(worker_env)
+    try:
+        assert boundary.worker_agy_refreshed is False
+        assert os.path.lexists(temp) is (kind != "old")
+    finally:
+        boundary.cleanup()
+
+
+def test_stale_worker_agy_temps_survive_a_group_writable_bin(worker_env):
+    temp = worker_env["bin"] / ".agy.0123456789abcdef.tmp"
+    temp.write_text("partial copy")
+    old = time.time() - 7200
+    os.utime(temp, (old, old))
+    os.chmod(worker_env["bin"], 0o775)
+    try:
+        worker_mod._sweep_stale_worker_agy_temps(worker_env["worker_agy"])
+        assert temp.read_text() == "partial copy"
+    finally:
+        os.chmod(worker_env["bin"], 0o755)
+
+
+@pytest.mark.parametrize("foreign", ["bin", "temp"])
+def test_stale_worker_agy_temps_require_owner_uid(worker_env, monkeypatch, foreign):
+    temp = worker_env["bin"] / ".agy.0123456789abcdef.tmp"
+    temp.write_text("partial copy")
+    old = time.time() - 7200
+    os.utime(temp, (old, old))
+    real_lstat = Path.lstat
+    foreign_path = worker_env["bin"] if foreign == "bin" else temp
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == foreign_path:
+            fields = list(info)
+            fields[4] = os.getuid() + 1
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    worker_mod._sweep_stale_worker_agy_temps(worker_env["worker_agy"])
+    assert temp.read_text() == "partial copy"
+
+
+def test_stale_worker_agy_temp_unlink_errors_are_best_effort(worker_env, monkeypatch, caplog):
+    temps = [worker_env["bin"] / f".agy.{value:016x}.tmp" for value in (1, 2)]
+    old = time.time() - 7200
+    for temp in temps:
+        temp.write_text("partial copy")
+        os.utime(temp, (old, old))
+    real_unlink = Path.unlink
+    failed = []
+
+    def unlink(path, *args, **kwargs):
+        if not failed:  # whichever temp the directory listing yields first
+            failed.append(path)
+            raise PermissionError("cannot remove temp")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    worker_mod._sweep_stale_worker_agy_temps(worker_env["worker_agy"])
+    assert [t for t in temps if t.exists()] == failed
+    assert "AGY_WORKER_TEMP_SWEEP_FAILED" in caplog.text
+
+
+def test_stale_worker_agy_temp_sweep_skips_a_symlinked_or_missing_bin(worker_env, tmp_path):
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir(mode=0o755)
+    temp = real_bin / ".agy.0123456789abcdef.tmp"
+    temp.write_text("partial copy")
+    old = time.time() - 7200
+    os.utime(temp, (old, old))
+    linked_bin = tmp_path / "linked-bin"
+    linked_bin.symlink_to(real_bin)
+    worker_mod._sweep_stale_worker_agy_temps(linked_bin / "agy")
+    assert temp.read_text() == "partial copy"
+    worker_mod._sweep_stale_worker_agy_temps(tmp_path / "missing-bin" / "agy")  # must not raise
 
 
 def test_prepare_refresh_failure_refuses_and_leaves_the_copy(worker_env):

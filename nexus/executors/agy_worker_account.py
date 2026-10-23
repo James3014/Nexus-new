@@ -154,9 +154,17 @@ def _refuse(reason: str) -> AgyWriteBoundaryError:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise _refuse("hash_target_not_regular")
+            while chunk := os.read(fd, 1 << 20):
+                digest.update(chunk)
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise _refuse(f"hash_target_unreadable:{type(exc).__name__}") from exc
     return digest.hexdigest()
 
 
@@ -452,19 +460,48 @@ def reap_orphaned_worker_run(
 
 
 def pid_start_tokens(
-    pids: Iterable[int], *, since: Optional[float], strict: bool = False
+    pids: Iterable[int],
+    *,
+    since: Optional[float],
+    strict: bool = False,
+    owners: Optional[set[int]] = None,
 ) -> list[str]:
     """``pid:<lstart>`` for each live pid started at/after ``since`` (1 s margin).
 
     A pid ps does not report has exited and is dropped; ``since=None`` keeps
     every reported pid. ``strict`` refuses errors or incomplete ps output instead
     of treating an uncertain probe as an exited process (orphan-reap proof).
+    ``owners`` drops a pid only when both its real and effective uid are known
+    and neither is in the set; an unknown owner keeps the pid.
     """
     wanted = sorted({int(p) for p in pids if int(p) > 1})
     lines: list[str] = []
     reported: set[int] = set()
     # One pid per call: ps rejects the whole list when one pid is out of range.
     for pid in wanted:
+        if owners is not None:
+            # Real and effective uid: a worker process that ran another user's
+            # setuid binary keeps its real uid, which `ps -U` also matches.
+            try:
+                owner = subprocess.run(
+                    ["ps", "-o", "ruid=,uid=", "-p", str(pid)],
+                    env=_PS_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                uids = owner.stdout.split()
+                if (
+                    owner.returncode == 0
+                    and not owner.stderr.strip()
+                    and len(uids) == 2
+                    and all(u.isascii() and u.isdigit() for u in uids)
+                    and not {int(u) for u in uids} & owners
+                ):
+                    continue
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass  # An uncertain owner must not hide a survivor.
         try:
             completed = subprocess.run(
                 ["ps", "-o", "pid=,lstart=", "-p", str(pid)],
@@ -561,6 +598,35 @@ def _open_source_without_symlinks(real: Path) -> int:
         return os.open(real.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     finally:
         os.close(dir_fd)
+
+
+def _sweep_stale_worker_agy_temps(worker_agy: Path, *, older_than: float = 3600) -> None:
+    """Best-effort cleanup of old copy temps in the Owner's safe worker bin."""
+    try:
+        bin_info = worker_agy.parent.lstat()
+        if (
+            not stat.S_ISDIR(bin_info.st_mode)
+            or bin_info.st_uid != os.getuid()
+            or bin_info.st_mode & 0o022
+        ):
+            return
+        pattern = re.compile(rf"\.{re.escape(worker_agy.name)}\.[0-9a-f]{{16}}\.tmp")
+        cutoff = time.time() - older_than
+        for path in worker_agy.parent.iterdir():
+            if not pattern.fullmatch(path.name):
+                continue
+            try:
+                info = path.lstat()
+                if (
+                    stat.S_ISREG(info.st_mode)
+                    and info.st_uid == os.getuid()
+                    and info.st_mtime < cutoff
+                ):
+                    path.unlink()
+            except Exception:
+                _LOG.warning("AGY_WORKER_TEMP_SWEEP_FAILED path=%s", path, exc_info=True)
+    except Exception:
+        _LOG.warning("AGY_WORKER_TEMP_SWEEP_FAILED bin=%s", worker_agy.parent, exc_info=True)
 
 
 def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
@@ -1307,8 +1373,13 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
 
     def _record_unclean_tokens(self, tracked: Iterable[int]) -> None:
         try:
+            try:
+                owners = {0, pwd.getpwnam(WORKER_USER).pw_uid}
+            except Exception:
+                _LOG.exception("AGY_WORKER_UNCLEAN_OWNER_LOOKUP_FAILED")
+                owners = None
             tokens = pid_start_tokens(
-                [*tracked, *(int(pid) for pid in self._worker_left)], since=None
+                [*tracked, *(int(pid) for pid in self._worker_left)], since=None, owners=owners
             )
             # Keep evidence from an earlier timeout/termination sweep even if
             # a later wrapper report loses sight of that surviving process.
@@ -1488,6 +1559,7 @@ def prepare_worker_account_boundary(
     if _sha256_file(Path(wrapper)) != wrapper_sha256:
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
+    _sweep_stale_worker_agy_temps(Path(worker_agy))
     if not source_agy:
         raise _refuse("worker_agy_stale")
     worker_agy_refreshed = False

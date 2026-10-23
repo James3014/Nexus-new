@@ -1581,22 +1581,94 @@ def test_unclean_sweep_records_tracked_and_wrapper_pids_with_no_since_filter(
     boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
     _launch(boundary)
     boundary._tracker = SimpleNamespace(stop=lambda: {4343, 4444})
+    monkeypatch.setattr(worker_mod.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=501))
     captured = []
     evidence = [f"{p}:Fri_Oct_23_12:34:56_2026" for p in range(100, 170)]
 
-    def tokens(pids, *, since):
-        captured.append((set(pids), since))
+    def tokens(pids, *, since, owners=None):
+        captured.append((set(pids), since, owners))
         return list(evidence)
 
     monkeypatch.setattr(worker_mod, "pid_start_tokens", tokens)
     boundary.cleanup()
-    assert captured[-1] == ({4242, 4343, 4444}, None)
+    assert captured[-1] == ({4242, 4343, 4444}, None, {0, 501})
     assert boundary.unclean_tokens == evidence[:64]
     returned = boundary.unclean_tokens
     returned.clear()
     assert boundary.unclean_tokens == evidence[:64]
     with pytest.raises(AttributeError):
         boundary.unclean_tokens = []
+
+
+@pytest.mark.parametrize(
+    ("owner", "kept"),
+    [
+        pytest.param((0, "501 501\n", ""), True, id="worker"),
+        pytest.param((0, "0 0\n", ""), True, id="root"),
+        pytest.param((0, "501 0\n", ""), True, id="worker-ran-setuid-root"),
+        pytest.param((0, "501 502\n", ""), True, id="worker-ran-setuid-other"),
+        pytest.param((0, "502 502\n", ""), False, id="other"),
+        pytest.param((0, "502 0\n", ""), True, id="foreign-ruid-root-euid"),
+        pytest.param((0, "502 501\n", ""), True, id="foreign-ruid-worker-euid"),
+        pytest.param((1, "502 502\n", ""), True, id="ps-failed-with-output"),
+        pytest.param((1, "", ""), True, id="uid-missing"),
+        pytest.param((0, "502 502\n", "ps error"), True, id="uid-stderr"),
+        pytest.param((0, "unknown\n", ""), True, id="uid-malformed"),
+        pytest.param((0, "502\n", ""), True, id="uid-partial"),
+        pytest.param(OSError("ps failed"), True, id="uid-error"),
+        pytest.param(subprocess.TimeoutExpired("ps", 10), True, id="uid-timeout"),
+    ],
+)
+def test_unclean_tokens_keep_worker_root_and_unknown_owners(
+    worker_env, monkeypatch, owner, kept
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    monkeypatch.setattr(worker_mod.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=501))
+    boundary._worker_left = ["4242"]
+    probes = []
+
+    def ps(argv, **kwargs):
+        probes.append(argv)
+        if argv[2] == "ruid=,uid=":
+            if isinstance(owner, Exception):
+                raise owner
+            code, out, err = owner
+            return subprocess.CompletedProcess(argv, code, out, err)
+        return subprocess.CompletedProcess(argv, 0, f"{argv[-1]} Fri Oct 23 12:34:56 2026\n", "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", ps)
+    try:
+        boundary._record_unclean_tokens([4343])
+        assert boundary.unclean_tokens == (
+            [f"{pid}:Fri_Oct_23_12:34:56_2026" for pid in (4242, 4343)] if kept else []
+        )
+        assert [argv[-1] for argv in probes if argv[2] == "ruid=,uid="] == ["4242", "4343"]
+    finally:
+        boundary.cleanup()
+
+
+@pytest.mark.parametrize("error", [KeyError("worker missing"), OSError("lookup failed")])
+def test_unclean_tokens_keep_pids_when_worker_lookup_fails(worker_env, monkeypatch, error) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+
+    def lookup(name):
+        raise error
+
+    def ps(argv, **kwargs):
+        assert argv[2] == "pid=,lstart="
+        return subprocess.CompletedProcess(argv, 0, "4242 Fri Oct 23 12:34:56 2026\n", "")
+
+    monkeypatch.setattr(worker_mod.pwd, "getpwnam", lookup)
+    monkeypatch.setattr(worker_mod.subprocess, "run", ps)
+    try:
+        boundary._record_unclean_tokens([4242])
+        assert boundary.unclean_tokens == ["4242:Fri_Oct_23_12:34:56_2026"]
+    finally:
+        boundary.cleanup()
 
 
 @pytest.mark.parametrize("mark_fails", [False, True], ids=["marked", "mark-error"])
