@@ -26,9 +26,6 @@ HELPER_NAMES = frozenset({"decide", "decide_all"})
 # "module:qualname" -> how the site decides. Only "HELPER" (fail_closed.decide/decide_all).
 DECISION_PATHS: dict[str, str] = {
     "nexus.core.capability_executor_registry:_exec_committee": "HELPER",
-    "nexus.research.experiment_effect_controller:ExperimentEffectController._wait_for_terminal": (
-        "HELPER"
-    ),
 }
 
 # "module:qualname" -> reason. A derived site that is deliberately not a pass decision

@@ -1075,7 +1075,6 @@ CASES: tuple[GoldenCase, ...] = (
             "docs/agents/TASK_EXECUTION_CONTRACT.md#Direct delegated boundary",
         ),
         (
-            "tests/research/test_experiment_run_guard.py::test_outcome_unknown_requires_same_effect_reconciliation",
             "tests/nexus/orchestrator/test_gateway_convergence.py::test_outcome_unknown_never_becomes_retry_permission",
             "tests/nexus/orchestrator/test_gateway_convergence.py::test_started_effect_is_reconciled_before_newer_generation",
         ),
