@@ -1001,10 +1001,54 @@ class _RecoveryAdapters:
     ] | None = None
 
 
+# A successful fetch may otherwise leave a detached `git maintenance`/`gc
+# --auto` child writing into the scratch repository after the command
+# returned, racing the scratch removal (#2883).
+_R1_GIT_NO_BACKGROUND_CONFIG = (("gc.auto", "0"), ("maintenance.auto", "false"))
+
+
+def _r1_git_env() -> dict[str, str]:
+    """Environment for git children: appends to any caller GIT_CONFIG_* entries."""
+    env = dict(os.environ)
+    try:
+        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0")))
+    except ValueError:
+        count = 0
+    for offset, (key, value) in enumerate(_R1_GIT_NO_BACKGROUND_CONFIG):
+        env[f"GIT_CONFIG_KEY_{count + offset}"] = key
+        env[f"GIT_CONFIG_VALUE_{count + offset}"] = value
+    env["GIT_CONFIG_COUNT"] = str(count + len(_R1_GIT_NO_BACKGROUND_CONFIG))
+    return env
+
+
+def _r1_remove_scratch(path: Path) -> None:
+    """Remove a manager scratch tree, failing closed if it cannot be removed."""
+    # Up to 10 attempts, 0.05 s .. 0.5 s apart (2.25 s in all): long enough for
+    # a git child that was still flushing when its parent returned, short
+    # enough not to hide a real leftover.  Persisting failure is reported, so
+    # a stray scratch under source-bundles never goes unnoticed again.
+    last: OSError | None = None
+    attempts = 10
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.05 * (attempt + 1))
+        else:
+            return
+    raise _gateway_error("R1 scratch cleanup failed", last)
+
+
 def _r1_run(*command: str, bytes_output: bool = False, timeout: int = 60) -> str | bytes:
+    env = _r1_git_env() if command and command[0] == "git" else None
     try:
         result = subprocess.run(
             command,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=not bytes_output,
@@ -1444,8 +1488,16 @@ def _r1_create_or_verify_bundle(
         os.chmod(candidate, 0o600)
         if not bundle_exists:
             os.replace(candidate, bundle)
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+    except BaseException as exc:
+        # Fail closed on a leftover scratch, but keep the original error as
+        # the reported one: a masked "remote main moved" would be misleading.
+        try:
+            _r1_remove_scratch(scratch)
+        except GatewayContractError as cleanup_exc:
+            exc.add_note(f"R1 scratch cleanup also failed: {cleanup_exc}")
+        raise
+    else:
+        _r1_remove_scratch(scratch)
     if bundle.exists() or bundle.is_symlink():
         info = os.lstat(bundle)
         if (

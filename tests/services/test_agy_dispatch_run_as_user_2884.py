@@ -1375,3 +1375,509 @@ def test_dispatch_copy_back_refusal_needs_no_reconciliation(worker_env, monkeypa
     assert meta["failure_kind"] == "AGY_WORKER_COPY_BACK_REFUSED:symlink_created:src/link"
     assert meta["reconciliation_required"] is False and meta["provider_effect"] is False
     assert meta["rotations"] == 0
+
+
+# ---------------------------------------------------------------------------
+# #2888: fail-closed copy-in and durable worker reconciliation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def worker_preflight(worker_env, monkeypatch):
+    # Layout validation has its own tests above. These unit tests isolate it
+    # because some test hosts strip setgid even after a successful chmod.
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, gid: path)
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_prepare_refuses_a_missing_wrapper_reference(worker_env, tmp_path):
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="wrapper_reference_missing"):
+        _prepare(worker_env, repo_wrapper=tmp_path / "missing-wrapper")
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize("cap", ["MAX_COPY_BACK_ENTRIES", "MAX_COPY_BACK_BYTES"])
+@pytest.mark.usefixtures("worker_preflight")
+def test_oversized_copy_in_is_refused_before_creating_files(worker_env, monkeypatch, cap):
+    monkeypatch.setattr(worker_mod, cap, 2)
+    real_write = os.write
+    writes = []
+
+    def observe_write(fd, data):
+        writes.append(len(data))
+        return real_write(fd, data)
+
+    monkeypatch.setattr(worker_mod.os, "write", observe_write)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    assert writes == []
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "cap, grown_size, expected_writes",
+    [(32, 30, [7]), ((1 << 20) + 10, (1 << 20) + 16, [7, 1 << 20])],
+)
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_counts_actual_bytes_when_a_source_file_grows(
+    worker_env, monkeypatch, cap, grown_size, expected_writes
+):
+    monkeypatch.setattr(worker_mod, "MAX_COPY_BACK_BYTES", cap)
+    real_check = worker_mod._check_copy_caps
+
+    def grow_after_preflight(manifest, source):
+        real_check(manifest, source)
+        (source / "src" / "a.py").write_bytes(b"x" * grown_size)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", grow_after_preflight)
+    real_write = os.write
+    written = []
+
+    def observe_write(fd, data):
+        written.append(len(data))
+        assert sum(written) <= worker_mod.MAX_COPY_BACK_BYTES
+        return real_write(fd, data)
+
+    monkeypatch.setattr(worker_mod.os, "write", observe_write)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_too_large"):
+        _prepare(worker_env)
+    assert written == expected_writes  # neither an individual file nor their sum crosses the cap
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+def _worker_reconcile_operation(tmp_path, monkeypatch, **fields):
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_999)
+    journal.heartbeat(
+        operation_id,
+        attempts=1,
+        descendant_sweep_clean=None,
+        descendant_sweep_attempt=1,
+        **fields,
+    )
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_process_alive", lambda pid: False)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+    return journal, operation_id
+
+
+def test_reconcile_worker_sweeps_exact_wrapper_argv_before_owner_check(
+    worker_env, tmp_path, monkeypatch
+):
+    run_root = worker_env["runs"] / ("a" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(run_root, operation_id)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv == worker_mod.sweep_argv(run_root, [])
+        assert kwargs == {
+            "cwd": "/",
+            "env": worker_mod.LAUNCH_ENV,
+            "stdin": subprocess.DEVNULL,
+            "capture_output": True,
+            "text": True,
+            "timeout": worker_mod.SWEEP_TIMEOUT_SECONDS,
+            "check": False,
+        }
+        return subprocess.CompletedProcess(argv, 0, "diagnostic\nAGY_WORKER_SWEEP clean\n", "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    real_reconcile = journal.reconcile
+
+    def owner_reconcile(operation_id):
+        assert calls == [worker_mod.sweep_argv(run_root, [])]
+        return real_reconcile(operation_id)
+
+    monkeypatch.setattr(journal, "reconcile", owner_reconcile)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"] == {
+        "result": "CLEAN",
+        "run_root": str(run_root),
+    }
+    assert journal.read(operation_id)["reconciliation"] == record["reconciliation"]
+
+
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("gone", "RUN_ROOT_GONE_UNPROVEN"),
+        ("wrong_user", "RECORD_INVALID"),
+        ("outside", "RECORD_INVALID"),
+        ("parent", "RECORD_INVALID"),
+        ("nested", "RECORD_INVALID"),
+        ("dotdot", "RECORD_INVALID"),
+        ("symlink", "RECORD_INVALID"),
+        ("missing_root", "RECORD_INVALID"),
+    ],
+)
+def test_reconcile_worker_validates_record_without_sudo(
+    worker_env, tmp_path, monkeypatch, case, expected
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("b" * 32)
+    user = "root" if case == "wrong_user" else worker_mod.WORKER_USER
+    raw_root = str(run_root)
+    if case == "outside":
+        raw_root = str(tmp_path.resolve() / ("b" * 32))
+    elif case == "parent":
+        raw_root = str(runs)
+    elif case == "nested":
+        raw_root = str(run_root / "work")
+    elif case == "dotdot":
+        raw_root = f"{runs}/../worker-runs/{run_root.name}"
+    elif case == "symlink":
+        run_root.symlink_to(worker_env["target"], target_is_directory=True)
+    elif case == "missing_root":
+        raw_root = None
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path, monkeypatch, worker_run_as_user=user, worker_run_root=raw_root
+    )
+
+    def no_sudo(*args, **kwargs):
+        pytest.fail("invalid or missing worker run must not invoke sudo")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", no_sudo)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"] == {
+        "result": expected,
+        "run_root": raw_root,
+    }
+
+
+@pytest.mark.parametrize(
+    "stdout, returncode, error, expected",
+    [
+        ("AGY_WORKER_SWEEP unclean 42\n", 0, None, "UNCLEAN"),
+        ("AGY_WORKER_SWEEP clean\n", 1, None, "UNCLEAN"),
+        ("AGY_WORKER_SWEEP clean\nlater diagnostic\n", 0, None, "UNCLEAN"),
+        ("", 0, OSError("sudo unavailable"), "SWEEP_ERROR"),
+        ("", 0, subprocess.TimeoutExpired("stub-sudo", 30), "SWEEP_ERROR"),
+    ],
+)
+@pytest.mark.parametrize("provider_alive_after", [True, False, None])
+def test_reconcile_worker_sweep_failure_holds_and_blocks_retry(
+    worker_env, tmp_path, monkeypatch, stdout, returncode, error, expected, provider_alive_after
+):
+    run_root = worker_env["runs"] / ("c" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(run_root, operation_id)
+    # Exercise the completed-provider projection too: it must preserve the
+    # existing provider truth when the worker sweep cannot confirm cleanup.
+    journal.update(
+        operation_id,
+        status="COMPLETED",
+        phase="TERMINAL",
+        exit_code=0,
+        provider_process_state="EXITED",
+        has_unresolved_external_effect=False,
+        reconciliation={"provider_alive_after": provider_alive_after, "retry_permitted": True},
+    )
+
+    def run(argv, **kwargs):
+        assert argv == worker_mod.sweep_argv(run_root, [])
+        if error is not None:
+            raise error
+        return subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    reconciliation = record["reconciliation"]
+    assert reconciliation["worker_sweep"] == {"result": expected, "run_root": str(run_root)}
+    assert reconciliation["result"] == "WORKER_SWEEP_UNPROVEN_HELD"
+    assert reconciliation["provider_alive_after"] is None  # never releasable
+    assert reconciliation["retry_permitted"] is False
+    assert record["phase"] == "RECONCILE_REQUIRED"
+
+
+def test_reconcile_non_worker_never_calls_worker_sweep(tmp_path, monkeypatch):
+    journal, operation_id = _worker_reconcile_operation(tmp_path, monkeypatch)
+
+    def no_sweep(record):
+        pytest.fail("non-worker operation must not sweep the worker uid")
+
+    monkeypatch.setattr(dispatch, "_run_worker_sweep", no_sweep)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert "worker_sweep" not in record["reconciliation"]
+
+
+@pytest.mark.parametrize("run_as_user", [None, worker_mod.WORKER_USER])
+@pytest.mark.usefixtures("worker_preflight")
+def test_background_pending_marker_records_worker_fields_only_for_worker_runs(
+    worker_env, tmp_path, monkeypatch, run_as_user
+):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    for module in (worker_mod, boundary_mod):
+        monkeypatch.setattr(module, "_prepare_run_home_keychain", lambda home: "NOT_APPLICABLE")
+    journal, operation_id = _worker_reconcile_operation(tmp_path, monkeypatch)
+    # Start with a fresh marker, as a newly queued background operation would.
+    journal.update(operation_id, descendant_sweep_clean=True)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "edit")
+    seen = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        record = journal.read(operation_id)  # the marker is durable before launch
+        assert record["descendant_sweep_clean"] is None
+        if run_as_user is not None:
+            assert record["worker_run_as_user"] == worker_mod.WORKER_USER
+            assert record["worker_run_root"] == str(write_boundary.run_root)
+        else:
+            assert "worker_run_as_user" not in record
+            assert "worker_run_root" not in record
+        seen.append(record)
+        return 0, "done", "", False, 1
+
+    monkeypatch.setattr(
+        dispatch,
+        "dispatch_run",
+        functools.partial(
+            dispatch.dispatch_run,
+            coordinator=_Coordinator(worker_env["home"]),
+            run_agy_fn=runner,
+        ),
+    )
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(worker_env["target"]),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=None,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=journal.root,
+        write_paths=[str(worker_env["target"] / "src" / "a.py")],
+        run_as_user=run_as_user,
+    )
+    assert code == 0
+    assert len(seen) == 1
+
+
+def test_reconcile_vanished_run_root_is_proven_only_by_a_recorded_clean_sweep(
+    worker_env, tmp_path, monkeypatch
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("d" * 32)
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+    )
+    real_run = subprocess.run
+
+    def no_sudo(argv, *a, **k):
+        assert "sudo" not in str(argv[0]), "no sudo for a vanished run root"
+        return real_run(argv, *a, **k)
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", no_sudo)
+    held = dispatch._reconcile_operation(journal, operation_id)
+    assert held["reconciliation"]["worker_sweep"]["result"] == "RUN_ROOT_GONE_UNPROVEN"
+    assert held["reconciliation"]["retry_permitted"] is False
+    assert held["reconciliation"]["provider_alive_after"] is None
+    journal.heartbeat(operation_id, descendant_sweep_clean=True, descendant_sweep_attempt=1)
+    proven = dispatch._reconcile_operation(journal, operation_id)
+    assert proven["reconciliation"]["worker_sweep"]["result"] == "RUN_ROOT_GONE"
+
+
+def test_reconcile_refuses_another_operations_valid_run_root(worker_env, tmp_path, monkeypatch):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    run_root = runs / ("e" * 32)
+    run_root.mkdir()
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(run_root, "someone-elses-operation")
+    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: pytest.fail("no sudo"))
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    assert record["reconciliation"]["provider_alive_after"] is None
+    # No marker at all is refused too.
+    (run_root / worker_mod.OPERATION_MARKER).unlink()
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_refuses_a_file_swapped_for_a_symlink_after_the_walk(worker_env, monkeypatch):
+    secret = worker_env["home"] / "secret.txt"
+    secret.write_text("top secret")
+    real_check = worker_mod._check_copy_caps
+
+    def swap_after_manifest(manifest, source):
+        real_check(manifest, source)
+        victim = source / "src" / "a.py"
+        victim.unlink()
+        victim.symlink_to(secret)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", swap_after_manifest)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_changed_during_copy"):
+        _prepare(worker_env)
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+@pytest.mark.usefixtures("worker_preflight")
+def test_copy_in_refuses_an_ancestor_swapped_for_a_symlink_after_the_walk(worker_env, monkeypatch):
+    real_dir = worker_env["home"] / "elsewhere"
+    real_dir.mkdir()
+    (real_dir / "a.py").write_text(worker_env["target"].joinpath("src", "a.py").read_text())
+    real_check = worker_mod._check_copy_caps
+
+    def swap_dir(manifest, source):
+        real_check(manifest, source)
+        shutil.rmtree(source / "src")
+        (source / "src").symlink_to(real_dir, target_is_directory=True)
+
+    monkeypatch.setattr(worker_mod, "_check_copy_caps", swap_dir)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="target_changed_during_copy"):
+        _prepare(worker_env)
+    assert list(worker_env["runs"].iterdir()) == []
+
+
+def test_reconcile_refuses_a_transplanted_marker_and_a_replaced_root(
+    worker_env, tmp_path, monkeypatch
+):
+    runs = worker_env["runs"]
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", runs)
+    root_a, root_b = runs / ("a" * 32), runs / ("b" * 32)
+    root_a.mkdir()
+    root_b.mkdir()
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(root_a),
+        worker_run_root_id=[root_a.lstat().st_dev, root_a.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(root_a, operation_id)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "AGY_WORKER_SWEEP clean\n", "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    # The record now points at B, the marker is renamed in from A.
+    (root_a / worker_mod.OPERATION_MARKER).rename(root_b / worker_mod.OPERATION_MARKER)
+    journal.update(operation_id, worker_run_root=str(root_b))
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    # A new directory under the original name with another inode.  ext4
+    # hands a freshly freed inode number straight back, so park any reuse
+    # under a decoy name and allocate again (APFS never reuses here).
+    journal.update(operation_id, worker_run_root=str(root_a))
+    recorded_ino = root_a.lstat().st_ino
+    shutil.rmtree(root_a)
+    for attempt in range(64):
+        root_a.mkdir()
+        if root_a.lstat().st_ino != recorded_ino:
+            break
+        root_a.rename(runs / f"decoy-{attempt}")
+    else:
+        pytest.fail("could not allocate a directory with a fresh inode")
+    worker_mod.write_operation_marker(root_a, operation_id)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == "RECORD_INVALID"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "stdout, error, receipt_survives, sweep_result",
+    [
+        ("AGY_WORKER_SWEEP unclean 42\n", None, True, "UNCLEAN"),
+        ("", OSError("sudo unavailable"), True, "SWEEP_ERROR"),
+        ("AGY_WORKER_SWEEP clean\n", None, False, "CLEAN"),
+    ],
+)
+def test_reconcile_keeps_the_lease_receipt_unless_the_worker_sweep_is_clean(
+    worker_env, tmp_path, monkeypatch, stdout, error, receipt_survives, sweep_result
+):
+    run_root = worker_env["runs"] / ("f" * 32)
+    run_root.mkdir()
+    monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"])
+    journal, operation_id = _worker_reconcile_operation(
+        tmp_path,
+        monkeypatch,
+        worker_run_as_user=worker_mod.WORKER_USER,
+        worker_run_root=str(run_root),
+        worker_run_root_id=[run_root.lstat().st_dev, run_root.lstat().st_ino],
+    )
+    worker_mod.write_operation_marker(run_root, operation_id)
+    alias_hash, lease_hash, owner_pid = "a" * 12, "b" * 12, 999_999_999
+    journal.update(
+        operation_id,
+        account_alias_hash=alias_hash,
+        lease_id_hash=lease_hash,
+        status="COMPLETED",
+        phase="TERMINAL",
+        exit_code=0,
+        provider_process_state="EXITED",
+        has_unresolved_external_effect=False,
+    )
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    receipt = leases / f"{alias_hash}.receipt.json"
+    receipt.write_text(
+        json.dumps({
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_hash,
+            "consumer_id": "agy-operation",
+            "claimed_at": 1.0,
+            "pid": owner_pid,
+        })
+    )
+
+    def run(argv, **kwargs):
+        if error is not None:
+            raise error
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", run)
+    record = dispatch._reconcile_operation(journal, operation_id)
+    assert record["reconciliation"]["worker_sweep"]["result"] == sweep_result
+    assert receipt.exists() is receipt_survives
+    lease_result = record["reconciliation"]["lease_cleanup"]["result"]
+    if receipt_survives:
+        assert lease_result == "WORKER_SWEEP_UNPROVEN_PRESERVED"
+    else:
+        assert lease_result == "LEASE_RECEIPT_REMOVED"
