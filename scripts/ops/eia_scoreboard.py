@@ -420,7 +420,15 @@ def collect(
 def filter_since(runs: list[dict[str, Any]], since: str | None) -> list[dict[str, Any]]:
     if not since:
         return runs
-    cut = _parse_ts(since if "T" in since else f"{since}T00:00:00+00:00")
+    value = since if "T" in since else f"{since}T00:00:00"
+    try:
+        cut_dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        cut = None
+    else:
+        if cut_dt.tzinfo is None:
+            cut_dt = cut_dt.replace(tzinfo=UTC)
+        cut = cut_dt.timestamp()
     if cut is None:
         raise SystemExit(f"invalid --since value: {since}")
     kept = []
