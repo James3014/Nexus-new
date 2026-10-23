@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import grp
 import hashlib
+import json
 import os
 import pwd
 import secrets
@@ -116,6 +117,11 @@ AGY_WORKER_ACCOUNT_REFUSED = "AGY_WORKER_ACCOUNT_REFUSED"
 AGY_WORKER_LAUNCH_FAILED = "AGY_WORKER_LAUNCH_FAILED"
 AGY_WORKER_COPY_BACK_FAILED = "AGY_WORKER_COPY_BACK_FAILED"  # target partly written
 AGY_WORKER_COPY_BACK_REFUSED = "AGY_WORKER_COPY_BACK_REFUSED"  # nothing applied
+
+# Receipt lines on stderr (same prefix as the dispatcher's status line), written
+# only for a boundary the dispatcher gave a ``receipt_context``: one
+# WORKER_LAUNCH, WORKER_SWEEP and WORKER_CLEANUP per attempt, owner-side data only.
+RECEIPT_PREFIX = "NEXUS_AGY_DISPATCH "
 
 # The wrapper this module speaks to: this reference must exist and match the installed copy.
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
@@ -811,7 +817,15 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     worker_failure: Optional[str] = None
     leftover_run_root: Optional[str] = None
     run_command: Callable[..., Any] = field(default=subprocess.run, repr=False)
+    # sha256 of the reference wrapper that prepare_worker_account_boundary
+    # verified against the installed copy (receipt field only).
+    wrapper_sha256: str = ""
+    # Set by the dispatcher ({"operation_id", "attempt"}); None = emit no receipts.
+    receipt_context: Optional[dict] = field(default=None, repr=False)
+    receipts: list = field(default_factory=list, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
+    _worker_verdict: Optional[str] = field(default=None, repr=False)
+    _receipt_events: set = field(default_factory=set, repr=False)
 
     launch_env = LAUNCH_ENV
 
@@ -830,6 +844,74 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             agy=self.worker_agy,
         )
 
+    def _emit_receipt(self, event: str, **fields: Any) -> None:
+        """Write one receipt line to stderr, at most once per event; never raises.
+
+        Only owner-side values go in (never the environment, tokens, prompt or any
+        path but the run root); nothing the worker account can write is read.
+        """
+        if self.receipt_context is None or event in self._receipt_events:
+            return
+        if event != "WORKER_LAUNCH" and "WORKER_LAUNCH" not in self._receipt_events:
+            return  # no launch line was written: sweep/cleanup lines would orphan
+        self._receipt_events.add(event)
+        try:
+            obj = {"event": event, "attempt": self.receipt_context.get("attempt"), **fields}
+            line = RECEIPT_PREFIX + json.dumps(obj, sort_keys=True) + "\n"
+            self.receipts.append(obj)
+            sys.stderr.write(line)
+            sys.stderr.flush()
+        except Exception:
+            pass  # a closed stderr or an unserialisable value must not break the run
+
+    def _emit_launch_receipt(self) -> None:
+        if self.receipt_context is None or "WORKER_LAUNCH" in self._receipt_events:
+            return
+        try:
+            info = os.lstat(self.run_root)  # the owner's own lstat, taken before launch
+            fields = {
+                "operation_id": self.receipt_context.get("operation_id"),
+                "run_as_user": self.worker_user,
+                "run_root": str(self.run_root),
+                "run_root_id": [info.st_dev, info.st_ino],
+                # The pid exists only after Popen; the line is never delayed for it.
+                "pid": None,
+                "lstart": None,
+                "wrapper_sha256": self.wrapper_sha256,
+            }
+        except Exception:
+            return  # no launch line: the caller rejects a run without one
+        self._emit_receipt("WORKER_LAUNCH", **fields)
+
+    def _emit_sweep_receipt(self, result: str) -> None:
+        # The wrapper reports bare pids of survivors, not pid:lstart tokens, and
+        # sweep_run_root only returns its verdict, so there is nothing to list.
+        self._emit_receipt("WORKER_SWEEP", result=result, left=[])
+
+    def _sweep_result(self, started: bool) -> str:
+        """The receipt word for the verdict ``sweep`` just stored in ``_swept``.
+
+        Derived only from ``_swept`` (the value the journal's
+        ``descendant_sweep_clean`` records) so "clean" and "not_started" can never
+        be written for a sweep that was unclean.
+        """
+        if self._swept:
+            return "clean" if started else "not_started"
+        return "error" if self._worker_verdict == "SWEEP_ERROR" else "unclean"
+
+    def _emit_cleanup_receipt(self) -> None:
+        if "WORKER_SWEEP" not in self._receipt_events:
+            # Launch line written but no sweep ran: the launch frame raised
+            # before the worker existed (not launched) or the sweep failed.
+            self._emit_sweep_receipt("error" if self._launched else "not_started")
+        failure = self.worker_failure
+        self._emit_receipt(
+            "WORKER_CLEANUP",
+            run_root_removed=not os.path.lexists(self.run_root),
+            # kind:reason only; later segments may name worker-chosen files
+            worker_failure=":".join(failure.split(":", 2)[:2]) if failure else None,
+        )
+
     def before_launch(self) -> None:
         # Everything the dispatcher wrote (copied session files, settings,
         # keychain, permission profile, workdir copy) becomes usable by the
@@ -840,20 +922,19 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             read_only=(self.run_home / AGY_RUN_HOME_SETTINGS, self.profile_path),
         )
         super().before_launch()
+        self._emit_launch_receipt()
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
         baseline = self._baseline
         tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
-        return (
-            sweep_run_root(
-                self.run_root,
-                tokens,
-                user=self.worker_user,
-                wrapper=self.wrapper,
-                run_command=self.run_command,
-            )
-            == "CLEAN"
+        self._worker_verdict = sweep_run_root(
+            self.run_root,
+            tokens,
+            user=self.worker_user,
+            wrapper=self.wrapper,
+            run_command=self.run_command,
         )
+        return self._worker_verdict == "CLEAN"
 
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
@@ -876,11 +957,16 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         # and a sudo that refuses the launch refuses the sweep too; the
         # Owner-side check of the tracked descendants still has to be clean.
         started = (self.run_root / WRAPPER_STARTED_MARKER).exists()
-        # stop() takes a final snapshot; the Owner-side sweep below calls it again.
-        tracked = self._tracker.stop() if self._tracker is not None else set()
-        self._worker_swept = self._worker_sweep(tracked)
-        owner_clean = super().sweep()
-        self._swept = bool(owner_clean and (self._worker_swept or not started))
+        try:
+            # stop() takes a final snapshot; the Owner-side sweep below calls it again.
+            tracked = self._tracker.stop() if self._tracker is not None else set()
+            self._worker_swept = self._worker_sweep(tracked)
+            owner_clean = super().sweep()
+            self._swept = bool(owner_clean and (self._worker_swept or not started))
+        except BaseException:
+            self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
+            raise
+        self._emit_sweep_receipt(self._sweep_result(started))
         return self._swept
 
     def cleanup(self) -> None:
@@ -919,6 +1005,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                     sys.stderr.write(
                         f"nexus-agy-dispatch: worker run dir left behind: {self.run_root}\n"
                     )
+            self._emit_cleanup_receipt()
 
 
 def prepare_worker_account_boundary(
@@ -953,7 +1040,8 @@ def prepare_worker_account_boundary(
     _check_owner_executable(Path(wrapper), "wrapper")
     if not repo_wrapper.is_file():
         raise _refuse("wrapper_reference_missing")
-    if _sha256_file(Path(wrapper)) != _sha256_file(repo_wrapper):
+    wrapper_sha256 = _sha256_file(repo_wrapper)
+    if _sha256_file(Path(wrapper)) != wrapper_sha256:
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
     if not source_agy or _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
@@ -1034,4 +1122,5 @@ def prepare_worker_account_boundary(
         manifest=manifest,
         workdir_identity=workdir_identity,
         run_command=run_command,
+        wrapper_sha256=wrapper_sha256,
     )

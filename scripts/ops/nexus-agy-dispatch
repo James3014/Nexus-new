@@ -4371,6 +4371,7 @@ def dispatch_run(
     exclude_accounts: list[str] | None = None,
     run_as_user: str | None = None,
     empty_output_min_bytes: int | None = None,
+    operation_id: str | None = None,
 ) -> int:
     started_at = _monotonic()
     limits: dict[str, Any] = {}
@@ -5247,6 +5248,13 @@ def dispatch_run(
                                 worker_user=run_as_user,
                                 source_agy=shutil.which("agy"),
                             )
+                            # Worker receipts on stderr (one WORKER_LAUNCH, WORKER_SWEEP
+                            # and WORKER_CLEANUP line per attempt); the foreground has
+                            # no operation id.
+                            write_boundary.receipt_context = {
+                                "operation_id": operation_id,
+                                "attempt": attempts,
+                            }
                         else:
                             write_boundary = boundary_module.prepare_accept_edits_boundary(
                                 source_env=env,
@@ -6589,7 +6597,11 @@ def _run_background_operation(
             pre_effect_max_seconds=pre_effect_max_seconds,
             pre_effect_max_tool_events=pre_effect_max_tool_events,
             exclude_accounts=exclude_accounts,
-            **({"run_as_user": run_as_user} if run_as_user is not None else {}),
+            **(
+                {"run_as_user": run_as_user, "operation_id": operation_id}
+                if run_as_user is not None
+                else {}
+            ),
         )
         with state_lock:
             snapshot = dict(state)
