@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -3346,6 +3347,144 @@ def test_2854_failure_after_this_runs_dispatching_save_keeps_that_record(tmp_pat
     second = automation.run_issue("o/r", 58, "title", body)
     assert second["state"] == "COMPLETE"
     assert len(sidecar.calls) == 2
+
+
+class _DiagnosisSidecar(FakeSidecar):
+    def __init__(self, store, diagnosis):
+        super().__init__(store)
+        self.diagnosis = diagnosis
+
+    def analyze(self, record, sources, selected_worker=None):
+        result = super().analyze(record, sources, selected_worker)
+        envelope = {"schema": "external_execution_envelope.v2", "diagnosis": self.diagnosis}
+        text = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+        (self.store.root / "envelopes" / f"{'b' * 64}.json").write_text(text, encoding="utf-8")
+        result["envelope_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+        return result
+
+
+@pytest.mark.parametrize(
+    ("diagnosis", "status"),
+    [
+        ({"status": "UNKNOWN", "hypothesis": "h", "next_probe": "p"}, "UNKNOWN"),
+        ({"status": "LIKELY", "hypothesis": "h", "next_probe": "p"}, "LIKELY"),
+        ({"status": "proven"}, "INVALID"),
+        ("PROVEN", "INVALID"),
+    ],
+)
+def test_core_bound_fanout_is_not_dispatched_on_unproven_diagnosis(tmp_path, diagnosis, status):
+    """#2895: the runtime binds Core only for PROVEN, so anything else would loop unbound."""
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
+    automation = _automation(
+        tmp_path, repo, store, sidecar=_DiagnosisSidecar(store, diagnosis), c=c
+    )
+    result = automation.run_issue("o/r", 79, "title", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["stage"] == "INTELLIGENCE"
+    assert result["error"] == "INTELLIGENCE_DIAGNOSIS_NOT_PROVEN"
+    assert result["diagnosis_status"] == status
+    assert result["semantic_dispatched"] is True
+    assert c.calls == []
+
+
+def test_core_bound_fanout_is_dispatched_on_proven_diagnosis(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
+    sidecar = _DiagnosisSidecar(store, {"status": "PROVEN", "hypothesis": "", "next_probe": ""})
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 80, "title", body
+    )
+
+    assert result["state"] == "COMPLETE"
+    units, _lease = c.calls[0]
+    assert all("core_authority" in unit for unit in units)
+
+
+def test_core_bound_fanout_without_declared_diagnosis_is_dispatched(tmp_path):
+    """#2895: a v1 envelope declares no diagnosis; it dispatches as before."""
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
+    result = _automation(tmp_path, repo, store, c=c).run_issue("o/r", 81, "title", body)
+
+    assert result["state"] == "COMPLETE"
+    units, _lease = c.calls[0]
+    assert all("core_authority" in unit for unit in units)
+
+
+def test_envelope_diagnosis_status_reads_the_verified_envelope_ref(tmp_path):
+    status = ExternalIntelligenceAutomation._envelope_diagnosis_status
+    ref = tmp_path / "envelope.json"
+    for envelope, expected in [
+        ({"diagnosis": {"status": "PROVEN"}}, "PROVEN"),
+        ({"diagnosis": {"status": "UNKNOWN"}}, "UNKNOWN"),
+        ({"schema": "external_execution_envelope.v1"}, None),
+        (None, "INVALID"),
+        ([], "INVALID"),
+        ({"diagnosis": None}, "INVALID"),
+    ]:
+        ref.write_text(json.dumps(envelope), encoding="utf-8")
+        assert status([{"envelope_ref": str(ref)}]) == expected
+    ref.write_text("{", encoding="utf-8")
+    assert status([{"envelope_ref": str(ref)}]) == "INVALID"
+    assert status([{"envelope_ref": str(tmp_path / "missing.json")}]) == "INVALID"
+    assert status([]) is None
+
+
+def test_resumed_fanout_reconciliation_is_not_blocked_on_unproven_diagnosis(tmp_path):
+    """#2895: an existing fanout reconciliation still resumes; only new dispatch is gated."""
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    item = IssueWorkItem("o/r", 82, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(
+        item,
+        "RECONCILIATION_REQUIRED",
+        prior_state="FANOUT_DISPATCHING",
+        intelligence_effect_id=effect_id,
+        worker_binding=binding,
+        semantic_dispatched=True,
+    )
+    _install_completed_receipt(automation, item, card, store)
+    envelope_bytes = json.dumps(
+        {"diagnosis": {"status": "UNKNOWN"}}, sort_keys=True, separators=(",", ":")
+    ).encode()
+    (store.root / "envelopes" / f"{effect_id}.json").write_bytes(envelope_bytes)
+    store.existing_receipt = lambda request: {
+        "receipt_id": "receipt-1",
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+    automation._fanout_snapshot_matches = lambda previous, units: True
+
+    result = automation.run_issue("o/r", 82, "title", body)
+
+    assert result.get("error") != "INTELLIGENCE_DIAGNOSIS_NOT_PROVEN"
+    assert sidecar.calls == []
+    assert len(c.calls) == 1
+
+
+def test_unproven_diagnosis_still_dispatches_without_a_core_binding_transport(tmp_path):
+    """#2895 review: only a transport that binds Core (Open SWE) loops; others run as before."""
+    repo, _, contract, body, store = _setup(tmp_path)
+    c = FakeC()
+    sidecar = _DiagnosisSidecar(store, {"status": "UNKNOWN", "hypothesis": "h", "next_probe": "p"})
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 83, "title", body
+    )
+
+    assert result["state"] == "COMPLETE"
+    assert len(c.calls) == 1
 
 
 def test_error_reason_fields_carries_only_bounded_transport_error_code():

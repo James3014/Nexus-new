@@ -19,6 +19,7 @@ from nexus.engine.canonical_task_seam import (
 )
 from nexus.services.eia_source_excerpt import ExcerptError, validate_symbol_names
 from nexus.services.external_intelligence import (
+    DIAGNOSIS_STATUSES,
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
@@ -1128,6 +1129,24 @@ class ExternalIntelligenceAutomation:
             units.append(unit_data)
         return units
 
+    @staticmethod
+    def _envelope_diagnosis_status(units: list[dict[str, Any]]) -> str | None:
+        """The diagnosis status of the envelope ``_c_units`` verified, or None when the
+        envelope declares no diagnosis (v1).  Unreadable or malformed reads as "INVALID"."""
+        if not units:
+            return None
+        try:
+            envelope = json.loads(Path(units[0]["envelope_ref"]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError, KeyError):
+            return "INVALID"
+        if not isinstance(envelope, Mapping):
+            return "INVALID"
+        if "diagnosis" not in envelope:
+            return None
+        diagnosis = envelope["diagnosis"]
+        status = diagnosis.get("status") if isinstance(diagnosis, Mapping) else None
+        return status if status in DIAGNOSIS_STATUSES else "INVALID"
+
     def _core_authority_inputs(self, item: IssueWorkItem) -> dict[str, Any] | None:
         """Issue contract + Task Card + worker binding inputs for Core binding minting.
 
@@ -1647,6 +1666,34 @@ class ExternalIntelligenceAutomation:
                     **self._carry_forward(item),
                     stage="FANOUT",
                     error="FANOUT_RECONCILIATION_BINDING_DRIFT",
+                    semantic_dispatched=True,
+                )
+            resuming_fanout = legacy_fanout_recovery or (
+                previous is not None
+                and previous.get("state") == "RECONCILIATION_REQUIRED"
+                and previous.get("prior_state") == "FANOUT_DISPATCHING"
+            )
+            diagnosis_status = self._envelope_diagnosis_status(units)
+            if (
+                not resuming_fanout
+                and any("core_authority" in unit for unit in units)
+                and getattr(
+                    getattr(self.c_runtime, "transport", None),
+                    "supports_core_mutation_binding",
+                    False,
+                )
+                and diagnosis_status not in (None, "PROVEN")
+            ):
+                # The Open SWE runtime binds Core only for a PROVEN diagnosis; any other diagnosis
+                # runs unbound, which a Core-bound attempt rejects as OUTCOME_UNKNOWN and
+                # reconciliation can never clear (#2895).  Escalate instead of dispatching.
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    **self._carry_forward(item),
+                    stage="INTELLIGENCE",
+                    error="INTELLIGENCE_DIAGNOSIS_NOT_PROVEN",
+                    diagnosis_status=diagnosis_status,
                     semantic_dispatched=True,
                 )
             self.state_store.save(

@@ -428,6 +428,18 @@ def test_classify_is_conservative(state: dict[str, Any], kind: str) -> None:
     assert en.classify(state)[0] == kind
 
 
+def test_classify_unproven_diagnosis_escalates_as_model() -> None:
+    """#2895: a stale or under-specified task needs a human, not an infra retry."""
+    state = {
+        "state": "BLOCKED",
+        "stage": "INTELLIGENCE",
+        "error": "INTELLIGENCE_DIAGNOSIS_NOT_PROVEN",
+        "diagnosis_status": "UNKNOWN",
+        "semantic_dispatched": True,
+    }
+    assert en.classify(state) == ("model", "BLOCKED:INTELLIGENCE_DIAGNOSIS_NOT_PROVEN")
+
+
 def test_night_boundaries() -> None:
     assert en.night_of(dt.datetime(2026, 10, 16, 16, 0)) == NIGHT
     assert en.night_of(dt.datetime(2026, 10, 16, 23, 30)) == NIGHT
