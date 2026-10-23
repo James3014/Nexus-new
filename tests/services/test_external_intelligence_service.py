@@ -2850,3 +2850,41 @@ def test_run_once_reports_a_restored_record_with_its_transient_error(tmp_path):
 )
 def test_transient_status_error_only_for_a_transient_record(value, expected):
     assert transient_status_error(value) == expected
+
+
+def test_run_once_lists_a_transient_record_even_when_a_later_issue_is_last(tmp_path):
+    """Codex r1 on #2914: a later Issue's result cannot hide an earlier transient error."""
+    config = _config(tmp_path)
+    results = {
+        1: {
+            "state": "FANOUT_DISPATCHING",
+            "intelligence_effect_id": "e" * 64,
+            "last_transient_error": "SOURCE_LINEAGE_FAILED",
+        },
+        2: {"state": "BLOCKED", "error": "SOMETHING"},
+    }
+
+    class TwoIssues:
+        def run_issue(self, repository, issue_number, title, body):
+            return dict(results[issue_number])
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 1, "title": "a", "body": "a"},
+            {"number": 2, "title": "b", "body": "b"},
+        ]
+    })
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: TwoIssues(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert result["issue_number"] == 2
+    assert result["transient_errors"] == [
+        {"repository": "o/r", "issue_number": 1, "error": "SOURCE_LINEAGE_FAILED"}
+    ]
+    assert transient_status_error(result) == {
+        "type": "TransientError",
+        "code": "SOURCE_LINEAGE_FAILED",
+    }

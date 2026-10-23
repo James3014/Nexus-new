@@ -225,8 +225,14 @@ def transient_status_error(value: Mapping[str, Any] | None) -> dict[str, str] | 
 
     The poll itself succeeded (the record waits fail-closed), so readiness is unchanged; only
     ``last_error`` names the error so a persistent one is visible in ``status``."""
-    result = value.get("result") if isinstance(value, Mapping) else None
-    error = result.get("last_transient_error") if isinstance(result, Mapping) else None
+    if not isinstance(value, Mapping):
+        return None
+    listed = value.get("transient_errors")
+    if isinstance(listed, list) and listed and isinstance(listed[0], Mapping):
+        error = listed[0].get("error")
+    else:
+        result = value.get("result")
+        error = result.get("last_transient_error") if isinstance(result, Mapping) else None
     if not error:
         return None
     code = str(error)
@@ -1060,6 +1066,22 @@ def run_once(
     automation_factory=build_automation,
     refresh_fn=refresh_remote_main,
 ) -> dict[str, Any]:
+    """One poll.  Every restored record seen with a transient error is also listed under
+    ``transient_errors`` (#2864), so a later Issue's result cannot hide it."""
+    transient: list[dict[str, Any]] = []
+    value = _run_once(config, gh, automation_factory, refresh_fn, transient)
+    if transient:
+        value = {**value, "transient_errors": transient}
+    return value
+
+
+def _run_once(
+    config: ServiceConfig,
+    gh: GhIssueTransport | Any | None,
+    automation_factory,
+    refresh_fn,
+    transient: list[dict[str, Any]],
+) -> dict[str, Any]:
     if gh is None:
         gh = GhIssueTransport()
     last: dict[str, Any] | None = None
@@ -1147,6 +1169,11 @@ def run_once(
             if result.get("last_transient_error"):
                 # #2864: a record restored after a transient error is still waiting, but the
                 # error must be visible in run-once output and the daemon status.
+                transient.append({
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "error": result.get("last_transient_error"),
+                })
                 last = {
                     "status": result.get("state"),
                     "repository": repository,

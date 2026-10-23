@@ -2429,6 +2429,43 @@ def test_a_different_transient_error_restarts_the_count(env) -> None:
     assert (seen["error"], seen["count"]) == ("OPENCLI_TIMEOUT", 1)
 
 
+def test_a_clean_poll_between_transient_errors_restarts_the_count(env) -> None:
+    """Codex r1 on #2914: only consecutive occurrences count toward REPEATED."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    for minute in ("31", "36"):
+        _transient(env, att, f"2026-10-17T00:{minute}:00.000+00:00")
+        night = _dispatch(env, f"2026-10-17T00:{minute}:30")
+    _write_daemon_state(env, 11, att["identity_hash"], state="INTELLIGENCE_DISPATCHING")
+    night = _dispatch(env, "2026-10-17T00:40:00")
+    assert "transient_error" not in night["issues"]["11"]["attempts"][0]
+    _transient(env, att, "2026-10-17T00:41:00.000+00:00")
+    night = _dispatch(env, "2026-10-17T00:41:30")
+    assert night["issues"]["11"]["attempts"][0]["transient_error"]["count"] == 1
+
+
+def test_transient_error_text_cannot_inject_markdown_into_the_report(env) -> None:
+    """Codex r1 on #2914: daemon text in the report carries no link or emphasis syntax."""
+    _started(env)
+    night = _dispatch(env, "2026-10-17T00:30:00")
+    att = night["issues"]["11"]["attempts"][-1]
+    _write_daemon_state(
+        env,
+        11,
+        att["identity_hash"],
+        state="INTELLIGENCE_DISPATCHING",
+        last_transient_error="[click](https://evil.example) *x* !",
+        last_transient_error_reason={"r": "[a](b)"},
+        last_transient_error_at="[t](u)",
+    )
+    night = _dispatch(env, "2026-10-17T00:35:00")
+    section = env["app"].report(night).split("Transient errors", 1)[1]
+    assert "- #11: clickhttps:evil.example" in section
+    for bad in ("[", "]", "](", "*", "!", "`"):
+        assert bad not in section
+
+
 def test_a_single_transient_error_at_the_cap_keeps_the_cap_reason(env) -> None:
     _started(env)
     night = _dispatch(env, "2026-10-17T00:30:00")

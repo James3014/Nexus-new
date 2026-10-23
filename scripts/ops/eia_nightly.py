@@ -235,6 +235,12 @@ def _one_line(text: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", clean).strip()[:limit]
 
 
+def _plain(text: Any, limit: int) -> str:
+    """``_one_line`` limited to characters with no Markdown meaning (no links, emphasis or
+    code): daemon-sourced text shown in the report and the coord note (#2864)."""
+    return re.sub(r"[^A-Za-z0-9_.:,=+ {}\"'-]", "", _one_line(text, limit))
+
+
 def _issue_number(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, str)) or not str(value).isdigit():
         raise NightlyError("ISSUE_NUMBER_INVALID")
@@ -2019,10 +2025,11 @@ class Nightly:
         elif kind == "wait":
             repeats = 0
             if record.get("last_transient_error"):
-                att["note"] = (
-                    f"last_transient_error={_one_line(record['last_transient_error'], 200)}"
-                )
+                att["note"] = f"last_transient_error={_plain(record['last_transient_error'], 200)}"
                 repeats = self._note_transient(att, record)
+            else:
+                # a normal save cleared the error: only consecutive occurrences count
+                att.pop("transient_error", None)
             if age > self.issue_cap_min:
                 if repeats >= TRANSIENT_REPEAT_THRESHOLD:
                     error = _token(record["last_transient_error"])
@@ -2041,8 +2048,8 @@ class Nightly:
         Each daemon poll that hits the error again writes a new ``last_transient_error_at``,
         so a new timestamp counts one more occurrence; a different error starts again at 1
         (#2864)."""
-        error = _one_line(record["last_transient_error"], 200)
-        at = _one_line(record.get("last_transient_error_at") or "", 64)
+        error = _plain(record["last_transient_error"], 200)
+        at = _plain(record.get("last_transient_error_at") or "", 64)
         seen = att.get("transient_error")
         seen = seen if isinstance(seen, dict) else {}
         count = int(seen.get("count") or 0)
@@ -2053,7 +2060,7 @@ class Nightly:
         reason = record.get("last_transient_error_reason")
         att["transient_error"] = {
             "error": error,
-            "reason": _one_line(json.dumps(reason, sort_keys=True, default=str), 200)
+            "reason": _plain(json.dumps(reason, sort_keys=True, default=str), 200)
             if reason
             else "",
             "at": at,
