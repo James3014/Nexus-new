@@ -6,7 +6,9 @@ Big-file split step S8a moves these class members out of
 * ``_checkpoint`` (every lifecycle status write of a running task);
 * ``TERMINAL_CORE_RECORD_SCHEMA`` and ``_TERMINAL_CORE_EXPECTED_HOST_REASONS``;
 * ``_build_terminal_core_record`` and ``_record_terminal_core_not_covered`` (#2346);
-* ``_heartbeat`` and the static ``_touch_owned_state``.
+* the static ``_touch_owned_state`` (the in-repo ``_heartbeat`` loop was removed in #2584
+  Phase-2 batch A; the live loop is nexus-runtime's, reaching it through
+  ``runtime_coordination_bridge._State.heartbeat``).
 
 These tests pin the behaviour before the move and must pass unchanged after it:
 
@@ -24,7 +26,8 @@ These tests pin the behaviour before the move and must pass unchanged after it:
   status only, the Core record built outside the lock and attached under it; the event
   sequence numbers on the real EventBus; an event-append failure propagates after the
   state was written, records the debt, and skips the terminal record;
-* the heartbeat loop (1 s wait, stop event, which errors end it and which propagate);
+* one heartbeat through the runtime bridge (ownership check, timestamps, which errors
+  reach the runtime loop);
 * that every facade-module name the moved code reads (``TERMINAL_STATUSES``,
   ``_jsonable``, ``_parse_time``, ``_utc_now``, ``time``,
   ``build_runtime_development_mapping``, ``build_core_verdict`` and the facade logger
@@ -59,6 +62,7 @@ import pytest
 
 import nexus.orchestrator.self_hosted_task_service as service_module
 from nexus.events.transport import NexusEventBus
+from nexus.orchestrator.runtime_coordination_bridge import _State as _BridgeState
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 NOW = "2026-10-18T12:00:00+00:00"
@@ -368,11 +372,6 @@ SIGNATURES = {
         "(self, task_id: 'str', state: 'Any') -> 'None'",
         "Persist the #2346 record; never changes the terminal state it describes.",
     ),
-    "_heartbeat": (
-        "function",
-        "(self, task_id: 'str', attempt_id: 'str', stop: 'threading.Event') -> 'None'",
-        None,
-    ),
     "_touch_owned_state": (
         "staticmethod",
         "(state: 'dict[str, Any]', attempt_id: 'str') -> 'None'",
@@ -398,6 +397,8 @@ def test_checkpoint_members_keep_kinds_signatures_and_docstrings() -> None:
         "CORE_COVERAGE_INCOMPLETE",
     })
     assert type(SelfHostedTaskService._TERMINAL_CORE_EXPECTED_HOST_REASONS) is frozenset
+    # retired in #2584 Phase-2 batch A: the heartbeat loop is nexus-runtime's
+    assert not hasattr(SelfHostedTaskService, "_heartbeat")
     # the static helper is reachable from the class and from an instance (runtime bridge)
     assert (
         SelfHostedTaskService._touch_owned_state
@@ -1424,25 +1425,24 @@ def test_record_base_exception_is_not_swallowed(state_dir, monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _heartbeat / _touch_owned_state
+# heartbeat (through the runtime bridge) / _touch_owned_state
+#
+# The in-repo ``_heartbeat`` loop had no caller and was removed in #2584 Phase-2 batch A.
+# The live loop is nexus-runtime's ``execution_coordination/coordinator.py::_heartbeat``
+# (1 s wait; it stops on RuntimeError, OSError and JSONDecodeError). One beat of it is
+# ``runtime_coordination_bridge._State.heartbeat`` -> ``_mutate_state`` ->
+# ``_touch_owned_state``; these tests (ids kept) drive that live beat.
 
 
-class FakeStop:
-    def __init__(self, beats: int) -> None:
-        self.beats = beats
-        self.waits: list[float] = []
-
-    def wait(self, timeout: float) -> bool:
-        self.waits.append(timeout)
-        return len(self.waits) > self.beats
+def _beat(service: SelfHostedTaskService, task_id: str = "t") -> None:
+    assert _BridgeState(service).heartbeat(task_id, "attempt-1") is None
 
 
 def test_heartbeat_touches_until_stopped(service, state_dir, events, monkeypatch) -> None:
     _seed(service, heartbeat_at="old", updated_at="old")
     recorder = Recorder(monkeypatch, events)
-    stop = FakeStop(beats=2)
-    assert service._heartbeat("t", "attempt-1", stop) is None  # type: ignore[arg-type]
-    assert stop.waits == [1.0, 1.0, 1.0]
+    _beat(service)
+    _beat(service)
     assert recorder.names() == [
         "_mutate_state",
         "lock+",
@@ -1457,6 +1457,7 @@ def test_heartbeat_touches_until_stopped(service, state_dir, events, monkeypatch
     ]
     on_disk = _read(state_dir)
     assert on_disk["heartbeat_at"] == on_disk["updated_at"] == NOW
+    assert not hasattr(SelfHostedTaskService, "_heartbeat")
 
 
 @pytest.mark.parametrize(
@@ -1467,9 +1468,9 @@ def test_heartbeat_touches_until_stopped(service, state_dir, events, monkeypatch
 def test_heartbeat_ends_when_the_attempt_lost_ownership(service, state_dir, seed) -> None:
     _seed(service, **seed)
     before = _disk(state_dir)
-    stop = FakeStop(beats=5)
-    service._heartbeat("t", "attempt-1", stop)  # type: ignore[arg-type]
-    assert stop.waits == [1.0]
+    # RuntimeError is one of the errors that end the runtime loop
+    with pytest.raises(RuntimeError, match="no longer owned"):
+        _beat(service)
     assert _disk(state_dir) == before
 
 
@@ -1486,9 +1487,10 @@ def test_heartbeat_ends_on_store_errors(service, monkeypatch, error) -> None:
         raise error
 
     monkeypatch.setattr(service, "_mutate_state", mutate)
-    stop = FakeStop(beats=5)
-    service._heartbeat("t", "attempt-1", stop)  # type: ignore[arg-type]
-    assert calls == ["t"] and stop.waits == [1.0]
+    # the bridge does not swallow the store error; the runtime loop ends on it
+    with pytest.raises(type(error)):
+        _beat(service)
+    assert calls == ["t"]
 
 
 def test_heartbeat_propagates_other_errors(service, monkeypatch) -> None:
@@ -1497,23 +1499,23 @@ def test_heartbeat_propagates_other_errors(service, monkeypatch) -> None:
 
     monkeypatch.setattr(service, "_mutate_state", mutate)
     with pytest.raises(ValueError, match="^unexpected$"):
-        service._heartbeat("t", "attempt-1", FakeStop(beats=5))  # type: ignore[arg-type]
+        _beat(service)
 
 
 def test_heartbeat_unknown_task_keeps_beating(service, state_dir) -> None:
-    stop = FakeStop(beats=3)
-    service._heartbeat("missing", "attempt-1", stop)  # type: ignore[arg-type]
-    assert stop.waits == [1.0] * 4 and _disk(state_dir) == {}
+    for _ in range(4):
+        _beat(service, "missing")
+    assert _disk(state_dir) == {}
 
 
 def test_heartbeat_thread_stops_on_the_event(service, state_dir) -> None:
+    # The loop (and its stop event) moved to nexus-runtime; no in-repo loop is left
+    # that a thread could be started on.
     _seed(service)
-    stop = threading.Event()
-    thread = threading.Thread(target=service._heartbeat, args=("t", "attempt-1", stop), daemon=True)
-    thread.start()
-    stop.set()
-    thread.join(10)
-    assert not thread.is_alive()
+    assert not hasattr(SelfHostedTaskService, "_heartbeat")
+    assert not hasattr(service, "_heartbeat")
+    _beat(service)
+    assert _read(state_dir)["heartbeat_at"]
 
 
 def test_touch_owned_state() -> None:
@@ -1708,7 +1710,7 @@ def test_class_patch_of_touch_owned_state_reaches_the_heartbeat(
         "_touch_owned_state",
         staticmethod(lambda state, attempt_id: touched.append(attempt_id)),
     )
-    service._heartbeat("t", "attempt-1", FakeStop(beats=1))  # type: ignore[arg-type]
+    _beat(service)
     assert touched == ["attempt-1"]
 
 

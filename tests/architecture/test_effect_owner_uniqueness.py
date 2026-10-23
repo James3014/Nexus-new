@@ -62,11 +62,15 @@ CANDIDATE_SINK = Ref(
     "ControlledIntegrationManager",
     "integrate_authorized_task_state",
 )
+# Retired 2026-10-24 (#2584 Phase-2 batch A): TargetIntegrationLifecycle.transactional_integration
+# had no production caller and was removed. Kept as a RETIRED record only; it is not in
+# DECLARED, so ``integrate_authorized_task_state`` now has exactly one admitted caller,
+# ``SelfHostedTaskService.integrate_approved``.
 TARGET_LIFECYCLE_CALLER = Ref(
     "nexus/orchestrator/target_integration_lifecycle.py",
     "TargetIntegrationLifecycle",
     "transactional_integration",
-    "COMPATIBILITY_ONLY",
+    "RETIRED",
 )
 COMPETITION_SINK = Ref(
     "nexus/orchestrator/governed_integration.py",
@@ -150,7 +154,6 @@ DECLARED = (
     MERGE_LOOP,
     CANDIDATE_FACADE,
     CANDIDATE_SINK,
-    TARGET_LIFECYCLE_CALLER,
     COMPETITION_SINK,
     UNIFIED_CALLER,
     SELF_HOSTED_CALLER,
@@ -165,7 +168,6 @@ EDGES = (
     (UNIFIED_CALLER, "self.service.integrate_approved"),
     (SELF_HOSTED_CALLER, "self.service.integrate_approved"),
     (CANDIDATE_FACADE, "ControlledIntegrationManager().integrate_authorized_task_state"),
-    (TARGET_LIFECYCLE_CALLER, "manager.integrate_authorized_task_state"),
     (SWITCH_CALLER, "_write_transition_file"),
     (RESTORE_CALLER, "_write_transition_file"),
 )
@@ -324,7 +326,9 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         ),
     )
 
-    allowed_candidate_callers = {CANDIDATE_FACADE.id, TARGET_LIFECYCLE_CALLER.id}
+    allowed_candidate_callers = {
+        CANDIDATE_FACADE.id
+    }  # transactional_integration retired (#2584 batch A)
     allowed_git_apply = {CANDIDATE_SINK.id, COMPETITION_SINK.id}
     candidate_conflicts: list[Record] = []
     for row in rows:
@@ -384,7 +388,8 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
                 "effect_owner_class": (
                     "nexus/orchestrator/governed_integration.py:ControlledIntegrationManager"
                 ),
-                "compatibility_callers": [TARGET_LIFECYCLE_CALLER.id],
+                "compatibility_callers": [],
+                "retired_callers": [TARGET_LIFECYCLE_CALLER.id],
                 "compatibility_domain": {
                     "name": "competition_winner_integration",
                     "caller": COMPETITION_CALLER.id,
@@ -448,7 +453,12 @@ def test_competition_integration_is_explicit_compatibility_domain():
     assert COMPETITION_CALLER not in DECLARED
     assert compatibility["caller"] == COMPETITION_CALLER.id
     assert compatibility["physical_sink"] == COMPETITION_SINK.id
-    assert TARGET_LIFECYCLE_CALLER.id in candidate["compatibility_callers"]
+    # transactional_integration retired too (#2584 Phase-2 batch A): no compatibility
+    # caller of integrate_authorized_task_state is left.
+    assert candidate["compatibility_callers"] == []
+    assert candidate["retired_callers"] == [TARGET_LIFECYCLE_CALLER.id]
+    assert TARGET_LIFECYCLE_CALLER not in DECLARED
+    assert TARGET_LIFECYCLE_CALLER.label == "RETIRED"
 
 
 def test_recursive_scan_discovers_new_source_file(tmp_path):

@@ -389,29 +389,63 @@ def _authorization(root: Path, base: str, candidate: str, acceptance: ExternalAc
     )
 
 
+def _integrate_via_sink(
+    root: Path, *, candidate: str, acceptance, auth, staging_root, apply: bool = False,
+    post_apply_commands=(), state_overrides=None,
+):
+    """Drive the live sink ``ControlledIntegrationManager.integrate_authorized_task_state``.
+
+    #2584 Phase-2 batch A removed the unused compatibility adapter
+    ``TargetIntegrationLifecycle.transactional_integration``. The refusals these cases
+    pinned on it are the sink's own checks (it is what the live
+    ``SelfHostedTaskService.integrate_approved`` calls), so the cases now build the
+    authorized task state the adapter built and hand it to the sink directly.
+    """
+    authorization_state: dict[str, object] = {}
+    if auth is not None:
+        authorization_state = auth.to_dict()
+        authorization_state["authorization_hash"] = auth.authorization_hash
+    state = {
+        "task_id": "task-1",
+        "external_acceptance": acceptance.to_dict() if acceptance is not None else None,
+        "integration_authorization": authorization_state,
+        "post_apply_commands": [list(command) for command in post_apply_commands],
+        "verifier_argv_commands": [],
+        "promotion_packet": {"candidate_commit_sha": candidate},
+        "contract": {"controller_repo_root": str(root.resolve()), "verifier_commands": []},
+        **dict(state_overrides or {}),
+    }
+    return ControlledIntegrationManager(integration_root=root.resolve()).integrate_authorized_task_state(
+        state, integration_branch="nexus/integration/canary", staging_root=staging_root,
+        apply=apply, post_apply_commands=post_apply_commands,
+    )
+
+
+def _assert_transactional_adapter_retired() -> None:
+    assert not hasattr(TargetIntegrationLifecycle, "transactional_integration")
+
+
 def test_integration_without_external_acceptance_is_blocked(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
+    auth = _authorization(root, base, candidate, _acceptance(candidate))
     with pytest.raises(RuntimeError, match="external acceptance"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base,
-                expected_status_hash=_status_hash(root),
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=None, auth=auth,
             staging_root=tmp_path / "stage", apply=True,
-            external_acceptance=None, authorization=None,
         )
     assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_integration_without_owner_authorization_is_blocked(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
-    with pytest.raises(RuntimeError, match="Owner authorization"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base,
-            expected_status_hash=_status_hash(root),
+    with pytest.raises(RuntimeError, match="authorized integration identity is incomplete"):
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=_acceptance(candidate), auth=None,
             staging_root=tmp_path / "stage", apply=True,
-            external_acceptance=_acceptance(candidate), authorization=None,
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_authorization_is_consumed_once():
@@ -423,41 +457,46 @@ def test_authorization_is_consumed_once():
 
 
 def test_authorization_candidate_drift_is_blocked(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
     auth = _authorization(root, base, candidate, receipt)
-    with pytest.raises(RuntimeError, match="candidate drift"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit="f" * 40,
-            expected_canonical_head=base, staging_root=str(tmp_path / "stage"),
-            external_acceptance=receipt, authorization=auth,
+    # The persisted Candidate no longer matches the one the acceptance and the
+    # authorization name.
+    with pytest.raises(RuntimeError, match="not bound to this task and candidate"):
+        _integrate_via_sink(
+            root, candidate="f" * 40, acceptance=receipt, auth=auth,
+            staging_root=str(tmp_path / "stage"),
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_authorization_task_card_drift_is_blocked(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
     auth = _authorization(root, base, candidate, receipt)
-    with pytest.raises(RuntimeError, match="task card drift"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base, staging_root=str(tmp_path / "stage"),
-            external_acceptance=receipt, authorization=auth,
-            current_task_card_hash="f" * 64,
+    with pytest.raises(RuntimeError, match="authorization drift: task_card_hash"):
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt, auth=auth,
+            staging_root=str(tmp_path / "stage"),
+            state_overrides={"task_card_hash": "f" * 64},
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_authorization_plan_drift_is_blocked(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
     auth = _authorization(root, base, candidate, receipt)
-    with pytest.raises(RuntimeError, match="integration plan drift"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base, staging_root=str(tmp_path / "stage"),
-            external_acceptance=receipt, authorization=auth,
-            current_integration_plan_hash="f" * 64,
+    with pytest.raises(RuntimeError, match="authorization drift: integration_plan_hash"):
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt, auth=auth,
+            staging_root=str(tmp_path / "stage"),
+            state_overrides={"integration_plan_hash": "f" * 64},
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_target_lifecycle_adapter_does_not_execute_raw_git_mutations():
@@ -478,28 +517,28 @@ def test_cleanup_delegates_to_worktree_manager():
 
 def test_dirty_canonical_blocks_apply_even_when_status_hash_matches(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
+    receipt = _acceptance(candidate)
+    auth = _authorization(root, base, candidate, receipt)
     (root / "value.txt").write_text("unrelated dirty\n")
     with pytest.raises(RuntimeError, match="canonical.*clean"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base,
-                expected_status_hash=_status_hash(root),
-                staging_root=tmp_path / "stage", apply=True,
-                external_acceptance=_acceptance(candidate), authorization=_authorization(root, base, candidate, _acceptance(candidate)),
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt, auth=auth,
+            staging_root=tmp_path / "stage", apply=True,
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_untracked_canonical_blocks_apply(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
+    receipt = _acceptance(candidate)
+    auth = _authorization(root, base, candidate, receipt)
     (root / "untracked.txt").write_text("untracked\n")
     with pytest.raises(RuntimeError, match="canonical.*clean"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base,
-                expected_status_hash=_status_hash(root),
-                staging_root=tmp_path / "stage", apply=True,
-                external_acceptance=_acceptance(candidate), authorization=_authorization(root, base, candidate, _acceptance(candidate)),
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt, auth=auth,
+            staging_root=tmp_path / "stage", apply=True,
         )
+    assert _git(root, "rev-parse", "HEAD") == base
 
 
 def test_forged_cleanup_decision_cannot_remove_worktree(tmp_path: Path):
@@ -558,13 +597,12 @@ def test_cleanup_without_durable_ref_is_blocked(tmp_path: Path):
 
 def test_post_apply_verification_failure_blocks_cleanup(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
+    receipt = _acceptance(candidate)
     with pytest.raises(RuntimeError, match="post-apply"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1", canonical_root=root, candidate_commit=candidate,
-            expected_canonical_head=base,
-                expected_status_hash=_status_hash(root),
-                staging_root=tmp_path / "stage", apply=True,
-                external_acceptance=_acceptance(candidate), authorization=_authorization(root, base, candidate, _acceptance(candidate)),
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt,
+            auth=_authorization(root, base, candidate, receipt),
+            staging_root=tmp_path / "stage", apply=True,
             post_apply_commands=(("/bin/sh", "-c", "exit 1"),),
         )
 
@@ -3730,6 +3768,7 @@ def test_h7_existing_binding_drift_controls_fail_closed(tmp_path: Path):
 
 
 def test_h8_transactional_integration_rejects_expired_authorization_before_staging_or_apply(tmp_path: Path):
+    _assert_transactional_adapter_retired()
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
     auth = replace(
@@ -3737,15 +3776,9 @@ def test_h8_transactional_integration_rejects_expired_authorization_before_stagi
         expires_at="2000-01-01T00:00:00+00:00",
     )
     with pytest.raises(RuntimeError, match="authorization expired"):
-        TargetIntegrationLifecycle.transactional_integration(
-            task_id="task-1",
-            canonical_root=str(root.resolve()),
-            candidate_commit=candidate,
-            expected_canonical_head=base,
-            staging_root=str(tmp_path / "stage"),
-            apply=True,
-            external_acceptance=receipt,
-            authorization=auth,
+        _integrate_via_sink(
+            root, candidate=candidate, acceptance=receipt, auth=auth,
+            staging_root=str(tmp_path / "stage"), apply=True,
         )
 
     # Mutation Sentinel: HEAD is untouched, no staging directory created
