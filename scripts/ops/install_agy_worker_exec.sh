@@ -5,8 +5,9 @@
 # /Users/Shared/cairnwork-worker/bin (Owner-owned, 0755). Copies
 #   scripts/ops/agy-worker-exec -> <bin>/agy-worker-exec   (the sudoers rule names this path)
 #   the Owner's agy binary      -> <bin>/agy               (the worker cannot enter /Users/<owner>)
-# both Owner-owned, mode 0755, replaced atomically. Re-run it whenever agy is updated:
-# nexus-agy-dispatch --run-as-user refuses a run when either copy differs from its source.
+# both Owner-owned, mode 0755, replaced atomically. Re-run it whenever the wrapper changes:
+# nexus-agy-dispatch --run-as-user refuses a run while the wrapper copy differs from its source.
+# A stale agy copy (agy updates itself) is replaced by the dispatcher itself (#2888 follow-up).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
