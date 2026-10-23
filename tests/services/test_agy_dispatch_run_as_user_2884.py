@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import grp
+import hashlib
 import json
 import os
 import re
@@ -1021,6 +1022,8 @@ def test_default_dispatch_uses_the_unchanged_boundary(tmp_path, monkeypatch, cap
     assert profile.count(str(boundary_mod.WORKER_RUNS_DIR)) == 1
     assert dispatch._popen_env(seen["boundary"], {"A": "1"}) == {"A": "1"}
     assert dispatch._popen_env(None, {"A": "1"}) == {"A": "1"}
+    # #2888: no worker receipt line without --run-as-user
+    assert "WORKER_" not in capsys.readouterr().err
 
 
 def test_background_argv_carries_run_as_user_only_when_set(tmp_path, monkeypatch):
@@ -1665,6 +1668,7 @@ def test_background_pending_marker_records_worker_fields_only_for_worker_runs(
         if run_as_user is not None:
             assert record["worker_run_as_user"] == worker_mod.WORKER_USER
             assert record["worker_run_root"] == str(write_boundary.run_root)
+            assert write_boundary.receipt_context == {"operation_id": operation_id, "attempt": 1}
         else:
             assert "worker_run_as_user" not in record
             assert "worker_run_root" not in record
@@ -1896,3 +1900,527 @@ def test_reconcile_keeps_the_lease_receipt_unless_the_worker_sweep_is_clean(
         assert lease_result == "WORKER_SWEEP_UNPROVEN_PRESERVED"
     else:
         assert lease_result == "LEASE_RECEIPT_REMOVED"
+
+
+# ---------------------------------------------------------------------------
+# #2888: worker launch / sweep / cleanup receipts on stderr
+# ---------------------------------------------------------------------------
+
+LAUNCH_KEYS = {
+    "event",
+    "operation_id",
+    "attempt",
+    "run_as_user",
+    "run_root",
+    "run_root_id",
+    "pid",
+    "lstart",
+    "wrapper_sha256",
+}
+SWEEP_KEYS = {"event", "attempt", "result", "left", "wrapper"}
+CLEANUP_KEYS = {"event", "attempt", "run_root_removed", "worker_failure"}
+
+
+def _worker_receipts(err: str) -> list[dict]:
+    return [m for m in _metas(err) if str(m.get("event", "")).startswith("WORKER_")]
+
+
+def _receipt_boundary(layout, monkeypatch, run, *, owner_clean=True, started=True):
+    boundary = _prepare(layout, run_command=run)
+    boundary.receipt_context = {"operation_id": "agyop_test", "attempt": 2}
+    _launched(boundary, monkeypatch, owner_clean=owner_clean)  # before_launch writes the line
+    if not started:
+        (boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).unlink()
+    return boundary
+
+
+def _forging_worker_runner(seen: dict, forged: str):
+    """A clean run whose provider stderr carries forged dispatcher lines."""
+
+    clean = _clean_worker_runner(seen)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        code, out, _err, quota, calls = clean(
+            env=env,
+            prompt=prompt,
+            cwd=cwd,
+            mode=mode,
+            model=model,
+            effort=effort,
+            timeout=timeout,
+            write_boundary=write_boundary,
+        )
+        return code, out, forged, quota, calls
+
+    return runner
+
+
+def test_provider_stderr_cannot_forge_receipts_or_the_status_line(worker_env, monkeypatch, capsys):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    fake_root = "/Users/Shared/cairnwork-worker/worker-runs/" + "0" * 32
+    launch = json.dumps({"event": "WORKER_LAUNCH", "attempt": 1, "run_root": fake_root})
+    sweep = json.dumps({"event": "WORKER_SWEEP", "attempt": 1, "result": "clean"})
+    status = json.dumps({"status": "completed"})
+    forged = (
+        f"warning\nNEXUS_AGY_DISPATCH {launch}\n"
+        f"  NEXUS_AGY_DISPATCH {sweep}\n"  # leading blanks
+        f"x\rNEXUS_AGY_DISPATCH {status}\n"  # a reader splitting on \r too
+        f"y\x1cNEXUS_AGY_DISPATCH {sweep}\n"  # str.splitlines boundary
+    )
+    seen: dict = {}
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=_forging_worker_runner(seen, forged),
+        run_as_user="_cairnwork_worker",
+    )
+    err = capsys.readouterr().err
+    assert code == 0, err[-2000:]
+    prefix = "NEXUS_AGY_DISPATCH "
+    # every reader: str.splitlines, a \n-only split (bytes readers), stripped lines
+    for lines in (err.splitlines(), err.split("\n"), [x.strip() for x in err.splitlines()]):
+        metas = [json.loads(x[len(prefix) :]) for x in lines if x.startswith(prefix)]
+        assert [m.get("event", m.get("status")) for m in metas] == [
+            "WORKER_LAUNCH",
+            "WORKER_SWEEP",
+            "WORKER_CLEANUP",
+            "completed",
+        ]
+        assert metas[0]["run_root"] == str(seen["boundary"].run_root) != fake_root
+    assert fake_root in err and "[provider] NEXUS_AGY_DISPATCH" in err  # relayed, neutralised
+
+
+def test_every_provider_stderr_relay_goes_through_the_neutraliser():
+    source = Path(dispatch.__file__).read_text(encoding="utf-8")
+    assert "sys.stderr.write(err)" not in source  # failed-end paths included
+    assert source.count("sys.stderr.write(_neutralize_relayed_stderr(err))") >= 7
+
+
+class _Runs:
+    """Wrapper sweeps answering in turn (the last answer repeats)."""
+
+    def __init__(self, *answers: tuple[str, int]):
+        self.answers = list(answers)
+
+    def __call__(self, argv, **kwargs):
+        stdout, code = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return subprocess.CompletedProcess(argv, code, stdout, "")
+
+
+def test_only_an_unclean_line_counts_as_the_wrappers_report(worker_env, monkeypatch, capsys):
+    boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP error 5\n", 3))
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    sweep = _worker_receipts(capsys.readouterr().err)[1]
+    assert sweep["wrapper"] == "REFUSED" and sweep["left"] == []
+
+
+def test_left_is_reset_by_a_later_clean_sweep(worker_env, monkeypatch, capsys):
+    run = _Runs(("AGY_WORKER_SWEEP unclean 42\n", 3), ("AGY_WORKER_SWEEP clean\n", 0))
+    boundary = _receipt_boundary(worker_env, monkeypatch, run)
+    boundary.terminate_worker()  # the timeout kill reports a survivor
+    assert boundary.sweep() is True  # the final sweep is clean
+    boundary.cleanup()
+    sweep = _worker_receipts(capsys.readouterr().err)[1]
+    assert (sweep["result"], sweep["wrapper"], sweep["left"]) == ("clean", "CLEAN", [])
+
+
+def test_relayed_stderr_without_dispatcher_lines_is_unchanged():
+    text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nmore NEXUS_AGY_DISPATCH inline\n"
+    assert dispatch._neutralize_relayed_stderr("plain\n") == "plain\n"
+    assert dispatch._neutralize_relayed_stderr(text) == text
+
+
+def _clean_worker_runner(seen: dict):
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        seen["boundary"] = write_boundary
+        seen["lstat"] = os.lstat(write_boundary.run_root)
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        (write_boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("")
+        return 0, "edited", "", False, 1
+
+    return runner
+
+
+def test_dispatch_writes_one_launch_sweep_cleanup_receipt_in_order(worker_env, monkeypatch, capsys):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    seen: dict = {}
+    hook_events: list[dict] = []
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=_clean_worker_runner(seen),
+        run_as_user="_cairnwork_worker",
+        operation_hook=hook_events.append,
+    )
+    err = capsys.readouterr().err
+    assert code == 0
+    metas = _metas(err)
+    assert [m.get("event", m.get("status")) for m in metas] == [
+        "WORKER_LAUNCH",
+        "WORKER_SWEEP",
+        "WORKER_CLEANUP",
+        metas[-1]["status"],
+    ]
+    launch, sweep, cleanup, final = metas
+    assert set(launch) == LAUNCH_KEYS and set(sweep) == SWEEP_KEYS
+    assert set(cleanup) == CLEANUP_KEYS
+    # the final status line keeps its shape and stays the last NEXUS_AGY_DISPATCH line
+    assert "event" not in final and final["status"] == "completed"
+    boundary = seen["boundary"]
+    assert launch["operation_id"] is None  # foreground: no journal operation
+    assert launch["attempt"] == sweep["attempt"] == cleanup["attempt"] == 1
+    assert launch["run_as_user"] == worker_mod.WORKER_USER
+    assert launch["run_root"] == str(boundary.run_root)
+    assert launch["run_root_id"] == [seen["lstat"].st_dev, seen["lstat"].st_ino]
+    assert launch["pid"] is None and launch["lstart"] is None
+    assert launch["wrapper_sha256"] == hashlib.sha256(WRAPPER.read_bytes()).hexdigest()
+    assert sweep["result"] == "clean" and sweep["left"] == []
+    assert cleanup["run_root_removed"] is True and cleanup["worker_failure"] is None
+    # consistent with the journal's sweep verdict
+    verdicts = [e["descendant_sweep_clean"] for e in hook_events if "descendant_sweep_clean" in e]
+    assert verdicts[-1] is True
+    # owner-side only: no pool HOME, env or token in any receipt line
+    receipt_text = "".join(line for line in err.splitlines(keepends=True) if '"WORKER_' in line)
+    assert str(worker_env["home"]) not in receipt_text and "GH_TOKEN" not in receipt_text
+    assert str(boundary.run_home) not in receipt_text
+
+
+def test_dispatch_unclean_sweep_receipt_matches_the_journal_verdict(
+    worker_env, monkeypatch, capsys
+):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP unclean 4242\n", 3))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    hook_events: list[dict] = []
+    dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=_clean_worker_runner({}),
+        run_as_user="_cairnwork_worker",
+        operation_hook=hook_events.append,
+    )
+    err = capsys.readouterr().err
+    sweeps = [m for m in _worker_receipts(err) if m["event"] == "WORKER_SWEEP"]
+    assert [m["result"] for m in sweeps] == ["unclean"]
+    verdicts = [e["descendant_sweep_clean"] for e in hook_events if "descendant_sweep_clean" in e]
+    assert verdicts[-1] is False
+    assert _metas(err)[-1].get("event") is None  # the status line is still last
+
+
+def test_dispatch_launch_failure_receipts_say_not_started(worker_env, monkeypatch, capsys):
+    # sudo refuses both the launch and the sweep: the wrapper never wrote its marker
+    _patch_prepare(monkeypatch, worker_env, _Run("", 1))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        return 1, "", "sudo: a password is required\n", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+        max_calls=3,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code == 1
+    assert [m.get("event") for m in metas[:-1]] == [
+        "WORKER_LAUNCH",
+        "WORKER_SWEEP",
+        "WORKER_CLEANUP",
+    ]
+    assert metas[-2]["worker_failure"] == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
+    assert metas[-3]["result"] == "not_started" and metas[-3]["left"] == []
+    assert "event" not in metas[-1] and metas[-1]["failure_kind"].startswith("AGY_WORKER_LAUNCH")
+
+
+def test_dispatch_copy_back_refusal_receipt_names_no_worker_chosen_path(
+    worker_env, monkeypatch, capsys
+):
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        (write_boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("")
+        (Path(cwd) / "src" / "worker-chosen-name").symlink_to("/etc/passwd")
+        return 0, "done", "", False, 1
+
+    dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=_Coordinator(worker_env["home"]),
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+    )
+    err = capsys.readouterr().err
+    cleanup = [m for m in _worker_receipts(err) if m["event"] == "WORKER_CLEANUP"]
+    assert [m["worker_failure"] for m in cleanup] == [
+        "AGY_WORKER_COPY_BACK_REFUSED:symlink_created"
+    ]
+    assert "worker-chosen-name" not in "".join(
+        line for line in err.splitlines() if '"WORKER_' in line
+    )
+
+
+@pytest.mark.parametrize(
+    ("run", "owner_clean", "expected"),
+    [
+        (_Run("AGY_WORKER_SWEEP clean\n"), True, "clean"),
+        (_Run("AGY_WORKER_SWEEP unclean 4242\n", 3), True, "unclean"),
+        (_Run("AGY_WORKER_SWEEP clean\n"), False, "unclean"),  # owner-side check unclean
+        (_Run("", 1), True, "unclean"),  # sudo refused after the wrapper started
+    ],
+)
+def test_sweep_receipt_is_clean_only_when_the_sweep_verdict_is_clean(
+    worker_env, monkeypatch, capsys, run, owner_clean, expected
+):
+    boundary = _receipt_boundary(worker_env, monkeypatch, run, owner_clean=owner_clean)
+    assert boundary.sweep() is (expected == "clean")
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert [m["event"] for m in receipts] == ["WORKER_LAUNCH", "WORKER_SWEEP", "WORKER_CLEANUP"]
+    assert receipts[0]["operation_id"] == "agyop_test"
+    assert {m["attempt"] for m in receipts} == {2}
+    assert receipts[1]["result"] == expected
+    # left: only the pids the wrapper itself reported as surviving
+    assert receipts[1]["left"] == (["4242"] if "unclean 4242" in run.stdout else [])
+    assert boundary.receipts == receipts  # what the dispatcher can read back
+
+
+def test_sweep_receipt_error_when_the_wrapper_sweep_cannot_run(worker_env, monkeypatch, capsys):
+    def run(argv, **kwargs):
+        raise OSError("sudo missing")
+
+    boundary = _receipt_boundary(worker_env, monkeypatch, run)
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    assert [m["result"] for m in _worker_receipts(capsys.readouterr().err)[1:2]] == ["error"]
+
+
+def test_sweep_that_raises_is_reported_as_error_never_clean(worker_env, monkeypatch, capsys):
+    boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP clean\n"))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("sweep blew up")
+
+    monkeypatch.setattr(cli_worker, "sweep_run", boom)
+    with pytest.raises(RuntimeError):
+        boundary.sweep()
+    shutil.rmtree(boundary.run_root)
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert [(m["event"], m.get("result")) for m in receipts] == [
+        ("WORKER_LAUNCH", None),
+        ("WORKER_SWEEP", "error"),
+    ]
+
+
+@pytest.mark.parametrize("owner_clean", [True, False])
+def test_wrapper_that_never_started_is_not_started_unless_the_owner_sweep_is_unclean(
+    worker_env, monkeypatch, capsys, owner_clean
+):
+    boundary = _receipt_boundary(
+        worker_env, monkeypatch, _Run("", 1), owner_clean=owner_clean, started=False
+    )
+    assert boundary.sweep() is owner_clean
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert receipts[1]["result"] == ("not_started" if owner_clean else "unclean")
+    assert receipts[1]["wrapper"] == "REFUSED"  # sudo refused: no wrapper report line
+    assert receipts[2]["worker_failure"] == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
+    assert receipts[2]["run_root_removed"] is True
+
+
+def test_launch_that_never_happened_still_closes_with_not_started_and_cleanup(
+    worker_env, monkeypatch, capsys
+):
+    boundary = _prepare(worker_env, run_command=_Run("", 1))
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    boundary.before_launch()  # Popen then raised: after_launch never ran
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert [(m["event"], m.get("result")) for m in receipts] == [
+        ("WORKER_LAUNCH", None),
+        ("WORKER_SWEEP", "not_started"),
+        ("WORKER_CLEANUP", None),
+    ]
+    assert receipts[2]["worker_failure"] is None and receipts[2]["run_root_removed"] is True
+
+
+@pytest.mark.parametrize("how", ["keep_env", "rmtree_stub"])
+def test_cleanup_receipt_says_the_run_root_was_not_removed(worker_env, monkeypatch, capsys, how):
+    boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP clean\n"))
+    if how == "keep_env":
+        monkeypatch.setenv(boundary_mod.KEEP_RUN_ROOT_ENV, "1")
+    else:
+        monkeypatch.setattr(worker_mod.shutil, "rmtree", lambda *a, **k: None)
+    boundary.cleanup()
+    monkeypatch.undo()
+    try:
+        cleanup = _worker_receipts(capsys.readouterr().err)[-1]
+        assert cleanup["event"] == "WORKER_CLEANUP" and cleanup["run_root_removed"] is False
+    finally:
+        shutil.rmtree(boundary.run_root, ignore_errors=True)
+
+
+def test_each_receipt_is_written_once_per_attempt(worker_env, monkeypatch, capsys):
+    boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP clean\n"))
+    boundary.before_launch()
+    assert boundary.sweep() is True and boundary.sweep() is True
+    boundary.cleanup()
+    boundary.cleanup()
+    events = [m["event"] for m in _worker_receipts(capsys.readouterr().err)]
+    assert events == ["WORKER_LAUNCH", "WORKER_SWEEP", "WORKER_CLEANUP"]
+
+
+def test_a_boundary_without_a_receipt_context_writes_nothing(worker_env, monkeypatch, capsys):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    _launched(boundary, monkeypatch)
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    assert "NEXUS_AGY_DISPATCH" not in capsys.readouterr().err
+    assert boundary.receipts == []
+
+
+class _BrokenStderr:
+    def write(self, text):
+        raise ValueError("I/O operation on closed file")
+
+    def flush(self):
+        raise ValueError("I/O operation on closed file")
+
+
+def test_a_failing_stderr_never_breaks_launch_sweep_or_cleanup(worker_env, monkeypatch):
+    run = _Run("AGY_WORKER_SWEEP clean\n")
+    boundary = _prepare(worker_env, run_command=run)
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    monkeypatch.setattr(sys, "stderr", _BrokenStderr())
+    _launched(boundary, monkeypatch)
+    (boundary.target / "src" / "a.py").write_text("worker edit\n", encoding="utf-8")
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    monkeypatch.undo()
+    assert boundary.worker_failure is None and not boundary.run_root.exists()
+    # the work still came back; nothing was written, so nothing is recorded
+    assert (worker_env["target"] / "src" / "a.py").read_text() == "worker edit\n"
+    assert boundary.receipts == []
+
+
+class _FirstWriteFails:
+    """stderr whose first write fails (the launch line), then works."""
+
+    def __init__(self, real):
+        self.real, self.failed = real, False
+
+    def write(self, text):
+        if not self.failed:
+            self.failed = True
+            raise ValueError("I/O operation on closed file")
+        return self.real.write(text)
+
+    def flush(self):
+        self.real.flush()
+
+
+def test_an_unwritten_launch_line_keeps_sweep_and_cleanup_lines_out(
+    worker_env, monkeypatch, capsys
+):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    monkeypatch.setattr(sys, "stderr", _FirstWriteFails(sys.stderr))
+    _launched(boundary, monkeypatch)
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    # no orphan WORKER_SWEEP / WORKER_CLEANUP without the launch line that names run_root
+    assert _worker_receipts(capsys.readouterr().err) == []
+    assert boundary.receipts == []
+
+
+def test_a_deleted_start_marker_never_hides_the_wrappers_unclean_report(
+    worker_env, monkeypatch, capsys
+):
+    # The worker account can write the run root and delete the marker; the
+    # wrapper's own report of surviving processes must still make it unclean.
+    boundary = _receipt_boundary(
+        worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP unclean 4242 77\n", 3), started=False
+    )
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert receipts[1]["result"] == "unclean" and receipts[1]["left"] == ["4242", "77"]
+    assert receipts[1]["wrapper"] == "UNCLEAN"
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("sudo missing"), subprocess.TimeoutExpired("stub-sudo", 30)]
+)
+def test_a_deleted_start_marker_never_excuses_a_sweep_that_errored(
+    worker_env, monkeypatch, capsys, failure
+):
+    def run(argv, **kwargs):
+        raise failure
+
+    boundary = _receipt_boundary(worker_env, monkeypatch, run, started=False)
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert receipts[1]["result"] == "error" and receipts[1]["wrapper"] == "SWEEP_ERROR"
+
+
+def test_left_lists_only_ascii_pids(worker_env, monkeypatch, capsys):
+    run = _Run("AGY_WORKER_SWEEP unclean 12 \u00b2 x9 99999999999 7\n", 3)
+    boundary = _receipt_boundary(worker_env, monkeypatch, run)
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    assert _worker_receipts(capsys.readouterr().err)[1]["left"] == ["12", "7"]
+
+
+def test_sweep_report_returns_the_wrappers_last_line(tmp_path):
+    run = _Run("noise\nAGY_WORKER_SWEEP unclean 9\n", 3)
+    assert worker_mod.sweep_run_root_report(tmp_path, run_command=run) == (
+        "UNCLEAN",
+        "AGY_WORKER_SWEEP unclean 9",
+    )
+    assert worker_mod.sweep_run_root(tmp_path, run_command=run) == "UNCLEAN"
+    refused = _Run("", 1)
+    assert worker_mod.sweep_run_root_report(tmp_path, run_command=refused) == ("UNCLEAN", "")
+
+
+def test_an_unserialisable_receipt_value_is_swallowed(worker_env, monkeypatch, capsys):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    boundary.wrapper_sha256 = object()  # json.dumps raises TypeError
+    _launched(boundary, monkeypatch)
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    events = [m["event"] for m in _worker_receipts(capsys.readouterr().err)]
+    assert "WORKER_LAUNCH" not in events  # the caller rejects a run without a launch line
+    assert not boundary.run_root.exists()
