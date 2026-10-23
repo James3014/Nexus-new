@@ -23,6 +23,7 @@ import sys
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -137,6 +138,22 @@ def _layout(tmp_path: Path) -> dict[str, Any]:
         "pool": base / "pool",
         "target": target,
     }
+
+
+@pytest.fixture(autouse=True)
+def _no_host_worker_gc(monkeypatch):
+    """#2905: a dispatch under test must never GC the host's real worker-runs.
+
+    The GC's defaults (the real worker-runs dir, ``subprocess.run``) are bound at
+    definition, so patching ``WORKER_RUNS`` does not redirect it; only calls
+    that name their own ``runs_dir`` reach the real function.
+    """
+    real = worker_mod.gc_unreferenced_worker_run_roots
+
+    def guarded(referenced, **kwargs):
+        return real(referenced, **kwargs) if "runs_dir" in kwargs else []
+
+    monkeypatch.setattr(worker_mod, "gc_unreferenced_worker_run_roots", guarded)
 
 
 @pytest.fixture
@@ -1294,6 +1311,181 @@ def test_dispatch_run_as_user_runs_agy_in_the_worker_copy(worker_env, monkeypatc
     assert not boundary.run_root.exists()
     assert list(worker_env["runs"].iterdir()) == []
     assert coordinator.claim.released is True
+
+
+@pytest.mark.parametrize("gc_raises", [False, True], ids=["gc-ok", "gc-exception"])
+def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
+    worker_env, monkeypatch, capsys, gc_raises
+):
+    coordinator = _Coordinator(worker_env["home"])
+    coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
+    events = []
+    referenced = {"/runs/keep"}
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def references(leases_dir):
+        assert leases_dir == coordinator.claim.receipt_path.parent
+        events.append("references")
+        return referenced
+
+    def gc(roots, **kwargs):
+        assert roots is referenced
+        assert kwargs == {"limit": 2}  # bounds the pass to two sweeps
+        events.append("gc")
+        if gc_raises:
+            raise RuntimeError("best-effort GC failed")
+        return []
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        assert write_boundary is boundary
+        events.append("runner")
+        return 0, "edited", "", False, 1
+
+    monkeypatch.setattr(dispatch._agy_account_pool, "referenced_worker_run_roots", references)
+    monkeypatch.setattr(worker_mod, "gc_unreferenced_worker_run_roots", gc)
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+    )
+    assert code == 0, capsys.readouterr().err
+    assert events == ["references", "gc", "prepare", "runner"]
+    assert coordinator.claim.released is True
+
+
+def test_dispatch_runs_gc_once_even_when_it_rotates(worker_env, monkeypatch, capsys):
+    leases = worker_env["pool"] / "leases"
+
+    class _Rotating(_Coordinator):
+        def rotate_claim(self, **kwargs):
+            kwargs["current_claim"].release()
+            self.claim = _Claim(worker_env["home"])
+            self.claim.account_alias_hash = "worker-2"
+            self.claim.receipt_path = leases / "b.receipt.json"
+            return self.claim
+
+    coordinator = _Rotating(worker_env["home"])
+    coordinator.claim.receipt_path = leases / "a.receipt.json"
+    events = []
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        events.append("runner")
+        if events.count("runner") == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 1
+        return 0, "edited", "", False, 1
+
+    monkeypatch.setattr(
+        dispatch._agy_account_pool,
+        "referenced_worker_run_roots",
+        lambda leases_dir: events.append("references") or set(),
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "gc_unreferenced_worker_run_roots",
+        lambda roots, **kwargs: events.append("gc") or [],
+    )
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    # the first attempt provably changed nothing, so its quota failure rotates
+    journal = dispatch.direct_operation_journal
+    monkeypatch.setattr(journal, "capture_source_baseline", lambda cwd: object())
+    monkeypatch.setattr(journal, "observed_changed_paths_since", lambda cwd, baseline: [])
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+    )
+    assert code == 0, capsys.readouterr().err
+    assert coordinator.claim.account_alias_hash == "worker-2"
+    assert events == ["references", "gc", "prepare", "runner", "prepare", "runner"]
+
+
+@pytest.mark.parametrize(("elapsed", "gc_runs"), [(700.0, True), (800.0, False)])
+def test_dispatch_gc_gate_uses_the_remaining_budget(
+    worker_env, monkeypatch, capsys, elapsed, gc_runs
+):
+    coordinator = _Coordinator(worker_env["home"])
+    coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
+    events = []
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        events.append("runner")
+        return 0, "edited", "", False, 1
+
+    # 900 s budget: the dispatch starts at 0 and reaches the gate at 700 s (200 s
+    # left, GC runs) or 800 s (100 s left, below the 120 s floor, GC skipped).
+    ticks = iter([0.0])
+    monkeypatch.setattr(dispatch, "_monotonic", lambda: next(ticks, elapsed))
+    monkeypatch.setattr(
+        dispatch._agy_account_pool,
+        "referenced_worker_run_roots",
+        lambda leases_dir: events.append("references") or set(),
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        "gc_unreferenced_worker_run_roots",
+        lambda roots, **kwargs: events.append("gc") or [],
+    )
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+        timeout=900,
+    )
+    assert code == 0, capsys.readouterr().err
+    gc_events = ["references", "gc"] if gc_runs else []
+    assert events == [*gc_events, "prepare", "runner"]
 
 
 def test_dispatch_worker_launch_failure_does_not_rotate(worker_env, monkeypatch, capsys):

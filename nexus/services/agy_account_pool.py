@@ -64,6 +64,42 @@ def timeout_cooldown_minutes() -> int:
     return max(1, value)
 
 
+def referenced_worker_run_roots(leases_dir: Path) -> Optional[set[str]]:
+    """Collect worker roots from every lease receipt; any unreadable receipt fails closed."""
+    try:
+        try:
+            entries = os.scandir(leases_dir)
+        except FileNotFoundError:
+            return set()
+        roots: set[str] = set()
+        with entries:
+            for entry in entries:
+                if entry.name.startswith(".") or not entry.name.endswith(".receipt.json"):
+                    continue
+                if entry.is_symlink():
+                    return None
+                fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        return None
+                    chunks = []
+                    while chunk := os.read(fd, 65536):
+                        chunks.append(chunk)
+                finally:
+                    os.close(fd)
+                receipt = json.loads(b"".join(chunks))
+                if not isinstance(receipt, dict):
+                    return None
+                if "worker_run_root" in receipt:
+                    root = receipt["worker_run_root"]
+                    if not isinstance(root, str):
+                        return None
+                    roots.add(root)
+        return roots
+    except Exception:
+        return None
+
+
 class AgyAccountPoolError(RuntimeError):
     """Base exception for AGY Account Pool operations."""
 

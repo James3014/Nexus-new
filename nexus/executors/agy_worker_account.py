@@ -347,6 +347,69 @@ def _worker_user_has_no_process(user: str, run_command: Callable[..., Any]) -> b
     return completed.returncode == 1 and not pid_lines and not (completed.stderr or "").strip()
 
 
+def gc_unreferenced_worker_run_roots(
+    referenced: Optional[set[str]],
+    *,
+    runs_dir: Path = WORKER_RUNS,
+    older_than: float = 86400.0,
+    limit: int = 2,
+    run_command: Callable[..., Any] = subprocess.run,
+    now: Optional[float] = None,
+) -> list[str]:
+    """Sweep and remove old worker roots no lease references; any error stops GC (#2905)."""
+    removed: list[str] = []
+    try:
+        if referenced is None or os.environ.get(KEEP_RUN_ROOT_ENV) == "1":
+            return removed
+        info = runs_dir.lstat()
+        owner = os.getuid()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner:
+            return removed
+        if not _worker_user_has_no_process(WORKER_USER, run_command):
+            return removed
+        runs_dir_resolved = runs_dir.resolve()
+        cutoff = (time.time() if now is None else now) - older_than
+        candidates = []
+        with os.scandir(runs_dir) as entries:
+            for entry in entries:
+                if len(entry.name) != 32 or not set(entry.name) <= _RUN_TAG_DIGITS:
+                    continue
+                root = runs_dir_resolved / entry.name
+                info = root.lstat()
+                if (
+                    not stat.S_ISDIR(info.st_mode)
+                    or info.st_uid != owner
+                    or str(root) in referenced
+                    or max(info.st_mtime, info.st_ctime) >= cutoff
+                ):
+                    continue
+                candidates.append((max(info.st_mtime, info.st_ctime), root, info))
+        for _, root, info in sorted(candidates)[: max(0, limit)]:
+            # Probe again before each sweep: the wrapper sweep kills run-tagged
+            # and run-cwd processes, so a run that started after the first probe
+            # must stop the pass rather than be swept.
+            if not _worker_user_has_no_process(WORKER_USER, run_command):
+                break
+            if sweep_run_root(root, run_command=run_command) != "CLEAN":
+                continue
+            current = root.lstat()
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or current.st_uid != owner
+                or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
+            ):
+                continue
+            shutil.rmtree(root, ignore_errors=True)
+            if os.path.lexists(root):
+                _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_LEFTOVER root=%s", root)
+            else:
+                _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_REMOVED root=%s", root)
+                removed.append(str(root))
+    except Exception:
+        pass
+    return removed
+
+
 def _valid_receipt_run_root(receipt: Mapping[str, Any]) -> Optional[tuple[Path, list[int]]]:
     """Validate the worker fields a lease receipt carries (same checks as the journal path)."""
     if receipt.get("worker_run_as_user") != WORKER_USER:
