@@ -248,6 +248,24 @@ def sweep_run_root(
     run_command: Optional[Callable[..., Any]] = None,
 ) -> str:
     """Sweep a validated worker run through the wrapper with a fixed launch environment."""
+    return sweep_run_root_report(
+        run_root, pid_tokens, user=user, wrapper=wrapper, run_command=run_command
+    )[0]
+
+
+def sweep_run_root_report(
+    run_root: Path,
+    pid_tokens: Iterable[str] = (),
+    *,
+    user: str = WORKER_USER,
+    wrapper: Path = WORKER_WRAPPER,
+    run_command: Optional[Callable[..., Any]] = None,
+) -> tuple[str, str]:
+    """``sweep_run_root``'s verdict and the wrapper's last stdout line ("" if none).
+
+    The line tells an explicit ``AGY_WORKER_SWEEP unclean <pids>`` report apart
+    from a sweep that sudo or the wrapper refused (also verdict ``UNCLEAN``).
+    """
     try:
         completed = (run_command or subprocess.run)(
             sweep_argv(run_root, pid_tokens, user=user, wrapper=wrapper),
@@ -260,11 +278,12 @@ def sweep_run_root(
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return "SWEEP_ERROR"
+        return "SWEEP_ERROR", ""
     lines = (completed.stdout or "").strip().splitlines()
-    if completed.returncode == 0 and lines and lines[-1] == "AGY_WORKER_SWEEP clean":
-        return "CLEAN"
-    return "UNCLEAN"
+    last = lines[-1] if lines else ""
+    if completed.returncode == 0 and last == "AGY_WORKER_SWEEP clean":
+        return "CLEAN", last
+    return "UNCLEAN", last
 
 
 _PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
@@ -825,6 +844,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     receipts: list = field(default_factory=list, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
     _worker_verdict: Optional[str] = field(default=None, repr=False)
+    # The wrapper itself reported survivors ("AGY_WORKER_SWEEP unclean <pids>").
+    _worker_reported_unclean: bool = field(default=False, repr=False)
+    _worker_left: list = field(default_factory=list, repr=False)
     _receipt_events: set = field(default_factory=set, repr=False)
 
     launch_env = LAUNCH_ENV
@@ -854,15 +876,18 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             return
         if event != "WORKER_LAUNCH" and "WORKER_LAUNCH" not in self._receipt_events:
             return  # no launch line was written: sweep/cleanup lines would orphan
-        self._receipt_events.add(event)
         try:
             obj = {"event": event, "attempt": self.receipt_context.get("attempt"), **fields}
             line = RECEIPT_PREFIX + json.dumps(obj, sort_keys=True) + "\n"
-            self.receipts.append(obj)
             sys.stderr.write(line)
             sys.stderr.flush()
         except Exception:
-            pass  # a closed stderr or an unserialisable value must not break the run
+            # A closed stderr or an unserialisable value must not break the run.
+            # The event stays unrecorded, so a launch line that was not written
+            # keeps the sweep and cleanup lines from appearing without it.
+            return
+        self._receipt_events.add(event)
+        self.receipts.append(obj)
 
     def _emit_launch_receipt(self) -> None:
         if self.receipt_context is None or "WORKER_LAUNCH" in self._receipt_events:
@@ -884,9 +909,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         self._emit_receipt("WORKER_LAUNCH", **fields)
 
     def _emit_sweep_receipt(self, result: str) -> None:
-        # The wrapper reports bare pids of survivors, not pid:lstart tokens, and
-        # sweep_run_root only returns its verdict, so there is nothing to list.
-        self._emit_receipt("WORKER_SWEEP", result=result, left=[])
+        # left: the bare pids the wrapper reported as surviving (it does not
+        # report pid:lstart tokens); [] unless the wrapper said "unclean".
+        self._emit_receipt("WORKER_SWEEP", result=result, left=list(self._worker_left))
 
     def _sweep_result(self, started: bool) -> str:
         """The receipt word for the verdict ``sweep`` just stored in ``_swept``.
@@ -927,12 +952,19 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
         baseline = self._baseline
         tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
-        self._worker_verdict = sweep_run_root(
+        self._worker_verdict, last = sweep_run_root_report(
             self.run_root,
             tokens,
             user=self.worker_user,
             wrapper=self.wrapper,
             run_command=self.run_command,
+        )
+        words = last.split()
+        self._worker_reported_unclean = words[:2] == ["AGY_WORKER_SWEEP", "unclean"]
+        self._worker_left = (
+            [w for w in words[2:] if w.isdigit() and len(w) <= 10][:64]
+            if self._worker_reported_unclean
+            else []
         )
         return self._worker_verdict == "CLEAN"
 
@@ -962,7 +994,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             tracked = self._tracker.stop() if self._tracker is not None else set()
             self._worker_swept = self._worker_sweep(tracked)
             owner_clean = super().sweep()
-            self._swept = bool(owner_clean and (self._worker_swept or not started))
+            # The marker lives in the run root, which the worker account can
+            # write, so its absence may excuse a refused sweep (sudo refuses the
+            # launch and the sweep alike) but never the wrapper's own report
+            # that worker processes of this run survived.
+            excused = not started and not self._worker_reported_unclean
+            self._swept = bool(owner_clean and (self._worker_swept or excused))
         except BaseException:
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
             raise

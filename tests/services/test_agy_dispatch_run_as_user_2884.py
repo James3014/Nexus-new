@@ -2093,7 +2093,9 @@ def test_sweep_receipt_is_clean_only_when_the_sweep_verdict_is_clean(
     assert [m["event"] for m in receipts] == ["WORKER_LAUNCH", "WORKER_SWEEP", "WORKER_CLEANUP"]
     assert receipts[0]["operation_id"] == "agyop_test"
     assert {m["attempt"] for m in receipts} == {2}
-    assert receipts[1]["result"] == expected and receipts[1]["left"] == []
+    assert receipts[1]["result"] == expected
+    # left: only the pids the wrapper itself reported as surviving
+    assert receipts[1]["left"] == (["4242"] if "unclean 4242" in run.stdout else [])
     assert boundary.receipts == receipts  # what the dispatcher can read back
 
 
@@ -2209,13 +2211,64 @@ def test_a_failing_stderr_never_breaks_launch_sweep_or_cleanup(worker_env, monke
     boundary.cleanup()
     monkeypatch.undo()
     assert boundary.worker_failure is None and not boundary.run_root.exists()
-    # the work still came back, and the receipts were recorded for the dispatcher
+    # the work still came back; nothing was written, so nothing is recorded
     assert (worker_env["target"] / "src" / "a.py").read_text() == "worker edit\n"
-    assert [m["event"] for m in boundary.receipts] == [
-        "WORKER_LAUNCH",
-        "WORKER_SWEEP",
-        "WORKER_CLEANUP",
-    ]
+    assert boundary.receipts == []
+
+
+class _FirstWriteFails:
+    """stderr whose first write fails (the launch line), then works."""
+
+    def __init__(self, real):
+        self.real, self.failed = real, False
+
+    def write(self, text):
+        if not self.failed:
+            self.failed = True
+            raise ValueError("I/O operation on closed file")
+        return self.real.write(text)
+
+    def flush(self):
+        self.real.flush()
+
+
+def test_an_unwritten_launch_line_keeps_sweep_and_cleanup_lines_out(
+    worker_env, monkeypatch, capsys
+):
+    boundary = _prepare(worker_env, run_command=_Run("AGY_WORKER_SWEEP clean\n"))
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    monkeypatch.setattr(sys, "stderr", _FirstWriteFails(sys.stderr))
+    _launched(boundary, monkeypatch)
+    assert boundary.sweep() is True
+    boundary.cleanup()
+    # no orphan WORKER_SWEEP / WORKER_CLEANUP without the launch line that names run_root
+    assert _worker_receipts(capsys.readouterr().err) == []
+    assert boundary.receipts == []
+
+
+def test_a_deleted_start_marker_never_hides_the_wrappers_unclean_report(
+    worker_env, monkeypatch, capsys
+):
+    # The worker account can write the run root and delete the marker; the
+    # wrapper's own report of surviving processes must still make it unclean.
+    boundary = _receipt_boundary(
+        worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP unclean 4242 77\n", 3), started=False
+    )
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    assert receipts[1]["result"] == "unclean" and receipts[1]["left"] == ["4242", "77"]
+
+
+def test_sweep_report_returns_the_wrappers_last_line(tmp_path):
+    run = _Run("noise\nAGY_WORKER_SWEEP unclean 9\n", 3)
+    assert worker_mod.sweep_run_root_report(tmp_path, run_command=run) == (
+        "UNCLEAN",
+        "AGY_WORKER_SWEEP unclean 9",
+    )
+    assert worker_mod.sweep_run_root(tmp_path, run_command=run) == "UNCLEAN"
+    refused = _Run("", 1)
+    assert worker_mod.sweep_run_root_report(tmp_path, run_command=refused) == ("UNCLEAN", "")
 
 
 def test_an_unserialisable_receipt_value_is_swallowed(worker_env, monkeypatch, capsys):
