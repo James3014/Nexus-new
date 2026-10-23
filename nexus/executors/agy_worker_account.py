@@ -428,9 +428,9 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
                 with os.fdopen(fd, "wb") as out:
                     while chunk := os.read(src_fd, 1 << 20):
                         out.write(chunk)
-                    os.fchmod(out.fileno(), 0o755)
                     out.flush()
                     os.fsync(out.fileno())
+                    os.fchmod(out.fileno(), 0o755)  # readable only once complete
                 os.replace(tmp, worker_agy)
             except BaseException:
                 try:
