@@ -48,6 +48,11 @@ Trust and limits (#2885 review r1):
   ``/bin/sh`` ...), so a tagged system binary is only found by the tracker or
   by its cwd.  Copy-back does not trust the run dir, so this is not a safety
   hole.
+* ``sudo`` closes the inherited lease-lock descriptor (#2888), so only the dispatcher
+  holds the account flock.  Before launch it records the run in its lease receipt
+  (``AccountLeaseClaim.mark_worker_run``) and it never releases the claim after an
+  unclean worker sweep.  If the dispatcher dies, the pool removes the receipt only
+  after ``reap_orphaned_worker_run`` proves the run is gone.
 * A clean sweep does not prove that no worker process survived (one that
   clears its environment, leaves the run directory and was never seen by the
   tracker is not found).  Copy-back therefore re-opens the workdir with
@@ -78,6 +83,7 @@ from nexus.executors import cli_worker
 from nexus.executors.agy_dispatch_boundary import (
     AGY_WRITE_BOUNDARY_UNAVAILABLE,
     KEEP_RUN_ROOT_ENV,
+    WORKER_RUNS_DIR,
     AgyDispatchBoundary,
     AgyWriteBoundaryError,
     _prepare_run_home_keychain,
@@ -96,8 +102,10 @@ from nexus.executors.agy_write_admission import (
 
 WORKER_USER = "_cairnwork_worker"
 WORKER_RUN_GROUP = "_cairnwork_wrun"
-WORKER_ROOT = Path("/Users/Shared/cairnwork-worker")
-WORKER_RUNS = WORKER_ROOT / "worker-runs"
+# One definition of the worker-runs path, owned by the boundary module so the
+# default (Owner-uid) profile can deny it without importing this module (#2888).
+WORKER_RUNS = WORKER_RUNS_DIR
+WORKER_ROOT = WORKER_RUNS.parent
 WORKER_BIN = WORKER_ROOT / "bin"
 WORKER_WRAPPER = WORKER_BIN / "agy-worker-exec"
 WORKER_AGY = WORKER_BIN / "agy"
@@ -262,6 +270,105 @@ def sweep_run_root(
 
 
 _PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+
+PS_PATH = "/bin/ps"
+PS_TIMEOUT_SECONDS = 10.0
+_RUN_TAG_DIGITS = frozenset("0123456789abcdef")
+
+
+def _worker_user_has_no_process(user: str, run_command: Callable[..., Any]) -> bool:
+    """True only when ``ps`` positively reports that ``user`` owns no process.
+
+    Observed on macOS 27: ``ps -U <user> -o pid=`` exits 0 and prints one pid per
+    line while the user owns a process; when the user exists and owns none it
+    exits 1 with empty stdout and empty stderr; for an unknown user it also exits
+    1 with empty stdout but names the user on stderr.  Only the first no-match
+    shape counts, so a missing user, a ``ps`` failure or an unexpected exit code
+    never reads as "nothing runs".
+    """
+    try:
+        completed = run_command(
+            [PS_PATH, "-U", user, "-o", "pid="],
+            cwd="/",
+            env=dict(_PS_ENV),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    pid_lines = [line for line in (completed.stdout or "").splitlines() if line.strip()]
+    return completed.returncode == 1 and not pid_lines and not (completed.stderr or "").strip()
+
+
+def _valid_receipt_run_root(receipt: Mapping[str, Any]) -> Optional[tuple[Path, list[int]]]:
+    """Validate the worker fields a lease receipt carries (same checks as the journal path)."""
+    if receipt.get("worker_run_as_user") != WORKER_USER:
+        return None
+    raw_root = receipt.get("worker_run_root")
+    if not isinstance(raw_root, str) or not raw_root or "\x00" in raw_root:
+        return None
+    root = Path(raw_root)
+    if (
+        ".." in root.parts
+        or str(root.resolve()) != raw_root
+        or root.parent != WORKER_RUNS.resolve()
+        or len(root.name) != 32
+        or not set(root.name) <= _RUN_TAG_DIGITS
+    ):
+        return None
+    root_id = receipt.get("worker_run_root_id")
+    if (
+        not isinstance(root_id, list)
+        or len(root_id) != 2
+        or not all(isinstance(item, int) and not isinstance(item, bool) for item in root_id)
+    ):
+        return None
+    return root, list(root_id)
+
+
+def reap_orphaned_worker_run(
+    receipt: Mapping[str, Any],
+    *,
+    run_command: Callable[..., Any] = subprocess.run,
+) -> bool:
+    """True only when the worker run named by an orphaned lease receipt is proven gone (#2888).
+
+    A ``--run-as-user`` agy runs through ``sudo``, which closes the inherited
+    lease lock, so a free lock and a dead dispatcher PID prove nothing about it.
+    The account pool keeps such a receipt unless this returns True; it never
+    raises (any error is "not proven").
+
+    * Run root still there: it must be the directory the dispatcher created
+      (a real directory we own with the recorded device and inode); the worker
+      sweep must report CLEAN; then the run root is removed.
+    * Run root gone: that proves nothing (a surviving worker keeps an unlinked
+      cwd, and the wrapper refuses a missing root), so only "the worker account
+      owns no process at all" counts.  That is stricter than needed when other
+      worker runs are active, which only delays reclaiming the account.
+    """
+    try:
+        validated = _valid_receipt_run_root(receipt)
+        if validated is None:
+            return False
+        root, root_id = validated
+        if not os.path.lexists(root):
+            return _worker_user_has_no_process(WORKER_USER, run_command)
+        info = os.lstat(root)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or [info.st_dev, info.st_ino] != root_id
+        ):
+            return False
+        if sweep_run_root(root, run_command=run_command) != "CLEAN":
+            return False
+        shutil.rmtree(root, ignore_errors=True)
+        return not os.path.lexists(root)
+    except Exception:
+        return False
 
 
 def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str]:

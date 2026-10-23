@@ -824,6 +824,14 @@ class _Claim:
             "Lease", (), {"execution_env": {"HOME": str(home), "PATH": "/usr/bin:/bin"}}
         )()
         self.released = False
+        self.marks: list[dict[str, Any]] = []
+
+    def mark_worker_run(self, *, run_root: str, run_root_id: list[int], run_as_user: str) -> None:
+        self.marks.append({
+            "run_root": run_root,
+            "run_root_id": run_root_id,
+            "run_as_user": run_as_user,
+        })
 
     def release(self) -> None:
         self.released = True
@@ -1003,7 +1011,14 @@ def test_default_dispatch_uses_the_unchanged_boundary(tmp_path, monkeypatch, cap
         "--x",
     ]
     assert not hasattr(seen["boundary"], "launch_env")
-    assert "worker-runs" not in seen["boundary"].profile
+    # #2888: the Owner-uid profile denies the worker-runs tree right after the head
+    # (and never allows a path inside it); the worker profile has its own rules.
+    head = "(version 1)\n(allow default)\n"
+    deny = f'(deny file-read* file-write* (subpath "{boundary_mod.WORKER_RUNS_DIR}"))\n'
+    profile = seen["boundary"].profile
+    assert profile.startswith(head) and deny in profile
+    assert profile[len(head) :].splitlines(keepends=True)[1] == deny
+    assert profile.count(str(boundary_mod.WORKER_RUNS_DIR)) == 1
     assert dispatch._popen_env(seen["boundary"], {"A": "1"}) == {"A": "1"}
     assert dispatch._popen_env(None, {"A": "1"}) == {"A": "1"}
 

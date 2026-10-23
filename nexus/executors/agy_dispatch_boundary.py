@@ -63,6 +63,10 @@ from nexus.executors.agy_write_admission import (
 
 AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
 KEEP_RUN_ROOT_ENV = "NEXUS_AGY_KEEP_RUN_ROOT"
+# Per-run directories of the worker account (#2884).  ``agy_worker_account``
+# imports this module, so the one definition lives here and it re-exports it as
+# ``WORKER_RUNS``.
+WORKER_RUNS_DIR = Path("/Users/Shared/cairnwork-worker/worker-runs")
 
 
 class AgyWriteBoundaryError(RuntimeError):
@@ -133,6 +137,28 @@ def _prepare_run_home_keychain(run_home: Path) -> str:
     except AgyAccountPoolManagerError as exc:
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{exc}") from exc
     return KEYCHAIN_NOT_APPLICABLE if keychain is None else KEYCHAIN_ISOLATED
+
+
+_PROFILE_HEAD = "(version 1)\n(allow default)\n"
+
+
+def _deny_worker_runs(profile: str, runs_dir: Path = WORKER_RUNS_DIR) -> str:
+    """Deny the default (Owner-uid) profile any access to the worker-runs tree (#2888).
+
+    The Owner is in the worker run group, so without this rule a sandboxed agy
+    running as the Owner could read the per-run HOMEs and work copies of
+    concurrent ``--run-as-user`` runs.  The rule goes right after the head like
+    ``cross_run_profile``'s; nothing later in this profile allows a path inside
+    worker-runs.  The ``--run-as-user`` profile is built elsewhere and has its
+    own, narrower cross-run rules.
+    """
+    if not profile.startswith(_PROFILE_HEAD):
+        raise ValueError("unexpected base profile shape")
+    rule = (
+        ";; #2888: an Owner-uid run may not read or write the worker account's run directories\n"
+        f'(deny file-read* file-write* (subpath "{_sbpl_path(runs_dir)}"))\n'
+    )
+    return _PROFILE_HEAD + rule + profile[len(_PROFILE_HEAD) :]
 
 
 def _with_literal_writes(profile: str, files: Iterable[Path]) -> str:
@@ -308,11 +334,13 @@ def prepare_accept_edits_boundary(
         keychain_state = _prepare_run_home_keychain(run_home)
         try:
             profile = _with_literal_writes(
-                build_seatbelt_profile(
-                    run_root=run_root,
-                    writable_target=target_real,
-                    run_home=run_home,
-                    source_home=worker_home(source_env),
+                _deny_worker_runs(
+                    build_seatbelt_profile(
+                        run_root=run_root,
+                        writable_target=target_real,
+                        run_home=run_home,
+                        source_home=worker_home(source_env),
+                    )
                 ),
                 extras,
             )

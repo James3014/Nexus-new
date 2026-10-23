@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -124,6 +125,68 @@ class AccountLeaseClaim:
             self.manager.release(self.lease)
         except Exception:
             pass
+
+    def mark_worker_run(
+        self,
+        *,
+        run_root: str,
+        run_root_id: list[int],
+        run_as_user: str,
+    ) -> None:
+        """Record in the durable receipt that a worker-account agy is about to run (#2888).
+
+        Under ``--run-as-user`` the provider runs through ``sudo``, which closes
+        inherited descriptors, so only the dispatcher holds the account flock.
+        A dispatcher that dies leaves a free lock and a dead owner PID although
+        the worker agy may still run on the account's session files.  The three
+        ``worker_*`` fields let the next claimer's reclaim path prove the run is
+        gone before it removes the receipt (``_reclaim_orphaned_desktop_receipt``).
+
+        The receipt is rewritten atomically (same-directory temp file, fsync,
+        ``os.replace``) and only while it still names this claim and this
+        process.  Any mismatch or I/O error raises ``AgyAccountPoolError``;
+        the caller must then not launch.
+        """
+        if self.released:
+            raise AgyAccountPoolError("AGY_WORKER_LEASE_MARK_REFUSED:claim_released")
+        receipt_path = Path(self.receipt_path)
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise AgyAccountPoolError("AGY_WORKER_LEASE_MARK_REFUSED:receipt_unreadable") from exc
+        pid = receipt.get("pid") if isinstance(receipt, dict) else None
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("account_alias_hash") != self.account_alias_hash
+            or receipt.get("lease_id_hash") != self.lease_id_hash
+            or not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid != os.getpid()
+        ):
+            raise AgyAccountPoolError("AGY_WORKER_LEASE_MARK_REFUSED:receipt_identity_mismatch")
+        updated = dict(receipt)
+        updated["worker_run_root"] = run_root
+        updated["worker_run_root_id"] = list(run_root_id)
+        updated["worker_run_as_user"] = run_as_user
+        tmp_path = receipt_path.with_name(f".{receipt_path.name}.{secrets.token_hex(8)}.tmp")
+        created = False
+        try:
+            mode = stat.S_IMODE(os.stat(receipt_path).st_mode)
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            created = True
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                os.fchmod(handle.fileno(), mode)
+                handle.write(json.dumps(updated) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, receipt_path)
+        except (OSError, TypeError, ValueError) as exc:
+            if created:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            raise AgyAccountPoolError(f"AGY_WORKER_LEASE_MARK_FAILED:{type(exc).__name__}") from exc
 
     def abandon_parent_reference(self) -> None:
         """Drop only this process' lock reference while preserving durable lease evidence.
@@ -1314,6 +1377,10 @@ class CrossProcessLeaseCoordinator:
                             # identity proves nothing still runs on the
                             # account; remove that receipt and claim normally.
                             # Journal reconcilers accept ALREADY_ABSENT.
+                            # #2888: a ``--run-as-user`` receipt carries
+                            # ``worker_*`` fields (sudo closes the inherited
+                            # fd), so it is removed only after the worker run
+                            # is proven gone.
                             if receipt_path.exists() and not _reclaim_orphaned_desktop_receipt(
                                 receipt_path, candidate.alias_hash
                             ):
@@ -1498,6 +1565,11 @@ def _reclaim_orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: st
     Returns True only when the receipt was removed.  Any ambiguity (unreadable
     receipt, identity mismatch, non-desktop consumer, live or unprovable owner
     PID) preserves the receipt so the account stays fail-closed (#2717).
+
+    A receipt with ``worker_*`` fields (``AccountLeaseClaim.mark_worker_run``,
+    #2888) belongs to a ``--run-as-user`` dispatch whose agy ran through sudo
+    without the inherited lock, so it is removed only when
+    ``reap_orphaned_worker_run`` proves that run is gone.
     """
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -1518,6 +1590,24 @@ def _reclaim_orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: st
         or not _pid_is_dead(pid)
     ):
         return False
+    if any(isinstance(key, str) and key.startswith("worker_") for key in receipt):
+        # #2888: a ``--run-as-user`` dispatch ran its agy under another uid
+        # through sudo, which closes the inherited lock fd, so a free lock and
+        # a dead owner prove nothing about that agy.  Remove the receipt only
+        # when the worker run is proven gone.
+        try:
+            from nexus.executors.agy_worker_account import reap_orphaned_worker_run
+
+            reaped = reap_orphaned_worker_run(receipt) is True
+        except Exception:
+            reaped = False
+        if not reaped:
+            _LOG.warning(
+                "AGY_ORPHANED_WORKER_RECEIPT_PRESERVED account=%s lease=%s",
+                account_alias_hash,
+                receipt.get("lease_id_hash"),
+            )
+            return False
     try:
         receipt_path.unlink()
     except OSError:
