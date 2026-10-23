@@ -3393,6 +3393,7 @@ def test_core_bound_fanout_is_not_dispatched_on_unproven_diagnosis(tmp_path, dia
 def test_core_bound_fanout_is_dispatched_on_proven_diagnosis(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
     sidecar = _DiagnosisSidecar(store, {"status": "PROVEN", "hypothesis": "", "next_probe": ""})
     result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
         "o/r", 80, "title", body
@@ -3407,6 +3408,7 @@ def test_core_bound_fanout_without_declared_diagnosis_is_dispatched(tmp_path):
     """#2895: a v1 envelope declares no diagnosis; it dispatches as before."""
     repo, _, contract, body, store = _setup(tmp_path)
     c = FakeC()
+    c.transport = SimpleNamespace(supports_core_mutation_binding=True)
     result = _automation(tmp_path, repo, store, c=c).run_issue("o/r", 81, "title", body)
 
     assert result["state"] == "COMPLETE"
