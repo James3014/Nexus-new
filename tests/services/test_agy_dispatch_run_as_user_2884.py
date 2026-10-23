@@ -701,6 +701,77 @@ def test_prepare_refresh_follows_a_symlinked_source_but_never_replaces_the_wrapp
         boundary.cleanup()
 
 
+def test_prepare_refresh_never_publishes_a_source_others_cannot_read(worker_env):
+    # The worker copy is world-readable: an owner-only file (a key, say) never lands there.
+    before = worker_env["worker_agy"].read_bytes()
+    worker_env["source_agy"].write_text("SECRET\n", encoding="utf-8")
+    os.chmod(worker_env["source_agy"], 0o700)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_source_unsafe"):
+        _prepare(worker_env)
+    assert worker_env["worker_agy"].read_bytes() == before
+    assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+
+
+def _swap_source_on_open(monkeypatch, source: Path, swap, *, after_open: bool) -> None:
+    """Run ``swap`` once, just before or just after the refresh opens the source."""
+    real_open = os.open
+    resolved = os.path.realpath(source)
+    pending = [swap]
+
+    def fake_open(path, flags, *args, **kwargs):
+        hit = pending and os.fspath(path) == resolved and not flags & os.O_WRONLY
+        if hit and not after_open:
+            pending.pop()()
+        fd = real_open(path, flags, *args, **kwargs)
+        if hit and after_open and pending:
+            pending.pop()()
+        return fd
+
+    monkeypatch.setattr(worker_mod.os, "open", fake_open)
+
+
+def test_prepare_refresh_refuses_a_source_swapped_for_a_symlink_before_open(
+    worker_env, monkeypatch
+):
+    before = worker_env["worker_agy"].read_bytes()
+    source = worker_env["source_agy"]
+    source.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    secret = source.with_name("owner-key")
+    secret.write_text("SECRET\n", encoding="utf-8")
+    os.chmod(secret, 0o600)
+
+    def swap():
+        source.unlink()
+        source.symlink_to(secret)
+
+    _swap_source_on_open(monkeypatch, source, swap, after_open=False)
+    with pytest.raises(
+        boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_refresh_failed:OSError"
+    ):
+        _prepare(worker_env)
+    assert worker_env["worker_agy"].read_bytes() == before
+    assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+
+
+def test_prepare_refresh_copies_the_checked_file_even_if_the_path_is_swapped_after_open(
+    worker_env, monkeypatch
+):
+    source = worker_env["source_agy"]
+    source.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    checked = source.read_bytes()
+    other = source.with_name("other-agy")
+    other.write_text("#!/bin/sh\necho swapped\n", encoding="utf-8")
+    os.chmod(other, 0o755)
+
+    _swap_source_on_open(monkeypatch, source, lambda: os.replace(other, source), after_open=True)
+    # The copy holds the bytes that were checked; the re-check then sees the
+    # source changed and refuses rather than launching.
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale"):
+        _prepare(worker_env)
+    assert worker_env["worker_agy"].read_bytes() == checked
+    assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+
+
 def test_prepare_refuses_a_bad_layout(worker_env, monkeypatch):
     runs = worker_env["runs"]
     os.chmod(runs, 0o2770)

@@ -356,35 +356,45 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     copy used to refuse every ``--run-as-user`` run until someone re-ran
     ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
     the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
-    0755, fsync, ``os.replace``.  The source must be a regular file that only
-    its owner (the Owner or root) can write.  The caller re-checks the copy
-    against the source afterwards.  The wrapper, which the sudoers rule names,
-    is never replaced here.
+    0755, fsync, ``os.replace``.  The source is opened once (``O_NOFOLLOW``)
+    and checked and copied through that descriptor, so a swap after the check
+    cannot change what is copied.  It must be a regular file that only its
+    owner (the Owner or root) can write and that everyone can already read and
+    execute: the worker copy is world-readable, so nothing else (a key file
+    swapped in, say) may ever be published there.  The caller re-checks the
+    copy against the source afterwards.  The wrapper, which the sudoers rule
+    names, is never replaced here.
     """
     try:
         real = Path(os.path.realpath(source_agy))
-        info = os.stat(real)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid not in (os.getuid(), 0)
-            or info.st_mode & 0o022
-        ):
-            raise _refuse("worker_agy_stale_source_unsafe")
-        tmp = worker_agy.with_name(f".{worker_agy.name}.{secrets.token_hex(8)}.tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        src_fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
-            with os.fdopen(fd, "wb") as out, open(real, "rb") as src:
-                shutil.copyfileobj(src, out, 1 << 20)
-                os.fchmod(out.fileno(), 0o755)
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(tmp, worker_agy)
-        except BaseException:
+            info = os.fstat(src_fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in (os.getuid(), 0)
+                or info.st_mode & 0o022
+                or info.st_mode & 0o005 != 0o005
+            ):
+                raise _refuse("worker_agy_stale_source_unsafe")
+            tmp = worker_agy.with_name(f".{worker_agy.name}.{secrets.token_hex(8)}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             try:
-                tmp.unlink()
-            except OSError:
-                pass
-            raise
+                with os.fdopen(fd, "wb") as out:
+                    while chunk := os.read(src_fd, 1 << 20):
+                        out.write(chunk)
+                    os.fchmod(out.fileno(), 0o755)
+                    out.flush()
+                    os.fsync(out.fileno())
+                os.replace(tmp, worker_agy)
+            except BaseException:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+        finally:
+            os.close(src_fd)
     except AgyWriteBoundaryError:
         raise
     except OSError as exc:
