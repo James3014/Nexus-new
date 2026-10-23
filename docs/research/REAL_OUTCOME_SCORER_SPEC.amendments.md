@@ -24,7 +24,7 @@ The v1 header names `SCORER_VERSION = "1.0.0"`. The scorer versions are:
 | `1.2.4` | opt-in OS sandbox for pytest runs (#2723), A9 below | unchanged from 1.2.3 with `--sandbox none` (the default); A9 adds a receipt field and an opt-in run mode |
 | `1.3.0` | opt-in spec v3 (#2709), A10 below | unchanged from 1.2.4 with `--spec-version v1` (the default: v1, or v2 for the GOLD port fallback). `--spec-version v3` scores under `REAL_OUTCOME_SCORER_SPEC.v3.md` (the same rules plus a metadata-only stub for the BASE project); those receipts record `spec_version: "v3"`, are left out of the headline and `v1_plus_v2`, and are counted in a separate `v3` summary block |
 | `1.3.1` | sandbox and cap hardening (#2751), A11 below | unchanged from 1.3.0. Under `--sandbox none` a label can change only for a task whose run actually hits an A6 cap, because sizes are now allocated bytes. Under `--sandbox os`, cap or host-disk trips caused by the candidate (its runs, its trees' growth, its survivors' leftover run directories) are `NOT_RUNNABLE`, so that task stays in the denominator. Host disk that is low for other reasons, or a cap pushed by bytes under another scoring's run parent, stops scoring with exit 8 and no receipt (infra). Survivors are reaped after each scoring. A version string too long for Python's int parser is `version_invalid` |
-| `1.3.2` | os-mode hardening follow-ups (#2740), A12 below | unchanged from 1.3.1. Under `--sandbox none` nothing changes. Under `--sandbox os` one case moves from a charge to an infra abort (a recovered disk when other users took most of the drop), and the candidate scope is reaped after every candidate run; see A12 |
+| `1.3.2` | os-mode hardening follow-ups (#2740), A12 below | unchanged from 1.3.1. Under `--sandbox none` nothing changes. Under `--sandbox os` one case moves from a charge to an infra abort (a recovered disk when other users took most of the drop), the candidate scope is reaped after every candidate run, and a candidate tree root that changes after the first candidate run is an infra abort; see A12 |
 
 Current scorer: `SCORER_VERSION = "1.3.2"`. Receipts record the version that wrote them.
 
@@ -497,10 +497,16 @@ test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
 - **Reap after every candidate-role run.** After each candidate-role run whose
   post-run disk check passed, the scorer reaps this scoring's candidate scope, the same
   scope and the same by-PID reaper as in A11 (a PID found by lsof under this scoring's
-  candidate run directories or candidate trees; never by name). The candidate tree
-  paths are used exactly as recorded (resolved) before any candidate code ran; they are
-  not resolved again, so a candidate that replaces its tree root with a symlink cannot
-  move the scope to another directory. This narrows the race
+  candidate run directories or candidate trees; never by name).
+- **Candidate tree binding.** The first candidate run of a scoring binds each candidate
+  tree path to where it resolves at that moment, before any candidate code ran (a tree
+  that is already a symlink then is refused). Every later `os` run, of any role, first
+  checks that no bound tree root is a symlink or resolves elsewhere; if one does, the
+  scorer stops with an infra abort (exit 8, no receipt) before confining, measuring or
+  reaping anything. The reap scope and the cap accounting use the bound paths and never
+  resolve a candidate tree again. Without this, a candidate that replaced its tree root
+  with a symlink could move the next run's sandbox write grant and the reap scope (and
+  so a SIGKILL) to another directory. The abort is loud: such a task is not scored. This narrows the race
   in which a survivor fills an unlinked file during a later GOLD_REF or BASE run and
   closes it before the next check. When the post-run check itself finds a shortfall,
   the existing shortfall reap runs there, as before. The reaper still re-checks every

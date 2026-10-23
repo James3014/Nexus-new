@@ -1502,6 +1502,9 @@ class PytestRunner:
         # A11 ("os"): candidate trees of this scoring -> their allocated size before their
         # first candidate run; growth beyond it is the candidate's.
         self._cand_tree_base: dict[str, int] = {}
+        # 1.3.2: each candidate tree as given (absolute, not resolved) -> its resolved
+        # path at first sight, before any candidate code ran (#2908 review).
+        self._cand_tree_alias: dict[str, str] = {}
         # A11 ("os"): host free bytes at the pre-run check of this scoring's first
         # candidate run (before any candidate code ran); None until then.
         self.free_start: int | None = None
@@ -1593,6 +1596,7 @@ class PytestRunner:
             errors += [f"runs/{e}" for e in clean_scratch_tmp(self.runs)]
         self.task_dir = None  # the next task scoring gets a fresh parent
         self._cand_tree_base.clear()
+        self._cand_tree_alias.clear()
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
@@ -1792,6 +1796,7 @@ class PytestRunner:
         del task_key  # the parent is random; the task key is not needed
         self.task_dir = None
         self._cand_tree_base.clear()
+        self._cand_tree_alias.clear()
         self.free_start = None
         self._candidate_ran = False
         self.reaped_pids = []
@@ -1892,6 +1897,20 @@ class PytestRunner:
         reaped = self.reap_survivors(trees, name_prefixes=names, resolved=True)
         self.reaped_pids += reaped
         return reaped
+
+    def _check_cand_tree_binding(self, tree: Path, role: str) -> None:
+        """1.3.2: bind each candidate tree path to its resolved location the first time a
+        candidate run sees it; afterwards every os run (any role) refuses, as an infra
+        abort, when a bound tree root is a symlink or resolves somewhere else."""
+        if role == CAND_ROLE:
+            given = os.path.abspath(tree)
+            if given not in self._cand_tree_alias:
+                if Path(given).is_symlink():
+                    raise ScratchInfraAbort(f"candidate_tree_root_is_symlink: {given}")
+                self._cand_tree_alias[given] = str(Path(given).resolve())
+        for given, bound in self._cand_tree_alias.items():
+            if Path(given).is_symlink() or str(Path(given).resolve()) != bound:
+                raise ScratchInfraAbort(f"candidate_tree_root_changed: {given}")
 
     def _reap_after_candidate_run(self) -> list[int]:
         """1.3.2 (#2740): the per-run reap, a separate step from the shortfall reap."""
@@ -2056,6 +2075,10 @@ class PytestRunner:
             junit.parent.mkdir(parents=True, exist_ok=True)
             junit.unlink(missing_ok=True)
         else:
+            # 1.3.2 (#2908 review): a candidate tree whose root became a symlink, or now
+            # resolves elsewhere, would move the sandbox write grant and the reap scope
+            # to another directory. Check before anything is confined, measured or reaped.
+            self._check_cand_tree_binding(tree, role)
             # A11: before every "os" run (charged to the candidate or infra if low).
             self._check_disk_for_run(tree, target, run_idx, role, run_dir, pre=True)
             if self.runs.is_symlink() or run_dir.parent.is_symlink():
@@ -2092,7 +2115,8 @@ class PytestRunner:
         # A11: one walk per measurement point (total and candidate share together). A
         # candidate run's tree is measured too: its growth is that run's growth.
         if run_dir is not None and role == CAND_ROLE:
-            self._cand_tree_base.setdefault(str(Path(tree).resolve()), tree_bytes(tree))
+            resolved_tree = self._cand_tree_alias[os.path.abspath(tree)]
+            self._cand_tree_base.setdefault(resolved_tree, tree_bytes(Path(resolved_tree)))
         cand_trees = list(self._cand_tree_base) if run_dir is not None else []
         usage_before = self.measure(run_dir, cand_trees)
         before = usage_before.total

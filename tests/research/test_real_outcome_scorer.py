@@ -5183,6 +5183,41 @@ def test_reap_scope_is_not_redirected_by_a_tree_root_symlink_swap(tmp_path, monk
     assert 4343 in killed
 
 
+def test_tree_root_swap_between_runs_is_refused_before_confine_or_reap(tmp_path, monkeypatch):
+    """#2908 Codex review r2: after one candidate run the candidate replaces its tree root
+    with a symlink to another directory. The next run (e.g. a majority rerun) must not
+    register that directory as scope or confine into it: infra abort before anything."""
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    cand = _leak_tree(tmp_path / "c", 0)
+    env = LocalEnv().get("fixture-repo", cand)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert runner.run(env, cand, "c", "tests", (), 0, ros.CAND_ROLE).outcomes
+    bound = set(runner._cand_tree_base)
+    assert bound == {str(cand.resolve())}
+    cand.rename(tmp_path / "c-moved")
+    cand.symlink_to(outside)
+    confined: list[Path] = []
+    monkeypatch.setattr(runner, "_confine", lambda env, tree, run_dir: confined.append(tree) or [])
+    for role in (ros.CAND_ROLE, "BASE+T"):
+        with pytest.raises(ros.ScratchInfraAbort, match="candidate_tree_root_changed"):
+            runner.run(env, cand, "c", "tests", (), 1, role)
+    assert confined == []
+    assert set(runner._cand_tree_base) == bound
+    assert all(str(outside.resolve()) not in str(p) for call in runner.reaped_prefixes for p in call)
+
+
+def test_a_candidate_tree_that_is_a_symlink_at_first_sight_is_refused(tmp_path, monkeypatch):
+    runner = _unconfined_os_runner(tmp_path / "work" / "scratch", monkeypatch)
+    real = _leak_tree(tmp_path / "real", 0)
+    link = tmp_path / "c"
+    link.symlink_to(real)
+    env = LocalEnv().get("fixture-repo", link)
+    with pytest.raises(ros.ScratchInfraAbort, match="candidate_tree_root_is_symlink"):
+        runner.run(env, link, "c", "tests", (), 0, ros.CAND_ROLE)
+    assert runner._cand_tree_base == {}
+
+
 def test_none_mode_is_unchanged_by_1_3_2(tmp_path, monkeypatch):
     """--sandbox none goes through none of the 1.3.2 code: no disk check, no reap, no
     rerun loop, even for a candidate-role run."""
