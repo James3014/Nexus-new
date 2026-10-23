@@ -497,7 +497,14 @@ test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
 - **Reap after every candidate-role run.** After each candidate-role run whose
   post-run disk check passed, the scorer reaps this scoring's candidate scope, the same
   scope and the same by-PID reaper as in A11 (a PID found by lsof under this scoring's
-  candidate run directories or candidate trees; never by name).
+  candidate run directories or candidate trees; never by name). This narrows the race
+  in which a survivor fills an unlinked file during a later GOLD_REF or BASE run and
+  closes it before the next check. When the post-run check itself finds a shortfall,
+  the existing shortfall reap runs there, as before. The reaper still re-checks every
+  killed PID (`kill(pid, 0)`, zombies count as gone, up to 5 seconds) and, if one
+  survives, fails closed: infra abort, exit 8, no receipt, nothing cached. Reaped PIDs
+  appear in `reaped_pids` in the scorer's timing file (not the sealed receipt), which
+  can now list PIDs from the per-run reaps (a diagnostic field).
 - **Candidate tree binding.** The first candidate run of a scoring binds each candidate
   tree path to where it resolves at that moment, before any candidate code ran (a tree
   that is already a symlink then is refused). Every later `os` run, of any role, first
@@ -506,14 +513,7 @@ test pins it). The spec rules (v1, v2, v3) and all labels are unchanged.
   reaping anything. The reap scope and the cap accounting use the bound paths and never
   resolve a candidate tree again. Without this, a candidate that replaced its tree root
   with a symlink could move the next run's sandbox write grant and the reap scope (and
-  so a SIGKILL) to another directory. The abort is loud: such a task is not scored. This narrows the race
-  in which a survivor fills an unlinked file during a later GOLD_REF or BASE run and
-  closes it before the next check. When the post-run check itself finds a shortfall,
-  the existing shortfall reap runs there, as before. The reaper still re-checks every
-  killed PID (`kill(pid, 0)`, zombies count as gone, up to 5 seconds) and, if one
-  survives, fails closed: infra abort, exit 8, no receipt, nothing cached. Reaped PIDs
-  appear in `reaped_pids` in the scorer's timing file (not the sealed receipt), which
-  can now list PIDs from the per-run reaps (a diagnostic field).
+  so a SIGKILL) to another directory. The abort is loud: such a task is not scored.
 - **Shared-host baseline.** The baseline `free_start` (free space at the pre-run check
   of the scoring's first candidate run) already decided the still-below case in 1.3.1
   (A11, rule 5). 1.3.2 applies the same baseline to the post-run recovered case (rule
