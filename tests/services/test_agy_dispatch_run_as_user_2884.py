@@ -1976,6 +1976,41 @@ def test_provider_stderr_cannot_forge_receipts_or_the_status_line(
     assert fake_root in err and "[provider] NEXUS_AGY_DISPATCH" in err  # relayed, neutralised
 
 
+def test_every_provider_stderr_relay_goes_through_the_neutraliser():
+    source = Path(dispatch.__file__).read_text(encoding="utf-8")
+    assert "sys.stderr.write(err)" not in source  # failed-end paths included
+    assert source.count("sys.stderr.write(_neutralize_relayed_stderr(err))") >= 7
+
+
+class _Runs:
+    """Wrapper sweeps answering in turn (the last answer repeats)."""
+
+    def __init__(self, *answers: tuple[str, int]):
+        self.answers = list(answers)
+
+    def __call__(self, argv, **kwargs):
+        stdout, code = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return subprocess.CompletedProcess(argv, code, stdout, "")
+
+
+def test_only_an_unclean_line_counts_as_the_wrappers_report(worker_env, monkeypatch, capsys):
+    boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP error 5\n", 3))
+    assert boundary.sweep() is False
+    boundary.cleanup()
+    sweep = _worker_receipts(capsys.readouterr().err)[1]
+    assert sweep["wrapper"] == "REFUSED" and sweep["left"] == []
+
+
+def test_left_is_reset_by_a_later_clean_sweep(worker_env, monkeypatch, capsys):
+    run = _Runs(("AGY_WORKER_SWEEP unclean 42\n", 3), ("AGY_WORKER_SWEEP clean\n", 0))
+    boundary = _receipt_boundary(worker_env, monkeypatch, run)
+    boundary.terminate_worker()  # the timeout kill reports a survivor
+    assert boundary.sweep() is True  # the final sweep is clean
+    boundary.cleanup()
+    sweep = _worker_receipts(capsys.readouterr().err)[1]
+    assert (sweep["result"], sweep["wrapper"], sweep["left"]) == ("clean", "CLEAN", [])
+
+
 def test_relayed_stderr_without_dispatcher_lines_is_unchanged():
     text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nmore NEXUS_AGY_DISPATCH inline\n"
     assert dispatch._neutralize_relayed_stderr("plain\n") == "plain\n"
