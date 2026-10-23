@@ -107,6 +107,7 @@ def _layout(tmp_path: Path) -> dict[str, Any]:
     os.chmod(wrapper, 0o755)
     source_agy = base / "owner-bin" / "agy"
     source_agy.parent.mkdir()
+    os.chmod(source_agy.parent, 0o755)  # the refresh refuses a group-writable source dir
     source_agy.write_text("#!/bin/sh\necho agy\n", encoding="utf-8")
     os.chmod(source_agy, 0o755)
     worker_agy = bin_dir / "agy"
@@ -728,6 +729,34 @@ def test_prepare_refresh_refuses_a_source_in_a_directory_others_can_write(worker
     assert worker_env["worker_agy"].read_bytes() == before
 
 
+def test_prepare_refresh_refuses_a_symlinked_source_planted_in_a_directory_others_can_write(
+    worker_env,
+):
+    # An early PATH entry others can write: realpath would land somewhere safe.
+    before = worker_env["worker_agy"].read_bytes()
+    real = worker_env["source_agy"]
+    real.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    planted_dir = real.parent.parent / "shared-path-dir"
+    planted_dir.mkdir()
+    os.chmod(planted_dir, 0o777)
+    (planted_dir / "agy").symlink_to(real)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_source_unsafe"):
+        _prepare(worker_env, source_agy=planted_dir / "agy")
+    assert worker_env["worker_agy"].read_bytes() == before
+
+
+def test_prepare_refresh_refuses_a_worker_bin_others_can_write(worker_env):
+    before = worker_env["worker_agy"].read_bytes()
+    worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    os.chmod(worker_env["bin"], 0o775)
+    try:
+        with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_bin_unsafe"):
+            _prepare(worker_env)
+    finally:
+        os.chmod(worker_env["bin"], 0o755)
+    assert worker_env["worker_agy"].read_bytes() == before
+
+
 def _swap_on_open(monkeypatch, name: str, swap, *, after_open: bool) -> None:
     """Run ``swap`` once, just before or just after the refresh opens ``name``.
 
@@ -780,6 +809,7 @@ def test_prepare_refresh_refuses_a_directory_swapped_for_a_symlink_mid_path(
     base = worker_env["source_agy"].parent
     sub = base / "agy-dir"
     sub.mkdir()
+    os.chmod(sub, 0o755)
     real = sub / "agy"
     real.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
     os.chmod(real, 0o755)
@@ -824,7 +854,7 @@ def test_prepare_refresh_copies_the_checked_file_even_if_the_path_is_swapped_aft
     )
     # The copy holds the bytes that were checked; the re-check then sees the
     # source changed and refuses rather than launching.
-    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale"):
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale$"):
         _prepare(worker_env)
     assert worker_env["worker_agy"].read_bytes() == checked
     assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
@@ -2104,6 +2134,19 @@ def _receipt_boundary(layout, monkeypatch, run, *, owner_clean=True, started=Tru
     if not started:
         (boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).unlink()
     return boundary
+
+
+def test_launch_receipt_says_whether_this_prepare_refreshed_the_worker_agy(
+    worker_env, monkeypatch, capsys
+):
+    worker_env["source_agy"].write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    for _ in range(2):  # stale copy (refreshed), then current copy (left alone)
+        boundary = _receipt_boundary(worker_env, monkeypatch, _Run("AGY_WORKER_SWEEP clean\n"))
+        boundary.sweep()
+        boundary.cleanup()
+    receipts = _worker_receipts(capsys.readouterr().err)
+    launches = [m for m in receipts if m["event"] == "WORKER_LAUNCH"]
+    assert [m["worker_agy_refreshed"] for m in launches] == [True, False]
 
 
 def _forging_worker_runner(seen: dict, forged: str):

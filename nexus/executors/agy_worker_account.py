@@ -388,11 +388,13 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     copy used to refuse every ``--run-as-user`` run until someone re-ran
     ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
     the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
-    0755, fsync, ``os.replace``.  The resolved source is opened component by
-    component without following any symlink, every directory on the way owned
-    by the Owner or root and not writable by others (a root-owned sticky
-    directory such as ``/tmp`` is allowed), and the file is checked and copied
-    through that one descriptor.  It must be a regular file that only
+    0755, fsync, ``os.replace``, into a bin directory that must be the Owner's
+    and not writable by others.  The directory that names the source and every
+    directory on its resolved path must be owned by the Owner or root and not
+    writable by others (a root-owned sticky directory such as ``/tmp`` is
+    allowed); the resolved source is opened component by component without
+    following any symlink and checked and copied through that one descriptor.
+    It must be a regular file that only
     its owner (the Owner or root) can write and that is marked readable and
     executable by everyone: the worker copy is world-readable, so an
     owner-only file is never published there.  The caller re-checks the copy
@@ -400,6 +402,16 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     is never replaced here.
     """
     try:
+        bin_info = os.lstat(worker_agy.parent)
+        if (
+            not stat.S_ISDIR(bin_info.st_mode)
+            or bin_info.st_uid != os.getuid()
+            or bin_info.st_mode & 0o022
+        ):
+            raise _refuse("worker_bin_unsafe")
+        # A symlink planted in a directory others can write (an early PATH
+        # entry, say) is refused before realpath follows it.
+        _check_source_dir(os.stat(Path(source_agy).parent))
         src_fd = _open_source_without_symlinks(Path(os.path.realpath(source_agy)))
         try:
             info = os.fstat(src_fd)
