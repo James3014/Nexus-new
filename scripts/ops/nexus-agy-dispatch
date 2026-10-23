@@ -2030,9 +2030,13 @@ def run_agy(
                 # account stays locked while any provider outlives this dispatcher.
                 pass_fds=(lease_fd,) if isinstance(lease_fd, int) and lease_fd > 2 else (),
             )
-        except OSError:
+        except OSError as exc:
+            # Only an error the child reported (exec or chdir, which carries a
+            # filename) proves no child is left: CPython reaps that child before
+            # raising.  An OSError in the parent after fork may leave sudo
+            # running, so the launch still counts as possibly started.
             launch_failed = getattr(write_boundary, "launch_failed_before_spawn", None)
-            if launch_failed is not None:
+            if launch_failed is not None and exc.filename is not None:
                 launch_failed()
             raise
     except BaseException:

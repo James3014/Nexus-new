@@ -1292,7 +1292,13 @@ def test_mark_happens_before_the_provider_popen(worker_env, monkeypatch, capsys)
 
 
 @pytest.mark.parametrize(
-    "error", [OSError("no spawn"), KeyboardInterrupt(), RuntimeError("unknown")]
+    "error",
+    [
+        FileNotFoundError(2, "No such file or directory", "/usr/bin/sudo"),  # child-reported
+        OSError("parent side, after fork"),  # no filename: a child may exist
+        KeyboardInterrupt(),
+        RuntimeError("unknown"),
+    ],
 )
 def test_provider_popen_only_oserror_clears_launch_attempt_and_releases(
     worker_env, monkeypatch, error
@@ -1317,13 +1323,13 @@ def test_provider_popen_only_oserror_clears_launch_attempt_and_releases(
 
     monkeypatch.setattr(worker_mod.AgyWorkerAccountBoundary, "before_launch", before)
     monkeypatch.setattr(dispatch.subprocess, "Popen", popen)
-    if isinstance(error, RuntimeError):
-        assert _run_dispatch(worker_env, _Coordinator(claim), None) != 0
-    else:
+    no_spawn = isinstance(error, OSError) and error.filename is not None
+    if no_spawn or isinstance(error, KeyboardInterrupt):
         with pytest.raises(type(error)):
             _run_dispatch(worker_env, _Coordinator(claim), None)
+    else:  # possibly launched: the unproven sweep ends the attempt with a failure
+        assert _run_dispatch(worker_env, _Coordinator(claim), None) != 0
     (boundary,) = boundaries
-    no_spawn = isinstance(error, OSError)
     assert boundary.sweep_verdict_clean is no_spawn
     assert boundary._launch_attempted is not no_spawn
     assert claim.released is no_spawn
@@ -1376,6 +1382,51 @@ def test_cleanup_scrubs_known_credentials_only_on_an_unclean_sweep(
     if not clean:
         assert boundary.run_root.is_dir() and unrelated.read_text() == "keep"
         assert (worker_env["home"] / TOKEN).read_text() == "token"
+
+
+def test_kept_root_scrub_reports_a_renamed_credential_directory_as_not_scrubbed(
+    worker_env, monkeypatch, capsys
+) -> None:
+    # A surviving worker renamed .gemini (token inside): the known names are
+    # gone but the token is not, so the receipt must not claim a scrub.
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+    moved = boundary.run_home / ".gemini-moved"
+    (boundary.run_home / ".gemini").rename(moved)
+    boundary.cleanup()
+    cleanup = next(
+        r
+        for r in _worker_receipts_in(capsys.readouterr().err)
+        if r["event"] == "WORKER_CLEANUP"
+    )
+    assert cleanup["credentials_scrubbed"] is False
+    assert (moved / "antigravity-cli" / TOKEN.name).is_file()  # left for the reaper's rmtree
+
+
+def test_kept_root_scrub_reports_a_hard_linked_credential_as_not_scrubbed(
+    worker_env, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(worker_mod, "_check_runs_dir", lambda path, _gid: path)
+    monkeypatch.setattr(worker_mod, "_prepare_run_home_keychain", lambda _home: "not_applicable")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"attempt": 1}
+    _launch(boundary)
+    kept = boundary.run_root / "work" / "token-copy"
+    kept.parent.mkdir(exist_ok=True)
+    os.link(boundary.run_home / TOKEN, kept)
+    boundary.cleanup()
+    cleanup = next(
+        r
+        for r in _worker_receipts_in(capsys.readouterr().err)
+        if r["event"] == "WORKER_CLEANUP"
+    )
+    assert cleanup["credentials_scrubbed"] is False
+    assert not os.path.lexists(boundary.run_home / TOKEN)
 
 
 @pytest.mark.parametrize("swap", ["leaf", "parent", "home", "directory", "unlink-error"])

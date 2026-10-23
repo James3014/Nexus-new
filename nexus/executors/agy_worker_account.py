@@ -106,6 +106,9 @@ from nexus.executors.agy_write_admission import (
 )
 from nexus.services.agy_account_pool import AGY_ISOLATED_KEYCHAIN
 
+# Credentials the dispatcher may place in a run HOME (scrubbed from a kept root).
+_RUN_HOME_CREDENTIALS = (*AGY_RUN_HOME_COPIED_FILES, AGY_RUN_HOME_SETTINGS, AGY_ISOLATED_KEYCHAIN)
+
 WORKER_USER = "_cairnwork_worker"
 WORKER_RUN_GROUP = "_cairnwork_wrun"
 # One definition of the worker-runs path, owned by the boundary module so the
@@ -1027,8 +1030,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     _worker_reported_unclean: bool = field(default=False, repr=False)
     _worker_left: list = field(default_factory=list, repr=False)
     _receipt_events: set = field(default_factory=set, repr=False)
-    # None: the run root was not kept, so there was nothing to scrub.
+    # None: no scrub ran (nothing launched, or the sweep was clean).
     _credentials_scrubbed: Optional[bool] = field(default=None, repr=False)
+    _scrub_paths: tuple = field(default=(), repr=False)
     _unclean_tokens: list[str] = field(default_factory=list, repr=False)
 
     launch_env = LAUNCH_ENV
@@ -1128,6 +1132,11 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
 
     def before_launch(self) -> None:
+        # Recorded before any worker process exists: what a kept root's scrub
+        # must find and remove (#2905 N2).
+        self._scrub_paths = tuple(
+            rel for rel in _RUN_HOME_CREDENTIALS if os.path.lexists(self.run_home / rel)
+        )
         # Everything the dispatcher wrote (copied session files, settings,
         # keychain, permission profile, workdir copy) becomes usable by the
         # run group; the agy settings and the profile stay read-only.
@@ -1297,10 +1306,13 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
 
         Open each directory relative to an already open parent with O_NOFOLLOW:
         lstat on just the leaf would still follow a swapped parent symlink.
-        Missing files are already scrubbed; directories and I/O failures are not.
+        True only if every credential present at launch is still at its name
+        and is unlinked.  A missing file or directory (a surviving worker may
+        have renamed it), a directory in its place, a file with other hard
+        links, or an I/O failure all report False.
         """
         clean = True
-        for relative in (*AGY_RUN_HOME_COPIED_FILES, AGY_RUN_HOME_SETTINGS, AGY_ISOLATED_KEYCHAIN):
+        for relative in self._scrub_paths:
             fds: list[int] = []
             try:
                 flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -1311,10 +1323,10 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 info = os.lstat(relative.name, dir_fd=fds[-1])
                 if stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
                     os.unlink(relative.name, dir_fd=fds[-1])
+                    if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+                        clean = False  # the bytes live on under another name
                 else:
                     clean = False
-            except FileNotFoundError:
-                pass
             except OSError:
                 clean = False
             finally:
