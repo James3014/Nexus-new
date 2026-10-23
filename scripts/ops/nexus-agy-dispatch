@@ -228,6 +228,23 @@ def _resolve_dispatch_limits(
     }
 
 
+def _unresolved_dispatch_limits(
+    timeout: int | None,
+    provider_stall_seconds: float | None,
+    empty_output_min_bytes: int | None = None,
+) -> dict[str, Any]:
+    """No profile kind (contract rejected): report the explicit limits, mark the rest unresolved."""
+    return {
+        "timeout_seconds": timeout,
+        "timeout_source": "explicit" if timeout is not None else "unresolved",
+        "provider_stall_seconds": provider_stall_seconds,
+        "provider_stall_source": (
+            "explicit" if provider_stall_seconds is not None else "unresolved"
+        ),
+        "empty_output_min_bytes": empty_output_min_bytes,
+    }
+
+
 def _stream_no_progress_seconds() -> float:
     return _bounded_positive_seconds(
         "NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS",
@@ -4394,16 +4411,9 @@ def dispatch_run(
     except ValueError as exc:
         failure_kind = str(exc)
         contract_failure = f"DISPATCH_CONTRACT_REJECTED:{failure_kind}"
-        # No profile kind: report the explicit limits, mark the rest unresolved.
-        limits = {
-            "timeout_seconds": timeout,
-            "timeout_source": "explicit" if timeout is not None else "unresolved",
-            "provider_stall_seconds": provider_stall_seconds,
-            "provider_stall_source": (
-                "explicit" if provider_stall_seconds is not None else "unresolved"
-            ),
-            "empty_output_min_bytes": empty_output_min_bytes,
-        }
+        limits = _unresolved_dispatch_limits(
+            timeout, provider_stall_seconds, empty_output_min_bytes
+        )
         _operation_hook(
             operation_hook,
             phase="CONTRACT_REJECTED",
@@ -5740,6 +5750,10 @@ def dispatch_run(
                 exclude_hashes.add(claim.account_alias_hash)
                 claim.release()
                 if empty_output_failovers >= 1 or rotations >= max_failovers:
+                    if out:
+                        sys.stdout.write(out)
+                    if err:
+                        sys.stderr.write(err)
                     emit_run_meta({
                         "status": "failed",
                         "attempts": attempts,
@@ -5761,11 +5775,18 @@ def dispatch_run(
                         model_family=scoped_model_family,
                     ))
                 except _PoolClaimFailure as exc:
+                    _operation_hook(
+                        operation_hook,
+                        pool_queue=dict(pool_queue),
+                        **_pool_busy_failure_fields(exc),
+                    )
                     emit_run_meta({
-                        "status": "failed",
+                        "status": "pool_busy" if exc.busy else "pool_exhausted",
                         "attempts": attempts,
                         "rotations": rotations,
-                        "failure_kind": AGY_EMPTY_OUTPUT,
+                        "failure_kind": (
+                            "AGY_ACCOUNT_POOL_BUSY" if exc.busy else AGY_EMPTY_OUTPUT
+                        ),
                         "wall_ms": total_wall_ms,
                         **_pool_claim_meta(exc),
                     })
@@ -6063,11 +6084,18 @@ def _spawn_background_operation(
         )
     except ValueError:
         # Preserve background launch semantics: the child owns contract rejection.
-        profile_kind = "INVALID"
-    limits = _resolve_dispatch_limits(
-        profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
-    )
-    resolved_provider_stall_seconds = limits["provider_stall_seconds"]
+        profile_kind = None
+    if profile_kind is None:
+        limits = _unresolved_dispatch_limits(
+            timeout, provider_stall_seconds, empty_output_min_bytes
+        )
+    else:
+        limits = _resolve_dispatch_limits(
+            profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+        )
+    resolved_provider_stall_seconds = _resolve_dispatch_limits(
+        profile_kind or "INVALID", timeout, provider_stall_seconds
+    )["provider_stall_seconds"]
     resolved_stream_no_progress_seconds = (
         _stream_no_progress_seconds()
         if stream_no_progress_seconds is None
@@ -6441,12 +6469,15 @@ def _run_background_operation(
             temp_command_permissions=temp_command_permissions,
         )
     except ValueError:
-        _seed_profile_kind = "INVALID"
-    state.update(
-        _resolve_dispatch_limits(
-            _seed_profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+        state.update(
+            _unresolved_dispatch_limits(timeout, provider_stall_seconds, empty_output_min_bytes)
         )
-    )
+    else:
+        state.update(
+            _resolve_dispatch_limits(
+                _seed_profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+            )
+        )
     state["empty_output_failovers"] = 0
     state_lock = threading.Lock()
     sweep_write_lock = threading.Lock()
