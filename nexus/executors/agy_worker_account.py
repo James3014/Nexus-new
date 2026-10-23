@@ -478,6 +478,107 @@ def _check_owner_executable(path: Path, reason: str) -> None:
         raise _refuse(f"{reason}_not_owner_0755")
 
 
+def _check_source_dir(info: os.stat_result) -> None:
+    """Only the Owner or root may change a directory on the agy source path."""
+    sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid not in (os.getuid(), 0)
+        or (info.st_mode & 0o022 and not sticky_root)
+    ):
+        raise _refuse("worker_agy_stale_source_unsafe")
+
+
+def _open_source_without_symlinks(real: Path) -> int:
+    """Open ``real`` one component at a time, never following a symlink.
+
+    Each directory is opened relative to the previous one with
+    ``O_DIRECTORY|O_NOFOLLOW`` and checked on its descriptor, so a component
+    swapped for a symlink anywhere on the path (by mode bits or an ACL) fails
+    the open instead of redirecting it to a file behind a private directory.
+    """
+    dir_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _check_source_dir(os.fstat(dir_fd))
+        for name in real.parts[1:-1]:
+            next_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+            _check_source_dir(os.fstat(dir_fd))
+        return os.open(real.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
+    """Replace the worker's stale agy copy with the Owner's agy (#2888 follow-up).
+
+    agy updates itself in the Owner's home, which the worker account cannot
+    enter, so the worker runs a copy in the Owner-owned worker bin.  A stale
+    copy used to refuse every ``--run-as-user`` run until someone re-ran
+    ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
+    the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
+    0755, fsync, ``os.replace``, into a bin directory that must be the Owner's
+    and not writable by others.  The directory that names the source and every
+    directory on its resolved path must be owned by the Owner or root and not
+    writable by others (a root-owned sticky directory such as ``/tmp`` is
+    allowed); the resolved source is opened component by component without
+    following any symlink and checked and copied through that one descriptor.
+    It must be a regular file that only
+    its owner (the Owner or root) can write and that is marked readable and
+    executable by everyone: the worker copy is world-readable, so an
+    owner-only file is never published there.  The caller re-checks the copy
+    against the source afterwards.  The wrapper, which the sudoers rule names,
+    is never replaced here.
+    """
+    try:
+        bin_info = os.lstat(worker_agy.parent)
+        if (
+            not stat.S_ISDIR(bin_info.st_mode)
+            or bin_info.st_uid != os.getuid()
+            or bin_info.st_mode & 0o022
+        ):
+            raise _refuse("worker_bin_unsafe")
+        # A symlink planted in a directory others can write (an early PATH
+        # entry, say) is refused before realpath follows it.
+        _check_source_dir(os.stat(Path(source_agy).parent))
+        src_fd = _open_source_without_symlinks(Path(os.path.realpath(source_agy)))
+        try:
+            info = os.fstat(src_fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in (os.getuid(), 0)
+                or info.st_mode & 0o022
+                or info.st_mode & 0o005 != 0o005
+            ):
+                raise _refuse("worker_agy_stale_source_unsafe")
+            tmp = worker_agy.with_name(f".{worker_agy.name}.{secrets.token_hex(8)}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as out:
+                    while chunk := os.read(src_fd, 1 << 20):
+                        out.write(chunk)
+                    out.flush()
+                    os.fsync(out.fileno())
+                    # 0755 on purpose: the worker account executes this copy;
+                    # set only once the bytes are complete.
+                    os.fchmod(out.fileno(), 0o755)  # nosec B103
+                    os.fsync(out.fileno())  # and the mode durable before the rename
+                os.replace(tmp, worker_agy)
+            except BaseException:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+        finally:
+            os.close(src_fd)
+    except AgyWriteBoundaryError:
+        raise
+    except OSError as exc:
+        raise _refuse(f"worker_agy_stale_refresh_failed:{type(exc).__name__}") from exc
+
+
 # ---------------------------------------------------------------------------
 # copy-in / copy-back
 # ---------------------------------------------------------------------------
@@ -969,6 +1070,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     # sha256 of the reference wrapper that prepare_worker_account_boundary
     # verified against the installed copy (receipt field only).
     wrapper_sha256: str = ""
+    # True when prepare replaced a stale worker agy copy before this run.
+    worker_agy_refreshed: bool = False
     # Set by the dispatcher ({"operation_id", "attempt"}); None = emit no receipts.
     receipt_context: Optional[dict] = field(default=None, repr=False)
     receipts: list = field(default_factory=list, repr=False)
@@ -1037,6 +1140,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 "pid": None,
                 "lstart": None,
                 "wrapper_sha256": self.wrapper_sha256,
+                "worker_agy_refreshed": self.worker_agy_refreshed,
             }
         except Exception:
             return  # no launch line: the caller rejects a run without one
@@ -1249,8 +1353,15 @@ def prepare_worker_account_boundary(
     if _sha256_file(Path(wrapper)) != wrapper_sha256:
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
-    if not source_agy or _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+    if not source_agy:
         raise _refuse("worker_agy_stale")
+    worker_agy_refreshed = False
+    if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+        _refresh_worker_agy(Path(source_agy), Path(worker_agy))
+        worker_agy_refreshed = True
+        _check_owner_executable(Path(worker_agy), "worker_agy")
+        if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+            raise _refuse("worker_agy_stale")  # the source changed during the copy
     source_target = Path(os.path.realpath(Path(target).expanduser()))
     if not source_target.is_dir():
         raise _refuse("target_missing")
@@ -1328,4 +1439,5 @@ def prepare_worker_account_boundary(
         workdir_identity=workdir_identity,
         run_command=run_command,
         wrapper_sha256=wrapper_sha256,
+        worker_agy_refreshed=worker_agy_refreshed,
     )
