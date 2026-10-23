@@ -48,6 +48,11 @@ Trust and limits (#2885 review r1):
   ``/bin/sh`` ...), so a tagged system binary is only found by the tracker or
   by its cwd.  Copy-back does not trust the run dir, so this is not a safety
   hole.
+* ``sudo`` closes the inherited lease-lock descriptor (#2888), so only the dispatcher
+  holds the account flock.  Before launch it records the run in its lease receipt
+  (``AccountLeaseClaim.mark_worker_run``) and it never releases the claim after an
+  unclean worker sweep.  If the dispatcher dies, the pool removes the receipt only
+  after ``reap_orphaned_worker_run`` proves the run is gone.
 * A clean sweep does not prove that no worker process survived (one that
   clears its environment, leaves the run directory and was never seen by the
   tracker is not found).  Copy-back therefore re-opens the workdir with
@@ -60,11 +65,14 @@ Trust and limits (#2885 review r1):
 
 from __future__ import annotations
 
+import errno
 import grp
 import hashlib
 import json
+import logging
 import os
 import pwd
+import re
 import secrets
 import shutil
 import stat
@@ -79,12 +87,14 @@ from nexus.executors import cli_worker
 from nexus.executors.agy_dispatch_boundary import (
     AGY_WRITE_BOUNDARY_UNAVAILABLE,
     KEEP_RUN_ROOT_ENV,
+    WORKER_RUNS_DIR,
     AgyDispatchBoundary,
     AgyWriteBoundaryError,
     _prepare_run_home_keychain,
     boundary_available,
 )
 from nexus.executors.agy_write_admission import (
+    AGY_RUN_HOME_COPIED_FILES,
     AGY_RUN_HOME_SETTINGS,
     TARGET_AGY_CUSTOMIZATION_PATHS,
     CredentialPathOverlapError,
@@ -94,11 +104,17 @@ from nexus.executors.agy_write_admission import (
     materialize_run_home,
     worker_home,
 )
+from nexus.services.agy_account_pool import AGY_ISOLATED_KEYCHAIN
+
+# Credentials the dispatcher may place in a run HOME (scrubbed from a kept root).
+_RUN_HOME_CREDENTIALS = (*AGY_RUN_HOME_COPIED_FILES, AGY_RUN_HOME_SETTINGS, AGY_ISOLATED_KEYCHAIN)
 
 WORKER_USER = "_cairnwork_worker"
 WORKER_RUN_GROUP = "_cairnwork_wrun"
-WORKER_ROOT = Path("/Users/Shared/cairnwork-worker")
-WORKER_RUNS = WORKER_ROOT / "worker-runs"
+# One definition of the worker-runs path, owned by the boundary module so the
+# default (Owner-uid) profile can deny it without importing this module (#2888).
+WORKER_RUNS = WORKER_RUNS_DIR
+WORKER_ROOT = WORKER_RUNS.parent
 WORKER_BIN = WORKER_ROOT / "bin"
 WORKER_WRAPPER = WORKER_BIN / "agy-worker-exec"
 WORKER_AGY = WORKER_BIN / "agy"
@@ -127,6 +143,9 @@ RECEIPT_PREFIX = "NEXUS_AGY_DISPATCH "
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
 
 
+_LOG = logging.getLogger(__name__)
+
+
 def _refuse(reason: str) -> AgyWriteBoundaryError:
     return AgyWriteBoundaryError(
         f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:{AGY_WORKER_ACCOUNT_REFUSED}:{reason}"
@@ -135,9 +154,17 @@ def _refuse(reason: str) -> AgyWriteBoundaryError:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise _refuse("hash_target_not_regular")
+            while chunk := os.read(fd, 1 << 20):
+                digest.update(chunk)
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise _refuse(f"hash_target_unreadable:{type(exc).__name__}") from exc
     return digest.hexdigest()
 
 
@@ -288,17 +315,193 @@ def sweep_run_root_report(
 
 _PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
 
+PS_PATH = "/bin/ps"
+PS_TIMEOUT_SECONDS = 10.0
+_RUN_TAG_DIGITS = frozenset("0123456789abcdef")
 
-def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str]:
+
+def _worker_user_has_no_process(user: str, run_command: Callable[..., Any]) -> bool:
+    """True only when ``ps`` positively reports that ``user`` owns no process.
+
+    Observed on macOS 27: ``ps -U <user> -o pid=`` exits 0 and prints one pid per
+    line while the user owns a process; when the user exists and owns none it
+    exits 1 with empty stdout and empty stderr; for an unknown user it also exits
+    1 with empty stdout but names the user on stderr.  Only the first no-match
+    shape counts, so a missing user, a ``ps`` failure or an unexpected exit code
+    never reads as "nothing runs".
+    """
+    try:
+        completed = run_command(
+            [PS_PATH, "-U", user, "-o", "pid="],
+            cwd="/",
+            env=dict(_PS_ENV),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=PS_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    pid_lines = [line for line in (completed.stdout or "").splitlines() if line.strip()]
+    return completed.returncode == 1 and not pid_lines and not (completed.stderr or "").strip()
+
+
+def _valid_receipt_run_root(receipt: Mapping[str, Any]) -> Optional[tuple[Path, list[int]]]:
+    """Validate the worker fields a lease receipt carries (same checks as the journal path)."""
+    if receipt.get("worker_run_as_user") != WORKER_USER:
+        return None
+    raw_root = receipt.get("worker_run_root")
+    if not isinstance(raw_root, str) or not raw_root or "\x00" in raw_root:
+        return None
+    root = Path(raw_root)
+    if (
+        ".." in root.parts
+        or str(root.resolve()) != raw_root
+        or root.parent != WORKER_RUNS.resolve()
+        or len(root.name) != 32
+        or not set(root.name) <= _RUN_TAG_DIGITS
+    ):
+        return None
+    root_id = receipt.get("worker_run_root_id")
+    if (
+        not isinstance(root_id, list)
+        or len(root_id) != 2
+        or not all(isinstance(item, int) and not isinstance(item, bool) for item in root_id)
+    ):
+        return None
+    return root, list(root_id)
+
+
+def _run_root_is_the_recorded_directory(root: Path, root_id: list[int]) -> bool:
+    """True when ``root`` is a real directory we own with the recorded device and inode.
+
+    False when it is gone or is anything else (a different inode after a reboot, a
+    replaced directory, a file, another owner); other ``OSError`` propagates.
+    """
+    try:
+        info = os.lstat(root)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+            return False
+        raise
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.getuid()
+        and [info.st_dev, info.st_ino] == root_id
+    )
+
+
+def reap_orphaned_worker_run(
+    receipt: Mapping[str, Any],
+    *,
+    run_command: Callable[..., Any] = subprocess.run,
+) -> bool:
+    """True only when the worker run named by an orphaned lease receipt is proven gone (#2888).
+
+    A ``--run-as-user`` agy runs through ``sudo``, which closes the inherited
+    lease lock, so a free lock and a dead dispatcher PID prove nothing about it.
+    The account pool keeps such a receipt unless this returns True; it never
+    raises (any error is "not proven").
+
+    * The recorded run root is still there (a real directory we own with the
+      recorded device and inode): the per-run wrapper sweep must report CLEAN;
+      then the run root is removed best-effort.  A leftover tree after a clean
+      sweep is logged but still proves the run gone, as the dispatcher's own
+      cleanup releases on a clean sweep regardless.
+    * The run root is gone, or is not the directory the dispatcher created (a
+      different inode after a reboot, a replaced directory): nothing is swept or
+      removed, and only "the worker account owns no process at all" counts (a
+      surviving worker keeps an unlinked cwd, and the wrapper refuses a missing
+      root).  That is stricter than needed while other worker runs are active,
+      which only delays reclaiming the account.
+    """
+    try:
+        validated = _valid_receipt_run_root(receipt)
+        if validated is None:
+            return False
+        if "worker_unclean_tokens" in receipt:
+            tokens = receipt["worker_unclean_tokens"]
+            if not isinstance(tokens, list) or len(tokens) > 64:
+                return False
+            for token in tokens:
+                if not isinstance(token, str) or not re.fullmatch(
+                    r"[1-9][0-9]{0,9}:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)_"
+                    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)_"
+                    r"[0-9]{1,2}_[0-9]{2}:[0-9]{2}:[0-9]{2}_[0-9]{4}",
+                    token,
+                ):
+                    return False
+                pid, started = token.split(":", 1)
+                if int(pid) <= 1:
+                    return False
+                time.strptime(started, "%a_%b_%d_%H:%M:%S_%Y")
+            alive = pid_start_tokens(
+                (int(t.split(":", 1)[0]) for t in tokens), since=None, strict=True
+            )
+            if set(tokens).intersection(alive):
+                return False
+            # The run ended unclean: a survivor may have forked and exited, or
+            # cleared its env and left the run cwd, beyond both the tokens and
+            # the per-run sweep.  Only an idle worker account proves it gone.
+            if not _worker_user_has_no_process(WORKER_USER, run_command):
+                return False
+        root, root_id = validated
+        if not _run_root_is_the_recorded_directory(root, root_id):
+            return _worker_user_has_no_process(WORKER_USER, run_command)
+        if sweep_run_root(root, run_command=run_command) != "CLEAN":
+            return False
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.lexists(root):
+            _LOG.warning("AGY_WORKER_RUN_ROOT_LEFTOVER_AFTER_CLEAN_SWEEP root=%s", root)
+        return True
+    except Exception:
+        return False
+
+
+def pid_start_tokens(
+    pids: Iterable[int],
+    *,
+    since: Optional[float],
+    strict: bool = False,
+    owners: Optional[set[int]] = None,
+) -> list[str]:
     """``pid:<lstart>`` for each live pid started at/after ``since`` (1 s margin).
 
     A pid ps does not report has exited and is dropped; ``since=None`` keeps
-    every reported pid.
+    every reported pid. ``strict`` refuses errors or incomplete ps output instead
+    of treating an uncertain probe as an exited process (orphan-reap proof).
+    ``owners`` drops a pid only when both its real and effective uid are known
+    and neither is in the set; an unknown owner keeps the pid.
     """
     wanted = sorted({int(p) for p in pids if int(p) > 1})
     lines: list[str] = []
+    reported: set[int] = set()
     # One pid per call: ps rejects the whole list when one pid is out of range.
     for pid in wanted:
+        if owners is not None:
+            # Real and effective uid: a worker process that ran another user's
+            # setuid binary keeps its real uid, which `ps -U` also matches.
+            try:
+                owner = subprocess.run(
+                    ["ps", "-o", "ruid=,uid=", "-p", str(pid)],
+                    env=_PS_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                uids = owner.stdout.split()
+                if (
+                    owner.returncode == 0
+                    and not owner.stderr.strip()
+                    and len(uids) == 2
+                    and all(u.isascii() and u.isdigit() for u in uids)
+                    and not {int(u) for u in uids} & owners
+                ):
+                    continue
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass  # An uncertain owner must not hide a survivor.
         try:
             completed = subprocess.run(
                 ["ps", "-o", "pid=,lstart=", "-p", str(pid)],
@@ -309,19 +512,36 @@ def pid_start_tokens(pids: Iterable[int], *, since: Optional[float]) -> list[str
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):
+            if strict:
+                raise
             continue
+        if strict:
+            if (
+                completed.stderr.strip()
+                or completed.returncode not in (0, 1)
+                or (completed.returncode == 1 and completed.stdout.strip())
+            ):
+                raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
+            if completed.returncode == 0:
+                reported.add(pid)
         lines += completed.stdout.splitlines()
     tokens: list[str] = []
     for line in lines:
         parts = line.split()
         if len(parts) != 6 or not parts[0].isdigit() or int(parts[0]) not in wanted:
+            if strict:
+                raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
             continue
         try:
             started = time.mktime(time.strptime(" ".join(parts[1:]), "%a %b %d %H:%M:%S %Y"))
         except ValueError:
+            if strict:
+                raise
             continue
         if since is None or started >= since - 1.0:
             tokens.append(f"{parts[0]}:{'_'.join(parts[1:])}")
+    if strict and {int(token.split(":", 1)[0]) for token in tokens} != reported:
+        raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
     return tokens
 
 
@@ -346,6 +566,136 @@ def _check_owner_executable(path: Path, reason: str) -> None:
     info = path.stat()
     if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o755:
         raise _refuse(f"{reason}_not_owner_0755")
+
+
+def _check_source_dir(info: os.stat_result) -> None:
+    """Only the Owner or root may change a directory on the agy source path."""
+    sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid not in (os.getuid(), 0)
+        or (info.st_mode & 0o022 and not sticky_root)
+    ):
+        raise _refuse("worker_agy_stale_source_unsafe")
+
+
+def _open_source_without_symlinks(real: Path) -> int:
+    """Open ``real`` one component at a time, never following a symlink.
+
+    Each directory is opened relative to the previous one with
+    ``O_DIRECTORY|O_NOFOLLOW`` and checked on its descriptor, so a component
+    swapped for a symlink anywhere on the path (by mode bits or an ACL) fails
+    the open instead of redirecting it to a file behind a private directory.
+    """
+    dir_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _check_source_dir(os.fstat(dir_fd))
+        for name in real.parts[1:-1]:
+            next_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+            _check_source_dir(os.fstat(dir_fd))
+        return os.open(real.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _sweep_stale_worker_agy_temps(worker_agy: Path, *, older_than: float = 3600) -> None:
+    """Best-effort cleanup of old copy temps in the Owner's safe worker bin."""
+    try:
+        bin_info = worker_agy.parent.lstat()
+        if (
+            not stat.S_ISDIR(bin_info.st_mode)
+            or bin_info.st_uid != os.getuid()
+            or bin_info.st_mode & 0o022
+        ):
+            return
+        pattern = re.compile(rf"\.{re.escape(worker_agy.name)}\.[0-9a-f]{{16}}\.tmp")
+        cutoff = time.time() - older_than
+        for path in worker_agy.parent.iterdir():
+            if not pattern.fullmatch(path.name):
+                continue
+            try:
+                info = path.lstat()
+                if (
+                    stat.S_ISREG(info.st_mode)
+                    and info.st_uid == os.getuid()
+                    and info.st_mtime < cutoff
+                ):
+                    path.unlink()
+            except Exception:
+                _LOG.warning("AGY_WORKER_TEMP_SWEEP_FAILED path=%s", path, exc_info=True)
+    except Exception:
+        _LOG.warning("AGY_WORKER_TEMP_SWEEP_FAILED bin=%s", worker_agy.parent, exc_info=True)
+
+
+def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
+    """Replace the worker's stale agy copy with the Owner's agy (#2888 follow-up).
+
+    agy updates itself in the Owner's home, which the worker account cannot
+    enter, so the worker runs a copy in the Owner-owned worker bin.  A stale
+    copy used to refuse every ``--run-as-user`` run until someone re-ran
+    ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
+    the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
+    0755, fsync, ``os.replace``, into a bin directory that must be the Owner's
+    and not writable by others.  The directory that names the source and every
+    directory on its resolved path must be owned by the Owner or root and not
+    writable by others (a root-owned sticky directory such as ``/tmp`` is
+    allowed); the resolved source is opened component by component without
+    following any symlink and checked and copied through that one descriptor.
+    It must be a regular file that only
+    its owner (the Owner or root) can write and that is marked readable and
+    executable by everyone: the worker copy is world-readable, so an
+    owner-only file is never published there.  The caller re-checks the copy
+    against the source afterwards.  The wrapper, which the sudoers rule names,
+    is never replaced here.
+    """
+    try:
+        bin_info = os.lstat(worker_agy.parent)
+        if (
+            not stat.S_ISDIR(bin_info.st_mode)
+            or bin_info.st_uid != os.getuid()
+            or bin_info.st_mode & 0o022
+        ):
+            raise _refuse("worker_bin_unsafe")
+        # A symlink planted in a directory others can write (an early PATH
+        # entry, say) is refused before realpath follows it.
+        _check_source_dir(os.stat(Path(source_agy).parent))
+        src_fd = _open_source_without_symlinks(Path(os.path.realpath(source_agy)))
+        try:
+            info = os.fstat(src_fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in (os.getuid(), 0)
+                or info.st_mode & 0o022
+                or info.st_mode & 0o005 != 0o005
+            ):
+                raise _refuse("worker_agy_stale_source_unsafe")
+            tmp = worker_agy.with_name(f".{worker_agy.name}.{secrets.token_hex(8)}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as out:
+                    while chunk := os.read(src_fd, 1 << 20):
+                        out.write(chunk)
+                    out.flush()
+                    os.fsync(out.fileno())
+                    # 0755 on purpose: the worker account executes this copy;
+                    # set only once the bytes are complete.
+                    os.fchmod(out.fileno(), 0o755)  # nosec B103
+                    os.fsync(out.fileno())  # and the mode durable before the rename
+                os.replace(tmp, worker_agy)
+            except BaseException:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+        finally:
+            os.close(src_fd)
+    except AgyWriteBoundaryError:
+        raise
+    except OSError as exc:
+        raise _refuse(f"worker_agy_stale_refresh_failed:{type(exc).__name__}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -839,15 +1189,25 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     # sha256 of the reference wrapper that prepare_worker_account_boundary
     # verified against the installed copy (receipt field only).
     wrapper_sha256: str = ""
+    # True when prepare replaced a stale worker agy copy before this run.
+    worker_agy_refreshed: bool = False
     # Set by the dispatcher ({"operation_id", "attempt"}); None = emit no receipts.
     receipt_context: Optional[dict] = field(default=None, repr=False)
     receipts: list = field(default_factory=list, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
+    # Set by before_launch, which runs just before Popen: ``_launched`` only turns
+    # True in after_launch, so a signal in between would otherwise read as "never
+    # launched" while sudo/agy may already run.
+    _launch_attempted: bool = field(default=False, repr=False)
     _worker_verdict: Optional[str] = field(default=None, repr=False)
     # The wrapper itself reported survivors ("AGY_WORKER_SWEEP unclean <pids>").
     _worker_reported_unclean: bool = field(default=False, repr=False)
     _worker_left: list = field(default_factory=list, repr=False)
     _receipt_events: set = field(default_factory=set, repr=False)
+    # None: no scrub ran (nothing launched, or the sweep was clean).
+    _credentials_scrubbed: Optional[bool] = field(default=None, repr=False)
+    _scrub_paths: tuple = field(default=(), repr=False)
+    _unclean_tokens: list[str] = field(default_factory=list, repr=False)
 
     launch_env = LAUNCH_ENV
 
@@ -903,6 +1263,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 "pid": None,
                 "lstart": None,
                 "wrapper_sha256": self.wrapper_sha256,
+                "worker_agy_refreshed": self.worker_agy_refreshed,
             }
         except Exception:
             return  # no launch line: the caller rejects a run without one
@@ -935,16 +1296,22 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         if "WORKER_SWEEP" not in self._receipt_events:
             # Launch line written but no sweep ran: the launch frame raised
             # before the worker existed (not launched) or the sweep failed.
-            self._emit_sweep_receipt("error" if self._launched else "not_started")
+            self._emit_sweep_receipt("error" if self._possibly_launched else "not_started")
         failure = self.worker_failure
         self._emit_receipt(
             "WORKER_CLEANUP",
             run_root_removed=not os.path.lexists(self.run_root),
+            credentials_scrubbed=self._credentials_scrubbed,
             # kind:reason only; later segments may name worker-chosen files
             worker_failure=":".join(failure.split(":", 2)[:2]) if failure else None,
         )
 
     def before_launch(self) -> None:
+        # Recorded before any worker process exists: what a kept root's scrub
+        # must find and remove (#2905 N2).
+        self._scrub_paths = tuple(
+            rel for rel in _RUN_HOME_CREDENTIALS if os.path.lexists(self.run_home / rel)
+        )
         # Everything the dispatcher wrote (copied session files, settings,
         # keychain, permission profile, workdir copy) becomes usable by the
         # run group; the agy settings and the profile stay read-only.
@@ -955,8 +1322,20 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
         super().before_launch()
         self._emit_launch_receipt()
+        # Last: nothing before this can have started a worker process.
+        self._launch_attempted = True
+
+    def launch_failed_before_spawn(self) -> None:
+        """A provider Popen OSError proves no child was spawned."""
+        if not self._launched:
+            self._launch_attempted = False
+
+    @property
+    def _possibly_launched(self) -> bool:
+        return self._launched or self._launch_attempted
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
+        pids = tuple(pids)
         baseline = self._baseline
         tokens = pid_start_tokens(pids, since=getattr(baseline, "started_at", None))
         self._worker_verdict, last = sweep_run_root_report(
@@ -973,11 +1352,44 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             if self._worker_reported_unclean
             else []
         )
+        if self._worker_verdict != "CLEAN":
+            self._record_unclean_tokens(pids)
         return self._worker_verdict == "CLEAN"
+
+    @property
+    def sweep_verdict_clean(self) -> bool:
+        """The recorded verdict, without running a sweep (#2888 lease release).
+
+        True when nothing launched or the run-once sweep finished clean; False
+        when it was unclean, raised before recording a verdict, or never ran.  A
+        launch that was attempted (``before_launch`` ran) counts as launched.
+        """
+        return not self._possibly_launched or self._swept is True
+
+    @property
+    def unclean_tokens(self) -> list[str]:
+        """A copy of the survivor identities captured by an unclean sweep."""
+        return list(self._unclean_tokens)
+
+    def _record_unclean_tokens(self, tracked: Iterable[int]) -> None:
+        try:
+            try:
+                owners = {0, pwd.getpwnam(WORKER_USER).pw_uid}
+            except Exception:
+                _LOG.exception("AGY_WORKER_UNCLEAN_OWNER_LOOKUP_FAILED")
+                owners = None
+            tokens = pid_start_tokens(
+                [*tracked, *(int(pid) for pid in self._worker_left)], since=None, owners=owners
+            )
+            # Keep evidence from an earlier timeout/termination sweep even if
+            # a later wrapper report loses sight of that surviving process.
+            self._unclean_tokens = list(dict.fromkeys([*self._unclean_tokens, *tokens]))[:64]
+        except Exception:
+            _LOG.exception("AGY_WORKER_UNCLEAN_TOKENS_FAILED")
 
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
-        if self._launched:
+        if self._possibly_launched:
             self._worker_sweep(())
 
     def sweep(self) -> bool:
@@ -987,7 +1399,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         run-cwd or tracked worker process, and the Owner-side check confirms the
         tracked descendants are gone.
         """
-        if not self._launched:
+        if not self._possibly_launched:
             return True
         if self._swept is not None:
             return self._swept
@@ -996,6 +1408,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         # and a sudo that refuses the launch refuses the sweep too; the
         # Owner-side check of the tracked descendants still has to be clean.
         started = (self.run_root / WRAPPER_STARTED_MARKER).exists()
+        tracked: Iterable[int] = ()
         try:
             # stop() takes a final snapshot; the Owner-side sweep below calls it again.
             tracked = self._tracker.stop() if self._tracker is not None else set()
@@ -1010,48 +1423,104 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             excused = not started and refused
             self._swept = bool(owner_clean and (self._worker_swept or excused))
         except BaseException:
+            # The Owner-side sweep inside the try stores its own result in
+            # ``_swept`` before the combined verdict exists: an interrupt after it
+            # must never leave that half verdict standing as "clean".
+            self._swept = None
+            self._record_unclean_tokens(tracked)
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
             raise
+        if not self._swept:
+            self._record_unclean_tokens(tracked)
         self._emit_sweep_receipt(self._sweep_result(started))
         return self._swept
 
     def cleanup(self) -> None:
-        if self._launched and self._swept is None:
-            self.sweep()
-        tracker, self._tracker = self._tracker, None
-        if tracker is not None:
-            tracker.stop()
-        cli_worker.release_run(self.run_tag)
         try:
-            if self._launched and not (self.run_root / WRAPPER_STARTED_MARKER).exists():
-                self.worker_failure = f"{AGY_WORKER_LAUNCH_FAILED}:wrapper_did_not_start"
-            elif self._launched and self._swept:
-                # A clean sweep does not prove no worker process survived (one
-                # that cleared its env, left the run cwd and escaped the
-                # tracker is not found); copy_back therefore trusts nothing in
-                # the run dir beyond the verified workdir fd and the plan hashes.
-                copy_back(
-                    self.manifest,
-                    self.run_root,
-                    self.target.name,
-                    self.workdir_identity,
-                    self.source_target,
-                )
-        except CopyBackRefused as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_REFUSED}:{exc}"
-        except CopyBackPartial as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
-        except OSError as exc:
-            self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
+            if self._possibly_launched and self._swept is None:
+                self.sweep()
+            tracker, self._tracker = self._tracker, None
+            if tracker is not None:
+                tracker.stop()
+            cli_worker.release_run(self.run_tag)
+            try:
+                if self._launched and not (self.run_root / WRAPPER_STARTED_MARKER).exists():
+                    self.worker_failure = f"{AGY_WORKER_LAUNCH_FAILED}:wrapper_did_not_start"
+                elif self._launched and self._swept:
+                    # A clean sweep does not prove no worker process survived (one
+                    # that cleared its env, left the run cwd and escaped the
+                    # tracker is not found); copy_back therefore trusts nothing in
+                    # the run dir beyond the verified workdir fd and the plan hashes.
+                    copy_back(
+                        self.manifest,
+                        self.run_root,
+                        self.target.name,
+                        self.workdir_identity,
+                        self.source_target,
+                    )
+            except CopyBackRefused as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_REFUSED}:{exc}"
+            except CopyBackPartial as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{exc}"
+            except OSError as exc:
+                self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
         finally:
+            if self._possibly_launched and self._swept is not True:
+                self._credentials_scrubbed = self._scrub_run_home_credentials()
             if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
-                shutil.rmtree(self.run_root, ignore_errors=True)
+                # An unproven worker sweep keeps the run root (#2888): the lease
+                # receipt stays too, and the pool's reaper can then prove this
+                # run's processes gone with the per-run wrapper sweep instead of
+                # the coarse "the worker account owns no process" check.
+                if not (self._possibly_launched and self._swept is not True):
+                    shutil.rmtree(self.run_root, ignore_errors=True)
                 if os.path.lexists(self.run_root):
                     self.leftover_run_root = str(self.run_root)
                     sys.stderr.write(
                         f"nexus-agy-dispatch: worker run dir left behind: {self.run_root}\n"
                     )
             self._emit_cleanup_receipt()
+
+    def _scrub_run_home_credentials(self) -> bool:
+        """Unlink only known HOME files, without following worker-controlled symlinks.
+
+        Open each directory relative to an already open parent with O_NOFOLLOW:
+        lstat on just the leaf would still follow a swapped parent symlink.
+        True only if every credential name present at launch still holds a
+        regular file with no other hard link and is unlinked ("the known names
+        were scrubbed"; files agy wrote under other names are not seen).  A
+        missing file or directory (a surviving worker may have renamed it), a
+        symlink or directory in its place, a file with other hard links, or an
+        I/O failure all report False.  Best effort against leftovers only: a
+        surviving worker could read these files while it ran and may hold a
+        copy anywhere (or swap names under this scrub), which no scrub can
+        rule out; the lease, not this field, keeps such a run fail-closed.
+        """
+        clean = True
+        for relative in self._scrub_paths:
+            fds: list[int] = []
+            try:
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                fds.append(os.open(self.run_root, flags))
+                fds.append(os.open(self.run_home.name, flags, dir_fd=fds[-1]))
+                for part in relative.parts[:-1]:
+                    fds.append(os.open(part, flags, dir_fd=fds[-1]))
+                info = os.lstat(relative.name, dir_fd=fds[-1])
+                if stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                    os.unlink(relative.name, dir_fd=fds[-1])
+                    if stat.S_ISLNK(info.st_mode) or info.st_nlink > 1:
+                        clean = False  # the credential bytes live on elsewhere
+                else:
+                    clean = False
+            except OSError:
+                clean = False
+            finally:
+                for fd in reversed(fds):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        clean = False
+        return clean
 
 
 def prepare_worker_account_boundary(
@@ -1090,8 +1559,16 @@ def prepare_worker_account_boundary(
     if _sha256_file(Path(wrapper)) != wrapper_sha256:
         raise _refuse("wrapper_stale")
     _check_owner_executable(Path(worker_agy), "worker_agy")
-    if not source_agy or _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+    _sweep_stale_worker_agy_temps(Path(worker_agy))
+    if not source_agy:
         raise _refuse("worker_agy_stale")
+    worker_agy_refreshed = False
+    if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+        _refresh_worker_agy(Path(source_agy), Path(worker_agy))
+        worker_agy_refreshed = True
+        _check_owner_executable(Path(worker_agy), "worker_agy")
+        if _sha256_file(Path(worker_agy)) != _sha256_file(Path(source_agy)):
+            raise _refuse("worker_agy_stale")  # the source changed during the copy
     source_target = Path(os.path.realpath(Path(target).expanduser()))
     if not source_target.is_dir():
         raise _refuse("target_missing")
@@ -1169,4 +1646,5 @@ def prepare_worker_account_boundary(
         workdir_identity=workdir_identity,
         run_command=run_command,
         wrapper_sha256=wrapper_sha256,
+        worker_agy_refreshed=worker_agy_refreshed,
     )
