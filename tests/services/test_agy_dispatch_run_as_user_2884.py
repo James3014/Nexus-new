@@ -741,7 +741,10 @@ def test_sweep_kills_through_the_wrapper_and_needs_both_sides_clean(worker_env, 
         boundary.cleanup()
         # an unclean sweep never copies anything back
         assert (worker_env["target"] / "src" / "a.py").read_text() == "print('a')\n"
-        assert not boundary.run_root.exists()
+        # ... and keeps the run root (#2888): the lease reaper sweeps that run later
+        assert boundary.run_root.exists()
+        assert boundary.leftover_run_root == str(boundary.run_root)
+        shutil.rmtree(boundary.run_root)
 
 
 def test_terminate_worker_sweeps_as_the_worker(worker_env, monkeypatch):
@@ -808,7 +811,10 @@ def test_launch_without_the_wrapper_marker_is_a_launch_failure(
     assert boundary.sweep() is owner_clean
     boundary.cleanup()
     assert boundary.worker_failure == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
-    assert not boundary.run_root.exists()
+    # an unproven sweep keeps the run root for the lease reaper (#2888)
+    assert boundary.run_root.exists() is (not owner_clean)
+    if not owner_clean:
+        shutil.rmtree(boundary.run_root)
 
 
 # ---------------------------------------------------------------------------
@@ -2030,7 +2036,7 @@ def test_left_is_reset_by_a_later_clean_sweep(worker_env, monkeypatch, capsys):
     assert (sweep["result"], sweep["wrapper"], sweep["left"]) == ("clean", "CLEAN", [])
 
 
-def test_relayed_stderr_without_dispatcher_token_is_unchanged():
+def test_relayed_stderr_without_dispatcher_lines_is_unchanged():
     text = "plain\nNEXUS_AGY_DESCENDANT_SWEEP_FAILED\nNEXUS_AGY_DISPATC\n"
     assert dispatch._neutralize_relayed_stderr("plain\n") == "plain\n"
     assert dispatch._neutralize_relayed_stderr(text) == text
@@ -2270,7 +2276,9 @@ def test_wrapper_that_never_started_is_not_started_unless_the_owner_sweep_is_unc
     assert receipts[1]["result"] == ("not_started" if owner_clean else "unclean")
     assert receipts[1]["wrapper"] == "REFUSED"  # sudo refused: no wrapper report line
     assert receipts[2]["worker_failure"] == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
-    assert receipts[2]["run_root_removed"] is True
+    assert receipts[2]["run_root_removed"] is owner_clean  # unclean: kept (#2888)
+    if not owner_clean:
+        shutil.rmtree(boundary.run_root)
 
 
 def test_launch_that_never_happened_still_closes_with_not_started_and_cleanup(

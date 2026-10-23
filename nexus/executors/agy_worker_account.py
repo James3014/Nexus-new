@@ -65,9 +65,11 @@ Trust and limits (#2885 review r1):
 
 from __future__ import annotations
 
+import errno
 import grp
 import hashlib
 import json
+import logging
 import os
 import pwd
 import secrets
@@ -133,6 +135,9 @@ RECEIPT_PREFIX = "NEXUS_AGY_DISPATCH "
 
 # The wrapper this module speaks to: this reference must exist and match the installed copy.
 REPO_WRAPPER = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "agy-worker-exec"
+
+
+_LOG = logging.getLogger(__name__)
 
 
 def _refuse(reason: str) -> AgyWriteBoundaryError:
@@ -354,6 +359,25 @@ def _valid_receipt_run_root(receipt: Mapping[str, Any]) -> Optional[tuple[Path, 
     return root, list(root_id)
 
 
+def _run_root_is_the_recorded_directory(root: Path, root_id: list[int]) -> bool:
+    """True when ``root`` is a real directory we own with the recorded device and inode.
+
+    False when it is gone or is anything else (a different inode after a reboot, a
+    replaced directory, a file, another owner); other ``OSError`` propagates.
+    """
+    try:
+        info = os.lstat(root)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+            return False
+        raise
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.getuid()
+        and [info.st_dev, info.st_ino] == root_id
+    )
+
+
 def reap_orphaned_worker_run(
     receipt: Mapping[str, Any],
     *,
@@ -366,32 +390,31 @@ def reap_orphaned_worker_run(
     The account pool keeps such a receipt unless this returns True; it never
     raises (any error is "not proven").
 
-    * Run root still there: it must be the directory the dispatcher created
-      (a real directory we own with the recorded device and inode); the worker
-      sweep must report CLEAN; then the run root is removed.
-    * Run root gone: that proves nothing (a surviving worker keeps an unlinked
-      cwd, and the wrapper refuses a missing root), so only "the worker account
-      owns no process at all" counts.  That is stricter than needed when other
-      worker runs are active, which only delays reclaiming the account.
+    * The recorded run root is still there (a real directory we own with the
+      recorded device and inode): the per-run wrapper sweep must report CLEAN;
+      then the run root is removed best-effort.  A leftover tree after a clean
+      sweep is logged but still proves the run gone, as the dispatcher's own
+      cleanup releases on a clean sweep regardless.
+    * The run root is gone, or is not the directory the dispatcher created (a
+      different inode after a reboot, a replaced directory): nothing is swept or
+      removed, and only "the worker account owns no process at all" counts (a
+      surviving worker keeps an unlinked cwd, and the wrapper refuses a missing
+      root).  That is stricter than needed while other worker runs are active,
+      which only delays reclaiming the account.
     """
     try:
         validated = _valid_receipt_run_root(receipt)
         if validated is None:
             return False
         root, root_id = validated
-        if not os.path.lexists(root):
+        if not _run_root_is_the_recorded_directory(root, root_id):
             return _worker_user_has_no_process(WORKER_USER, run_command)
-        info = os.lstat(root)
-        if (
-            not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid()
-            or [info.st_dev, info.st_ino] != root_id
-        ):
-            return False
         if sweep_run_root(root, run_command=run_command) != "CLEAN":
             return False
         shutil.rmtree(root, ignore_errors=True)
-        return not os.path.lexists(root)
+        if os.path.lexists(root):
+            _LOG.warning("AGY_WORKER_RUN_ROOT_LEFTOVER_AFTER_CLEAN_SWEEP root=%s", root)
+        return True
     except Exception:
         return False
 
@@ -950,6 +973,10 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     receipt_context: Optional[dict] = field(default=None, repr=False)
     receipts: list = field(default_factory=list, repr=False)
     _worker_swept: Optional[bool] = field(default=None, repr=False)
+    # Set by before_launch, which runs just before Popen: ``_launched`` only turns
+    # True in after_launch, so a signal in between would otherwise read as "never
+    # launched" while sudo/agy may already run.
+    _launch_attempted: bool = field(default=False, repr=False)
     _worker_verdict: Optional[str] = field(default=None, repr=False)
     # The wrapper itself reported survivors ("AGY_WORKER_SWEEP unclean <pids>").
     _worker_reported_unclean: bool = field(default=False, repr=False)
@@ -1042,7 +1069,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         if "WORKER_SWEEP" not in self._receipt_events:
             # Launch line written but no sweep ran: the launch frame raised
             # before the worker existed (not launched) or the sweep failed.
-            self._emit_sweep_receipt("error" if self._launched else "not_started")
+            self._emit_sweep_receipt("error" if self._possibly_launched else "not_started")
         failure = self.worker_failure
         self._emit_receipt(
             "WORKER_CLEANUP",
@@ -1062,6 +1089,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         )
         super().before_launch()
         self._emit_launch_receipt()
+        # Last: nothing before this can have started a worker process.
+        self._launch_attempted = True
+
+    @property
+    def _possibly_launched(self) -> bool:
+        return self._launched or self._launch_attempted
 
     def _worker_sweep(self, pids: Iterable[int]) -> bool:
         baseline = self._baseline
@@ -1087,13 +1120,14 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         """The recorded verdict, without running a sweep (#2888 lease release).
 
         True when nothing launched or the run-once sweep finished clean; False
-        when it was unclean, raised before recording a verdict, or never ran.
+        when it was unclean, raised before recording a verdict, or never ran.  A
+        launch that was attempted (``before_launch`` ran) counts as launched.
         """
-        return not self._launched or self._swept is True
+        return not self._possibly_launched or self._swept is True
 
     def terminate_worker(self) -> None:
         """Kill this run's worker processes now (timeout, quota): the Owner cannot."""
-        if self._launched:
+        if self._possibly_launched:
             self._worker_sweep(())
 
     def sweep(self) -> bool:
@@ -1103,7 +1137,7 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         run-cwd or tracked worker process, and the Owner-side check confirms the
         tracked descendants are gone.
         """
-        if not self._launched:
+        if not self._possibly_launched:
             return True
         if self._swept is not None:
             return self._swept
@@ -1126,13 +1160,17 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             excused = not started and refused
             self._swept = bool(owner_clean and (self._worker_swept or excused))
         except BaseException:
+            # The Owner-side sweep inside the try stores its own result in
+            # ``_swept`` before the combined verdict exists: an interrupt after it
+            # must never leave that half verdict standing as "clean".
+            self._swept = None
             self._emit_sweep_receipt("error")  # a sweep that cannot finish is never clean
             raise
         self._emit_sweep_receipt(self._sweep_result(started))
         return self._swept
 
     def cleanup(self) -> None:
-        if self._launched and self._swept is None:
+        if self._possibly_launched and self._swept is None:
             self.sweep()
         tracker, self._tracker = self._tracker, None
         if tracker is not None:
@@ -1161,7 +1199,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
             self.worker_failure = f"{AGY_WORKER_COPY_BACK_FAILED}:{type(exc).__name__}"
         finally:
             if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
-                shutil.rmtree(self.run_root, ignore_errors=True)
+                # An unproven worker sweep keeps the run root (#2888): the lease
+                # receipt stays too, and the pool's reaper can then prove this
+                # run's processes gone with the per-run wrapper sweep instead of
+                # the coarse "the worker account owns no process" check.
+                if not (self._possibly_launched and self._swept is not True):
+                    shutil.rmtree(self.run_root, ignore_errors=True)
                 if os.path.lexists(self.run_root):
                     self.leftover_run_root = str(self.run_root)
                     sys.stderr.write(

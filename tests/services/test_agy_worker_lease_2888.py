@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import functools
 import grp
 import json
@@ -23,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +36,7 @@ from nexus.executors import agy_dispatch_boundary as boundary_mod
 from nexus.executors import agy_worker_account as worker_mod
 from nexus.executors import agy_write_admission as admission
 from nexus.executors import cli_worker
+from nexus.services import agy_account_pool as agy_pool
 from nexus.services.agy_account_pool import (
     AccountLeaseClaim,
     AgyAccount,
@@ -59,6 +62,22 @@ SWEEP_CLEAN = "AGY_WORKER_SWEEP clean\n"
 SWEEP_UNCLEAN = "AGY_WORKER_SWEEP unclean 4242\n"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_worker_reap_cache():
+    """The pool keeps a process-local negative cache of unproven worker receipts."""
+    agy_pool._WORKER_REAP_UNPROVEN.clear()
+    yield
+    agy_pool._WORKER_REAP_UNPROVEN.clear()
+
+
+@pytest.fixture
+def reap_clock(monkeypatch):
+    """A controllable clock for the pool's 60 s negative cache."""
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(agy_pool, "_reap_monotonic", lambda: clock.now)
+    return clock
+
+
 # ---------------------------------------------------------------------------
 # pool: mark_worker_run
 # ---------------------------------------------------------------------------
@@ -70,17 +89,22 @@ def _dead_pid() -> int:
     return proc.pid
 
 
-def _coordinator(tmp_path: Path) -> tuple[CrossProcessLeaseCoordinator, str]:
-    home = tmp_path / "home-a"
-    home.mkdir(exist_ok=True)
-    manager = AgyAccountPoolManager(
-        accounts=[AgyAccount(alias="a", home_dir=str(home))], use_real_manager=False
-    )
+def _coordinator(
+    tmp_path: Path, aliases: tuple[str, ...] = ("a",), poll_interval: float | None = None
+) -> tuple[CrossProcessLeaseCoordinator, str]:
+    accounts = []
+    for alias in aliases:
+        home = tmp_path / f"home-{alias}"
+        home.mkdir(exist_ok=True)
+        accounts.append(AgyAccount(alias=alias, home_dir=str(home)))
+    manager = AgyAccountPoolManager(accounts=accounts, use_real_manager=False)
+    extra = {} if poll_interval is None else {"poll_interval": poll_interval}
     coordinator = CrossProcessLeaseCoordinator(
         manager=manager,
         allocator_lock_path=tmp_path / "allocator.lock",
         leases_dir=tmp_path / "leases",
         default_wait_timeout=0,
+        **extra,
     )
     (tmp_path / "leases").mkdir(exist_ok=True)
     return coordinator, manager._accounts[0].alias_hash
@@ -323,7 +347,7 @@ def test_worker_receipt_is_removed_when_the_reaper_proves_the_run_gone(
 @pytest.mark.parametrize(
     "fields",
     [
-        pytest.param({"pid": os.getpid()}, id="live-pid"),
+        pytest.param({"pid": os.getppid()}, id="live-pid"),
         pytest.param({"consumer_id": "model-probe:task-1"}, id="non-desktop-consumer"),
         pytest.param({"account_alias_hash": "000000000000"}, id="identity-mismatch"),
     ],
@@ -333,16 +357,22 @@ def test_the_existing_reclaim_checks_still_run_before_the_reaper(
 ) -> None:
     coordinator, alias_hash = _coordinator(tmp_path)
     receipt = _write_receipt(tmp_path, alias_hash, **_worker_fields(), **fields)
-    assert _reclaim_orphaned_desktop_receipt(receipt, alias_hash) is False
-    assert receipt.exists() and reaper.calls == []
+    deferred: list = []
+    assert _reclaim_orphaned_desktop_receipt(receipt, alias_hash, defer=deferred) is False
+    assert receipt.exists() and reaper.calls == [] and deferred == []
 
 
-def test_any_worker_prefixed_key_routes_to_the_reaper(tmp_path: Path, reaper) -> None:
+def test_any_worker_prefixed_key_is_deferred_and_never_reaped_inline(
+    tmp_path: Path, reaper
+) -> None:
     coordinator, alias_hash = _coordinator(tmp_path)
     receipt = _write_receipt(tmp_path, alias_hash, worker_future_field=1)
-    reaper.result = False
+    deferred: list = []
+    assert _reclaim_orphaned_desktop_receipt(receipt, alias_hash, defer=deferred) is False
+    assert deferred == [(alias_hash, receipt, "deadbeef0001")]
+    # without a defer list the answer is the same and nothing is removed
     assert _reclaim_orphaned_desktop_receipt(receipt, alias_hash) is False
-    assert receipt.exists() and len(reaper.calls) == 1
+    assert receipt.exists() and reaper.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -432,42 +462,58 @@ def test_existing_root_without_a_clean_sweep_is_kept(runs: Path, sweep: Any) -> 
     assert len(commands.sweeps) == 1
 
 
-def test_a_root_that_cannot_be_removed_is_not_proven(runs: Path, monkeypatch) -> None:
+def test_a_clean_sweep_proves_the_run_gone_even_if_leftovers_remain(
+    runs: Path, monkeypatch, caplog
+) -> None:
     root, receipt = _run_root(runs)
     monkeypatch.setattr(worker_mod.shutil, "rmtree", lambda *a, **k: None)
-    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is False
-    assert root.exists()
+    with caplog.at_level(logging.WARNING, logger=worker_mod.__name__):
+        assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is True
+    assert root.exists()  # best-effort removal: the tree stays, the proof does not depend on it
+    assert str(root) in caplog.text and "LEFTOVER" in caplog.text
 
 
-def test_a_replaced_root_is_refused_without_sweeping(runs: Path) -> None:
-    root, receipt = _run_root(runs)
-    shutil.rmtree(root)
-    root.mkdir()  # same name, new inode
-    commands = _Commands()
-    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is False
-    assert root.exists() and commands.calls == []
+def _not_the_recorded_directory(case: str, runs_dir: Path, monkeypatch) -> tuple[Path, dict]:
+    """A run root that exists but is not the directory the receipt recorded."""
+    if case == "file":
+        root = runs_dir / RUN_TAG
+        root.write_text("file", encoding="utf-8")
+        info = os.lstat(root)
+        return root, {
+            "worker_run_root": str(root),
+            "worker_run_root_id": [info.st_dev, info.st_ino],
+            "worker_run_as_user": worker_mod.WORKER_USER,
+        }
+    root, receipt = _run_root(runs_dir)
+    if case == "other-inode":
+        # e.g. after a reboot; inode numbers are reused on some filesystems, so the
+        # receipt is altered instead of recreating the directory
+        dev, ino = receipt["worker_run_root_id"]
+        receipt["worker_run_root_id"] = [dev, ino + 1]
+    elif case == "other-device":
+        dev, ino = receipt["worker_run_root_id"]
+        receipt["worker_run_root_id"] = [dev + 1, ino]
+    elif case == "other-owner":
+        monkeypatch.setattr(worker_mod.os, "getuid", lambda: os.lstat(root).st_uid + 1)
+    else:  # pragma: no cover
+        raise AssertionError(case)
+    return root, receipt
 
 
-def test_a_root_owned_by_someone_else_is_refused(runs: Path, monkeypatch) -> None:
-    root, receipt = _run_root(runs)
-    monkeypatch.setattr(worker_mod.os, "getuid", lambda: os.lstat(root).st_uid + 1)
-    commands = _Commands()
-    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is False
-    assert root.exists() and commands.calls == []
-
-
-def test_a_root_that_is_not_a_directory_is_refused(runs: Path) -> None:
-    root = runs / RUN_TAG
-    root.write_text("file", encoding="utf-8")
-    info = os.lstat(root)
-    receipt = {
-        "worker_run_root": str(root),
-        "worker_run_root_id": [info.st_dev, info.st_ino],
-        "worker_run_as_user": worker_mod.WORKER_USER,
-    }
-    commands = _Commands()
-    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is False
-    assert root.exists() and commands.calls == []
+@pytest.mark.parametrize("case", ["file", "other-inode", "other-device", "other-owner"])
+@pytest.mark.parametrize(
+    ("ps", "proven"),
+    [((1, "", ""), True), ((0, "  4242\n", ""), False), ((2, "", ""), False)],
+    ids=["no-worker-process", "worker-process-alive", "ps-error"],
+)
+def test_a_root_that_is_not_the_recorded_directory_falls_back_to_the_ps_proof(
+    runs: Path, monkeypatch, case: str, ps: tuple, proven: bool
+) -> None:
+    root, receipt = _not_the_recorded_directory(case, runs, monkeypatch)
+    commands = _Commands(ps=ps)
+    assert worker_mod.reap_orphaned_worker_run(receipt, run_command=commands) is proven
+    assert root.exists()  # never swept, never removed
+    assert commands.sweeps == [] and len(commands.pses) == 1
 
 
 def test_a_dangling_symlink_root_is_refused(runs: Path, tmp_path: Path) -> None:
@@ -651,7 +697,9 @@ def test_reaper_never_raises(runs: Path, monkeypatch) -> None:
     assert worker_mod.reap_orphaned_worker_run(receipt, run_command=_Commands()) is False
 
 
-def test_reaper_end_to_end_through_the_pool(tmp_path: Path, runs: Path, monkeypatch) -> None:
+def test_reaper_end_to_end_through_the_pool(
+    tmp_path: Path, runs: Path, monkeypatch, reap_clock
+) -> None:
     """A real receipt, the real reclaim path and the real reaper (fake sudo and ps)."""
     coordinator, alias_hash = _coordinator(tmp_path)
     root, worker_fields = _run_root(runs)
@@ -670,6 +718,7 @@ def test_reaper_end_to_end_through_the_pool(tmp_path: Path, runs: Path, monkeypa
     assert receipt.exists() and root.exists()
 
     commands.sweep = (0, SWEEP_CLEAN)
+    reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1  # the unproven verdict expired
     claim = coordinator.acquire_claim("desktop-new", wait_timeout=0)
     try:
         assert not root.exists() and _read(receipt)["consumer_id"] == "desktop-new"
@@ -1059,7 +1108,7 @@ def test_an_unlaunched_worker_attempt_still_releases(worker_env, monkeypatch, ca
 
 
 def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
-    worker_env, tmp_path, monkeypatch, capsys
+    worker_env, tmp_path, monkeypatch, capsys, reap_clock
 ) -> None:
     """End to end with the real pool: the receipt survives and names the worker run."""
     _patch_prepare(monkeypatch, worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
@@ -1149,13 +1198,24 @@ def test_real_claim_keeps_a_marked_receipt_after_an_unclean_sweep(
         data = _read(receipt)
         data["pid"] = _dead_pid()
         receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
-        monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", lambda r: False)
+        run_root = Path(seen["root"])
+        assert run_root.exists()  # an unclean worker sweep keeps the run root (#2888)
+        # The real reaper (fake sudo): the per-run wrapper sweep decides, not "no process".
+        commands = _Commands(sweep=(3, SWEEP_UNCLEAN))
+        real_reaper = worker_mod.reap_orphaned_worker_run
+        monkeypatch.setattr(worker_mod, "WORKER_RUNS", worker_env["runs"].resolve())
+        monkeypatch.setattr(
+            worker_mod, "reap_orphaned_worker_run", lambda r: real_reaper(r, run_command=commands)
+        )
         with pytest.raises(AgyAccountPoolBusyError):
             real_acquire(consumer_id="desktop-next", wait_timeout=0)
-        assert receipt.exists()
-        monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", lambda r: True)
+        assert receipt.exists() and run_root.exists()
+        assert commands.sweeps == [worker_mod.sweep_argv(run_root, [])] and commands.pses == []
+        commands.sweep = (0, SWEEP_CLEAN)
+        reap_clock.now += agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS + 1
         next_claim = real_acquire(consumer_id="desktop-next", wait_timeout=0)
         next_claim.release()
+        assert not run_root.exists() and not receipt.exists()
     finally:
         if not claim.lock_file_obj.closed:
             claim.lock_file_obj.close()
@@ -1398,3 +1458,507 @@ def test_default_profile_blocks_a_real_listing_of_a_worker_runs_dir(tmp_path, mo
     assert run("/bin/cat", str(runs_dir / RUN_TAG / "secret")).returncode != 0
     assert run("/bin/ls", str(other)).returncode == 0
     assert run("/bin/ls", "/tmp").returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# review of #2904: worker receipts are reaped outside the allocation lock
+# ---------------------------------------------------------------------------
+
+
+def _lock_is_free(path: Path) -> bool:
+    """True when another open file description can take this flock right now."""
+    with path.open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return True
+
+
+def _alias_hash(alias: str) -> str:
+    return AgyAccount(alias=alias, home_dir="/nowhere").alias_hash
+
+
+def test_the_reaper_never_runs_under_the_allocation_lock(tmp_path: Path, monkeypatch) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    old = _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    seen: list[dict[str, bool]] = []
+
+    def fake_reaper(receipt, **_kwargs):
+        seen.append({
+            "allocation_lock_free": _lock_is_free(tmp_path / "allocator.lock"),
+            "account_lock_free": _lock_is_free(tmp_path / "leases" / f"{alias_hash}.lock"),
+            "receipt_still_there": old.exists(),
+        })
+        return True
+
+    monkeypatch.setattr(worker_mod, "reap_orphaned_worker_run", fake_reaper)
+    # A proven reap lets the very same call take the account on its next pass.
+    claim = coordinator.acquire_claim("desktop-new", wait_timeout=0)
+    try:
+        assert claim.account_alias_hash == alias_hash
+        assert _read(old)["consumer_id"] == "desktop-new" and "worker_run_root" not in _read(old)
+    finally:
+        claim.release()
+    assert seen == [
+        {"allocation_lock_free": True, "account_lock_free": False, "receipt_still_there": True}
+    ]
+
+
+def test_an_account_waiting_for_its_reap_counts_as_busy_but_another_is_still_claimable(
+    tmp_path: Path, reaper
+) -> None:
+    coordinator, _first = _coordinator(tmp_path, aliases=("a", "b"))
+    alias_a, alias_b = _alias_hash("a"), _alias_hash("b")
+    _write_receipt(tmp_path, alias_a, **_worker_fields())
+    reaper.result = False
+    first = coordinator.acquire_claim("desktop-one", wait_timeout=0)
+    try:
+        # the free account is taken without ever reaping the other one's receipt
+        assert first.account_alias_hash == alias_b and reaper.calls == []
+        # with b held, a is only "busy" (not exhausted) until its run is proven gone
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim("desktop-two", wait_timeout=0)
+        assert len(reaper.calls) == 1
+    finally:
+        first.release()
+
+
+def test_an_unproven_reap_is_retried_at_most_once_per_minute_and_warns_once(
+    tmp_path: Path, reaper, reap_clock, caplog
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    reaper.result = False
+    ttl = agy_pool.WORKER_REAP_NEGATIVE_TTL_SECONDS
+    assert ttl == 60.0
+
+    def attempt() -> None:
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim("desktop-new", wait_timeout=0)
+
+    with caplog.at_level(logging.WARNING, logger="nexus.services.agy_account_pool"):
+        attempt()
+        assert len(reaper.calls) == 1
+        reap_clock.now += ttl - 1
+        attempt()
+        attempt()
+        assert len(reaper.calls) == 1  # still inside the minute
+        reap_clock.now += 2
+        attempt()
+        assert len(reaper.calls) == 2  # retried once the minute is over
+        attempt()
+        assert len(reaper.calls) == 2
+    assert caplog.text.count("AGY_ORPHANED_WORKER_RECEIPT_PRESERVED") == 1  # first result only
+    assert receipt.exists()
+    reaper.result = True  # once the run is proven gone the account is claimable again
+    reap_clock.now += ttl + 1
+    claim = coordinator.acquire_claim("desktop-new", wait_timeout=0)
+    claim.release()
+    assert len(reaper.calls) == 3
+
+
+def test_polling_an_unproven_receipt_neither_re_reaps_nor_re_logs(
+    tmp_path: Path, reaper, reap_clock, caplog
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path, poll_interval=0.01)
+    _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    reaper.result = False
+    with caplog.at_level(logging.WARNING, logger="nexus.services.agy_account_pool"):
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim("desktop-new", wait_timeout=0.3)  # ~30 polls
+    assert len(reaper.calls) == 1
+    assert caplog.text.count("AGY_ORPHANED_WORKER_RECEIPT_PRESERVED") == 1
+
+
+def test_a_deferred_reap_rechecks_the_account_lock_and_the_receipt(tmp_path: Path, reaper) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    entry = (alias_hash, receipt, "deadbeef0001")
+    reaper.result = True
+    lock_path = tmp_path / "leases" / f"{alias_hash}.lock"
+    with lock_path.open("a+") as holder:  # someone claimed the account meanwhile
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert coordinator._reap_deferred_worker_receipts([entry]) is False
+    assert reaper.calls == [] and receipt.exists()
+
+    data = _read(receipt)
+    other = dict(data, lease_id_hash="feedface0002")  # the receipt changed hands
+    receipt.write_text(json.dumps(other) + "\n", encoding="utf-8")
+    assert coordinator._reap_deferred_worker_receipts([entry]) is False
+    alive = dict(data, pid=os.getppid())  # its owner is alive after all
+    receipt.write_text(json.dumps(alive) + "\n", encoding="utf-8")
+    assert coordinator._reap_deferred_worker_receipts([entry]) is False
+    assert reaper.calls == [] and receipt.exists()
+
+    receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")  # exactly what was deferred
+    assert coordinator._reap_deferred_worker_receipts([entry]) is True
+    assert len(reaper.calls) == 1 and not receipt.exists()
+    assert _lock_is_free(lock_path)  # the per-account flock is released again
+
+
+# ---------------------------------------------------------------------------
+# review of #2904: the other receipt-removal paths need the reaper as well
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        pytest.param(False, "LEASE_WORKER_UNPROVEN_PRESERVED", id="not-proven"),
+        pytest.param(RuntimeError("boom"), "LEASE_WORKER_UNPROVEN_PRESERVED", id="reaper-raises"),
+        pytest.param(True, "LEASE_RECEIPT_REMOVED", id="proven"),
+    ],
+)
+def test_pool_reconcile_claim_receipt_needs_the_reaper_for_worker_receipts(
+    tmp_path: Path, reaper, result: Any, expected: str
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    reaper.result = result
+    outcome = coordinator.reconcile_claim_receipt(
+        account_alias_hash=alias_hash,
+        lease_id_hash="deadbeef0001",
+        owner_pid=_read(receipt)["pid"],
+    )
+    assert outcome == {"result": expected}
+    assert receipt.exists() is (expected != "LEASE_RECEIPT_REMOVED")
+    assert len(reaper.calls) == 1
+
+
+def test_pool_reconcile_claim_receipt_without_worker_fields_never_calls_the_reaper(
+    tmp_path: Path, reaper
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash)
+    outcome = coordinator.reconcile_claim_receipt(
+        account_alias_hash=alias_hash,
+        lease_id_hash="deadbeef0001",
+        owner_pid=_read(receipt)["pid"],
+    )
+    assert outcome == {"result": "LEASE_RECEIPT_REMOVED"} and reaper.calls == []
+
+
+def _reconciled_record(alias_hash: str, owner_pid: int) -> dict[str, Any]:
+    return {
+        "reconciliation": {"provider_alive_after": False},
+        "account_alias_hash": alias_hash,
+        "lease_id_hash": "deadbeef0001",
+        "pid": owner_pid,
+    }
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        pytest.param(False, "LEASE_WORKER_UNPROVEN_PRESERVED", id="not-proven"),
+        pytest.param(OSError("boom"), "LEASE_WORKER_UNPROVEN_PRESERVED", id="reaper-raises"),
+        pytest.param(True, "LEASE_RECEIPT_REMOVED", id="proven"),
+    ],
+)
+def test_dispatcher_lease_cleanup_needs_the_reaper_for_worker_receipts(
+    tmp_path: Path, monkeypatch, reaper, result: Any, expected: str
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash, **_worker_fields())
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+    reaper.result = result
+    outcome = dispatch._cleanup_reconciled_lease(
+        _reconciled_record(alias_hash, _read(receipt)["pid"])
+    )
+    assert outcome == {"result": expected}
+    assert receipt.exists() is (expected != "LEASE_RECEIPT_REMOVED")
+    assert len(reaper.calls) == 1
+
+
+def test_dispatcher_lease_cleanup_without_worker_fields_never_calls_the_reaper(
+    tmp_path: Path, monkeypatch, reaper
+) -> None:
+    coordinator, alias_hash = _coordinator(tmp_path)
+    receipt = _write_receipt(tmp_path, alias_hash)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+    outcome = dispatch._cleanup_reconciled_lease(
+        _reconciled_record(alias_hash, _read(receipt)["pid"])
+    )
+    assert outcome == {"result": "LEASE_RECEIPT_REMOVED"} and reaper.calls == []
+    assert not receipt.exists()
+
+
+# ---------------------------------------------------------------------------
+# review of #2904: the launch window, and the run root of an unproven sweep
+# ---------------------------------------------------------------------------
+
+
+def _prepare_boundary(layout: dict[str, Any], run_command) -> Any:
+    return worker_mod.prepare_worker_account_boundary(
+        source_env={"HOME": str(layout["home"]), "PATH": "/usr/bin:/bin"},
+        target=layout["target"],
+        worker_user=worker_mod.WORKER_USER,
+        source_agy=str(layout["source_agy"]),
+        runs_dir=layout["runs"],
+        wrapper=layout["wrapper"],
+        worker_agy=layout["worker_agy"],
+        run_group=layout["group"],
+        repo_wrapper=WRAPPER,
+        run_command=run_command,
+    )
+
+
+def _worker_receipts_in(err: str) -> list[dict[str, Any]]:
+    prefix = "NEXUS_AGY_DISPATCH "
+    found = [
+        json.loads(line[len(prefix) :]) for line in err.splitlines() if line.startswith(prefix)
+    ]
+    return [meta for meta in found if str(meta.get("event", "")).startswith("WORKER_")]
+
+
+@pytest.mark.parametrize("clean", [False, True], ids=["unclean-sweep", "clean-sweep"])
+def test_a_launch_that_was_attempted_counts_as_launched_before_after_launch(
+    worker_env, monkeypatch, clean: bool
+) -> None:
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    run = _SweepRun(SWEEP_CLEAN if clean else SWEEP_UNCLEAN, 0 if clean else 3)
+    boundary = _prepare_boundary(worker_env, run)
+    # nothing attempted yet: free, and no sweep is run for a boundary that never launched
+    assert boundary.sweep_verdict_clean is True
+    assert boundary.sweep() is True and run.calls == []
+    boundary.before_launch()  # Popen runs next; after_launch has not
+    assert boundary._launched is False
+    assert boundary.sweep_verdict_clean is False  # no verdict yet: the account is not free
+    boundary.cleanup()  # what a signal in this window ends up running
+    assert run.calls == [
+        worker_mod.sweep_argv(boundary.run_root, [], wrapper=worker_env["wrapper"])
+    ]
+    assert boundary.sweep_verdict_clean is clean
+    assert boundary.run_root.exists() is (not clean)
+    if not clean:
+        shutil.rmtree(boundary.run_root)
+
+
+@pytest.mark.parametrize(
+    ("sweep", "released"),
+    [
+        pytest.param((3, SWEEP_UNCLEAN), False, id="unclean-sweep"),
+        pytest.param((0, SWEEP_CLEAN), True, id="clean-sweep"),
+    ],
+)
+def test_a_signal_between_popen_and_after_launch_is_judged_by_the_worker_sweep(
+    worker_env, monkeypatch, capsys, sweep: tuple[int, str], released: bool
+) -> None:
+    _patch_prepare(monkeypatch, worker_env, _SweepRun(sweep[1], sweep[0]))
+    claim = _Claim(worker_env["home"], [])
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        write_boundary.before_launch()
+        # Popen returned, then the signal arrived before after_launch recorded the launch
+        raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_dispatch(worker_env, _Coordinator(claim), runner)
+    capsys.readouterr()
+    assert claim.released is released
+
+
+def test_an_interrupt_after_the_owner_side_sweep_never_leaves_a_clean_verdict(
+    worker_env, monkeypatch
+) -> None:
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_CLEAN))
+    _launch(boundary)
+    real_sweep = boundary_mod.AgyDispatchBoundary.sweep
+
+    def interrupted(self):
+        real_sweep(self)  # stores the Owner-side verdict (True) in ``_swept`` ...
+        raise KeyboardInterrupt()  # ... and the combined verdict never gets computed
+
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        boundary.sweep()
+    assert boundary._swept is None
+    assert boundary.sweep_verdict_clean is False
+    monkeypatch.setattr(boundary_mod.AgyDispatchBoundary, "sweep", real_sweep)
+    boundary.cleanup()
+    assert boundary.sweep_verdict_clean is False  # the tracker is spent: still not provable
+    assert boundary.run_root.exists()
+    shutil.rmtree(boundary.run_root)
+
+
+def test_an_unclean_sweep_keeps_the_run_root_and_says_so(worker_env, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_UNCLEAN, 3))
+    boundary.receipt_context = {"operation_id": None, "attempt": 1}
+    _launch(boundary)
+    (boundary.target / "src" / "a.py").write_text("worker edit\n", encoding="utf-8")
+    boundary.cleanup()
+    err = capsys.readouterr().err
+    assert boundary.run_root.exists()
+    assert boundary.leftover_run_root == str(boundary.run_root)
+    assert f"worker run dir left behind: {boundary.run_root}" in err
+    cleanup = [m for m in _worker_receipts_in(err) if m["event"] == "WORKER_CLEANUP"]
+    assert [m["run_root_removed"] for m in cleanup] == [False]
+    # copy-back stays skipped for an unclean sweep
+    assert (worker_env["target"] / "src" / "a.py").read_text() == "print('a')\n"
+    shutil.rmtree(boundary.run_root)
+
+
+@pytest.mark.parametrize("clean", [False, True], ids=["unclean-sweep", "clean-sweep"])
+def test_keep_run_root_env_behaviour_is_unchanged(worker_env, monkeypatch, clean: bool) -> None:
+    monkeypatch.setenv(boundary_mod.KEEP_RUN_ROOT_ENV, "1")
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    run = _SweepRun(SWEEP_CLEAN if clean else SWEEP_UNCLEAN, 0 if clean else 3)
+    boundary = _prepare_boundary(worker_env, run)
+    _launch(boundary)
+    boundary.cleanup()
+    assert boundary.run_root.exists() and boundary.leftover_run_root is None
+    shutil.rmtree(boundary.run_root)
+
+
+def test_a_clean_sweep_still_removes_the_run_root(worker_env, monkeypatch) -> None:
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    boundary = _prepare_boundary(worker_env, _SweepRun(SWEEP_CLEAN))
+    _launch(boundary)
+    boundary.cleanup()
+    assert not boundary.run_root.exists() and boundary.leftover_run_root is None
+
+
+def test_worker_failure_with_an_unproven_sweep_ends_in_reconciliation_and_keeps_the_claim(
+    worker_env, monkeypatch, capsys
+) -> None:
+    """No runner marker, a launch failure named, and a wrapper that reports survivors."""
+    _patch_prepare(monkeypatch, worker_env, _SweepRun("AGY_WORKER_SWEEP unclean 42\n", 3))
+    events: list[str] = []
+    claim = _Claim(worker_env["home"], events)
+    coordinator = _Coordinator(claim)
+    boundaries: list[Any] = []
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        boundaries.append(write_boundary)
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker()
+        # the wrapper-start marker is deliberately not written
+        return 0, "edited", "", False, 1
+
+    code = _run_dispatch(worker_env, coordinator, runner, max_calls=3)
+    meta = _metas(capsys.readouterr().err)[-1]
+    assert boundaries[0].worker_failure == "AGY_WORKER_LAUNCH_FAILED:wrapper_did_not_start"
+    assert boundaries[0].sweep_verdict_clean is False
+    assert code != 0
+    assert meta["failure_kind"] == "AGY_DESCENDANT_SWEEP_FAILED"
+    assert meta["reconciliation_required"] is True and meta["provider_effect"] is None
+    assert meta["rotations"] == 0 and coordinator.acquire_count == 1
+    assert claim.released is False and "release" not in events
+
+
+# ---------------------------------------------------------------------------
+# review of #2904: a target that overlaps worker-runs would re-open it
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stand_in(tmp_path, monkeypatch):
+    """A stand-in /Users/Shared/cairnwork-worker tree and a private TMPDIR."""
+    base = tmp_path.resolve()
+    shared = base / "Shared"
+    runs_dir = shared / "cairnwork-worker" / "worker-runs"
+    (runs_dir / RUN_TAG / "work").mkdir(parents=True)
+    (runs_dir / RUN_TAG / "work" / "seed").write_text("secret\n", encoding="utf-8")
+    sibling = shared / "cairnwork-worker" / "worker-runs-other"
+    sibling.mkdir()
+    normal = base / "normal-target"
+    normal.mkdir()
+    home = base / "home"
+    (home / TOKEN).parent.mkdir(parents=True)
+    (home / TOKEN).write_text("token", encoding="utf-8")
+    private_tmp = base / "private-tmp"
+    private_tmp.mkdir()
+    monkeypatch.setattr(boundary_mod, "WORKER_RUNS_DIR", runs_dir)
+    monkeypatch.setattr(tempfile, "tempdir", str(private_tmp))
+    if not admission.seatbelt_available():
+        monkeypatch.setattr(boundary_mod, "seatbelt_available", lambda: True)
+    return SimpleNamespace(
+        base=base,
+        shared=shared,
+        runs=runs_dir,
+        sibling=sibling,
+        normal=normal,
+        tmp=private_tmp,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+    )
+
+
+@pytest.mark.parametrize("which", ["ancestor", "equal", "descendant", "symlink-to-ancestor"])
+def test_default_boundary_refuses_a_target_overlapping_worker_runs(stand_in, which: str) -> None:
+    target = {
+        "ancestor": stand_in.shared,
+        "equal": stand_in.runs,
+        "descendant": stand_in.runs / RUN_TAG / "work",
+        "symlink-to-ancestor": stand_in.base / "link",
+    }[which]
+    if which == "symlink-to-ancestor":
+        target.symlink_to(stand_in.shared)
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError) as excinfo:
+        boundary_mod.prepare_accept_edits_boundary(source_env=stand_in.env, target=target)
+    assert str(excinfo.value) == "AGY_WRITE_BOUNDARY_UNAVAILABLE:target_overlaps_worker_runs"
+    assert list(stand_in.tmp.iterdir()) == []  # refused before anything was created
+
+
+def test_default_boundary_allows_a_sibling_that_only_shares_the_prefix(stand_in) -> None:
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env=stand_in.env, target=stand_in.sibling
+    )
+    try:
+        assert boundary.target == stand_in.sibling
+        assert f'(subpath "{stand_in.runs}")' in boundary.profile
+    finally:
+        boundary.cleanup()
+
+
+def test_default_boundary_refuses_a_literal_write_grant_inside_worker_runs(stand_in) -> None:
+    with pytest.raises(boundary_mod.AgyWriteBoundaryError) as excinfo:
+        boundary_mod.prepare_accept_edits_boundary(
+            source_env=stand_in.env,
+            target=stand_in.normal,
+            extra_writable_files=[stand_in.runs / "dispatch.log"],
+            extra_writable_roots=[stand_in.runs],
+        )
+    assert str(excinfo.value) == "AGY_WRITE_BOUNDARY_UNAVAILABLE:extra_path_in_worker_runs"
+    assert list(stand_in.tmp.iterdir()) == []
+
+
+def test_default_profile_denies_real_writes_and_reads_under_worker_runs(stand_in) -> None:
+    if not _seatbelt_usable():
+        pytest.skip("sandbox-exec not usable here")
+    boundary = boundary_mod.prepare_accept_edits_boundary(
+        source_env=stand_in.env, target=stand_in.normal
+    )
+    try:
+
+        def sandboxed(script: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [
+                    admission.SANDBOX_EXEC_PATH,
+                    "-f",
+                    str(boundary.profile_path),
+                    "/bin/sh",
+                    "-c",
+                    script,
+                ],
+                cwd="/",
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+
+        planted = stand_in.runs / RUN_TAG / "work" / "planted"
+        denied = sandboxed(f"echo x > '{planted}'")
+        assert denied.returncode != 0 and "Operation not permitted" in denied.stderr
+        assert not planted.exists()
+        peek = sandboxed(f"cat '{stand_in.runs / RUN_TAG / 'work' / 'seed'}'")
+        assert peek.returncode != 0 and "secret" not in peek.stdout
+        ok = sandboxed(f"echo x > '{stand_in.normal}/ok' && echo WROTE")
+        assert "WROTE" in ok.stdout and (stand_in.normal / "ok").exists()
+    finally:
+        boundary.cleanup()

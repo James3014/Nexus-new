@@ -7010,6 +7010,14 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
                 "observed": observed,
             }
 
+        # #2888: a worker-account agy runs through sudo without the inherited
+        # lock, so matching alias, lease and pid is not enough (same rule as the
+        # pool's reconcile_claim_receipt).
+        if _agy_account_pool.receipt_has_worker_fields(
+            receipt
+        ) and not _agy_account_pool.worker_receipt_run_gone(receipt):
+            return {"result": "LEASE_WORKER_UNPROVEN_PRESERVED"}
+
         try:
             receipt_path.unlink()
         except OSError as exc:

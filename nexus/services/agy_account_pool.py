@@ -1259,6 +1259,9 @@ class CrossProcessLeaseCoordinator:
         while True:
             claimed: Optional[AccountLeaseClaim] = None
             has_healthy_candidates = False
+            # #2888: dead-owner receipts of worker-account runs, reaped after the
+            # allocation lock is released; the account counts as busy this pass.
+            deferred_reaps: list[tuple[str, Path, Any]] = []
 
             with self.allocator_lock_path.open("a+") as alloc_f:
                 fcntl.flock(alloc_f.fileno(), fcntl.LOCK_EX)
@@ -1380,9 +1383,10 @@ class CrossProcessLeaseCoordinator:
                             # #2888: a ``--run-as-user`` receipt carries
                             # ``worker_*`` fields (sudo closes the inherited
                             # fd), so it is removed only after the worker run
-                            # is proven gone.
+                            # is proven gone, and never under this lock: it is
+                            # deferred and reaped once the lock is released.
                             if receipt_path.exists() and not _reclaim_orphaned_desktop_receipt(
-                                receipt_path, candidate.alias_hash
+                                receipt_path, candidate.alias_hash, defer=deferred_reaps
                             ):
                                 try:
                                     lock_obj.close()
@@ -1429,6 +1433,10 @@ class CrossProcessLeaseCoordinator:
             if claimed is not None:
                 return claimed
 
+            if deferred_reaps and self._reap_deferred_worker_receipts(deferred_reaps):
+                # A proven reap freed an account: take another pass at once.
+                continue
+
             if not has_healthy_candidates:
                 raise AgyAccountPoolExhaustedError(
                     "AGY_ACCOUNT_POOL_EXHAUSTED: No available healthy accounts"
@@ -1441,6 +1449,61 @@ class CrossProcessLeaseCoordinator:
                 )
 
             time.sleep(min(self.poll_interval, max(0.01, remaining)))
+
+    def _reap_deferred_worker_receipts(self, deferred: Sequence[tuple[str, Path, Any]]) -> bool:
+        """Reap worker-run receipts set aside by the claim loop; True if any was removed.
+
+        Runs outside the allocation lock and holds only the account's own flock
+        (skipped when busy).  The receipt is re-read and its identity and dead
+        owner re-checked before the reaper runs.  An unproven receipt is not
+        re-reaped for ``WORKER_REAP_NEGATIVE_TTL_SECONDS`` and warns once per lease.
+        """
+        import fcntl
+
+        reaped_any = False
+        for alias_hash, receipt_path, lease_hash in deferred:
+            key = _worker_reap_key(alias_hash, lease_hash)
+            if _worker_reap_recently_unproven(key):
+                continue
+            lock_obj = None
+            try:
+                lock_obj = (self.leases_dir / f"{alias_hash}.lock").open("a+")
+                fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError):
+                if lock_obj is not None:
+                    try:
+                        lock_obj.close()
+                    except OSError:
+                        pass
+                continue
+            try:
+                receipt = _orphaned_desktop_receipt(receipt_path, alias_hash)
+                if (
+                    receipt is None
+                    or not receipt_has_worker_fields(receipt)
+                    or receipt.get("lease_id_hash") != lease_hash
+                ):
+                    continue
+                if not worker_receipt_run_gone(receipt):
+                    _note_worker_reap_unproven(key, alias_hash, lease_hash)
+                    continue
+                try:
+                    receipt_path.unlink()
+                except OSError:
+                    continue
+                _WORKER_REAP_UNPROVEN.pop(key, None)
+                _LOG.warning(
+                    "AGY_ORPHANED_DESKTOP_RECEIPT_RECLAIMED account=%s lease=%s",
+                    alias_hash,
+                    lease_hash,
+                )
+                reaped_any = True
+            finally:
+                try:
+                    fcntl.flock(lock_obj.fileno(), fcntl.LOCK_UN)
+                finally:
+                    lock_obj.close()
+        return reaped_any
 
     def reconcile_claim_receipt(
         self,
@@ -1495,6 +1558,11 @@ class CrossProcessLeaseCoordinator:
                     "result": "LEASE_IDENTITY_MISMATCH_PRESERVED",
                     "observed": observed,
                 }
+
+            # #2888: a worker-account agy runs through sudo without the inherited
+            # lock, so matching alias, lease and pid is not enough.
+            if receipt_has_worker_fields(receipt) and not worker_receipt_run_gone(receipt):
+                return {"result": "LEASE_WORKER_UNPROVEN_PRESERVED"}
 
             try:
                 receipt_path.unlink()
@@ -1559,24 +1627,83 @@ def _pid_is_dead(pid: int) -> bool:
     return False
 
 
-def _reclaim_orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: str) -> bool:
-    """Remove an orphaned foreground-desktop receipt; caller holds the account flock.
+# #2888: a receipt with ``worker_*`` fields belongs to a ``--run-as-user`` dispatch
+# whose agy ran through sudo (which closes the inherited lock fd).  Proving such a
+# run gone can take a sudo sweep, so it never runs under the allocation lock and an
+# unproven receipt is not re-examined on every poll.
+WORKER_REAP_NEGATIVE_TTL_SECONDS = 60.0
+_WORKER_REAP_CACHE_LIMIT = 256
+# (account_alias_hash, lease key) -> monotonic time until which an unproven receipt is
+# not re-reaped.  Entries stay after they expire so the warning logs once per lease.
+_WORKER_REAP_UNPROVEN: dict[tuple[str, str], float] = {}
 
-    Returns True only when the receipt was removed.  Any ambiguity (unreadable
-    receipt, identity mismatch, non-desktop consumer, live or unprovable owner
-    PID) preserves the receipt so the account stays fail-closed (#2717).
 
-    A receipt with ``worker_*`` fields (``AccountLeaseClaim.mark_worker_run``,
-    #2888) belongs to a ``--run-as-user`` dispatch whose agy ran through sudo
-    without the inherited lock, so it is removed only when
-    ``reap_orphaned_worker_run`` proves that run is gone.
+def _reap_monotonic() -> float:
+    import time
+
+    return time.monotonic()
+
+
+def receipt_has_worker_fields(receipt: Any) -> bool:
+    """True when a lease receipt records a worker-account run (any ``worker_*`` key)."""
+    return isinstance(receipt, dict) and any(
+        isinstance(key, str) and key.startswith("worker_") for key in receipt
+    )
+
+
+def worker_receipt_run_gone(receipt: Any) -> bool:
+    """True only when ``reap_orphaned_worker_run`` proves the receipt's worker run gone.
+
+    Never raises: an import problem or any error from the reaper is "not proven".
+    """
+    try:
+        from nexus.executors.agy_worker_account import reap_orphaned_worker_run
+
+        return reap_orphaned_worker_run(receipt) is True
+    except Exception:
+        return False
+
+
+def _worker_reap_key(account_alias_hash: str, lease_id_hash: Any) -> tuple[str, str]:
+    lease = lease_id_hash if isinstance(lease_id_hash, str) else repr(lease_id_hash)
+    return (account_alias_hash, lease)
+
+
+def _worker_reap_recently_unproven(key: tuple[str, str]) -> bool:
+    until = _WORKER_REAP_UNPROVEN.get(key)
+    return until is not None and _reap_monotonic() < until
+
+
+def _note_worker_reap_unproven(
+    key: tuple[str, str], account_alias_hash: str, lease_id_hash: Any
+) -> None:
+    first = key not in _WORKER_REAP_UNPROVEN
+    _WORKER_REAP_UNPROVEN[key] = _reap_monotonic() + WORKER_REAP_NEGATIVE_TTL_SECONDS
+    if len(_WORKER_REAP_UNPROVEN) > _WORKER_REAP_CACHE_LIMIT:
+        for stale in sorted(_WORKER_REAP_UNPROVEN, key=_WORKER_REAP_UNPROVEN.__getitem__)[
+            : _WORKER_REAP_CACHE_LIMIT // 2
+        ]:
+            _WORKER_REAP_UNPROVEN.pop(stale, None)
+    if first:
+        _LOG.warning(
+            "AGY_ORPHANED_WORKER_RECEIPT_PRESERVED account=%s lease=%s",
+            account_alias_hash,
+            lease_id_hash,
+        )
+
+
+def _orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: str) -> Optional[dict]:
+    """The receipt when it is a desktop dispatcher's with a provably dead owner, else None.
+
+    Any ambiguity (unreadable receipt, identity mismatch, non-desktop consumer,
+    live or unprovable owner PID) is None so the account stays fail-closed (#2717).
     """
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
+        return None
     if not isinstance(receipt, dict):
-        return False
+        return None
     pid = receipt.get("pid")
     consumer_id = receipt.get("consumer_id")
     if (
@@ -1589,25 +1716,37 @@ def _reclaim_orphaned_desktop_receipt(receipt_path: Path, account_alias_hash: st
         or pid == os.getpid()
         or not _pid_is_dead(pid)
     ):
-        return False
-    if any(isinstance(key, str) and key.startswith("worker_") for key in receipt):
-        # #2888: a ``--run-as-user`` dispatch ran its agy under another uid
-        # through sudo, which closes the inherited lock fd, so a free lock and
-        # a dead owner prove nothing about that agy.  Remove the receipt only
-        # when the worker run is proven gone.
-        try:
-            from nexus.executors.agy_worker_account import reap_orphaned_worker_run
+        return None
+    return receipt
 
-            reaped = reap_orphaned_worker_run(receipt) is True
-        except Exception:
-            reaped = False
-        if not reaped:
-            _LOG.warning(
-                "AGY_ORPHANED_WORKER_RECEIPT_PRESERVED account=%s lease=%s",
-                account_alias_hash,
-                receipt.get("lease_id_hash"),
-            )
-            return False
+
+def _reclaim_orphaned_desktop_receipt(
+    receipt_path: Path,
+    account_alias_hash: str,
+    *,
+    defer: Optional[list] = None,
+) -> bool:
+    """Remove an orphaned foreground-desktop receipt; caller holds the account flock.
+
+    Returns True only when the receipt was removed.  Any ambiguity (unreadable
+    receipt, identity mismatch, non-desktop consumer, live or unprovable owner
+    PID) preserves the receipt so the account stays fail-closed (#2717).
+
+    A receipt with ``worker_*`` fields (``AccountLeaseClaim.mark_worker_run``,
+    #2888) belongs to a ``--run-as-user`` dispatch whose agy ran through sudo
+    without the inherited lock.  It is never reaped here: this runs under the
+    allocation lock and proving the worker run gone may take a sudo sweep.  When
+    ``defer`` is a list, ``(alias_hash, receipt_path, lease_id_hash)`` is appended
+    so the caller can reap it after releasing the allocation lock
+    (``CrossProcessLeaseCoordinator._reap_deferred_worker_receipts``).
+    """
+    receipt = _orphaned_desktop_receipt(receipt_path, account_alias_hash)
+    if receipt is None:
+        return False
+    if receipt_has_worker_fields(receipt):
+        if defer is not None:
+            defer.append((account_alias_hash, receipt_path, receipt.get("lease_id_hash")))
+        return False
     try:
         receipt_path.unlink()
     except OSError:
