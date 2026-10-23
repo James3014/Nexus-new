@@ -5778,7 +5778,7 @@ def dispatch_run(
                     if out:
                         sys.stdout.write(out)
                     if err:
-                        sys.stderr.write(err)
+                        sys.stderr.write(_neutralize_relayed_stderr(err))
                     emit_run_meta({
                         "status": "failed",
                         "attempts": attempts,
