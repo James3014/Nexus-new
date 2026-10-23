@@ -326,7 +326,9 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         ),
     )
 
-    allowed_candidate_callers = {CANDIDATE_FACADE.id}  # transactional_integration retired (#2584 batch A)
+    allowed_candidate_callers = {
+        CANDIDATE_FACADE.id
+    }  # transactional_integration retired (#2584 batch A)
     allowed_git_apply = {CANDIDATE_SINK.id, COMPETITION_SINK.id}
     candidate_conflicts: list[Record] = []
     for row in rows:

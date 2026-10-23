@@ -37,9 +37,17 @@ RETIRED_MODULES = (
 
 # (module, class, member) that must stay absent.
 RETIRED_MEMBERS = (
-    ("nexus.orchestrator.self_hosted_task_service", "SelfHostedTaskService", "record_operator_outcome"),
+    (
+        "nexus.orchestrator.self_hosted_task_service",
+        "SelfHostedTaskService",
+        "record_operator_outcome",
+    ),
     ("nexus.orchestrator.self_hosted_task_service", "SelfHostedTaskService", "_heartbeat"),
-    ("nexus.orchestrator.target_integration_lifecycle", "TargetIntegrationLifecycle", "transactional_integration"),
+    (
+        "nexus.orchestrator.target_integration_lifecycle",
+        "TargetIntegrationLifecycle",
+        "transactional_integration",
+    ),
 )
 
 RETIRED_NAMES = (
