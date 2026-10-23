@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
@@ -170,6 +171,61 @@ def _provider_stall_seconds() -> float:
         "NEXUS_AGY_PROVIDER_STALL_SECONDS",
         DEFAULT_PROVIDER_STALL_SECONDS,
     )
+
+
+_READ_ONLY_PROFILE_KINDS = frozenset({"READ_ONLY_RESEARCH", "NO_TOOL_PACKET"})
+# A read-only answer counts as empty when its stripped stdout is shorter than this.
+# 1 = only a blank answer; the R6 autopsy's "under 100 bytes" cohort included legitimate
+# short replies (canaries, yes/no probes), so a larger cut-off is opt-in per call.
+DEFAULT_EMPTY_OUTPUT_MIN_BYTES = 1
+
+
+def _empty_output_min_bytes() -> int:
+    return _bounded_positive_int("NEXUS_AGY_EMPTY_OUTPUT_MIN_BYTES", DEFAULT_EMPTY_OUTPUT_MIN_BYTES)
+
+_DEFAULT_TIMEOUT_SECONDS = {
+    "NO_TOOL_PACKET": 300,
+    "READ_ONLY_RESEARCH": 600,
+    "CODING_BOUNDED": 900,
+}
+
+
+class _DispatchFailureKind(str, Enum):
+    # Dispatch-local failure: the shared pool must not persist a cooldown.
+    EMPTY_OUTPUT = "AGY_EMPTY_OUTPUT"
+
+
+AGY_EMPTY_OUTPUT = _DispatchFailureKind.EMPTY_OUTPUT.value
+
+
+def _resolve_dispatch_limits(
+    kind: str,
+    timeout: int | None,
+    provider_stall_seconds: float | None,
+    empty_output_min_bytes: int | None = None,
+) -> dict[str, Any]:
+    stall_default = _provider_stall_seconds()
+    if kind in _READ_ONLY_PROFILE_KINDS:
+        stall_default = max(30.0, stall_default / 2)
+    return {
+        "timeout_seconds": (
+            timeout if timeout is not None else _DEFAULT_TIMEOUT_SECONDS.get(kind, 900)
+        ),
+        "timeout_source": "explicit" if timeout is not None else f"default:{kind}",
+        "provider_stall_seconds": (
+            max(0.1, float(provider_stall_seconds))
+            if provider_stall_seconds is not None
+            else stall_default
+        ),
+        "provider_stall_source": (
+            "explicit" if provider_stall_seconds is not None else f"default:{kind}"
+        ),
+        "empty_output_min_bytes": (
+            max(1, int(empty_output_min_bytes))
+            if empty_output_min_bytes is not None
+            else _empty_output_min_bytes()
+        ),
+    }
 
 
 def _stream_no_progress_seconds() -> float:
@@ -2147,6 +2203,8 @@ def run_agy(
             and observed_at - started >= resolved_provider_stall_seconds
         ):
             return "PROVIDER_STALLED"
+        if not expect_coding_progress:
+            return None
         if first_tool_monotonic is not None and (
             observed_at - first_tool_monotonic >= resolved_pre_effect_max_seconds
             or tool_event_count >= resolved_pre_effect_max_tool_events
@@ -2223,7 +2281,10 @@ def run_agy(
 
             _refresh_progress_telemetry(observed_at=now)
 
-            if expect_coding_progress and not first_effect_seen.is_set():
+            if (
+                expect_coding_progress
+                or (mode == "plan" and provider_stall_seconds is not None)
+            ) and not first_effect_seen.is_set():
                 non_progress_failure = _classify_non_progress(observed_at=now)
                 if non_progress_failure is not None:
                     # Telemetry can become durable after the regular poll but before
@@ -4292,7 +4353,7 @@ def dispatch_run(
     mode: str = "plan",
     model: str | None = None,
     effort: str | None = None,
-    timeout: int = 900,
+    timeout: int | None = None,
     max_calls: int = 3,
     pool_wait_timeout: float | None = None,
     allow: list[str] | None = None,
@@ -4309,9 +4370,15 @@ def dispatch_run(
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
     run_as_user: str | None = None,
+    empty_output_min_bytes: int | None = None,
 ) -> int:
-    total_budget_seconds = max(1, int(timeout))
-    total_deadline = _monotonic() + total_budget_seconds
+    started_at = _monotonic()
+    limits: dict[str, Any] = {}
+    empty_output_failovers = 0
+
+    def emit_run_meta(data: dict[str, Any]) -> None:
+        emit_meta({**limits, "empty_output_failovers": empty_output_failovers, **data})
+
     user_allow = list(allow or [])
     try:
         effective_permissions, permission_profile_kind, permission_profile_sha256 = (
@@ -4327,6 +4394,16 @@ def dispatch_run(
     except ValueError as exc:
         failure_kind = str(exc)
         contract_failure = f"DISPATCH_CONTRACT_REJECTED:{failure_kind}"
+        # No profile kind: report the explicit limits, mark the rest unresolved.
+        limits = {
+            "timeout_seconds": timeout,
+            "timeout_source": "explicit" if timeout is not None else "unresolved",
+            "provider_stall_seconds": provider_stall_seconds,
+            "provider_stall_source": (
+                "explicit" if provider_stall_seconds is not None else "unresolved"
+            ),
+            "empty_output_min_bytes": empty_output_min_bytes,
+        }
         _operation_hook(
             operation_hook,
             phase="CONTRACT_REJECTED",
@@ -4338,7 +4415,7 @@ def dispatch_run(
             permission_profile_sha256=None,
             effective_permissions=None,
         )
-        emit_meta({
+        emit_run_meta({
             "status": "invalid_contract",
             "attempts": 0,
             "rotations": 0,
@@ -4350,8 +4427,16 @@ def dispatch_run(
         })
         return 64
 
+    limits = _resolve_dispatch_limits(
+        permission_profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+    )
+    total_budget_seconds = max(1, int(limits["timeout_seconds"]))
+    total_deadline = started_at + total_budget_seconds
+    provider_stall_seconds = limits["provider_stall_seconds"]
     _operation_hook(
         operation_hook,
+        **limits,
+        empty_output_failovers=empty_output_failovers,
         permission_profile_sha256=permission_profile_sha256,
         permission_profile_kind=permission_profile_kind,
         effective_permissions=effective_permissions,
@@ -4367,7 +4452,7 @@ def dispatch_run(
             failure_kind=effort_failure,
             provider_effect=False,
         )
-        emit_meta({
+        emit_run_meta({
             "status": "invalid_contract",
             "attempts": 0,
             "rotations": 0,
@@ -4407,7 +4492,7 @@ def dispatch_run(
                 failure_kind=model_failure,
                 provider_effect=False,
             )
-            emit_meta({
+            emit_run_meta({
                 "status": "invalid_model",
                 "attempts": 0,
                 "rotations": 0,
@@ -4430,7 +4515,7 @@ def dispatch_run(
                 failure_kind=admission_failure,
                 provider_effect=False,
             )
-            emit_meta({
+            emit_run_meta({
                 "status": "admission_rejected",
                 "attempts": 0,
                 "rotations": 0,
@@ -4464,7 +4549,7 @@ def dispatch_run(
             failure_kind=boundary_failure,
             provider_effect=False,
         )
-        emit_meta({
+        emit_run_meta({
             "status": "invalid_contract",
             "attempts": 0,
             "rotations": 0,
@@ -4535,7 +4620,7 @@ def dispatch_run(
                 dispatch_decision="BLOCK_KNOWN_QUOTA",
             ),
         )
-        emit_meta({
+        emit_run_meta({
             "status": "failed",
             "attempts": 0,
             "rotations": 0,
@@ -4561,7 +4646,7 @@ def dispatch_run(
             failure_kind=contract_failure,
             provider_effect=False,
         )
-        emit_meta({
+        emit_run_meta({
             "status": "invalid_contract",
             "attempts": 0,
             "rotations": 0,
@@ -4688,7 +4773,7 @@ def dispatch_run(
                 "unknown_count": len(unknown_candidates),
             }
         _operation_hook(operation_hook, **claim_event)
-        emit_meta({
+        emit_run_meta({
             "status": "pool_busy" if busy else "pool_exhausted",
             "attempts": 0,
             "rotations": 0,
@@ -4767,7 +4852,7 @@ def dispatch_run(
             provider_effect=None,
             reconciliation_required=False,
         )
-        emit_meta({
+        emit_run_meta({
             "status": "failed",
             "attempts": attempts,
             "rotations": rotations,
@@ -4860,7 +4945,7 @@ def dispatch_run(
                             model_family=scoped_model_family,
                             unavailable_until=unavailable_until,
                         )
-                        emit_meta({
+                        emit_run_meta({
                             "status": "failed",
                             "attempts": attempts,
                             "rotations": rotations,
@@ -4907,7 +4992,7 @@ def dispatch_run(
                             pool_queue=dict(pool_queue),
                             **_pool_busy_failure_fields(rotate_exc),
                         )
-                        emit_meta({
+                        emit_run_meta({
                             "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                             "attempts": attempts,
                             "rotations": rotations,
@@ -5021,7 +5106,7 @@ def dispatch_run(
                             pool_queue=dict(pool_queue),
                             failure_kind="AGY_ACCOUNT_POOL_BUSY",
                         )
-                        emit_meta({
+                        emit_run_meta({
                             "status": "pool_busy",
                             "attempts": attempts,
                             "rotations": rotations,
@@ -5072,7 +5157,7 @@ def dispatch_run(
                     account_alias_hash=claim.account_alias_hash,
                     lease_id_hash=claim.lease_id_hash,
                 )
-                emit_meta({
+                emit_run_meta({
                     "status": "invalid_model",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5183,7 +5268,7 @@ def dispatch_run(
                             failure_kind=prepare_failure,
                             provider_effect=False,
                         )
-                        emit_meta({
+                        emit_run_meta({
                             "status": "invalid_contract",
                             "attempts": attempts,
                             "rotations": rotations,
@@ -5357,7 +5442,7 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5393,7 +5478,7 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5503,9 +5588,16 @@ def dispatch_run(
                     no_tool_violation = False
                     no_tool_refused_calls = refused_calls
 
+            empty_output = (
+                permission_profile_kind in _READ_ONLY_PROFILE_KINDS
+                and code == 0
+                and not timed_out
+                and len(out.strip().encode("utf-8")) < int(limits["empty_output_min_bytes"])
+            )
             if (
                 code == 0
                 and not timed_out
+                and not empty_output
                 and not permission_blocked
                 and not scope_blocked
                 and not no_tool_violation
@@ -5528,7 +5620,7 @@ def dispatch_run(
                 }
                 if no_tool_refused_calls:
                     completed_meta["no_tool_refused_tool_calls"] = no_tool_refused_calls
-                emit_meta(completed_meta)
+                emit_run_meta(completed_meta)
                 return 0
 
             kind = (
@@ -5582,6 +5674,11 @@ def dispatch_run(
                 else:
                     provider_effect_observed = None
                     reconciliation_required = True
+            elif empty_output and not provider_terminal_quota:
+                last_kind = AGY_EMPTY_OUTPUT
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
             elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
                 last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
                 if attempt_changed_paths:
@@ -5618,7 +5715,7 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5635,12 +5732,76 @@ def dispatch_run(
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
+            if last_kind == AGY_EMPTY_OUTPUT:
+                # Dispatch-local: the account is healthy, so it is only excluded
+                # for this dispatch. It is released and another account is leased
+                # with acquire_claim; rotate_claim / retire_failed_claim are never
+                # called, so no cooldown or family retirement is persisted.
+                exclude_hashes.add(claim.account_alias_hash)
+                claim.release()
+                if empty_output_failovers >= 1 or rotations >= max_failovers:
+                    emit_run_meta({
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": AGY_EMPTY_OUTPUT,
+                        "provider_effect": False,
+                        "wall_ms": total_wall_ms,
+                        "permission_profile_kind": permission_profile_kind,
+                        "permission_profile_sha256": permission_profile_sha256,
+                    })
+                    return 1
+                if _budget_exhausted():
+                    return _emit_total_deadline_exhausted()
+                try:
+                    claim = _queued_claim(first_pass=lambda: coordinator.acquire_claim(
+                        consumer_id=consumer_id,
+                        exclude_hashes=exclude_hashes,
+                        wait_timeout=0.0,
+                        model_family=scoped_model_family,
+                    ))
+                except _PoolClaimFailure as exc:
+                    emit_run_meta({
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": AGY_EMPTY_OUTPUT,
+                        "wall_ms": total_wall_ms,
+                        **_pool_claim_meta(exc),
+                    })
+                    return 75
+                except Exception:
+                    emit_run_meta({
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": AGY_EMPTY_OUTPUT,
+                        "wall_ms": total_wall_ms,
+                    })
+                    return 75
+                empty_output_failovers += 1
+                # One account switch: it counts toward the failover cap (bounded by
+                # the pool size) but not toward --max-calls (work_failures).
+                rotations += 1
+                _operation_hook(
+                    operation_hook,
+                    phase="ACCOUNT_ROTATED",
+                    attempts=attempts,
+                    rotations=rotations,
+                    empty_output_failovers=empty_output_failovers,
+                    failure_kind=last_kind,
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                    pool_queue=dict(pool_queue),
+                )
+                continue
+
             if not is_agy_rotation_eligible(kind):
                 if out:
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5688,7 +5849,7 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5723,7 +5884,7 @@ def dispatch_run(
                         pass
                     if err:
                         sys.stderr.write(err)
-                    emit_meta({
+                    emit_run_meta({
                         "status": "failed",
                         "attempts": attempts,
                         "rotations": rotations,
@@ -5747,7 +5908,7 @@ def dispatch_run(
                     _retire_current()
                 except Exception:
                     pass
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5804,7 +5965,7 @@ def dispatch_run(
                     pool_queue=dict(pool_queue),
                     **_pool_busy_failure_fields(rotate_exc),
                 )
-                emit_meta({
+                emit_run_meta({
                     "status": "pool_busy" if rotate_exc.busy else "pool_exhausted",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5814,7 +5975,7 @@ def dispatch_run(
                 })
                 return 75
             except Exception:
-                emit_meta({
+                emit_run_meta({
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
@@ -5838,7 +5999,7 @@ def dispatch_run(
             except Exception:
                 pass
 
-    emit_meta({"status": "failed", "failure_kind": last_kind or "UNKNOWN"})
+    emit_run_meta({"status": "failed", "failure_kind": last_kind or "UNKNOWN"})
     return 1
 
 
@@ -5868,7 +6029,7 @@ def _spawn_background_operation(
     mode: str,
     model: str | None,
     effort: str | None,
-    timeout: int,
+    timeout: int | None,
     max_calls: int,
     pool_wait_timeout: float | None,
     allow: list[str],
@@ -5883,6 +6044,7 @@ def _spawn_background_operation(
     exclude_accounts: list[str] | None = None,
     evidence_refs: list[str] | None = None,
     run_as_user: str | None = None,
+    empty_output_min_bytes: int | None = None,
 ) -> dict[str, Any]:
     resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
@@ -5890,11 +6052,22 @@ def _spawn_background_operation(
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
     coding_progress_required = bool(mode == "accept-edits" and write_paths)
-    resolved_provider_stall_seconds = (
-        _provider_stall_seconds()
-        if provider_stall_seconds is None
-        else max(0.1, float(provider_stall_seconds))
+    try:
+        _, profile_kind, _ = build_effective_permission_profile(
+            cwd=cwd,
+            mode=mode,
+            write_paths=write_paths,
+            allow_rules=allow,
+            deny_rules=deny,
+            temp_command_permissions=temp_command_permissions,
+        )
+    except ValueError:
+        # Preserve background launch semantics: the child owns contract rejection.
+        profile_kind = "INVALID"
+    limits = _resolve_dispatch_limits(
+        profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
     )
+    resolved_provider_stall_seconds = limits["provider_stall_seconds"]
     resolved_stream_no_progress_seconds = (
         _stream_no_progress_seconds()
         if stream_no_progress_seconds is None
@@ -5920,6 +6093,8 @@ def _spawn_background_operation(
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         runtime_revision=_runtime_revision(),
         initial_fields={
+            **limits,
+            "empty_output_failovers": 0,
             "excluded_account_hashes": resolved_exclude_hashes,
             "evidence_refs": resolved_evidence_refs,
             "liveness_policy": {
@@ -5949,13 +6124,20 @@ def _spawn_background_operation(
         cwd,
         "--mode",
         mode,
-        "--timeout",
-        str(timeout),
+        *(["--timeout", str(timeout)] if timeout is not None else []),
+        *(
+            ["--empty-output-min-bytes", str(empty_output_min_bytes)]
+            if empty_output_min_bytes is not None
+            else []
+        ),
         "--max-calls",
         str(max_calls),
         *(["--pool-wait-timeout", str(pool_wait_timeout)] if pool_wait_timeout is not None else []),
-        "--provider-stall-seconds",
-        str(resolved_provider_stall_seconds),
+        *(
+            ["--provider-stall-seconds", str(provider_stall_seconds)]
+            if provider_stall_seconds is not None
+            else []
+        ),
         "--stream-no-progress-seconds",
         str(resolved_stream_no_progress_seconds),
         "--pre-effect-max-seconds",
@@ -6189,7 +6371,7 @@ def _run_background_operation(
     mode: str,
     model: str | None,
     effort: str | None,
-    timeout: int,
+    timeout: int | None,
     max_calls: int,
     pool_wait_timeout: float | None,
     allow: list[str],
@@ -6204,6 +6386,7 @@ def _run_background_operation(
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
     run_as_user: str | None = None,
+    empty_output_min_bytes: int | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -6246,6 +6429,25 @@ def _run_background_operation(
         "permission_profile_kind": None,
         "effective_permissions": None,
     }
+    # #2887: resolve the limits here too, so a heartbeat written before dispatch_run's
+    # first event carries the same values the parent recorded instead of nulls.
+    try:
+        _, _seed_profile_kind, _ = build_effective_permission_profile(
+            cwd=cwd,
+            mode=mode,
+            write_paths=write_paths,
+            allow_rules=allow,
+            deny_rules=deny,
+            temp_command_permissions=temp_command_permissions,
+        )
+    except ValueError:
+        _seed_profile_kind = "INVALID"
+    state.update(
+        _resolve_dispatch_limits(
+            _seed_profile_kind, timeout, provider_stall_seconds, empty_output_min_bytes
+        )
+    )
+    state["empty_output_failovers"] = 0
     state_lock = threading.Lock()
     sweep_write_lock = threading.Lock()
 
@@ -6255,6 +6457,11 @@ def _run_background_operation(
             phase=str(snapshot.get("phase") or "RUNNING"),
             attempts=int(snapshot.get("attempts") or 0),
             rotations=int(snapshot.get("rotations") or 0),
+            empty_output_failovers=int(snapshot.get("empty_output_failovers") or 0),
+            timeout_seconds=snapshot.get("timeout_seconds"),
+            timeout_source=snapshot.get("timeout_source"),
+            provider_stall_seconds=snapshot.get("provider_stall_seconds"),
+            provider_stall_source=snapshot.get("provider_stall_source"),
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
@@ -6369,6 +6576,7 @@ def _run_background_operation(
             model=model,
             effort=effort,
             timeout=timeout,
+            empty_output_min_bytes=empty_output_min_bytes,
             max_calls=max_calls,
             pool_wait_timeout=pool_wait_timeout,
             allow=allow,
@@ -6404,6 +6612,11 @@ def _run_background_operation(
                 failure_kind=unresolved_failure,
                 attempts=int(snapshot.get("attempts") or 0),
                 rotations=int(snapshot.get("rotations") or 0),
+                empty_output_failovers=int(snapshot.get("empty_output_failovers") or 0),
+                timeout_seconds=snapshot.get("timeout_seconds"),
+                timeout_source=snapshot.get("timeout_source"),
+                provider_stall_seconds=snapshot.get("provider_stall_seconds"),
+                provider_stall_source=snapshot.get("provider_stall_source"),
                 account_alias_hash=snapshot.get("account_alias_hash"),
                 lease_id_hash=snapshot.get("lease_id_hash"),
                 provider_pid=provider_pid,
@@ -6446,6 +6659,11 @@ def _run_background_operation(
                 failure_kind=failure_kind or AGY_DESCENDANT_SWEEP_FAILED,
                 attempts=int(snapshot.get("attempts") or 0),
                 rotations=int(snapshot.get("rotations") or 0),
+                empty_output_failovers=int(snapshot.get("empty_output_failovers") or 0),
+                timeout_seconds=snapshot.get("timeout_seconds"),
+                timeout_source=snapshot.get("timeout_source"),
+                provider_stall_seconds=snapshot.get("provider_stall_seconds"),
+                provider_stall_source=snapshot.get("provider_stall_source"),
                 account_alias_hash=snapshot.get("account_alias_hash"),
                 lease_id_hash=snapshot.get("lease_id_hash"),
                 provider_pid=provider_pid,
@@ -6528,6 +6746,11 @@ def _run_background_operation(
             write_paths=write_paths,
             attempts=int(snapshot.get("attempts") or 0),
             rotations=int(snapshot.get("rotations") or 0),
+            empty_output_failovers=int(snapshot.get("empty_output_failovers") or 0),
+            timeout_seconds=snapshot.get("timeout_seconds"),
+            timeout_source=snapshot.get("timeout_source"),
+            provider_stall_seconds=snapshot.get("provider_stall_seconds"),
+            provider_stall_source=snapshot.get("provider_stall_source"),
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             reconciliation=reconciliation,
@@ -6945,7 +7168,17 @@ def _ack_unclean_sweep_operation(
 
 
 def _print_operation(record: dict[str, Any]) -> None:
-    print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
+    summary = public_operation_view(record)
+    for key in (
+        "timeout_seconds",
+        "timeout_source",
+        "provider_stall_seconds",
+        "provider_stall_source",
+        "empty_output_failovers",
+    ):
+        if key in record:
+            summary[key] = record[key]
+    print(json.dumps(summary, indent=2, sort_keys=True))
 
 
 class _ForegroundSignalExit(BaseException):
@@ -7005,7 +7238,7 @@ def _run_foreground_with_signal_cleanup(func: Any, **kwargs: Any) -> int:
                 pass
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="Quota-aware direct Agy dispatcher using the existing Nexus account pool."
     )
@@ -7043,7 +7276,13 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Bounded writable path inside --cwd for accept-edits; repeatable",
     )
-    ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--timeout", type=int, default=None)
+    ap.add_argument(
+        "--empty-output-min-bytes",
+        type=int,
+        default=None,
+        help="Read-only answers shorter than this (stripped, bytes) fail over once to another account; default 1",
+    )
     ap.add_argument("--max-calls", type=int, default=3)
     ap.add_argument(
         "--pool-wait-timeout",
@@ -7057,8 +7296,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--provider-stall-seconds",
         type=float,
-        default=_provider_stall_seconds(),
-        help="Coding-task provider-start deadline before classifying no provider progress",
+        default=None,
+        help="Provider-start deadline; read-only defaults are halved (minimum 30 seconds)",
     )
     ap.add_argument(
         "--stream-no-progress-seconds",
@@ -7129,7 +7368,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--operation-root", default=str(OPERATION_ROOT), help=argparse.SUPPRESS)
     ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
 
     operation_root = Path(args.operation_root).expanduser()
     journal = AgyOperationJournal(operation_root)
@@ -7210,6 +7453,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             effort=args.effort,
             timeout=args.timeout,
+            empty_output_min_bytes=args.empty_output_min_bytes,
             max_calls=args.max_calls,
             pool_wait_timeout=args.pool_wait_timeout,
             allow=args.allow,
@@ -7233,6 +7477,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             effort=args.effort,
             timeout=args.timeout,
+            empty_output_min_bytes=args.empty_output_min_bytes,
             max_calls=args.max_calls,
             pool_wait_timeout=args.pool_wait_timeout,
             allow=args.allow,
@@ -7259,6 +7504,7 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
         effort=args.effort,
         timeout=args.timeout,
+        empty_output_min_bytes=args.empty_output_min_bytes,
         max_calls=args.max_calls,
         pool_wait_timeout=args.pool_wait_timeout,
         allow=args.allow,
