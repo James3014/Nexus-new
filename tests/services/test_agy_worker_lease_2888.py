@@ -1468,7 +1468,7 @@ def test_kept_root_scrub_never_follows_symlinks_or_removes_directories(
     cleanup = next(
         r for r in _worker_receipts_in(capsys.readouterr().err) if r["event"] == "WORKER_CLEANUP"
     )
-    assert cleanup["credentials_scrubbed"] is (swap == "leaf")
+    assert cleanup["credentials_scrubbed"] is False  # a swapped-in symlink is not a scrub
     assert boundary.run_root.exists()
     assert outside.read_text() == "outside secret"
     if swap == "leaf":

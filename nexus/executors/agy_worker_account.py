@@ -1306,10 +1306,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
 
         Open each directory relative to an already open parent with O_NOFOLLOW:
         lstat on just the leaf would still follow a swapped parent symlink.
-        True only if every credential present at launch is still at its name
-        and is unlinked.  A missing file or directory (a surviving worker may
-        have renamed it), a directory in its place, a file with other hard
-        links, or an I/O failure all report False.
+        True only if every credential name present at launch still holds a
+        regular file with no other hard link and is unlinked ("the known names
+        were scrubbed"; files agy wrote under other names are not seen).  A
+        missing file or directory (a surviving worker may have renamed it), a
+        symlink or directory in its place, a file with other hard links, or an
+        I/O failure all report False.
         """
         clean = True
         for relative in self._scrub_paths:
@@ -1323,8 +1325,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 info = os.lstat(relative.name, dir_fd=fds[-1])
                 if stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
                     os.unlink(relative.name, dir_fd=fds[-1])
-                    if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-                        clean = False  # the bytes live on under another name
+                    if stat.S_ISLNK(info.st_mode) or info.st_nlink > 1:
+                        clean = False  # the credential bytes live on elsewhere
                 else:
                     clean = False
             except OSError:
