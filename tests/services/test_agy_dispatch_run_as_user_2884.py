@@ -23,6 +23,7 @@ import sys
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -1293,6 +1294,62 @@ def test_dispatch_run_as_user_runs_agy_in_the_worker_copy(worker_env, monkeypatc
     assert (target / "src" / "a.py").read_text() == "print('worker')\n"
     assert not boundary.run_root.exists()
     assert list(worker_env["runs"].iterdir()) == []
+    assert coordinator.claim.released is True
+
+
+@pytest.mark.parametrize("gc_raises", [False, True], ids=["gc-ok", "gc-exception"])
+def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
+    worker_env, monkeypatch, capsys, gc_raises
+):
+    coordinator = _Coordinator(worker_env["home"])
+    coordinator.claim.receipt_path = worker_env["pool"] / "leases" / "a.receipt.json"
+    events = []
+    referenced = {"/runs/keep"}
+    boundary = SimpleNamespace(
+        env=coordinator.claim.lease.execution_env,
+        target=worker_env["target"],
+        run_root=worker_env["runs"],
+        cleanup=lambda: None,
+        sweep=lambda: True,
+        sweep_verdict_clean=True,
+    )
+
+    def references(leases_dir):
+        assert leases_dir == coordinator.claim.receipt_path.parent
+        events.append("references")
+        return referenced
+
+    def gc(roots):
+        assert roots is referenced
+        events.append("gc")
+        if gc_raises:
+            raise RuntimeError("best-effort GC failed")
+        return []
+
+    def prepare_boundary(**kwargs):
+        events.append("prepare")
+        return boundary
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        assert write_boundary is boundary
+        events.append("runner")
+        return 0, "edited", "", False, 1
+
+    monkeypatch.setattr(dispatch._agy_account_pool, "referenced_worker_run_roots", references)
+    monkeypatch.setattr(worker_mod, "gc_unreferenced_worker_run_roots", gc)
+    monkeypatch.setattr(worker_mod, "prepare_worker_account_boundary", prepare_boundary)
+    target = worker_env["target"]
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user=worker_mod.WORKER_USER,
+    )
+    assert code == 0, capsys.readouterr().err
+    assert events == ["references", "gc", "prepare", "runner"]
     assert coordinator.claim.released is True
 
 

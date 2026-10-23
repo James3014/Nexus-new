@@ -703,6 +703,254 @@ def _run_root(runs_dir: Path, tag: str = RUN_TAG) -> tuple[Path, dict[str, Any]]
     return root, receipt
 
 
+# ---------------------------------------------------------------------------
+# #2905: old worker roots without any lease receipt
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def orphan_gc(runs, monkeypatch):
+    monkeypatch.delenv(worker_mod.KEEP_RUN_ROOT_ENV, raising=False)
+    # ctime cannot be backdated; future mtimes give deterministic ages and order.
+    now = worker_mod.time.time() + 3 * 86400
+    commands = _Commands()
+
+    def root(tag=RUN_TAG, *, age=86401):
+        path, _ = _run_root(runs, tag)
+        os.utime(path, (now - age, now - age))
+        return path
+
+    return SimpleNamespace(
+        root=root,
+        commands=commands,
+        now=now,
+        collect=functools.partial(
+            worker_mod.gc_unreferenced_worker_run_roots,
+            runs_dir=runs,
+            now=now,
+            run_command=commands,
+        ),
+    )
+
+
+def test_gc_removes_an_old_unreferenced_root_after_clean_sweep(orphan_gc, caplog) -> None:
+    root = orphan_gc.root()
+    assert orphan_gc.collect(set()) == [str(root)]
+    assert not root.exists()
+    assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(root, [])]
+    assert len(orphan_gc.commands.pses) == 1
+    assert orphan_gc.commands.calls[0][0][0] == worker_mod.PS_PATH
+    assert f"AGY_WORKER_ORPHAN_RUN_ROOT_REMOVED root={root}" in caplog.text
+
+
+def test_gc_preserves_a_referenced_root_using_resolved_runs_path(orphan_gc, runs) -> None:
+    referenced = orphan_gc.root()
+    other = orphan_gc.root("c" * 32)
+    assert orphan_gc.collect({str(referenced)}, runs_dir=runs / ".." / runs.name) == [str(other)]
+    assert referenced.exists() and not other.exists()
+    assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(other, [])]
+
+
+@pytest.mark.parametrize("age", [10, 86400], ids=["fresh", "exact-cutoff"])
+def test_gc_preserves_fresh_roots(orphan_gc, age) -> None:
+    fresh = orphan_gc.root(age=age)
+    old = orphan_gc.root("c" * 32)
+    assert orphan_gc.collect(set()) == [str(old)]
+    assert fresh.exists() and not old.exists()
+    assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(old, [])]
+
+
+def test_gc_uses_ctime_as_well_as_mtime(orphan_gc) -> None:
+    root = orphan_gc.root()
+    os.utime(root, (1, 1))
+    assert orphan_gc.collect(set(), now=root.lstat().st_ctime + 10) == []
+    assert root.exists() and orphan_gc.commands.sweeps == []
+
+
+@pytest.mark.parametrize("name", ["g" * 32, "A" * 32, "a" * 31, "a" * 33])
+def test_gc_preserves_non_run_names(orphan_gc, name) -> None:
+    invalid = orphan_gc.root(name)
+    old = orphan_gc.root()
+    assert orphan_gc.collect(set()) == [str(old)]
+    assert invalid.exists() and orphan_gc.commands.sweeps == [worker_mod.sweep_argv(old, [])]
+
+
+@pytest.mark.parametrize("kind", ["symlink", "file"])
+def test_gc_preserves_non_directory_entries(orphan_gc, runs, tmp_path, kind) -> None:
+    entry = runs / ("c" * 32)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if kind == "symlink":
+        entry.symlink_to(outside, target_is_directory=True)
+    else:
+        entry.write_text("keep", encoding="utf-8")
+    old = orphan_gc.root()
+    assert orphan_gc.collect(set(), now=orphan_gc.now + 86400) == [str(old)]
+    assert entry.exists() and outside.exists()
+    assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(old, [])]
+
+
+@pytest.mark.parametrize("guard", ["unknown-references", "debug-keep", "symlink-runs"])
+def test_gc_requires_reference_proof_and_allows_debug_keep(
+    orphan_gc, runs, tmp_path, monkeypatch, guard
+) -> None:
+    root = orphan_gc.root()
+    referenced = set()
+    if guard == "unknown-references":
+        referenced = None
+    elif guard == "debug-keep":
+        monkeypatch.setenv(worker_mod.KEEP_RUN_ROOT_ENV, "1")
+    else:
+        link = tmp_path / "runs-link"
+        link.symlink_to(runs, target_is_directory=True)
+        orphan_gc.collect.keywords["runs_dir"] = link
+    assert orphan_gc.collect(referenced) == []
+    assert root.exists() and orphan_gc.commands.calls == []
+
+
+@pytest.mark.parametrize("which", ["runs-dir", "run-root"])
+def test_gc_requires_owner_owned_directories(orphan_gc, runs, monkeypatch, which) -> None:
+    root = orphan_gc.root()
+    real_lstat = Path.lstat
+    wrong_owner = runs if which == "runs-dir" else root
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == wrong_owner:
+            fields = list(info)
+            fields[4] = os.getuid() + 1
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    assert orphan_gc.collect(set()) == []
+    assert root.exists() and orphan_gc.commands.sweeps == []
+
+
+@pytest.mark.parametrize(
+    "ps",
+    [(0, " 4242\n", ""), (1, "", "denied"), OSError("ps denied")],
+    ids=["busy", "failure", "exception"],
+)
+def test_gc_requires_a_positive_idle_worker_probe(orphan_gc, ps) -> None:
+    root = orphan_gc.root()
+    orphan_gc.commands.ps = ps
+    assert orphan_gc.collect(set()) == []
+    assert root.exists() and orphan_gc.commands.sweeps == []
+    assert len(orphan_gc.commands.pses) == 1
+
+
+def test_gc_skips_unclean_sweep_and_still_processes_the_next_root(orphan_gc) -> None:
+    unclean = orphan_gc.root(age=90000)
+    clean = orphan_gc.root("c" * 32)
+    commands = orphan_gc.commands
+
+    def run(argv, **kwargs):
+        commands.sweep = (3, SWEEP_UNCLEAN) if str(unclean) in argv else (0, SWEEP_CLEAN)
+        return commands(argv, **kwargs)
+
+    assert orphan_gc.collect(set(), run_command=run) == [str(clean)]
+    assert unclean.exists() and not clean.exists()
+    assert commands.sweeps == [worker_mod.sweep_argv(p, []) for p in (unclean, clean)]
+
+
+@pytest.mark.parametrize("limit", [0, 1, 2])
+def test_gc_honours_limit_and_oldest_first_order(orphan_gc, limit) -> None:
+    newest = orphan_gc.root(age=86401)
+    oldest = orphan_gc.root("c" * 32, age=90000)
+    middle = orphan_gc.root("d" * 32, age=88000)
+    ordered = [oldest, middle, newest]
+    assert orphan_gc.collect(set(), limit=limit) == [str(p) for p in ordered[:limit]]
+    assert orphan_gc.commands.sweeps == [worker_mod.sweep_argv(p, []) for p in ordered[:limit]]
+    assert all(p.exists() for p in ordered[limit:])
+
+
+def test_gc_skips_an_inode_swapped_during_the_sweep(orphan_gc, tmp_path, monkeypatch) -> None:
+    root = orphan_gc.root()
+    moved = tmp_path / "original"
+
+    def sweep(path, **kwargs):
+        assert path == root and kwargs["run_command"] is orphan_gc.commands
+        path.rename(moved)  # retain the original so its inode cannot be reused
+        path.mkdir()
+        (path / "keep").write_text("replacement", encoding="utf-8")
+        return "CLEAN"
+
+    monkeypatch.setattr(worker_mod, "sweep_run_root", sweep)
+    assert orphan_gc.collect(set()) == []
+    assert (root / "keep").read_text() == "replacement" and moved.exists()
+
+
+def test_gc_reports_a_leftover_without_counting_it(orphan_gc, monkeypatch, caplog) -> None:
+    root = orphan_gc.root()
+    monkeypatch.setattr(worker_mod.shutil, "rmtree", lambda *a, **k: None)
+    assert orphan_gc.collect(set()) == []
+    assert root.exists() and len(orphan_gc.commands.sweeps) == 1
+    assert f"AGY_WORKER_ORPHAN_RUN_ROOT_LEFTOVER root={root}" in caplog.text
+
+
+def test_gc_stops_on_exception_and_returns_roots_already_removed(orphan_gc, monkeypatch) -> None:
+    first = orphan_gc.root(age=90000)
+    second = orphan_gc.root("c" * 32)
+    real_sweep = worker_mod.sweep_run_root
+
+    def sweep(path, **kwargs):
+        if path == second:
+            raise RuntimeError("sweep failed")
+        return real_sweep(path, **kwargs)
+
+    monkeypatch.setattr(worker_mod, "sweep_run_root", sweep)
+    assert orphan_gc.collect(set()) == [str(first)]
+    assert not first.exists() and second.exists()
+
+
+def test_referenced_worker_run_roots_collects_only_direct_visible_receipts(tmp_path) -> None:
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    for name, data in {
+        "a.receipt.json": {"worker_run_root": "/runs/a"},
+        "b.receipt.json": {"worker_run_root": "/runs/b"},
+        "c.receipt.json": {"worker_run_root": 123},
+        "d.receipt.json": {},
+    }.items():
+        (leases / name).write_text(json.dumps(data), encoding="utf-8")
+    (leases / ".hidden.receipt.json").write_text("invalid", encoding="utf-8")
+    (leases / "other.json").write_text("invalid", encoding="utf-8")
+    (leases / "nested").mkdir()
+    (leases / "nested" / "bad.receipt.json").write_text("invalid", encoding="utf-8")
+    assert agy_pool.referenced_worker_run_roots(leases) == {"/runs/a", "/runs/b"}
+
+
+def test_referenced_worker_run_roots_missing_directory_is_empty(tmp_path) -> None:
+    assert agy_pool.referenced_worker_run_roots(tmp_path / "missing") == set()
+
+
+@pytest.mark.parametrize("data", ["invalid", "[]", "null", '"text"'])
+def test_referenced_worker_run_roots_rejects_invalid_or_non_object_json(tmp_path, data) -> None:
+    (tmp_path / "bad.receipt.json").write_text(data, encoding="utf-8")
+    assert agy_pool.referenced_worker_run_roots(tmp_path) is None
+
+
+def test_referenced_worker_run_roots_rejects_a_symlinked_receipt(tmp_path) -> None:
+    target = tmp_path / "target.json"
+    target.write_text('{"worker_run_root": "/runs/a"}', encoding="utf-8")
+    (tmp_path / "a.receipt.json").symlink_to(target)
+    assert agy_pool.referenced_worker_run_roots(tmp_path) is None
+
+
+@pytest.mark.parametrize("operation", ["listing", "reading"])
+def test_referenced_worker_run_roots_fails_closed_on_io_errors(
+    tmp_path, monkeypatch, operation
+) -> None:
+    (tmp_path / "a.receipt.json").write_text("{}", encoding="utf-8")
+
+    def denied(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(agy_pool.os, "scandir" if operation == "listing" else "open", denied)
+    assert agy_pool.referenced_worker_run_roots(tmp_path) is None
+
+
 def test_existing_root_with_a_clean_sweep_is_removed_and_proven(runs: Path) -> None:
     root, receipt = _run_root(runs)
     commands = _Commands()
