@@ -348,6 +348,38 @@ def _check_owner_executable(path: Path, reason: str) -> None:
         raise _refuse(f"{reason}_not_owner_0755")
 
 
+def _check_source_dir(info: os.stat_result) -> None:
+    """Only the Owner or root may change a directory on the agy source path."""
+    sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid not in (os.getuid(), 0)
+        or (info.st_mode & 0o022 and not sticky_root)
+    ):
+        raise _refuse("worker_agy_stale_source_unsafe")
+
+
+def _open_source_without_symlinks(real: Path) -> int:
+    """Open ``real`` one component at a time, never following a symlink.
+
+    Each directory is opened relative to the previous one with
+    ``O_DIRECTORY|O_NOFOLLOW`` and checked on its descriptor, so a component
+    swapped for a symlink anywhere on the path (by mode bits or an ACL) fails
+    the open instead of redirecting it to a file behind a private directory.
+    """
+    dir_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _check_source_dir(os.fstat(dir_fd))
+        for name in real.parts[1:-1]:
+            next_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+            _check_source_dir(os.fstat(dir_fd))
+        return os.open(real.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
 def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     """Replace the worker's stale agy copy with the Owner's agy (#2888 follow-up).
 
@@ -356,11 +388,11 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     copy used to refuse every ``--run-as-user`` run until someone re-ran
     ``install_agy_worker_exec.sh``; the dispatcher runs as the Owner and does
     the same copy itself: a same-directory temp file (``O_EXCL|O_NOFOLLOW``),
-    0755, fsync, ``os.replace``.  Every directory on the resolved source path
-    must be owned by the Owner or root and not writable by others (a root-owned
-    sticky directory such as ``/tmp`` is allowed), so no other user can swap a
-    path component; the source is then opened once (``O_NOFOLLOW``) and checked
-    and copied through that descriptor.  It must be a regular file that only
+    0755, fsync, ``os.replace``.  The resolved source is opened component by
+    component without following any symlink, every directory on the way owned
+    by the Owner or root and not writable by others (a root-owned sticky
+    directory such as ``/tmp`` is allowed), and the file is checked and copied
+    through that one descriptor.  It must be a regular file that only
     its owner (the Owner or root) can write and that is marked readable and
     executable by everyone: the worker copy is world-readable, so an
     owner-only file is never published there.  The caller re-checks the copy
@@ -368,17 +400,7 @@ def _refresh_worker_agy(source_agy: Path, worker_agy: Path) -> None:
     is never replaced here.
     """
     try:
-        real = Path(os.path.realpath(source_agy))
-        for parent in real.parents:
-            dinfo = os.lstat(parent)
-            sticky_root = dinfo.st_uid == 0 and dinfo.st_mode & stat.S_ISVTX
-            if (
-                not stat.S_ISDIR(dinfo.st_mode)
-                or dinfo.st_uid not in (os.getuid(), 0)
-                or (dinfo.st_mode & 0o022 and not sticky_root)
-            ):
-                raise _refuse("worker_agy_stale_source_unsafe")
-        src_fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        src_fd = _open_source_without_symlinks(Path(os.path.realpath(source_agy)))
         try:
             info = os.fstat(src_fd)
             if (

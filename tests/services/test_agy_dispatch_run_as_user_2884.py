@@ -728,14 +728,16 @@ def test_prepare_refresh_refuses_a_source_in_a_directory_others_can_write(worker
     assert worker_env["worker_agy"].read_bytes() == before
 
 
-def _swap_source_on_open(monkeypatch, source: Path, swap, *, after_open: bool) -> None:
-    """Run ``swap`` once, just before or just after the refresh opens the source."""
+def _swap_on_open(monkeypatch, name: str, swap, *, after_open: bool) -> None:
+    """Run ``swap`` once, just before or just after the refresh opens ``name``.
+
+    The refresh opens each path component relative to its parent (``dir_fd``).
+    """
     real_open = os.open
-    resolved = os.path.realpath(source)
     pending = [swap]
 
     def fake_open(path, flags, *args, **kwargs):
-        hit = pending and os.fspath(path) == resolved and not flags & os.O_WRONLY
+        hit = pending and "dir_fd" in kwargs and os.fspath(path) == name
         if hit and not after_open:
             pending.pop()()
         fd = real_open(path, flags, *args, **kwargs)
@@ -760,9 +762,44 @@ def test_prepare_refresh_refuses_a_source_swapped_for_a_symlink_before_open(
         source.unlink()
         source.symlink_to(secret)
 
-    _swap_source_on_open(monkeypatch, source, swap, after_open=False)
+    _swap_on_open(monkeypatch, Path(os.path.realpath(source)).name, swap, after_open=False)
     with pytest.raises(
         boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale_refresh_failed:OSError"
+    ):
+        _prepare(worker_env)
+    assert worker_env["worker_agy"].read_bytes() == before
+    assert sorted(p.name for p in worker_env["bin"].iterdir()) == ["agy", "agy-worker-exec"]
+
+
+def test_prepare_refresh_refuses_a_directory_swapped_for_a_symlink_mid_path(
+    worker_env, monkeypatch
+):
+    # A directory on the path swapped for a symlink to a private directory
+    # holding a 0755 file: the walk refuses instead of publishing those bytes.
+    before = worker_env["worker_agy"].read_bytes()
+    base = worker_env["source_agy"].parent
+    sub = base / "agy-dir"
+    sub.mkdir()
+    real = sub / "agy"
+    real.write_text("#!/bin/sh\necho newer agy\n", encoding="utf-8")
+    os.chmod(real, 0o755)
+    private = base / "private-dir"
+    private.mkdir()
+    (private / "agy").write_text("SECRET\n", encoding="utf-8")
+    os.chmod(private / "agy", 0o755)
+    os.chmod(private, 0o700)
+    worker_env["source_agy"].unlink()
+    worker_env["source_agy"].symlink_to(real)
+
+    def swap():
+        sub.rename(base / "agy-dir-old")
+        sub.symlink_to(private)
+
+    _swap_on_open(monkeypatch, "agy-dir", swap, after_open=False)
+    # O_DIRECTORY|O_NOFOLLOW on a symlink: ENOTDIR on macOS, ELOOP on Linux.
+    with pytest.raises(
+        boundary_mod.AgyWriteBoundaryError,
+        match="worker_agy_stale_refresh_failed:(NotADirectoryError|OSError)",
     ):
         _prepare(worker_env)
     assert worker_env["worker_agy"].read_bytes() == before
@@ -779,7 +816,12 @@ def test_prepare_refresh_copies_the_checked_file_even_if_the_path_is_swapped_aft
     other.write_text("#!/bin/sh\necho swapped\n", encoding="utf-8")
     os.chmod(other, 0o755)
 
-    _swap_source_on_open(monkeypatch, source, lambda: os.replace(other, source), after_open=True)
+    _swap_on_open(
+        monkeypatch,
+        Path(os.path.realpath(source)).name,
+        lambda: os.replace(other, source),
+        after_open=True,
+    )
     # The copy holds the bytes that were checked; the re-check then sees the
     # source changed and refuses rather than launching.
     with pytest.raises(boundary_mod.AgyWriteBoundaryError, match="worker_agy_stale"):
