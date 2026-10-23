@@ -82,6 +82,10 @@ Facade edits: `self_hosted_task_service.py` drops the two re-exports and the mix
     RETIRED and removed from DECLARED / EDGES, so `integrate_authorized_task_state` has exactly one
     admitted caller (`SelfHostedTaskService.integrate_approved`).
   - `tests/architecture/fixtures/bigfile_split_class_tables.json`: two member rows removed.
+  - `tests/nexus/orchestrator/test_runtime_state_real_path.py`: the parity case execs a frozen
+    pre-split `self_hosted_task_service.py` (4ecec9409) that imports the deleted contract; the
+    harness now registers a stub for that module (its names were only used by the never-called
+    `record_operator_outcome`, which the scenario does not touch).
 - Added `tests/services/test_archived_phase2_batch_a_2026_10_24.py`: modules absent and
   `find_spec` None, members absent, no AST/importlib import or name under `nexus/` and `scripts/`
   (archive excluded), live neighbours present, non-vacuity. Mutation-checked: restoring the two

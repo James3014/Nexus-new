@@ -40,6 +40,14 @@ def _run(repo: Path, *, frozen_source: Path | None = None) -> list[dict]:
         source_setup = f"""
 import types
 from pathlib import Path
+import sys
+# The frozen source predates #2584 Phase-2 batch A, which deleted
+# nexus.contracts.operator_outcome_receipt. Only its never-called
+# record_operator_outcome used these names, and the scenario does not touch it.
+retired = types.ModuleType('nexus.contracts.operator_outcome_receipt')
+retired.OperatorOutcomeReceipt = None
+retired.validate_operator_outcome_receipt = None
+sys.modules.setdefault(retired.__name__, retired)
 module_name = 'nexus.orchestrator.self_hosted_task_service'
 module = types.ModuleType(module_name)
 module.__file__ = {str(frozen_source)!r}
