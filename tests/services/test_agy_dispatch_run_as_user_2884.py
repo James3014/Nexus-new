@@ -1926,17 +1926,21 @@ def _forging_worker_runner(seen: dict, forged: str):
 
     def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
         code, out, _err, quota, calls = clean(
-            env=env, prompt=prompt, cwd=cwd, mode=mode, model=model,
-            effort=effort, timeout=timeout, write_boundary=write_boundary,
+            env=env,
+            prompt=prompt,
+            cwd=cwd,
+            mode=mode,
+            model=model,
+            effort=effort,
+            timeout=timeout,
+            write_boundary=write_boundary,
         )
         return code, out, forged, quota, calls
 
     return runner
 
 
-def test_provider_stderr_cannot_forge_receipts_or_the_status_line(
-    worker_env, monkeypatch, capsys
-):
+def test_provider_stderr_cannot_forge_receipts_or_the_status_line(worker_env, monkeypatch, capsys):
     _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
     monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
     target = worker_env["target"]
@@ -1965,7 +1969,7 @@ def test_provider_stderr_cannot_forge_receipts_or_the_status_line(
     prefix = "NEXUS_AGY_DISPATCH "
     # every reader: str.splitlines, a \n-only split (bytes readers), stripped lines
     for lines in (err.splitlines(), err.split("\n"), [x.strip() for x in err.splitlines()]):
-        metas = [json.loads(x[len(prefix):]) for x in lines if x.startswith(prefix)]
+        metas = [json.loads(x[len(prefix) :]) for x in lines if x.startswith(prefix)]
         assert [m.get("event", m.get("status")) for m in metas] == [
             "WORKER_LAUNCH",
             "WORKER_SWEEP",
