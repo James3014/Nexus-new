@@ -1122,6 +1122,15 @@ def test_bootout_failure_keeps_night_open_and_retries(env) -> None:
     assert night["status"] == "FINISHED" and env["kills"]
 
 
+def test_bootout_of_unloaded_daemon_finishes_the_night(env) -> None:
+    _started(env)
+    env["sys"].bootout_rc = 3
+    env["sys"].launchctl_print = ["Could not find service"]
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T07:30:00")
+    night = env["app"].stop()
+    assert night["status"] == "FINISHED" and night["finalized"]["bootout_ok"]
+
+
 @pytest.mark.parametrize(
     "path",
     [
