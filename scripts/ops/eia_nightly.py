@@ -2352,6 +2352,11 @@ class Nightly:
     def finalize(self, night: dict[str, Any]) -> None:
         out = eia_service.stop(launchctl_runner=self.launchctl)
         bootout_ok = out.returncode == 0 or "Could not find service" in f"{out.stdout}{out.stderr}"
+        if not bootout_ok:
+            # Newer macOS answers a bootout of an unloaded label with "Boot-out failed: 3: No
+            # such process", so confirm with launchctl print that the label is really gone.
+            with contextlib.suppress(NightlyError):
+                bootout_ok = self._daemon_state() == "absent"
         for entry in self._entries(night, "ARMED") + self._entries(night, "ARMING"):
             entry.update(status="HARD_STOPPING", disarm_pending=True)
             if entry["attempts"]:
