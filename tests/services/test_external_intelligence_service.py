@@ -3009,3 +3009,83 @@ def test_run_once_lists_a_transient_record_even_when_a_later_issue_is_last(tmp_p
         "type": "TransientError",
         "code": "SOURCE_LINEAGE_FAILED",
     }
+
+
+def test_restart_bootout_mixed_not_found_stays_terminal(tmp_path, monkeypatch):
+    """Mixed error output with not-found text is still a terminal bootout failure."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            err = (
+                "Boot-out failed: 5: Input/output error\n"
+                "Could not find service: com.nexus.external-intelligence\n"
+            )
+            return subprocess.CompletedProcess(["launchctl", *args], 5, "", err)
+        if args[0] == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    def forbidden_install(_config_path):
+        raise AssertionError("install must not run after failed bootout")
+
+    monkeypatch.setattr(service_module, "install", forbidden_install)
+    result = service_module.restart(config_path, launchctl_runner=runner)
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert [call[0] for call in calls] == ["bootout"]
+
+
+def test_is_label_loaded_state_line_with_not_found_text_is_loaded():
+    """Output containing state = running alongside not-found text is not unloaded."""
+    output = (
+        "state = running\npid = 12345\nCould not find service: com.nexus.external-intelligence\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 0, output, "")
+
+    loaded = service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+    assert loaded is True
+
+
+@pytest.mark.parametrize(
+    ("returncode", "uid_in_message"),
+    [(113, "other"), (0, "self")],
+)
+def test_is_label_loaded_not_found_needs_own_domain_and_failure_exit(returncode, uid_in_message):
+    """Not-found counts only for this user's GUI domain and a failing print."""
+    uid = os.getuid() + 1 if uid_in_message == "other" else os.getuid()
+    output = (
+        "Bad request.\n"
+        f'Could not find service "{service_module.SERVICE_LABEL}" '
+        f"in domain for user gui: {uid}\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], returncode, "", output)
+
+    with pytest.raises(ServiceError):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+def test_is_label_loaded_real_print_not_found_is_unloaded():
+    """The real macOS print diagnostic for this user's domain means unloaded."""
+    output = (
+        "Bad request.\n"
+        f'Could not find service "{service_module.SERVICE_LABEL}" '
+        f"in domain for user gui: {os.getuid()}\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 113, "", output)
+
+    assert (
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+        is False
+    )
