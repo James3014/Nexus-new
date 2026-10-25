@@ -382,3 +382,58 @@ def test_malformed_launchd_label_raises_entrypoints_error(repo, labels):
     path.write_text(json.dumps(["not", "a", "mapping"]))
     with pytest.raises(et.EntrypointsError, match="malformed"):
         et.analyze(repo, ["nexus/services/deep_a.py"])
+
+
+def _add_and_edit(repo: Path, rel: str, text: str, old: str, new: str) -> tuple[str, str]:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    _git(repo, "add", rel)
+    _git(repo, "commit", "-qm", f"add {rel}")
+    return _commit_edit(repo, rel, old, new)
+
+
+EXTENSIONLESS_PY_CLI = """\
+#!/usr/bin/env python3
+import sys
+
+
+def main():
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+
+def test_changed_extensionless_python_cli_requires_a_real_run(repo):
+    base, head = _add_and_edit(
+        repo, "scripts/ops/nexus-demo-dispatch", EXTENSIONLESS_PY_CLI, "return 0", "return 2"
+    )
+    report = _run(repo, base, head)
+    assert "script:scripts/ops/nexus-demo-dispatch" in _ids(report)
+    row = next(
+        r for r in report["entrypoints"] if r["id"] == "script:scripts/ops/nexus-demo-dispatch"
+    )
+    assert row["kind"] == "script" and row["via"] == ["scripts/ops/nexus-demo-dispatch"]
+
+
+def test_extensionless_python_cli_with_python_shebang_variant_is_listed(repo):
+    text = EXTENSIONLESS_PY_CLI.replace(
+        "#!/usr/bin/env python3", "#!/opt/homebrew/bin/python3.12 -I"
+    )
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-other-cli", text, "return 0", "return 3")
+    assert "script:scripts/ops/nexus-other-cli" in _ids(_run(repo, base, head))
+
+
+def test_extensionless_non_python_files_are_not_scripts(repo):
+    shell = '#!/bin/bash\n# if __name__ == "__main__": is python, not bash\necho __main__\nexit 0\n'
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-shell-tool", shell, "exit 0", "exit 1")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+    no_shebang = 'import sys\n\nif __name__ == "__main__":\n    sys.exit(0)\n'
+    base, head = _add_and_edit(repo, "scripts/ops/NOTES", no_shebang, "exit(0)", "exit(1)")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+    pyish = "#!/usr/bin/env python3\nprint('no main block')\n"
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-no-main", pyish, "no main", "still none")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
