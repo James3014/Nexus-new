@@ -2715,6 +2715,7 @@ def test_restart_bootout_no_such_process_still_loaded_does_not_bootstrap(tmp_pat
     [
         (5, "Boot-out failed: 5: Input/output error\nNo such process\n"),
         (1, "Boot-out failed: 3: No such process\n"),
+        (3, "Boot-out failed: 3: No such process\nBoot-out failed: 5: Input/output error\n"),
     ],
 )
 def test_restart_bootout_mixed_no_such_process_stays_terminal(
