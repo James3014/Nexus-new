@@ -41,7 +41,7 @@ from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __package__ in (None, ""):
@@ -430,6 +430,44 @@ def _closure(
     return seen
 
 
+def _is_extensionless(path: str) -> bool:
+    try:
+        name = Path(path).name
+    except ValueError:
+        return False
+    return bool(name) and "." not in name
+
+
+# env(1) options whose value is the next word (macOS and GNU coreutils).
+_ENV_OPTIONS_WITH_ARGUMENT = frozenset({"-u", "--unset", "-C", "--chdir", "-P", "-a", "--argv0"})
+_PYTHON_INTERPRETER = re.compile(r"python(?:\d+(?:\.\d+)*)?")
+
+
+def _has_python_shebang(repo: Path, path: str) -> bool:
+    """True when ``path`` is a regular file whose ``#!`` interpreter is Python.
+
+    Only the interpreter counts (``#!/usr/bin/env bash python`` is bash); ``env``
+    options and ``NAME=value`` assignments before the command are skipped."""
+    target = repo / path
+    if target.is_symlink() or not target.is_file():
+        return False
+    try:
+        with target.open("rb") as f:
+            first_line = f.readline(1024)
+    except (OSError, ValueError):
+        return False
+    if not first_line.startswith(b"#!"):
+        return False
+    parts = first_line[2:].decode("utf-8", errors="replace").split()
+    if parts and PurePosixPath(parts[0]).name == "env":
+        parts = parts[1:]
+        while parts and (parts[0].startswith("-") or "=" in parts[0]):
+            option = parts.pop(0)
+            if option in _ENV_OPTIONS_WITH_ARGUMENT and parts:
+                parts.pop(0)
+    return bool(parts) and _PYTHON_INTERPRETER.fullmatch(PurePosixPath(parts[0]).name) is not None
+
+
 def _has_main_block(repo: Path, path: str) -> bool:
     tree = _parse(repo, path)
     if tree is None:
@@ -588,6 +626,19 @@ def analyze(
 
     for path in changed_py:
         if _has_main_block(repo, path):
+            hit(
+                f"script:{path}",
+                "script",
+                [path],
+                "changed __main__ script: a real run is required",
+            )
+
+    for path in sorted(changed):
+        if (
+            _is_extensionless(path)
+            and _has_python_shebang(repo, path)
+            and _has_main_block(repo, path)
+        ):
             hit(
                 f"script:{path}",
                 "script",

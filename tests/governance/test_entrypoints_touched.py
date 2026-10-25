@@ -382,3 +382,108 @@ def test_malformed_launchd_label_raises_entrypoints_error(repo, labels):
     path.write_text(json.dumps(["not", "a", "mapping"]))
     with pytest.raises(et.EntrypointsError, match="malformed"):
         et.analyze(repo, ["nexus/services/deep_a.py"])
+
+
+def _add_and_edit(repo: Path, rel: str, text: str, old: str, new: str) -> tuple[str, str]:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    _git(repo, "add", rel)
+    _git(repo, "commit", "-qm", f"add {rel}")
+    return _commit_edit(repo, rel, old, new)
+
+
+EXTENSIONLESS_PY_CLI = """\
+#!/usr/bin/env python3
+import sys
+
+
+def main():
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+
+def test_changed_extensionless_python_cli_requires_a_real_run(repo):
+    base, head = _add_and_edit(
+        repo, "scripts/ops/nexus-demo-dispatch", EXTENSIONLESS_PY_CLI, "return 0", "return 2"
+    )
+    report = _run(repo, base, head)
+    assert "script:scripts/ops/nexus-demo-dispatch" in _ids(report)
+    row = next(
+        r for r in report["entrypoints"] if r["id"] == "script:scripts/ops/nexus-demo-dispatch"
+    )
+    assert row["kind"] == "script" and row["via"] == ["scripts/ops/nexus-demo-dispatch"]
+
+
+def test_extensionless_python_cli_with_python_shebang_variant_is_listed(repo):
+    text = EXTENSIONLESS_PY_CLI.replace(
+        "#!/usr/bin/env python3", "#!/opt/homebrew/bin/python3.12 -I"
+    )
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-other-cli", text, "return 0", "return 3")
+    assert "script:scripts/ops/nexus-other-cli" in _ids(_run(repo, base, head))
+
+
+def test_extensionless_non_python_files_are_not_scripts(repo):
+    shell = '#!/bin/bash\n# if __name__ == "__main__": is python, not bash\necho __main__\nexit 0\n'
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-shell-tool", shell, "exit 0", "exit 1")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+    no_shebang = 'import sys\n\nif __name__ == "__main__":\n    sys.exit(0)\n'
+    base, head = _add_and_edit(repo, "scripts/ops/NOTES", no_shebang, "exit(0)", "exit(1)")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+    pyish = "#!/usr/bin/env python3\nprint('no main block')\n"
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-no-main", pyish, "no main", "still none")
+    assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+
+
+def test_only_the_shebang_interpreter_decides_python(repo):
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", "#!/usr/bin/env bash python")
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-bash-arg", text, "return 0", "return 4")
+    assert "script:scripts/ops/nexus-bash-arg" not in _ids(_run(repo, base, head))
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", "#!/usr/bin/env -S python3 -u")
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-env-s", text, "return 0", "return 5")
+    assert "script:scripts/ops/nexus-env-s" in _ids(_run(repo, base, head))
+
+
+def test_extensionless_symlink_to_a_python_cli_is_not_a_script(repo):
+    target = repo / "scripts/ops/nexus-real-cli"
+    target.write_text(EXTENSIONLESS_PY_CLI)
+    (repo / "scripts/ops/nexus-link").symlink_to("standalone.py")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add cli and link")
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "scripts/ops/nexus-link").unlink()
+    (repo / "scripts/ops/nexus-link").symlink_to("nexus-real-cli")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "repoint link")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert "script:scripts/ops/nexus-link" not in _ids(_run(repo, base, head))
+
+
+def test_dotted_non_py_file_with_python_shebang_is_not_a_script(repo):
+    base, head = _add_and_edit(
+        repo, "scripts/ops/nexus-tool.sh", EXTENSIONLESS_PY_CLI, "return 0", "return 6"
+    )
+    assert "script:scripts/ops/nexus-tool.sh" not in _ids(_run(repo, base, head))
+
+
+@pytest.mark.parametrize(
+    "shebang,listed",
+    [
+        ("#!/usr/bin/env -S -u HOME python3", True),
+        ("#!/usr/bin/env -u PYTHONPATH python3.12", True),
+        ("#!/usr/bin/env PYTHONHASHSEED=0 python", True),
+        ("#!/usr/bin/env -S -u python3 bash", False),
+        ("#!/usr/bin/env -C /tmp bash", False),
+        ("#!/usr/bin/pythonsh", False),
+        ("#!/usr/bin/env python3-config", False),
+    ],
+)
+def test_env_option_arguments_and_interpreter_name(repo, shebang, listed):
+    rel = "scripts/ops/nexus-shebang-case"
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", shebang)
+    base, head = _add_and_edit(repo, rel, text, "return 0", "return 7")
+    assert (f"script:{rel}" in _ids(_run(repo, base, head))) is listed
