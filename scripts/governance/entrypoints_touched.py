@@ -41,7 +41,7 @@ from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __package__ in (None, ""):
@@ -439,19 +439,24 @@ def _is_extensionless(path: str) -> bool:
 
 
 def _has_python_shebang(repo: Path, path: str) -> bool:
+    """True when ``path`` is a regular file whose ``#!`` interpreter is Python.
+
+    Only the interpreter counts (``#!/usr/bin/env bash python`` is bash); ``env``
+    options and ``NAME=value`` assignments before the command are skipped."""
+    target = repo / path
+    if target.is_symlink() or not target.is_file():
+        return False
     try:
-        with (repo / path).open("rb") as f:
+        with target.open("rb") as f:
             first_line = f.readline(1024)
     except (OSError, ValueError):
         return False
     if not first_line.startswith(b"#!"):
         return False
-    line = first_line.decode("utf-8", errors="replace").strip()
-    parts = line[2:].strip().split()
-    return any(
-        p.strip("'\"").replace("\\", "/").rsplit("/", 1)[-1].startswith("python")
-        for p in parts
-    )
+    parts = first_line[2:].decode("utf-8", errors="replace").split()
+    if parts and PurePosixPath(parts[0]).name == "env":
+        parts = [p for p in parts[1:] if not p.startswith("-") and "=" not in p]
+    return bool(parts) and PurePosixPath(parts[0]).name.startswith("python")
 
 
 def _has_main_block(repo: Path, path: str) -> bool:

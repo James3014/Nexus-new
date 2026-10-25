@@ -437,3 +437,34 @@ def test_extensionless_non_python_files_are_not_scripts(repo):
     pyish = "#!/usr/bin/env python3\nprint('no main block')\n"
     base, head = _add_and_edit(repo, "scripts/ops/nexus-no-main", pyish, "no main", "still none")
     assert not any(i.startswith("script:") for i in _ids(_run(repo, base, head)))
+
+
+def test_only_the_shebang_interpreter_decides_python(repo):
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", "#!/usr/bin/env bash python")
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-bash-arg", text, "return 0", "return 4")
+    assert "script:scripts/ops/nexus-bash-arg" not in _ids(_run(repo, base, head))
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", "#!/usr/bin/env -S python3 -u")
+    base, head = _add_and_edit(repo, "scripts/ops/nexus-env-s", text, "return 0", "return 5")
+    assert "script:scripts/ops/nexus-env-s" in _ids(_run(repo, base, head))
+
+
+def test_extensionless_symlink_to_a_python_cli_is_not_a_script(repo):
+    target = repo / "scripts/ops/nexus-real-cli"
+    target.write_text(EXTENSIONLESS_PY_CLI)
+    (repo / "scripts/ops/nexus-link").symlink_to("standalone.py")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add cli and link")
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "scripts/ops/nexus-link").unlink()
+    (repo / "scripts/ops/nexus-link").symlink_to("nexus-real-cli")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "repoint link")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert "script:scripts/ops/nexus-link" not in _ids(_run(repo, base, head))
+
+
+def test_dotted_non_py_file_with_python_shebang_is_not_a_script(repo):
+    base, head = _add_and_edit(
+        repo, "scripts/ops/nexus-tool.sh", EXTENSIONLESS_PY_CLI, "return 0", "return 6"
+    )
+    assert "script:scripts/ops/nexus-tool.sh" not in _ids(_run(repo, base, head))
