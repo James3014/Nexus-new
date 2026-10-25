@@ -2633,6 +2633,119 @@ def test_restart_bootout_failure_does_not_install_or_bootstrap(tmp_path, monkeyp
     assert [call[0] for call in calls] == ["bootout"]
 
 
+def test_restart_bootout_no_such_process_proceeds_when_unloaded(tmp_path, monkeypatch):
+    """bootout returns rc 3 No such process; print confirms not found -> install and bootstrap."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 3, "", "Boot-out failed: 3: No such process\n"
+            )
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+    installs = []
+
+    def recording_install(path):
+        installs.append(path)
+        return tmp_path / "dummy.plist"
+
+    monkeypatch.setattr(service_module, "install", recording_install)
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=runner,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode == 0
+    assert len(installs) == 1
+    actions = [c[0] for c in calls]
+    assert actions[0] == "bootout"
+    assert "print" in actions
+    assert actions[-1] == "bootstrap"
+
+
+def test_restart_bootout_no_such_process_still_loaded_does_not_bootstrap(tmp_path, monkeypatch):
+    """bootout returns rc 3 No such process, but print still reports running -> timeout, no bootstrap."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 3, "", "Boot-out failed: 3: No such process\n"
+            )
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=runner,
+        deadline=0.05,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "BOOTOUT_UNLOAD_TIMEOUT" in result.stderr
+    assert not any(c[0] == "bootstrap" for c in calls)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stderr"),
+    [
+        (5, "Boot-out failed: 5: Input/output error\nNo such process\n"),
+        (1, "Boot-out failed: 3: No such process\n"),
+        (3, "Boot-out failed: 3: No such process\nBoot-out failed: 5: Input/output error\n"),
+    ],
+)
+def test_restart_bootout_mixed_no_such_process_stays_terminal(
+    tmp_path, monkeypatch, returncode, stderr
+):
+    """Only the exact rc 3 'No such process' answer counts as already unloaded."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], returncode, "", stderr)
+        if args[0] == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    def forbidden_install(_config_path):
+        raise AssertionError("install must not run after failed bootout")
+
+    monkeypatch.setattr(service_module, "install", forbidden_install)
+    result = service_module.restart(config_path, launchctl_runner=runner)
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert [call[0] for call in calls] == ["bootout"]
+
+
 # ---- CLI command-level restart tests ----
 
 

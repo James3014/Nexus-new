@@ -1247,6 +1247,8 @@ _TERMINAL_PRINT_FAILURE = "TERMINAL_PRINT_FAILURE"
 _DEFAULT_UNLOAD_DEADLINE = 30.0
 _DEFAULT_UNLOAD_POLL_INTERVAL = 0.5
 _LAUNCHCTL_NOT_FOUND = "Could not find service"
+# Newer macOS answers a bootout of an already-unloaded label with exactly this (rc 3).
+_LAUNCHCTL_NO_SUCH_PROCESS = re.compile(r"Boot-out failed:\s*3:\s*No such process", re.IGNORECASE)
 
 
 def _is_label_loaded(
@@ -1354,7 +1356,11 @@ def restart(
         bootout_output = "".join(
             str(getattr(bootout, field, "") or "") for field in ("stdout", "stderr")
         )
-        if _LAUNCHCTL_NOT_FOUND not in bootout_output:
+        already_unloaded = _LAUNCHCTL_NOT_FOUND in bootout_output or (
+            bootout.returncode == 3
+            and _LAUNCHCTL_NO_SUCH_PROCESS.fullmatch(bootout_output.strip()) is not None
+        )
+        if not already_unloaded:
             msg = f"{_TERMINAL_BOOTOUT_FAILURE}: {bootout_output.strip()}".rstrip()
             return subprocess.CompletedProcess(
                 ["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
