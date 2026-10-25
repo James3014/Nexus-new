@@ -3009,3 +3009,54 @@ def test_run_once_lists_a_transient_record_even_when_a_later_issue_is_last(tmp_p
         "type": "TransientError",
         "code": "SOURCE_LINEAGE_FAILED",
     }
+
+
+def test_restart_bootout_mixed_not_found_stays_terminal(tmp_path, monkeypatch):
+    """Mixed error output with not-found text is still a terminal bootout failure."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            err = (
+                "Boot-out failed: 5: Input/output error\n"
+                "Could not find service: com.nexus.external-intelligence\n"
+            )
+            return subprocess.CompletedProcess(["launchctl", *args], 5, "", err)
+        if args[0] == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    def forbidden_install(_config_path):
+        raise AssertionError("install must not run after failed bootout")
+
+    monkeypatch.setattr(service_module, "install", forbidden_install)
+    result = service_module.restart(config_path, launchctl_runner=runner)
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert [call[0] for call in calls] == ["bootout"]
+
+
+def test_is_label_loaded_state_line_with_not_found_text_is_loaded():
+    """Output containing state = running alongside not-found text is not unloaded."""
+    output = (
+        "state = running\n"
+        "pid = 12345\n"
+        "Could not find service: com.nexus.external-intelligence\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 0, output, "")
+
+    try:
+        loaded = service_module._is_label_loaded(
+            service_module.SERVICE_LABEL, launchctl_runner=runner
+        )
+        assert loaded is not False
+    except ServiceError:
+        pass
+

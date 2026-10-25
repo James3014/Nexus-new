@@ -1251,6 +1251,22 @@ _LAUNCHCTL_NOT_FOUND = "Could not find service"
 _LAUNCHCTL_NO_SUCH_PROCESS = re.compile(r"Boot-out failed:\s*3:\s*No such process", re.IGNORECASE)
 
 
+def _is_exact_not_found(output: str, label: str) -> bool:
+    """Return True if output is an exact expected launchctl not-found message for label."""
+    text = output.strip()
+    escaped = re.escape(label)
+    patterns = (
+        rf'(?:Boot-out failed:\s*(?:\d+:\s*)?)?'
+        rf'Bad request\.\s*Could not find service ["\']?{escaped}["\']?'
+        rf' in domain for user gui:\s*\d+',
+        rf"(?:Boot-out failed:\s*(?:\d+:\s*)?)?Could not find service:\s*[\"']?{escaped}[\"']?",
+    )
+    return any(
+        re.fullmatch(pat, text, flags=re.IGNORECASE | re.DOTALL) is not None
+        for pat in patterns
+    )
+
+
 def _is_label_loaded(
     label: str,
     *,
@@ -1270,13 +1286,13 @@ def _is_label_loaded(
     stdout = str(getattr(result, "stdout", "") or "")
     stderr = str(getattr(result, "stderr", "") or "")
     combined = stdout + stderr
-    if _LAUNCHCTL_NOT_FOUND in combined:
-        return False
-    if getattr(result, "returncode", 1) != 0:
-        raise ServiceError(_TERMINAL_PRINT_FAILURE)
     state_match = re.search(r"^\s*state\s*=\s*(\S+)", stdout, re.MULTILINE)
     if state_match:
         return True
+    if _is_exact_not_found(combined, label):
+        return False
+    if getattr(result, "returncode", 1) != 0:
+        raise ServiceError(_TERMINAL_PRINT_FAILURE)
     # A successful command without the documented state shape is not proof
     # that the service is unloaded.  Fail closed rather than bootstrapping
     # over an unknown launchd response.
@@ -1356,7 +1372,7 @@ def restart(
         bootout_output = "".join(
             str(getattr(bootout, field, "") or "") for field in ("stdout", "stderr")
         )
-        already_unloaded = _LAUNCHCTL_NOT_FOUND in bootout_output or (
+        already_unloaded = _is_exact_not_found(bootout_output, SERVICE_LABEL) or (
             bootout.returncode == 3
             and _LAUNCHCTL_NO_SUCH_PROCESS.fullmatch(bootout_output.strip()) is not None
         )
