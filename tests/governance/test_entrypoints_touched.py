@@ -468,3 +468,22 @@ def test_dotted_non_py_file_with_python_shebang_is_not_a_script(repo):
         repo, "scripts/ops/nexus-tool.sh", EXTENSIONLESS_PY_CLI, "return 0", "return 6"
     )
     assert "script:scripts/ops/nexus-tool.sh" not in _ids(_run(repo, base, head))
+
+
+@pytest.mark.parametrize(
+    "shebang,listed",
+    [
+        ("#!/usr/bin/env -S -u HOME python3", True),
+        ("#!/usr/bin/env -u PYTHONPATH python3.12", True),
+        ("#!/usr/bin/env PYTHONHASHSEED=0 python", True),
+        ("#!/usr/bin/env -S -u python3 bash", False),
+        ("#!/usr/bin/env -C /tmp bash", False),
+        ("#!/usr/bin/pythonsh", False),
+        ("#!/usr/bin/env python3-config", False),
+    ],
+)
+def test_env_option_arguments_and_interpreter_name(repo, shebang, listed):
+    rel = "scripts/ops/nexus-shebang-case"
+    text = EXTENSIONLESS_PY_CLI.replace("#!/usr/bin/env python3", shebang)
+    base, head = _add_and_edit(repo, rel, text, "return 0", "return 7")
+    assert (f"script:{rel}" in _ids(_run(repo, base, head))) is listed

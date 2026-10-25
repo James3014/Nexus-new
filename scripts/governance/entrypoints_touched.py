@@ -438,6 +438,11 @@ def _is_extensionless(path: str) -> bool:
     return bool(name) and "." not in name
 
 
+# env(1) options whose value is the next word (macOS and GNU coreutils).
+_ENV_OPTIONS_WITH_ARGUMENT = frozenset({"-u", "--unset", "-C", "--chdir", "-P", "-a", "--argv0"})
+_PYTHON_INTERPRETER = re.compile(r"python(?:\d+(?:\.\d+)*)?")
+
+
 def _has_python_shebang(repo: Path, path: str) -> bool:
     """True when ``path`` is a regular file whose ``#!`` interpreter is Python.
 
@@ -455,8 +460,12 @@ def _has_python_shebang(repo: Path, path: str) -> bool:
         return False
     parts = first_line[2:].decode("utf-8", errors="replace").split()
     if parts and PurePosixPath(parts[0]).name == "env":
-        parts = [p for p in parts[1:] if not p.startswith("-") and "=" not in p]
-    return bool(parts) and PurePosixPath(parts[0]).name.startswith("python")
+        parts = parts[1:]
+        while parts and (parts[0].startswith("-") or "=" in parts[0]):
+            option = parts.pop(0)
+            if option in _ENV_OPTIONS_WITH_ARGUMENT and parts:
+                parts.pop(0)
+    return bool(parts) and _PYTHON_INTERPRETER.fullmatch(PurePosixPath(parts[0]).name) is not None
 
 
 def _has_main_block(repo: Path, path: str) -> bool:
