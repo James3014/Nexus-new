@@ -430,6 +430,30 @@ def _closure(
     return seen
 
 
+def _is_extensionless(path: str) -> bool:
+    try:
+        name = Path(path).name
+    except ValueError:
+        return False
+    return bool(name) and "." not in name
+
+
+def _has_python_shebang(repo: Path, path: str) -> bool:
+    try:
+        with (repo / path).open("rb") as f:
+            first_line = f.readline(1024)
+    except (OSError, ValueError):
+        return False
+    if not first_line.startswith(b"#!"):
+        return False
+    line = first_line.decode("utf-8", errors="replace").strip()
+    parts = line[2:].strip().split()
+    return any(
+        p.strip("'\"").replace("\\", "/").rsplit("/", 1)[-1].startswith("python")
+        for p in parts
+    )
+
+
 def _has_main_block(repo: Path, path: str) -> bool:
     tree = _parse(repo, path)
     if tree is None:
@@ -588,6 +612,19 @@ def analyze(
 
     for path in changed_py:
         if _has_main_block(repo, path):
+            hit(
+                f"script:{path}",
+                "script",
+                [path],
+                "changed __main__ script: a real run is required",
+            )
+
+    for path in sorted(changed):
+        if (
+            _is_extensionless(path)
+            and _has_python_shebang(repo, path)
+            and _has_main_block(repo, path)
+        ):
             hit(
                 f"script:{path}",
                 "script",
