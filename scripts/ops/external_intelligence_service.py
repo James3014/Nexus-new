@@ -1246,7 +1246,6 @@ _TERMINAL_BOOTSTRAP_FAILURE = "TERMINAL_BOOTSTRAP_FAILURE"
 _TERMINAL_PRINT_FAILURE = "TERMINAL_PRINT_FAILURE"
 _DEFAULT_UNLOAD_DEADLINE = 30.0
 _DEFAULT_UNLOAD_POLL_INTERVAL = 0.5
-_LAUNCHCTL_NOT_FOUND = "Could not find service"
 # Newer macOS answers a bootout of an already-unloaded label with exactly this (rc 3).
 _LAUNCHCTL_NO_SUCH_PROCESS = re.compile(r"Boot-out failed:\s*3:\s*No such process", re.IGNORECASE)
 
