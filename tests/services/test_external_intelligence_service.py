@@ -2730,7 +2730,9 @@ def test_restart_bootout_mixed_no_such_process_stays_terminal(
         if args[0] == "bootout":
             return subprocess.CompletedProcess(["launchctl", *args], returncode, "", stderr)
         if args[0] == "print":
-            return subprocess.CompletedProcess(["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, "")
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
         return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
 
     def forbidden_install(_config_path):
