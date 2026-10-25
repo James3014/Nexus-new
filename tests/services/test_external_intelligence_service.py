@@ -2710,6 +2710,39 @@ def test_restart_bootout_no_such_process_still_loaded_does_not_bootstrap(tmp_pat
     assert not any(c[0] == "bootstrap" for c in calls)
 
 
+@pytest.mark.parametrize(
+    ("returncode", "stderr"),
+    [
+        (5, "Boot-out failed: 5: Input/output error\nNo such process\n"),
+        (1, "Boot-out failed: 3: No such process\n"),
+    ],
+)
+def test_restart_bootout_mixed_no_such_process_stays_terminal(
+    tmp_path, monkeypatch, returncode, stderr
+):
+    """Only the exact rc 3 'No such process' answer counts as already unloaded."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], returncode, "", stderr)
+        if args[0] == "print":
+            return subprocess.CompletedProcess(["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, "")
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    def forbidden_install(_config_path):
+        raise AssertionError("install must not run after failed bootout")
+
+    monkeypatch.setattr(service_module, "install", forbidden_install)
+    result = service_module.restart(config_path, launchctl_runner=runner)
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert [call[0] for call in calls] == ["bootout"]
+
+
 # ---- CLI command-level restart tests ----
 
 
