@@ -3044,19 +3044,48 @@ def test_restart_bootout_mixed_not_found_stays_terminal(tmp_path, monkeypatch):
 def test_is_label_loaded_state_line_with_not_found_text_is_loaded():
     """Output containing state = running alongside not-found text is not unloaded."""
     output = (
-        "state = running\n"
-        "pid = 12345\n"
-        "Could not find service: com.nexus.external-intelligence\n"
+        "state = running\npid = 12345\nCould not find service: com.nexus.external-intelligence\n"
     )
 
     def runner(*args):
         return subprocess.CompletedProcess(["launchctl", *args], 0, output, "")
 
-    try:
-        loaded = service_module._is_label_loaded(
-            service_module.SERVICE_LABEL, launchctl_runner=runner
-        )
-        assert loaded is not False
-    except ServiceError:
-        pass
+    loaded = service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+    assert loaded is True
 
+
+@pytest.mark.parametrize(
+    ("returncode", "uid_in_message"),
+    [(113, "other"), (0, "self")],
+)
+def test_is_label_loaded_not_found_needs_own_domain_and_failure_exit(returncode, uid_in_message):
+    """Not-found counts only for this user's GUI domain and a failing print."""
+    uid = os.getuid() + 1 if uid_in_message == "other" else os.getuid()
+    output = (
+        "Bad request.\n"
+        f'Could not find service "{service_module.SERVICE_LABEL}" '
+        f"in domain for user gui: {uid}\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], returncode, "", output)
+
+    with pytest.raises(ServiceError):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+def test_is_label_loaded_real_print_not_found_is_unloaded():
+    """The real macOS print diagnostic for this user's domain means unloaded."""
+    output = (
+        "Bad request.\n"
+        f'Could not find service "{service_module.SERVICE_LABEL}" '
+        f"in domain for user gui: {os.getuid()}\n"
+    )
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 113, "", output)
+
+    assert (
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+        is False
+    )

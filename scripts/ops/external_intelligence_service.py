@@ -1250,19 +1250,22 @@ _DEFAULT_UNLOAD_POLL_INTERVAL = 0.5
 _LAUNCHCTL_NO_SUCH_PROCESS = re.compile(r"Boot-out failed:\s*3:\s*No such process", re.IGNORECASE)
 
 
-def _is_exact_not_found(output: str, label: str) -> bool:
-    """Return True if output is an exact expected launchctl not-found message for label."""
+def _is_exact_not_found(output: str, label: str, uid: int | None = None) -> bool:
+    """Return True if output is an exact expected launchctl not-found message for label.
+
+    The modern diagnostic names the GUI domain; it must be this user's domain.
+    """
     text = output.strip()
     escaped = re.escape(label)
+    domain_uid = uid if uid is not None else os.getuid()
     patterns = (
-        rf'(?:Boot-out failed:\s*(?:\d+:\s*)?)?'
+        rf"(?:Boot-out failed:\s*(?:\d+:\s*)?)?"
         rf'Bad request\.\s*Could not find service ["\']?{escaped}["\']?'
-        rf' in domain for user gui:\s*\d+',
+        rf" in domain for user gui:\s*{domain_uid}",
         rf"(?:Boot-out failed:\s*(?:\d+:\s*)?)?Could not find service:\s*[\"']?{escaped}[\"']?",
     )
     return any(
-        re.fullmatch(pat, text, flags=re.IGNORECASE | re.DOTALL) is not None
-        for pat in patterns
+        re.fullmatch(pat, text, flags=re.IGNORECASE | re.DOTALL) is not None for pat in patterns
     )
 
 
@@ -1288,7 +1291,10 @@ def _is_label_loaded(
     state_match = re.search(r"^\s*state\s*=\s*(\S+)", stdout, re.MULTILINE)
     if state_match:
         return True
-    if _is_exact_not_found(combined, label):
+    # launchctl reports a missing service with a nonzero exit; a zero exit is never "not found".
+    if getattr(result, "returncode", 0) != 0 and _is_exact_not_found(
+        combined, label, uid=domain_uid
+    ):
         return False
     if getattr(result, "returncode", 1) != 0:
         raise ServiceError(_TERMINAL_PRINT_FAILURE)
