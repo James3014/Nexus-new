@@ -2448,6 +2448,132 @@ def test_start_preserves_old_behavior_no_wait(tmp_path, monkeypatch):
     assert actions == ["bootout", "bootstrap"]
 
 
+def test_start_bootout_real_failure_blocks_install_and_bootstrap(tmp_path, monkeypatch):
+    """Real bootout failure (rc 5) returns error and blocks install and bootstrap."""
+    config_path = _make_config(tmp_path)
+    installed = False
+
+    def fake_install(_cp):
+        nonlocal installed
+        installed = True
+        return tmp_path / "dummy.plist"
+
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 5, "", "Could not read domain: 5: Input/output error"
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    monkeypatch.setattr(service_module, "install", fake_install)
+    monkeypatch.setattr(service_module, "_launchctl", runner)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 1
+    assert result.stdout == "TERMINAL_BOOTOUT_FAILURE"
+    assert result.stderr == (
+        "TERMINAL_BOOTOUT_FAILURE: Could not read domain: 5: Input/output error"
+    )
+    assert installed is False
+    assert [c[0] for c in calls] == ["bootout"]
+
+
+def test_start_bootout_oserror_blocks_install_and_bootstrap(tmp_path, monkeypatch):
+    """bootout raising OSError returns error and blocks install and bootstrap."""
+    config_path = _make_config(tmp_path)
+    installed = False
+
+    def fake_install(_cp):
+        nonlocal installed
+        installed = True
+        return tmp_path / "dummy.plist"
+
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            raise OSError("permission denied")
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    monkeypatch.setattr(service_module, "install", fake_install)
+    monkeypatch.setattr(service_module, "_launchctl", runner)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 1
+    assert result.stdout == "TERMINAL_BOOTOUT_FAILURE"
+    assert result.stderr == "TERMINAL_BOOTOUT_FAILURE: permission denied"
+    assert installed is False
+    assert [c[0] for c in calls] == ["bootout"]
+
+
+def test_start_bootout_no_such_process_proceeds_to_bootstrap(tmp_path, monkeypatch):
+    """bootout returning rc 3 No such process is treated as unloaded and bootstraps."""
+    config_path = _make_config(tmp_path)
+    installed = False
+
+    def fake_install(_cp):
+        nonlocal installed
+        installed = True
+        return tmp_path / "dummy.plist"
+
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 3, "", "Boot-out failed: 3: No such process\n"
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    monkeypatch.setattr(service_module, "install", fake_install)
+    monkeypatch.setattr(service_module, "_launchctl", runner)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 0
+    assert installed is True
+    assert [c[0] for c in calls] == ["bootout", "bootstrap"]
+
+
+def test_start_bootout_no_such_process_with_noise_blocks_bootstrap(tmp_path, monkeypatch):
+    """rc 3 bootout with extraneous noise is not exact not-found, blocking bootstrap."""
+    config_path = _make_config(tmp_path)
+    installed = False
+
+    def fake_install(_cp):
+        nonlocal installed
+        installed = True
+        return tmp_path / "dummy.plist"
+
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 3, "", "Boot-out failed: 3: No such process\nextra noise"
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    monkeypatch.setattr(service_module, "install", fake_install)
+    monkeypatch.setattr(service_module, "_launchctl", runner)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 1
+    assert result.stdout == "TERMINAL_BOOTOUT_FAILURE"
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert installed is False
+    assert [c[0] for c in calls] == ["bootout"]
+
+
 # ---- stop() tests ----
 
 

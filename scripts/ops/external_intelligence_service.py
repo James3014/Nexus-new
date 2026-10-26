@@ -1341,13 +1341,40 @@ def _bootstrap(
     return bootstrap
 
 
-def start(config_path: str | os.PathLike[str]):
-    """Install the plist and bootstrap.  Best-effort bootout of any prior
-    instance; the caller is not required to wait for unload.  For the
-    durability-aware stop-wait-bootstrap sequence, use ``restart()``."""
-    plist = install(config_path)
+def start(config_path: str | os.PathLike[str]) -> subprocess.CompletedProcess[str]:
+    """Boot out any prior instance, then install the plist and bootstrap.
+    A bootout that fails for any reason other than "already unloaded" is
+    terminal (no install, no bootstrap), as in ``restart()``; the caller is
+    not required to wait for unload.  For the durability-aware
+    stop-wait-bootstrap sequence, use ``restart()``."""
     domain = f"gui/{os.getuid()}"
-    _launchctl("bootout", f"{domain}/{SERVICE_LABEL}")
+    try:
+        bootout = _launchctl("bootout", f"{domain}/{SERVICE_LABEL}")
+    except (OSError, subprocess.SubprocessError) as exc:
+        msg = f"{_TERMINAL_BOOTOUT_FAILURE}: {exc}"
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
+            returncode=1,
+            stdout=_TERMINAL_BOOTOUT_FAILURE,
+            stderr=msg,
+        )
+    if bootout.returncode != 0:
+        bootout_output = "".join(
+            str(getattr(bootout, field, "") or "") for field in ("stdout", "stderr")
+        )
+        already_unloaded = _is_exact_not_found(bootout_output, SERVICE_LABEL) or (
+            bootout.returncode == 3
+            and _LAUNCHCTL_NO_SUCH_PROCESS.fullmatch(bootout_output.strip()) is not None
+        )
+        if not already_unloaded:
+            msg = f"{_TERMINAL_BOOTOUT_FAILURE}: {bootout_output.strip()}".rstrip()
+            return subprocess.CompletedProcess(
+                ["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
+                returncode=1,
+                stdout=_TERMINAL_BOOTOUT_FAILURE,
+                stderr=msg,
+            )
+    plist = install(config_path)
     return _launchctl("bootstrap", domain, str(plist))
 
 
