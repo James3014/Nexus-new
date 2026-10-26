@@ -2574,7 +2574,6 @@ def test_start_bootout_no_such_process_with_noise_blocks_bootstrap(tmp_path, mon
     assert [c[0] for c in calls] == ["bootout"]
 
 
-
 def _start_with_bootout(tmp_path, monkeypatch, bootout):
     """Run start() with a scripted bootout; return (result, install count, launchctl actions)."""
     config_path = _make_config(tmp_path)
