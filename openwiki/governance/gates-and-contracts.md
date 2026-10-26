@@ -1,23 +1,23 @@
 ---
 type: Concept
 title: Governance Gates, Independent Acceptance & Evidence Contracts
-description: Current-source guide to fail-closed completion, exact-Candidate acceptance, operator outcome receipts, and non-mutating GitHub merge-intent preparation.
+description: Current-source guide to fail-closed completion, exact-Candidate acceptance, and non-mutating GitHub merge-intent preparation.
 tags: [governance, gates, completion, acceptance, receipts, github]
 openwiki:
   roles: [architecture, domain, operations]
   change_kinds: [public-api, governance]
   source_paths: [nexus/engine/completion_enforcer.py, nexus/engine/completion_contract.py, scripts/pre_write_quality_gate.py]
   symbols: [CompletionEnforcer, build_completion_envelope, ensure_verified_completion, CompletionEnforcementError]
-  test_paths: [tests/test_task_runner_completion_gate.py, tests/nexus/orchestrator/test_acceptance_loop.py, tests/contracts/test_operator_outcome_receipt.py, tests/contracts/test_github_orchestration.py, tests/nexus/orchestrator/test_github_orchestration.py]
+  test_paths: [tests/test_task_runner_completion_gate.py, tests/nexus/orchestrator/test_acceptance_loop.py, tests/contracts/test_github_orchestration.py, tests/nexus/orchestrator/test_github_orchestration.py]
   invariants: [Completion fails closed. Independent acceptance never performs approval, integration, merge, or public-claim promotion. GitHub merge intent is non-mutating. OpenWiki has no approval or release authority.]
-  validation_commands: [pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_operator_outcome_receipt.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q]
+  validation_commands: [pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q]
 ---
 
 # Governance Gates, Independent Acceptance & Evidence Contracts
 
 Nexus separates **verification evidence**, **independent Candidate acceptance**, **operator-observed outcomes**, and **GitHub merge intent** so that no single receipt silently acquires approval or integration authority.
 
-> 🏛️ **Authority contract**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority. OpenWiki is `derived_non_authoritative`. A passing verifier, an `ACCEPT` result, an operator outcome receipt, or a prepared merge intent does not by itself authorize merge, push, integration, release, or public claims.
+> 🏛️ **Authority contract**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority. OpenWiki is `derived_non_authoritative`. A passing verifier, an `ACCEPT` result, or a prepared merge intent does not by itself authorize merge, push, integration, release, or public claims.
 
 ---
 
@@ -69,17 +69,9 @@ flowchart LR
 
 ---
 
-## 🧾 Operator Outcome Receipts
+## 🧾 Operator Outcome Receipts (retired)
 
-`nexus/contracts/operator_outcome_receipt.py` defines `nexus.operator_outcome_receipt.v1`, a privacy-bounded immutable observational receipt.
-
-It distinguishes observation basis from authority:
-
-- `OPERATOR_REPORT`
-- `SYSTEM_OBSERVATION`
-- `NOT_OBSERVED`
-
-Allowed observed outcomes are `SUCCESS`, `FAILURE`, `PARTIAL`, `UNKNOWN`, and `NOT_OBSERVED`. Fields carry explicit provenance and canonical hashes. The contract contains no free-form approval authority and must not be converted into a release or merge decision.
+Retired. The `nexus.operator_outcome_receipt.v1` contract (`nexus/contracts/operator_outcome_receipt.py`) and its task-service recording path had no production caller and were removed in the Phase-2 dead-code batch (#2915, Refs #2584). The only remaining code is `nexus/orchestrator/self_hosted_task_service_parts/read_projection.py`, which still strips or passes through the legacy `operator_outcome_receipt` / `operator_outcome_receipts` state keys of older task states. No current component records a new operator outcome receipt.
 
 ---
 
@@ -125,20 +117,6 @@ claim_ceiling: Independently reduces exact Candidate and reviewer evidence to AC
 ```
 
 ```yaml
-component: OperatorOutcomeReceipt
-implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - LOCAL_RUNTIME
-authority_roles:
-  - NONE
-evidence_basis:
-  - nexus/contracts/operator_outcome_receipt.py:OperatorOutcomeReceipt
-  - nexus/orchestrator/self_hosted_task_service.py:validate_operator_outcome_receipt
-claim_ceiling: Immutable privacy-bounded observation receipt consumed by the task service; observational evidence is not approval or route authority.
-```
-
-```yaml
 component: GitHubMergeIntent
 implementation_status: CURRENT
 wiring_status: UNKNOWN
@@ -180,19 +158,17 @@ Consult this page for completion gates, Candidate acceptance, verifier/receipt i
 
 ### Exact Source Files & Symbols
 - `nexus/orchestrator/acceptance_loop.py` → `CandidateAcceptanceRequest`, `IndependentReviewReceipt`, `reduce_candidate_acceptance`
-- `nexus/contracts/operator_outcome_receipt.py` → `OperatorOutcomeReceipt`, `build_operator_outcome_receipt`
 - `nexus/contracts/github_orchestration.py` → `GitHubOrchestrationEvidence`, `MergeIntent`
 - `nexus/orchestrator/github_orchestration.py` → `prepare_merge_intent`, `revalidate_merge_intent`
 - `nexus/engine/completion_enforcer.py` / `completion_contract.py` → completion gates
 
 ### Focused Tests
 - `tests/nexus/orchestrator/test_acceptance_loop.py`
-- `tests/contracts/test_operator_outcome_receipt.py`
 - `tests/contracts/test_github_orchestration.py`
 - `tests/nexus/orchestrator/test_github_orchestration.py`
 - `tests/test_task_runner_completion_gate.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_operator_outcome_receipt.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q
+pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q
 ```

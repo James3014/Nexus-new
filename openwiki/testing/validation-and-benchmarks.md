@@ -49,11 +49,10 @@ pytest tests/engine/test_capability_planner.py tests/contracts/test_canonical_ex
 
 Use this lane for task identity, retry/recovery/cleanup, direct-vs-isolated execution-lane rules, Cueline forwarding, or cross-attempt continuity projection.
 
-### 4. Independent Acceptance & Outcome Evidence
+### 4. Independent Acceptance
 - `tests/nexus/orchestrator/test_acceptance_loop.py`
-- `tests/contracts/test_operator_outcome_receipt.py`
 
-These tests cover exact Candidate/reviewer identity binding, `ACCEPT/REPAIRABLE/BLOCK`, non-promoting acceptance, immutable operator outcome evidence, and provenance validation.
+These tests cover exact Candidate/reviewer identity binding, `ACCEPT/REPAIRABLE/BLOCK`, non-promoting acceptance, and provenance validation.
 
 ### 5. GitHub Orchestration Contracts
 - `tests/contracts/test_github_orchestration.py`
