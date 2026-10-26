@@ -150,6 +150,7 @@ NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
     "scripts/ops/external_intelligence_service.py:_launchctl",
     "scripts/ops/external_intelligence_service.py:restart",
     "scripts/ops/external_intelligence_service.py:service_status",
+    "scripts/ops/external_intelligence_service.py:start",
     "scripts/ops/learn_refresh_launchd.py:install",
     "scripts/ops/learn_refresh_launchd.py:status",
     "scripts/ops/learn_refresh_launchd.py:uninstall",
