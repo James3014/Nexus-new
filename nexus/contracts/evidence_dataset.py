@@ -141,9 +141,10 @@ def evidence_record_from_sf_smoke_case(
 
 
 def _first_non_none(row: Mapping[str, Any], *keys: str) -> Any:
+    """The first value under ``keys`` that is present: not missing, None or empty (#2938)."""
     for key in keys:
         value = row.get(key)
-        if value is not None:
+        if value is not None and value != "":
             return value
     return None
 
@@ -259,7 +260,7 @@ def validate_evidence_dataset_record(payload: Mapping[str, Any]) -> list[str]:
 
 
 def _provider_token_cleanliness(row: Mapping[str, Any]) -> ProviderTokenCleanliness:
-    model_calls = _int_or_none(row.get("model_calls") or row.get("modelcalls")) or 0
+    model_calls = _int_or_none(_first_non_none(row, "model_calls", "modelcalls")) or 0
     if model_calls <= 0:
         return ProviderTokenCleanliness.NOT_APPLICABLE
     if bool(row.get("provider_token_measured", False)):

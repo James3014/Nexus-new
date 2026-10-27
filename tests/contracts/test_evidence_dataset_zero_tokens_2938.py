@@ -30,8 +30,17 @@ def test_zero_total_tokens_and_zero_model_calls_are_kept():
         ({"total_tokens": 1234, "model_calls": 9}, 1234, 9),
         ({}, None, None),
         ({"total_tokens": None, "totaltokens": 5, "model_calls": None, "modelcalls": 4}, 5, 4),
+        ({"total_tokens": "", "totaltokens": 5, "model_calls": "", "modelcalls": 4}, 5, 4),
     ],
-    ids=["zero_primary_wins", "zero_alias", "alias_only", "nonzero", "missing", "none_falls_back"],
+    ids=[
+        "zero_primary_wins",
+        "zero_alias",
+        "alias_only",
+        "nonzero",
+        "missing",
+        "none_falls_back",
+        "empty_falls_back",
+    ],
 )
 def test_token_and_call_counts_take_the_first_present_value(fields, total, calls):
     counts = _counts(**fields)
@@ -46,3 +55,12 @@ def test_zero_counts_survive_to_dict():
     payload = record.to_dict()
     assert payload["token_counts"]["total"] == 0
     assert payload["token_counts"]["model_calls"] == 0
+
+
+def test_provider_token_status_reads_the_same_model_calls_as_the_record():
+    # Review of #2944: the cleanliness check still used "or", so 0 vs an alias of 3 disagreed.
+    record = evidence_record_from_benchmark_row(
+        {**_BASE, "model_calls": 0, "modelcalls": 3}, source_path="rows.jsonl"
+    )
+    assert record.token_counts["model_calls"] == 0
+    assert record.provider_token_cleanliness.value == "not_applicable"
