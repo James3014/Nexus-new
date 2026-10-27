@@ -23,13 +23,14 @@ physical diff and rerun the applicable verifier. That coordinator verification
 is sufficient; no third reviewer is required. The direct merge sink is the
 server-bound `git_merge_pull_request`. Direct merge does not require a Task
 Card, GitHub `APPROVED` review, independent acceptance receipt/hash, standing
-grant, `GITHUB_MERGE`, or `github_complete_pull_request`.
+grant, or `GITHUB_MERGE`.
 
 For `GOVERNED`, keep the existing independent acceptance,
-machine-verifiable provenance, `MERGE_INTENT`, standing-grant `GITHUB_MERGE`,
-and `github_complete_pull_request` completion-loop rules. A valid current
-standing grant explicitly covering the exact repository, Goal, coordinator,
-and normal GitHub action remains valid across ordinary phase transitions; do
+machine-verifiable provenance, `MERGE_INTENT` and standing-grant `GITHUB_MERGE`
+rules; the merge itself is the same `git_merge_pull_request`, run by the
+coordinator on the governed CAS path (no separate completion action, #2918).
+A valid current standing grant explicitly covering the exact repository, Goal,
+coordinator, and normal GitHub action remains valid across ordinary phase transitions; do
 not request redundant Owner reauthorization. Reauthorize only for a real
 authority boundary or genuine external-platform approval. No lane may bypass
 verification, branch protection, or CAS. Local lifecycle approval cannot

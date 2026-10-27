@@ -366,7 +366,7 @@ path is permitted only after the coordinator, distinct from the worker, has
 independently inspected the physical diff and rerun the applicable verifier.
 Neither direct lane requires a third-party GitHub `APPROVED` review, an
 `IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
-receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
+receipt, or `GITHUB_MERGE`.
 
 A stale exact base invalidates the current **merge attempt**, not automatically
 its Candidate or PR. On `main` movement, the coordinator must first apply the
@@ -384,13 +384,13 @@ Candidate re-acceptance, or full-verifier replay caused solely by base movement.
   conflict, platform-mandated new integration subject, or `IMPACT_UNKNOWN` may
   require a new integration head/rebase/reverification; plain base inequality may not.
 
-For GOVERNED completion, `github_complete_pull_request` is the existing bounded
-consumer of this repeated-drift logic when the action is exposed. DIRECT remains
-lightweight and ends at `git_merge_pull_request`, but it must not skip the
-main-movement decision and substitute mechanical PR reconstruction. If the
-current action surface cannot obtain the exact requalification evidence, report a
-transport/evidence capability gap rather than treating Candidate recreation as a
-safe fallback.
+For GOVERNED completion, the primary coordinator applies this repeated-drift
+logic itself on the governed coordinator CAS path; the separate completion
+action is retired (#2918). DIRECT remains lightweight and ends at
+`git_merge_pull_request`, but it must not skip the main-movement decision and
+substitute mechanical PR reconstruction. If the current action surface cannot
+obtain the exact requalification evidence, report a transport/evidence
+capability gap rather than treating Candidate recreation as a safe fallback.
 
 
 > **Historical:** the lane-binding paragraphs below were retired (#2006/#2286);
@@ -482,14 +482,14 @@ platform approval) fails closed and requires the corresponding new decision.
 `MERGE_INTENT` is evidence and standing authority is authorization only; neither
 substitutes for the verification gates. This GitHub action does not approve or
 integrate local Nexus lifecycle state.
-When the live MCP surface exposes `github_complete_pull_request`, governed
-protected-merge completion after independent acceptance uses that action (none is
-implemented; its unwired loop was retired in #2584, see #2918); required checks
-still execute on the exact current integration subject; physical merge remains
-expected-head/CAS. Absence of the
-action is not a new Owner-approval boundary; fall back to the existing
-governed coordinator CAS path. The action cannot mint standing-grant or merge
-authority.
+Governed protected-merge completion after independent acceptance uses the
+governed coordinator CAS path: the primary coordinator runs the bounded
+`git_merge_pull_request` merge once every governed gate above passes (#2918).
+`github_complete_pull_request` existed only on the archived devspace branch
+`nexus/connector-host-v1`, used Nexus-new's `run_github_completion_loop`
+(removed in #2917), and is retired. Required checks still execute on the exact
+current integration subject; physical merge remains expected-head/CAS. The merge
+sink cannot mint standing-grant or merge authority.
 
 ## Blocks and residual debt
 
