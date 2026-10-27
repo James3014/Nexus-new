@@ -80,6 +80,30 @@ def test_a_value_option_at_base_keeps_its_token_and_still_refuses_a_dropped_test
     assert row["base_collect"]["options_with_dropped_token"] == [], row
 
 
+def test_a_node_id_after_a_value_option_does_not_hide_a_dropped_test(tmp_path):
+    # #2948 review: a node id right after "--seed-file" was left out of the base run before its
+    # option was considered, so "--seed-file" swallowed tests/test_sel.py there and
+    # test_slow's drop escaped (the node id itself is still observed through its file).
+    root, base, cand = _repo(
+        tmp_path,
+        {
+            "tests/conftest.py": _VALUE_SEED + "\n\n" + _DROP_AT_MAKEITEM,
+            "src_mod.py": "VALUE = 2\n",
+        },
+        base={
+            "tests/conftest.py": _VALUE_SEED,
+            "tests/test_sel.py": _FAST_AND_SLOW,
+            "tests/test_mod.py": _PASSING,
+        },
+    )
+    spec = _spec(
+        "--seed-file", "tests/test_mod.py::test_ok", "tests/test_sel.py", "tests/test_mod.py"
+    )
+    row = _row(root, base, cand, spec, ["tests/conftest.py", "src_mod.py"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_DECLARED_NODE_MISSING, row
+
+
 def test_a_value_option_at_base_still_passes_an_honest_card(tmp_path):
     root, base, cand = _repo(
         tmp_path,

@@ -2545,9 +2545,13 @@ def _base_collect_invocation(
     for index, token in enumerate(invocation.pytest_args):
         if index in targets:
             had_target = True
-            if "::" in token:
+            # A node id is left out like a missing target, but one that may be the value of
+            # the option before it gets the same treatment as any other such token: without
+            # it a value option would swallow the next target at base (#2948 review).
+            node_id = "::" in token
+            if node_id and index not in maybe_values:
                 continue
-            (rel,) = _declared_path_prefixes(root, [token]) or ("",)
+            (rel,) = ("",) if node_id else (_declared_path_prefixes(root, [token]) or ("",))
             missing = not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel)
             if missing or not (base_tree / rel).exists():
                 if index in maybe_values and dropped_after is not None:
