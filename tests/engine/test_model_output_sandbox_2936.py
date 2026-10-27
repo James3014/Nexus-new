@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.core import layer_ports
 from nexus.core.argv_command import run_command_string
 from nexus.core.drone_engine import DroneToolBox
 from nexus.engine import model_output_sandbox as mos
@@ -57,6 +58,17 @@ def test_drone_bash_fails_closed_without_barrier(tmp_path, no_barrier):
     out = DroneToolBox(tmp_path).bash_exec(_marker_cmd(marker))
     assert out["exit_code"] == -1
     assert "no_os_barrier" in out["stderr"]
+    assert not marker.exists()
+
+
+def test_drone_bash_fails_closed_when_the_sandbox_port_is_unbound(tmp_path, monkeypatch):
+    # nexus.core reaches the sandbox only through a port; an unbound port must not fall back
+    # to running the command unconfined.
+    monkeypatch.delitem(layer_ports._LOADERS, "model_output.run_model_command_string")
+    marker = tmp_path / "ran.txt"
+    out = DroneToolBox(tmp_path).bash_exec(_marker_cmd(marker))
+    assert out["exit_code"] == -1
+    assert "PORT_UNBOUND" in out["stderr"]
     assert not marker.exists()
 
 
@@ -116,6 +128,7 @@ def test_only_python_interpreters_widen_reads(tmp_path, monkeypatch):
 
 
 # --- With a real barrier: what the model's command can no longer do. Without one: it never ran.
+
 
 def _net(port: int) -> str:
     return f"import socket; socket.create_connection(('127.0.0.1', {port}), 3); print('CONNECTED')"

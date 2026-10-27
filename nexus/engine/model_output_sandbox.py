@@ -109,9 +109,7 @@ def argument_file_roots(argv: Iterable[str]) -> list[Path]:
     their directories. Not for model-chosen commands."""
 
     roots = [
-        Path(arg).resolve()
-        for arg in list(argv)[1:]
-        if os.path.isabs(arg) and os.path.isfile(arg)
+        Path(arg).resolve() for arg in list(argv)[1:] if os.path.isabs(arg) and os.path.isfile(arg)
     ]
     return list(dict.fromkeys(roots))
 

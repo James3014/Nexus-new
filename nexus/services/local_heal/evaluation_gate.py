@@ -264,9 +264,7 @@ class EvaluationGate:
     def __init__(self, repo_dir: Path):
         self.repo_dir = repo_dir
 
-    def _run_confined(
-        self, cmd: List[str], env: dict, timeout: int
-    ) -> subprocess.CompletedProcess:
+    def _run_confined(self, cmd: List[str], env: dict, timeout: int) -> subprocess.CompletedProcess:
         # repo_dir holds a model-written patch: its tests run under the OS sandbox (no
         # network, writes only in repo_dir, allowlisted env + PYTHONPATH). A missing barrier
         # raises SandboxError, which the callers record as a failed test (#2936).
