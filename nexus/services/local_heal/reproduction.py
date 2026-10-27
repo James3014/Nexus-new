@@ -4,11 +4,19 @@ import inspect
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
 import tempfile
 import traceback
 from pathlib import Path
 from typing import Any, Tuple
+
+from nexus.engine.model_output_sandbox import (
+    SandboxError,
+    interpreter_readable_roots,
+    run_model_argv,
+)
 
 
 class SyntaxValidator:
@@ -22,6 +30,9 @@ class SyntaxValidator:
         except (SyntaxError, IndentationError) as e:
             tb = "".join(traceback.format_exception_only(type(e), e))
             return False, tb.strip()
+
+
+_FAILURE_RECORD_MAX_BYTES = 1024 * 1024
 
 
 class ReproductionRunner:
@@ -238,10 +249,21 @@ class ReproductionRunner:
 
     @staticmethod
     def _failure_record(record_path: Path) -> dict[str, Any] | None:
+        # The script can write its record dir (#2945): only a regular file, opened without
+        # following a link or blocking on a FIFO, and only a bounded read, is a record.
         try:
-            record = json.loads(record_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            fd = os.open(record_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
             return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                record = json.loads(handle.read(_FAILURE_RECORD_MAX_BYTES).decode("utf-8"))
+        except (OSError, ValueError):
+            return None
+        finally:
+            os.close(fd)
         return record if isinstance(record, dict) else None
 
     @staticmethod
@@ -306,7 +328,7 @@ class ReproductionRunner:
 
         repro_path = self.repo_dir / "reproduce_bug.py"
         subprocess_started = False
-        record_path: Path | None = None
+        record_dir: Path | None = None
         try:
             # 硬化：路徑注入必須在最前面，否則會載入到 venv 裡已安裝的 astropy
             benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
@@ -319,26 +341,25 @@ class ReproductionRunner:
             repro_path.write_text(executed_script, encoding="utf-8")
             self.last_script_sha256 = hashlib.sha256(executed_script.encode("utf-8")).hexdigest()
 
-            record_fd, raw_record_path = tempfile.mkstemp(
-                prefix="nexus-repro-failure-", suffix=".json"
-            )
-            os.close(record_fd)
-            os.unlink(raw_record_path)
-            record_path = Path(raw_record_path)
-            execution_env = os.environ.copy()
-            execution_env[self._FAILURE_RECORD_ENV] = str(record_path)
+            # The failure record is written by the script's own process, so its directory is the
+            # one place outside repo_dir the sandbox lets it write.
+            record_dir = Path(tempfile.mkdtemp(prefix="nexus-repro-failure-"))
+            record_path = record_dir / "failure.json"
 
-            # 不使用 -I 模式以利繼承環境
+            # 不使用 -I 模式以利繼承環境; the environment itself is the sandbox allowlist,
+            # never the host's (no tokens or provider keys reach the model's script).
             repro_run_timeout = int(os.environ.get("NEXUS_REPRO_RUN_TIMEOUT_SECONDS", "180"))
             self.last_command = (self.python_executable, "reproduce_bug.py")
             subprocess_started = True
-            res = subprocess.run(
+            # The script is model-written: OS sandbox, no network, writes only in repo_dir and
+            # record_dir; no barrier means nothing runs (#2945).
+            res = run_model_argv(
                 [self.python_executable, "reproduce_bug.py"],
-                cwd=str(self.repo_dir),
-                capture_output=True,
-                text=True,
+                work_dir=self.repo_dir,
                 timeout=repro_run_timeout,
-                env=execution_env,
+                extra_env={self._FAILURE_RECORD_ENV: str(record_path)},
+                readable=interpreter_readable_roots(self.python_executable),
+                writable=(record_dir,),
             )
             self.last_exit_status = res.returncode
 
@@ -376,17 +397,17 @@ class ReproductionRunner:
         except subprocess.TimeoutExpired as e:
             self.last_reason_code = "execution_timeout"
             return False, str(e)
+        except SandboxError as e:
+            self.last_reason_code = "sandbox_unavailable"
+            return False, f"verifier_sandbox_unavailable: {e}"
         except Exception as e:
             self.last_reason_code = (
                 "execution_exception" if subprocess_started else "pre_subprocess_failure"
             )
             return False, str(e)
         finally:
-            if record_path is not None:
-                try:
-                    record_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            if record_dir is not None:
+                shutil.rmtree(record_dir, ignore_errors=True)
             # 暫時保留腳本以供偵錯
             pass
             # if repro_path.exists():

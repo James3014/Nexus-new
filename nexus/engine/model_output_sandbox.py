@@ -19,6 +19,7 @@ There is no unconfined fallback: without an OS barrier (non-macOS, or
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
@@ -35,6 +36,7 @@ from nexus.core.argv_command import (
 )
 from nexus.engine.sandboxed_lane import (
     SANDBOX_EXEC,
+    SBPL_SAFE_PATH,
     SandboxError,
     confinement,
     developer_toolchain_read_roots,
@@ -52,6 +54,8 @@ _DENIED_HOME_SUBTREES = (
     "Library/Application Support",
     "Library/Cookies",
 )
+# Work-dir entries the host itself runs from after a model command (#2945).
+_HOST_RUN_SUBTREES = (".git", ".venv")
 
 __all__ = [
     "SandboxError",
@@ -131,24 +135,41 @@ def _command_readable_roots(command: str) -> list[Path]:
 
 @contextmanager
 def model_sandbox(
-    work_dir: Path | str, *, readable: Iterable[Path | str] = ()
+    work_dir: Path | str,
+    *,
+    readable: Iterable[Path | str] = (),
+    writable: Iterable[Path | str] = (),
 ) -> Iterator[tuple[list[str], dict[str, str]]]:
     """Yield ``(argv_prefix, env)`` for commands confined to ``work_dir``.
 
-    Prepend ``argv_prefix`` to each argv and run it with ``env``. Raises SandboxError when no
-    OS barrier exists or a root is unsafe (fail closed)."""
+    Prepend ``argv_prefix`` to each argv and run it with ``env``. ``writable`` adds existing
+    directories the caller created for the run (e.g. a result-record dir); they get the same
+    root checks as ``work_dir``. Raises SandboxError when no OS barrier exists or a root is
+    unsafe (fail closed)."""
 
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise SandboxError("work_dir_missing")
+    extra = tuple(Path(path).resolve() for path in writable)
+    if not all(path.is_dir() for path in extra):
+        raise SandboxError("writable_dir_missing")
     home = Path(os.path.expanduser("~")).resolve()
+    # The host runs git and the task interpreter in work_dir after the model's command (#2945):
+    # a planted hook, git config (core.fsmonitor, diff.external) or venv file would run there,
+    # unconfined. Both the path and, for a symlink, its target stay unwritable.
+    read_only = sorted({
+        str(path) for name in _HOST_RUN_SUBTREES for path in (work / name, (work / name).resolve())
+    })
+    if not all(SBPL_SAFE_PATH.fullmatch(path) for path in read_only):
+        raise SandboxError("sandbox_path_unsafe")
     with tempfile.TemporaryDirectory(prefix="nexus-model-exec-") as private:
         bound = confinement(
             sandbox=Path(private).resolve(),
-            extra_writable=(work,),
+            extra_writable=(work, *extra),
             # /usr/bin/python3, git, make… are xcrun shims that load the active developer dir.
             extra_readable=(*readable, *developer_toolchain_read_roots()),
             forbidden_subtrees=tuple(home / rel for rel in _DENIED_HOME_SUBTREES),
+            read_only_paths=read_only,
         )
         yield [SANDBOX_EXEC, "-p", bound.profile], dict(bound.env)
 
@@ -160,19 +181,31 @@ def run_model_argv(
     timeout: float,
     extra_env: Mapping[str, str] | None = None,
     readable: Iterable[Path | str] = (),
+    writable: Iterable[Path | str] = (),
     text: bool = True,
 ) -> subprocess.CompletedProcess:
     """``subprocess.run(argv, cwd=work_dir)`` inside the model sandbox (no shell).
 
-    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran."""
+    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran. A program that
+    does not exist raises FileNotFoundError, as ``subprocess.run`` would, rather than surfacing
+    as sandbox-exec's own exit status."""
 
     if not argv:
         raise SandboxError("empty_command")
-    with model_sandbox(work_dir, readable=readable) as (prefix, env):
+    program = argv[0]
+    with model_sandbox(work_dir, readable=readable, writable=writable) as (prefix, env):
+        run_env = {**env, **(extra_env or {})}
+        # Looked up as the sandboxed run would (its PATH), after the barrier check.
+        if os.sep in program:
+            found = program if os.path.isabs(program) else str(Path(work_dir) / program)
+        else:
+            found = shutil.which(program, path=run_env.get("PATH", "")) or ""
+        if not found or not os.path.exists(found):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
         return subprocess.run(  # noqa: S603 - argv list, no shell
             [*prefix, *argv],
             cwd=str(Path(work_dir).resolve()),
-            env={**env, **(extra_env or {})},
+            env=run_env,
             capture_output=True,
             text=text,
             timeout=timeout,

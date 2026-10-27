@@ -29,7 +29,7 @@ def model_exec_without_barrier_runs_unconfined():
         return
 
     @contextlib.contextmanager
-    def passthrough(work_dir, *, readable=()):
+    def passthrough(work_dir, *, readable=(), writable=()):
         yield [], dict(os.environ)
 
     # The product canary memoizes whole runs; a result computed under the refusing sandbox by an

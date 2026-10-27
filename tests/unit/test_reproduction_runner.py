@@ -1,7 +1,14 @@
 import hashlib
 import subprocess
 
+import pytest
+
 from nexus.services.local_heal.reproduction import ReproductionRunner, SyntaxValidator
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2945: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise local_heal logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 def test_generate_repro_script_extracts_python_fence(tmp_path):
