@@ -978,26 +978,111 @@ _PYTEST_BASE_INI_KEYS = (
 _PYTEST_VALUE_OPTIONS = frozenset({
     "-k",
     "-m",
+    "-n",
     "-p",
     "-o",
     "-c",
     "-W",
     "-r",
+    "--assert",
+    "--basetemp",
+    "--capture",
+    "--code-highlight",
+    "--color",
+    "--confcutdir",
+    "--config-file",
+    "--cov",
+    "--cov-config",
+    "--cov-fail-under",
+    "--cov-report",
     "--deselect",
+    "--dist",
+    "--durations",
+    "--durations-min",
     "--ignore",
     "--ignore-glob",
-    "--rootdir",
-    "--confcutdir",
-    "--basetemp",
-    "--junitxml",
-    "--junit-xml",
-    "--maxfail",
-    "--tb",
-    "--override-ini",
-    "--config-file",
     "--import-mode",
+    "--junit-xml",
+    "--junitxml",
+    "--log-auto-indent",
+    "--log-cli-date-format",
+    "--log-cli-format",
+    "--log-cli-level",
+    "--log-date-format",
+    "--log-file",
+    "--log-file-date-format",
+    "--log-file-format",
+    "--log-file-level",
+    "--log-format",
+    "--log-level",
+    "--maxfail",
+    "--maxprocesses",
+    "--numprocesses",
+    "--override-ini",
+    "--pastebin",
+    "--rootdir",
+    "--rsyncdir",
+    "--rsyncignore",
+    "--show-capture",
+    "--tb",
+    "--timeout",
+    "--timeout-method",
+    "--tx",
+    "--verbosity",
 })
 _PYTHON_VALUE_OPTIONS = frozenset({"-X", "-W", "-Q"})
+
+
+# Long pytest flags that never take a value. Any other long option written without ``=`` may take
+# the next token as its value (a plugin's ``--random-order-seed 5``), so that token is never
+# counted as a target: fewer declared targets only widen the deselection checks (#2934).
+_PYTEST_FLAG_OPTIONS = frozenset({
+    "--cache-clear",
+    "--cache-show",
+    "--co",
+    "--collect-only",
+    "--continue-on-collection-errors",
+    "--disable-pytest-warnings",
+    "--disable-warnings",
+    "--doctest-modules",
+    "--exitfirst",
+    "--failed-first",
+    "--ff",
+    "--last-failed",
+    "--lf",
+    "--new-first",
+    "--nf",
+    "--no-header",
+    "--no-summary",
+    "--pdb",
+    "--quiet",
+    "--runxfail",
+    "--setup-only",
+    "--setup-plan",
+    "--setup-show",
+    "--showlocals",
+    "--stepwise",
+    "--stepwise-skip",
+    "--strict",
+    "--strict-config",
+    "--strict-markers",
+    "--sw",
+    "--sw-skip",
+    "--trace",
+    "--verbose",
+})
+
+
+def _pytest_value_follows(token: str, following: str | None) -> bool:
+    """Whether ``following`` is the value of the option ``token``, not a target."""
+    name, has_eq, _ = token.partition("=")
+    if has_eq or following is None:
+        return False
+    if name in _PYTEST_VALUE_OPTIONS:
+        return True
+    return (
+        name.startswith("--") and name not in _PYTEST_FLAG_OPTIONS and not following.startswith("-")
+    )
 _PYTHON_NAME_RE = re.compile(r"^python(?:[0-9]+(?:\.[0-9]+)*)?$")
 _JUNIT_MAX_BYTES = 10 * 1024 * 1024
 
@@ -1047,14 +1132,13 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
     declared: list[str] = []
     declared_paths: list[str] = []
     skip_next = False
-    for token in pytest_args:
+    for index, token in enumerate(pytest_args):
         if skip_next:
             skip_next = False
             continue
-        if token in _PYTEST_VALUE_OPTIONS:
-            skip_next = True
-            continue
         if token.startswith("-"):
+            following = pytest_args[index + 1] if index + 1 < len(pytest_args) else None
+            skip_next = _pytest_value_follows(token, following)
             continue
         if "::" not in token:
             declared_paths.append(token)
@@ -2418,11 +2502,13 @@ def _base_collect_invocation(
     args: list[str] = []
     skip_next = False
     had_target = kept_target = False
-    for token in invocation.pytest_args:
+    tokens = invocation.pytest_args
+    for index, token in enumerate(tokens):
         if skip_next:
             skip_next = False
-        elif token in _PYTEST_VALUE_OPTIONS:
-            skip_next = True
+        elif token.startswith("-"):
+            following = tokens[index + 1] if index + 1 < len(tokens) else None
+            skip_next = _pytest_value_follows(token, following)
         elif not token.startswith("-"):
             had_target = True
             if "::" in token:
