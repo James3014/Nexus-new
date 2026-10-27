@@ -14,10 +14,11 @@ import sys
 import pytest
 
 from nexus.services.external_intelligence_closure import (
-    VERIFIER_BASE_RUN_FAILED,
+    _PYTEST_FLAG_OPTIONS,
     VERIFIER_DECLARED_NODE_MISSING,
     _base_collect_invocation,
     _pytest_invocation,
+    _pytest_target_indices,
     _with_pytest_options,
 )
 from tests.services.test_eia_closure_verifier_followups_2811 import (
@@ -97,7 +98,7 @@ def _invocation(*args):
         (("--full-trace", "a.py", "b.py"), ("a.py", "b.py"), ()),
         (("--runslow", "a.py", "b.py"), ("a.py", "b.py"), ()),
         (("--full-trace", "a.py", "b.py::t"), ("a.py",), ("b.py::t",)),
-        (("--lf", "a.py"), (), ()),
+        (("--runslow", "a.py"), (), ()),
         (("--durations=5", "a.py"), ("a.py",), ()),
         (("--unknown-flag", "-k", "fast"), (), ()),
         (("--", "a.py", "b.py"), ("a.py", "b.py"), ()),
@@ -105,6 +106,7 @@ def _invocation(*args):
         (("-qp", "no:cacheprovider", "a.py"), ("a.py",), ()),
         (("-pno:cacheprovider", "a.py"), ("a.py",), ()),
         (("-q", "a.py"), ("a.py",), ()),
+        (("--lf", "a.py"), ("a.py",), ()),
     ],
     ids=[
         "unknown_long_only",
@@ -120,6 +122,7 @@ def _invocation(*args):
         "grouped_short_value_then_target",
         "attached_short_value",
         "short_flag",
+        "pytest_flag_then_lone_target",
     ],
 )
 def test_an_option_value_never_narrows_or_invents_targets(args, paths, nodes):
@@ -193,7 +196,7 @@ def test_a_double_dash_card_dropping_tests_is_refused(tmp_path):
 _FIXTURE_CONFTEST = "import pytest\n\n\n@pytest.fixture\ndef extra():\n    return 1\n"
 
 
-def test_a_candidate_added_target_after_a_flag_is_not_a_base_run_failure(tmp_path):
+def test_a_candidate_added_target_after_a_pytest_flag_is_not_a_base_run_failure(tmp_path):
     # #2948: the added file was kept as the flag's value, so the base run got a path that
     # does not exist there and failed (VERIFIER_BASE_RUN_FAILED).
     root, base, cand = _repo(
@@ -211,7 +214,7 @@ def test_a_candidate_added_target_after_a_flag_is_not_a_base_run_failure(tmp_pat
         assert row["passed"] is True, (flag, row)
 
 
-def test_a_candidate_added_target_after_a_flag_still_refuses_a_dropped_test(tmp_path):
+def test_a_candidate_added_target_after_a_pytest_flag_still_refuses_a_dropped_test(tmp_path):
     root, base, cand = _repo(
         tmp_path,
         {"tests/conftest.py": _DROP_AT_MAKEITEM, "tests/test_new.py": _PASSING},
@@ -223,38 +226,59 @@ def test_a_candidate_added_target_after_a_flag_still_refuses_a_dropped_test(tmp_
     assert row["error"] == VERIFIER_DECLARED_NODE_MISSING, row
 
 
-def test_base_collect_moves_the_flag_before_an_added_target_last(tmp_path):
-    base_tree, root = tmp_path / "base", tmp_path / "cand"
-    for tree in (base_tree, root):
-        (tree / "tests").mkdir(parents=True)
-        (tree / "tests" / "test_sel.py").write_text(_PASSING)
-    (root / "tests" / "test_new.py").write_text(_PASSING)
+def test_a_pytest_flag_is_followed_by_a_target_not_a_value():
+    assert _pytest_target_indices(("--full-trace", "a.py", "b.py")) == ((1, 2), frozenset())
+    assert _pytest_target_indices(("--run-slow", "a.py", "b.py")) == ((1, 2), frozenset({1}))
+
+
+def test_base_collect_drops_a_candidate_added_target_after_a_pytest_flag(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_sel.py").write_text(_PASSING)
     invocation = _invocation("--full-trace", "tests/test_new.py", "tests/test_sel.py")
-    collected = _base_collect_invocation(invocation, base_tree, root)
+    collected = _base_collect_invocation(invocation, tmp_path, tmp_path)
     assert collected is not None
-    assert collected.pytest_args == ("tests/test_sel.py", "--collect-only", "--full-trace")
+    assert collected.pytest_args == ("--full-trace", "tests/test_sel.py", "--collect-only")
 
 
-_VALUE_OPTION_CONFTEST = "def pytest_addoption(parser):\n    parser.addoption('--seed-file')\n"
+def test_the_flag_list_names_only_pytest_options_that_take_no_value():
+    # Codex review of #2950: dropping the token after an option whose arity is unknown lets an
+    # optional-value option or a later competing flag change what the base run collects.
+    from _pytest.config import _prepareconfig
+
+    config = _prepareconfig(["-p", "no:asyncio", "-p", "no:timeout"])
+    parser = config._parser
+    zero_arg = {
+        name
+        for group in (parser._anonymous, *parser._groups)
+        for option in group.options
+        if option.attrs().get("nargs") is None
+        and option.attrs().get("action")
+        in {"store_true", "store_false", "store_const", "count", "version"}
+        for name in option.names()
+    }
+    assert _PYTEST_FLAG_OPTIONS <= zero_arg, sorted(_PYTEST_FLAG_OPTIONS - zero_arg)
 
 
-def test_a_value_option_whose_value_the_candidate_added_does_not_swallow_a_target(tmp_path):
-    # If "--seed-file" kept its place after its value was dropped, the base run would read
-    # tests/test_sel.py as the value, compare test_mod.py only and miss the dropped test.
-    # Moved last, it has no value at base and the base run fails: a refusal either way.
+_RUN_SLOW_CONFTEST = (
+    "def pytest_addoption(parser):\n    parser.addoption('--seed-file', nargs='?', const=None)\n"
+)
+
+
+def test_an_unknown_option_before_a_candidate_added_path_stays_refused(tmp_path):
+    # An option a conftest registers may take an (optional) value, so the token after it
+    # stays with it and the base run fails closed, as before #2948.
     root, base, cand = _repo(
         tmp_path,
         {
-            "tests/conftest.py": _VALUE_OPTION_CONFTEST + "\n\n" + _DROP_AT_MAKEITEM,
+            "tests/conftest.py": _RUN_SLOW_CONFTEST + "\n\n" + _DROP_AT_MAKEITEM,
             "seed.txt": "1\n",
         },
         base={
-            "tests/conftest.py": _VALUE_OPTION_CONFTEST,
+            "tests/conftest.py": _RUN_SLOW_CONFTEST,
             "tests/test_sel.py": _FAST_AND_SLOW,
             "tests/test_mod.py": _PASSING,
         },
     )
     spec = _spec("--seed-file", "seed.txt", "tests/test_sel.py", "tests/test_mod.py")
     row = _row(root, base, cand, spec, ["tests/conftest.py", "seed.txt"])
-    assert row["passed"] is False
-    assert row["error"] in (VERIFIER_BASE_RUN_FAILED, VERIFIER_DECLARED_NODE_MISSING), row
+    assert row["passed"] is False, row

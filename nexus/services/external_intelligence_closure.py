@@ -1042,15 +1042,76 @@ def _short_option_takes_next(token: str) -> bool:
     return False
 
 
+# pytest's own long options that take no value (#2948). A plugin cannot register one of these
+# names again (argparse refuses a conflicting option), so the token after one is a target.
+_PYTEST_FLAG_OPTIONS = frozenset({
+    "--cache-clear",
+    "--co",
+    "--collect-in-virtualenv",
+    "--collect-only",
+    "--collectonly",
+    "--continue-on-collection-errors",
+    "--disable-plugin-autoload",
+    "--disable-pytest-warnings",
+    "--disable-warnings",
+    "--doctest-continue-on-failure",
+    "--doctest-ignore-import-errors",
+    "--doctest-modules",
+    "--exitfirst",
+    "--failed-first",
+    "--ff",
+    "--fixtures",
+    "--fixtures-per-test",
+    "--force-short-summary",
+    "--full-trace",
+    "--fulltrace",
+    "--funcargs",
+    "--keep-duplicates",
+    "--keepduplicates",
+    "--last-failed",
+    "--lf",
+    "--markers",
+    "--new-first",
+    "--nf",
+    "--no-fold-skipped",
+    "--no-header",
+    "--no-showlocals",
+    "--no-summary",
+    "--noconftest",
+    "--pdb",
+    "--pyargs",
+    "--runxfail",
+    "--setup-only",
+    "--setup-plan",
+    "--setup-show",
+    "--setuponly",
+    "--setupplan",
+    "--setupshow",
+    "--showlocals",
+    "--stepwise",
+    "--stepwise-reset",
+    "--stepwise-skip",
+    "--sw",
+    "--sw-reset",
+    "--sw-skip",
+    "--trace",
+    "--trace-config",
+    "--traceconfig",
+    "--verbose",
+    "--version",
+    "--xfail-tb",
+})
+
+
 def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozenset[int]]:
     """Indices of ``args`` that pytest takes as file, directory or node targets (#2934), and
     which of them may instead be the value of the unknown long option before them.
 
     The value of a known value option (``--durations 5``, ``-k expr``, ``-xk expr``) is never a
-    target. A token right after an unknown long option written without ``=`` may be that option's
-    value or a target: it counts only when another target exists, so it never narrows a card's
-    targets and never turns a card without targets into a file-scoped one. Everything after
-    ``--`` is a target."""
+    target, and the token after one of pytest's own flags is a target (#2948). A token right
+    after any other long option written without ``=`` may be that option's value or a target:
+    it counts only when another target exists, so it never narrows a card's targets and never
+    turns a card without targets into a file-scoped one. Everything after ``--`` is a target."""
     certain: list[int] = []
     maybe: list[int] = []
     after_unknown_long = False
@@ -1063,7 +1124,7 @@ def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozen
         if token.startswith("--"):
             name, has_eq, _ = token.partition("=")
             takes_next = not has_eq and name in _PYTEST_VALUE_OPTIONS
-            after_unknown_long = not has_eq and not takes_next
+            after_unknown_long = not has_eq and not takes_next and name not in _PYTEST_FLAG_OPTIONS
             index += 2 if takes_next else 1
             continue
         if token.startswith("-") and len(token) > 1:
@@ -2494,12 +2555,9 @@ def _base_collect_invocation(
     make the base run fail.  Targets are made relative to the candidate root (an
     absolute one would otherwise name the candidate tree, #2846 review r2); targets
     outside the root or missing at base are dropped (a file the candidate added has
-    nothing to compare).  A token that may be an unknown option's value or a target is
-    kept with its option when it is a path in neither tree; when the candidate added it,
-    it is dropped and the option moved last (#2948).  ``None`` when no file or directory
-    target is left although the card named targets."""
+    nothing to compare).  ``None`` when no file or directory target is left although
+    the card named targets."""
     args: list[str] = []
-    moved_last: list[str] = []
     had_target = kept_target = False
     targets, maybe_values = _pytest_target_indices(invocation.pytest_args)
     for index, token in enumerate(invocation.pytest_args):
@@ -2510,12 +2568,7 @@ def _base_collect_invocation(
             (rel,) = _declared_path_prefixes(root, [token]) or ("",)
             missing = not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel)
             if missing or not (base_tree / rel).exists():
-                if index in maybe_values and not missing and (root / rel).exists():
-                    # #2948: a target the candidate added, so the option before it is a flag.
-                    # The option goes last: if it does take a value, the base run fails
-                    # instead of swallowing the next target.
-                    moved_last.append(args.pop())
-                elif index in maybe_values:  # most likely the option's value: keep it with it
+                if index in maybe_values:  # most likely the option's value: keep it with the option
                     args.append(token)
                 continue
             kept_target = True
@@ -2526,7 +2579,7 @@ def _base_collect_invocation(
     return _PytestInvocation(
         interpreter=invocation.interpreter,
         interpreter_args=invocation.interpreter_args,
-        pytest_args=_with_pytest_options(args, "--collect-only", *moved_last),
+        pytest_args=_with_pytest_options(args, "--collect-only"),
         declared_node_ids=(),
         declared_paths=(),
     )
