@@ -8,11 +8,23 @@ Catches issues early to avoid wasting 14B model calls on invalid patches.
 from __future__ import annotations
 
 import ast
-import subprocess
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from nexus.engine.model_output_sandbox import (
+    SandboxError,
+    interpreter_readable_roots,
+    run_model_argv,
+)
+
+# Imports one module of the patched repo; the repo dir and module name arrive as argv, never
+# interpolated into the code.
+_IMPORT_PROBE = (
+    "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module(sys.argv[2])"
+)
 
 
 @dataclass
@@ -137,14 +149,21 @@ class MicroVerifier:
                     rel_path = os.path.relpath(full_path, repo_dir)
                     module_name = os.path.splitext(rel_path)[0].replace(os.path.sep, ".")
                     try:
-                        result = subprocess.run(
-                            [cmd_interpreter, "-c", f"import sys; sys.path.insert(0, '{repo_dir}'); import {module_name}"],
-                            capture_output=True, text=True, timeout=10,
-                            cwd=str(repo_dir)
+                        # Importing runs the model-written patch: OS sandbox, no network, writes
+                        # only in repo_dir; no barrier means nothing runs (#2945).
+                        result = run_model_argv(
+                            [cmd_interpreter, "-c", _IMPORT_PROBE, str(repo_dir), module_name],
+                            work_dir=repo_dir,
+                            timeout=10,
+                            readable=interpreter_readable_roots(cmd_interpreter),
                         )
                         if result.returncode != 0:
                             import_ok = False
                             import_errors.append(f"{file_path}: {result.stderr[:200]}")
+                    except SandboxError as e:
+                        import_ok = False
+                        classifications.append("verifier_unavailable")
+                        import_errors.append(f"verifier_sandbox_unavailable: {e}")
                     except FileNotFoundError:
                         import_ok = False
                         classifications.append("verifier_unavailable")
@@ -194,14 +213,20 @@ class MicroVerifier:
                 full_path = repo_dir / test_file
                 if full_path.exists():
                     try:
-                        result = subprocess.run(
+                        # The patched repo's tests (and any conftest.py in it) are model output.
+                        result = run_model_argv(
                             run_cmd + [str(full_path), "-x", "--tb=short", "-q"],
-                            capture_output=True, text=True, timeout=30,
-                            cwd=str(repo_dir)
+                            work_dir=repo_dir,
+                            timeout=30,
+                            readable=interpreter_readable_roots(run_cmd[0]),
                         )
                         if result.returncode != 0:
                             test_ok = False
                             test_errors.append(f"{test_file}: {result.stdout[-500:]}")
+                    except SandboxError as e:
+                        test_ok = False
+                        classifications.append("verifier_unavailable")
+                        test_errors.append(f"verifier_sandbox_unavailable: {e}")
                     except FileNotFoundError:
                         test_ok = False
                         classifications.append("verifier_unavailable")

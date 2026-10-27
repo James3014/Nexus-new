@@ -1,7 +1,6 @@
 import hashlib
 import re
 import subprocess
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from nexus.engine.local_model_policy import LocalModelPolicy
@@ -122,6 +121,7 @@ class ReproductionPhase(IPhase):
                         "execution_timeout",
                         "execution_exception",
                         "pre_subprocess_failure",
+                        "sandbox_unavailable",
                     }
                     else "missing_exit_status"
                 )
@@ -319,29 +319,25 @@ class ReproductionPhase(IPhase):
             recipe = recipe_registry.match(signals)
             if recipe:
                 recipe_attempts += 1
-                venv_python = str(input_data.repo_dir / ".venv" / "bin" / "python3")
-                pip_python = venv_python if Path(venv_python).exists() else "python3"
-
-                # Extract package name from evidence
-                missing_pkg = None
-                pkg_match = re.search(r"No module named '(\w+)'", evidence)
-                if pkg_match:
-                    missing_pkg = pkg_match.group(1)
+                venv_python = input_data.repo_dir / ".venv" / "bin" / "python3"
 
                 for action in recipe.allowed_actions:
                     if "pip install" in action:
-                        pkg = missing_pkg or action.replace("pip install ", "").strip("'\"")
-                        if pkg and "<" not in pkg:
-                            for py in [pip_python, "python3"]:
-                                try:
-                                    subprocess.run(
-                                        ["uv", "pip", "install", pkg, "--python", py],
-                                        capture_output=True,
-                                        text=True,
-                                        timeout=60,
-                                    )
-                                except Exception:
-                                    pass
+                        # #2945: install only the recipe's own fixed requirement, never a name
+                        # parsed from the output of the model-written script (that output is
+                        # model-controlled), and only into the task's own venv, never the
+                        # host's python3.
+                        pkg = action.replace("pip install ", "").strip("'\"")
+                        if pkg and "<" not in pkg and venv_python.exists():
+                            try:
+                                subprocess.run(
+                                    ["uv", "pip", "install", pkg, "--python", str(venv_python)],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                )
+                            except Exception:
+                                pass
                     elif "collections" in action.lower() and "shim" in action.lower():
                         # Collections compatibility shim — inject into repro script
                         shim = (

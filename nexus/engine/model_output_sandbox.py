@@ -19,6 +19,7 @@ There is no unconfined fallback: without an OS barrier (non-macOS, or
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
@@ -131,21 +132,29 @@ def _command_readable_roots(command: str) -> list[Path]:
 
 @contextmanager
 def model_sandbox(
-    work_dir: Path | str, *, readable: Iterable[Path | str] = ()
+    work_dir: Path | str,
+    *,
+    readable: Iterable[Path | str] = (),
+    writable: Iterable[Path | str] = (),
 ) -> Iterator[tuple[list[str], dict[str, str]]]:
     """Yield ``(argv_prefix, env)`` for commands confined to ``work_dir``.
 
-    Prepend ``argv_prefix`` to each argv and run it with ``env``. Raises SandboxError when no
-    OS barrier exists or a root is unsafe (fail closed)."""
+    Prepend ``argv_prefix`` to each argv and run it with ``env``. ``writable`` adds existing
+    directories the caller created for the run (e.g. a result-record dir); they get the same
+    root checks as ``work_dir``. Raises SandboxError when no OS barrier exists or a root is
+    unsafe (fail closed)."""
 
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise SandboxError("work_dir_missing")
+    extra = tuple(Path(path).resolve() for path in writable)
+    if not all(path.is_dir() for path in extra):
+        raise SandboxError("writable_dir_missing")
     home = Path(os.path.expanduser("~")).resolve()
     with tempfile.TemporaryDirectory(prefix="nexus-model-exec-") as private:
         bound = confinement(
             sandbox=Path(private).resolve(),
-            extra_writable=(work,),
+            extra_writable=(work, *extra),
             # /usr/bin/python3, git, make… are xcrun shims that load the active developer dir.
             extra_readable=(*readable, *developer_toolchain_read_roots()),
             forbidden_subtrees=tuple(home / rel for rel in _DENIED_HOME_SUBTREES),
@@ -160,15 +169,25 @@ def run_model_argv(
     timeout: float,
     extra_env: Mapping[str, str] | None = None,
     readable: Iterable[Path | str] = (),
+    writable: Iterable[Path | str] = (),
     text: bool = True,
 ) -> subprocess.CompletedProcess:
     """``subprocess.run(argv, cwd=work_dir)`` inside the model sandbox (no shell).
 
-    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran."""
+    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran. A program that
+    does not exist raises FileNotFoundError, as ``subprocess.run`` would, rather than surfacing
+    as sandbox-exec's own exit status."""
 
     if not argv:
         raise SandboxError("empty_command")
-    with model_sandbox(work_dir, readable=readable) as (prefix, env):
+    program = argv[0]
+    if os.sep in program:
+        found = program if os.path.isabs(program) else str(Path(work_dir) / program)
+    else:
+        found = shutil.which(program) or ""
+    if not found or not os.path.exists(found):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
+    with model_sandbox(work_dir, readable=readable, writable=writable) as (prefix, env):
         return subprocess.run(  # noqa: S603 - argv list, no shell
             [*prefix, *argv],
             cwd=str(Path(work_dir).resolve()),
