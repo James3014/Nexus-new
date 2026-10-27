@@ -140,6 +140,14 @@ def evidence_record_from_sf_smoke_case(
     )
 
 
+def _first_non_none(row: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def evidence_record_from_benchmark_row(
     row: Mapping[str, Any],
     *,
@@ -183,10 +191,10 @@ def evidence_record_from_benchmark_row(
         receipt_refs=tuple(receipt_refs),
         phase_wall_sec=_phase_wall_from_row(row),
         token_counts={
-            "total": _int_or_none(row.get("total_tokens") or row.get("totaltokens")),
+            "total": _int_or_none(_first_non_none(row, "total_tokens", "totaltokens")),
             "prompt": _int_or_none(row.get("prompt_tokens")),
             "completion": _int_or_none(row.get("completion_tokens")),
-            "model_calls": _int_or_none(row.get("model_calls") or row.get("modelcalls")),
+            "model_calls": _int_or_none(_first_non_none(row, "model_calls", "modelcalls")),
         },
         gate_status={
             "delivery": delivery_status,
