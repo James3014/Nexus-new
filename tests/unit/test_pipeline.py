@@ -5,6 +5,11 @@ import sys
 from nexus.services.local_heal.evaluation_gate import TestResult
 from nexus.services.local_heal.interface import RepairPlan
 from nexus.services.local_heal.pipeline import HealPipeline, HealContext
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 def test_pipeline_successful_flow(tmp_path):
     # 建立目標模擬檔案

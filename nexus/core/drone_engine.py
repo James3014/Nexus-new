@@ -10,7 +10,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from nexus.core.argv_command import run_command_string
+from nexus.engine.model_output_sandbox import run_model_command_string
 from nexus.core.drone_protocol import DroneProtocol
 
 logger = logging.getLogger("nexus.drone")
@@ -90,8 +90,10 @@ class DroneToolBox:
         self.sandbox_dir = sandbox_dir
 
     def bash_exec(self, command: str) -> Dict[str, Any]:
+        # The command is local-model output: run it under the OS sandbox (no network, writes
+        # only in sandbox_dir, allowlisted env). Without a barrier nothing runs (#2936).
         try:
-            res = run_command_string(command, cwd=self.sandbox_dir, timeout=30)
+            res = run_model_command_string(command, work_dir=self.sandbox_dir, timeout=30)
             return {"exit_code": res.returncode, "stdout": res.stdout, "stderr": res.stderr}
         except Exception as e:
             return {"exit_code": -1, "stderr": str(e)}

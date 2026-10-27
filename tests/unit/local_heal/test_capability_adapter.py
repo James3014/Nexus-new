@@ -20,6 +20,11 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     OllamaLocalModelProvider,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 # The snapshot keys LocalHealCapabilityAdapter reads as grants. They are cleared from the real
 # planner snapshot so that each scenario states its grants explicitly.

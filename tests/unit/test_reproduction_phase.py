@@ -4,10 +4,17 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from nexus.services.local_heal.context import GovernanceContext, HealContext, OperationalContext
 from nexus.services.local_heal.interface import ReproductionInput, ReproductionProvenance
 from nexus.services.local_heal.phases.reproduction import ReproductionPhase
 from nexus.services.local_heal.reproduction import ReproductionRunner
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 def test_reproduction_phase_success():

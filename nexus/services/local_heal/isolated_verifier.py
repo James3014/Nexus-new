@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import subprocess
+from dataclasses import dataclass
 from typing import Any
+
+from nexus.engine.model_output_sandbox import (
+    SandboxError,
+    argument_file_roots,
+    interpreter_readable_roots,
+    run_model_argv,
+)
 
 KNOWN_BUGGY_SYMBOLS: tuple[str, ...] = (
     "view(NdarrayMixin)",
@@ -16,6 +23,8 @@ class IsolatedVerifierRequest:
     verifier_command: tuple[str, ...]
     timeout_sec: float = 30.0
     verifier_allowed: bool = False
+    # Extra read-only roots for the sandboxed run (e.g. a sealed oracle outside the workspace).
+    readable_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -67,12 +76,18 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
         )
         
     try:
-        res = subprocess.run(
+        # The workspace holds a model-written patch: run its tests under the OS sandbox (no
+        # network, writes only in the workspace, allowlisted env). No barrier, no run (#2936).
+        res = run_model_argv(
             request.verifier_command,
-            cwd=request.workspace_path,
-            shell=False,
-            capture_output=True,
+            work_dir=request.workspace_path,
             timeout=request.timeout_sec,
+            readable=(
+                *interpreter_readable_roots(request.verifier_command[0]),
+                *argument_file_roots(request.verifier_command),
+                *request.readable_paths,
+            ),
+            text=False,
         )
         
         stdout_str = res.stdout.decode("utf-8", errors="replace")[-1000:]
@@ -87,6 +102,16 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
             stdout_tail=stdout_str,
             stderr_tail=stderr_str,
             verifier_error="",
+            verifier_allowed=True,
+        )
+    except SandboxError as e:
+        return IsolatedVerifierReceipt(
+            task_id=request.task_id,
+            verifier_status="blocked",
+            exit_code=None,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error=f"verifier_sandbox_unavailable: {e}",
             verifier_allowed=True,
         )
     except subprocess.TimeoutExpired as e:

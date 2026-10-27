@@ -21,6 +21,11 @@ from scripts.bench.n30r_v1_full_armor_trace import (
     WRONG_PATCH,
     classify_provider_prompt,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 _TRACE_ARTIFACT_DIRS: set[Path] = set()
 

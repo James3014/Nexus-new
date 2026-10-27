@@ -15,6 +15,11 @@ from nexus.services.local_assist_service import LocalAssistService
 from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 from scripts.ops import unified_runtime_scenarios as scenarios
 from scripts.ops.unified_runtime_scenarios import run_scenario, run_scenario_matrix
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 _PATCH = (

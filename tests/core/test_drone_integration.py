@@ -4,6 +4,11 @@ from pathlib import Path
 from nexus.core.campaign_general import CampaignGeneral
 from nexus.core.skill_assembler import SkillAssembler
 from nexus.core.drone_engine import TacticalDrone, LocalBonsaiBrain
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 @pytest.fixture
 def project_root(tmp_path):
