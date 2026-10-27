@@ -173,6 +173,18 @@ def _provider_stall_seconds() -> float:
     )
 
 
+def _provider_stall_env_set() -> bool:
+    """True when NEXUS_AGY_PROVIDER_STALL_SECONDS holds a usable number (it then sets the cut-off)."""
+    raw = os.getenv("NEXUS_AGY_PROVIDER_STALL_SECONDS")
+    if raw is None:
+        return False
+    try:
+        float(raw)
+    except ValueError:
+        return False
+    return True
+
+
 _READ_ONLY_PROFILE_KINDS = frozenset({"READ_ONLY_RESEARCH", "NO_TOOL_PACKET"})
 # A read-only answer counts as empty when its stripped stdout is shorter than this.
 # 1 = only a blank answer; the R6 autopsy's "under 100 bytes" cohort included legitimate
@@ -218,7 +230,11 @@ def _resolve_dispatch_limits(
             else stall_default
         ),
         "provider_stall_source": (
-            "explicit" if provider_stall_seconds is not None else f"default:{kind}"
+            "explicit"
+            if provider_stall_seconds is not None
+            else f"env:{kind}"
+            if _provider_stall_env_set()
+            else f"default:{kind}"
         ),
         "empty_output_min_bytes": (
             max(1, int(empty_output_min_bytes))
@@ -2309,9 +2325,17 @@ def run_agy(
 
             _refresh_progress_telemetry(observed_at=now)
 
+            # A plan run is judged stalled only when a provider stream signal exists
+            # (attestation log, background operations). A foreground plan run has none:
+            # its stdout stays empty while the model thinks, so the cut-off measured time
+            # to the first answer byte and killed live answers. The timeout still bounds it.
             if (
                 expect_coding_progress
-                or (mode == "plan" and provider_stall_seconds is not None)
+                or (
+                    mode == "plan"
+                    and provider_stall_seconds is not None
+                    and provider_log_path is not None
+                )
             ) and not first_effect_seen.is_set():
                 non_progress_failure = _classify_non_progress(observed_at=now)
                 if non_progress_failure is not None:
@@ -7481,7 +7505,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--provider-stall-seconds",
         type=float,
         default=None,
-        help="Provider-start deadline; read-only defaults are halved (minimum 30 seconds)",
+        help=(
+            "Provider-start deadline; read-only defaults are halved (minimum 30 seconds); "
+            "plan runs apply it only with a provider stream signal (background operations)"
+        ),
     )
     ap.add_argument(
         "--stream-no-progress-seconds",
