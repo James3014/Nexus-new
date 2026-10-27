@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -2279,6 +2280,9 @@ class _PytestRun:
     # The node ids pytest selected (the witness ``selected`` record), for the #2811
     # base collection comparison.
     selected_node_ids: tuple[str, ...] = ()
+    # How the run's effective parser reads each long option of the invocation (the witness
+    # ``begin`` record): ``0`` takes no value (#2948).
+    option_arity: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def _run_pytest_verifier(
@@ -2464,6 +2468,9 @@ def _run_pytest_verifier(
         ),
         (),
     )
+    begin = records[0] if records and records[0].get("t") == "begin" else {}
+    arity = begin.get("option_arity")
+    run.option_arity = arity if isinstance(arity, dict) else {}
     return run
 
 
@@ -2511,7 +2518,11 @@ def _base_skipped_nodes(
 
 
 def _base_collect_invocation(
-    invocation: _PytestInvocation, base_tree: Path, root: Path
+    invocation: _PytestInvocation,
+    base_tree: Path,
+    root: Path,
+    *,
+    dropped_after: list[str] | None = None,
 ) -> _PytestInvocation | None:
     """The same verifier as a ``--collect-only`` run at the base commit, over the
     card's file and directory targets only.
@@ -2522,7 +2533,12 @@ def _base_collect_invocation(
     absolute one would otherwise name the candidate tree, #2846 review r2); targets
     outside the root or missing at base are dropped (a file the candidate added has
     nothing to compare).  ``None`` when no file or directory target is left although
-    the card named targets."""
+    the card named targets.
+
+    A token that may instead be the value of the unknown long option before it is kept
+    with that option when missing at base, unless ``dropped_after`` is given: it is then
+    dropped like a target and the option's name is appended to ``dropped_after``, for the
+    caller to confirm with the base run's parser that the option takes no value (#2948)."""
     args: list[str] = []
     had_target = kept_target = False
     targets, maybe_values = _pytest_target_indices(invocation.pytest_args)
@@ -2534,7 +2550,9 @@ def _base_collect_invocation(
             (rel,) = _declared_path_prefixes(root, [token]) or ("",)
             missing = not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel)
             if missing or not (base_tree / rel).exists():
-                if index in maybe_values:  # most likely the option's value: keep it with the option
+                if index in maybe_values and dropped_after is not None:
+                    dropped_after.append(invocation.pytest_args[index - 1])
+                elif index in maybe_values:  # may be the option's value: keep it with the option
                     args.append(token)
                 continue
             kept_target = True
@@ -2570,27 +2588,48 @@ def _base_declared_nodes_missing(
     ``pytest_collect_file``, ``pytest_pycollect_makeitem`` ...).  Nodes in test files the
     candidate changed or added are judged by the other rules.  ``None`` when the base
     collection produced no complete witness (fail closed)."""
-    base_invocation = _base_collect_invocation(invocation, base_tree, root)
+
+    def collect(base_invocation: _PytestInvocation) -> _PytestRun:
+        run_dir = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-collect-")).resolve()
+        try:
+            return _run_pytest_verifier(
+                base_invocation,
+                root=base_tree,
+                run_dir=run_dir,
+                base_config=base_config,
+                base_sha=base_sha,
+                candidate_commit=candidate_commit,
+                timeout=timeout,
+                changed_paths=(),
+                base_skipped=(),
+                root_writable=False,
+            )
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+    # A token missing at base right after an unknown long option (``--full-trace
+    # tests/test_new.py``) is first dropped as a candidate-added target (#2948). That is
+    # right only when the base parser reads the option as taking no value; otherwise the
+    # option would swallow the next target, so the run is repeated with the token kept as
+    # the option's value, as before (fail closed if that base run fails).
+    dropped_after: list[str] = []
+    base_invocation = _base_collect_invocation(
+        invocation, base_tree, root, dropped_after=dropped_after
+    )
     if base_invocation is None:
         return [], {"ran": False, "reason": "no_declared_target_at_base"}
-    run_dir = Path(tempfile.mkdtemp(prefix="nexus-verifier-base-collect-")).resolve()
-    try:
-        run = _run_pytest_verifier(
-            base_invocation,
-            root=base_tree,
-            run_dir=run_dir,
-            base_config=base_config,
-            base_sha=base_sha,
-            candidate_commit=candidate_commit,
-            timeout=timeout,
-            changed_paths=(),
-            base_skipped=(),
-            root_writable=False,
-        )
-    finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+    run = collect(base_invocation)
+    value_kept = bool(dropped_after) and any(
+        run.option_arity.get(name) != 0 for name in dropped_after
+    )
+    if value_kept:
+        base_invocation = _base_collect_invocation(invocation, base_tree, root)
+        if base_invocation is None:  # unreachable: the same targets are kept either way
+            return None, {"ran": False, "error": VERIFIER_BASE_RUN_FAILED}
+        run = collect(base_invocation)
     info: dict[str, Any] = {
         "ran": True,
+        "options_with_dropped_token": [] if value_kept else dropped_after,
         "returncode": run.returncode,
         "witness_complete": bool(run.witness.get("complete")),
         "sandboxed": bool(run.sandbox.get("sandboxed")),

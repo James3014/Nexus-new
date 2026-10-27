@@ -357,6 +357,23 @@ def _test_code(item: Any) -> types.CodeType | None:
     return code if isinstance(code, types.CodeType) else None
 
 
+def _long_option_arity(config: Any) -> dict[str, Any]:
+    """How the effective parser (pytest's own options plus those of the initial conftests and
+    plugins) reads each long option of this invocation (#2948): ``0`` for one that takes no
+    value, otherwise its argparse ``nargs`` as text. Options it does not know are left out."""
+    arity: dict[str, Any] = {}
+    try:
+        actions = config._parser.optparser._option_string_actions
+        for arg in config.invocation_params.args:
+            name = str(arg).partition("=")[0]
+            action = actions.get(name) if name.startswith("--") and name != "--" else None
+            if action is not None:
+                arity[name] = 0 if action.nargs == 0 else str(action.nargs)
+    except Exception:  # noqa: BLE001 - an unreadable parser reads as "unknown", never stops the record
+        return {}
+    return arity
+
+
 def _skip_text(report: Any) -> str:
     longrepr = getattr(report, "longrepr", None)
     if isinstance(longrepr, tuple) and len(longrepr) == 3:
@@ -614,6 +631,7 @@ def _build_plugin(emit: Any) -> tuple[Any, Any]:
             "pytest": pytest.__version__,
             "python": sys.version.split()[0],
             "rootpath": str(config.rootpath),
+            "option_arity": _long_option_arity(config),
         })
 
     def pytest_plugin_registered(plugin: Any, manager: Any) -> None:
