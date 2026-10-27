@@ -2494,9 +2494,12 @@ def _base_collect_invocation(
     make the base run fail.  Targets are made relative to the candidate root (an
     absolute one would otherwise name the candidate tree, #2846 review r2); targets
     outside the root or missing at base are dropped (a file the candidate added has
-    nothing to compare).  ``None`` when no file or directory target is left although
-    the card named targets."""
+    nothing to compare).  A token that may be an unknown option's value or a target is
+    kept with its option when it is a path in neither tree; when the candidate added it,
+    it is dropped and the option moved last (#2948).  ``None`` when no file or directory
+    target is left although the card named targets."""
     args: list[str] = []
+    moved_last: list[str] = []
     had_target = kept_target = False
     targets, maybe_values = _pytest_target_indices(invocation.pytest_args)
     for index, token in enumerate(invocation.pytest_args):
@@ -2507,7 +2510,12 @@ def _base_collect_invocation(
             (rel,) = _declared_path_prefixes(root, [token]) or ("",)
             missing = not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel)
             if missing or not (base_tree / rel).exists():
-                if index in maybe_values:  # most likely the option's value: keep it with the option
+                if index in maybe_values and not missing and (root / rel).exists():
+                    # #2948: a target the candidate added, so the option before it is a flag.
+                    # The option goes last: if it does take a value, the base run fails
+                    # instead of swallowing the next target.
+                    moved_last.append(args.pop())
+                elif index in maybe_values:  # most likely the option's value: keep it with it
                     args.append(token)
                 continue
             kept_target = True
@@ -2518,7 +2526,7 @@ def _base_collect_invocation(
     return _PytestInvocation(
         interpreter=invocation.interpreter,
         interpreter_args=invocation.interpreter_args,
-        pytest_args=_with_pytest_options(args, "--collect-only"),
+        pytest_args=_with_pytest_options(args, "--collect-only", *moved_last),
         declared_node_ids=(),
         declared_paths=(),
     )

@@ -14,11 +14,14 @@ import sys
 import pytest
 
 from nexus.services.external_intelligence_closure import (
+    VERIFIER_BASE_RUN_FAILED,
+    VERIFIER_DECLARED_NODE_MISSING,
     _base_collect_invocation,
     _pytest_invocation,
     _with_pytest_options,
 )
 from tests.services.test_eia_closure_verifier_followups_2811 import (
+    _DROP_AT_MAKEITEM,
     _DROP_IN_PLACE,
     _FAST_AND_SLOW,
     _PASSING,
@@ -185,3 +188,73 @@ def test_a_double_dash_card_dropping_tests_is_refused(tmp_path):
     spec = _spec("--", "tests/test_sel.py", "tests/test_mod.py")
     row = _row(root, base, cand, spec, ["tests/conftest.py"])
     assert row["passed"] is False, row
+
+
+_FIXTURE_CONFTEST = "import pytest\n\n\n@pytest.fixture\ndef extra():\n    return 1\n"
+
+
+def test_a_candidate_added_target_after_a_flag_is_not_a_base_run_failure(tmp_path):
+    # #2948: the added file was kept as the flag's value, so the base run got a path that
+    # does not exist there and failed (VERIFIER_BASE_RUN_FAILED).
+    root, base, cand = _repo(
+        tmp_path,
+        {
+            "tests/conftest.py": _FIXTURE_CONFTEST,
+            "src_mod.py": "VALUE = 2\n",
+            "tests/test_new.py": _PASSING,
+        },
+    )
+    authorized = ["tests/conftest.py", "src_mod.py", "tests/test_new.py"]
+    for flag in ((), ("--full-trace",)):
+        spec = _spec(*flag, "tests/test_new.py", "tests/test_mod.py")
+        row = _row(root, base, cand, spec, authorized)
+        assert row["passed"] is True, (flag, row)
+
+
+def test_a_candidate_added_target_after_a_flag_still_refuses_a_dropped_test(tmp_path):
+    root, base, cand = _repo(
+        tmp_path,
+        {"tests/conftest.py": _DROP_AT_MAKEITEM, "tests/test_new.py": _PASSING},
+        base={"tests/test_sel.py": _FAST_AND_SLOW, "tests/test_mod.py": _PASSING},
+    )
+    spec = _spec("--full-trace", "tests/test_new.py", "tests/test_sel.py")
+    row = _row(root, base, cand, spec, ["tests/conftest.py", "tests/test_new.py"])
+    assert row["passed"] is False
+    assert row["error"] == VERIFIER_DECLARED_NODE_MISSING, row
+
+
+def test_base_collect_moves_the_flag_before_an_added_target_last(tmp_path):
+    base_tree, root = tmp_path / "base", tmp_path / "cand"
+    for tree in (base_tree, root):
+        (tree / "tests").mkdir(parents=True)
+        (tree / "tests" / "test_sel.py").write_text(_PASSING)
+    (root / "tests" / "test_new.py").write_text(_PASSING)
+    invocation = _invocation("--full-trace", "tests/test_new.py", "tests/test_sel.py")
+    collected = _base_collect_invocation(invocation, base_tree, root)
+    assert collected is not None
+    assert collected.pytest_args == ("tests/test_sel.py", "--collect-only", "--full-trace")
+
+
+_VALUE_OPTION_CONFTEST = "def pytest_addoption(parser):\n    parser.addoption('--seed-file')\n"
+
+
+def test_a_value_option_whose_value_the_candidate_added_does_not_swallow_a_target(tmp_path):
+    # If "--seed-file" kept its place after its value was dropped, the base run would read
+    # tests/test_sel.py as the value, compare test_mod.py only and miss the dropped test.
+    # Moved last, it has no value at base and the base run fails: a refusal either way.
+    root, base, cand = _repo(
+        tmp_path,
+        {
+            "tests/conftest.py": _VALUE_OPTION_CONFTEST + "\n\n" + _DROP_AT_MAKEITEM,
+            "seed.txt": "1\n",
+        },
+        base={
+            "tests/conftest.py": _VALUE_OPTION_CONFTEST,
+            "tests/test_sel.py": _FAST_AND_SLOW,
+            "tests/test_mod.py": _PASSING,
+        },
+    )
+    spec = _spec("--seed-file", "seed.txt", "tests/test_sel.py", "tests/test_mod.py")
+    row = _row(root, base, cand, spec, ["tests/conftest.py", "seed.txt"])
+    assert row["passed"] is False
+    assert row["error"] in (VERIFIER_BASE_RUN_FAILED, VERIFIER_DECLARED_NODE_MISSING), row
