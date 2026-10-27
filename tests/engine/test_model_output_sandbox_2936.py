@@ -221,3 +221,32 @@ def test_token_stores_under_home_stay_unreadable(tmp_path, monkeypatch):
     assert allowed.returncode == 0 and "fine" in allowed.stdout
     denied = run(secret, [project])
     assert denied.returncode != 0 and "s3cret" not in denied.stdout
+
+
+def test_bench_hidden_staging_stays_unreadable_under_a_granted_parent(tmp_path, monkeypatch):
+    # The shared SANDBOX_DENIED_HOME_PATHS rule denies ~/.cache/nexus-bench-hidden after the
+    # read allows, and the model sandbox only appends denies: a granted ~/.cache cannot reopen it.
+    home = (tmp_path / "home").resolve()
+    hidden = home / ".cache" / "nexus-bench-hidden" / "case" / "test_hidden.py"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text("HIDDEN_ORACLE")
+    visible = home / ".cache" / "visible.txt"
+    visible.write_text("fine")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    read = "import sys; print(open(sys.argv[1]).read())"
+
+    def run(path):
+        return mos.run_model_argv(
+            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=[home / ".cache"]
+        )
+
+    if not os_sandbox_available():
+        with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+            run(hidden)
+        return
+    allowed = run(visible)
+    assert allowed.returncode == 0 and "fine" in allowed.stdout
+    denied = run(hidden)
+    assert denied.returncode != 0 and "HIDDEN_ORACLE" not in denied.stdout
