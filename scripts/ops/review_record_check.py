@@ -26,13 +26,15 @@ quotes the words never counts):
   ``claude``/``opus``/``sonnet``, or cross-model ``codex``/``gemini``/``gpt``. When
   both appear, the family is Claude. A verdict with no family is not a record.
 - A *rebuttal at the cap* is a cross-model section with a REJECT line at round
-  three or later followed by a past-tense ``rebutted`` line.
+  three or later followed by a past-tense ``rebutted`` line. It does not count for
+  the repos in ``NO_REBUTTAL_AT_CAP_REPOS`` (cairnwork/cairnwork since cairnwork#344:
+  a finding still open at round three goes back to design, not past a rebuttal).
 - A submitted ``APPROVED`` review whose ``commit_id`` is the head also counts as an
   independent record, unless the same reviewer later requested changes.
 
 Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
-  record at head (an accepting verdict, or a rebuttal at the cap).
+  record at head (an accepting verdict, or a rebuttal at the cap where it counts).
 - ``MISSING_RECORD`` / ``MISSING_CROSS_MODEL``: what is absent; the reason tells a
   stale-head record from a comment with no verdict.
 - ``ERROR``: the API could not be read; fails closed and, when the head is known,
@@ -58,6 +60,9 @@ from typing import Any, Callable
 API_ROOT = "https://api.github.com"
 PER_PAGE = 100
 STATUS_CONTEXT = "Review record present (advisory)"
+# Repos whose review rules take no rebuttal at the cap as a cross-model record (#2954).
+# Matched against --repo, which the callers set from github.repository (not PR text).
+NO_REBUTTAL_AT_CAP_REPOS = frozenset({"cairnwork/cairnwork"})
 MIN_PREFIX = 9
 MAX_DESCRIPTION = 140
 
@@ -574,8 +579,13 @@ def approved_reviews_at_head(reviews: list[Any], head: str) -> int:
     return sum(1 for state in latest.values() if state == "APPROVED")
 
 
+def rebuttal_counts(repo: str) -> bool:
+    """Whether a rebuttal at the cap counts as a cross-model record for ``repo``."""
+    return repo.strip().lower() not in NO_REBUTTAL_AT_CAP_REPOS
+
+
 def _evidence_at(
-    head: str, comments: list[Any], reviews: list[Any]
+    head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
 ) -> tuple[list[dict[str, Any]], bool, bool, int]:
     """Records, stale flag, unbound flag and approved-review count for one head."""
     records: list[dict[str, Any]] = []
@@ -592,6 +602,8 @@ def _evidence_at(
             ):
                 stale = True
             continue
+        if not allow_rebuttal:
+            record = dict(record, rebuttal_at_cap=False)
         if record["verdict"] or record["rebuttal_at_cap"]:
             records.append(record)
         else:
@@ -599,9 +611,11 @@ def _evidence_at(
     return records, stale, unbound, approved_reviews_at_head(reviews, head)
 
 
-def _contributes(head: str, comments: list[Any], reviews: list[Any]) -> tuple[bool, bool]:
+def _contributes(
+    head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
+) -> tuple[bool, bool]:
     """(independent, cross_model) evidence a record at ``head`` provides."""
-    records, _stale, _unbound, approved = _evidence_at(head, comments, reviews)
+    records, _stale, _unbound, approved = _evidence_at(head, comments, reviews, allow_rebuttal)
     return (
         approved > 0 or any(r["claude"] for r in records),
         any(r["cross_model"] or r["rebuttal_at_cap"] for r in records),
@@ -614,15 +628,19 @@ def evaluate(
     comments: list[Any],
     reviews: list[Any],
     delta_verified: tuple[str, ...] = (),
+    allow_rebuttal: bool = True,
 ) -> dict[str, Any]:
     """Pure classification of the PR's review evidence at ``head``.
 
     ``delta_verified`` lists older reviewed heads whose delta to ``head`` the caller has
     verified as merge-only (#2308); a record at one of those counts as a record at the head.
     The caller is the only place that may verify a delta; this function trusts nothing else.
+    ``allow_rebuttal`` False (``rebuttal_counts(repo)``) drops rebuttals at the cap.
     """
     risky = high_risk_paths(files)
-    records, stale, unbound, approved_reviews = _evidence_at(head, comments, reviews)
+    records, stale, unbound, approved_reviews = _evidence_at(
+        head, comments, reviews, allow_rebuttal
+    )
     # The independent record is the Claude-family review (or a submitted approval); a
     # cross-model record alone satisfies only the cross-model requirement.
     independent_head = approved_reviews > 0 or any(r["claude"] for r in records)
@@ -632,7 +650,7 @@ def evaluate(
     for old in delta_verified:
         if old.lower() == head.lower():
             continue
-        old_ind, old_cross = _contributes(old, comments, reviews)
+        old_ind, old_cross = _contributes(old, comments, reviews, allow_rebuttal)
         used = (old_ind and not independent_head) or (old_cross and not cross_head and bool(risky))
         independent = independent or old_ind
         cross_model = cross_model or old_cross
@@ -653,7 +671,15 @@ def evaluate(
             )
     elif risky and not cross_model:
         status = "MISSING_CROSS_MODEL"
-        reason = f"high-risk paths changed but no Codex/Gemini verdict or rebuttal at head {short}"
+        if allow_rebuttal:
+            reason = (
+                f"high-risk paths changed but no Codex/Gemini verdict or rebuttal at head {short}"
+            )
+        else:
+            reason = (
+                f"high-risk paths changed but no Codex/Gemini ACCEPT verdict at head {short} "
+                "(a rebuttal at the cap does not count for this repo)"
+            )
     elif delta_heads:
         status = "OK"
         reason = (
@@ -853,6 +879,7 @@ def _verify_deltas(
     files: list[Any],
     comments: list[Any],
     reviews: list[Any],
+    allow_rebuttal: bool = True,
 ) -> tuple[str, ...]:
     """Older reviewed heads that carry a record and differ from the head by a merge only."""
     try:
@@ -861,7 +888,7 @@ def _verify_deltas(
         pr_paths = _names(files)
         verified = []
         for old in _delta_candidates(fetch, base, token, head, comments, reviews):
-            if any(_contributes(old, comments, reviews)) and merge_only_delta(
+            if any(_contributes(old, comments, reviews, allow_rebuttal)) and merge_only_delta(
                 fetch, base, token, old, head, pr_paths, base_ref
             ):
                 verified.append(old)
@@ -900,11 +927,12 @@ def run(
         files = _paginate(fetch, f"{base}/pulls/{pr}/files", token)
         comments = _paginate(fetch, f"{base}/issues/{pr}/comments", token)
         reviews = _paginate(fetch, f"{base}/pulls/{pr}/reviews", token)
-        report = evaluate(head, files, comments, reviews)
+        allow = rebuttal_counts(repo)
+        report = evaluate(head, files, comments, reviews, allow_rebuttal=allow)
         if report["status"] != "OK":
-            deltas = _verify_deltas(fetch, base, token, head, pull, files, comments, reviews)
+            deltas = _verify_deltas(fetch, base, token, head, pull, files, comments, reviews, allow)
             if deltas:
-                report = evaluate(head, files, comments, reviews, deltas)
+                report = evaluate(head, files, comments, reviews, deltas, allow_rebuttal=allow)
     except Exception as exc:  # noqa: BLE001 - any read failure must fail closed
         report = {
             "schema": "nexus.review_record_check.v1",

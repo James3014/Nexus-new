@@ -1354,3 +1354,91 @@ def test_gemini_with_codex_out_of_credits_aside_still_credits_cross_model():
     )
     record = rrc.classify_record(f"## Review record\n{line}\n", HEAD)
     assert record is not None and record["cross_model"]
+
+
+# -- per-repo rebuttal at the cap (#2954, cairnwork#344) ------------------------------
+
+
+def test_rebuttal_counts_everywhere_except_cairnwork():
+    assert rrc.rebuttal_counts("James3014/Nexus-new")
+    assert rrc.rebuttal_counts("James3014/nexus-core")
+    assert rrc.rebuttal_counts("o/r")
+    assert not rrc.rebuttal_counts("cairnwork/cairnwork")
+    assert not rrc.rebuttal_counts("Cairnwork/Cairnwork")  # GitHub names are case-insensitive
+    assert not rrc.rebuttal_counts(" cairnwork/cairnwork ")
+    assert rrc.rebuttal_counts("cairnwork/cairnwork.github.io")  # only the product repo
+
+
+def test_cairnwork_rebuttal_at_cap_is_not_a_cross_model_record():
+    comments = [_c(OPUS_RECORD), _c(CODEX_REBUTTAL)]
+    nexus = rrc.evaluate(HEAD, RISKY, comments, [])
+    assert nexus["status"] == "OK" and nexus["cross_model"] is True
+    cairn = rrc.evaluate(HEAD, RISKY, comments, [], allow_rebuttal=False)
+    assert cairn["status"] == "MISSING_CROSS_MODEL" and cairn["cross_model"] is False
+    assert "rebuttal at the cap does not count" in cairn["reason"]
+    # the #2280 shape (cap in the section header, "Rebutted" lines later) is dropped too
+    shaped = (
+        f"Head {HEAD}\n**Claude**: ACCEPT@{HEAD}\n**Codex review (3 rounds, cap)**\n"
+        "- **r3 REJECT**: early return.\n  - **Rebutted:** verdict unchanged, cap reached.\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(shaped)], [])["status"] == "OK"
+    assert rrc.evaluate(HEAD, RISKY, [_c(shaped)], [], allow_rebuttal=False)["status"] == (
+        "MISSING_CROSS_MODEL"
+    )
+
+
+def test_cairnwork_still_takes_a_cross_model_accept_and_low_risk_prs():
+    accept = [_c(OPUS_RECORD), _c(CODEX_RECORD)]
+    assert rrc.evaluate(HEAD, RISKY, accept, [], allow_rebuttal=False)["status"] == "OK"
+    # an accept next to an earlier-round rebuttal still counts: only the rebuttal is dropped
+    both = [_c(OPUS_RECORD), _c(CODEX_REBUTTAL), _c(CODEX_RECORD)]
+    assert rrc.evaluate(HEAD, RISKY, both, [], allow_rebuttal=False)["status"] == "OK"
+    # not high risk: no cross-model record needed, the rebuttal changes nothing
+    docs = rrc.evaluate(HEAD, DOCS, [_c(OPUS_RECORD), _c(CODEX_REBUTTAL)], [], allow_rebuttal=False)
+    assert docs["status"] == "OK"
+    # a rebuttal-only comment is no independent record either way
+    assert rrc.evaluate(HEAD, DOCS, [_c(CODEX_REBUTTAL)], [], allow_rebuttal=False)["status"] == (
+        "MISSING_RECORD"
+    )
+
+
+def test_cairnwork_delta_verified_rebuttal_does_not_count():
+    claude_old = _c(OPUS_RECORD.replace(HEAD, R_OLD))
+    rebut_old = _c(CODEX_REBUTTAL.replace(HEAD, R_OLD))
+    comments = [claude_old, rebut_old]
+    assert rrc.evaluate(HEAD, RISKY, comments, [], (R_OLD,))["status"] == "OK"
+    assert rrc.evaluate(HEAD, RISKY, comments, [], (R_OLD,), allow_rebuttal=False)["status"] == (
+        "MISSING_CROSS_MODEL"
+    )
+
+
+def test_run_drops_the_rebuttal_for_cairnwork_only(capsys):
+    comments = [_c(OPUS_RECORD), _c(CODEX_REBUTTAL)]
+    for repo, state, rc_want in (
+        ("James3014/Nexus-new", "success", 0),
+        ("cairnwork/cairnwork", "failure", 1),
+    ):
+        posted, post = _posts()
+        rc = rrc.run(repo, 7, TOKEN, _fake(files=RISKY, comments=comments), post)
+        assert rc == rc_want
+        ((url, payload),) = posted
+        assert url.endswith(f"/repos/{repo}/statuses/{HEAD}") and payload["state"] == state
+    assert "MISSING_CROSS_MODEL" in capsys.readouterr().out
+
+
+def test_run_cairnwork_merge_only_delta_ignores_an_old_rebuttal():
+    claude_old = _c(OPUS_RECORD.replace(HEAD, R_OLD[:12]))
+    rebut_old = _c(CODEX_REBUTTAL.replace(HEAD, R_OLD))
+    fetch = _delta_fetch_with_old_pr_files(
+        RISKY, pr_files=RISKY, comments=[claude_old, rebut_old], changed=()
+    )
+
+    def wrapped(url, token):
+        return _pull_main() if url.endswith("/pulls/7") else fetch(url, token)
+
+    results = {}
+    for repo in ("James3014/Nexus-new", "cairnwork/cairnwork"):
+        posted, post = _posts()
+        results[repo] = (rrc.run(repo, 7, TOKEN, wrapped, post), posted[0][1]["state"])
+    assert results["James3014/Nexus-new"] == (0, "success")
+    assert results["cairnwork/cairnwork"] == (1, "failure")
