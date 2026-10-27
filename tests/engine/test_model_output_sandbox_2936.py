@@ -7,6 +7,7 @@ nothing runs. No test skips.
 
 from __future__ import annotations
 
+import socket
 import sys
 from pathlib import Path
 
@@ -116,7 +117,19 @@ def test_only_python_interpreters_widen_reads(tmp_path, monkeypatch):
 
 # --- With a real barrier: what the model's command can no longer do. Without one: it never ran.
 
-_NET = "import socket; socket.create_connection(('169.254.169.254', 80), 3); print('CONNECTED')"
+def _net(port: int) -> str:
+    return f"import socket; socket.create_connection(('127.0.0.1', {port}), 3); print('CONNECTED')"
+
+
+@pytest.fixture
+def listener():
+    # A loopback port the host itself can reach (local model servers listen on loopback), so a
+    # failed connect proves the sandbox denied it rather than the host having no route.
+    server = socket.create_server(("127.0.0.1", 0))
+    port = server.getsockname()[1]
+    socket.create_connection(("127.0.0.1", port), 3).close()
+    yield port
+    server.close()
 
 
 def _expect_confined_or_refused(run):
@@ -127,9 +140,9 @@ def _expect_confined_or_refused(run):
     return run()
 
 
-def test_network_is_denied(tmp_path):
+def test_network_is_denied(tmp_path, listener):
     res = _expect_confined_or_refused(
-        lambda: mos.run_model_argv([*_PY, _NET], work_dir=tmp_path, timeout=20)
+        lambda: mos.run_model_argv([*_PY, _net(listener)], work_dir=tmp_path, timeout=20)
     )
     if res is not None:
         assert res.returncode != 0
@@ -151,11 +164,11 @@ def test_write_outside_work_dir_is_denied(tmp_path):
     assert not outside.exists()
 
 
-def test_drone_bash_cannot_reach_the_network_or_leak_env(tmp_path, monkeypatch):
+def test_drone_bash_cannot_reach_the_network_or_leak_env(tmp_path, monkeypatch, listener):
     monkeypatch.setenv("NEXUS_TEST_SECRET_2936", "s3cret")
     box = DroneToolBox(tmp_path)
     env_out = box.bash_exec("/usr/bin/env")
-    net_out = box.bash_exec(f'{sys.executable} -I -c "{_NET}"')
+    net_out = box.bash_exec(f'{sys.executable} -I -c "{_net(listener)}"')
     if not os_sandbox_available():
         assert env_out["exit_code"] == -1 and net_out["exit_code"] == -1
         return
