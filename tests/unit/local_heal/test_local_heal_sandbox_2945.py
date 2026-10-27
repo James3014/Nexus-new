@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nexus.engine.model_output_sandbox import SandboxError, run_model_argv
 from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.local_heal.interface import ReproductionInput
 from nexus.services.local_heal.micro_verifier import MicroVerifier
@@ -185,3 +186,95 @@ def test_recipe_never_installs_a_package_named_by_model_output(tmp_path, monkeyp
 def test_recipe_never_installs_into_the_host_python(tmp_path, monkeypatch):
     evidence = "ModuleNotFoundError: No module named 'mpmath'\nSymPy now depends on mpmath"
     assert _recipe_installs(tmp_path, monkeypatch, evidence, with_venv=False) == []
+
+
+_HOST_RUN_STUB = "#!/bin/sh\nexit 1\n"
+
+
+def _git_repo_with_venv(repo: Path) -> Path:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "source.py").write_text("value = 1\n")
+    subprocess.run(["git", "add", "source.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=repo, check=True)
+    venv_python = repo / ".venv" / "bin" / "python3"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text(_HOST_RUN_STUB)
+    venv_python.chmod(0o755)
+    return venv_python
+
+
+def _plant_host_run_code(marker: Path) -> str:
+    # What the host runs in the repo after the model's command: git (hooks, core.fsmonitor)
+    # and the task venv's interpreter (the recipe install). The payload leaves ``marker``.
+    payload = f"#!/bin/sh\ntouch {str(marker)!r}\n"
+    return (
+        "import os\n"
+        "def attempt(f):\n"
+        "    try:\n"
+        "        f()\n"
+        "    except OSError:\n"
+        "        pass\n"
+        f"PAYLOAD = {payload!r}\n"
+        "def plant(path):\n"
+        "    os.makedirs(os.path.dirname(path), exist_ok=True)\n"
+        "    with open(path, 'w') as f:\n"
+        "        f.write(PAYLOAD)\n"
+        "    os.chmod(path, 0o755)\n"
+        "attempt(lambda: plant('.venv/bin/python3'))\n"
+        "attempt(lambda: plant('.git/hooks/post-checkout'))\n"
+        "attempt(lambda: plant('fsmonitor.sh'))\n"
+        "attempt(lambda: open('.git/config', 'a').write('[core]\\n\\tfsmonitor = ./fsmonitor.sh\\n'))\n"
+        "attempt(lambda: os.link('.git/config', 'config_link'))\n"
+        "attempt(lambda: os.rename('.venv', 'venv_moved'))\n"
+    )
+
+
+def test_model_command_cannot_change_what_the_host_runs_in_the_repo(tmp_path):
+    repo = tmp_path / "repo"
+    marker = tmp_path / "escaped.txt"
+    venv_python = _git_repo_with_venv(repo)
+    config = (repo / ".git" / "config").read_text()
+    script = _plant_host_run_code(marker) + "open('legit.txt', 'w').write('x')\n"
+    try:
+        result = run_model_argv([sys.executable, "-c", script], work_dir=repo, timeout=60)
+    except SandboxError as exc:
+        assert not os_sandbox_available() and str(exc) == "no_os_barrier"
+        assert not (repo / "fsmonitor.sh").exists()
+        return
+    assert result.returncode == 0, result.stderr
+    assert (repo / "legit.txt").exists()  # the work dir itself stays writable
+    assert venv_python.read_text() == _HOST_RUN_STUB
+    assert (repo / ".git" / "config").read_text() == config
+    assert not (repo / ".git" / "hooks" / "post-checkout").exists()
+    assert not (repo / "config_link").exists()
+    assert not marker.exists()
+
+
+def test_reproduction_phase_runs_no_interpreter_or_git_hook_the_script_planted(tmp_path):
+    repo = tmp_path / "repo"
+    marker = tmp_path / "escaped.txt"
+    venv_python = _git_repo_with_venv(repo)
+    # Fails without the reproduction contract and names the mpmath recipe, so the phase goes on
+    # to the recipe install (``uv pip install mpmath --python .venv/bin/python3``) on the host.
+    script = (
+        _plant_host_run_code(marker) + "print('SymPy now depends on mpmath')\nraise SystemExit(1)\n"
+    )
+    runner = ReproductionRunner(repo, python_executable=sys.executable)
+    ReproductionPhase(runner, MagicMock()).run(
+        ReproductionInput("test", repo, "bug", script, sys.executable)
+    )
+    runner.workspace_identity()
+    subprocess.run(["git", "status"], cwd=repo, capture_output=True, check=False)
+    assert venv_python.read_text() == _HOST_RUN_STUB
+    assert not marker.exists()
+
+
+@pytest.mark.timeout(120)
+def test_a_fifo_failure_record_does_not_hang_the_host(tmp_path):
+    runner = ReproductionRunner(tmp_path, python_executable=sys.executable)
+    script = "import os, __main__\nos.mkfifo(__main__._nexus_record_path)\nos._exit(1)\n"
+    ok, _ = runner.run_repro(script)
+    assert ok is False

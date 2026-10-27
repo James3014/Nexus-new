@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import traceback
@@ -29,6 +30,9 @@ class SyntaxValidator:
         except (SyntaxError, IndentationError) as e:
             tb = "".join(traceback.format_exception_only(type(e), e))
             return False, tb.strip()
+
+
+_FAILURE_RECORD_MAX_BYTES = 1024 * 1024
 
 
 class ReproductionRunner:
@@ -245,10 +249,21 @@ class ReproductionRunner:
 
     @staticmethod
     def _failure_record(record_path: Path) -> dict[str, Any] | None:
+        # The script can write its record dir (#2945): only a regular file, opened without
+        # following a link or blocking on a FIFO, and only a bounded read, is a record.
         try:
-            record = json.loads(record_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            fd = os.open(record_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
             return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                record = json.loads(handle.read(_FAILURE_RECORD_MAX_BYTES).decode("utf-8"))
+        except (OSError, ValueError):
+            return None
+        finally:
+            os.close(fd)
         return record if isinstance(record, dict) else None
 
     @staticmethod

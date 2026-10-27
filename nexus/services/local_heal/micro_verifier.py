@@ -222,7 +222,9 @@ class MicroVerifier:
                         )
                         if result.returncode != 0:
                             test_ok = False
-                            test_errors.append(f"{test_file}: {result.stdout[-500:]}")
+                            test_errors.append(
+                                f"{test_file}: {result.stdout[-500:]}{result.stderr[-500:]}"
+                            )
                     except SandboxError as e:
                         test_ok = False
                         classifications.append("verifier_unavailable")

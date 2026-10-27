@@ -318,6 +318,7 @@ def build_sandbox_profile(
     read_roots: Iterable[str],
     deny_subtrees: Iterable[Path | str] = (),
     allow_signal_same_sandbox: bool = False,
+    read_only_paths: Iterable[str] = (),
 ) -> str:
     """SBPL policy for one confined command (last matching rule wins).
 
@@ -328,6 +329,9 @@ def build_sandbox_profile(
     Signals: only to the process itself by default. ``allow_signal_same_sandbox`` also lets
     it signal processes inside the same sandbox (its own children and process group), never
     a process outside it; test suites that kill their own subprocesses need it.
+
+    ``read_only_paths`` (absolute, already SBPL-safe, not resolved: a symlink there must not be
+    replaceable either) stay unwritable even inside ``writable``.
     """
 
     writes = " ".join(f'(subpath "{sbpl_path(path)}")' for path in writable)
@@ -356,6 +360,7 @@ def build_sandbox_profile(
         *(["(allow signal (target same-sandbox))"] if allow_signal_same_sandbox else []),
         "(deny network*)",
         f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
+        *(f'(deny file-write* (subpath "{path}"))' for path in read_only_paths),
         f"(deny file-read* {denied})",
         # Last rule wins: forbidden subtrees stay unreadable even under an allowed root.
         *(
@@ -678,6 +683,7 @@ def confinement(
     extra_forbidden: Iterable[Path] = (),
     extra_readable: Iterable[Path | str] = (),
     forbidden_subtrees: Iterable[Path | str] = (),
+    read_only_paths: Iterable[str] = (),
 ) -> Confinement:
     """Bind a sandbox (``home/`` and ``tmp/`` created inside ``sandbox``): writes and reads only
     in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
@@ -704,7 +710,10 @@ def confinement(
         forbidden_subtrees=subtrees,
     )
     profile = build_sandbox_profile(
-        writable=[str(p) for p in writable], read_roots=read_roots, deny_subtrees=subtrees
+        writable=[str(p) for p in writable],
+        read_roots=read_roots,
+        deny_subtrees=subtrees,
+        read_only_paths=read_only_paths,
     )
     env = scrubbed_env(
         home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)
