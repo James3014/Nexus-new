@@ -1042,64 +1042,30 @@ def _short_option_takes_next(token: str) -> bool:
     return False
 
 
-# pytest's own long options that take no value (#2948). A plugin cannot register one of these
-# names again (argparse refuses a conflicting option), so the token after one is a target.
+# Long options that take no value, registered by the plugins pytest refuses to disable (``mark``,
+# ``main``, ``runner``, ``fixtures``, ``helpconfig``) before any conftest loads (#2948). A conftest
+# cannot register one of these names again (argparse refuses the conflict), so the token after one
+# is a target. Options of other plugins are left out: a ``-p no:<plugin>`` in the card, the ini
+# file or the verifier's own ``-p no:cacheprovider`` frees their names (#2950 reviews).
 _PYTEST_FLAG_OPTIONS = frozenset({
-    "--cache-clear",
     "--co",
     "--collect-in-virtualenv",
     "--collect-only",
     "--collectonly",
     "--continue-on-collection-errors",
     "--disable-plugin-autoload",
-    "--disable-pytest-warnings",
-    "--disable-warnings",
-    "--doctest-continue-on-failure",
-    "--doctest-ignore-import-errors",
-    "--doctest-modules",
     "--exitfirst",
-    "--failed-first",
-    "--ff",
     "--fixtures",
     "--fixtures-per-test",
-    "--force-short-summary",
-    "--full-trace",
-    "--fulltrace",
     "--funcargs",
     "--keep-duplicates",
     "--keepduplicates",
-    "--last-failed",
-    "--lf",
     "--markers",
-    "--new-first",
-    "--nf",
-    "--no-fold-skipped",
-    "--no-header",
-    "--no-showlocals",
-    "--no-summary",
     "--noconftest",
-    "--pdb",
     "--pyargs",
-    "--runxfail",
-    "--setup-only",
-    "--setup-plan",
-    "--setup-show",
-    "--setuponly",
-    "--setupplan",
-    "--setupshow",
-    "--showlocals",
-    "--stepwise",
-    "--stepwise-reset",
-    "--stepwise-skip",
-    "--sw",
-    "--sw-reset",
-    "--sw-skip",
-    "--trace",
     "--trace-config",
     "--traceconfig",
-    "--verbose",
     "--version",
-    "--xfail-tb",
 })
 
 
@@ -1108,7 +1074,7 @@ def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozen
     which of them may instead be the value of the unknown long option before them.
 
     The value of a known value option (``--durations 5``, ``-k expr``, ``-xk expr``) is never a
-    target, and the token after one of pytest's own flags is a target (#2948). A token right
+    target, and the token after a flag pytest cannot drop is a target (#2948). A token right
     after any other long option written without ``=`` may be that option's value or a target:
     it counts only when another target exists, so it never narrows a card's targets and never
     turns a card without targets into a file-scoped one. Everything after ``--`` is a target."""
