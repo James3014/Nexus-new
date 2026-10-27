@@ -1042,15 +1042,42 @@ def _short_option_takes_next(token: str) -> bool:
     return False
 
 
+# Long options that take no value, registered by the plugins pytest refuses to disable (``mark``,
+# ``main``, ``runner``, ``fixtures``, ``helpconfig``) before any conftest loads (#2948). A conftest
+# cannot register one of these names again (argparse refuses the conflict), so the token after one
+# is a target. Options of other plugins are left out: a ``-p no:<plugin>`` in the card, the ini
+# file or the verifier's own ``-p no:cacheprovider`` frees their names (#2950 reviews).
+_PYTEST_FLAG_OPTIONS = frozenset({
+    "--co",
+    "--collect-in-virtualenv",
+    "--collect-only",
+    "--collectonly",
+    "--continue-on-collection-errors",
+    "--disable-plugin-autoload",
+    "--exitfirst",
+    "--fixtures",
+    "--fixtures-per-test",
+    "--funcargs",
+    "--keep-duplicates",
+    "--keepduplicates",
+    "--markers",
+    "--noconftest",
+    "--pyargs",
+    "--trace-config",
+    "--traceconfig",
+    "--version",
+})
+
+
 def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozenset[int]]:
     """Indices of ``args`` that pytest takes as file, directory or node targets (#2934), and
     which of them may instead be the value of the unknown long option before them.
 
     The value of a known value option (``--durations 5``, ``-k expr``, ``-xk expr``) is never a
-    target. A token right after an unknown long option written without ``=`` may be that option's
-    value or a target: it counts only when another target exists, so it never narrows a card's
-    targets and never turns a card without targets into a file-scoped one. Everything after
-    ``--`` is a target."""
+    target, and the token after a flag pytest cannot drop is a target (#2948). A token right
+    after any other long option written without ``=`` may be that option's value or a target:
+    it counts only when another target exists, so it never narrows a card's targets and never
+    turns a card without targets into a file-scoped one. Everything after ``--`` is a target."""
     certain: list[int] = []
     maybe: list[int] = []
     after_unknown_long = False
@@ -1063,7 +1090,7 @@ def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozen
         if token.startswith("--"):
             name, has_eq, _ = token.partition("=")
             takes_next = not has_eq and name in _PYTEST_VALUE_OPTIONS
-            after_unknown_long = not has_eq and not takes_next
+            after_unknown_long = not has_eq and not takes_next and name not in _PYTEST_FLAG_OPTIONS
             index += 2 if takes_next else 1
             continue
         if token.startswith("-") and len(token) > 1:
