@@ -37,7 +37,10 @@ protected_merge:
     independent_acceptance_hash_required: false
     standing_grant_required: false
   GOVERNED:
-    merge_sink: github_complete_pull_request
+    # Same bounded merge as the direct lanes, reached only through the governed
+    # coordinator CAS path after the gates below; the separate completion action
+    # is retired (Owner decision, #2918).
+    merge_sink: git_merge_pull_request
     independent_acceptance_required: true
     machine_verifiable_acceptance_provenance_required: true
     standing_grant_required: true
