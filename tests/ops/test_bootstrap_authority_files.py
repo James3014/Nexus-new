@@ -169,11 +169,50 @@ def test_governed_protected_merge_keeps_acceptance_and_authority_fail_closed():
     )
     governed = mode["protected_merge"]["GOVERNED"]
 
-    assert governed["merge_sink"] == "github_complete_pull_request"
+    assert governed["merge_sink"] == "git_merge_pull_request"
     assert governed["independent_acceptance_required"] is True
     assert governed["machine_verifiable_acceptance_provenance_required"] is True
     assert governed["standing_grant_required"] is True
     assert governed["github_merge_action_required"] is True
+
+
+def test_every_merge_sink_is_the_implemented_bounded_merge():
+    """#2918: no lane may name a merge sink with no implementation.
+
+    The Owner decided (2026-10-27) that GOVERNED completion uses the same bounded
+    ``git_merge_pull_request`` merge through the governed coordinator CAS path;
+    the retired ``github_complete_pull_request`` action may appear in the current
+    merge authority docs only as the one sentence that records its retirement.
+    """
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+    lanes = mode["protected_merge"]
+    assert set(lanes) == {"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"}
+    for lane, rules in lanes.items():
+        assert rules["merge_sink"] == "git_merge_pull_request", lane
+
+    retired_action = "github_complete_" + "pull_request"
+    contract_path = "docs/agents/TASK_EXECUTION_CONTRACT.md"
+    for path in (
+        "docs/governance/current_operating_mode.yaml",
+        *AUTHORITY_FILES,
+        ".agents/skills/nexus-merge-gate/SKILL.md",
+    ):
+        if path == contract_path:
+            continue
+        assert retired_action not in (ROOT / path).read_text(encoding="utf-8"), path
+
+    contract = _norm((ROOT / contract_path).read_text(encoding="utf-8"))
+    retirement = (
+        f"`{retired_action}` existed only on the archived devspace branch"
+        " `nexus/connector-host-v1`, used Nexus-new's `run_github_completion_loop`"
+        " (removed in #2917), and is retired."
+    )
+    assert retirement in contract
+    assert contract.count(retired_action) == 1
 
 
 def test_high_risk_authority_effects_still_escalate_to_governed():
