@@ -103,7 +103,8 @@ class DroneToolBox:
     def file_edit(self, target: str, content: str) -> Dict[str, Any]:
         try:
             path = (self.sandbox_dir / target).resolve()
-            if not str(path).startswith(str(self.sandbox_dir.resolve())):
+            # Path containment, not a string prefix: "<dir>EXTRA" must not pass for "<dir>" (#2949).
+            if not path.is_relative_to(self.sandbox_dir.resolve()):
                 return {"status": "FAIL", "error": "Path traversal blocked"}
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
