@@ -1448,6 +1448,9 @@ def test_every_confinement_call_site_is_known_and_protects_the_bench_subtrees(
     assert sites == [
         "nexus/committee/execution_verifier.py",
         "nexus/engine/confined_test_runner.py",
+        # #2936: local-model output (drone BASH, local_heal verifiers); the staging parent is
+        # still denied by its profile's last rule (SANDBOX_DENIED_HOME_PATHS).
+        "nexus/engine/model_output_sandbox.py",
         "nexus/engine/swarm_run.py",
     ], sites
 

@@ -14,6 +14,11 @@ from tests.services.test_product_capability_online_native_closure import (
     _online_task,
     _production_canary_runner,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 LIVE_ONLINE_GATES = frozenset({"claim_gate", "delivery_gate"})
