@@ -16,7 +16,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexus.engine.model_output_sandbox import SandboxError, run_model_argv
+from nexus.engine.model_output_sandbox import (
+    SandboxError,
+    interpreter_readable_roots,
+    run_model_argv,
+)
 from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.local_heal.interface import ReproductionInput
 from nexus.services.local_heal.micro_verifier import MicroVerifier
@@ -243,7 +247,12 @@ def test_model_command_cannot_change_what_the_host_runs_in_the_repo(tmp_path):
     config = (repo / ".git" / "config").read_text()
     script = _plant_host_run_code(marker) + "open('legit.txt', 'w').write('x')\n"
     try:
-        result = run_model_argv([sys.executable, "-c", script], work_dir=repo, timeout=60)
+        result = run_model_argv(
+            [sys.executable, "-c", script],
+            work_dir=repo,
+            timeout=60,
+            readable=interpreter_readable_roots(sys.executable),
+        )
     except SandboxError as exc:
         assert not os_sandbox_available() and str(exc) == "no_os_barrier"
         assert not (repo / "fsmonitor.sh").exists()
@@ -275,7 +284,12 @@ def test_model_command_cannot_create_git_or_venv_in_any_spelling(tmp_path):
         "os.makedirs('planted', exist_ok=True)\n"
     )
     try:
-        result = run_model_argv([sys.executable, "-c", script], work_dir=repo, timeout=60)
+        result = run_model_argv(
+            [sys.executable, "-c", script],
+            work_dir=repo,
+            timeout=60,
+            readable=interpreter_readable_roots(sys.executable),
+        )
     except SandboxError as exc:
         assert not os_sandbox_available() and str(exc) == "no_os_barrier"
         assert sorted(p.name for p in repo.iterdir()) == []
