@@ -229,6 +229,10 @@ def _plant_host_run_code(marker: Path) -> str:
         "attempt(lambda: open('.git/config', 'a').write('[core]\\n\\tfsmonitor = ./fsmonitor.sh\\n'))\n"
         "attempt(lambda: os.link('.git/config', 'config_link'))\n"
         "attempt(lambda: os.rename('.venv', 'venv_moved'))\n"
+        # APFS is case-insensitive: other spellings name the same entries.
+        "attempt(lambda: plant('.VENV/bin/python3'))\n"
+        "attempt(lambda: plant('.Git/hooks/pre-commit'))\n"
+        "attempt(lambda: open('.GIT/config', 'a').write('[core]\\n\\thooksPath = ../hooks\\n'))\n"
     )
 
 
@@ -249,8 +253,35 @@ def test_model_command_cannot_change_what_the_host_runs_in_the_repo(tmp_path):
     assert venv_python.read_text() == _HOST_RUN_STUB
     assert (repo / ".git" / "config").read_text() == config
     assert not (repo / ".git" / "hooks" / "post-checkout").exists()
+    assert not (repo / ".git" / "hooks" / "pre-commit").exists()
     assert not (repo / "config_link").exists()
     assert not marker.exists()
+
+
+def test_model_command_cannot_create_git_or_venv_in_any_spelling(tmp_path):
+    # A repo without .git (or .venv): creating one, as a dir or as a gitfile pointing at a
+    # writable dir, in any case spelling, would hand the host's next git call to the model.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = (
+        "import os\n"
+        "for name in ('.git', '.GIT', '.Git', '.venv', '.Venv'):\n"
+        "    for make in (lambda: os.makedirs(name + '/hooks'),\n"
+        "                 lambda: open(name, 'w').write('gitdir: ./planted\\n')):\n"
+        "        try:\n"
+        "            make()\n"
+        "        except OSError:\n"
+        "            pass\n"
+        "os.makedirs('planted', exist_ok=True)\n"
+    )
+    try:
+        result = run_model_argv([sys.executable, "-c", script], work_dir=repo, timeout=60)
+    except SandboxError as exc:
+        assert not os_sandbox_available() and str(exc) == "no_os_barrier"
+        assert sorted(p.name for p in repo.iterdir()) == []
+        return
+    assert result.returncode == 0, result.stderr
+    assert sorted(p.name for p in repo.iterdir()) == ["planted"]
 
 
 def test_reproduction_phase_runs_no_interpreter_or_git_hook_the_script_planted(tmp_path):
