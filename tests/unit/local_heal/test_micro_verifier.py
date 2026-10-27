@@ -2,6 +2,11 @@ import pytest
 import sys
 from pathlib import Path
 from nexus.services.local_heal.micro_verifier import MicroVerifier, MicroVerifyResult
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2945: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise local_heal logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 def test_generic_python3_not_full_verifier(tmp_path):

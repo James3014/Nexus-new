@@ -20,6 +20,12 @@ from nexus.services.local_heal.phases.reproduction import ReproductionPhase
 from nexus.services.local_heal.phases.localization import LocalizationPhase
 from nexus.services.local_heal.phases.verification import VerificationPhase
 from nexus.services.local_heal.granular_localizer import LocalizationBundle
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2945: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise local_heal logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
+
 
 # 1. Mock LLM client implementation
 class DummyLLMClient(ILLMClient):
