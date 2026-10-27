@@ -978,26 +978,113 @@ _PYTEST_BASE_INI_KEYS = (
 _PYTEST_VALUE_OPTIONS = frozenset({
     "-k",
     "-m",
+    "-n",
     "-p",
     "-o",
     "-c",
     "-W",
     "-r",
+    "--assert",
+    "--basetemp",
+    "--capture",
+    "--code-highlight",
+    "--color",
+    "--confcutdir",
+    "--config-file",
+    "--cov",
+    "--cov-config",
+    "--cov-fail-under",
+    "--cov-report",
     "--deselect",
+    "--dist",
+    "--durations",
+    "--durations-min",
     "--ignore",
     "--ignore-glob",
-    "--rootdir",
-    "--confcutdir",
-    "--basetemp",
-    "--junitxml",
-    "--junit-xml",
-    "--maxfail",
-    "--tb",
-    "--override-ini",
-    "--config-file",
     "--import-mode",
+    "--junit-xml",
+    "--junitxml",
+    "--log-auto-indent",
+    "--log-cli-date-format",
+    "--log-cli-format",
+    "--log-cli-level",
+    "--log-date-format",
+    "--log-file",
+    "--log-file-date-format",
+    "--log-file-format",
+    "--log-file-level",
+    "--log-format",
+    "--log-level",
+    "--maxfail",
+    "--maxprocesses",
+    "--numprocesses",
+    "--override-ini",
+    "--pastebin",
+    "--rootdir",
+    "--rsyncdir",
+    "--rsyncignore",
+    "--show-capture",
+    "--tb",
+    "--timeout",
+    "--timeout-method",
+    "--tx",
+    "--verbosity",
 })
 _PYTHON_VALUE_OPTIONS = frozenset({"-X", "-W", "-Q"})
+
+
+def _short_option_takes_next(token: str) -> bool:
+    """Whether a short option group (``-k``, ``-xk``) takes the next token as its value."""
+    letters = token[1:]
+    for position, letter in enumerate(letters):
+        if f"-{letter}" in _PYTEST_VALUE_OPTIONS:
+            return position == len(letters) - 1  # otherwise the value is attached (``-pno:x``)
+    return False
+
+
+def _pytest_target_indices(args: Sequence[str]) -> tuple[tuple[int, ...], frozenset[int]]:
+    """Indices of ``args`` that pytest takes as file, directory or node targets (#2934), and
+    which of them may instead be the value of the unknown long option before them.
+
+    The value of a known value option (``--durations 5``, ``-k expr``, ``-xk expr``) is never a
+    target. A token right after an unknown long option written without ``=`` may be that option's
+    value or a target: it counts only when another target exists, so it never narrows a card's
+    targets and never turns a card without targets into a file-scoped one. Everything after
+    ``--`` is a target."""
+    certain: list[int] = []
+    maybe: list[int] = []
+    after_unknown_long = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            certain.extend(range(index + 1, len(args)))
+            break
+        if token.startswith("--"):
+            name, has_eq, _ = token.partition("=")
+            takes_next = not has_eq and name in _PYTEST_VALUE_OPTIONS
+            after_unknown_long = not has_eq and not takes_next
+            index += 2 if takes_next else 1
+            continue
+        if token.startswith("-") and len(token) > 1:
+            after_unknown_long = False
+            index += 2 if _short_option_takes_next(token) else 1
+            continue
+        (maybe if after_unknown_long else certain).append(index)
+        after_unknown_long = False
+        index += 1
+    if not certain:
+        return (), frozenset()
+    return tuple(sorted(certain + maybe)), frozenset(maybe)
+
+
+def _with_pytest_options(args: Sequence[str], *options: str) -> tuple[str, ...]:
+    """``args`` with ``options`` added after its last option, before a ``--`` separator: pytest
+    reads every token after ``--`` as a target, an appended option included (#2934)."""
+    end = args.index("--") if "--" in args else len(args)
+    return (*args[:end], *options, *args[end:])
+
+
 _PYTHON_NAME_RE = re.compile(r"^python(?:[0-9]+(?:\.[0-9]+)*)?$")
 _JUNIT_MAX_BYTES = 10 * 1024 * 1024
 
@@ -1046,16 +1133,8 @@ def _pytest_invocation(argv: Sequence[str], path_env: str) -> _PytestInvocation 
         return None
     declared: list[str] = []
     declared_paths: list[str] = []
-    skip_next = False
-    for token in pytest_args:
-        if skip_next:
-            skip_next = False
-            continue
-        if token in _PYTEST_VALUE_OPTIONS:
-            skip_next = True
-            continue
-        if token.startswith("-"):
-            continue
+    for index in _pytest_target_indices(pytest_args)[0]:
+        token = pytest_args[index]
         if "::" not in token:
             declared_paths.append(token)
             continue
@@ -2212,19 +2291,21 @@ def _run_pytest_verifier(
         *invocation.interpreter_args,
         "-m",
         "pytest",
-        *invocation.pytest_args,
-        # Appended last so they override any earlier value.
-        *extra_args,
-        "-c",
-        str(ini_path),
-        "--rootdir",
-        str(root),
-        "--confcutdir",
-        str(root),
-        "-p",
-        "no:cacheprovider",
-        "-p",
-        VERIFIER_WITNESS_PLUGIN,
+        # Added after the card's options so they override any earlier value.
+        *_with_pytest_options(
+            invocation.pytest_args,
+            *extra_args,
+            "-c",
+            str(ini_path),
+            "--rootdir",
+            str(root),
+            "--confcutdir",
+            str(root),
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            VERIFIER_WITNESS_PLUGIN,
+        ),
     ]
     sandbox: dict[str, Any] = {"sandboxed": False, "barrier": None, "network": "not_confined"}
     witness = _empty_witness_summary()
@@ -2416,21 +2497,18 @@ def _base_collect_invocation(
     nothing to compare).  ``None`` when no file or directory target is left although
     the card named targets."""
     args: list[str] = []
-    skip_next = False
     had_target = kept_target = False
-    for token in invocation.pytest_args:
-        if skip_next:
-            skip_next = False
-        elif token in _PYTEST_VALUE_OPTIONS:
-            skip_next = True
-        elif not token.startswith("-"):
+    targets, maybe_values = _pytest_target_indices(invocation.pytest_args)
+    for index, token in enumerate(invocation.pytest_args):
+        if index in targets:
             had_target = True
             if "::" in token:
                 continue
             (rel,) = _declared_path_prefixes(root, [token]) or ("",)
-            if not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel):
-                continue
-            if not (base_tree / rel).exists():
+            missing = not rel or rel == ".." or rel.startswith("../") or os.path.isabs(rel)
+            if missing or not (base_tree / rel).exists():
+                if index in maybe_values:  # most likely the option's value: keep it with the option
+                    args.append(token)
                 continue
             kept_target = True
             token = rel
@@ -2440,7 +2518,7 @@ def _base_collect_invocation(
     return _PytestInvocation(
         interpreter=invocation.interpreter,
         interpreter_args=invocation.interpreter_args,
-        pytest_args=(*args, "--collect-only"),
+        pytest_args=_with_pytest_options(args, "--collect-only"),
         declared_node_ids=(),
         declared_paths=(),
     )
