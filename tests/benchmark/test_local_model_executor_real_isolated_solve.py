@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 
 from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 def _make_committee_envelope(candidate_id, target_file, target_symbol, patch_content):

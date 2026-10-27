@@ -22,6 +22,11 @@ from nexus.core.argv_command import (
     run_command_string,
     split_command_chain,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

@@ -35,6 +35,11 @@ from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     normalize_online_invoker_payload,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 # Valid bound artifact: sha256: + 64 hex (no length-based fallback).
 VALID_VERIFIER_ARTIFACT = "sha256:" + ("ab" * 32)

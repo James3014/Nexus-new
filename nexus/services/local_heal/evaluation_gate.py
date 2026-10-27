@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+from nexus.engine.model_output_sandbox import interpreter_readable_roots, run_model_argv
+
 
 @dataclass
 class TestResult:
@@ -262,22 +264,28 @@ class EvaluationGate:
     def __init__(self, repo_dir: Path):
         self.repo_dir = repo_dir
 
+    def _run_confined(self, cmd: List[str], env: dict, timeout: int) -> subprocess.CompletedProcess:
+        # repo_dir holds a model-written patch: its tests run under the OS sandbox (no
+        # network, writes only in repo_dir, allowlisted env + PYTHONPATH). A missing barrier
+        # raises SandboxError, which the callers record as a failed test (#2936).
+        return run_model_argv(
+            cmd,
+            work_dir=self.repo_dir,
+            timeout=timeout,
+            extra_env=env,
+            readable=interpreter_readable_roots(cmd[0]) if cmd else (),
+        )
+
     def run_visible_tests(self, test_cmds: List[List[str]]) -> List[TestResult]:
         results = []
         for cmd in test_cmds:
-            env = os.environ.copy()
             benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
-            env["PYTHONPATH"] = f"{str(self.repo_dir)}:{benchmarks_dir}:{env.get('PYTHONPATH', '')}"
+            env = {
+                "PYTHONPATH": f"{str(self.repo_dir)}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"
+            }
             test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = subprocess.run(
-                    cmd,
-                    cwd=str(self.repo_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=test_timeout,
-                    env=env,
-                )
+                res = self._run_confined(cmd, env, test_timeout)
                 results.append(
                     TestResult(
                         test_id=" ".join(cmd),
@@ -301,19 +309,13 @@ class EvaluationGate:
             ]
         results = []
         for cmd in cmds:
-            env = os.environ.copy()
             benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
-            env["PYTHONPATH"] = f"{str(self.repo_dir)}:{benchmarks_dir}:{env.get('PYTHONPATH', '')}"
+            env = {
+                "PYTHONPATH": f"{str(self.repo_dir)}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"
+            }
             test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = subprocess.run(
-                    cmd,
-                    cwd=str(self.repo_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=test_timeout,
-                    env=env,
-                )
+                res = self._run_confined(cmd, env, test_timeout)
                 results.append(
                     TestResult(
                         test_id=" ".join(cmd),

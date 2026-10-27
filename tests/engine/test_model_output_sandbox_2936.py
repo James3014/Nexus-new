@@ -1,0 +1,252 @@
+"""#2936: local-model output (drone BASH, local_heal verifiers) runs only inside the OS sandbox.
+
+Where an OS barrier exists (macOS sandbox-exec) the tests prove network and writes outside the
+work dir are refused; where none exists (Linux CI, NEXUS_DISABLE_OS_SANDBOX=1) they prove that
+nothing runs. No test skips.
+"""
+
+from __future__ import annotations
+
+import socket
+import sys
+from pathlib import Path
+
+import pytest
+
+from nexus.core import layer_ports
+from nexus.core.argv_command import run_command_string
+from nexus.core.drone_engine import DroneToolBox
+from nexus.engine import model_output_sandbox as mos
+from nexus.engine.sandboxed_lane import os_sandbox_available
+from nexus.services.local_heal.evaluation_gate import EvaluationGate
+from nexus.services.local_heal.isolated_verifier import (
+    IsolatedVerifierRequest,
+    run_isolated_verifier,
+)
+
+_PY = [sys.executable, "-I", "-c"]
+
+
+def _marker_cmd(marker: Path) -> str:
+    return f'{sys.executable} -I -c \'open("{marker}", "w").write("ran")\''
+
+
+@pytest.fixture
+def no_barrier(monkeypatch):
+    monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
+
+
+def test_run_command_string_prefixes_every_segment(tmp_path):
+    res = run_command_string(
+        "first && second", cwd=tmp_path, argv_prefix=["/bin/echo", "PFX"], timeout=10
+    )
+    assert res.returncode == 0
+    assert res.stdout.splitlines() == ["PFX first", "PFX second"]
+
+
+def test_no_barrier_runs_nothing(tmp_path, no_barrier):
+    marker = tmp_path / "ran.txt"
+    with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+        mos.run_model_argv([*_PY, f"open({str(marker)!r}, 'w')"], work_dir=tmp_path, timeout=10)
+    with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+        mos.run_model_command_string(_marker_cmd(marker), work_dir=tmp_path, timeout=10)
+    assert not marker.exists()
+
+
+def test_drone_bash_fails_closed_without_barrier(tmp_path, no_barrier):
+    marker = tmp_path / "ran.txt"
+    out = DroneToolBox(tmp_path).bash_exec(_marker_cmd(marker))
+    assert out["exit_code"] == -1
+    assert "no_os_barrier" in out["stderr"]
+    assert not marker.exists()
+
+
+def test_drone_bash_fails_closed_when_the_sandbox_port_is_unbound(tmp_path, monkeypatch):
+    # nexus.core reaches the sandbox only through a port; an unbound port must not fall back
+    # to running the command unconfined.
+    monkeypatch.delitem(layer_ports._LOADERS, "model_output.run_model_command_string")
+    marker = tmp_path / "ran.txt"
+    out = DroneToolBox(tmp_path).bash_exec(_marker_cmd(marker))
+    assert out["exit_code"] == -1
+    assert "PORT_UNBOUND" in out["stderr"]
+    assert not marker.exists()
+
+
+def test_isolated_verifier_blocks_without_barrier(tmp_path, no_barrier):
+    marker = tmp_path / "ran.txt"
+    receipt = run_isolated_verifier(
+        IsolatedVerifierRequest(
+            task_id="t",
+            workspace_path=str(tmp_path),
+            verifier_command=(*_PY, f"open({str(marker)!r}, 'w')"),
+            verifier_allowed=True,
+        )
+    )
+    assert receipt.verifier_status == "blocked"
+    assert receipt.verifier_error.startswith("verifier_sandbox_unavailable")
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_evaluation_gate_fails_closed_without_barrier(tmp_path, no_barrier, hidden):
+    marker = tmp_path / "ran.txt"
+    gate = EvaluationGate(tmp_path)
+    cmd = [*_PY, f"open({str(marker)!r}, 'w')"]
+    results = gate.run_hidden_verifier([cmd]) if hidden else gate.run_visible_tests([cmd])
+    assert [r.passed for r in results] == [False]
+    assert "no_os_barrier" in results[0].output
+    assert not marker.exists()
+
+
+def test_interpreter_readable_roots_reads_the_venv_and_its_base(tmp_path):
+    base = tmp_path / "base"
+    (base / "bin").mkdir(parents=True)
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text(f"home = {base / 'bin'}\nversion = 3.13\n")
+    python = venv / "bin" / "python"
+    python.write_text("")
+    roots = mos.interpreter_readable_roots(str(python))
+    assert roots[:2] == [venv.resolve(), base.resolve()]
+    assert mos.interpreter_readable_roots("no-such-tool-2936") == []
+    assert mos.interpreter_readable_roots(str(tmp_path / "python")) == []
+    # A model-chosen path never widens reads; only a bare name resolved on PATH may.
+    assert mos.interpreter_readable_roots(str(python), allow_absolute=False) == []
+    assert mos.interpreter_readable_roots("bin/python", allow_absolute=False) == []
+
+
+def test_only_python_interpreters_widen_reads(tmp_path, monkeypatch):
+    prefix = tmp_path / "prefix"
+    (prefix / "bin").mkdir(parents=True)
+    for name in ("python3.99", "uploader"):
+        tool = prefix / "bin" / name
+        tool.write_text("")
+        tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(prefix / "bin"))
+    assert mos.interpreter_readable_roots("python3.99") == [prefix.resolve()]
+    assert mos.interpreter_readable_roots("uploader") == []
+
+
+# --- With a real barrier: what the model's command can no longer do. Without one: it never ran.
+
+
+def _net(port: int) -> str:
+    return f"import socket; socket.create_connection(('127.0.0.1', {port}), 3); print('CONNECTED')"
+
+
+@pytest.fixture
+def listener():
+    # A loopback port the host itself can reach (local model servers listen on loopback), so a
+    # failed connect proves the sandbox denied it rather than the host having no route.
+    server = socket.create_server(("127.0.0.1", 0))
+    port = server.getsockname()[1]
+    socket.create_connection(("127.0.0.1", port), 3).close()
+    yield port
+    server.close()
+
+
+def _expect_confined_or_refused(run):
+    if not os_sandbox_available():
+        with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+            run()
+        return None
+    return run()
+
+
+def test_network_is_denied(tmp_path, listener):
+    res = _expect_confined_or_refused(
+        lambda: mos.run_model_argv([*_PY, _net(listener)], work_dir=tmp_path, timeout=20)
+    )
+    if res is not None:
+        assert res.returncode != 0
+        assert "CONNECTED" not in res.stdout
+
+
+def test_write_outside_work_dir_is_denied(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside.txt"
+    inside = work / "inside.txt"
+    script = f"open({str(inside)!r}, 'w').write('x'); open({str(outside)!r}, 'w').write('x')"
+    res = _expect_confined_or_refused(
+        lambda: mos.run_model_argv([*_PY, script], work_dir=work, timeout=20)
+    )
+    if res is not None:
+        assert inside.exists()
+        assert res.returncode != 0
+    assert not outside.exists()
+
+
+def test_drone_bash_cannot_reach_the_network_or_leak_env(tmp_path, monkeypatch, listener):
+    monkeypatch.setenv("NEXUS_TEST_SECRET_2936", "s3cret")
+    box = DroneToolBox(tmp_path)
+    env_out = box.bash_exec("/usr/bin/env")
+    net_out = box.bash_exec(f'{sys.executable} -I -c "{_net(listener)}"')
+    if not os_sandbox_available():
+        assert env_out["exit_code"] == -1 and net_out["exit_code"] == -1
+        return
+    assert env_out["exit_code"] == 0
+    assert "s3cret" not in env_out["stdout"]
+    assert net_out["exit_code"] != 0
+    assert "CONNECTED" not in net_out["stdout"]
+
+
+def test_token_stores_under_home_stay_unreadable(tmp_path, monkeypatch):
+    # A read root inside ~/.config (bot credentials) is refused; one that contains it cannot
+    # reopen it either, because the profile denies the subtree last.
+    home = (tmp_path / "home").resolve()
+    secret = home / ".config" / "bot" / "token"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("s3cret")
+    project = home / "project"
+    (project / ".config").mkdir(parents=True)
+    (project / "ok.txt").write_text("fine")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    read = "import sys; print(open(sys.argv[1]).read())"
+
+    def run(path, readable):
+        return mos.run_model_argv(
+            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=readable
+        )
+
+    if not os_sandbox_available():
+        with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+            run(secret, [secret.parent])
+        return
+    with pytest.raises(mos.SandboxError, match="sandbox_read_root_inside_forbidden"):
+        run(secret, [secret.parent])
+    allowed = run(project / "ok.txt", [project])
+    assert allowed.returncode == 0 and "fine" in allowed.stdout
+    denied = run(secret, [project])
+    assert denied.returncode != 0 and "s3cret" not in denied.stdout
+
+
+def test_bench_hidden_staging_stays_unreadable_under_a_granted_parent(tmp_path, monkeypatch):
+    # The shared SANDBOX_DENIED_HOME_PATHS rule denies ~/.cache/nexus-bench-hidden after the
+    # read allows, and the model sandbox only appends denies: a granted ~/.cache cannot reopen it.
+    home = (tmp_path / "home").resolve()
+    hidden = home / ".cache" / "nexus-bench-hidden" / "case" / "test_hidden.py"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text("HIDDEN_ORACLE")
+    visible = home / ".cache" / "visible.txt"
+    visible.write_text("fine")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    read = "import sys; print(open(sys.argv[1]).read())"
+
+    def run(path):
+        return mos.run_model_argv(
+            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=[home / ".cache"]
+        )
+
+    if not os_sandbox_available():
+        with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+            run(hidden)
+        return
+    allowed = run(visible)
+    assert allowed.returncode == 0 and "fine" in allowed.stdout
+    denied = run(hidden)
+    assert denied.returncode != 0 and "HIDDEN_ORACLE" not in denied.stdout

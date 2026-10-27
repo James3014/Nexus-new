@@ -10,6 +10,11 @@ from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 from nexus.services.local_heal.patcher import Patcher
 from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
 from nexus.services.local_heal.phases.verification import VerificationPhase
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 def test_orchestrator_flow():
     op = OperationalContext(instance_id="t1", repo_dir=Path("/tmp"), problem_statement="p")

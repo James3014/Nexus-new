@@ -67,6 +67,7 @@
 | tests/unit/committee/test_oracle_touch_guard.py | tests/unit/committee/test_oracle_touch_guard.py | active | high | test_contract |
 | nexus/committee/execution_verifier.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/services/test_capability_wiring_fixes_groupc.py, tests/unit/committee/test_data_flow_v267.py | active | high | committee_patch_execution_verifier_contract |
 | nexus/engine/sandboxed_lane.py | tests/unit/committee/test_execution_verifier_sandbox.py, tests/engine/test_swarm_run_sandbox.py, tests/engine/test_ultra_review_service.py, tests/services/test_capability_wiring_fixes_groupc.py | active | high | untrusted_code_sandbox_contract |
+| nexus/engine/model_output_sandbox.py | tests/engine/test_model_output_sandbox_2936.py, tests/core, tests/services | active | high | local_model_output_sandbox_2936 |
 | tests/unit/committee/test_execution_verifier_sandbox.py | tests/unit/committee/test_execution_verifier_sandbox.py | active | high | test_contract |
 | nexus/engine/swarm_run.py | tests/engine/test_swarm_run_sandbox.py, tests/services/test_capability_wiring_fixes_groupc.py | active | high | swarm_verify_sandbox_contract |
 | tests/engine/test_swarm_run_sandbox.py | tests/engine/test_swarm_run_sandbox.py | active | high | test_contract |

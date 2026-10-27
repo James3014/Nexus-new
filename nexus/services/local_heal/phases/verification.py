@@ -395,6 +395,8 @@ def _sealed_request(
         request,
         workspace_path=str(workspace.path),
         verifier_command=command,
+        # The sealed oracle lives outside the workspace; the sandbox may read, not write, it.
+        readable_paths=(str(sealed_path.parent),),
     )
 
 

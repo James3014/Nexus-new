@@ -63,6 +63,11 @@ CORE_ENGINE_PORTS: dict[str, tuple[str, str]] = {
     "planner.CapabilityPlanner": ("nexus.engine.capability_planner", "CapabilityPlanner"),
     # nexus.core.router
     "receipts.attested_receipt_dict": ("nexus.engine.capability_receipts", "attested_receipt_dict"),
+    # nexus.core.drone_engine (#2936: drone BASH runs local-model output in the OS sandbox)
+    "model_output.run_model_command_string": (
+        "nexus.engine.model_output_sandbox",
+        "run_model_command_string",
+    ),
 }
 
 

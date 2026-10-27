@@ -7,6 +7,8 @@ import shutil
 import tempfile
 from unittest import mock
 
+import pytest
+
 from nexus.contracts.planner_snapshot_binding import ROUTE_CONTEXT_NOT_PLANNER_BOUND
 from nexus.engine.capability_executor_controls import build_execution_plan
 from nexus.engine.capability_planner import CapabilityPlanner
@@ -19,6 +21,11 @@ from nexus.services.local_heal.isolated_local_solve_loop import (
     IsolatedLocalSolveRequest,
     run_isolated_local_solve_loop,
 )
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 _DIFF = "--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
 

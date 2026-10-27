@@ -165,11 +165,14 @@ def run_command_string(
     env: Mapping[str, str] | None = None,
     timeout: float | None = None,
     capture_output: bool = True,
+    argv_prefix: Sequence[str] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Run *command* without a shell and return one combined result.
 
     ``subprocess.TimeoutExpired`` propagates, as it does from
     ``subprocess.run``; callers keep their existing timeout handling.
+    ``argv_prefix`` is prepended to every segment's argv (e.g. a
+    ``sandbox-exec`` wrapper, #2936).
     """
     try:
         segments = _split_chain(command)
@@ -188,7 +191,7 @@ def run_command_string(
             continue
         try:
             completed = subprocess.run(
-                argv,
+                [*argv_prefix, *argv],
                 cwd=None if cwd is None else str(cwd),
                 env={**base_env, **assignments},
                 capture_output=capture_output,

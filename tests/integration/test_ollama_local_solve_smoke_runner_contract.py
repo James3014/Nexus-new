@@ -7,6 +7,12 @@ import tempfile
 from unittest.mock import patch, MagicMock
 
 from scripts.local_heal.run_ollama_local_solve_smoke import main
+import pytest
+from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
+
+# #2936: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
+# exercise verifier/drone logic, so they run them unconfined there (sandbox stays on macOS).
+pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
 def test_smoke_runner_env_blocked() -> None:
