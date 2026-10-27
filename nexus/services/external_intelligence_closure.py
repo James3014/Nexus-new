@@ -1033,7 +1033,6 @@ _PYTEST_VALUE_OPTIONS = frozenset({
 _PYTHON_VALUE_OPTIONS = frozenset({"-X", "-W", "-Q"})
 
 
-
 def _short_option_takes_next(token: str) -> bool:
     """Whether a short option group (``-k``, ``-xk``) takes the next token as its value."""
     letters = token[1:]
