@@ -8,7 +8,8 @@ sandbox, so these runs go through ``sandbox-exec`` with the default-deny policy 
 * no network at all (``(deny network*)``), so cloud metadata and uploads are refused;
 * writes only inside the work dir and a private ``home``/``tmp`` created for the run;
 * reads limited to the work dir, the trusted interpreter, fixed system paths and the
-  caller's ``readable`` roots; credential stores under ``$HOME`` stay unreadable;
+  caller's ``readable`` roots; credential stores under ``$HOME`` (plus ``~/.config``,
+  ``~/.local/state`` and the token stores in ``~/Library``) stay unreadable;
 * an allowlisted environment (no tokens or provider keys) with ``HOME``/``TMPDIR`` in the
   private dir; ``extra_env`` is added on top by the caller.
 
@@ -42,6 +43,15 @@ from nexus.engine.sandboxed_lane import (
 # Binaries here need no extra read root (system paths are already readable or not wanted).
 _SYSTEM_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/System/")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Under ``$HOME`` and holding tokens or session state, but not in sandboxed_lane's credential
+# list (bot credentials live in ~/.config). Denied as whole subtrees by the profile's last rule,
+# and a read root inside one is refused, whatever roots the caller grants.
+_DENIED_HOME_SUBTREES = (
+    ".config",
+    ".local/state",
+    "Library/Application Support",
+    "Library/Cookies",
+)
 
 __all__ = [
     "SandboxError",
@@ -133,12 +143,14 @@ def model_sandbox(
     work = Path(work_dir).resolve()
     if not work.is_dir():
         raise SandboxError("work_dir_missing")
+    home = Path(os.path.expanduser("~")).resolve()
     with tempfile.TemporaryDirectory(prefix="nexus-model-exec-") as private:
         bound = confinement(
             sandbox=Path(private).resolve(),
             extra_writable=(work,),
             # /usr/bin/python3, git, make… are xcrun shims that load the active developer dir.
             extra_readable=(*readable, *developer_toolchain_read_roots()),
+            forbidden_subtrees=tuple(home / rel for rel in _DENIED_HOME_SUBTREES),
         )
         yield [SANDBOX_EXEC, "-p", bound.profile], dict(bound.env)
 

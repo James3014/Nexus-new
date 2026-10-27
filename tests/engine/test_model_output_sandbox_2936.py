@@ -163,3 +163,35 @@ def test_drone_bash_cannot_reach_the_network_or_leak_env(tmp_path, monkeypatch):
     assert "s3cret" not in env_out["stdout"]
     assert net_out["exit_code"] != 0
     assert "CONNECTED" not in net_out["stdout"]
+
+
+def test_token_stores_under_home_stay_unreadable(tmp_path, monkeypatch):
+    # A read root inside ~/.config (bot credentials) is refused; one that contains it cannot
+    # reopen it either, because the profile denies the subtree last.
+    home = (tmp_path / "home").resolve()
+    secret = home / ".config" / "bot" / "token"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("s3cret")
+    project = home / "project"
+    (project / ".config").mkdir(parents=True)
+    (project / "ok.txt").write_text("fine")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    read = "import sys; print(open(sys.argv[1]).read())"
+
+    def run(path, readable):
+        return mos.run_model_argv(
+            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=readable
+        )
+
+    if not os_sandbox_available():
+        with pytest.raises(mos.SandboxError, match="no_os_barrier"):
+            run(secret, [secret.parent])
+        return
+    with pytest.raises(mos.SandboxError, match="sandbox_read_root_inside_forbidden"):
+        run(secret, [secret.parent])
+    allowed = run(project / "ok.txt", [project])
+    assert allowed.returncode == 0 and "fine" in allowed.stdout
+    denied = run(secret, [project])
+    assert denied.returncode != 0 and "s3cret" not in denied.stdout
