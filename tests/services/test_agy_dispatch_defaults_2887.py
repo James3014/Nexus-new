@@ -354,6 +354,8 @@ def test_read_only_provider_start_watchdog(tmp_path, monkeypatch):
     monkeypatch.setattr(
         dispatch._agy_operation_journal, "_process_group_alive", lambda _pgid: False
     )
+    # The plan watchdog needs a provider stream signal source (background operations).
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
     code, _, err, timed_out, wall_ms = dispatch.run_agy(
         env=os.environ.copy(),
         prompt="read",
@@ -368,6 +370,44 @@ def test_read_only_provider_start_watchdog(tmp_path, monkeypatch):
     assert "NEXUS_AGY_NON_PROGRESS:PROVIDER_STALLED" in err
     assert not timed_out
     assert wall_ms < 3000
+
+
+def test_foreground_plan_without_stream_signal_is_not_judged_stalled(tmp_path, monkeypatch):
+    # Foreground plan runs (agy-bulk) have no attestation log, so stdout is the only signal and
+    # it stays empty while the model thinks. 2026-10-27: a 6.7KB review needed 1-5 min before its
+    # first byte and was killed at the 45 s read-only default on every account.
+    fake_agy = tmp_path / "fake-agy"
+    fake_agy.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(1.0)\nprint('answer')\n")
+    fake_agy.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: str(fake_agy))
+    monkeypatch.delenv("NEXUS_AGY_ATTESTATION_LOG", raising=False)
+    code, out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="read",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=15,
+        provider_stall_seconds=0.1,
+    )
+    assert code == 0
+    assert out.strip() == "answer"
+    assert "PROVIDER_STALLED" not in err
+    assert not timed_out
+
+
+@pytest.mark.parametrize(
+    ("raw", "stall", "source"),
+    [("240", 120.0, "env:NO_TOOL_PACKET"), ("not-a-number", 45.0, "default:NO_TOOL_PACKET")],
+)
+def test_stall_source_names_the_env_override(monkeypatch, raw, stall, source):
+    monkeypatch.setenv("NEXUS_AGY_PROVIDER_STALL_SECONDS", raw)
+    limits = dispatch._resolve_dispatch_limits("NO_TOOL_PACKET", None, None)
+    assert limits["provider_stall_seconds"] == stall
+    assert limits["provider_stall_source"] == source
+    explicit = dispatch._resolve_dispatch_limits("NO_TOOL_PACKET", None, 17)
+    assert explicit["provider_stall_source"] == "explicit"
 
 
 @pytest.mark.parametrize("second_output", ["answer " * 20, ""])
