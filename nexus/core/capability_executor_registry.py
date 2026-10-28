@@ -2558,6 +2558,22 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
 
 
+def _paths_overlap(left: Path, right: Path) -> bool:
+    """One directory is the other or inside it, by inode too (case-insensitive APFS, #2967)."""
+
+    def _same(a: Path, b: Path) -> bool:
+        try:
+            return os.path.samefile(a, b)
+        except OSError:
+            return False
+
+    if left.is_relative_to(right) or right.is_relative_to(left):
+        return True
+    return any(_same(parent, right) for parent in (left, *left.parents)) or any(
+        _same(parent, left) for parent in (right, *right.parents)
+    )
+
+
 def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
@@ -2589,10 +2605,21 @@ def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
                 ),
             )
         timeout_sec = max(1, min(120, int(constraints.get("verify_timeout_sec") or 30)))
+        from nexus.orchestrator.canonical_source_root import (
+            CANONICAL_SOURCE_ROOT_ENV,
+            DEFAULT_CANONICAL_SOURCE_ROOT,
+        )
+
+        # On the task_run path the root is the controller worktree: one stray file there
+        # refuses every task, so the caller's verifier runs in a disposable sandboxed copy (#2967).
+        controller = Path(
+            os.environ.get(CANONICAL_SOURCE_ROOT_ENV) or DEFAULT_CANONICAL_SOURCE_ROOT
+        ).expanduser().resolve()
         all_passed, results = run_cli_pregate(
             root,
             cmds,
             timeout_per_cmd=timeout_sec,
+            isolate_workspace=_paths_overlap(root, controller),
         )
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(

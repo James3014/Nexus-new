@@ -102,9 +102,12 @@ def verifier_input_files(
         if relative.is_absolute() or ".." in relative.parts:
             continue
         candidate = source / relative
-        if candidate.is_symlink() or not candidate.is_file():
-            continue
-        if not candidate.resolve().is_relative_to(source):
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            if not candidate.resolve().is_relative_to(source):
+                continue
+        except OSError:  # e.g. ENAMETOOLONG for a long ``-c`` body: not a file (#2967)
             continue
         if text not in found:
             found.append(text)
