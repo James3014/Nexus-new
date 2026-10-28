@@ -88,14 +88,21 @@ credential). If the missing range touches the verifier, driver or dependency loc
 (`DAEMON_CRITICAL_PATHS`), the night is `START_FAILED` with `DAEMON_CHECKOUT_STALE`.
 
 Since #2979, the daytime `prepare` first fast-forwards a STALE or BEHIND checkout to the
-fetched `origin/main`, but only when all of these hold: the work tree is clean, `HEAD` is an
-ancestor of `origin/main`, and `launchctl print` shows the EIA daemon is not loaded. If
-`pyproject.toml` or `uv.lock` changed, it runs `uv sync --frozen --all-groups --all-extras`
-(`~/.local/bin/uv`), then the `python3` import check above, then compares again. The night
-log records the move as `daemon_checkout_ff` (`from`, `to`). To roll back, run
-`git checkout <from>` plus the same `uv sync`. A skipped move is logged as
-`daemon_checkout_ff_skipped` with its reason, and the night fails as before. A failed step is
-`START_FAILED` with `DAEMON_CHECKOUT_FF_FAILED:<step>`. `start` never moves the checkout.
+fetched `origin/main`, but only when all of these hold: `main` is checked out, the work tree
+is clean, `HEAD` is an ancestor of `origin/main`, and `launchctl print` shows the EIA daemon
+is not loaded. If `pyproject.toml` or `uv.lock` changed, it runs
+`uv sync --frozen --all-groups --all-extras` (`~/.local/bin/uv`), then the `python3` import
+check above, then compares again. The night log records the move as `daemon_checkout_ff`
+(`from`, `to`). A skipped move is logged as `daemon_checkout_ff_skipped` with its reason, and
+the night fails as before. `start` never moves the checkout.
+
+A failed step is `START_FAILED` with `DAEMON_CHECKOUT_FF_FAILED:<step>`. The scheduler then
+resets `HEAD` back to `from` (`git reset --keep`), so a critical gap stays STALE and the next
+`prepare` retries the whole move. The file `DAEMON_CHECKOUT_FF_PENDING` in the state directory
+exists while a move is in flight. It is removed only after success or a verified rollback, and
+while it exists every night fails with `DAEMON_CHECKOUT_FF_PENDING`. If it is still there
+(crash or failed rollback), run `git reset --keep <from>` and `uv sync --frozen --all-groups
+--all-extras` in the daemon checkout, then delete the file.
 
 ## Review job
 
