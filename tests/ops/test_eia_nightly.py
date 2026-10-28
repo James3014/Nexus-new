@@ -2186,10 +2186,15 @@ def test_prepare_fast_forwards_a_lagging_checkout_when_safe(env, path: str) -> N
     assert night["daemon_checkout"]["status"] in ("CURRENT", "BEHIND")
     assert night["daemon_checkout"]["head"] == target
     assert _ff_events(env, night, "daemon_checkout_ff")[0]["from"] == base
+    assert not (env["app"].state_dir / en.FF_PENDING_FILE).exists()
 
 
 def _dirty(env) -> None:
     (env["repo"] / "untracked.txt").write_text("x\n")
+
+
+def _detach(env) -> None:
+    _git(env["repo"], "checkout", "-q", "--detach", "HEAD")
 
 
 def _local_commit(env) -> None:
@@ -2202,6 +2207,8 @@ def _local_commit(env) -> None:
     "setup,reason",
     [
         (lambda env: None, "DAEMON_LOADED"),  # the fixture's daemon is running
+        (lambda env: setattr(env["sys"], "launchctl_print", ["state = waiting"]), "DAEMON_LOADED"),
+        (lambda env: (_daemon_unloaded(env), _detach(env)), "HEAD_NOT_ON_MAIN"),
         (lambda env: (_daemon_unloaded(env), _dirty(env)), "WORK_TREE_DIRTY"),
         (lambda env: (_daemon_unloaded(env), _local_commit(env)), "HEAD_NOT_ANCESTOR"),
     ],
@@ -2273,9 +2280,73 @@ def test_fast_forward_failure_fails_the_night_closed_and_records_the_rollback_sh
     assert night["daemon_checkout_ff"]["from"] == base
     failed = _ff_events(env, night, "daemon_checkout_ff_failed")
     assert failed[0]["rollback"] == base and failed[0]["step"] == step
+    assert failed[0]["rolled_back"] is True and "rolled back to" in error
+    assert _git(env["repo"], "rev-parse", "HEAD") == base  # the moved HEAD is not left behind
+    assert _git(env["repo"], "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert not (env["app"].state_dir / en.FF_PENDING_FILE).exists()
     assert not env["gh"].prs
     env["app"]._flush_outbox(night)
     assert any("DAEMON_CHECKOUT_FF_FAILED" in m for m in env["sys"].coord())
+    # The night stays closed at start: the rolled-back checkout still misses uv.lock.
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED" and not night["started"]["ok"]
+    assert "DAEMON_CHECKOUT_STALE" in night["started"]["error"]
+
+
+def test_failed_rollback_keeps_every_later_check_closed(env) -> None:
+    _daemon_unloaded(env)
+    env["gh"].add_issue(11, task_body())
+    _origin_ahead(env, "uv.lock")
+    target = _git(env["repo"], "rev-parse", "refs/remotes/origin/main")
+    original = env["app"].run
+
+    def runner(argv, **kw):
+        if argv[0] == env["app"].uv:
+            return _cp(argv, 2, "", "resolution failed")
+        if argv[0] == "git" and "reset" in argv:
+            return _cp(argv, 1, "", "cannot reset")
+        return original(argv, **kw)
+
+    env["app"].run = runner
+    night = env["app"].prepare()
+    assert night["status"] == "START_FAILED"
+    assert "ROLLBACK FAILED" in night["started"]["error"]
+    assert night["daemon_checkout_ff"]["rolled_back"] is False
+    assert _git(env["repo"], "rev-parse", "HEAD") == target  # moved, venv not synced
+    assert (env["app"].state_dir / en.FF_PENDING_FILE).exists()
+    env["app"].run = original
+    env["sys"].python3_rc = 0
+    for at in ("2026-10-16T20:00:00", "2026-10-17T16:00:00"):
+        env["clock"].at = dt.datetime.fromisoformat(at)
+        night = env["app"].prepare()
+        assert night["status"] == "START_FAILED", at
+        assert night["started"]["error"].startswith("DAEMON_CHECKOUT_FF_PENDING"), at
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-17T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED"
+    assert night["started"]["error"].startswith("DAEMON_CHECKOUT_FF_PENDING")
+    assert not [c for c in env["sys"].calls if c[0] == "open"]
+
+
+def test_rollback_sha_is_on_disk_before_the_checkout_moves(env) -> None:
+    _daemon_unloaded(env)
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, "docs/a.md")
+    original = env["app"].run
+    seen: list[tuple[bool, str]] = []
+
+    def runner(argv, **kw):
+        if argv[0] == "git" and "merge" in argv:
+            pending = env["app"].state_dir / en.FF_PENDING_FILE
+            saved = env["app"].load(NIGHT) or {}
+            seen.append((pending.exists(), (saved.get("daemon_checkout_ff") or {}).get("from")))
+        return original(argv, **kw)
+
+    env["app"].run = runner
+    night = env["app"].prepare()
+    assert night["daemon_checkout_ff"]["ok"] is True
+    assert seen == [(True, base)]
 
 
 def test_start_never_fast_forwards_the_checkout(env) -> None:

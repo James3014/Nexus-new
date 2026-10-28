@@ -139,6 +139,9 @@ DAEMON_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 WORKER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,60}(/[A-Za-z0-9_.:-]{1,60})?$")
 REPO_OWNER = "James3014"
 STOP_FILE = "STOP_REQUESTED"
+# Present while a daytime fast-forward of the daemon checkout is in flight or could not be rolled
+# back (#2979).  Every checkout check fails closed on it until an operator removes it.
+FF_PENDING_FILE = "DAEMON_CHECKOUT_FF_PENDING"
 GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
 MAX_ISSUE_FAILURES = 3
 MAX_LOOKBACK_NIGHTS = 14
@@ -836,6 +839,10 @@ class Nightly:
 
         With ``fast_forward`` (daytime ``prepare`` only) a STALE or BEHIND checkout is first
         fast-forwarded when that is safe, then compared again."""
+        pending = self.state_dir / FF_PENDING_FILE
+        if pending.exists():  # a fast-forward that never finished: the venv may not match
+            note = _one_line(pending.read_text(encoding="utf-8", errors="replace"), 200)
+            raise NightlyError(f"DAEMON_CHECKOUT_FF_PENDING:{note}")
         info = self._daemon_checkout_gap()
         night["daemon_checkout"] = info
         self._event(night, "daemon_checkout", **info)
@@ -861,14 +868,22 @@ class Nightly:
         """Fast-forward a lagging daemon checkout to the fetched origin/main (#2979).
 
         origin/main already passed the required checks, so moving to it keeps the night fail
-        closed.  Only when the work tree is clean, HEAD is an ancestor of origin/main (no local
-        commit is lost) and the daemon label is not loaded; otherwise the checkout is left
-        alone and False is returned.  The old sha is saved to the night log before the move,
-        for rollback.  A failure after the move started raises DAEMON_CHECKOUT_FF_FAILED.
+        closed.  Only when ``main`` is checked out with a clean work tree, HEAD is an ancestor
+        of origin/main (no local commit is lost) and the daemon label is not loaded; otherwise
+        the checkout is left alone and False is returned.
+
+        The old sha goes to the night log and to FF_PENDING_FILE before the checkout moves.  A
+        failed step rolls HEAD back to it (a critical gap then stays STALE, so the next prepare
+        retries the whole move) and raises DAEMON_CHECKOUT_FF_FAILED.  The pending file is
+        removed only after success or a verified rollback, so a crash or a failed rollback
+        keeps every later check closed instead of reading the moved HEAD as CURRENT.
         """
         repo, old, new = self.daemon_repo, _sha(info["head"]), _sha(info["origin_main"])
+        branch = self.run(["git", "-C", str(repo), "symbolic-ref", "-q", "HEAD"])
         try:
-            if self._git(repo, "status", "--porcelain"):
+            if str(branch.stdout).strip() != "refs/heads/main":
+                reason = "HEAD_NOT_ON_MAIN"
+            elif self._git(repo, "status", "--porcelain"):
                 reason = "WORK_TREE_DIRTY"
             elif not self._is_ancestor(repo, old, new):
                 reason = "HEAD_NOT_ANCESTOR_OF_ORIGIN_MAIN"
@@ -885,6 +900,8 @@ class Nightly:
         night["daemon_checkout_ff"] = ff
         self._event(night, "daemon_checkout_ff", **ff)
         self.save(night)  # write-ahead: the rollback sha is on disk before the checkout moves
+        pending = self.state_dir / FF_PENDING_FILE
+        pending.write_text(f"night {night['night']} from {old} to {new}\n", encoding="utf-8")
         step = "MERGE"
         try:
             self._git(repo, "merge", "-q", "--ff-only", new, code="FF_MERGE_FAILED")
@@ -899,10 +916,24 @@ class Nightly:
         except NightlyError as exc:
             ff["failed"] = step
             error = _one_line(exc, 200)
-            self._event(night, "daemon_checkout_ff_failed", step=step, error=error, rollback=old)
+            reset = self.run(["git", "-C", str(repo), "reset", "-q", "--keep", old])
+            head = self.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD^{commit}"])
+            ff["rolled_back"] = reset.returncode == 0 and str(head.stdout).strip() == old
+            if ff["rolled_back"]:
+                pending.unlink()
+            self._event(
+                night,
+                "daemon_checkout_ff_failed",
+                step=step,
+                error=error,
+                rollback=old,
+                rolled_back=ff["rolled_back"],
+            )
+            done = "rolled back to" if ff["rolled_back"] else "ROLLBACK FAILED, still pending; was"
             raise NightlyError(
-                f"DAEMON_CHECKOUT_FF_FAILED:{step} (rollback to {old[:12]}): {error}"
+                f"DAEMON_CHECKOUT_FF_FAILED:{step} ({done} {old[:12]}): {error}"
             ) from exc
+        pending.unlink()
         ff["ok"] = True
         return True
 
