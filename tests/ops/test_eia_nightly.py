@@ -2151,6 +2151,146 @@ def test_renamed_verifier_file_still_lists_its_old_path(env) -> None:
     assert "nexus/services/external_intelligence_closure.py" in gap["touched"]
 
 
+def test_daemon_checkout_fetch_uses_the_bot_credential(env) -> None:
+    env["app"]._daemon_checkout_gap()
+    fetch = next(c for c in env["sys"].calls if c[0] == "git" and "fetch" in c)
+    helper = f"credential.helper=!{env['app'].git_credential}"
+    assert fetch[3:7] == ["-c", "credential.helper=", "-c", helper]
+
+
+# ------------------------------------------------- daemon checkout daytime fast-forward (#2979)
+
+
+def _daemon_unloaded(env) -> None:
+    env["sys"].launchctl_print = ["Could not find service"]
+
+
+def _ff_events(env, night: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    return [e for e in env["app"].load(night["night"])["events"] if e["event"] == name]
+
+
+@pytest.mark.parametrize("path", ["nexus/services/external_intelligence_closure.py", "docs/a.md"])
+def test_prepare_fast_forwards_a_lagging_checkout_when_safe(env, path: str) -> None:
+    _daemon_unloaded(env)
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, path)
+    target = _git(env["repo"], "rev-parse", "refs/remotes/origin/main")
+    night = env["app"].prepare()
+    assert night["status"] == "CARDS_PENDING", night.get("started")
+    assert _git(env["repo"], "rev-parse", "HEAD") == target
+    ff = night["daemon_checkout_ff"]
+    assert (ff["from"], ff["to"], ff["ok"]) == (base, target, True)
+    assert "uv_sync" not in ff  # no dependency change: the venv is left alone
+    assert not [c for c in env["sys"].calls if c[0] == env["app"].uv]
+    assert [c for c in env["sys"].calls if c[0] == "/usr/bin/env"]  # import check ran
+    assert night["daemon_checkout"]["status"] in ("CURRENT", "BEHIND")
+    assert night["daemon_checkout"]["head"] == target
+    assert _ff_events(env, night, "daemon_checkout_ff")[0]["from"] == base
+
+
+def _dirty(env) -> None:
+    (env["repo"] / "untracked.txt").write_text("x\n")
+
+
+def _local_commit(env) -> None:
+    (env["repo"] / "pkg/local.py").write_text("Y = 1\n")
+    _git(env["repo"], "add", "-A")
+    _git(env["repo"], "commit", "-qm", "local daemon-only commit")
+
+
+@pytest.mark.parametrize(
+    "setup,reason",
+    [
+        (lambda env: None, "DAEMON_LOADED"),  # the fixture's daemon is running
+        (lambda env: (_daemon_unloaded(env), _dirty(env)), "WORK_TREE_DIRTY"),
+        (lambda env: (_daemon_unloaded(env), _local_commit(env)), "HEAD_NOT_ANCESTOR"),
+    ],
+)
+def test_prepare_leaves_the_checkout_alone_unless_every_condition_holds(
+    env, setup, reason: str
+) -> None:
+    env["gh"].add_issue(11, task_body())
+    _origin_ahead(env, "nexus/services/external_intelligence_closure.py")
+    setup(env)
+    head = _git(env["repo"], "rev-parse", "HEAD")
+    night = env["app"].prepare()
+    assert night["status"] == "START_FAILED"
+    assert night["started"]["error"].startswith("DAEMON_CHECKOUT_STALE")
+    assert _git(env["repo"], "rev-parse", "HEAD") == head
+    assert "daemon_checkout_ff" not in night
+    skipped = _ff_events(env, night, "daemon_checkout_ff_skipped")
+    assert skipped and skipped[0]["reason"].startswith(reason) and skipped[0]["head"] == head
+    assert not env["gh"].prs
+
+
+def test_launchctl_failure_is_not_read_as_unloaded(env) -> None:
+    env["app"].launchctl = lambda *a: _cp(["launchctl", *a], 124, "", "TimeoutExpired")
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, "nexus/services/external_intelligence_closure.py")
+    night = env["app"].prepare()
+    assert night["status"] == "START_FAILED"
+    assert _git(env["repo"], "rev-parse", "HEAD") == base
+    skipped = _ff_events(env, night, "daemon_checkout_ff_skipped")
+    assert skipped[0]["reason"].startswith("LAUNCHCTL_PRINT_FAILED")
+
+
+def test_fast_forward_syncs_the_venv_when_the_lock_changes(env) -> None:
+    _daemon_unloaded(env)
+    env["gh"].add_issue(11, task_body())
+    _origin_ahead(env, "uv.lock")
+    night = env["app"].prepare()
+    assert night["status"] == "CARDS_PENDING", night.get("started")
+    syncs = [c for c in env["sys"].calls if c[0] == env["app"].uv]
+    assert syncs == [[env["app"].uv, "sync", "--frozen", "--all-groups", "--all-extras"]]
+    assert night["daemon_checkout_ff"]["uv_sync"] is True
+    calls = [c for c in env["sys"].calls if c[0] in (env["app"].uv, "/usr/bin/env")]
+    assert calls[0][0] == env["app"].uv  # sync before the import check
+
+
+@pytest.mark.parametrize("step", ["UV_SYNC", "IMPORT_CHECK"])
+def test_fast_forward_failure_fails_the_night_closed_and_records_the_rollback_sha(
+    env, step: str
+) -> None:
+    _daemon_unloaded(env)
+    env["gh"].add_issue(11, task_body())
+    base = _origin_ahead(env, "uv.lock")
+    original = env["app"].run
+
+    def runner(argv, **kw):
+        if step == "UV_SYNC" and argv[0] == env["app"].uv:
+            assert kw["cwd"] == str(env["repo"])
+            return _cp(argv, 2, "", "resolution failed")
+        return original(argv, **kw)
+
+    env["app"].run = runner
+    if step == "IMPORT_CHECK":
+        env["sys"].python3_rc = 1
+    night = env["app"].prepare()
+    assert night["status"] == "START_FAILED"
+    error = night["started"]["error"]
+    assert error.startswith(f"DAEMON_CHECKOUT_FF_FAILED:{step}") and base[:12] in error
+    assert night["daemon_checkout_ff"]["failed"] == step
+    assert night["daemon_checkout_ff"]["from"] == base
+    failed = _ff_events(env, night, "daemon_checkout_ff_failed")
+    assert failed[0]["rollback"] == base and failed[0]["step"] == step
+    assert not env["gh"].prs
+    env["app"]._flush_outbox(night)
+    assert any("DAEMON_CHECKOUT_FF_FAILED" in m for m in env["sys"].coord())
+
+
+def test_start_never_fast_forwards_the_checkout(env) -> None:
+    _prepared(env)
+    _daemon_unloaded(env)
+    head = _git(env["repo"], "rev-parse", "HEAD")
+    _origin_ahead(env, "scripts/ops/eia_nightly.py")
+    env["clock"].at = dt.datetime.fromisoformat("2026-10-16T23:30:00")
+    night = env["app"].start()
+    assert night["status"] == "START_FAILED"
+    assert "DAEMON_CHECKOUT_STALE" in night["started"]["error"]
+    assert _git(env["repo"], "rev-parse", "HEAD") == head
+    assert "daemon_checkout_ff" not in night
+
+
 # ------------------------------------------------------------------ bridge early warning
 
 

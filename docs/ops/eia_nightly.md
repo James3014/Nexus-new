@@ -81,6 +81,22 @@ Sync that venv the way CI does: `uv sync --frozen --all-groups --all-extras`. A 
 `uv sync --frozen` leaves out the `legacy` extra (pydantic, PyYAML), and most verifiers then
 fail at import.
 
+## Daemon checkout freshness
+
+`prepare` and `start` compare the daemon checkout with `origin/main` (fetched with the bot
+credential). If the missing range touches the verifier, driver or dependency lock
+(`DAEMON_CRITICAL_PATHS`), the night is `START_FAILED` with `DAEMON_CHECKOUT_STALE`.
+
+Since #2979, the daytime `prepare` first fast-forwards a STALE or BEHIND checkout to the
+fetched `origin/main`, but only when all of these hold: the work tree is clean, `HEAD` is an
+ancestor of `origin/main`, and `launchctl print` shows the EIA daemon is not loaded. If
+`pyproject.toml` or `uv.lock` changed, it runs `uv sync --frozen --all-groups --all-extras`
+(`~/.local/bin/uv`), then the `python3` import check above, then compares again. The night
+log records the move as `daemon_checkout_ff` (`from`, `to`). To roll back, run
+`git checkout <from>` plus the same `uv sync`. A skipped move is logged as
+`daemon_checkout_ff_skipped` with its reason, and the night fails as before. A failed step is
+`START_FAILED` with `DAEMON_CHECKOUT_FF_FAILED:<step>`. `start` never moves the checkout.
+
 ## Review job
 
 `com.nexus.eia-nightly-review` (17:00, 21:00 and 08:30) runs headless Claude Code on the M4.
