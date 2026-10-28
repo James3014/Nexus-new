@@ -2558,6 +2558,22 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
 
 
+def _paths_overlap(left: Path, right: Path) -> bool:
+    """One directory is the other or inside it, by inode too (case-insensitive APFS, #2967)."""
+
+    def _same(a: Path, b: Path) -> bool:
+        try:
+            return os.path.samefile(a, b)
+        except OSError:
+            return False
+
+    if left.is_relative_to(right) or right.is_relative_to(left):
+        return True
+    return any(_same(parent, right) for parent in (left, *left.parents)) or any(
+        _same(parent, left) for parent in (right, *right.parents)
+    )
+
+
 def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
@@ -2603,7 +2619,7 @@ def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
             root,
             cmds,
             timeout_per_cmd=timeout_sec,
-            isolate_workspace=root.is_relative_to(controller) or controller.is_relative_to(root),
+            isolate_workspace=_paths_overlap(root, controller),
         )
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(

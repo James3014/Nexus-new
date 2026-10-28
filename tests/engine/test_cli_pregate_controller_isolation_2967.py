@@ -112,7 +112,14 @@ def test_isolated_pregate_without_os_barrier_still_runs_only_in_the_copy(tmp_pat
     def no_barrier(work_dir, *, readable=()):
         raise SandboxError("no_os_barrier")
 
+    seen = []
+    real = cli_worker.run_cli_worker
     monkeypatch.setattr(sandbox_module, "model_sandbox", no_barrier)
+    monkeypatch.setattr(
+        cli_worker,
+        "run_cli_worker",
+        lambda request, **kw: seen.append(request) or real(request, **kw),
+    )
     command = f"{sys.executable} -c \"import pathlib; pathlib.Path('probe.txt').write_text('x'); print('CWD=' + str(pathlib.Path.cwd()))\""
 
     passed, results = cli_pregate.run_cli_pregate(root, [command], isolate_workspace=True)
@@ -121,6 +128,9 @@ def test_isolated_pregate_without_os_barrier_still_runs_only_in_the_copy(tmp_pat
     assert results[0]["confinement"] == "copy_only"
     assert f"CWD={root.resolve()}" not in results[0]["stdout_tail"]
     assert _tree(root) == before
+    (request,) = seen
+    assert request.seatbelt_profile is None
+    assert request.sweep_descendants_on_exit is True and request.sweep_roots == (request.cwd,)
 
 
 def test_isolated_pregate_fails_closed_on_any_other_sandbox_error(tmp_path, monkeypatch):
@@ -148,7 +158,8 @@ def test_isolated_pregate_repoints_root_arguments_at_the_copy(tmp_path, unconfin
     venv_python = root / ".venv" / "bin" / "python3"
     command = (
         f"{sys.executable} -c pass --rootdir={root.resolve()} {root.resolve()}/oracle_mod.py {root} "
-        f"{root.resolve()}/missing.py {venv_python} {root.resolve()}2/x.py"
+        f"{root.resolve()}/build/junit.xml -o={root.resolve()}/out.json {venv_python} "
+        f"{root.resolve()}/.git/config {root.resolve()}2/x.py"
     )
 
     passed, results = cli_pregate.run_cli_pregate(root, [command], isolate_workspace=True)
@@ -160,8 +171,10 @@ def test_isolated_pregate_repoints_root_arguments_at_the_copy(tmp_path, unconfin
         f"--rootdir={copy}",
         f"{copy}/oracle_mod.py",
         copy,
-        f"{root.resolve()}/missing.py",  # not in the copy: left as is
-        str(venv_python),  # the root's .venv is not copied
+        f"{copy}/build/junit.xml",  # an output that does not exist yet moves too
+        f"-o={copy}/out.json",
+        str(venv_python),  # the root's .venv is not copied: left as is
+        f"{root.resolve()}/.git/config",
         f"{root.resolve()}2/x.py",  # a sibling path is not the root
     )
     assert results[0]["cmd"] == command
@@ -240,6 +253,23 @@ def test_exec_pregate_capability_isolates_the_controller(tmp_path, monkeypatch, 
     assert _exec_pregate_isolation(monkeypatch, root / relative) == [True]
     # A parent of the controller would contain it too.
     assert _exec_pregate_isolation(monkeypatch, tmp_path) == [True]
+
+
+def test_exec_pregate_overlap_check_uses_inode_identity(tmp_path, monkeypatch):
+    """A case-insensitive volume names one directory two ways; samefile still matches."""
+
+    controller = _controller(tmp_path)
+    alias = tmp_path / "CONTROLLER"
+    real_samefile = registry.os.path.samefile
+
+    def samefile(a, b):
+        names = {str(Path(a)), str(Path(b))}
+        return names == {str(alias), str(controller)} or real_samefile(a, b)
+
+    monkeypatch.setattr(registry.os.path, "samefile", samefile)
+    assert registry._paths_overlap(alias, controller) is True
+    assert registry._paths_overlap(alias / "tasks", controller) is True
+    assert registry._paths_overlap(tmp_path / "other", controller) is False
 
 
 def test_exec_pregate_capability_leaves_other_workspaces_in_place(tmp_path, monkeypatch):

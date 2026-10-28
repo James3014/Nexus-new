@@ -37,9 +37,10 @@ _PREGATE_PYTHON_RE = re.compile(r"python[0-9.]*(\.exe)?")
 _PREGATE_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PREGATE_ENV_ALLOWLIST = frozenset({"LANG", "LC_ALL", "PATH", "PYTHONPATH", "TMPDIR", "VIRTUAL_ENV"})
 # Not copied into the disposable pregate workspace (same set World C skips).
-_PREGATE_COPY_IGNORED = shutil.ignore_patterns(
+_PREGATE_COPY_SKIPPED = (
     ".git", ".nexus", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__", "node_modules"
 )
+_PREGATE_COPY_IGNORED = shutil.ignore_patterns(*_PREGATE_COPY_SKIPPED)
 # The live controller copies ~165 MB in ~2 s; a far larger root fails closed instead.
 _PREGATE_COPY_MAX_BYTES = 1 << 30
 
@@ -47,15 +48,16 @@ _PREGATE_COPY_MAX_BYTES = 1 << 30
 def _relocate_token(token: str, source: Path, copy: Path) -> str:
     """Point an argument naming ``source`` (or a path under it) at the same path in ``copy``.
 
-    ``--opt=<path>`` is handled too. A path missing from the copy (e.g. the root's ``.venv``,
-    which is not copied) is left as is.
+    ``-o=<path>``/``--opt=<path>`` are handled too, and paths that do not exist yet (outputs)
+    move as well. Paths into a directory that is not copied (e.g. the root's ``.venv``) stay.
     """
-    head, sep, value = token.partition("=") if token.startswith("--") else ("", "", token)
+    head, sep, value = token.partition("=") if token.startswith("-") and "=" in token else ("", "", token)
     for root in dict.fromkeys((str(source), str(source.resolve()))):
         if value == root or value.startswith(root + os.sep):
-            moved = str(copy) + value[len(root):]
-            if value == root or os.path.lexists(moved):
-                return f"{head}{sep}{moved}"
+            rest = value[len(root):]
+            if rest.lstrip(os.sep).split(os.sep, 1)[0] in _PREGATE_COPY_SKIPPED:
+                return token
+            return f"{head}{sep}{copy}{rest}"
     return token
 
 
@@ -121,7 +123,9 @@ def run_cli_pregate(
 
     ``isolate_workspace=True`` runs the commands in a disposable copy of the root under the
     model-output OS sandbox (no network, writes only in the copy), so a caller's verifier can
-    never change the root itself (#2967). Without an OS barrier nothing runs (fail closed).
+    never change the root itself (#2967). Without an OS barrier (``no_os_barrier``) the
+    commands still run only in the copy, labelled ``confinement: copy_only``; any other
+    sandbox error, a failed copy or a copy over the size cap fails closed.
     """
     if isinstance(project_root, TargetEnvContext):
         target_repo_root = project_root.target_repo_root
@@ -277,7 +281,9 @@ def _run_pregate_commands(
                         continue
                     # No OS barrier on this host (Linux, or the operator kill switch): the
                     # disposable copy still keeps the root clean, as before but never in it.
-                    worker = run_cli_worker(request)
+                    worker = run_cli_worker(
+                        replace(request, sweep_descendants_on_exit=True, sweep_roots=(request.cwd,))
+                    )
                     confinement = "copy_only"
                 except ValueError as exc:
                     results.extend(_fail_closed_results([cmd], f"pregate sandbox unavailable: {exc}"))
