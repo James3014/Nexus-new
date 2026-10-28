@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "benchmark-ci.yml"
 GATE = "steps.prereq.outputs.runnable == 'true'"
+# Unset and empty secrets are both falsy, so only "true"/"false" reaches the step.
+PRESENCE = re.compile(r"^\$\{\{ secrets\.[A-Z_]+ && 'true' \|\| 'false' \}\}$")
 
 
 def _workflow() -> dict:
@@ -36,7 +39,7 @@ def test_benchmark_ci_checks_prerequisites_before_any_setup():
     assert "exit 1" not in script and "::error::" not in script
     # Only key presence reaches this step, never the secret values.
     env = steps[prereq]["env"]
-    assert all(value.endswith("!= '' }}") for value in env.values())
+    assert all(PRESENCE.match(value) for value in env.values())
 
 
 def test_benchmark_ci_gates_every_later_step_on_the_prerequisites():
@@ -54,6 +57,6 @@ def test_benchmark_ci_uses_secret_values_only_in_the_benchmark_step():
             continue
         if step["name"] == "Check Benchmark Prerequisites":
             # Presence booleans only: no secret value.
-            assert all(value.endswith("!= '' }}") for value in step["env"].values())
+            assert all(PRESENCE.match(value) for value in step["env"].values())
             continue
         assert "secrets." not in text, step["name"]

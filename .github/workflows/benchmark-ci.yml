@@ -48,8 +48,8 @@ jobs:
         id: prereq
         shell: bash
         env:
-          HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
-          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+          HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY && 'true' || 'false' }}
+          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY && 'true' || 'false' }}
         run: |
           set -euo pipefail
           missing=""
