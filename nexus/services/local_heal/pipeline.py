@@ -60,6 +60,7 @@ class HealContext:
     receipt_path: str = ""
     model_decisions: List[Dict[str, Any]] = field(default_factory=list)
     env_denoise: Dict[str, Any] = field(default_factory=dict)
+    env_recipe: Dict[str, Any] = field(default_factory=dict)
     env_resolution: Dict[str, Any] = field(default_factory=dict)
     python_executable: str = ""
     auto_heal_enabled: bool = False
@@ -105,6 +106,7 @@ class HealContext:
             receipt_path=self.receipt_path,
             model_decisions=self.model_decisions,
             env_denoise=self.env_denoise,
+            env_recipe=self.env_recipe,
             env_resolution=self.env_resolution,
             python_executable=self.python_executable,
             auto_heal_enabled=self.auto_heal_enabled,

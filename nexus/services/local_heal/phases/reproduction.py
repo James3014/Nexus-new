@@ -1,6 +1,9 @@
 import hashlib
+import os
 import re
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from nexus.engine.local_model_policy import LocalModelPolicy
@@ -39,6 +42,44 @@ class ReproductionPhase(IPhase):
             self.llm_client = OllamaLLMClient(ollama_generate_fn)
         else:
             self.llm_client = None
+
+    @staticmethod
+    def _link_chain_outside_workspace(path: Path, repo_dir: Path) -> bool:
+        repo = repo_dir.resolve()
+        venv = (repo / ".venv").resolve()
+        hop = path.absolute()
+        for _ in range(40):
+            hop = hop.parent.resolve() / hop.name
+            if repo in hop.parents and venv not in hop.parents:
+                return False
+            if not hop.is_symlink():
+                return True
+            hop = hop.parent / os.readlink(hop)
+        return False  # a link loop or an absurdly long chain
+
+    @staticmethod
+    def _recipe_host_install(pkg: str, venv_python: Path, repo_dir: Path) -> Dict[str, Any]:
+        """Run one recipe install on the host and record what happened to it (#2961).
+
+        ``attempted`` says whether the host command was started; ``returncode`` (or ``error``)
+        is that command's result, not proof that the package is installed.
+
+        uv starts ``venv_python`` to inspect it. ``.venv`` is read-only to model code
+        (model_output_sandbox), but an entry in it may link to a model-writable path elsewhere
+        in the repo. Every hop of the link chain, not just its end, must lie outside the repo or
+        inside ``.venv``: a process the model's script left running could swap a writable hop
+        after this check. uv runs from an empty directory so no ``uv.toml`` around the caller's
+        cwd applies; the argv names the venv entry by absolute path because of that."""
+
+        argv = ["uv", "pip", "install", pkg, "--python", str(venv_python.absolute())]
+        if not ReproductionPhase._link_chain_outside_workspace(venv_python, repo_dir):
+            return {"argv": argv, "attempted": False, "skipped": "interpreter_target_in_workspace"}
+        try:
+            with tempfile.TemporaryDirectory(prefix="nexus-recipe-install-") as cwd:
+                res = subprocess.run(argv, capture_output=True, text=True, timeout=60, cwd=cwd)
+        except Exception as exc:
+            return {"argv": argv, "attempted": True, "error": type(exc).__name__}
+        return {"argv": argv, "attempted": True, "returncode": res.returncode}
 
     @staticmethod
     def _hash(value: str) -> str:
@@ -165,6 +206,7 @@ class ReproductionPhase(IPhase):
         repro_script = input_data.repro_script
         model_decision: Dict[str, Any] = {}
         env_denoise_receipt: Dict[str, Any] = {}
+        env_recipe_receipt: Dict[str, Any] = {}
         success = False
         evidence = ""
         provenance = self._provenance("descriptive", input_data)
@@ -320,6 +362,7 @@ class ReproductionPhase(IPhase):
             if recipe:
                 recipe_attempts += 1
                 venv_python = input_data.repo_dir / ".venv" / "bin" / "python3"
+                host_install_actions: list[Dict[str, Any]] = []
 
                 for action in recipe.allowed_actions:
                     if "pip install" in action:
@@ -329,15 +372,9 @@ class ReproductionPhase(IPhase):
                         # host's python3.
                         pkg = action.replace("pip install ", "").strip("'\"")
                         if pkg and "<" not in pkg and venv_python.exists():
-                            try:
-                                subprocess.run(
-                                    ["uv", "pip", "install", pkg, "--python", str(venv_python)],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=60,
-                                )
-                            except Exception:
-                                pass
+                            host_install_actions.append(
+                                self._recipe_host_install(pkg, venv_python, input_data.repo_dir)
+                            )
                     elif "collections" in action.lower() and "shim" in action.lower():
                         # Collections compatibility shim — inject into repro script
                         shim = (
@@ -363,6 +400,12 @@ class ReproductionPhase(IPhase):
                     "recipe_actions": recipe.allowed_actions,
                     "recipe_succeeded": success,
                     "recipe_attempt": recipe_attempts,
+                }
+                # #2961: the legacy denoiser below replaces env_denoise_receipt, and it feeds
+                # env taxonomy, so the host commands the recipe attempted are kept apart.
+                env_recipe_receipt = {
+                    **env_denoise_receipt,
+                    "host_install_actions": host_install_actions,
                 }
 
         # 4. Legacy env_denoiser auto-heal (existing path)
@@ -413,6 +456,7 @@ class ReproductionPhase(IPhase):
                 repro_evidence=truncated_evidence,
                 error_reason=reason,
                 env_denoise=env_denoise_receipt,
+                env_recipe=env_recipe_receipt,
                 model_decision=model_decision,
                 provenance=provenance,
             )
@@ -424,6 +468,7 @@ class ReproductionPhase(IPhase):
             reproduced=True,
             repro_evidence=truncated_evidence,
             env_denoise=env_denoise_receipt,
+            env_recipe=env_recipe_receipt,
             model_decision=model_decision,
             provenance=provenance,
         )
@@ -485,6 +530,8 @@ class ReproductionPhase(IPhase):
         ctx.op.reproduction_provenance = output.provenance
         if output.env_denoise:
             ctx.op.env_denoise = output.env_denoise
+        if output.env_recipe:
+            ctx.op.env_recipe = output.env_recipe
         if output.model_decision:
             ctx.op.model_decisions.append(output.model_decision)
 

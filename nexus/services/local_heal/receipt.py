@@ -620,6 +620,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "patch_len": len(final_patch),
             "model_decisions": model_decisions,
             "env_denoise": dict(getattr(ctx, "env_denoise", {}) or {}),
+            "env_recipe": dict(getattr(ctx, "env_recipe", {}) or {}),
             "env_resolution": dict(getattr(ctx, "env_resolution", {}) or {}),
             "token_telemetry_status": str(getattr(ctx, "token_telemetry_status", "not_applicable") or "not_applicable"),
             "token_total_estimated": int(getattr(ctx, "token_total_estimated", 0) or 0),
