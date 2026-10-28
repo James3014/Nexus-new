@@ -372,7 +372,7 @@ class ReproductionPhase(IPhase):
             and auto_heal_enabled
             and getattr(self, "env_denoiser", None)
         ):
-            denoise_result = self.env_denoiser.prepare_from_evidence(evidence)
+            denoise_result = self.env_denoiser.prepare_from_evidence(evidence, model_output=True)
             if hasattr(denoise_result, "to_receipt"):
                 env_denoise_receipt = dict(denoise_result.to_receipt())
             else:

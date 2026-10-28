@@ -12,6 +12,11 @@ from typing import Any, Callable, Sequence
 
 
 CommandRunner = Callable[[list[str], Path, int], tuple[int, str]]
+# Import names a model-written script's output may get installed (#2952): the astropy build
+# dependencies the denoiser already installs itself, plus what env_resolver requires.
+_MODEL_OUTPUT_INSTALLABLE = frozenset(
+    {"erfa", "numpy", "extension_helpers", "setuptools", "Cython"}
+)
 
 
 @dataclass
@@ -149,7 +154,23 @@ class EnvDenoiser:
                 python_executable=target_python,
             )
 
-    def prepare_from_evidence(self, evidence: str) -> EnvDenoiseResult:
+    def prepare_from_evidence(
+        self, evidence: str, *, model_output: bool = False
+    ) -> EnvDenoiseResult:
+        # ``model_output``: the evidence is the output of a model-written script (#2952). It may
+        # not pick the package to install, nor make the host build sources that script could
+        # write (setup.py build_ext and its retries run unconfined).
+        if model_output:
+            missing_pkg = self._extract_missing_module(evidence)
+            astropy = missing_pkg == "astropy"
+            if astropy or self._looks_like_astropy_source_checkout_failure(evidence):
+                return EnvDenoiseResult(reason="HOST_BUILD_REFUSED_MODEL_OUTPUT")
+            if missing_pkg is None:
+                return EnvDenoiseResult()
+            if missing_pkg not in _MODEL_OUTPUT_INSTALLABLE:
+                return EnvDenoiseResult(reason="MODULE_NOT_ALLOWLISTED")
+            # Only an allowlisted name reaches the install below, never other evidence text.
+            evidence = f"ModuleNotFoundError: No module named '{missing_pkg}'"
         # 1. 處理 Astropy 特有的 Source Checkout 失敗 (優先級最高)
         if self._looks_like_astropy_source_checkout_failure(evidence):
             # 在編譯前，先確保基礎依賴存在 (單元測試 mock run_command 時跳過)
