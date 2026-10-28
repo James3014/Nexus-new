@@ -13,6 +13,7 @@ import pytest
 
 from nexus.engine.model_output_sandbox import denied_subtrees
 from nexus.engine.sandboxed_lane import os_sandbox_available
+from nexus.services.local_heal import armor_artifact_storage
 from nexus.services.local_heal.armor_artifact_storage import (
     ENV_ARMOR_ALLOW_EPHEMERAL,
     SANDBOX_REACHABLE_WORKSPACES_REL,
@@ -45,6 +46,17 @@ def test_default_work_root_leaves_a_denied_subtree(home):
     assert root == (home / SANDBOX_REACHABLE_WORKSPACES_REL).resolve()
     assert root.is_dir()
     assert not any(root.is_relative_to(subtree) for subtree in denied_subtrees())
+
+
+def test_relocated_work_root_must_still_be_durable(home, monkeypatch):
+    # Only the fallback counts as ephemeral here, so the refusal is the relocation's own check.
+    monkeypatch.setattr(
+        armor_artifact_storage,
+        "is_ephemeral_path",
+        lambda path: str(SANDBOX_REACHABLE_WORKSPACES_REL) in str(path),
+    )
+    with pytest.raises(ValueError, match="isolated work root must be durable"):
+        resolve_isolated_work_root(workspace_root=_deployment(home), env={})
 
 
 def test_default_work_root_is_unchanged_outside_denied_subtrees(home):
