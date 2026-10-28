@@ -418,7 +418,8 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             mutation_allowed=True,
         )
 
-    # Durable parent by default (.nexus/artifacts/local_armor/workspaces).
+    # Durable parent by default (.nexus/artifacts/local_armor/workspaces, or a home-relative
+    # root when that one is sandbox-denied, #2966).
     # When work_dir is set, isolate under that durable/operator-supplied parent.
     tmpdir = str(make_isolated_workspace(work_dir=request.work_dir or None, prefix="armor-apply-"))
 

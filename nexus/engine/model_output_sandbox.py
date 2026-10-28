@@ -60,11 +60,20 @@ _HOST_RUN_SUBTREES = (".git", ".venv")
 __all__ = [
     "SandboxError",
     "argument_file_roots",
+    "denied_subtrees",
     "interpreter_readable_roots",
     "model_sandbox",
     "run_model_argv",
     "run_model_command_string",
 ]
+
+
+def denied_subtrees() -> tuple[Path, ...]:
+    """The ``$HOME`` subtrees model output may never read, resolved against the current home.
+    local_heal keeps its work dirs out of them: a read root inside one is refused (#2966)."""
+
+    home = Path(os.path.expanduser("~")).resolve()
+    return tuple(home / rel for rel in _DENIED_HOME_SUBTREES)
 
 
 def interpreter_readable_roots(executable: str, *, allow_absolute: bool = True) -> list[Path]:
@@ -153,7 +162,6 @@ def model_sandbox(
     extra = tuple(Path(path).resolve() for path in writable)
     if not all(path.is_dir() for path in extra):
         raise SandboxError("writable_dir_missing")
-    home = Path(os.path.expanduser("~")).resolve()
     # The host runs git and the task interpreter in work_dir after the model's command (#2945):
     # a planted hook, git config (core.fsmonitor, diff.external) or venv file would run there,
     # unconfined. Both the path and, for a symlink, its target stay unwritable.
@@ -168,7 +176,7 @@ def model_sandbox(
             extra_writable=(work, *extra),
             # /usr/bin/python3, git, make… are xcrun shims that load the active developer dir.
             extra_readable=(*readable, *developer_toolchain_read_roots()),
-            forbidden_subtrees=tuple(home / rel for rel in _DENIED_HOME_SUBTREES),
+            forbidden_subtrees=denied_subtrees(),
             read_only_paths=read_only,
             # Model output never runs host code; its interpreter is granted via ``readable``. The
             # Gateway venv sits under a denied subtree, so granting it refused every run (#2956).
