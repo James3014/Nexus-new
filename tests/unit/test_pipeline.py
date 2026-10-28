@@ -144,7 +144,7 @@ def test_pipeline_retries_reproduction_after_env_denoise(tmp_path, monkeypatch):
     ctx.localized_files = [("hello.py", file_path.read_text(encoding="utf-8"))]
 
     class FakeDenoiser:
-        def prepare_from_evidence(self, evidence):
+        def prepare_from_evidence(self, evidence, *, model_output=False):
             calls["denoise"] += 1
 
             class Result:

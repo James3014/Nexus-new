@@ -149,7 +149,21 @@ class EnvDenoiser:
                 python_executable=target_python,
             )
 
-    def prepare_from_evidence(self, evidence: str) -> EnvDenoiseResult:
+    def prepare_from_evidence(
+        self, evidence: str, *, model_output: bool = False
+    ) -> EnvDenoiseResult:
+        # ``model_output``: the evidence is the output of a model-written script (#2952). Every
+        # heal below runs on the host with repo_dir as cwd, which that script could write:
+        # setup.py build_ext (and its retries) runs its sources, and pip/uv pick up a planted
+        # ``pip`` package or ``uv.toml`` there. So model output triggers none of them.
+        if model_output:
+            if self._looks_like_astropy_source_checkout_failure(evidence):
+                return EnvDenoiseResult(reason="HOST_BUILD_REFUSED_MODEL_OUTPUT")
+            if self._extract_missing_module(evidence) == "astropy":
+                return EnvDenoiseResult(reason="HOST_BUILD_REFUSED_MODEL_OUTPUT")
+            if self._extract_missing_module(evidence):
+                return EnvDenoiseResult(reason="HOST_INSTALL_REFUSED_MODEL_OUTPUT")
+            return EnvDenoiseResult()
         # 1. 處理 Astropy 特有的 Source Checkout 失敗 (優先級最高)
         if self._looks_like_astropy_source_checkout_failure(evidence):
             # 在編譯前，先確保基礎依賴存在 (單元測試 mock run_command 時跳過)
