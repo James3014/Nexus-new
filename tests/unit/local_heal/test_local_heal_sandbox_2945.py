@@ -8,7 +8,6 @@ and the host environment are out of reach while a legitimate run still works; wh
 
 from __future__ import annotations
 
-import os
 import socket
 import subprocess
 import sys
@@ -26,7 +25,6 @@ from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.local_heal.env_denoiser import EnvDenoiser
 from nexus.services.local_heal.interface import ReproductionInput
 from nexus.services.local_heal.micro_verifier import MicroVerifier
-from nexus.services.local_heal.phases import reproduction as reproduction_phase
 from nexus.services.local_heal.phases.reproduction import ReproductionPhase
 from nexus.services.local_heal.reproduction import ReproductionRunner
 
@@ -167,7 +165,7 @@ def _recipe_installs(tmp_path, monkeypatch, evidence: str, *, with_venv: bool) -
         calls.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(reproduction_phase.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     runner = MagicMock()
     runner.run_repro.return_value = (False, evidence)
     runner.last_exit_status = 1
@@ -182,11 +180,11 @@ def _recipe_installs(tmp_path, monkeypatch, evidence: str, *, with_venv: bool) -
 
 
 def test_recipe_never_installs_a_package_named_by_model_output(tmp_path, monkeypatch):
-    # The script's own output names the package; it must not reach pip, in any recipe.
+    # The script's own output names the package; it must not reach pip, in any recipe. Since
+    # #2961 not even the recipe's fixed package is installed: the recipe is chosen from that
+    # output, and uv would start the venv interpreter, which imports from the repo.
     evidence = "ModuleNotFoundError: No module named 'evilpkg'\nSymPy now depends on mpmath"
-    installs = _recipe_installs(tmp_path, monkeypatch, evidence, with_venv=True)
-    venv_python = str(tmp_path / "repo" / ".venv" / "bin" / "python3")
-    assert installs == [["uv", "pip", "install", "mpmath", "--python", venv_python]]
+    assert _recipe_installs(tmp_path, monkeypatch, evidence, with_venv=True) == []
 
 
 def test_recipe_never_installs_into_the_host_python(tmp_path, monkeypatch):
@@ -327,31 +325,26 @@ def test_a_fifo_failure_record_does_not_hang_the_host(tmp_path):
     assert ok is False
 
 
-# --- #2961: the recipe's host install is recorded apart from env_denoise ---------------------
+# --- #2961: the recipe's host install is refused and recorded apart from env_denoise ---------
 
 _MPMATH_EVIDENCE = "ModuleNotFoundError: No module named 'evilpkg'\nSymPy now depends on mpmath"
 
 
-def _make_venv_python(repo: Path, target=None) -> Path:
+def _make_venv_python(repo: Path) -> Path:
     venv_python = repo / ".venv" / "bin" / "python3"
     venv_python.parent.mkdir(parents=True)
-    if target is None:
-        venv_python.write_text("")
-    else:
-        venv_python.symlink_to(target(repo))
+    venv_python.write_text("")
     return venv_python
 
 
-def _record_subprocess(monkeypatch, result=0) -> list[tuple[list[str], dict]]:
-    calls: list[tuple[list[str], dict]] = []
+def _no_subprocess(monkeypatch) -> list[list[str]]:
+    calls: list[list[str]] = []
 
     def fake_run(argv, *args, **kwargs):
-        calls.append((list(argv), kwargs))
-        if isinstance(result, BaseException):
-            raise result
-        return subprocess.CompletedProcess(argv, result, "", "")
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(reproduction_phase.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     return calls
 
 
@@ -392,21 +385,26 @@ def _run_phase(repo: Path, denoiser, runner, *, auto_heal: bool):
     )
 
 
-def test_recipe_host_install_is_recorded_and_env_denoise_is_unchanged(tmp_path, monkeypatch):
+def _refused(venv_python: Path) -> dict:
+    return {
+        "argv": ["uv", "pip", "install", "mpmath", "--python", str(venv_python)],
+        "attempted": False,
+        "skipped": "HOST_INSTALL_REFUSED_MODEL_OUTPUT",
+    }
+
+
+def test_recipe_install_is_refused_recorded_and_env_denoise_is_unchanged(tmp_path, monkeypatch):
     from nexus.services.local_heal.env_taxonomy import classify_env_failure
 
     repo = tmp_path / "repo"
     venv_python = _make_venv_python(repo)
-    calls = _record_subprocess(monkeypatch)
+    calls = _no_subprocess(monkeypatch)
     seen: list = []
     runner = _mpmath_runner()
     out = _run_phase(repo, _refusing_denoiser(repo, seen), runner, auto_heal=True)
-    argv = ["uv", "pip", "install", "mpmath", "--python", str(venv_python)]
-    assert [c[0] for c in calls] == [argv]
+    assert calls == []
     assert out.env_recipe["recipe_id"]
-    assert out.env_recipe["host_install_actions"] == [
-        {"argv": argv, "attempted": True, "returncode": 0}
-    ]
+    assert out.env_recipe["host_install_actions"] == [_refused(venv_python)]
     # The legacy denoiser still saw model output and refused; no rerun after its refusal.
     assert seen == [{"model_output": True}]
     assert runner.run_repro.call_count == 2
@@ -419,174 +417,10 @@ def test_recipe_host_install_is_recorded_and_env_denoise_is_unchanged(tmp_path, 
     )
 
 
-def test_recipe_install_names_the_venv_by_absolute_path_for_a_relative_repo(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    venv_python = _make_venv_python(repo)
-    calls = _record_subprocess(monkeypatch)
-    monkeypatch.chdir(tmp_path)
-    _run_phase(Path("repo"), MagicMock(), _mpmath_runner(), auto_heal=False)
-    [(argv, kwargs)] = calls
-    assert argv[-1] == str(venv_python) and Path(argv[-1]).is_absolute()
-    assert Path(kwargs["cwd"]).resolve() != tmp_path.resolve()
-
-
-def test_recipe_does_not_start_a_venv_interpreter_linked_into_the_workspace(tmp_path, monkeypatch):
-    def target(repo):
-        planted = repo / "tools" / "py"
-        planted.parent.mkdir(parents=True)
-        planted.write_text("#!/bin/sh\n")
-        return planted
-
-    repo = tmp_path / "repo"
-    _make_venv_python(repo, target)
-    calls = _record_subprocess(monkeypatch)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert calls == []
-    [entry] = out.env_recipe["host_install_actions"]
-    assert entry["attempted"] is False
-    assert entry["skipped"] == "interpreter_target_in_workspace"
-
-
-def test_recipe_rejects_a_workspace_hop_even_when_the_chain_ends_outside(tmp_path, monkeypatch):
-    # .venv/bin/python3 -> repo/link -> <outside>/python3: the end is outside the repo, but the
-    # middle link is model-writable and could be swapped after the check.
-    def target(repo):
-        base = tmp_path / "base" / "bin" / "python3"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-        link = repo / "link"
-        link.symlink_to(base)
-        return link
-
-    repo = tmp_path / "repo"
-    _make_venv_python(repo, target)
-    calls = _record_subprocess(monkeypatch)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert calls == []
-    assert out.env_recipe["host_install_actions"][0]["skipped"] == "interpreter_target_in_workspace"
-
-
-def test_recipe_accepts_links_that_stay_inside_the_venv(tmp_path, monkeypatch):
-    def target(repo):
-        real = repo / ".venv" / "bin" / "python3.12"
-        real.parent.mkdir(parents=True, exist_ok=True)
-        real.write_text("")
-        return Path("python3.12")  # relative, as venv creates it
-
-    repo = tmp_path / "repo"
-    (repo / ".venv" / "bin").mkdir(parents=True)
-    venv_python = repo / ".venv" / "bin" / "python3"
-    venv_python.symlink_to(target(repo))
-    calls = _record_subprocess(monkeypatch)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert len(calls) == 1
-    assert out.env_recipe["host_install_actions"][0]["attempted"] is True
-
-
-def test_recipe_rejects_a_venv_bin_dir_linked_into_the_workspace(tmp_path, monkeypatch):
-    # .venv/bin -> repo/evilbin: the entry's own path is under .venv, but its directory is a
-    # model-writable one where python3 could be replaced.
-    repo = tmp_path / "repo"
-    evilbin = repo / "evilbin"
-    evilbin.mkdir(parents=True)
-    (evilbin / "python3").write_text("")
-    (repo / ".venv").mkdir()
-    (repo / ".venv" / "bin").symlink_to(evilbin)
-    calls = _record_subprocess(monkeypatch)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert calls == []
-    assert out.env_recipe["host_install_actions"][0]["skipped"] == "interpreter_target_in_workspace"
-
-
-def test_recipe_install_runs_in_a_fresh_dir_without_python_env(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    _make_venv_python(repo)
-    monkeypatch.setenv("PYTHONPATH", str(repo))
-    monkeypatch.setenv("PYTHONSTARTUP", str(repo / "start.py"))
-    monkeypatch.chdir(repo)
-    calls = _record_subprocess(monkeypatch)
-    _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    [(_, kwargs)] = calls
-    cwd = Path(kwargs["cwd"])
-    assert cwd.name.startswith("nexus-recipe-install-") and not cwd.exists()
-    assert not any(k.startswith("PYTHON") for k in kwargs["env"])
-    assert kwargs["env"].get("PATH") == os.environ["PATH"]
-
-
-@pytest.mark.parametrize(
-    "link",
-    [
-        "../../tools/..",  # ends in "..": lands on the repo directory
-        "../../..",  # the repo itself
-        "../../tools",  # a directory in the repo, not an interpreter
-    ],
-)
-def test_recipe_link_check_rejects_links_ending_on_a_directory(tmp_path, link):
-    repo = tmp_path / "repo"
-    (repo / "tools").mkdir(parents=True)
-    (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "python3").symlink_to(link)
-    check = ReproductionPhase._link_chain_outside_workspace
-    assert check(repo / ".venv" / "bin" / "python3", repo) is False
-
-
-def test_recipe_link_check_gives_no_exemption_when_venv_is_the_repo(tmp_path):
-    repo = tmp_path / "repo"
-    (repo / "bin").mkdir(parents=True)
-    (repo / "bin" / "python3").write_text("")
-    (repo / ".venv").symlink_to(".")
-    check = ReproductionPhase._link_chain_outside_workspace
-    assert check(repo / ".venv" / "bin" / "python3", repo) is False
-
-
-def test_recipe_link_check_rejects_a_loop(tmp_path):
-    # The phase never reaches the check for a loop (``exists()`` is False); the helper itself
-    # must still terminate and refuse.
-    repo = tmp_path / "repo"
-    (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "python3").symlink_to("python3b")
-    (repo / ".venv" / "bin" / "python3b").symlink_to("python3")
-    check = ReproductionPhase._link_chain_outside_workspace
-    assert check(repo / ".venv" / "bin" / "python3", repo) is False
-
-
-def test_recipe_venv_interpreter_outside_the_repo_is_still_used(tmp_path, monkeypatch):
-    def target(repo):
-        base = tmp_path / "base" / "bin" / "python3"
-        base.parent.mkdir(parents=True)
-        base.write_text("")
-        return base
-
-    repo = tmp_path / "repo"
-    _make_venv_python(repo, target)
-    calls = _record_subprocess(monkeypatch)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert len(calls) == 1
-    assert out.env_recipe["host_install_actions"][0]["returncode"] == 0
-
-
-@pytest.mark.parametrize(
-    "result, expected",
-    [
-        (3, {"attempted": True, "returncode": 3}),
-        (subprocess.TimeoutExpired(["uv"], 60), {"attempted": True, "error": "TimeoutExpired"}),
-        (FileNotFoundError("uv"), {"attempted": True, "error": "FileNotFoundError"}),
-    ],
-)
-def test_recipe_install_failures_are_recorded_not_hidden(tmp_path, monkeypatch, result, expected):
-    repo = tmp_path / "repo"
-    _make_venv_python(repo)
-    calls = _record_subprocess(monkeypatch, result)
-    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
-    assert len(calls) == 1
-    [entry] = out.env_recipe["host_install_actions"]
-    assert {k: v for k, v in entry.items() if k != "argv"} == expected
-
-
 def test_recipe_only_keeps_the_env_denoise_shape(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     venv_python = _make_venv_python(repo)
-    _record_subprocess(monkeypatch)
+    assert _no_subprocess(monkeypatch) == []
     out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
     assert set(out.env_denoise) == {
         "recipe_id",
@@ -594,11 +428,15 @@ def test_recipe_only_keeps_the_env_denoise_shape(tmp_path, monkeypatch):
         "recipe_succeeded",
         "recipe_attempt",
     }
-    argv = ["uv", "pip", "install", "mpmath", "--python", str(venv_python)]
-    assert out.env_recipe == {
-        **out.env_denoise,
-        "host_install_actions": [{"argv": argv, "attempted": True, "returncode": 0}],
-    }
+    assert out.env_recipe == {**out.env_denoise, "host_install_actions": [_refused(venv_python)]}
+
+
+def test_recipe_without_a_task_venv_records_no_install(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _no_subprocess(monkeypatch)
+    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
+    assert out.env_recipe["host_install_actions"] == []
 
 
 @pytest.mark.parametrize("recipe_retry_reproduces", [False, True])
@@ -608,7 +446,7 @@ def test_recipe_record_reaches_the_repair_receipt(tmp_path, monkeypatch, recipe_
 
     repo = tmp_path / "repo"
     venv_python = _make_venv_python(repo)
-    _record_subprocess(monkeypatch)
+    calls = _no_subprocess(monkeypatch)
     retry = (True, "AssertionError: bug present " * 3) if recipe_retry_reproduces else None
     runner = _mpmath_runner([(False, _MPMATH_EVIDENCE), retry or (False, _MPMATH_EVIDENCE)])
     seen: list = []
@@ -620,9 +458,9 @@ def test_recipe_record_reaches_the_repair_receipt(tmp_path, monkeypatch, recipe_
     ReproductionPhase(runner, _refusing_denoiser(repo, seen)).execute(v2)
     legacy.sync_from_v2(v2)
     receipt = build_repair_receipt(legacy)
-    argv = ["uv", "pip", "install", "mpmath", "--python", str(venv_python)]
+    assert calls == []
     recipe = receipt["telemetries"]["env_recipe"]
-    assert recipe["host_install_actions"] == [{"argv": argv, "attempted": True, "returncode": 0}]
+    assert recipe["host_install_actions"] == [_refused(venv_python)]
     assert recipe["recipe_succeeded"] is recipe_retry_reproduces
     if recipe_retry_reproduces:
         # The denoiser is not reached; env_denoise is the recipe receipt, as before #2961.
@@ -632,7 +470,18 @@ def test_recipe_record_reaches_the_repair_receipt(tmp_path, monkeypatch, recipe_
         }
     else:
         assert seen == [{"model_output": True}]
-        assert (
-            receipt["telemetries"]["env_denoise"]["reason"] == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
-        )
-        assert "host_install" not in str(receipt["telemetries"]["env_denoise"])
+        denoise = receipt["telemetries"]["env_denoise"]
+        assert denoise["reason"] == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
+        assert "host_install" not in str(denoise)
+
+
+def test_legacy_context_hands_env_recipe_to_v2_and_back(tmp_path):
+    from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
+
+    legacy = LegacyHealContext(instance_id="t", repo_dir=tmp_path, problem_statement="bug")
+    legacy.env_recipe = {"recipe_id": "r", "host_install_actions": []}
+    v2 = legacy.to_v2()
+    assert v2.op.env_recipe == legacy.env_recipe
+    back = LegacyHealContext(instance_id="t", repo_dir=tmp_path, problem_statement="bug")
+    back.sync_from_v2(v2)
+    assert back.env_recipe == legacy.env_recipe

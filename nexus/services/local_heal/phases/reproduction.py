@@ -1,9 +1,5 @@
 import hashlib
-import os
 import re
-import subprocess
-import tempfile
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from nexus.engine.local_model_policy import LocalModelPolicy
@@ -42,55 +38,6 @@ class ReproductionPhase(IPhase):
             self.llm_client = OllamaLLMClient(ollama_generate_fn)
         else:
             self.llm_client = None
-
-    @staticmethod
-    def _link_chain_outside_workspace(path: Path, repo_dir: Path) -> bool:
-        """True when ``path`` leads to a regular file and no hop of its link chain (each hop's
-        directory resolved) lies in ``repo_dir`` outside its ``.venv``."""
-
-        repo = repo_dir.resolve()
-        venv: Path | None = (repo / ".venv").resolve()
-        if venv == repo or venv in repo.parents:
-            venv = None  # a .venv that is the repo (or above it) exempts nothing
-        hop = path.absolute()
-        for _ in range(40):
-            hop = hop.parent.resolve() / hop.name
-            in_venv = venv is not None and venv in hop.parents
-            if repo in hop.parents and not in_venv:
-                return False
-            if not hop.is_symlink():
-                return hop.is_file()  # a hop ending on a directory (the repo, "..") fails here
-            hop = hop.parent / os.readlink(hop)
-        return False  # a link loop or an absurdly long chain
-
-    @staticmethod
-    def _recipe_host_install(pkg: str, venv_python: Path, repo_dir: Path) -> Dict[str, Any]:
-        """Run one recipe install on the host and record what happened to it (#2961).
-
-        ``attempted`` says whether the host command was started; ``returncode`` (or ``error``)
-        is that command's result, not proof that the package is installed.
-
-        uv starts ``venv_python`` to inspect it. ``.venv`` is read-only to model code
-        (model_output_sandbox), but an entry in it may link to a model-writable path elsewhere
-        in the repo. Every hop of the link chain, not just its end, must lie outside the repo or
-        inside ``.venv``: a process the model's script left running could swap a writable hop
-        after this check. uv runs from an empty directory (no ``uv.toml`` from the caller's cwd
-        or the repo; host and user uv config still apply) without the caller's ``PYTHON*``
-        variables, so that interpreter imports nothing from a path the caller pointed at; the
-        argv names the venv entry by absolute path because of the cwd."""
-
-        argv = ["uv", "pip", "install", pkg, "--python", str(venv_python.absolute())]
-        if not ReproductionPhase._link_chain_outside_workspace(venv_python, repo_dir):
-            return {"argv": argv, "attempted": False, "skipped": "interpreter_target_in_workspace"}
-        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
-        try:
-            with tempfile.TemporaryDirectory(prefix="nexus-recipe-install-") as cwd:
-                res = subprocess.run(
-                    argv, capture_output=True, text=True, timeout=60, cwd=cwd, env=env
-                )
-        except Exception as exc:
-            return {"argv": argv, "attempted": True, "error": type(exc).__name__}
-        return {"argv": argv, "attempted": True, "returncode": res.returncode}
 
     @staticmethod
     def _hash(value: str) -> str:
@@ -377,15 +324,19 @@ class ReproductionPhase(IPhase):
 
                 for action in recipe.allowed_actions:
                     if "pip install" in action:
-                        # #2945: install only the recipe's own fixed requirement, never a name
-                        # parsed from the output of the model-written script (that output is
-                        # model-controlled), and only into the task's own venv, never the
-                        # host's python3.
+                        # Recorded, never run (#2961). The recipe was picked from the
+                        # model-written script's output (#2952), and uv would start the venv
+                        # interpreter on the host: an editable install's .pth puts the repo on
+                        # sys.path, so a sitecustomize.py the model wrote there runs unconfined.
+                        # Only the recipe's own fixed requirement for the task's venv (#2945).
                         pkg = action.replace("pip install ", "").strip("'\"")
                         if pkg and "<" not in pkg and venv_python.exists():
-                            host_install_actions.append(
-                                self._recipe_host_install(pkg, venv_python, input_data.repo_dir)
-                            )
+                            argv = ["uv", "pip", "install", pkg, "--python", str(venv_python)]
+                            host_install_actions.append({
+                                "argv": argv,
+                                "attempted": False,
+                                "skipped": "HOST_INSTALL_REFUSED_MODEL_OUTPUT",
+                            })
                     elif "collections" in action.lower() and "shim" in action.lower():
                         # Collections compatibility shim — inject into repro script
                         shim = (
@@ -413,7 +364,7 @@ class ReproductionPhase(IPhase):
                     "recipe_attempt": recipe_attempts,
                 }
                 # #2961: the legacy denoiser below replaces env_denoise_receipt, and it feeds
-                # env taxonomy, so the host commands the recipe attempted are kept apart.
+                # env taxonomy, so the installs the recipe refused are recorded apart.
                 env_recipe_receipt = {
                     **env_denoise_receipt,
                     "host_install_actions": host_install_actions,
