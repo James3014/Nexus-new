@@ -170,6 +170,9 @@ def model_sandbox(
             extra_readable=(*readable, *developer_toolchain_read_roots()),
             forbidden_subtrees=tuple(home / rel for rel in _DENIED_HOME_SUBTREES),
             read_only_paths=read_only,
+            # Model output never runs host code; its interpreter is granted via ``readable``. The
+            # Gateway venv sits under a denied subtree, so granting it refused every run (#2956).
+            host_interpreter_readable=False,
         )
         yield [SANDBOX_EXEC, "-p", bound.profile], dict(bound.env)
 

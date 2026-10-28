@@ -7,6 +7,7 @@ nothing runs. No test skips.
 
 from __future__ import annotations
 
+import os
 import socket
 import sys
 from pathlib import Path
@@ -25,6 +26,9 @@ from nexus.services.local_heal.isolated_verifier import (
 )
 
 _PY = [sys.executable, "-I", "-c"]
+# The model sandbox grants a command's own interpreter, never the host's (#2956): pass the test
+# interpreter's roots the way production callers (isolated verifier, micro_verifier) do.
+_PY_ROOTS = mos.interpreter_readable_roots(sys.executable)
 
 
 def _marker_cmd(marker: Path) -> str:
@@ -131,7 +135,10 @@ def test_only_python_interpreters_widen_reads(tmp_path, monkeypatch):
 
 
 def _net(port: int) -> str:
-    return f"import socket; socket.create_connection(('127.0.0.1', {port}), 3); print('CONNECTED')"
+    return (
+        "import socket; print('STARTED'); "
+        f"socket.create_connection(('127.0.0.1', {port}), 3); print('CONNECTED')"
+    )
 
 
 @pytest.fixture
@@ -155,9 +162,12 @@ def _expect_confined_or_refused(run):
 
 def test_network_is_denied(tmp_path, listener):
     res = _expect_confined_or_refused(
-        lambda: mos.run_model_argv([*_PY, _net(listener)], work_dir=tmp_path, timeout=20)
+        lambda: mos.run_model_argv(
+            [*_PY, _net(listener)], work_dir=tmp_path, timeout=20, readable=_PY_ROOTS
+        )
     )
     if res is not None:
+        assert "STARTED" in res.stdout  # the interpreter ran: the connect itself was denied
         assert res.returncode != 0
         assert "CONNECTED" not in res.stdout
 
@@ -169,7 +179,7 @@ def test_write_outside_work_dir_is_denied(tmp_path):
     inside = work / "inside.txt"
     script = f"open({str(inside)!r}, 'w').write('x'); open({str(outside)!r}, 'w').write('x')"
     res = _expect_confined_or_refused(
-        lambda: mos.run_model_argv([*_PY, script], work_dir=work, timeout=20)
+        lambda: mos.run_model_argv([*_PY, script], work_dir=work, timeout=20, readable=_PY_ROOTS)
     )
     if res is not None:
         assert inside.exists()
@@ -179,14 +189,17 @@ def test_write_outside_work_dir_is_denied(tmp_path):
 
 def test_drone_bash_cannot_reach_the_network_or_leak_env(tmp_path, monkeypatch, listener):
     monkeypatch.setenv("NEXUS_TEST_SECRET_2936", "s3cret")
+    # A model command names its interpreter by bare name, resolved on the trusted PATH.
+    monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}")
     box = DroneToolBox(tmp_path)
     env_out = box.bash_exec("/usr/bin/env")
-    net_out = box.bash_exec(f'{sys.executable} -I -c "{_net(listener)}"')
+    net_out = box.bash_exec(f'{Path(sys.executable).name} -I -c "{_net(listener)}"')
     if not os_sandbox_available():
         assert env_out["exit_code"] == -1 and net_out["exit_code"] == -1
         return
     assert env_out["exit_code"] == 0
     assert "s3cret" not in env_out["stdout"]
+    assert "STARTED" in net_out["stdout"]
     assert net_out["exit_code"] != 0
     assert "CONNECTED" not in net_out["stdout"]
 
@@ -208,7 +221,7 @@ def test_token_stores_under_home_stay_unreadable(tmp_path, monkeypatch):
 
     def run(path, readable):
         return mos.run_model_argv(
-            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=readable
+            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=[*_PY_ROOTS, *readable]
         )
 
     if not os_sandbox_available():
@@ -239,7 +252,10 @@ def test_bench_hidden_staging_stays_unreadable_under_a_granted_parent(tmp_path, 
 
     def run(path):
         return mos.run_model_argv(
-            [*_PY, read, str(path)], work_dir=work, timeout=20, readable=[home / ".cache"]
+            [*_PY, read, str(path)],
+            work_dir=work,
+            timeout=20,
+            readable=[*_PY_ROOTS, home / ".cache"],
         )
 
     if not os_sandbox_available():

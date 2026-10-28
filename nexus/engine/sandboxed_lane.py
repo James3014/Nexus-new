@@ -684,9 +684,12 @@ def confinement(
     extra_readable: Iterable[Path | str] = (),
     forbidden_subtrees: Iterable[Path | str] = (),
     read_only_paths: Iterable[str] = (),
+    host_interpreter_readable: bool = True,
 ) -> Confinement:
     """Bind a sandbox (``home/`` and ``tmp/`` created inside ``sandbox``): writes and reads only
     in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
+    ``host_interpreter_readable=False`` leaves out this process's own interpreter prefixes, for
+    commands that start their own interpreter (granted via ``extra_readable``) (#2956).
     Raises SandboxError("no_os_barrier") when there is no OS barrier: nothing may run."""
 
     if not os_sandbox_available():
@@ -701,7 +704,7 @@ def confinement(
     read_roots = checked_read_roots(
         [
             *(str(path) for path in writable),
-            *interpreter_read_roots(),
+            *(interpreter_read_roots() if host_interpreter_readable else ()),
             # Optional read-only system toolchain roots (e.g. /usr/bin for git); validated by
             # checked_read_roots like every other root, never $HOME or a repository.
             *(str(path) for path in extra_readable if os.path.exists(path)),
