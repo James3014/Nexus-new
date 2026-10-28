@@ -683,6 +683,8 @@
 | .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
 | .github/workflows/pr-bindings-preflight.yml | tests/ops/test_pr_bindings_preflight_workflow.py, tests/ops/test_pr_workflow_concurrency.py | active | high | bindings_preflight_workflow_contract |
 | .github/workflows/sibling-merge-checks.yml | tests/ops/test_sibling_merge_checks.py | active | high | sibling_merge_checks_contract |
+| .github/workflows/benchmark-ci.yml | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | benchmark_ci_dispatch_only_contract |
+| tests/ops/test_benchmark_ci_dispatch_only_2964.py | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | test_contract |
 | scripts/ops/sibling_bindings_check.py | tests/ops/test_sibling_merge_checks.py | active | high | sibling_merge_checks_contract |
 | docs/ops/sibling-merge-checks-caller.yml | tests/ops/test_sibling_merge_checks.py | active | medium | sibling_merge_checks_contract |
 | tests/ops/test_sibling_merge_checks.py | tests/ops/test_sibling_merge_checks.py | active | high | test_contract |
