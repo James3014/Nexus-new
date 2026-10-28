@@ -1,8 +1,8 @@
 """#2952: the reproduction phase's legacy auto-heal acts on a model-written script's output.
 
-That output may not pick the package the host installs, nor make the host build (setup.py
-build_ext and its shim / compat retries) sources the script could write. Allowlisted build
-dependencies are still installed; everything else runs no command at all.
+Every heal runs on the host with the repo as cwd, which that script could write (a planted
+``pip`` package or ``uv.toml`` is picked up by ``python -m pip`` / ``uv pip``; setup.py and its
+shim / compat retries run its sources). So model output runs no heal command at all.
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ def test_a_model_named_package_is_not_installed(tmp_path, output):
     calls: list = []
     result = _denoiser(tmp_path, calls).prepare_from_evidence(output, model_output=True)
     assert calls == []
-    assert result.attempted is False and result.reason == "MODULE_NOT_ALLOWLISTED"
-    assert "evilpkg" not in result.reason
+    assert result.attempted is False and result.reason == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
 
 
 @pytest.mark.parametrize(
@@ -66,14 +65,23 @@ def test_no_host_build_from_model_output(tmp_path, output):
     assert result.attempted is False and result.reason == "HOST_BUILD_REFUSED_MODEL_OUTPUT"
 
 
-def test_an_allowlisted_build_dependency_is_still_installed(tmp_path, monkeypatch):
-    monkeypatch.setattr("shutil.which", lambda name: None)
+@pytest.mark.parametrize("name", ["erfa", "numpy", "setuptools"])
+def test_even_a_common_build_dependency_is_not_installed(tmp_path, name):
+    # pip / uv run with the repo as cwd: a planted pip package or uv.toml there would run.
     calls: list = []
     result = _denoiser(tmp_path, calls).prepare_from_evidence(
-        "ModuleNotFoundError: No module named 'erfa'", model_output=True
+        f"ModuleNotFoundError: No module named '{name}'", model_output=True
     )
-    assert calls == [["python3", "-m", "pip", "install", "pyerfa"]]
-    assert result.succeeded is True
+    assert calls == []
+    assert result.reason == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
+
+
+def test_unrelated_output_runs_nothing(tmp_path):
+    calls: list = []
+    result = _denoiser(tmp_path, calls).prepare_from_evidence(
+        "AssertionError: bug present", model_output=True
+    )
+    assert calls == [] and result.reason == "UNSUPPORTED"
 
 
 def test_trusted_evidence_keeps_the_legacy_build(tmp_path):
@@ -102,4 +110,4 @@ def test_the_reproduction_phase_passes_the_script_output_as_model_output(tmp_pat
     )
     phase.execute(ctx)
     assert calls == []
-    assert ctx.op.env_denoise.get("reason") == "MODULE_NOT_ALLOWLISTED"
+    assert ctx.op.env_denoise.get("reason") == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
