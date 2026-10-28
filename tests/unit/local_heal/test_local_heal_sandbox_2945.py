@@ -338,13 +338,15 @@ def _make_venv_python(repo: Path) -> Path:
 
 
 def _no_subprocess(monkeypatch) -> list[list[str]]:
+    # Popen underlies run / check_output / call, so any host command the phase starts lands
+    # here (and fails the run), whichever helper it uses.
     calls: list[list[str]] = []
 
-    def fake_run(argv, *args, **kwargs):
-        calls.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, "", "")
+    def fake_popen(argv, *args, **kwargs):
+        calls.append(list(argv) if not isinstance(argv, str) else [argv])
+        raise AssertionError(f"host subprocess started: {argv!r}")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     return calls
 
 
