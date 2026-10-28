@@ -50,6 +50,7 @@ class ReproductionOutput:
     repro_evidence: str
     error_reason: str = ""
     env_denoise: Dict[str, Any] = field(default_factory=dict)
+    env_recipe: Dict[str, Any] = field(default_factory=dict)
     model_decision: Dict[str, Any] = field(default_factory=dict)
     provenance: ReproductionProvenance = field(default_factory=ReproductionProvenance)
 

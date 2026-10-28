@@ -1,6 +1,5 @@
 import hashlib
 import re
-import subprocess
 from typing import Any, Dict, Optional
 
 from nexus.engine.local_model_policy import LocalModelPolicy
@@ -165,6 +164,7 @@ class ReproductionPhase(IPhase):
         repro_script = input_data.repro_script
         model_decision: Dict[str, Any] = {}
         env_denoise_receipt: Dict[str, Any] = {}
+        env_recipe_receipt: Dict[str, Any] = {}
         success = False
         evidence = ""
         provenance = self._provenance("descriptive", input_data)
@@ -320,24 +320,23 @@ class ReproductionPhase(IPhase):
             if recipe:
                 recipe_attempts += 1
                 venv_python = input_data.repo_dir / ".venv" / "bin" / "python3"
+                host_install_actions: list[Dict[str, Any]] = []
 
                 for action in recipe.allowed_actions:
                     if "pip install" in action:
-                        # #2945: install only the recipe's own fixed requirement, never a name
-                        # parsed from the output of the model-written script (that output is
-                        # model-controlled), and only into the task's own venv, never the
-                        # host's python3.
+                        # Recorded, never run (#2961). The recipe was picked from the
+                        # model-written script's output (#2952), and uv would start the venv
+                        # interpreter on the host: an editable install's .pth puts the repo on
+                        # sys.path, so a sitecustomize.py the model wrote there runs unconfined.
+                        # Only the recipe's own fixed requirement for the task's venv (#2945).
                         pkg = action.replace("pip install ", "").strip("'\"")
                         if pkg and "<" not in pkg and venv_python.exists():
-                            try:
-                                subprocess.run(
-                                    ["uv", "pip", "install", pkg, "--python", str(venv_python)],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=60,
-                                )
-                            except Exception:
-                                pass
+                            argv = ["uv", "pip", "install", pkg, "--python", str(venv_python)]
+                            host_install_actions.append({
+                                "argv": argv,
+                                "attempted": False,
+                                "skipped": "HOST_INSTALL_REFUSED_MODEL_OUTPUT",
+                            })
                     elif "collections" in action.lower() and "shim" in action.lower():
                         # Collections compatibility shim — inject into repro script
                         shim = (
@@ -363,6 +362,12 @@ class ReproductionPhase(IPhase):
                     "recipe_actions": recipe.allowed_actions,
                     "recipe_succeeded": success,
                     "recipe_attempt": recipe_attempts,
+                }
+                # #2961: the legacy denoiser below replaces env_denoise_receipt, and it feeds
+                # env taxonomy, so the installs the recipe refused are recorded apart.
+                env_recipe_receipt = {
+                    **env_denoise_receipt,
+                    "host_install_actions": host_install_actions,
                 }
 
         # 4. Legacy env_denoiser auto-heal (existing path)
@@ -413,6 +418,7 @@ class ReproductionPhase(IPhase):
                 repro_evidence=truncated_evidence,
                 error_reason=reason,
                 env_denoise=env_denoise_receipt,
+                env_recipe=env_recipe_receipt,
                 model_decision=model_decision,
                 provenance=provenance,
             )
@@ -424,6 +430,7 @@ class ReproductionPhase(IPhase):
             reproduced=True,
             repro_evidence=truncated_evidence,
             env_denoise=env_denoise_receipt,
+            env_recipe=env_recipe_receipt,
             model_decision=model_decision,
             provenance=provenance,
         )
@@ -485,6 +492,8 @@ class ReproductionPhase(IPhase):
         ctx.op.reproduction_provenance = output.provenance
         if output.env_denoise:
             ctx.op.env_denoise = output.env_denoise
+        if output.env_recipe:
+            ctx.op.env_recipe = output.env_recipe
         if output.model_decision:
             ctx.op.model_decisions.append(output.model_decision)
 

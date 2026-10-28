@@ -22,9 +22,9 @@ from nexus.engine.model_output_sandbox import (
     run_model_argv,
 )
 from nexus.engine.sandboxed_lane import os_sandbox_available
+from nexus.services.local_heal.env_denoiser import EnvDenoiser
 from nexus.services.local_heal.interface import ReproductionInput
 from nexus.services.local_heal.micro_verifier import MicroVerifier
-from nexus.services.local_heal.phases import reproduction as reproduction_phase
 from nexus.services.local_heal.phases.reproduction import ReproductionPhase
 from nexus.services.local_heal.reproduction import ReproductionRunner
 
@@ -165,7 +165,7 @@ def _recipe_installs(tmp_path, monkeypatch, evidence: str, *, with_venv: bool) -
         calls.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(reproduction_phase.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     runner = MagicMock()
     runner.run_repro.return_value = (False, evidence)
     runner.last_exit_status = 1
@@ -180,11 +180,11 @@ def _recipe_installs(tmp_path, monkeypatch, evidence: str, *, with_venv: bool) -
 
 
 def test_recipe_never_installs_a_package_named_by_model_output(tmp_path, monkeypatch):
-    # The script's own output names the package; it must not reach pip, in any recipe.
+    # The script's own output names the package; it must not reach pip, in any recipe. Since
+    # #2961 not even the recipe's fixed package is installed: the recipe is chosen from that
+    # output, and uv would start the venv interpreter, which imports from the repo.
     evidence = "ModuleNotFoundError: No module named 'evilpkg'\nSymPy now depends on mpmath"
-    installs = _recipe_installs(tmp_path, monkeypatch, evidence, with_venv=True)
-    venv_python = str(tmp_path / "repo" / ".venv" / "bin" / "python3")
-    assert installs == [["uv", "pip", "install", "mpmath", "--python", venv_python]]
+    assert _recipe_installs(tmp_path, monkeypatch, evidence, with_venv=True) == []
 
 
 def test_recipe_never_installs_into_the_host_python(tmp_path, monkeypatch):
@@ -323,3 +323,167 @@ def test_a_fifo_failure_record_does_not_hang_the_host(tmp_path):
     script = "import os, __main__\nos.mkfifo(__main__._nexus_record_path)\nos._exit(1)\n"
     ok, _ = runner.run_repro(script)
     assert ok is False
+
+
+# --- #2961: the recipe's host install is refused and recorded apart from env_denoise ---------
+
+_MPMATH_EVIDENCE = "ModuleNotFoundError: No module named 'evilpkg'\nSymPy now depends on mpmath"
+
+
+def _make_venv_python(repo: Path) -> Path:
+    venv_python = repo / ".venv" / "bin" / "python3"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("")
+    return venv_python
+
+
+def _no_subprocess(monkeypatch) -> list[list[str]]:
+    # Popen underlies run / check_output / call, so any host command the phase starts lands
+    # here (and fails the run), whichever helper it uses.
+    calls: list[list[str]] = []
+
+    def fake_popen(argv, *args, **kwargs):
+        calls.append(list(argv) if not isinstance(argv, str) else [argv])
+        raise AssertionError(f"host subprocess started: {argv!r}")
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    return calls
+
+
+def _mpmath_runner(outcomes=None) -> MagicMock:
+    runner = MagicMock()
+    if outcomes is None:
+        runner.run_repro.return_value = (False, _MPMATH_EVIDENCE)
+    else:
+        runner.run_repro.side_effect = outcomes
+    runner.last_exit_status = 1
+    runner.last_reason_code = "unclassified_nonzero_exit"
+    runner.last_command = (sys.executable, "reproduce_bug.py")
+    runner.last_script_sha256 = "a" * 64
+    runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
+    return runner
+
+
+def _refusing_denoiser(repo: Path, seen: list) -> EnvDenoiser:
+    # compat_python_executable given: no ``uv python find`` probe, so the recorded
+    # subprocess calls are every one the phase starts.
+    denoiser = EnvDenoiser(
+        repo, run_command=lambda cmd, cwd, timeout: (0, "ok"), compat_python_executable="python3"
+    )
+    real_prepare = denoiser.prepare_from_evidence
+
+    def prepare(evidence, **kwargs):
+        seen.append(kwargs)
+        return real_prepare(evidence, **kwargs)
+
+    setattr(denoiser, "prepare_from_evidence", prepare)  # noqa: B010 - records the call
+    return denoiser
+
+
+def _run_phase(repo: Path, denoiser, runner, *, auto_heal: bool):
+    return ReproductionPhase(runner, denoiser).run(
+        ReproductionInput("test", repo, "bug", "import evilpkg", sys.executable),
+        auto_heal_enabled=auto_heal,
+    )
+
+
+def _refused(venv_python: Path) -> dict:
+    return {
+        "argv": ["uv", "pip", "install", "mpmath", "--python", str(venv_python)],
+        "attempted": False,
+        "skipped": "HOST_INSTALL_REFUSED_MODEL_OUTPUT",
+    }
+
+
+def test_recipe_install_is_refused_recorded_and_env_denoise_is_unchanged(tmp_path, monkeypatch):
+    from nexus.services.local_heal.env_taxonomy import classify_env_failure
+
+    repo = tmp_path / "repo"
+    venv_python = _make_venv_python(repo)
+    calls = _no_subprocess(monkeypatch)
+    seen: list = []
+    runner = _mpmath_runner()
+    out = _run_phase(repo, _refusing_denoiser(repo, seen), runner, auto_heal=True)
+    assert calls == []
+    assert out.env_recipe["recipe_id"]
+    assert out.env_recipe["host_install_actions"] == [_refused(venv_python)]
+    # The legacy denoiser still saw model output and refused; no rerun after its refusal.
+    assert seen == [{"model_output": True}]
+    assert runner.run_repro.call_count == 2
+    alone = _refusing_denoiser(repo, []).prepare_from_evidence(_MPMATH_EVIDENCE, model_output=True)
+    assert out.env_denoise == dict(alone.to_receipt())
+    assert "host_install" not in str(out.env_denoise)
+    reason = out.error_reason
+    assert classify_env_failure(reason, {}, out.env_denoise) == classify_env_failure(
+        reason, {}, dict(alone.to_receipt())
+    )
+
+
+def test_recipe_only_keeps_the_env_denoise_shape(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    venv_python = _make_venv_python(repo)
+    assert _no_subprocess(monkeypatch) == []
+    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
+    assert set(out.env_denoise) == {
+        "recipe_id",
+        "recipe_actions",
+        "recipe_succeeded",
+        "recipe_attempt",
+    }
+    assert out.env_recipe == {**out.env_denoise, "host_install_actions": [_refused(venv_python)]}
+
+
+def test_recipe_without_a_task_venv_records_no_install(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _no_subprocess(monkeypatch)
+    out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
+    assert out.env_recipe["host_install_actions"] == []
+
+
+@pytest.mark.parametrize("recipe_retry_reproduces", [False, True])
+def test_recipe_record_reaches_the_repair_receipt(tmp_path, monkeypatch, recipe_retry_reproduces):
+    from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
+    from nexus.services.local_heal.receipt import build_repair_receipt
+
+    repo = tmp_path / "repo"
+    venv_python = _make_venv_python(repo)
+    calls = _no_subprocess(monkeypatch)
+    retry = (True, "AssertionError: bug present " * 3) if recipe_retry_reproduces else None
+    runner = _mpmath_runner([(False, _MPMATH_EVIDENCE), retry or (False, _MPMATH_EVIDENCE)])
+    seen: list = []
+    legacy = LegacyHealContext(
+        instance_id="t-2961", repo_dir=repo, problem_statement="bug", auto_heal_enabled=True
+    )
+    legacy.repro_script = "import evilpkg"
+    v2 = legacy.to_v2()
+    ReproductionPhase(runner, _refusing_denoiser(repo, seen)).execute(v2)
+    legacy.sync_from_v2(v2)
+    receipt = build_repair_receipt(legacy)
+    assert calls == []
+    recipe = receipt["telemetries"]["env_recipe"]
+    assert recipe["host_install_actions"] == [_refused(venv_python)]
+    assert recipe["recipe_succeeded"] is recipe_retry_reproduces
+    if recipe_retry_reproduces:
+        # The denoiser is not reached; env_denoise is the recipe receipt, as before #2961.
+        assert seen == []
+        assert receipt["telemetries"]["env_denoise"] == {
+            k: v for k, v in recipe.items() if k != "host_install_actions"
+        }
+    else:
+        assert seen == [{"model_output": True}]
+        denoise = receipt["telemetries"]["env_denoise"]
+        assert denoise["reason"] == "HOST_INSTALL_REFUSED_MODEL_OUTPUT"
+        assert "host_install" not in str(denoise)
+
+
+def test_legacy_context_hands_env_recipe_to_v2_and_back(tmp_path):
+    from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
+
+    legacy = LegacyHealContext(instance_id="t", repo_dir=tmp_path, problem_statement="bug")
+    legacy.env_recipe = {"recipe_id": "r", "host_install_actions": []}
+    v2 = legacy.to_v2()
+    assert v2.op.env_recipe == legacy.env_recipe
+    back = LegacyHealContext(instance_id="t", repo_dir=tmp_path, problem_statement="bug")
+    back.sync_from_v2(v2)
+    assert back.env_recipe == legacy.env_recipe

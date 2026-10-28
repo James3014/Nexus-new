@@ -85,6 +85,7 @@ class OperationalContext:
     refusal_detected: bool = False
     empty_response: bool = False
     env_denoise: Dict[str, Any] = field(default_factory=dict)
+    env_recipe: Dict[str, Any] = field(default_factory=dict)
     env_resolution: Dict[str, Any] = field(default_factory=dict)
     run_group: str | None = None
     route_context: Dict[str, Any] = field(default_factory=dict)
