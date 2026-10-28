@@ -115,6 +115,7 @@ def test_isolated_pregate_without_os_barrier_still_runs_only_in_the_copy(tmp_pat
     seen = []
     real = cli_worker.run_cli_worker
     monkeypatch.setattr(sandbox_module, "model_sandbox", no_barrier)
+    monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")  # the operator's explicit kill switch
     monkeypatch.setattr(
         cli_worker,
         "run_cli_worker",
@@ -131,6 +132,29 @@ def test_isolated_pregate_without_os_barrier_still_runs_only_in_the_copy(tmp_pat
     (request,) = seen
     assert request.seatbelt_profile is None
     assert request.sweep_descendants_on_exit is True and request.sweep_roots == (request.cwd,)
+
+
+def test_isolated_pregate_on_macos_fails_closed_without_barrier_unless_kill_switch(
+    tmp_path, monkeypatch
+):
+    """A broken sandbox-exec on macOS must not silently unconfine the controller's pregate."""
+
+    root = _controller(tmp_path)
+
+    def no_barrier(work_dir, *, readable=()):
+        raise SandboxError("no_os_barrier")
+
+    calls = []
+    monkeypatch.setattr(sandbox_module, "model_sandbox", no_barrier)
+    monkeypatch.setattr(cli_worker, "run_cli_worker", lambda request, **kw: calls.append(request))
+    monkeypatch.setattr(cli_pregate.sys, "platform", "darwin")
+    monkeypatch.delenv("NEXUS_DISABLE_OS_SANDBOX", raising=False)
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")  # another lane's switch
+
+    passed, results = cli_pregate.run_cli_pregate(root, ["python3 -c pass"], isolate_workspace=True)
+
+    assert passed is False and calls == []
+    assert results[0]["exit_code"] == -1 and "no_os_barrier" in results[0]["stderr_tail"]
 
 
 def test_isolated_pregate_fails_closed_on_any_other_sandbox_error(tmp_path, monkeypatch):
@@ -191,11 +215,19 @@ def test_isolated_pregate_fails_closed_when_copy_fails(tmp_path):
 
 def test_isolated_pregate_fails_closed_over_the_copy_size_cap(tmp_path, monkeypatch):
     root = _controller(tmp_path)
-    (root / "big.bin").write_bytes(b"x" * 4096)
-    monkeypatch.setattr(cli_pregate, "_PREGATE_COPY_MAX_BYTES", 1024)
+    for index in range(40):
+        (root / f"big{index:02d}.bin").write_bytes(b"x" * 100)
+    monkeypatch.setattr(cli_pregate, "_PREGATE_COPY_MAX_BYTES", 150)
+    copies = []
+    real_copy2 = cli_pregate.shutil.copy2
+    monkeypatch.setattr(
+        cli_pregate.shutil, "copy2", lambda *a, **kw: copies.append(a[0]) or real_copy2(*a, **kw)
+    )
     passed, results = cli_pregate.run_cli_pregate(root, ["python3 -c pass"], isolate_workspace=True)
     assert passed is False
     assert results[0]["exit_code"] == -1 and "size cap" in results[0]["stderr_tail"]
+    assert len(copies) <= 2  # the walk stops at the first file over the cap
+    assert len(results[0]["stderr_tail"]) <= 500
 
 
 def test_isolated_pregate_real_barrier_leaves_controller_clean(tmp_path):
@@ -213,6 +245,48 @@ def test_isolated_pregate_real_barrier_leaves_controller_clean(tmp_path):
     assert _tree(root) == before
     expected = "os_sandbox" if _os_barrier(tmp_path) else "copy_only"
     assert results[0]["confinement"] == expected
+
+
+def test_isolated_pregate_real_barrier_refuses_absolute_writes_network_and_home(tmp_path):
+    """Under the real OS barrier, an absolute write into the root, the network and $HOME are
+    refused. Without a barrier (Linux CI) the run is labelled copy_only instead."""
+
+    root = _controller(tmp_path)
+    home_probe = Path.home() / f".nexus-pregate-2967-{tmp_path.name}"
+    code = (
+        "import pathlib, socket\n"
+        "def t(fn):\n"
+        "    try:\n"
+        "        fn()\n"
+        "        return 'ALLOWED'\n"
+        "    except OSError as e:\n"
+        "        return type(e).__name__\n"
+        f"r = [t(lambda: pathlib.Path({str(root.resolve() / 'abs.txt')!r}).write_text('x')),\n"
+        f"     t(lambda: pathlib.Path({str(home_probe)!r}).write_text('x')),\n"
+        "     t(lambda: socket.create_connection(('127.0.0.1', 9), timeout=2).close())]\n"
+        "print('R=' + ','.join(r))\n"
+    )
+    script = tmp_path / "probe_2967.py"
+    script.write_text(code, encoding="utf-8")
+    if not _os_barrier(tmp_path):
+        passed, results = cli_pregate.run_cli_pregate(
+            root, ["python3 -c pass"], isolate_workspace=True
+        )
+        assert results[0].get("confinement") == "copy_only" or results[0]["exit_code"] == -1
+        return
+    before = _tree(root)
+    try:
+        passed, results = cli_pregate.run_cli_pregate(
+            root, [f"{sys.executable} {script}"], isolate_workspace=True
+        )
+        assert results[0]["confinement"] == "os_sandbox", results
+        assert "R=PermissionError,PermissionError,PermissionError" in results[0]["stdout_tail"], (
+            results
+        )
+        assert _tree(root) == before
+        assert not home_probe.exists()
+    finally:
+        home_probe.unlink(missing_ok=True)
 
 
 def test_default_pregate_still_runs_in_the_root(tmp_path):

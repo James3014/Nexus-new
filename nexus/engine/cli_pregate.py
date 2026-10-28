@@ -123,9 +123,11 @@ def run_cli_pregate(
 
     ``isolate_workspace=True`` runs the commands in a disposable copy of the root under the
     model-output OS sandbox (no network, writes only in the copy), so a caller's verifier can
-    never change the root itself (#2967). Without an OS barrier (``no_os_barrier``) the
-    commands still run only in the copy, labelled ``confinement: copy_only``; any other
-    sandbox error, a failed copy or a copy over the size cap fails closed.
+    never change the root itself (#2967). Off macOS, or on macOS only when the operator set
+    ``NEXUS_DISABLE_OS_SANDBOX=1``, there is no OS barrier and the commands run unconfined in
+    the copy (``confinement: copy_only``): that stops cwd-relative writes, not a command that
+    writes absolute paths, the network or ``$HOME``. Every other sandbox error, a failed copy
+    or a copy over the size cap fails closed.
     """
     if isinstance(project_root, TargetEnvContext):
         target_repo_root = project_root.target_repo_root
@@ -186,24 +188,38 @@ def run_cli_pregate(
                 return _run_pregate_commands(
                     commands, work_dir, env, timeout_per_cmd, confined=True, source_root=target_repo_root
                 )
+        except _CopyCapExceeded:
+            return False, _fail_closed_results(commands, "pregate workspace over the copy size cap")
         except (OSError, shutil.Error) as exc:
             return False, _fail_closed_results(commands, f"pregate workspace copy failed: {exc}")
     return _run_pregate_commands(commands, target_repo_root, env, timeout_per_cmd, confined=False)
+
+
+class _CopyCapExceeded(Exception):
+    """Not an OSError, so ``copytree`` stops at the first file over the cap instead of
+    collecting one error per remaining file."""
 
 
 def _bounded_copy(budget: List[int]):
     def copy(src, dst, *, follow_symlinks=True):
         budget[0] -= os.lstat(src).st_size
         if budget[0] < 0:
-            raise OSError("pregate workspace over the copy size cap")
+            raise _CopyCapExceeded()
         return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
 
     return copy
 
 
+def _copy_only_allowed() -> bool:
+    """Unconfined copy runs only where no barrier exists, or when the operator turned the
+    model sandbox off on purpose; a broken ``sandbox-exec`` on macOS fails closed."""
+
+    return sys.platform != "darwin" or os.environ.get("NEXUS_DISABLE_OS_SANDBOX") == "1"
+
+
 def _fail_closed_results(commands: List[str], reason: str) -> List[dict]:
-    logger.warning("❌ CLI Pre-Gate REFUSED: %s", reason)
-    return [{"cmd": cmd, "exit_code": -1, "passed": False, "stderr_tail": reason} for cmd in commands]
+    logger.warning("❌ CLI Pre-Gate REFUSED: %s", reason[:500])
+    return [{"cmd": cmd, "exit_code": -1, "passed": False, "stderr_tail": reason[-500:]} for cmd in commands]
 
 
 def _run_confined_worker(request):
@@ -275,12 +291,12 @@ def _run_pregate_commands(
                     worker = _run_confined_worker(request)
                     confinement = "os_sandbox"
                 except SandboxError as exc:
-                    if str(exc) != "no_os_barrier":
+                    if str(exc) != "no_os_barrier" or not _copy_only_allowed():
                         results.extend(_fail_closed_results([cmd], f"pregate sandbox unavailable: {exc}"))
                         all_passed = False
                         continue
-                    # No OS barrier on this host (Linux, or the operator kill switch): the
-                    # disposable copy still keeps the root clean, as before but never in it.
+                    # No OS barrier on this host (Linux, or the operator's kill switch): run in
+                    # the disposable copy, never in the root; labelled so receipts show it.
                     worker = run_cli_worker(
                         replace(request, sweep_descendants_on_exit=True, sweep_roots=(request.cwd,))
                     )
