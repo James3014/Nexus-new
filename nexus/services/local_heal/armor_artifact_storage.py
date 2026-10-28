@@ -12,12 +12,17 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.engine.model_output_sandbox import denied_subtrees
+
 ENV_ARMOR_ARTIFACT_ROOT = "NEXUS_ARMOR_ARTIFACT_ROOT"
 ENV_ARMOR_WORKSPACE_ROOT = "NEXUS_ARMOR_WORKSPACE_ROOT"
 ENV_ARMOR_ALLOW_EPHEMERAL = "NEXUS_ARMOR_ALLOW_EPHEMERAL"
 
 DEFAULT_REPORTS_REL = Path(".nexus/reports/local_heal")
 DEFAULT_ARTIFACTS_REL = Path(".nexus/artifacts/local_armor")
+# Home-relative work root used when the default one lies where the model-output sandbox refuses a
+# work dir (#2966): the live Gateway's deployment dir is under ``~/Library/Application Support``.
+SANDBOX_REACHABLE_WORKSPACES_REL = Path(".local/share/nexus/local_heal/workspaces")
 DEFAULT_WORKSPACES_REL = Path(".nexus/artifacts/local_armor/workspaces")
 DEFAULT_REPLAY_REL = Path(".nexus/artifacts/local_armor/replay")
 DEFAULT_OPERATOR_LOG_REL = Path(".nexus/artifacts/local_armor/operator")
@@ -107,8 +112,16 @@ def resolve_isolated_work_root(
     env_map = env if env is not None else os.environ
     base = resolve_armor_artifact_root(workspace_root=workspace_root, env=env_map)
     root = (base / "workspaces").resolve()
+    if _inside_sandbox_denied_subtree(root):
+        root = (Path(os.path.expanduser("~")) / SANDBOX_REACHABLE_WORKSPACES_REL).resolve()
+        if not _allow_ephemeral(env_map):
+            assert_durable_path(root, label="isolated work root")
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _inside_sandbox_denied_subtree(path: Path) -> bool:
+    return any(path.is_relative_to(subtree) for subtree in denied_subtrees())
 
 
 def make_isolated_workspace(
