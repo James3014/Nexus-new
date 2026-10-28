@@ -139,6 +139,9 @@ DAEMON_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 WORKER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,60}(/[A-Za-z0-9_.:-]{1,60})?$")
 REPO_OWNER = "James3014"
 STOP_FILE = "STOP_REQUESTED"
+# Present while a daytime fast-forward of the daemon checkout is in flight or could not be rolled
+# back (#2979).  Every checkout check fails closed on it until an operator removes it.
+FF_PENDING_FILE = "DAEMON_CHECKOUT_FF_PENDING"
 GUARD_EVERY_POLLS = 3  # re-read the Issue every 60 s while watching
 MAX_ISSUE_FAILURES = 3
 MAX_LOOKBACK_NIGHTS = 14
@@ -692,6 +695,7 @@ class Nightly:
         gh: Path = HOME / ".config/nexus-agent-bot/bin/gh",
         git_credential: Path = HOME / ".config/nexus-agent-bot/bin/nexus-agent-git-credential",
         healthcheck: Path = HOME / ".local/share/nexus-open-swe-runtime/bin/eia-healthcheck",
+        uv: Path = HOME / ".local/bin/uv",
         coord_host: str = "james@100.104.233.2",
         daemon_plist: Path = HOME / "Library/LaunchAgents" / f"{DAEMON_LABEL}.plist",
         trusted_actors: Sequence[str] = tuple(TRUSTED_ACTORS),
@@ -718,6 +722,7 @@ class Nightly:
             str(git_credential),
             str(healthcheck),
         )
+        self.uv = str(uv)
         self.coord_host, self.daemon_plist = coord_host, str(daemon_plist)
         config = json.loads(Path(eia_config).expanduser().read_text(encoding="utf-8"))
         self.daemon_repo = Path(config["repository_roots"][REPOSITORY]).expanduser()
@@ -797,8 +802,15 @@ class Nightly:
         try:
             info["head"] = _sha(self._git(repo, "rev-parse", "--verify", "HEAD^{commit}"))
             refspec = "+refs/heads/main:refs/remotes/origin/main"
+            # The bot credential, as for pushes: the owner's keychain helper is not usable
+            # from a launchd job on the M4 (#2979).
+            helper = f"credential.helper=!{self.git_credential}"
             self._git(
-                repo, "fetch", "--no-tags", "origin", refspec, code="FETCH_FAILED", timeout=180
+                repo,
+                *("-c", "credential.helper=", "-c", helper),
+                *("fetch", "--no-tags", "origin", refspec),
+                code="FETCH_FAILED",
+                timeout=180,
             )
             info["origin_main"] = _sha(
                 self._git(repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
@@ -822,11 +834,26 @@ class Nightly:
         info["status"] = "STALE" if touched else ("BEHIND" if info["behind"] else "CURRENT")
         return info
 
-    def _check_daemon_checkout(self, night: dict[str, Any]) -> None:
-        """Record the daemon checkout state; raise NightlyError when the night must not run."""
+    def _check_daemon_checkout(self, night: dict[str, Any], *, fast_forward: bool = False) -> None:
+        """Record the daemon checkout state; raise NightlyError when the night must not run.
+
+        With ``fast_forward`` (daytime ``prepare`` only) a STALE or BEHIND checkout is first
+        fast-forwarded when that is safe, then compared again."""
+        pending = self.state_dir / FF_PENDING_FILE
+        if pending.exists():  # a fast-forward that never finished: the venv may not match
+            note = _one_line(pending.read_text(encoding="utf-8", errors="replace"), 200)
+            raise NightlyError(f"DAEMON_CHECKOUT_FF_PENDING:{note}")
         info = self._daemon_checkout_gap()
         night["daemon_checkout"] = info
         self._event(night, "daemon_checkout", **info)
+        if (
+            fast_forward
+            and info["status"] in ("STALE", "BEHIND")
+            and self._fast_forward_daemon_checkout(night, info)
+        ):
+            info = self._daemon_checkout_gap()
+            night["daemon_checkout"] = info
+            self._event(night, "daemon_checkout", **info)
         if info["status"] == "STALE":
             paths = ",".join(info["touched"][:8])
             raise NightlyError(
@@ -836,6 +863,79 @@ class Nightly:
             )
         if info["status"] == "UNKNOWN":
             raise NightlyError(f"DAEMON_CHECKOUT_UNVERIFIED:{info.get('error', '')}")
+
+    def _fast_forward_daemon_checkout(self, night: dict[str, Any], info: Mapping[str, Any]) -> bool:
+        """Fast-forward a lagging daemon checkout to the fetched origin/main (#2979).
+
+        origin/main already passed the required checks, so moving to it keeps the night fail
+        closed.  Only when ``main`` is checked out with a clean work tree, HEAD is an ancestor
+        of origin/main (no local commit is lost) and the daemon label is not loaded; otherwise
+        the checkout is left alone and False is returned.
+
+        The old sha goes to the night log and to FF_PENDING_FILE before the checkout moves.  A
+        failed step rolls HEAD back to it (a critical gap then stays STALE, so the next prepare
+        retries the whole move) and raises DAEMON_CHECKOUT_FF_FAILED.  The pending file is
+        removed only after success or a verified rollback, so a crash or a failed rollback
+        keeps every later check closed instead of reading the moved HEAD as CURRENT.
+        """
+        repo, old, new = self.daemon_repo, _sha(info["head"]), _sha(info["origin_main"])
+        branch = self.run(["git", "-C", str(repo), "symbolic-ref", "-q", "HEAD"])
+        try:
+            if str(branch.stdout).strip() != "refs/heads/main":
+                reason = "HEAD_NOT_ON_MAIN"
+            elif self._git(repo, "status", "--porcelain"):
+                reason = "WORK_TREE_DIRTY"
+            elif not self._is_ancestor(repo, old, new):
+                reason = "HEAD_NOT_ANCESTOR_OF_ORIGIN_MAIN"
+            elif self._daemon_state() != "absent":
+                reason = "DAEMON_LOADED"
+            else:
+                reason = ""
+        except NightlyError as exc:
+            reason = _one_line(exc, 200)
+        if reason:
+            self._event(night, "daemon_checkout_ff_skipped", reason=reason, head=old)
+            return False
+        ff: dict[str, Any] = {"at": self._iso(), "from": old, "to": new}
+        night["daemon_checkout_ff"] = ff
+        self._event(night, "daemon_checkout_ff", **ff)
+        self.save(night)  # write-ahead: the rollback sha is on disk before the checkout moves
+        pending = self.state_dir / FF_PENDING_FILE
+        pending.write_text(f"night {night['night']} from {old} to {new}\n", encoding="utf-8")
+        step = "MERGE"
+        try:
+            self._git(repo, "merge", "-q", "--ff-only", new, code="FF_MERGE_FAILED")
+            changed = self._git(repo, "diff", "--name-only", "--no-renames", old, new)
+            if {"pyproject.toml", "uv.lock"} & set(changed.splitlines()):
+                step = "UV_SYNC"
+                argv = [self.uv, "sync", "--frozen", "--all-groups", "--all-extras"]
+                self._ok(argv, code="UV_SYNC_FAILED", cwd=str(repo), timeout=900)
+                ff["uv_sync"] = True
+            step = "IMPORT_CHECK"
+            self._check_daemon_python()
+        except NightlyError as exc:
+            ff["failed"] = step
+            error = _one_line(exc, 200)
+            reset = self.run(["git", "-C", str(repo), "reset", "-q", "--keep", old])
+            head = self.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD^{commit}"])
+            ff["rolled_back"] = reset.returncode == 0 and str(head.stdout).strip() == old
+            if ff["rolled_back"]:
+                pending.unlink()
+            self._event(
+                night,
+                "daemon_checkout_ff_failed",
+                step=step,
+                error=error,
+                rollback=old,
+                rolled_back=ff["rolled_back"],
+            )
+            done = "rolled back to" if ff["rolled_back"] else "ROLLBACK FAILED, still pending; was"
+            raise NightlyError(
+                f"DAEMON_CHECKOUT_FF_FAILED:{step} ({done} {old[:12]}): {error}"
+            ) from exc
+        pending.unlink()
+        ff["ok"] = True
+        return True
 
     def _fail_start(self, night: dict[str, Any], exc: NightlyError) -> dict[str, Any]:
         started = night.setdefault("started", {"at": self._iso()})
@@ -1065,10 +1165,11 @@ class Nightly:
         # an armed night START_FAILED (dispatch would then stop harvesting it).
         if not (loaded.get("started") or {}).get("ok"):
             try:
-                self._check_daemon_checkout(loaded)
+                # Daytime only: ``start`` never moves the checkout (#2979).
+                self._check_daemon_checkout(loaded, fast_forward=True)
             except NightlyError as exc:
                 # UNKNOWN is only recorded here; ``start`` re-checks and fails closed.
-                if str(exc).startswith("DAEMON_CHECKOUT_STALE"):
+                if not str(exc).startswith("DAEMON_CHECKOUT_UNVERIFIED"):
                     return self._fail_start(loaded, exc)
         if not (loaded.get("started") or {}).get("ok"):
             self._warn_bridge_down(loaded)

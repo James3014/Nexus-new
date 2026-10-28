@@ -138,6 +138,8 @@ NON_CANDIDATE_GIT_WRITERS = frozenset({
     "nexus/orchestrator/worktree_manager.py:WorktreeManager.restore_task_branch_for_retry",
     "scripts/ops/trusted_deletion_anchor.py:_create_git_bundle",
     "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
+    # Fast-forwards the EIA daemon's own checkout to origin/main by day; no candidate (#2979).
+    "scripts/ops/eia_nightly.py:Nightly._fast_forward_daemon_checkout",
 })
 
 # These exact symbols own launchd effects for services other than the durable
