@@ -32,6 +32,8 @@ def test_benchmark_ci_checks_prerequisites_before_any_setup():
     for needed in ("GEMINI_API_KEY", "OPENAI_API_KEY", "nexus_benchmark.sh"):
         assert needed in script
     assert 'echo "runnable=false" >> "$GITHUB_OUTPUT"' in script
+    # A missing prerequisite is a green skip, never a red run.
+    assert "exit 1" not in script and "::error::" not in script
     # Only key presence reaches this step, never the secret values.
     env = steps[prereq]["env"]
     assert all(value.endswith("!= '' }}") for value in env.values())
@@ -48,7 +50,10 @@ def test_benchmark_ci_gates_every_later_step_on_the_prerequisites():
 def test_benchmark_ci_uses_secret_values_only_in_the_benchmark_step():
     for step in _steps():
         text = yaml.safe_dump(step)
-        if step["name"] != "Execute Benchmark Subset":
-            assert (
-                "secrets.GEMINI_API_KEY }}" not in text and "secrets.OPENAI_API_KEY }}" not in text
-            )
+        if step["name"] == "Execute Benchmark Subset":
+            continue
+        if step["name"] == "Check Benchmark Prerequisites":
+            # Presence booleans only: no secret value.
+            assert all(value.endswith("!= '' }}") for value in step["env"].values())
+            continue
+        assert "secrets." not in text, step["name"]
