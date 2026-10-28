@@ -45,15 +45,21 @@ class ReproductionPhase(IPhase):
 
     @staticmethod
     def _link_chain_outside_workspace(path: Path, repo_dir: Path) -> bool:
+        """True when ``path`` leads to a regular file and no hop of its link chain (each hop's
+        directory resolved) lies in ``repo_dir`` outside its ``.venv``."""
+
         repo = repo_dir.resolve()
-        venv = (repo / ".venv").resolve()
+        venv: Path | None = (repo / ".venv").resolve()
+        if venv == repo or venv in repo.parents:
+            venv = None  # a .venv that is the repo (or above it) exempts nothing
         hop = path.absolute()
         for _ in range(40):
             hop = hop.parent.resolve() / hop.name
-            if repo in hop.parents and venv not in hop.parents:
+            in_venv = venv is not None and venv in hop.parents
+            if repo in hop.parents and not in_venv:
                 return False
             if not hop.is_symlink():
-                return True
+                return hop.is_file()  # a hop ending on a directory (the repo, "..") fails here
             hop = hop.parent / os.readlink(hop)
         return False  # a link loop or an absurdly long chain
 
@@ -68,15 +74,20 @@ class ReproductionPhase(IPhase):
         (model_output_sandbox), but an entry in it may link to a model-writable path elsewhere
         in the repo. Every hop of the link chain, not just its end, must lie outside the repo or
         inside ``.venv``: a process the model's script left running could swap a writable hop
-        after this check. uv runs from an empty directory so no ``uv.toml`` around the caller's
-        cwd applies; the argv names the venv entry by absolute path because of that."""
+        after this check. uv runs from an empty directory (no ``uv.toml`` from the caller's cwd
+        or the repo; host and user uv config still apply) without the caller's ``PYTHON*``
+        variables, so that interpreter imports nothing from a path the caller pointed at; the
+        argv names the venv entry by absolute path because of the cwd."""
 
         argv = ["uv", "pip", "install", pkg, "--python", str(venv_python.absolute())]
         if not ReproductionPhase._link_chain_outside_workspace(venv_python, repo_dir):
             return {"argv": argv, "attempted": False, "skipped": "interpreter_target_in_workspace"}
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
         try:
             with tempfile.TemporaryDirectory(prefix="nexus-recipe-install-") as cwd:
-                res = subprocess.run(argv, capture_output=True, text=True, timeout=60, cwd=cwd)
+                res = subprocess.run(
+                    argv, capture_output=True, text=True, timeout=60, cwd=cwd, env=env
+                )
         except Exception as exc:
             return {"argv": argv, "attempted": True, "error": type(exc).__name__}
         return {"argv": argv, "attempted": True, "returncode": res.returncode}

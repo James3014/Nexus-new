@@ -8,6 +8,7 @@ and the host environment are out of reach while a legitimate run still works; wh
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -402,7 +403,6 @@ def test_recipe_host_install_is_recorded_and_env_denoise_is_unchanged(tmp_path, 
     out = _run_phase(repo, _refusing_denoiser(repo, seen), runner, auto_heal=True)
     argv = ["uv", "pip", "install", "mpmath", "--python", str(venv_python)]
     assert [c[0] for c in calls] == [argv]
-    assert repo.resolve() not in Path(calls[0][1]["cwd"]).resolve().parents
     assert out.env_recipe["recipe_id"]
     assert out.env_recipe["host_install_actions"] == [
         {"argv": argv, "attempted": True, "returncode": 0}
@@ -496,6 +496,47 @@ def test_recipe_rejects_a_venv_bin_dir_linked_into_the_workspace(tmp_path, monke
     out = _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
     assert calls == []
     assert out.env_recipe["host_install_actions"][0]["skipped"] == "interpreter_target_in_workspace"
+
+
+def test_recipe_install_runs_in_a_fresh_dir_without_python_env(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _make_venv_python(repo)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    monkeypatch.setenv("PYTHONSTARTUP", str(repo / "start.py"))
+    monkeypatch.chdir(repo)
+    calls = _record_subprocess(monkeypatch)
+    _run_phase(repo, MagicMock(), _mpmath_runner(), auto_heal=False)
+    [(_, kwargs)] = calls
+    cwd = Path(kwargs["cwd"])
+    assert cwd.name.startswith("nexus-recipe-install-") and not cwd.exists()
+    assert not any(k.startswith("PYTHON") for k in kwargs["env"])
+    assert kwargs["env"].get("PATH") == os.environ["PATH"]
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "../../tools/..",  # ends in "..": lands on the repo directory
+        "../../..",  # the repo itself
+        "../../tools",  # a directory in the repo, not an interpreter
+    ],
+)
+def test_recipe_link_check_rejects_links_ending_on_a_directory(tmp_path, link):
+    repo = tmp_path / "repo"
+    (repo / "tools").mkdir(parents=True)
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / ".venv" / "bin" / "python3").symlink_to(link)
+    check = ReproductionPhase._link_chain_outside_workspace
+    assert check(repo / ".venv" / "bin" / "python3", repo) is False
+
+
+def test_recipe_link_check_gives_no_exemption_when_venv_is_the_repo(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "bin").mkdir(parents=True)
+    (repo / "bin" / "python3").write_text("")
+    (repo / ".venv").symlink_to(".")
+    check = ReproductionPhase._link_chain_outside_workspace
+    assert check(repo / ".venv" / "bin" / "python3", repo) is False
 
 
 def test_recipe_link_check_rejects_a_loop(tmp_path):
