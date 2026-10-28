@@ -2589,10 +2589,21 @@ def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
                 ),
             )
         timeout_sec = max(1, min(120, int(constraints.get("verify_timeout_sec") or 30)))
+        from nexus.orchestrator.canonical_source_root import (
+            CANONICAL_SOURCE_ROOT_ENV,
+            DEFAULT_CANONICAL_SOURCE_ROOT,
+        )
+
+        # On the task_run path the root is the controller worktree: one stray file there
+        # refuses every task, so the caller's verifier runs in a disposable sandboxed copy (#2967).
+        controller = Path(
+            os.environ.get(CANONICAL_SOURCE_ROOT_ENV) or DEFAULT_CANONICAL_SOURCE_ROOT
+        ).expanduser().resolve()
         all_passed, results = run_cli_pregate(
             root,
             cmds,
             timeout_per_cmd=timeout_sec,
+            isolate_workspace=root.is_relative_to(controller) or controller.is_relative_to(root),
         )
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(

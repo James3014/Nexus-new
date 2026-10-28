@@ -8,7 +8,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from nexus.engine.target_env_context import TargetEnvContext
 
@@ -34,14 +36,42 @@ _PREGATE_OPERATORS = frozenset({";", "&&", "||", "|", "<", ">", "&", ">>", "2>",
 _PREGATE_PYTHON_RE = re.compile(r"python[0-9.]*(\.exe)?")
 _PREGATE_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PREGATE_ENV_ALLOWLIST = frozenset({"LANG", "LC_ALL", "PATH", "PYTHONPATH", "TMPDIR", "VIRTUAL_ENV"})
+# Not copied into the disposable pregate workspace (same set World C skips).
+_PREGATE_COPY_IGNORED = shutil.ignore_patterns(
+    ".git", ".nexus", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__", "node_modules"
+)
+# The live controller copies ~165 MB in ~2 s; a far larger root fails closed instead.
+_PREGATE_COPY_MAX_BYTES = 1 << 30
 
 
-def _build_pregate_request(cmd: str, cwd: Path, env_overlay: dict, timeout: float = 60.0):
+def _relocate_token(token: str, source: Path, copy: Path) -> str:
+    """Point an argument naming ``source`` (or a path under it) at the same path in ``copy``.
+
+    ``--opt=<path>`` is handled too. A path missing from the copy (e.g. the root's ``.venv``,
+    which is not copied) is left as is.
+    """
+    head, sep, value = token.partition("=") if token.startswith("--") else ("", "", token)
+    for root in dict.fromkeys((str(source), str(source.resolve()))):
+        if value == root or value.startswith(root + os.sep):
+            moved = str(copy) + value[len(root):]
+            if value == root or os.path.lexists(moved):
+                return f"{head}{sep}{moved}"
+    return token
+
+
+def _build_pregate_request(
+    cmd: str,
+    cwd: Path,
+    env_overlay: dict,
+    timeout: float = 60.0,
+    relocate_from: Optional[Path] = None,
+):
     """Tokenize ``cmd`` WITHOUT a shell and build a governed CliWorkerRequest.
 
     The request goes through the same no-shell launcher, forbidden-subcommand
     denylist, GitHub credential stripping and isolated HOME as every other
     verifier/worker spawn.  Raises ValueError when the command needs a shell.
+    With ``relocate_from``, arguments naming that root are re-pointed at ``cwd`` (its copy).
     """
     from nexus.executors.cli_worker import CliWorkerRequest
     from nexus.executors.exec_policy import is_forwarder_executable
@@ -65,6 +95,9 @@ def _build_pregate_request(cmd: str, cwd: Path, env_overlay: dict, timeout: floa
         exempt = python_code and index > 0 and args[index - 1] == "-c"
         if "\x00" in token or (any(ch in token for ch in ";&|<>()$`") and not exempt):
             raise ValueError("shell metacharacters are not allowed in pregate arguments")
+    if relocate_from is not None:
+        executable = _relocate_token(executable, relocate_from, cwd)
+        args = [_relocate_token(token, relocate_from, cwd) for token in args]
     path = env_overlay.get("PATH")
     resolved = shutil.which(executable, path=path) if path else None
     return CliWorkerRequest(
@@ -80,9 +113,15 @@ def run_cli_pregate(
     project_root: Path | str | TargetEnvContext,
     commands: List[str],
     timeout_per_cmd: int = 60,
+    *,
+    isolate_workspace: bool = False,
 ) -> Tuple[bool, List[dict]]:
     """
     執行驗證指令列表，回傳 (all_passed, results)
+
+    ``isolate_workspace=True`` runs the commands in a disposable copy of the root under the
+    model-output OS sandbox (no network, writes only in the copy), so a caller's verifier can
+    never change the root itself (#2967). Without an OS barrier nothing runs (fail closed).
     """
     if isinstance(project_root, TargetEnvContext):
         target_repo_root = project_root.target_repo_root
@@ -127,6 +166,85 @@ def run_cli_pregate(
     env["PATH"] = f"{venv_bin_str}{os.pathsep}{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{target_repo_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
     
+    if isolate_workspace:
+        try:
+            with tempfile.TemporaryDirectory(prefix="nexus-pregate-", ignore_cleanup_errors=True) as scratch:
+                work_dir = Path(scratch).resolve()
+                shutil.copytree(
+                    target_repo_root,
+                    work_dir,
+                    symlinks=True,
+                    ignore=_PREGATE_COPY_IGNORED,
+                    copy_function=_bounded_copy([_PREGATE_COPY_MAX_BYTES]),
+                    dirs_exist_ok=True,
+                )
+                env["PYTHONPATH"] = str(work_dir)
+                return _run_pregate_commands(
+                    commands, work_dir, env, timeout_per_cmd, confined=True, source_root=target_repo_root
+                )
+        except (OSError, shutil.Error) as exc:
+            return False, _fail_closed_results(commands, f"pregate workspace copy failed: {exc}")
+    return _run_pregate_commands(commands, target_repo_root, env, timeout_per_cmd, confined=False)
+
+
+def _bounded_copy(budget: List[int]):
+    def copy(src, dst, *, follow_symlinks=True):
+        budget[0] -= os.lstat(src).st_size
+        if budget[0] < 0:
+            raise OSError("pregate workspace over the copy size cap")
+        return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
+
+    return copy
+
+
+def _fail_closed_results(commands: List[str], reason: str) -> List[dict]:
+    logger.warning("❌ CLI Pre-Gate REFUSED: %s", reason)
+    return [{"cmd": cmd, "exit_code": -1, "passed": False, "stderr_tail": reason} for cmd in commands]
+
+
+def _run_confined_worker(request):
+    """Run ``request`` in its cwd under the model-output sandbox (#2967).
+
+    Reads are widened only for the resolved interpreter and absolute file arguments, as for
+    the local_heal verifiers; the environment is the sandbox's private one plus PATH and
+    PYTHONPATH. Raises SandboxError when there is no OS barrier.
+    """
+    from nexus.engine.model_output_sandbox import (
+        SANDBOX_EXEC,
+        argument_file_roots,
+        interpreter_readable_roots,
+        model_sandbox,
+    )
+    from nexus.executors.cli_worker import run_cli_worker
+
+    readable = (*interpreter_readable_roots(request.executable), *argument_file_roots(request.command))
+    with model_sandbox(request.cwd, readable=readable) as (prefix, sandbox_env):
+        if len(prefix) != 3 or prefix[:2] != [SANDBOX_EXEC, "-p"]:
+            raise ValueError("unexpected model sandbox prefix")
+        env = {**sandbox_env, **{key: request.env[key] for key in ("PATH", "PYTHONPATH")}}
+        return run_cli_worker(
+            replace(
+                request,
+                env=env,
+                exact_env=True,
+                seatbelt_profile=prefix[2],
+                sweep_descendants_on_exit=True,
+                sweep_roots=(request.cwd,),
+            )
+        )
+
+
+def _run_pregate_commands(
+    commands: List[str],
+    cwd: Path,
+    env: dict,
+    timeout_per_cmd: int,
+    *,
+    confined: bool,
+    source_root: Optional[Path] = None,
+) -> Tuple[bool, List[dict]]:
+    from nexus.engine.model_output_sandbox import SandboxError
+
     results = []
     all_passed = True
     
@@ -136,7 +254,7 @@ def run_cli_pregate(
             from nexus.executors.cli_worker import CliWorkerStatus, run_cli_worker
 
             try:
-                request = _build_pregate_request(cmd, target_repo_root, env, timeout_per_cmd)
+                request = _build_pregate_request(cmd, cwd, env, timeout_per_cmd, relocate_from=source_root)
             except ValueError as exc:
                 results.append({
                     "cmd": cmd,
@@ -147,7 +265,26 @@ def run_cli_pregate(
                 all_passed = False
                 logger.warning("❌ CLI Pre-Gate REJECTED: %s (%s)", cmd, exc)
                 continue
-            worker = run_cli_worker(request)
+            confinement = None
+            if confined:
+                try:
+                    worker = _run_confined_worker(request)
+                    confinement = "os_sandbox"
+                except SandboxError as exc:
+                    if str(exc) != "no_os_barrier":
+                        results.extend(_fail_closed_results([cmd], f"pregate sandbox unavailable: {exc}"))
+                        all_passed = False
+                        continue
+                    # No OS barrier on this host (Linux, or the operator kill switch): the
+                    # disposable copy still keeps the root clean, as before but never in it.
+                    worker = run_cli_worker(request)
+                    confinement = "copy_only"
+                except ValueError as exc:
+                    results.extend(_fail_closed_results([cmd], f"pregate sandbox unavailable: {exc}"))
+                    all_passed = False
+                    continue
+            else:
+                worker = run_cli_worker(request)
             if worker.status is CliWorkerStatus.TIMED_OUT:
                 raise subprocess.TimeoutExpired(cmd, timeout_per_cmd)
             if worker.status is CliWorkerStatus.START_FAILED or worker.exit_code is None:
@@ -180,8 +317,9 @@ def run_cli_pregate(
                 "is_soft_fail": is_env_error,
                 "stdout_tail": (proc.stdout or "")[-500:],
                 "stderr_tail": (proc.stderr or "")[-500:],
+                **({"confinement": confinement} if confinement else {}),
             })
-            
+
             if not passed:
                 all_passed = False
                 if is_env_error:
