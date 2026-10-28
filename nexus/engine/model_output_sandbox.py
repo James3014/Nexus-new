@@ -40,6 +40,7 @@ from nexus.engine.sandboxed_lane import (
     SandboxError,
     confinement,
     developer_toolchain_read_roots,
+    trusted_executable,
 )
 
 # Binaries here need no extra read root (system paths are already readable or not wanted).
@@ -127,8 +128,22 @@ def argument_file_roots(argv: Iterable[str]) -> list[Path]:
     return list(dict.fromkeys(roots))
 
 
-def _command_readable_roots(command: str) -> list[Path]:
-    """``interpreter_readable_roots`` for the program of every ``&&`` segment of ``command``."""
+def _sandbox_which(program: str, work_dir: Path, writable: Iterable[Path] = ()) -> str:
+    """Absolute path of a bare ``program`` as the sandboxed run finds it: on this process's
+    PATH without the entries inside the work dir or another writable root (``scrubbed_env``
+    drops them). Granting reads for a host lookup that kept them could name a different
+    interpreter than the one that starts, which then cannot load (exit -6, #2970)."""
+
+    try:
+        return trusted_executable(program, untrusted_roots=(work_dir, *writable))
+    except SandboxError:
+        return ""
+
+
+def _command_readable_roots(command: str, work_dir: Path) -> list[Path]:
+    """``interpreter_readable_roots`` for the program of every ``&&`` segment of ``command``.
+    Only a bare name, resolved as the sandbox resolves it, widens reads; a path the model wrote
+    never does."""
 
     try:
         segments = split_command_chain(command)
@@ -137,8 +152,10 @@ def _command_readable_roots(command: str) -> list[Path]:
     roots: list[Path] = []
     for words in segments:
         program = next((word for word in words if not _ASSIGNMENT.match(word)), None)
-        if program:
-            roots.extend(interpreter_readable_roots(program, allow_absolute=False))
+        if program and os.sep not in program:
+            found = _sandbox_which(program, work_dir)
+            if found:
+                roots.extend(interpreter_readable_roots(found))
     return list(dict.fromkeys(roots))
 
 
@@ -204,17 +221,25 @@ def run_model_argv(
     if not argv:
         raise SandboxError("empty_command")
     program = argv[0]
-    with model_sandbox(work_dir, readable=readable, writable=writable) as (prefix, env):
+    writable = tuple(Path(path).resolve() for path in writable)
+    command = list(argv)
+    grant: list[Path] = []
+    if os.sep in program:
+        found = program if os.path.isabs(program) else str(Path(work_dir) / program)
+    else:
+        # Resolved once, as the sandboxed run would, and run by that path, so the read grant
+        # names the interpreter that actually starts (#2970).
+        found = _sandbox_which(program, Path(work_dir).resolve(), writable)
+        if found:
+            command[0] = found
+            grant = interpreter_readable_roots(found)
+    with model_sandbox(work_dir, readable=(*readable, *grant), writable=writable) as (prefix, env):
         run_env = {**env, **(extra_env or {})}
-        # Looked up as the sandboxed run would (its PATH), after the barrier check.
-        if os.sep in program:
-            found = program if os.path.isabs(program) else str(Path(work_dir) / program)
-        else:
-            found = shutil.which(program, path=run_env.get("PATH", "")) or ""
+        # Raised after the barrier check, so a missing barrier is reported first.
         if not found or not os.path.exists(found):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
         return subprocess.run(  # noqa: S603 - argv list, no shell
-            [*prefix, *argv],
+            [*prefix, *command],
             cwd=str(Path(work_dir).resolve()),
             env=run_env,
             capture_output=True,
@@ -229,7 +254,8 @@ def run_model_command_string(
 ) -> subprocess.CompletedProcess[str]:
     """``run_command_string`` (no shell, ``&&`` chains only) with every segment confined."""
 
-    with model_sandbox(work_dir, readable=_command_readable_roots(command)) as (prefix, env):
+    readable = _command_readable_roots(command, Path(work_dir).resolve())
+    with model_sandbox(work_dir, readable=readable) as (prefix, env):
         return run_command_string(
             command, cwd=Path(work_dir).resolve(), env=env, timeout=timeout, argv_prefix=prefix
         )
