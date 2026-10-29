@@ -65,6 +65,15 @@ def test_no_host_build_from_model_output(tmp_path, output):
     assert result.attempted is False and result.reason == "HOST_BUILD_REFUSED_MODEL_OUTPUT"
 
 
+def test_astropy_build_refusal_takes_precedence_over_missing_module_model_output(tmp_path):
+    calls: list = []
+    output = "ModuleNotFoundError: No module named 'evilpkg'\n" + _ASTROPY_CHECKOUT
+    result = _denoiser(tmp_path, calls).prepare_from_evidence(output, model_output=True)
+    assert calls == []
+    assert result.attempted is False
+    assert result.reason == "HOST_BUILD_REFUSED_MODEL_OUTPUT"
+
+
 @pytest.mark.parametrize("name", ["erfa", "numpy", "setuptools"])
 def test_even_a_common_build_dependency_is_not_installed(tmp_path, name):
     # pip / uv run with the repo as cwd: a planted pip package or uv.toml there would run.
