@@ -10,6 +10,7 @@ other confined lanes keep granting them. Without an OS barrier nothing runs. No 
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -74,11 +75,11 @@ def test_the_host_interpreter_is_not_readable_by_model_output(tmp_path, monkeypa
     if not os_sandbox_available():
         with pytest.raises(SandboxError, match="no_os_barrier"):
             mos.run_model_command_string(
-                f"{sys.executable} -I -c pass", work_dir=tmp_path, timeout=20
+                f"{shlex.quote(sys.executable)} -I -c pass", work_dir=tmp_path, timeout=20
             )
         return
     res = mos.run_model_command_string(
-        f"{sys.executable} -I -c \"print('STARTED')\"", work_dir=tmp_path, timeout=20
+        f"{shlex.quote(sys.executable)} -I -c \"print('STARTED')\"", work_dir=tmp_path, timeout=20
     )
     assert res.returncode != 0
     assert "STARTED" not in res.stdout
