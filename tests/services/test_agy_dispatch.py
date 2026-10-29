@@ -5609,6 +5609,15 @@ def test_main_cli_rejects_prompt_text_next_to_prompt_file(
             "--cwd",
             str(tmp_path),
         ])
+    # --prompt used to win silently over a positional string holding the options.
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt",
+            "review this",
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --exclude-account google-02",
+        ])
     assert called == []
 
 

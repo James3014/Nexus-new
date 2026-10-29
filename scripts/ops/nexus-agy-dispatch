@@ -7650,6 +7650,8 @@ def main(argv: list[str] | None = None) -> int:
     # and every exclusion vanished without a trace (the run landed on primary).
     if args.prompt_file and prompt_text is not None:
         raise SystemExit("PROMPT_CONFLICT:positional/--prompt text given together with --prompt-file")
+    if args.prompt_flag is not None and args.prompt is not None:
+        raise SystemExit("PROMPT_CONFLICT:positional prompt given together with --prompt")
     if prompt_text is not None and prompt_text.lstrip().startswith("-"):
         raise SystemExit("PROMPT_LOOKS_LIKE_OPTIONS:prompt text starts with '-' (unsplit shell variable?)")
     if args.prompt_file:
