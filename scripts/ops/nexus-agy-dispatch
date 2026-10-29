@@ -7446,6 +7446,9 @@ def _run_foreground_with_signal_cleanup(func: Any, **kwargs: Any) -> int:
                 pass
 
 
+_OPTION_LIKE_PROMPT = re.compile(r"\s*--?[A-Za-z]")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="Quota-aware direct Agy dispatcher using the existing Nexus account pool."
@@ -7582,8 +7585,32 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _refuse_prompt_conflicts(args: argparse.Namespace) -> None:
+    """Fail closed on prompt-argument conflicts instead of silently picking one.
+
+    2026-10-29: a caller built " --exclude-account primary ..." in a shell
+    variable and expanded it unquoted under zsh (no word splitting), so the
+    whole option string arrived as the positional prompt, --prompt-file won,
+    and every exclusion vanished without a trace (the run landed on primary).
+    Runs before anything else in main(), so a refused call has no side effect.
+    """
+    if args.prompt_file is not None and (args.prompt_flag or args.prompt):
+        raise SystemExit("PROMPT_CONFLICT:positional/--prompt text given together with --prompt-file")
+    if args.prompt_flag is not None and args.prompt:
+        raise SystemExit("PROMPT_CONFLICT:positional prompt given together with --prompt")
+    # Only the positional slot can catch an unsplit option string. "--name" or
+    # "-x" at its start reads as options ("- fix the list", "---" and "-1" do
+    # not); prose that really starts that way can be passed with --prompt.
+    if args.prompt is not None and _OPTION_LIKE_PROMPT.match(args.prompt):
+        raise SystemExit(
+            "PROMPT_LOOKS_LIKE_OPTIONS:positional prompt starts with an option "
+            "(unsplit shell variable?); pass such text with --prompt"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    _refuse_prompt_conflicts(args)
 
     operation_root = Path(args.operation_root).expanduser()
     journal = AgyOperationJournal(operation_root)

@@ -5581,6 +5581,117 @@ def test_main_cli_parses_and_forwards_exclude_account(
     assert captured["exclude_accounts"] == ["google-08", "fd84db4038d7"]
 
 
+def test_main_cli_rejects_prompt_text_next_to_prompt_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-29: under zsh an unquoted "$EX" holding " --exclude-account primary ..."
+    # is one word, argparse took it as the positional prompt, --prompt-file won and
+    # the exclusions were dropped. The dispatcher must refuse instead of guessing.
+    called: list[dict[str, object]] = []
+    monkeypatch.setattr(dispatch, "dispatch_run", lambda **kw: called.append(kw) or 0)
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("review this", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt-file",
+            str(prompt_file),
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --exclude-account google-02",
+        ])
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt-file",
+            str(prompt_file),
+            "--prompt",
+            "also a prompt",
+            "--cwd",
+            str(tmp_path),
+        ])
+    # --prompt used to win silently over a positional string holding the options.
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt",
+            "review this",
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --exclude-account google-02",
+        ])
+    assert called == []
+
+
+def test_main_cli_rejects_prompt_text_that_looks_like_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[dict[str, object]] = []
+    monkeypatch.setattr(dispatch, "dispatch_run", lambda **kw: called.append(kw) or 0)
+
+    with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
+        dispatch.main([
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --timeout 580",
+        ])
+    with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
+        dispatch.main(["--cwd", str(tmp_path), " -x primary"])
+    assert called == []
+
+    # Real prompts that merely start with a dash still dispatch, unchanged, and
+    # --prompt carries text that really starts like an option.
+    for prompt in ("review - carefully", "- fix the bullet list", "---\ntitle: x", "-1 returned"):
+        assert dispatch.main(["--prompt", prompt, "--cwd", str(tmp_path)]) == 0
+    assert dispatch.main(["--cwd", str(tmp_path), "- fix the bullet list"]) == 0
+    assert (
+        dispatch.main(["--prompt", "--no-verify is broken, investigate", "--cwd", str(tmp_path)])
+        == 0
+    )
+    assert [kw["prompt"] for kw in called] == [
+        "review - carefully",
+        "- fix the bullet list",
+        "---\ntitle: x",
+        "-1 returned",
+        "- fix the bullet list",
+        "--no-verify is broken, investigate",
+    ]
+
+
+def test_main_cli_prompt_conflict_refused_before_any_side_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The refusal runs before the journal or cwd are touched: a missing cwd and
+    # a not-yet-existing operation root must stay untouched.
+    root = tmp_path / "ops"
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("review this", encoding="utf-8")
+    monkeypatch.setattr(
+        dispatch, "AgyOperationJournal", lambda *_a, **_k: pytest.fail("journal opened")
+    )
+
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--operation-root",
+            str(root),
+            "--prompt-file",
+            str(prompt_file),
+            "--cwd",
+            str(tmp_path / "missing"),
+            " --exclude-account primary",
+        ])
+    assert not root.exists()
+
+    # An empty string next to --prompt-file drops nothing, so it is not a conflict.
+    monkeypatch.undo()
+    with pytest.raises(SystemExit, match="INVALID_CWD"):
+        dispatch.main([
+            "--prompt-file",
+            str(prompt_file),
+            "--cwd",
+            str(tmp_path / "missing"),
+            "",
+        ])
+
+
 def test_background_spawn_persists_normalized_exclusion_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
