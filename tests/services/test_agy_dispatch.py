@@ -5634,21 +5634,25 @@ def test_main_cli_rejects_prompt_text_that_looks_like_options(
             " --exclude-account primary --timeout 580",
         ])
     with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
-        dispatch.main(["--prompt", "  --model gemini", "--cwd", str(tmp_path)])
-    with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
         dispatch.main(["--cwd", str(tmp_path), " -x primary"])
     assert called == []
 
-    # Real prompts that merely start with a dash still dispatch, unchanged.
+    # Real prompts that merely start with a dash still dispatch, unchanged, and
+    # --prompt carries text that really starts like an option.
     for prompt in ("review - carefully", "- fix the bullet list", "---\ntitle: x", "-1 returned"):
         assert dispatch.main(["--prompt", prompt, "--cwd", str(tmp_path)]) == 0
     assert dispatch.main(["--cwd", str(tmp_path), "- fix the bullet list"]) == 0
+    assert (
+        dispatch.main(["--prompt", "--no-verify is broken, investigate", "--cwd", str(tmp_path)])
+        == 0
+    )
     assert [kw["prompt"] for kw in called] == [
         "review - carefully",
         "- fix the bullet list",
         "---\ntitle: x",
         "-1 returned",
         "- fix the bullet list",
+        "--no-verify is broken, investigate",
     ]
 
 
