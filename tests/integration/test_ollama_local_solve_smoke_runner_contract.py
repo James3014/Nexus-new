@@ -65,8 +65,11 @@ def test_smoke_runner_mocked_success() -> None:
             "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
             "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
             "NEXUS_LOCAL_MODEL_NAME": "qwen2.5-coder",
+            # The verifier's bare "python3" is looked up on the sandbox PATH (#2945); with no
+            # PATH at all it is refused before running, as it is in production (#2982).
+            "PATH": os.environ.get("PATH", os.defpath),
         }
-        
+
         with patch.dict(os.environ, env, clear=True):
             with patch("urllib.request.urlopen", return_value=mock_conn):
                 with patch("sys.stdout") as mock_stdout:
