@@ -5581,6 +5581,59 @@ def test_main_cli_parses_and_forwards_exclude_account(
     assert captured["exclude_accounts"] == ["google-08", "fd84db4038d7"]
 
 
+def test_main_cli_rejects_prompt_text_next_to_prompt_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-29: under zsh an unquoted "$EX" holding " --exclude-account primary ..."
+    # is one word, argparse took it as the positional prompt, --prompt-file won and
+    # the exclusions were dropped. The dispatcher must refuse instead of guessing.
+    called: list[dict[str, object]] = []
+    monkeypatch.setattr(dispatch, "dispatch_run", lambda **kw: called.append(kw) or 0)
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("review this", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt-file",
+            str(prompt_file),
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --exclude-account google-02",
+        ])
+    with pytest.raises(SystemExit, match="PROMPT_CONFLICT"):
+        dispatch.main([
+            "--prompt-file",
+            str(prompt_file),
+            "--prompt",
+            "also a prompt",
+            "--cwd",
+            str(tmp_path),
+        ])
+    assert called == []
+
+
+def test_main_cli_rejects_prompt_text_that_looks_like_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[dict[str, object]] = []
+    monkeypatch.setattr(dispatch, "dispatch_run", lambda **kw: called.append(kw) or 0)
+
+    with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
+        dispatch.main([
+            "--cwd",
+            str(tmp_path),
+            " --exclude-account primary --timeout 580",
+        ])
+    with pytest.raises(SystemExit, match="PROMPT_LOOKS_LIKE_OPTIONS"):
+        dispatch.main(["--prompt", "  --model gemini", "--cwd", str(tmp_path)])
+    assert called == []
+
+    # A real prompt beginning with a dash-free sentence still dispatches.
+    rc = dispatch.main(["--prompt", "review - carefully", "--cwd", str(tmp_path)])
+    assert rc == 0
+    assert len(called) == 1
+
+
 def test_background_spawn_persists_normalized_exclusion_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
