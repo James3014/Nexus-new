@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import errno
 import fcntl
 import functools
 import hashlib
@@ -508,6 +509,8 @@ def canonicalize_agy_model(model: str | None) -> str | None:
 AGY_MODEL_CATALOG_TIMEOUT_DEFAULT_SEC = 30.0
 AGY_MODEL_CATALOG_TTL_DEFAULT_SEC = 900.0
 _AGY_MODEL_ID_RE = re.compile(r"[A-Za-z0-9_.:-]+")
+# Pool account alias hash: sha256(alias).hexdigest()[:12] (agy_account_pool).
+_ACCOUNT_ALIAS_HASH_RE = re.compile(r"[0-9a-f]{12}")
 
 
 def _env_positive_float(name: str, default: float) -> float:
@@ -7113,14 +7116,33 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
         or owner_pid <= 0
     ):
         return {"result": "LEASE_IDENTITY_INCOMPLETE"}
+    # #2991: the journal record is editable data; only the pool's own format
+    # (sha256 prefix, see agy_account_pool) may become a lease path.
+    if not _ACCOUNT_ALIAS_HASH_RE.fullmatch(alias_hash):
+        return {
+            "result": "LEASE_ALIAS_HASH_INVALID_PRESERVED",
+            "reason": "account_alias_hash is not 12 lowercase hex",
+        }
 
     lock_path = LEASES_DIR / f"{alias_hash}.lock"
     receipt_path = LEASES_DIR / f"{alias_hash}.receipt.json"
-    if not receipt_path.exists():
+    try:
+        receipt_info = os.lstat(receipt_path)
+    except FileNotFoundError:
         return {"result": "ALREADY_ABSENT"}
+    except OSError:
+        return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+    if stat.S_ISLNK(receipt_info.st_mode):
+        return {"result": "LEASE_PATH_SYMLINK_PRESERVED", "path": "receipt"}
 
     LEASES_DIR.mkdir(parents=True, exist_ok=True)
-    lock_obj = lock_path.open("a+")
+    try:
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o666)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return {"result": "LEASE_PATH_SYMLINK_PRESERVED", "path": "lock"}
+        raise
+    lock_obj = os.fdopen(lock_fd, "a+")
     try:
         try:
             fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -7128,8 +7150,15 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
             return {"result": "LEASE_BUSY_PRESERVED"}
 
         try:
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            receipt_fd = os.open(receipt_path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return {"result": "LEASE_PATH_SYMLINK_PRESERVED", "path": "receipt"}
+            return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+        try:
+            with os.fdopen(receipt_fd, "r", encoding="utf-8") as receipt_fh:
+                receipt = json.loads(receipt_fh.read())
+        except (OSError, ValueError):
             return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
 
         expected = {

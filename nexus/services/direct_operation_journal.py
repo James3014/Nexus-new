@@ -7,11 +7,13 @@ acceptance, merge, release, or production authority.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
 import os
 import socket
+import stat
 import subprocess
 import time
 import uuid
@@ -200,6 +202,29 @@ def _validate_prefix(prefix: str) -> str:
     if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for ch in value):
         raise DirectOperationJournalError("INVALID_OPERATION_PREFIX")
     return value
+
+
+def _real_directory_or_missing(path: Path) -> bool:
+    """True for a real directory, False when absent; raise for a symlink or a non-directory."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        raise DirectOperationJournalError("OPERATION_PATH_SYMLINK")
+    if not stat.S_ISDIR(info.st_mode):
+        raise DirectOperationJournalError("OPERATION_PATH_NOT_DIRECTORY")
+    return True
+
+
+def _open_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
+    """``os.open`` that refuses a symlink as the last path component (#2991)."""
+    try:
+        return os.open(str(path), flags | os.O_NOFOLLOW, mode)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise DirectOperationJournalError("OPERATION_PATH_SYMLINK") from exc
+        raise
 
 
 def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
@@ -524,7 +549,16 @@ class DirectOperationJournal:
         return new_operation_id(self.operation_prefix)
 
     def operation_dir(self, operation_id: str) -> Path:
-        return self.operations_dir / self._validate_operation_id(operation_id)
+        """``operations/<id>``, refused when it or ``operations`` is a symlink (#2991).
+
+        A missing directory is allowed (``create`` makes it); an existing one
+        must be a real directory that resolves directly under ``operations``.
+        """
+        path = self.operations_dir / self._validate_operation_id(operation_id)
+        if _real_directory_or_missing(self.operations_dir) and _real_directory_or_missing(path):
+            if path.resolve().parent != self.operations_dir.resolve():
+                raise DirectOperationJournalError("OPERATION_PATH_OUTSIDE_ROOT")
+        return path
 
     def record_path(self, operation_id: str) -> Path:
         return self.operation_dir(operation_id) / "operation.json"
@@ -663,7 +697,9 @@ class DirectOperationJournal:
     def read(self, operation_id: str) -> dict[str, Any]:
         path = self.record_path(operation_id)
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
+            fd = _open_nofollow(path, os.O_RDONLY)
+            with os.fdopen(fd, "r", encoding="utf-8") as fh:
+                record = json.loads(fh.read())
         except FileNotFoundError as exc:
             raise DirectOperationJournalError("OPERATION_NOT_FOUND") from exc
         except json.JSONDecodeError as exc:
@@ -680,7 +716,8 @@ class DirectOperationJournal:
         operation_id = self._validate_operation_id(operation_id)
         lock_path = self.operation_dir(operation_id) / ".lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+") as lock_fh:
+        lock_fd = _open_nofollow(lock_path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o666)
+        with os.fdopen(lock_fd, "a+") as lock_fh:
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
             try:
                 record = self.read(operation_id)
