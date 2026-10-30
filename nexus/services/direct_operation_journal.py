@@ -217,30 +217,54 @@ def _real_directory_or_missing(path: Path) -> bool:
     return True
 
 
-def _open_nofollow(path: Path, flags: int, mode: int = 0o600) -> int:
-    """``os.open`` that refuses a symlink as the last path component (#2991)."""
+def _refusal_for(name: str, dir_fd: int) -> DirectOperationJournalError:
+    """Name why ``name`` (relative to ``dir_fd``) could not be opened as asked."""
     try:
-        return os.open(str(path), flags | os.O_NOFOLLOW, mode)
+        info = os.lstat(name, dir_fd=dir_fd)
+    except OSError:
+        return DirectOperationJournalError("OPERATION_PATH_NOT_DIRECTORY")
+    if stat.S_ISLNK(info.st_mode):
+        return DirectOperationJournalError("OPERATION_PATH_SYMLINK")
+    return DirectOperationJournalError("OPERATION_PATH_NOT_DIRECTORY")
+
+
+def _open_at_nofollow(name: str, flags: int, dir_fd: int, mode: int = 0o600) -> int:
+    """``os.open(name, dir_fd=...)`` that refuses a symlink or wrong type as ``name`` (#2991).
+
+    Linux reports a symlink under ``O_NOFOLLOW`` as ELOOP; macOS reports
+    ENOTDIR when ``O_DIRECTORY`` is set too, so both are classified by lstat.
+    """
+    try:
+        return os.open(name, flags | os.O_NOFOLLOW, mode, dir_fd=dir_fd)
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise DirectOperationJournalError("OPERATION_PATH_SYMLINK") from exc
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise _refusal_for(name, dir_fd) from exc
         raise
 
 
-def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
-    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+def _fdopen_or_close(fd: int, mode: str, **kwargs: Any) -> Any:
+    """``os.fdopen`` that closes ``fd`` when wrapping fails (e.g. a directory)."""
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        return os.fdopen(fd, mode, **kwargs)
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _atomic_json_write_at(dir_fd: int, name: str, payload: dict[str, Any]) -> None:
+    """Write ``name`` in ``dir_fd`` via an fsynced temp file and rename (#2991)."""
+    tmp = f".{name}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+    try:
+        with _fdopen_or_close(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, sort_keys=True)
             fh.write("\n")
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     finally:
         try:
-            tmp.unlink()
+            os.unlink(tmp, dir_fd=dir_fd)
         except FileNotFoundError:
             pass
 
@@ -560,6 +584,43 @@ class DirectOperationJournal:
                 raise DirectOperationJournalError("OPERATION_PATH_OUTSIDE_ROOT")
         return path
 
+    def _open_operation_dir_fd(self, operation_id: str) -> int:
+        """Open ``operations/<id>`` without following a symlink at either level (#2991).
+
+        The configured root may itself be a symlink (trusted configuration).
+        Every later open, write and rename of the record or lock goes through
+        the returned descriptor, so swapping a directory for a symlink after
+        this call cannot redirect them.
+        """
+        name = self._validate_operation_id(operation_id)
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        root_fd = os.open(str(self.root), flags)
+        try:
+            ops_fd = _open_at_nofollow(self.operations_dir.name, flags, root_fd)
+        finally:
+            os.close(root_fd)
+        try:
+            return _open_at_nofollow(name, flags, ops_fd)
+        finally:
+            os.close(ops_fd)
+
+    def _read_at(self, op_fd: int, operation_id: str) -> dict[str, Any]:
+        try:
+            fd = _open_at_nofollow("operation.json", os.O_RDONLY, op_fd)
+            with _fdopen_or_close(fd, "r", encoding="utf-8") as fh:
+                record = json.loads(fh.read())
+        except FileNotFoundError as exc:
+            raise DirectOperationJournalError("OPERATION_NOT_FOUND") from exc
+        except json.JSONDecodeError as exc:
+            raise DirectOperationJournalError("OPERATION_RECORD_INVALID") from exc
+        if record.get("schema") != self.schema:
+            raise DirectOperationJournalError("OPERATION_SCHEMA_MISMATCH")
+        if record.get("operation_id") != self._validate_operation_id(operation_id):
+            raise DirectOperationJournalError("OPERATION_ID_MISMATCH")
+        if record.get("status") not in _ALLOWED_STATES:
+            raise DirectOperationJournalError("OPERATION_STATUS_INVALID")
+        return record
+
     def record_path(self, operation_id: str) -> Path:
         return self.operation_dir(operation_id) / "operation.json"
 
@@ -691,36 +752,40 @@ class DirectOperationJournal:
             op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
         except FileExistsError as exc:
             raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
-        _atomic_json_write(self.record_path(operation_id), record)
+        op_fd = self._open_operation_dir_fd(operation_id)
+        try:
+            _atomic_json_write_at(op_fd, "operation.json", record)
+        finally:
+            os.close(op_fd)
         return record
 
     def read(self, operation_id: str) -> dict[str, Any]:
-        path = self.record_path(operation_id)
         try:
-            fd = _open_nofollow(path, os.O_RDONLY)
-            with os.fdopen(fd, "r", encoding="utf-8") as fh:
-                record = json.loads(fh.read())
+            op_fd = self._open_operation_dir_fd(operation_id)
         except FileNotFoundError as exc:
             raise DirectOperationJournalError("OPERATION_NOT_FOUND") from exc
-        except json.JSONDecodeError as exc:
-            raise DirectOperationJournalError("OPERATION_RECORD_INVALID") from exc
-        if record.get("schema") != self.schema:
-            raise DirectOperationJournalError("OPERATION_SCHEMA_MISMATCH")
-        if record.get("operation_id") != self._validate_operation_id(operation_id):
-            raise DirectOperationJournalError("OPERATION_ID_MISMATCH")
-        if record.get("status") not in _ALLOWED_STATES:
-            raise DirectOperationJournalError("OPERATION_STATUS_INVALID")
-        return record
+        try:
+            return self._read_at(op_fd, operation_id)
+        finally:
+            os.close(op_fd)
 
     def update(self, operation_id: str, **changes: Any) -> dict[str, Any]:
         operation_id = self._validate_operation_id(operation_id)
-        lock_path = self.operation_dir(operation_id) / ".lock"
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fd = _open_nofollow(lock_path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o666)
-        with os.fdopen(lock_fd, "a+") as lock_fh:
+        try:
+            op_fd = self._open_operation_dir_fd(operation_id)
+        except FileNotFoundError as exc:
+            raise DirectOperationJournalError("OPERATION_NOT_FOUND") from exc
+        try:
+            return self._update_at(op_fd, operation_id, changes)
+        finally:
+            os.close(op_fd)
+
+    def _update_at(self, op_fd: int, operation_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        lock_fd = _open_at_nofollow(".lock", os.O_RDWR | os.O_CREAT | os.O_APPEND, op_fd, 0o666)
+        with _fdopen_or_close(lock_fd, "a+") as lock_fh:
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
             try:
-                record = self.read(operation_id)
+                record = self._read_at(op_fd, operation_id)
                 if "status" in changes and changes["status"] not in _ALLOWED_STATES:
                     raise DirectOperationJournalError("OPERATION_STATUS_INVALID")
                 if "write_paths" in changes and changes["write_paths"] is not None:
@@ -744,7 +809,7 @@ class DirectOperationJournal:
                 candidate_record = {**record, **changes}
                 _validate_continuity_fields(candidate_record)
                 record.update(changes)
-                _atomic_json_write(self.record_path(operation_id), record)
+                _atomic_json_write_at(op_fd, "operation.json", record)
                 return record
             finally:
                 fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)

@@ -7142,7 +7142,11 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
         if exc.errno == errno.ELOOP:
             return {"result": "LEASE_PATH_SYMLINK_PRESERVED", "path": "lock"}
         raise
-    lock_obj = os.fdopen(lock_fd, "a+")
+    try:
+        lock_obj = os.fdopen(lock_fd, "a+")
+    except BaseException:
+        os.close(lock_fd)
+        raise
     try:
         try:
             fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -7156,7 +7160,12 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
                 return {"result": "LEASE_PATH_SYMLINK_PRESERVED", "path": "receipt"}
             return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
         try:
-            with os.fdopen(receipt_fd, "r", encoding="utf-8") as receipt_fh:
+            receipt_fh = os.fdopen(receipt_fd, "r", encoding="utf-8")
+        except OSError:  # e.g. a directory planted as the receipt
+            os.close(receipt_fd)
+            return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+        try:
+            with receipt_fh:
                 receipt = json.loads(receipt_fh.read())
         except (OSError, ValueError):
             return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}

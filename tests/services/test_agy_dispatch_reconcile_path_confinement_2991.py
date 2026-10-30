@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+from importlib import import_module
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -111,6 +113,7 @@ def pool(tmp_path: Path, monkeypatch) -> Path:
         "0123456789a",
         "0123456789abc",
         "0123456789a\n",
+        VALID_ALIAS + "\n",
         "0123456789a/",
         "acct-finalize",
     ],
@@ -361,3 +364,78 @@ def test_operation_dir_that_is_a_file_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(dispatch.AgyOperationJournalError, match="OPERATION_PATH_NOT_DIRECTORY"):
         journal.read(operation_id)
+
+
+def _open_fd_count() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+def test_directory_planted_as_record_raises_without_leaking_an_fd(tmp_path: Path) -> None:
+    journal = dispatch.AgyOperationJournal(tmp_path / "root")
+    operation_id = _completed_operation(journal, tmp_path, alias_hash=VALID_ALIAS)
+    record_path = journal.record_path(operation_id)
+    record_path.unlink()
+    record_path.mkdir()
+    before = _open_fd_count()
+
+    for _ in range(5):
+        with pytest.raises(IsADirectoryError):
+            journal.read(operation_id)
+
+    assert _open_fd_count() == before
+
+
+def test_directory_planted_as_lease_receipt_is_preserved_without_leaking_an_fd(
+    pool: Path,
+) -> None:
+    receipt = pool / "leases" / f"{VALID_ALIAS}.receipt.json"
+    receipt.mkdir()
+    record = {
+        "account_alias_hash": VALID_ALIAS,
+        "lease_id_hash": LEASE_HASH,
+        "pid": OWNER_PID,
+        "reconciliation": {"provider_alive_after": False},
+    }
+    before = _open_fd_count()
+
+    for _ in range(5):
+        result = dispatch._cleanup_reconciled_lease(record)
+        assert result == {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+
+    assert _open_fd_count() == before
+    assert receipt.is_dir()
+
+
+@pytest.mark.parametrize("swap", ["operation_dir", "operations_dir"])
+def test_update_writes_into_the_directory_it_opened_when_swapped_mid_update(
+    tmp_path: Path, monkeypatch, swap: str
+) -> None:
+    """A directory swapped for a symlink after the checks cannot redirect the write."""
+    doj = import_module("nexus.services.direct_operation_journal")
+    journal = dispatch.AgyOperationJournal(tmp_path / "root")
+    operation_id = _completed_operation(journal, tmp_path, alias_hash=VALID_ALIAS)
+    op_dir = journal.operation_dir(operation_id)
+    swapped = op_dir if swap == "operation_dir" else op_dir.parent
+    decoy = tmp_path / "decoy"
+    shutil.copytree(swapped, decoy, symlinks=True)
+    decoy_before = _snapshot(decoy)
+    moved = tmp_path / "moved"
+    original_validate = doj._validate_continuity_fields
+    calls = []
+
+    def swap_then_validate(record):
+        if not calls:
+            os.rename(swapped, moved)
+            swapped.symlink_to(decoy, target_is_directory=True)
+        calls.append(1)
+        return original_validate(record)
+
+    monkeypatch.setattr(doj, "_validate_continuity_fields", swap_then_validate)
+
+    journal.update(operation_id, phase="RECONCILE_REQUIRED")
+
+    assert calls
+    assert _snapshot(decoy) == decoy_before
+    moved_record = moved / operation_id if swap == "operations_dir" else moved
+    record = json.loads((moved_record / "operation.json").read_text(encoding="utf-8"))
+    assert record["phase"] == "RECONCILE_REQUIRED"

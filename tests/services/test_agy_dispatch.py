@@ -4427,7 +4427,7 @@ def _create_outcome_unknown_source_operation(
     journal.mark_started(operation_id, pid=999_999_998)
     journal.update(
         operation_id,
-        account_alias_hash="acct-finalize",
+        account_alias_hash="f1a11ce0acc0",
         lease_id_hash="lease-finalize",
     )
     journal.mark_terminal(
@@ -4480,9 +4480,9 @@ def test_finalize_no_effect_fails_closed_when_lease_identity_conflicts(
     leases = tmp_path / "leases"
     leases.mkdir()
     monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
-    (leases / "acct-finalize.receipt.json").write_text(
+    (leases / "f1a11ce0acc0.receipt.json").write_text(
         json.dumps({
-            "account_alias_hash": "acct-finalize",
+            "account_alias_hash": "f1a11ce0acc0",
             "lease_id_hash": "different-lease",
             "pid": 999_999_998,
         }),
@@ -4491,7 +4491,7 @@ def test_finalize_no_effect_fails_closed_when_lease_identity_conflicts(
 
     with pytest.raises(
         dispatch.AgyOperationJournalError,
-        match="NO_EFFECT_LEASE_NOT_SAFE",
+        match="NO_EFFECT_LEASE_NOT_SAFE:LEASE_IDENTITY_MISMATCH_PRESERVED",
     ):
         dispatch._finalize_no_effect_operation(journal, operation_id)
 
