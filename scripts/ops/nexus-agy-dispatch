@@ -101,17 +101,20 @@ def _is_pool_stopped_maintenance_argv(argv: list[str]) -> bool:
     """True only for the exact maintenance shape: one maintenance flag with its
     operation id, optionally --operation-root, nothing else (no prompt, no
     other option, no ``--``).  Values may be attached with ``=``; a separate
-    value must not start with ``-``."""
+    value must not start with ``-``; no value may be empty."""
     seen = False
     i = 0
     while i < len(argv):
-        name, eq, _value = argv[i].partition("=")
+        name, eq, value = argv[i].partition("=")
         if name not in _POOL_STOPPED_MAINTENANCE_FLAGS and name != "--operation-root":
             return False
         if not eq:
             i += 1
-            if i >= len(argv) or argv[i].startswith("-"):
+            value = argv[i] if i < len(argv) else ""
+            if value.startswith("-"):
                 return False
+        if not value.strip():
+            return False
         if name in _POOL_STOPPED_MAINTENANCE_FLAGS:
             if seen:
                 return False

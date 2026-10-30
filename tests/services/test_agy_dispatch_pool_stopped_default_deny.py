@@ -158,6 +158,15 @@ def test_library_entry_points_refuse_without_override(monkeypatch, capsys, tmp_p
         ["--status", "op-1", "--background"],
         ["--status", "op-1", "--reconcile", "op-2"],
         ["--status"],
+        ["--status="],
+        ["--status", ""],
+        ["--reconcile", " "],
+        ["--status=op-1", "--operation-root="],
+        [],
+        ["--operation-root", "/x"],
+        ["--status", "--background"],
+        ["--", "--status=op"],
+        ["--status", "op", "--operation-run", "x"],
     ],
 )
 def test_cli_refuses_before_parsing_and_snapshot_import(tmp_path, argv):
