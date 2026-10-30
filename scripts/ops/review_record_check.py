@@ -528,6 +528,17 @@ def _label_family(line: str) -> str | None:
     return None
 
 
+def _stated_reject(text: str) -> bool:
+    """A REJECT word whose clause does not negate, condition or quote it (#2992):
+    "Round 17 (REJECT) is rebutted" states one, "r3 Codex did not REJECT" does not."""
+    for match in _REJECT.finditer(text):
+        splits = [m.end() for m in _CLAUSE_SPLIT.finditer(text, 0, match.start())]
+        before = text[(splits[-1] if splits else 0) : match.start()]
+        if not (_REJECT_PRE_DENY.search(_plain(before)) or _QUOTE.search(before)):
+            return True
+    return False
+
+
 def _rebuttal_at_cap(section: list[str], head: str) -> bool:
     """A cross-model REJECT at round >= 3 followed (or joined) by a past-tense rebuttal.
 
@@ -538,7 +549,7 @@ def _rebuttal_at_cap(section: list[str], head: str) -> bool:
     rebutted = False
     for line in section:
         plain = _plain(line, keep_parens=True)
-        if _REJECT.search(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
+        if _stated_reject(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
             reject_round_seen = True
             if rebutted and names_head(plain, head):
                 return False

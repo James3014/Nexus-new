@@ -1581,3 +1581,17 @@ def test_a_reviewed_commit_label_without_the_word_head_also_names_the_older_head
         f"Pushed one more fix; head is now {HEAD}.\n"
     )
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "reject_line",
+    ["- r3 Codex did not REJECT", '- r3: Codex never said "REJECT"', "- r3: no REJECT this round"],
+)
+def test_a_negated_or_quoted_round_three_reject_opens_no_rebuttal_at_the_cap(reject_line):
+    body = f"Head: {HEAD}\n**Codex review**\n{reject_line}\n- Rebutted\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["rebuttal_at_cap"] is False
+    report = rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    # The stated shape still counts.
+    assert rrc.classify_record(CODEX_REBUTTAL, HEAD)["rebuttal_at_cap"] is True
