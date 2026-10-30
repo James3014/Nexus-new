@@ -1443,6 +1443,18 @@ class AgyWorkerAdapter:
             return timeout - elapsed
 
         pool = self._get_account_pool()
+
+        from nexus.services.agy_account_pool import POOL_STOPPED_MESSAGE, agy_pool_stopped
+
+        if pool is not None and agy_pool_stopped():
+            # #2998: no pool account, and no pool manager call, while the pool is stopped.
+            return _agy_claim_receipt(
+                self.provider, contract, target=target, executable=executable, argv=argv,
+                started_at=started_at, result=None, outcome=WorkerOutcome.FAILED.value,
+                failure_reason=f"account pool lease acquire failed: {POOL_STOPPED_MESSAGE}",
+                provider_calls=0, rotations=0, attempts=0, account_alias_hash=None,
+            )
+
         claims_route = (
             self._use_installed_account_pool
             and self._injected_account_pool is None
@@ -1471,17 +1483,6 @@ class AgyWorkerAdapter:
                 sweep_roots=sweep_roots,
                 model_family=model_family,
                 provider_call_budget=provider_call_budget,
-            )
-
-        from nexus.services.agy_account_pool import POOL_STOPPED_MESSAGE, agy_pool_stopped
-
-        if pool is not None and agy_pool_stopped():
-            # #2998: an injected or claim-less pool leases no account while the pool is stopped.
-            return _agy_claim_receipt(
-                self.provider, contract, target=target, executable=executable, argv=argv,
-                started_at=started_at, result=None, outcome=WorkerOutcome.FAILED.value,
-                failure_reason=f"account pool lease acquire failed: {POOL_STOPPED_MESSAGE}",
-                provider_calls=0, rotations=0, attempts=0, account_alias_hash=None,
             )
 
         if pool is None:

@@ -165,6 +165,13 @@ def test_gateway_agy_worker_fails_closed_without_running_agy(monkeypatch, tmp_pa
     (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
     pool = AgyAccountPoolManager([AgyAccount(alias="acc-a", home_dir=str(home))])
     monkeypatch.setattr("nexus.services.agy_account_pool.get_account_pool_manager", lambda: pool)
+
+    def manager_call(*_args, **_kwargs):
+        raise AssertionError("pool manager called while stopped")
+
+    # Codex r2: no pool initialisation (manager ensure-active/status) either.
+    monkeypatch.setattr(pool, "_ensure_pool", manager_call)
+    monkeypatch.setattr(pool, "_refresh_pool_health", manager_call)
     monkeypatch.setenv("NEXUS_AGY_PREFERRED_ACCOUNTS", "acc-a")
     ran: list[object] = []
     monkeypatch.setattr(worker_registry, "run_cli_worker", lambda *a, **k: ran.append(a))
@@ -191,7 +198,7 @@ def test_gateway_agy_worker_fails_closed_without_running_agy(monkeypatch, tmp_pa
     assert ran == []
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert receipt.failure_reason is not None
-    assert "AgyAccountPoolStoppedError" in receipt.failure_reason
+    assert "AGY_ACCOUNT_POOL_STOPPED" in receipt.failure_reason
     assert receipt.provider_calls == 0
     assert not leases.exists() or not any(leases.iterdir())  # no lock, no receipt
 
