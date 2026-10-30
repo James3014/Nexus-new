@@ -24,18 +24,27 @@ pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined
 
 
 @pytest.fixture(scope="module")
-def python_without_pytest(tmp_path_factory) -> str:
-    """An interpreter that cannot import pytest (a fresh venv without pip or system site)."""
+def _venv_python(tmp_path_factory) -> str:
     venv = tmp_path_factory.mktemp("nopytest") / "venv"
     subprocess.run(
         [sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=120
     )
-    python = venv / "bin" / "python"
+    return str(venv / "bin" / "python")
+
+
+@pytest.fixture
+def python_without_pytest(_venv_python, monkeypatch) -> str:
+    """An interpreter that cannot import pytest (a fresh venv without pip or system site).
+
+    CI runs the suite with PYTHONPATH naming the runtime site-packages, which would hand
+    pytest to any interpreter; the MicroVerifier inherits this environment, so drop it."""
+    for name in ("PYTHONPATH", "PYTHONHOME"):
+        monkeypatch.delenv(name, raising=False)
     probe = subprocess.run(
-        [str(python), "-c", "import pytest"], capture_output=True, text=True, timeout=60
+        [_venv_python, "-c", "import pytest"], capture_output=True, text=True, timeout=60
     )
     assert probe.returncode != 0, "fixture venv unexpectedly has pytest"
-    return str(python)
+    return _venv_python
 
 
 def _verify(repo: Path, patched: list[str], interpreter: str):
