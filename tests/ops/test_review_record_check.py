@@ -1725,3 +1725,59 @@ def test_a_line_with_too_many_verdict_tokens_is_skipped_and_parsing_stays_fast()
     for body in ("r1 ACCEPT; " * 6000, "r1 REJECT; " * 6000, "head" + " " * 65000 + "x"):
         rrc.classify_record(f"{body}\n{HEAD}", HEAD)
     assert time.monotonic() - started < 5  # about 40 s before the bound
+
+
+# -- #2994: cairnwork's own high-risk paths ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "high"),
+    [
+        ("src/cairnwork/pipeline.py", True),
+        ("scripts/release.sh", True),
+        ("REVIEW.md", True),
+        ("experimental/x/mod.py", False),
+        ("docs/guide.md", False),
+        ("tests/test_x.py", False),
+        ("srcx/a.py", False),
+    ],
+)
+def test_cairnwork_adds_its_own_high_risk_paths(path, high):
+    files = [{"filename": path}]
+    assert rrc.high_risk_paths(files, "cairnwork/cairnwork") == ([path] if high else [])
+    assert rrc.high_risk_paths(files, "Cairnwork/Cairnwork") == ([path] if high else [])
+    # Other repos keep the shared list only.
+    assert rrc.high_risk_paths(files, "James3014/Nexus-new") == rrc.high_risk_paths(files)
+    renamed = [{"filename": "docs/old.md", "previous_filename": path}]
+    assert bool(rrc.high_risk_paths(renamed, "cairnwork/cairnwork")) is high
+
+
+def test_run_requires_a_cross_model_record_for_a_cairnwork_src_change():
+    files = [{"filename": "src/cairnwork/pipeline.py"}]
+    for repo, state in (("James3014/Nexus-new", "success"), ("cairnwork/cairnwork", "failure")):
+        posted, post = _posts()
+        rrc.run(repo, 7, TOKEN, _fake(files=files, comments=[_c(OPUS_RECORD)]), post)
+        assert posted[0][1]["state"] == state, repo
+    posted, post = _posts()
+    comments = [_c(OPUS_RECORD), _c(CODEX_RECORD)]
+    assert (
+        rrc.run("cairnwork/cairnwork", 7, TOKEN, _fake(files=files, comments=comments), post) == 0
+    )
+    assert posted[0][1]["state"] == "success"
+
+
+def test_run_cairnwork_merge_only_delta_still_requires_a_cross_model_record_for_src():
+    src = [{"filename": "src/cairnwork/x.py"}]
+    fetch = _delta_fetch_with_old_pr_files(src, pr_files=src, changed=())
+
+    def wrapped(url, token):
+        return _pull_main() if url.endswith("/pulls/7") else fetch(url, token)
+
+    results = {}
+    for repo in ("James3014/Nexus-new", "cairnwork/cairnwork"):
+        posted, post = _posts()
+        rrc.run(repo, 7, TOKEN, wrapped, post)
+        results[repo] = posted[0][1]
+    assert results["James3014/Nexus-new"]["state"] == "success"
+    assert results["cairnwork/cairnwork"]["state"] == "failure"
+    assert "MISSING_CROSS_MODEL" in results["cairnwork/cairnwork"]["description"]
