@@ -1764,3 +1764,20 @@ def test_run_requires_a_cross_model_record_for_a_cairnwork_src_change():
         rrc.run("cairnwork/cairnwork", 7, TOKEN, _fake(files=files, comments=comments), post) == 0
     )
     assert posted[0][1]["state"] == "success"
+
+
+def test_run_cairnwork_merge_only_delta_still_requires_a_cross_model_record_for_src():
+    src = [{"filename": "src/cairnwork/x.py"}]
+    fetch = _delta_fetch_with_old_pr_files(src, pr_files=src, changed=())
+
+    def wrapped(url, token):
+        return _pull_main() if url.endswith("/pulls/7") else fetch(url, token)
+
+    results = {}
+    for repo in ("James3014/Nexus-new", "cairnwork/cairnwork"):
+        posted, post = _posts()
+        rrc.run(repo, 7, TOKEN, wrapped, post)
+        results[repo] = posted[0][1]
+    assert results["James3014/Nexus-new"]["state"] == "success"
+    assert results["cairnwork/cairnwork"]["state"] == "failure"
+    assert "MISSING_CROSS_MODEL" in results["cairnwork/cairnwork"]["description"]
