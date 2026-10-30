@@ -41,6 +41,7 @@ from nexus.services.agy_account_pool import (
     AgyAccountPoolBusyError,
     AgyAccountPoolExhaustedError,
     AgyAccountPoolStoppedError,
+    agy_pool_stopped,
 )
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -307,6 +308,9 @@ class _ModelProbeMixin(_ModelProbeBase):
             if existing.get("probe_semantics_hash") != semantics:
                 raise _gateway().GatewayInputError("MODEL_PROBE_TASK_ID_CONFLICT")
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        if provider == "agy" and agy_pool_stopped():
+            # #2998: refuse before the version preflight, the job record and the lease.
+            raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED")
         # Resolve and attest the exact executable/version before creating an
         # isolated workspace or invoking Popen.  A failed preflight leaves no
         # probe workspace or provider process behind.

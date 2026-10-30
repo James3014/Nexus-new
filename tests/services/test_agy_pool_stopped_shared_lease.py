@@ -24,6 +24,7 @@ from nexus.executors import worker_registry
 from nexus.executors.worker_contract import WorkerOutcome
 from nexus.executors.worker_registry import AgyWorkerAdapter
 from nexus.orchestrator import unified_mcp_gateway as gateway_module
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.unified_mcp_gateway import GatewayInputError, UnifiedMCPGateway
 from nexus.services import agy_account_pool
 from nexus.services.agy_account_pool import (
@@ -193,3 +194,69 @@ def test_gateway_agy_worker_fails_closed_without_running_agy(monkeypatch, tmp_pa
     assert "AgyAccountPoolStoppedError" in receipt.failure_reason
     assert receipt.provider_calls == 0
     assert not leases.exists() or not any(leases.iterdir())  # no lock, no receipt
+
+
+class _Service(SelfHostedTaskService):
+    def __init__(self, state_dir: Path) -> None:
+        self.state_dir = state_dir
+
+
+def test_gateway_model_probe_submit_refused_before_preflight_record_or_lease(
+    monkeypatch, tmp_path
+) -> None:
+    """Codex r1: the refusal comes before the --version preflight and the probe job record."""
+    monkeypatch.delenv(OVERRIDE, raising=False)
+    gateway = UnifiedMCPGateway(service=_Service(tmp_path / "state"))
+    monkeypatch.setattr(
+        gateway, "_provider_executable", lambda provider: ({"default_model": "m"}, "/bin/echo")
+    )
+    monkeypatch.setattr(gateway_module, "get_account_pool_manager", _Untouchable)
+    ran: list[object] = []
+    monkeypatch.setattr(gateway_module.subprocess, "run", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(gateway_module.subprocess, "Popen", lambda *a, **k: ran.append(a))
+    arguments = {
+        "task_id": "probe-2998",
+        "provider": "agy",
+        "model": "gemini-3.8-flash-medium",
+        "prompt": "Return probe JSON",
+        "output_schema": {"type": "object"},
+    }
+
+    with pytest.raises(GatewayInputError, match="^AGY_ACCOUNT_POOL_STOPPED$"):
+        gateway._model_probe_submit(arguments)
+
+    assert ran == []
+    assert gateway._assist_read("probe-2998") is None
+
+
+def test_gateway_agy_worker_with_claimless_injected_pool_refused(monkeypatch, tmp_path) -> None:
+    """Codex r1: a pool without acquire() (legacy ensure_active route) leases nothing either."""
+    monkeypatch.delenv(OVERRIDE, raising=False)
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    account = AgyAccount(alias="legacy", home_dir=str(tmp_path / "h1"))
+
+    class _LegacyPool:
+        active_account_alias_hash = account.alias_hash
+
+        def ensure_active(self, target_worktree=None):
+            raise AssertionError("legacy pool touched while stopped")
+
+        def get_active_account(self):
+            raise AssertionError("legacy pool touched while stopped")
+
+    ran: list[object] = []
+    monkeypatch.setattr(worker_registry, "run_cli_worker", lambda *a, **k: ran.append(a))
+
+    receipt = AgyWorkerAdapter(account_pool=_LegacyPool()).invoke(
+        SimpleNamespace(task_id="agy-2998-legacy"),
+        SimpleNamespace(target_worktree=str(tmp_path)),
+        prompt="hello",
+        worker_role="implementation",
+    )
+
+    assert ran == []
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.provider_calls == 0
+    assert receipt.failure_reason is not None
+    assert "AGY_ACCOUNT_POOL_STOPPED" in receipt.failure_reason
