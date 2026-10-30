@@ -488,6 +488,7 @@ class PatchSynthesisPhase(IPhase):
             output_classification_telemetry["locked_search_len"] = locked_search_len
         
         # Keep micro verification behavior unchanged during C7 recovery.
+        micro_verify: dict = {}
         if apply_res.success and apply_res.applied_diffs:
             patched_files = []
             for diff_text in apply_res.applied_diffs:
@@ -501,6 +502,8 @@ class PatchSynthesisPhase(IPhase):
                     patched_files,
                     verifier_env_metadata={"interpreter": input_data.python_executable}
                 )
+                micro_verify = micro_result.receipt_fields()
+                model_decisions[-1]["micro_verify"] = micro_verify
                 if not micro_result.passed:
                     if micro_result.error_message in {
                         "ENV_BLOCKED",
@@ -522,7 +525,8 @@ class PatchSynthesisPhase(IPhase):
                             final_patch="",
                             model_decisions=model_decisions,
                             error_reason=f"MICRO_VERIFY_{micro_result.error_message}:{micro_result.details[:200]}",
-                            preflight_telemetry=preflight_telemetry
+                            preflight_telemetry=preflight_telemetry,
+                            micro_verify=micro_verify,
                         )
         preflight_telemetry = dict(apply_res.preflight_telemetry)
         preflight_telemetry.update(output_classification_telemetry)
@@ -536,10 +540,12 @@ class PatchSynthesisPhase(IPhase):
             preflight_telemetry=preflight_telemetry,
             errors=apply_res.errors,
             last_search_anchors=[intent.search for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else [],
-            last_replacement_texts=[intent.replace for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else []
+            last_replacement_texts=[intent.replace for intent in intents_or_error] if apply_res.success and not isinstance(intents_or_error, PatchError) else [],
+            micro_verify=micro_verify,
         )
 
     def execute(self, ctx: HealContext) -> PhaseResult:
+        ctx.op.micro_verify = {}
         input_data = PatchSynthesisInput(
             instance_id=ctx.op.instance_id,
             problem_statement=ctx.op.problem_statement,
@@ -567,6 +573,7 @@ class PatchSynthesisPhase(IPhase):
         ctx.op.syntax_gate_passed = output.syntax_gate_passed
         ctx.op.refusal_detected = output.refusal_detected
         ctx.op.empty_response = output.empty_response
+        ctx.op.micro_verify = dict(output.micro_verify or {})
 
         # T1.2: Forward PatchError objects for telemetry extraction
         if output.errors:

@@ -62,6 +62,8 @@ class OperationalContext:
     repair_specification: str = ""  # 🛡️ 規格中心修復：邏輯修復意圖 (Intent-based)
     errors: List[PatchError] = field(default_factory=list)
     model_decisions: List[Dict[str, Any]] = field(default_factory=list)
+    # Last attempt's MicroVerifier record (#2975).
+    micro_verify: Dict[str, Any] = field(default_factory=dict)
 
     # Phase 5: Verification
     evaluation_report: str = ""
