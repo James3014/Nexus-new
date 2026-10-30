@@ -70,6 +70,49 @@ LEASES_DIR = Path(
     )
 )
 
+# Agy pool stopped (James 2026-10-30): every new dispatch is refused unless
+# NEXUS_AGY_POOL_STOPPED_OVERRIDE is exactly "1".  See _pool_stopped_refusal.
+POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
+POOL_STOPPED_EXIT_CODE = 3
+POOL_STOPPED_MESSAGE = (
+    "nexus-agy-dispatch: Agy 帳號池已停用（James 10/30：Agy 只走原生 Cord 管道 agy-lane），"
+    "拒絕新派工。改用 Claude 子代理、Codex，或寄協調者走 agy-lane。"
+)
+_POOL_STOPPED_MAINTENANCE_FLAGS = (
+    "--status",
+    "--reconcile",
+    "--finalize-no-effect",
+    "--ack-unclean-sweep",
+)
+
+
+def _pool_stopped_overridden() -> bool:
+    return os.environ.get(POOL_STOPPED_OVERRIDE_ENV) == "1"
+
+
+def _refuse_if_pool_stopped() -> None:
+    """Library entry points that reach a lease, journal or provider refuse too."""
+    if not _pool_stopped_overridden():
+        print(POOL_STOPPED_MESSAGE, file=sys.stderr)
+        raise SystemExit(POOL_STOPPED_EXIT_CODE)
+
+
+# CLI: refuse before the snapshot import and argument parsing, so a refused
+# call runs no snapshot code and always answers with the reason line and 3.
+# Only an argv naming a maintenance flag goes on to main(), which checks again
+# on the parsed arguments.
+if (
+    __name__ == "__main__"
+    and not _pool_stopped_overridden()
+    and not any(
+        arg == flag or arg.startswith(flag + "=")
+        for arg in sys.argv[1:]
+        for flag in _POOL_STOPPED_MAINTENANCE_FLAGS
+    )
+):
+    print(POOL_STOPPED_MESSAGE, file=sys.stderr)
+    raise SystemExit(POOL_STOPPED_EXIT_CODE)
+
 if not SNAPSHOT.is_dir():
     raise SystemExit("NEXUS_AGY_SNAPSHOT_MISSING")
 sys.path.insert(0, str(SNAPSHOT))
@@ -1962,6 +2005,7 @@ def run_agy(
     write_boundary: Any = None,
     lease_fd: int | None = None,
 ):
+    _refuse_if_pool_stopped()
     expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
     if mode == "accept-edits":
         # #2202: never launch an editing Agy run without the Seatbelt write
@@ -3600,6 +3644,7 @@ def dispatch_hcom_collab(
     receives only the exact admitted account snapshot and an inherited
     per-account flock descriptor; it never chooses or rotates accounts itself.
     """
+    _refuse_if_pool_stopped()
     for item in hcom_args:
         lowered = item.strip().lower()
         if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
@@ -4457,6 +4502,7 @@ def dispatch_run(
     empty_output_min_bytes: int | None = None,
     operation_id: str | None = None,
 ) -> int:
+    _refuse_if_pool_stopped()
     started_at = _monotonic()
     limits: dict[str, Any] = {}
     empty_output_failovers = 0
@@ -6232,6 +6278,7 @@ def _spawn_background_operation(
     run_as_user: str | None = None,
     empty_output_min_bytes: int | None = None,
 ) -> dict[str, Any]:
+    _refuse_if_pool_stopped()
     resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
     journal = AgyOperationJournal(operation_root)
@@ -7608,14 +7655,6 @@ def _refuse_prompt_conflicts(args: argparse.Namespace) -> None:
         )
 
 
-POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
-POOL_STOPPED_EXIT_CODE = 3
-POOL_STOPPED_MESSAGE = (
-    "nexus-agy-dispatch: Agy 帳號池已停用（James 10/30：Agy 只走原生 Cord 管道 agy-lane），"
-    "拒絕新派工。改用 Claude 子代理、Codex，或寄協調者走 agy-lane。"
-)
-
-
 def _pool_stopped_refusal(args: argparse.Namespace) -> Optional[int]:
     """Refuse every new dispatch by default: the Agy account pool is stopped.
 
@@ -7633,7 +7672,7 @@ def _pool_stopped_refusal(args: argparse.Namespace) -> Optional[int]:
     background child inherits its parent's environment, so an overridden
     parent's child still runs.
     """
-    if os.environ.get(POOL_STOPPED_OVERRIDE_ENV) == "1":
+    if _pool_stopped_overridden():
         return None
     if args.status or args.reconcile or args.finalize_no_effect or args.ack_unclean_sweep:
         return None

@@ -530,14 +530,17 @@ def _agy_model_catalog_check_off_unless_requested(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _agy_pool_stopped_override_for_dispatcher_tests(monkeypatch):
+def _agy_pool_stopped_override_for_dispatcher_tests():
     """Agy pool stopped (2026-10-30): nexus-agy-dispatch refuses by default.
 
     Tests that drive the dispatcher's original logic (in process, or as a
     subprocess inheriting os.environ) run with the override; the default-deny
-    tests ``delenv`` it themselves, which runs after this fixture.
+    tests ``delenv`` it themselves, which runs after this fixture.  An own
+    MonkeyPatch, so a test's ``monkeypatch.undo()`` does not drop it.
     """
-    monkeypatch.setenv("NEXUS_AGY_POOL_STOPPED_OVERRIDE", "1")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("NEXUS_AGY_POOL_STOPPED_OVERRIDE", "1")
+        yield
 
 
 @pytest.fixture(autouse=True)

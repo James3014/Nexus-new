@@ -2,11 +2,14 @@
 
 Only NEXUS_AGY_POOL_STOPPED_OVERRIDE=1 runs the original logic; journal
 maintenance on existing operations (--status, --reconcile,
---finalize-no-effect, --ack-unclean-sweep) still runs.
+--finalize-no-effect, --ack-unclean-sweep) still runs.  The CLI refuses
+before the snapshot import and argument parsing; the library entry points
+that reach a lease, journal or provider refuse too.
 """
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -104,3 +107,66 @@ def test_installed_entrypoint_exits_3_with_message(tmp_path):
     assert proc.stderr.strip() == dispatch.POOL_STOPPED_MESSAGE
     assert proc.stdout == ""
     assert not op_root.exists()
+
+
+@pytest.mark.parametrize(
+    "entry", ["run_agy", "dispatch_hcom_collab", "dispatch_run", "_spawn_background_operation"]
+)
+def test_library_entry_points_refuse_without_override(monkeypatch, capsys, entry):
+    monkeypatch.delenv(OVERRIDE, raising=False)
+
+    func = getattr(dispatch, entry)
+    required = {
+        name: None
+        for name, param in inspect.signature(func).parameters.items()
+        if param.default is inspect.Parameter.empty
+    }
+
+    with pytest.raises(SystemExit) as exc:
+        func(**required)  # refused before any argument is used
+
+    assert exc.value.code == 3
+    assert capsys.readouterr().err.strip() == dispatch.POOL_STOPPED_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--help"],
+        ["--unknown-flag", "hello"],
+        ["--timeout", "not-an-int", "hello"],
+        ["--stat", "op-1"],  # argparse abbreviation of --status is not exempt
+    ],
+)
+def test_cli_refuses_before_parsing_and_snapshot_import(tmp_path, argv):
+    env = {k: v for k, v in os.environ.items() if k != OVERRIDE}
+    env["NEXUS_AGY_SNAPSHOT"] = str(tmp_path / "missing-snapshot")
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), *argv],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert proc.returncode == 3
+    assert proc.stderr.strip() == dispatch.POOL_STOPPED_MESSAGE
+
+
+def test_cli_maintenance_flag_reaches_snapshot_import(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k != OVERRIDE}
+    env["NEXUS_AGY_SNAPSHOT"] = str(tmp_path / "missing-snapshot")
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--status=op-1"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert proc.returncode == 1
+    assert "NEXUS_AGY_SNAPSHOT_MISSING" in proc.stderr
