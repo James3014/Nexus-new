@@ -1442,3 +1442,142 @@ def test_run_cairnwork_merge_only_delta_ignores_an_old_rebuttal():
         results[repo] = (rrc.run(repo, 7, TOKEN, wrapped, post), posted[0][1]["state"])
     assert results["James3014/Nexus-new"] == (0, "success")
     assert results["cairnwork/cairnwork"] == (1, "failure")
+
+
+# -- #2992: a record for another head, a later REJECT, a capped file list ---------------
+
+STALE_LABEL_RECORD = (
+    "## Review record — Claude (claude-opus-5-5)\n"
+    f"- Head reviewed: `{R_OLD}`\n- Verdict: **ACCEPT**\n"
+    f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n",
+        f"- Merged main → final head {HEAD}\n",
+    ],
+)
+def test_a_bare_verdict_under_an_older_head_label_is_not_read_as_the_new_head(tail):
+    body = (
+        "## Review record — Claude (claude-opus-5-5)\n"
+        f"- Head reviewed: `{R_OLD}`\n- Verdict: **ACCEPT**\n" + tail
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is False
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+    # The record still belongs to the head it names, so a merge-only delta can carry it.
+    old = rrc.classify_record(body, R_OLD)
+    assert old is not None and old["claude"] is True
+
+
+def test_a_head_label_after_the_verdict_still_binds_when_it_is_the_only_head():
+    body = f"**Claude review** (Opus)\nVerdict: **ACCEPT**\nHead reviewed: `{HEAD}`\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_prose_naming_another_sha_after_the_word_head_does_not_unbind_the_record():
+    # Shape of a real record: the title labels the head, a finding mentions main's sha.
+    body = (
+        f"## Review record — head `{HEAD}`\n\n"
+        "**Independent Claude review** (Claude Opus 5.5): **VERDICT: ACCEPT**.\n"
+        f"- Checked on this head and on origin/main {OLD[:9]}.\n\n"
+        "**Cross-model review** (Gemini via agy-bulk) @ `8d70e3ff`: **VERDICT: ACCEPT**.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] and record["cross_model"]
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+
+
+def test_run_carries_an_older_head_label_record_only_through_a_verified_merge_delta():
+    body = STALE_LABEL_RECORD.replace(
+        f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n",
+        f"- Merged main → final head {HEAD}\n",
+    )
+    rc, status = _delta_case(comments=[_c(body)])
+    assert rc == 0 and status["state"] == "success"
+    assert f"record at {R_OLD[:9]}, merge-only delta verified" in status["description"]
+    rc, status = _delta_case(comments=[_c(body)], changed=({"filename": "docs/a.md"},))
+    assert rc == 1 and status["state"] == "failure"
+
+
+CLAUDE_AT_HEAD = f"**Claude review** (Claude Opus 5.5): **ACCEPT@{HEAD[:9]}**.\n"
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        [
+            f"Head reviewed: {HEAD}\n**Codex**: r1 ACCEPT\n**Codex**: r2 REJECT — data-loss bug\n"
+            "**Claude**: ACCEPT\n"
+        ],
+        [f"Codex ACCEPT@{HEAD}", f"Codex r2 REJECT@{HEAD}: found a data-loss bug", CLAUDE_AT_HEAD],
+        [f"Codex r2: ACCEPT. After the rebase, Codex r3 on head {HEAD}: REJECT\n", CLAUDE_AT_HEAD],
+    ],
+)
+def test_a_later_cross_model_reject_at_the_head_withdraws_its_accept(comments):
+    report = rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    assert "later Codex/Gemini REJECT" in report["reason"]
+
+
+def test_a_later_claude_reject_at_the_head_withdraws_the_independent_record():
+    comments = [_c(OPUS_RECORD), _c(f"**Claude review** (Opus) r2: REJECT at {HEAD}: a regression")]
+    report = rrc.evaluate(HEAD, DOCS, comments, [])
+    assert report["status"] == "MISSING_RECORD" and "later Claude/Opus REJECT" in report["reason"]
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        # A later round accepts again.
+        [f"Codex r1 REJECT@{HEAD}: two findings", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
+        # A round history listed after the summary verdict.
+        [f"**Codex review** @ {HEAD}: **ACCEPT**\n- r1: REJECT (missing test)\n", CLAUDE_AT_HEAD],
+        # A numbered later round survives an earlier round listed after it.
+        [f"Codex r3 ACCEPT@{HEAD}", f"Recap: Codex r2 REJECT@{HEAD}: one finding", CLAUDE_AT_HEAD],
+        # Resolved, negated or quoted rejections and tables withdraw nothing.
+        [f"Codex ACCEPT@{HEAD}", f"Codex r2 REJECT@{HEAD} (rebutted, see above)", CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f"Codex did not REJECT at {HEAD}", CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f'Codex said "REJECT" at {HEAD} in a dry run', CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f"| Codex | r2 | REJECT@{HEAD} |", CLAUDE_AT_HEAD],
+        # A REJECT at another head is about that head.
+        [f"Codex r1 REJECT@{OLD[:9]}: fixed later", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
+        [CODEX_RECORD, CLAUDE_AT_HEAD],
+    ],
+)
+def test_resolved_or_superseded_rejects_do_not_withdraw(comments):
+    assert rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+def test_a_reject_is_credited_to_the_model_named_closest_before_it():
+    # Shape of a real cairnwork disposition: the Claude ACCEPT stands, Gemini's REJECT is
+    # Gemini's own.
+    body = (
+        f"Round 3 split: **Independent Claude review** ACCEPT at {HEAD}; "
+        f"**Cross-model review** (Gemini 3.8 Flash High) REJECT at {HEAD}.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is True and record["cross_model"] is False
+    assert [e["family"] for e in record["events"] if e["kind"] == "reject"] == ["cross_model"]
+
+
+def test_a_pr_file_list_at_the_api_cap_counts_as_high_risk():
+    files = [{"filename": f"docs/f{i:04}.md"} for i in range(rrc.MAX_PR_FILES)]
+    assert rrc.high_risk_paths(files) == [rrc.TRUNCATED_FILES]
+    assert rrc.high_risk_paths(files[:-1]) == []
+    comments = [_c(OPUS_RECORD)]
+    posted, post = _posts()
+    assert rrc.run("o/r", 7, TOKEN, _fake(files=files, comments=comments), post) == 1
+    assert posted[0][1]["state"] == "failure"
+    assert "MISSING_CROSS_MODEL" in posted[0][1]["description"]
+
+
+def test_a_reviewed_commit_label_without_the_word_head_also_names_the_older_head():
+    body = (
+        f"**Claude review** (Opus)\nReviewed commit {R_OLD[:12]}\nVerdict: **ACCEPT**\n"
+        f"Pushed one more fix; head is now {HEAD}.\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"

@@ -20,11 +20,18 @@ quotes the words never counts):
 - The verdict is *bound to the head* when its clause names the head sha (full, or
   a hex prefix of at least ``MIN_PREFIX`` characters), else when its line does,
   else when the comment has a ``Head`` label naming it (``Head reviewed: <sha>``,
-  ``final head <sha>``). A clause bound to another sha cannot be rebound.
+  ``final head <sha>``). A clause bound to another sha cannot be rebound. When the
+  comment's Head labels name different commits, only the nearest label above the
+  verdict binds it (#2992).
 - The *reviewer family* comes from the words before the token in its clause, else
   from the header of its section (a heading, bold label or ``Reviewer:`` line):
   ``claude``/``opus``/``sonnet``, or cross-model ``codex``/``gemini``/``gpt``. When
   both appear, the family is Claude. A verdict with no family is not a record.
+- A later *REJECT* (or ``REPAIR_REQUIRED`` / ``REQUEST_CHANGES``) in verdict position at
+  the head withdraws the earlier ACCEPTs of its reviewer family (the model named closest
+  before it), in the same comment or a later one, unless it says it was resolved
+  (``fixed``, ``rebutted``) or an ACCEPT is from a later round; a later ACCEPT stands
+  again (#2992).
 - A *rebuttal at the cap* is a cross-model section with a REJECT line at round
   three or later followed by a past-tense ``rebutted`` line. It does not count for
   the repos in ``NO_REBUTTAL_AT_CAP_REPOS`` (cairnwork/cairnwork since cairnwork#344:
@@ -35,6 +42,7 @@ quotes the words never counts):
 Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
   record at head (an accepting verdict, or a rebuttal at the cap where it counts).
+  A PR file list at the API cap (3000 files) may hide a path, so it is high-risk.
 - ``MISSING_RECORD`` / ``MISSING_CROSS_MODEL``: what is absent; the reason tells a
   stale-head record from a comment with no verdict.
 - ``ERROR``: the API could not be read; fails closed and, when the head is known,
@@ -65,6 +73,9 @@ STATUS_CONTEXT = "Review record present (advisory)"
 NO_REBUTTAL_AT_CAP_REPOS = frozenset({"cairnwork/cairnwork"})
 MIN_PREFIX = 9
 MAX_DESCRIPTION = 140
+# The PR files API lists at most 3000 files and then stops without an error (#2992).
+MAX_PR_FILES = 3000
+TRUNCATED_FILES = f"(file list of {MAX_PR_FILES}+ entries may be truncated)"
 
 # Paths whose change makes the PR high-risk (nexus-codex-review skill list, 2026-10-15).
 HIGH_RISK_PREFIXES = (
@@ -103,8 +114,23 @@ _VERDICT_POS = re.compile(
     rf"|(?<![\w-])({_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
 )
 # _plain strips underscores, so the joined forms must match too.
-_REJECT = re.compile(
-    r"\b(?:REJECT(?:ED)?|REPAIR_?REQUIRED|REQUEST_?CHANGES|CHANGES[ _]?REQUESTED)\b"
+_REJECT_TOKEN = r"(?:REJECT(?:ED)?|REPAIR_?REQUIRED|REQUEST_?CHANGES|CHANGES[ _]?REQUESTED)"
+_REJECT = re.compile(rf"\b{_REJECT_TOKEN}\b")
+# A rejecting verdict in the same positions as an accepting one (#2992); uppercase only.
+_REJECT_POS = re.compile(
+    rf"(?:\b(?i:verdict)\s*:\s*|@\s*|:\s*|\s[\-–—]\s*|\b(?i:r)\d+\s+|\b(?i:round)\s*\d+\s*:?\s*|^\s*)"
+    rf"({_REJECT_TOKEN})\b"
+    rf"|(?<![\w-])({_REJECT_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
+)
+_REJECT_PRE_DENY = re.compile(
+    r"\b(?:no|not|never|none|nothing|if|unless|whether|would|could|might|may|should|cannot"
+    r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
+    re.IGNORECASE,
+)
+_RESOLVED = re.compile(
+    r"\b(?:fixed|rebutted|addressed|resolved|superseded|withdrawn|retracted|overturned"
+    r"|dismissed|overridden|cleared)\b",
+    re.IGNORECASE,
 )
 _VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
 _QUOTE = re.compile("[\"\u201c\u2018]|(?<![A-Za-z])'")  # an apostrophe inside a word is possessive
@@ -136,6 +162,13 @@ _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
 _HEAD_BIND = re.compile(
     rf"\bhead\b[^\n]{{0,48}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
+)
+# A Head label proper ("Head reviewed: <sha>", "final head <sha>", "head is now <sha>",
+# "Reviewed commit <sha>"), not prose that merely has a sha within reach of the word
+# ("this head and main <sha>").
+_HEAD_LABEL = re.compile(
+    r"\b(?:head|reviewed)\b(?:\s+(?:reviewed|sha|commit))?(?:\s+(?:is|was))?(?:\s+now)?(?:\s+at)?"
+    rf"\s*[:=@]?\s*(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
 )
 _SKIP_LINE = re.compile(
     r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)"
@@ -341,18 +374,74 @@ def is_verdict_line(line: str) -> bool:
     return bool(verdict_clauses(line))
 
 
-def _comment_head(lines: list[str], head: str) -> bool:
-    """A line that labels the head: ``Head reviewed: <sha>``, ``final head <sha>``."""
-    head = head.lower()
+def reject_clauses(line: str) -> list[str]:
+    """Clauses of the line that carry an open rejecting verdict (#2992).
+
+    The token (``REJECT``, ``REPAIR_REQUIRED``, ``REQUEST_CHANGES``, ``CHANGES_REQUESTED``)
+    sits in the same verdict positions as an accepting one; it is not negated, conditional
+    or quoted, and nothing from it to the next verdict on the line says it was resolved
+    (``r1 REJECT (fixed)``, ``REJECT, rebutted``). Lines skipped for accepting verdicts
+    (tables, quotes, unticked checklist items, pasted commands) are skipped here too.
+    """
+    if _SKIP_LINE.match(line):
+        return []
+    out: list[str] = []
+    plain_line = _plain(line, keep_parens=True)
+    consumed = 0
+    for clause in _clauses(plain_line):
+        start = plain_line.find(clause, consumed)
+        consumed = start + len(clause) if start >= 0 else consumed
+        match = _REJECT_POS.search(clause)
+        if not match:
+            continue
+        token_start = match.start(1) if match.group(1) else match.start(2)
+        if _REJECT_PRE_DENY.search(_plain(clause[:token_start])) or _QUOTE.search(
+            clause[:token_start]
+        ):
+            continue
+        rest = plain_line[start + token_start :] if start >= 0 else clause[token_start:]
+        following = _VERDICT_POS.search(rest, 1)
+        following_reject = _REJECT_POS.search(rest, 1)
+        cut = min([m.start() for m in (following, following_reject) if m is not None] + [len(rest)])
+        if _RESOLVED.search(rest[:cut]):
+            continue
+        out.append(clause)
+    return out
+
+
+def _head_labels(lines: list[str]) -> list[tuple[list[str], str | None]]:
+    """Per line: every sha a loose ``head ... <sha>`` mention names, and the sha its first
+    Head label proper names (``Head reviewed: <sha>``, ``final head <sha>``) or None.
+    A parenthetical is neither."""
+    out: list[tuple[list[str], str | None]] = []
     for line in lines:
-        for found in _HEAD_BIND.findall(_plain(line).lower()):
-            if head.startswith(found):
-                return True
+        text = _plain(line).lower()
+        strict = _HEAD_LABEL.search(text)
+        out.append((_HEAD_BIND.findall(text), strict.group(1) if strict else None))
+    return out
+
+
+def _label_binds(labels: list[tuple[list[str], str | None]], index: int, head: str) -> bool:
+    """Whether a verdict on line ``index`` whose line names no sha binds to the head.
+
+    By default any line of the comment that names the head after the word ``head`` binds
+    it, above or below the verdict. When a Head label proper names another commit
+    ("Head reviewed: <old>" with "head is now <new>" elsewhere), only the nearest Head
+    label above the verdict binds it (#2992): the record is then that older head's, and
+    a merge-only delta to the new head is left to the API verification (#2308).
+    """
+    head = head.lower()
+    strict = [label for _loose, label in labels]
+    if all(label is None or head.startswith(label) for label in strict):
+        return any(head.startswith(found) for loose, _label in labels for found in loose)
+    for label in reversed(strict[: index + 1]):
+        if label is not None:
+            return head.startswith(label)
     return False
 
 
 def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
-    """A verdict binds to the head by its own clause's sha, else the line, else a Head line.
+    """A verdict binds to the head by its own clause's sha, else the line, else a Head label.
 
     A clause that names a different sha is bound to that sha: a later ``Head`` line
     or another sha on the same line cannot rebind it.
@@ -365,6 +454,9 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
 
 
 _MODEL_WORDS = re.compile(r"\b(?:codex|gemini|gpt|claude|opus|sonnet)\b", re.IGNORECASE)
+_NEAREST_MODEL = re.compile(
+    r"\b(?:codex|gemini|gpt|claude|opus|sonnet|cross-model)\b", re.IGNORECASE
+)
 
 
 def _own_status(line: str) -> bool:
@@ -462,6 +554,76 @@ def _rebuttal_at_cap(section: list[str], head: str) -> bool:
     return rebutted
 
 
+def _reject_match(clause: str) -> tuple[int, int] | None:
+    match = _REJECT_POS.search(clause)
+    if not match:
+        return None
+    group = 1 if match.group(1) else 2
+    return match.start(group), match.end(group)
+
+
+def _clause_family(
+    clause: str,
+    span: tuple[int, int] | None,
+    plain_line: str,
+    start: int,
+    header_family: str | None,
+    nearest: bool = False,
+) -> str | None:
+    """Reviewer family of a verdict clause: named before the token in the clause, else on
+    the line before it ("Claude: r1 ..., r2 ACCEPT"), else the section header's. None when
+    the label naming the model is disabled ("**Codex (not run)**: ACCEPT @ sha").
+
+    ``nearest`` (a REJECT) takes the model named closest before the token instead, so
+    "Claude ACCEPT at <sha>; Cross-model review (Gemini) REJECT at <sha>" rejects for
+    the cross-model family only.
+    """
+    before = clause[: span[0]] if span else ""
+    line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
+    label_part, status_part = _split_label(line_before)
+    if _disabled_verdict_label(label_part) or (
+        label_part != line_before
+        and bool(_MODEL_WORDS.search(label_part))
+        and len(status_part.split()) <= 4
+        and bool(_NOT_A_HEADER.search(_plain(status_part)))
+    ):
+        return None
+    if nearest:
+        named = _NEAREST_MODEL.findall(line_before)
+        if not named:
+            return header_family
+        return "cross_model" if named[-1].lower() == "cross-model" else _family(named[-1])
+    return _family(before) or _family(line_before) or header_family
+
+
+def standing_families(events: list[dict[str, Any]]) -> set[str]:
+    """Reviewer families whose ACCEPT at the head still stands after later REJECTs (#2992).
+
+    Events are in posting order (comments oldest first, lines top to bottom). A REJECT
+    withdraws every earlier ACCEPT of its family except one from a later round
+    (``r3 ACCEPT`` survives an ``r2 REJECT`` listed after it) and, inside one comment, an
+    unnumbered ACCEPT ahead of a numbered round history ("Verdict: ACCEPT" then
+    "r1: REJECT"). A later ACCEPT stands again.
+    """
+    accepts: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        family = event["family"]
+        if event["kind"] == "accept":
+            accepts.setdefault(family, []).append(event)
+            continue
+        reject_round = event["round"]
+
+        def survives(accept: dict[str, Any], reject: dict[str, Any] = event) -> bool:
+            if reject_round is None:
+                return False
+            if accept["round"] is None:
+                return accept["comment"] == reject["comment"]
+            return accept["round"] > reject_round
+
+        accepts[family] = [a for a in accepts.get(family, []) if survives(a)]
+    return {family for family, kept in accepts.items() if kept}
+
+
 def classify_record(body: str, head: str) -> dict[str, Any] | None:
     """Classify one comment body; None when it does not name the head anywhere.
 
@@ -482,13 +644,14 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             continue
         if not fenced:
             lines.append(raw)
-    comment_head = _comment_head(lines, head)
+    labels = _head_labels(lines)
     verdicts: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     rebuttal_at_cap = False
     section: list[str] = []
     header_family: str | None = None
     header_level = 0  # heading level that opened the section; 99 for a non-heading label
-    for line in lines:
+    for index, line in enumerate(lines):
         label = _label_family(line)
         level = re.match(r"^\s*(#+)\s", line)
         if label is not None:
@@ -503,41 +666,46 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
                 rebuttal_at_cap = True
             section, header_family = [], label  # "## Notes" opens a section with no family
         section.append(line)
-        clauses = verdict_clauses(line)
-        if not clauses:
-            continue
+        comment_head = _label_binds(labels, index, head)
         plain_line = _plain(line, keep_parens=True)
-        consumed = 0
-        for clause in clauses:
-            span = _verdict_match(clause)
-            before = clause[: span[0]] if span else ""
-            start = plain_line.find(clause, consumed)
-            consumed = start + len(clause) if start >= 0 else consumed
-            # The family named on the line before the token ("Claude: r1 ..., r2 ACCEPT"),
-            # else the section header's.
-            line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
-            label_part, status_part = _split_label(line_before)
-            if _disabled_verdict_label(label_part) or (
-                label_part != line_before
-                and bool(_MODEL_WORDS.search(label_part))
-                and len(status_part.split()) <= 4
-                and bool(_NOT_A_HEADER.search(_plain(status_part)))
-            ):
-                continue  # "**Codex (not run)**: ACCEPT @ sha" names no reviewer family
-            family = _family(before) or _family(line_before) or header_family
-            if family and _binding(clause, line, head, comment_head):
-                verdicts.append({"family": family, "line": clause.strip()})
+        accept_clauses = verdict_clauses(line)
+        line_events: list[tuple[int, dict[str, Any]]] = []
+        for kind, clauses in (("accept", accept_clauses), ("reject", reject_clauses(line))):
+            consumed = 0
+            for clause in clauses:
+                span = _verdict_match(clause) if kind == "accept" else _reject_match(clause)
+                start = plain_line.find(clause, consumed)
+                consumed = start + len(clause) if start >= 0 else consumed
+                family = _clause_family(
+                    clause, span, plain_line, start, header_family, nearest=kind == "reject"
+                )
+                if family and _binding(clause, line, head, comment_head):
+                    rounds = _ROUND.findall(clause[: span[0]]) if span else []
+                    event = {
+                        "family": family,
+                        "kind": kind,
+                        "round": int(rounds[-1]) if rounds else None,
+                        "comment": 0,
+                        "line": clause.strip(),
+                    }
+                    line_events.append((start + (span[0] if span else 0), event))
+        events.extend(event for _, event in sorted(line_events, key=lambda item: item[0]))
+        verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
+        if not accept_clauses:
+            continue
         if header_family == "cross_model" and _rebuttal_at_cap(section, head):
             rebuttal_at_cap = True
         section = []  # the header family persists: a reviewer block lists its rounds
     if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
         rebuttal_at_cap = True
+    standing = standing_families(events)
     return {
         "verdict": bool(verdicts),
-        "claude": any(v["family"] == "claude" for v in verdicts),
-        "cross_model": any(v["family"] == "cross_model" for v in verdicts),
+        "claude": "claude" in standing,
+        "cross_model": "cross_model" in standing,
         "rebuttal_at_cap": rebuttal_at_cap,
         "verdict_lines": [v["line"] for v in verdicts],
+        "events": events,
     }
 
 
@@ -546,8 +714,11 @@ def _is_high_risk(name: str) -> bool:
 
 
 def high_risk_paths(files: list[Any]) -> list[str]:
-    """High-risk paths touched by the PR; a rename counts by its old name too."""
-    paths: set[str] = set()
+    """High-risk paths touched by the PR; a rename counts by its old name too.
+
+    A list at the API's file cap may hide a high-risk path, so it counts as high-risk.
+    """
+    paths: set[str] = {TRUNCATED_FILES} if len(files) >= MAX_PR_FILES else set()
     for entry in files:
         if not isinstance(entry, dict):
             continue
@@ -586,12 +757,14 @@ def rebuttal_counts(repo: str) -> bool:
 
 def _evidence_at(
     head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
-) -> tuple[list[dict[str, Any]], bool, bool, int]:
-    """Records, stale flag, unbound flag and approved-review count for one head."""
+) -> tuple[list[dict[str, Any]], bool, bool, int, set[str]]:
+    """Records, stale flag, unbound flag, approved-review count and the reviewer families
+    whose ACCEPT still stands at one head (comments in API order: oldest first)."""
     records: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     stale = False
     unbound = False
-    for comment in comments:
+    for number, comment in enumerate(comments):
         body = comment.get("body") if isinstance(comment, dict) else None
         if not isinstance(body, str):
             continue
@@ -602,23 +775,27 @@ def _evidence_at(
             ):
                 stale = True
             continue
+        events.extend(dict(event, comment=number) for event in record["events"])
         if not allow_rebuttal:
             record = dict(record, rebuttal_at_cap=False)
         if record["verdict"] or record["rebuttal_at_cap"]:
             records.append(record)
         else:
             unbound = True
-    return records, stale, unbound, approved_reviews_at_head(reviews, head)
+    standing = standing_families(events)
+    return records, stale, unbound, approved_reviews_at_head(reviews, head), standing
 
 
 def _contributes(
     head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
 ) -> tuple[bool, bool]:
     """(independent, cross_model) evidence a record at ``head`` provides."""
-    records, _stale, _unbound, approved = _evidence_at(head, comments, reviews, allow_rebuttal)
+    records, _stale, _unbound, approved, standing = _evidence_at(
+        head, comments, reviews, allow_rebuttal
+    )
     return (
-        approved > 0 or any(r["claude"] for r in records),
-        any(r["cross_model"] or r["rebuttal_at_cap"] for r in records),
+        approved > 0 or "claude" in standing,
+        "cross_model" in standing or any(r["rebuttal_at_cap"] for r in records),
     )
 
 
@@ -638,13 +815,20 @@ def evaluate(
     ``allow_rebuttal`` False (``rebuttal_counts(repo)``) drops rebuttals at the cap.
     """
     risky = high_risk_paths(files)
-    records, stale, unbound, approved_reviews = _evidence_at(
+    records, stale, unbound, approved_reviews, standing = _evidence_at(
         head, comments, reviews, allow_rebuttal
     )
     # The independent record is the Claude-family review (or a submitted approval); a
-    # cross-model record alone satisfies only the cross-model requirement.
-    independent_head = approved_reviews > 0 or any(r["claude"] for r in records)
-    cross_head = any(r["cross_model"] or r["rebuttal_at_cap"] for r in records)
+    # cross-model record alone satisfies only the cross-model requirement. A family's
+    # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
+    independent_head = approved_reviews > 0 or "claude" in standing
+    cross_head = "cross_model" in standing or any(r["rebuttal_at_cap"] for r in records)
+    withdrawn = {
+        event["family"]
+        for record in records
+        for event in record["events"]
+        if event["kind"] == "accept"
+    } - standing
     independent, cross_model = independent_head, cross_head
     delta_heads: list[str] = []
     for old in delta_verified:
@@ -659,7 +843,9 @@ def evaluate(
     short = head[:12]
     if not independent:
         status = "MISSING_RECORD"
-        if stale:
+        if "claude" in withdrawn:
+            reason = f"a later Claude/Opus REJECT at head {short} withdraws its ACCEPT"
+        elif stale:
             reason = f"review record found for an older head only; none names head {short}"
         elif unbound:
             reason = (
@@ -671,7 +857,9 @@ def evaluate(
             )
     elif risky and not cross_model:
         status = "MISSING_CROSS_MODEL"
-        if allow_rebuttal:
+        if "cross_model" in withdrawn:
+            reason = f"a later Codex/Gemini REJECT at head {short} withdraws its ACCEPT"
+        elif allow_rebuttal:
             reason = (
                 f"high-risk paths changed but no Codex/Gemini verdict or rebuttal at head {short}"
             )
