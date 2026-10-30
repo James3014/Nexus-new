@@ -211,6 +211,13 @@ def record_world_c_phase_result(ctx: Any, phase_name: str, result: PhaseResult) 
         "output_evidence_present": output_evidence_present,
         "output_evidence_hash": output_evidence_hash,
     }
+    # #2975: what the MicroVerifier did on this attempt (e.g. a test step skipped because the
+    # interpreter has no pytest). Only present when it ran, so other attempts keep their shape.
+    # Consumed here, so a later attempt that never reached the MicroVerifier cannot inherit it.
+    micro_verify = getattr(op, "micro_verify", None) if stage == "patch_synthesis" else None
+    if isinstance(micro_verify, Mapping) and micro_verify:
+        payload["micro_verify"] = dict(micro_verify)
+        setattr(op, "micro_verify", {})
     payload["evidence_hash"] = _sha256_json(payload)
     attempts.append(payload)
 

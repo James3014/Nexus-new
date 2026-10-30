@@ -150,6 +150,7 @@ class PatchSynthesisOutput:
     errors: List = field(default_factory=list)  # T1.2: Forward PatchError objects for telemetry
     last_search_anchors: List[str] = field(default_factory=list)
     last_replacement_texts: List[str] = field(default_factory=list)
+    micro_verify: Dict[str, Any] = field(default_factory=dict)  # #2975: MicroVerifyResult.receipt_fields()
 
     @property
     def failure_reason(self) -> str:

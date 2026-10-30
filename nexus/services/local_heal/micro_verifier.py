@@ -11,7 +11,7 @@ import ast
 import os
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
 
 from nexus.engine.model_output_sandbox import (
@@ -26,6 +26,22 @@ _IMPORT_PROBE = (
     "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module(sys.argv[2])"
 )
 
+# Asks the interpreter whether it can import pytest at all, without importing it (#2975). Exit 0
+# with no output = present; exit 0 with the marker = absent; anything else = the probe failed.
+_PYTEST_ABSENT_MARKER = "NEXUS_MICRO_VERIFY_PYTEST_ABSENT"
+_PYTEST_PROBE = (
+    "import importlib.util; "
+    f"print('' if importlib.util.find_spec('pytest') else '{_PYTEST_ABSENT_MARKER}')"
+)
+# pytest's documented exit status for "no tests were collected".
+_PYTEST_NO_TESTS_COLLECTED = 5
+
+
+def is_test_file(file_path: str) -> bool:
+    """pytest's default ``python_files`` names: ``test_*.py`` or ``*_test.py`` (basename)."""
+    name = PurePath(file_path).name
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
 
 @dataclass
 class MicroVerifyResult:
@@ -39,10 +55,27 @@ class MicroVerifyResult:
     interpreter_used: str = ""
     classifications: List[str] = field(default_factory=list)
     task_scoped: bool = False  # T2: Whether task-scoped verifier was used
-    
+    # #2975: what the target-test step did: "not_applicable" (no test files), "ran",
+    # "failed", or "skipped" with test_skip_reason ("pytest_unavailable", "no_tests_collected").
+    test_step: str = "not_applicable"
+    test_skip_reason: str = ""
+    test_files: List[str] = field(default_factory=list)
+
     @property
     def can_proceed_to_full_verifier(self) -> bool:
         return self.passed and self.syntax_ok
+
+    def receipt_fields(self) -> Dict[str, Any]:
+        """Compact record for the patch attempt receipt (a skipped step stays visible)."""
+        return {
+            "passed": self.passed,
+            "error_message": self.error_message,
+            "interpreter": self.interpreter_used,
+            "test_step": self.test_step,
+            "test_skip_reason": self.test_skip_reason,
+            "test_files": list(self.test_files),
+            "classifications": list(self.classifications),
+        }
 
 
 class MicroVerifier:
@@ -192,11 +225,10 @@ class MicroVerifier:
         # 3. Target test check
         test_ok = True
         test_errors = []
-        test_files = []
-        for file_path in patched_files:
-            if file_path.startswith("test_") or "_test.py" in file_path:
-                test_files.append(file_path)
-        
+        test_files = [file_path for file_path in patched_files if is_test_file(file_path)]
+        test_skip_reason = ""
+        tests_collected = 0
+
         if test_files:
             # Determine pytest executable — prefer task-scoped
             run_cmd = []
@@ -208,8 +240,40 @@ class MicroVerifier:
                 run_cmd = [interpreter, "-m", "pytest"]
             else:
                 run_cmd = ["python3", "-m", "pytest"]
-                
-            for test_file in test_files:
+
+            # #2975: `<interpreter> -m pytest` on an interpreter without pytest is not a test
+            # failure. Ask first; when pytest is absent, record the step as skipped (the full
+            # verifier still decides). A probe that cannot run or answers oddly fails closed.
+            if not pytest_cmd:
+                try:
+                    probe = run_model_argv(
+                        [run_cmd[0], "-c", _PYTEST_PROBE],
+                        work_dir=repo_dir,
+                        timeout=10,
+                        readable=interpreter_readable_roots(run_cmd[0]),
+                    )
+                    if probe.returncode != 0:
+                        test_ok = False
+                        classifications.append("verifier_unavailable")
+                        test_errors.append(
+                            f"pytest_probe_failed: exit {probe.returncode}: {probe.stderr[-300:]}"
+                        )
+                    elif _PYTEST_ABSENT_MARKER in probe.stdout:
+                        test_skip_reason = "pytest_unavailable"
+                except SandboxError as e:
+                    test_ok = False
+                    classifications.append("verifier_unavailable")
+                    test_errors.append(f"verifier_sandbox_unavailable: {e}")
+                except FileNotFoundError:
+                    test_ok = False
+                    classifications.append("verifier_unavailable")
+                    test_errors.append(f"Interpreter {run_cmd[0]} not found.")
+                except subprocess.TimeoutExpired:
+                    test_ok = False
+                    classifications.append("verifier_unavailable")
+                    test_errors.append("Timeout expired during pytest probe.")
+
+            for test_file in test_files if test_ok and not test_skip_reason else []:
                 full_path = repo_dir / test_file
                 if full_path.exists():
                     try:
@@ -220,11 +284,15 @@ class MicroVerifier:
                             timeout=30,
                             readable=interpreter_readable_roots(run_cmd[0]),
                         )
+                        if result.returncode == _PYTEST_NO_TESTS_COLLECTED:
+                            continue  # a *_test.py module with no tests in it (#2975)
                         if result.returncode != 0:
                             test_ok = False
                             test_errors.append(
                                 f"{test_file}: {result.stdout[-500:]}{result.stderr[-500:]}"
                             )
+                        else:
+                            tests_collected += 1
                     except SandboxError as e:
                         test_ok = False
                         classifications.append("verifier_unavailable")
@@ -255,21 +323,38 @@ class MicroVerifier:
                 interpreter_used=cmd_interpreter,
                 classifications=classifications,
                 task_scoped=task_scoped,
+                test_step="failed",
+                test_files=test_files,
             )
-            
-        if test_files:
+
+        if test_files and not test_skip_reason and tests_collected == 0:
+            test_skip_reason = "no_tests_collected"
+
+        details = ""
+        if test_skip_reason:
+            # Degraded to syntax + import only; visible in the result and the receipt.
+            test_step = "skipped"
+            classifications.extend(["test_step_skipped", test_skip_reason, "false_pass_risk"])
+            details = f"test step skipped: {test_skip_reason} ({', '.join(test_files)})"
+        elif test_files:
+            test_step = "ran"
             classifications.append("verifier_command_check")
         else:
             # If no test files existed, we only did syntax + import.
             # Record false_pass_risk since we didn't run real tests.
+            test_step = "not_applicable"
             classifications.append("false_pass_risk")
-            
+
         return MicroVerifyResult(
             passed=True,
             syntax_ok=True,
             import_ok=True,
-            test_ok=True if test_files else False,
+            test_ok=test_step == "ran",
+            details=details,
             interpreter_used=cmd_interpreter,
             classifications=classifications,
             task_scoped=task_scoped,
+            test_step=test_step,
+            test_skip_reason=test_skip_reason,
+            test_files=test_files,
         )
