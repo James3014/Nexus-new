@@ -97,18 +97,37 @@ def _refuse_if_pool_stopped() -> None:
         raise SystemExit(POOL_STOPPED_EXIT_CODE)
 
 
+def _is_pool_stopped_maintenance_argv(argv: list[str]) -> bool:
+    """True only for the exact maintenance shape: one maintenance flag with its
+    operation id, optionally --operation-root, nothing else (no prompt, no
+    other option, no ``--``).  Values may be attached with ``=``; a separate
+    value must not start with ``-``."""
+    seen = False
+    i = 0
+    while i < len(argv):
+        name, eq, _value = argv[i].partition("=")
+        if name not in _POOL_STOPPED_MAINTENANCE_FLAGS and name != "--operation-root":
+            return False
+        if not eq:
+            i += 1
+            if i >= len(argv) or argv[i].startswith("-"):
+                return False
+        if name in _POOL_STOPPED_MAINTENANCE_FLAGS:
+            if seen:
+                return False
+            seen = True
+        i += 1
+    return seen
+
+
 # CLI: refuse before the snapshot import and argument parsing, so a refused
 # call runs no snapshot code and always answers with the reason line and 3.
-# Only an argv naming a maintenance flag goes on to main(), which checks again
+# Only the exact maintenance argv shape goes on to main(), which checks again
 # on the parsed arguments.
 if (
     __name__ == "__main__"
     and not _pool_stopped_overridden()
-    and not any(
-        arg == flag or arg.startswith(flag + "=")
-        for arg in sys.argv[1:]
-        for flag in _POOL_STOPPED_MAINTENANCE_FLAGS
-    )
+    and not _is_pool_stopped_maintenance_argv(sys.argv[1:])
 ):
     print(POOL_STOPPED_MESSAGE, file=sys.stderr)
     raise SystemExit(POOL_STOPPED_EXIT_CODE)

@@ -112,10 +112,23 @@ def test_installed_entrypoint_exits_3_with_message(tmp_path):
 @pytest.mark.parametrize(
     "entry", ["run_agy", "dispatch_hcom_collab", "dispatch_run", "_spawn_background_operation"]
 )
-def test_library_entry_points_refuse_without_override(monkeypatch, capsys, entry):
+def test_library_entry_points_refuse_without_override(monkeypatch, capsys, tmp_path, entry):
     monkeypatch.delenv(OVERRIDE, raising=False)
-
     func = getattr(dispatch, entry)
+
+    # A missing guard must fail here, never reach the real pool.
+    def boom(*_args, **_kwargs):
+        raise _PassedGate
+
+    for name in (
+        "AgyAccountPoolManager",
+        "CrossProcessLeaseCoordinator",
+        "AgyOperationJournal",
+        "run_agy",
+    ):
+        monkeypatch.setattr(dispatch, name, boom)
+    for name in ("MANAGER", "MANAGER_ROOT", "ALLOCATOR_LOCK_PATH", "LEASES_DIR"):
+        monkeypatch.setattr(dispatch, name, tmp_path / name)
     required = {
         name: None
         for name, param in inspect.signature(func).parameters.items()
@@ -136,6 +149,15 @@ def test_library_entry_points_refuse_without_override(monkeypatch, capsys, entry
         ["--unknown-flag", "hello"],
         ["--timeout", "not-an-int", "hello"],
         ["--stat", "op-1"],  # argparse abbreviation of --status is not exempt
+        ["--", "--status"],
+        ["--help", "--", "--status"],
+        ["--timeout", "bad", "--", "--status"],
+        ["check --status please"],
+        ["--prompt", "--status"],
+        ["--status", "op-1", "hello"],
+        ["--status", "op-1", "--background"],
+        ["--status", "op-1", "--reconcile", "op-2"],
+        ["--status"],
     ],
 )
 def test_cli_refuses_before_parsing_and_snapshot_import(tmp_path, argv):
@@ -155,11 +177,20 @@ def test_cli_refuses_before_parsing_and_snapshot_import(tmp_path, argv):
     assert proc.stderr.strip() == dispatch.POOL_STOPPED_MESSAGE
 
 
-def test_cli_maintenance_flag_reaches_snapshot_import(tmp_path):
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--status=op-1"],
+        ["--reconcile", "op-1"],
+        ["--operation-root", "/tmp/x", "--finalize-no-effect", "op-1"],
+        ["--ack-unclean-sweep=op-1", "--operation-root=/tmp/x"],
+    ],
+)
+def test_cli_maintenance_flag_reaches_snapshot_import(tmp_path, argv):
     env = {k: v for k, v in os.environ.items() if k != OVERRIDE}
     env["NEXUS_AGY_SNAPSHOT"] = str(tmp_path / "missing-snapshot")
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT), "--status=op-1"],
+        [sys.executable, str(SCRIPT), *argv],
         cwd=tmp_path,
         env=env,
         capture_output=True,
