@@ -25,6 +25,29 @@ from nexus.engine.model_output_sandbox import (
 _IMPORT_PROBE = (
     "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module(sys.argv[2])"
 )
+# The same import for a test file (#2975 R1): if it fails only because pytest itself is not
+# installed (the missing module is pytest/_pytest, and importing that package on its own fails
+# the same way), print the marker instead of failing. Any other import error is re-raised (exit 1,
+# fails closed); a missing ``pytest.<sub>`` while pytest imports is re-raised too.
+_PYTEST_IMPORT_MISSING_MARKER = "NEXUS_MICRO_VERIFY_TEST_IMPORT_NEEDS_PYTEST"
+_TEST_IMPORT_PROBE = (
+    "import importlib, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "try:\n"
+    "    importlib.import_module(sys.argv[2])\n"
+    "except ModuleNotFoundError as e:\n"
+    "    root = (e.name or '').partition('.')[0]\n"
+    "    if root not in ('pytest', '_pytest'):\n"
+    "        raise\n"
+    "    try:\n"
+    "        importlib.import_module(root)\n"
+    "    except ModuleNotFoundError as again:\n"
+    "        if again.name != root:\n"
+    "            raise e\n"
+    "    else:\n"
+    "        raise e\n"
+    f"    print('{_PYTEST_IMPORT_MISSING_MARKER}')\n"
+)
 
 # Asks the interpreter whether it can import pytest at all, without importing it (#2975). Exit 0
 # with the marker = absent (step skipped); exit 0 without it = present (pytest runs); a non-zero
@@ -36,6 +59,15 @@ _PYTEST_PROBE = (
 )
 # pytest's documented exit status for "no tests were collected".
 _PYTEST_NO_TESTS_COLLECTED = 5
+
+
+def _error_summary(stderr: str) -> str:
+    """The exception line first (the cause), then a bounded tail of the traceback (#2975 R2)."""
+    lines = [line for line in (stderr or "").strip().splitlines() if line.strip()]
+    if not lines:
+        return "(no stderr)"
+    tail = "\n".join(lines[:-1])[-400:]
+    return lines[-1][:300] + (f"\n{tail}" if tail else "")
 
 
 def is_test_file(file_path: str) -> bool:
@@ -62,6 +94,8 @@ class MicroVerifyResult:
     test_skip_reason: str = ""
     test_files: List[str] = field(default_factory=list)
     no_tests_collected: List[str] = field(default_factory=list)
+    # #2975 R1: test files whose import check could not run only because pytest is missing.
+    import_skipped: List[str] = field(default_factory=list)
 
     @property
     def can_proceed_to_full_verifier(self) -> bool:
@@ -78,6 +112,8 @@ class MicroVerifyResult:
             "test_files": list(self.test_files),
             "no_tests_collected": list(self.no_tests_collected),
             "classifications": list(self.classifications),
+            # Only when it happened, so receipts without a skipped import keep their shape.
+            **({"import_skipped": list(self.import_skipped)} if self.import_skipped else {}),
         }
 
 
@@ -178,24 +214,32 @@ class MicroVerifier:
             
         import_ok = True
         import_errors = []
+        import_skipped: List[str] = []
         for file_path in patched_files:
             if file_path.endswith(".py") and not file_path.startswith("test_"):
                 full_path = repo_dir / file_path
                 if full_path.exists():
                     rel_path = os.path.relpath(full_path, repo_dir)
                     module_name = os.path.splitext(rel_path)[0].replace(os.path.sep, ".")
+                    test_module = is_test_file(file_path)
+                    probe_code = _TEST_IMPORT_PROBE if test_module else _IMPORT_PROBE
                     try:
                         # Importing runs the model-written patch: OS sandbox, no network, writes
                         # only in repo_dir; no barrier means nothing runs (#2945).
                         result = run_model_argv(
-                            [cmd_interpreter, "-c", _IMPORT_PROBE, str(repo_dir), module_name],
+                            [cmd_interpreter, "-c", probe_code, str(repo_dir), module_name],
                             work_dir=repo_dir,
                             timeout=10,
                             readable=interpreter_readable_roots(cmd_interpreter),
                         )
                         if result.returncode != 0:
                             import_ok = False
-                            import_errors.append(f"{file_path}: {result.stderr[:200]}")
+                            import_errors.append(f"{file_path}: {_error_summary(result.stderr)}")
+                        elif test_module and _PYTEST_IMPORT_MISSING_MARKER in result.stdout:
+                            # #2975 R1: the test module needs pytest and this interpreter has none.
+                            # Not a patch error; recorded, and the test step below still probes
+                            # pytest and either runs the file or records its own skip.
+                            import_skipped.append(file_path)
                     except SandboxError as e:
                         import_ok = False
                         classifications.append("verifier_unavailable")
@@ -221,6 +265,7 @@ class MicroVerifier:
                 interpreter_used=cmd_interpreter,
                 classifications=classifications,
                 task_scoped=task_scoped,
+                import_skipped=import_skipped,
             )
             
         classifications.append("task_scoped_import_check")
@@ -327,7 +372,7 @@ class MicroVerifier:
             return MicroVerifyResult(
                 passed=False,
                 syntax_ok=True,
-                import_ok=True,
+                import_ok=not import_skipped,
                 test_ok=False,
                 error_message="TEST_FAILURE",
                 details="\n".join(test_errors),
@@ -336,6 +381,7 @@ class MicroVerifier:
                 task_scoped=task_scoped,
                 test_step="failed",
                 test_files=test_files,
+                import_skipped=import_skipped,
             )
 
         if test_files and not test_skip_reason and tests_collected == 0:
@@ -359,10 +405,20 @@ class MicroVerifier:
             test_step = "not_applicable"
             classifications.append("false_pass_risk")
 
+        if import_skipped:
+            # When pytest was absent the test step already recorded its own skip (and
+            # false_pass_risk). If it "ran" instead, the import probe and the pytest probe disagree
+            # (e.g. a repo-local pytest shim, #2975 R3), so the run does not count as a real test.
+            classifications.append("import_step_skipped")
+            if test_step == "ran" and "false_pass_risk" not in classifications:
+                classifications.append("false_pass_risk")
+            skipped_note = f"import check skipped (pytest_unavailable): {', '.join(import_skipped)}"
+            details = f"{details}\n{skipped_note}" if details else skipped_note
+
         return MicroVerifyResult(
             passed=True,
             syntax_ok=True,
-            import_ok=True,
+            import_ok=not import_skipped,
             test_ok=test_step == "ran",
             details=details,
             interpreter_used=cmd_interpreter,
@@ -372,4 +428,5 @@ class MicroVerifier:
             test_skip_reason=test_skip_reason,
             test_files=test_files,
             no_tests_collected=no_tests_collected,
+            import_skipped=import_skipped,
         )
