@@ -113,6 +113,11 @@ def test_mixed_collected_and_empty_test_files_counts_as_ran(tmp_path):
     assert res.passed is True
     assert res.test_ok is True
     assert res.test_step == "ran"
+    # The file that collected nothing is still on record (never reported as having run).
+    assert res.no_tests_collected == ["oracle_test.py"]
+    assert res.receipt_fields()["no_tests_collected"] == ["oracle_test.py"]
+    assert "no_tests_collected" in res.classifications
+    assert "false_pass_risk" in res.classifications
 
 
 def test_probe_sandbox_refusal_still_fails_closed(tmp_path, python_without_pytest, monkeypatch):
@@ -153,6 +158,29 @@ def test_probe_unexpected_exit_fails_closed(tmp_path, monkeypatch):
     res = _verify(tmp_path, ["oracle_test.py"], sys.executable)
     assert res.passed is False
     assert res.error_message == "TEST_FAILURE"
+    assert "verifier_unavailable" in res.classifications
+
+
+@pytest.mark.parametrize(
+    "error",
+    [subprocess.TimeoutExpired(["python"], 10), PermissionError("denied"), FileNotFoundError()],
+)
+def test_probe_errors_fail_closed_never_skip(tmp_path, monkeypatch, error):
+    from nexus.services.local_heal import micro_verifier
+
+    def probe_raises(argv, **kwargs):
+        if "-c" in argv and "find_spec" in argv[argv.index("-c") + 1]:
+            raise error
+        if "-m" in argv and "pytest" in argv:
+            raise AssertionError("pytest must not run when the probe failed")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(micro_verifier, "run_model_argv", probe_raises)
+    (tmp_path / "oracle_test.py").write_text("x = 1\n")
+    res = _verify(tmp_path, ["oracle_test.py"], sys.executable)
+    assert res.passed is False
+    assert res.error_message == "TEST_FAILURE"
+    assert res.test_skip_reason == ""
     assert "verifier_unavailable" in res.classifications
 
 
@@ -250,3 +278,67 @@ def test_world_c_micro_verify_is_not_inherited_by_a_later_attempt():
     first, second = op._world_c_phase_attempts
     assert "micro_verify" in first
     assert "micro_verify" not in second
+
+
+def test_failed_micro_verify_attempt_is_recorded_on_context(tmp_path):
+    from nexus.services.local_heal.context import (
+        GovernanceContext,
+        HealContext,
+        OperationalContext,
+    )
+    from nexus.services.local_heal.patch_applier import PatchApplicationResult
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
+    (tmp_path / "calc_test.py").write_text("def test_sub():\n    assert 5 - 3 == 3\n")
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            return "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
+
+    phase = PatchSynthesisPhase(SolidSearchReplaceProtocol(), Patcher(), llm_client=MockLLM())
+    phase.patch_applier.apply_and_validate = MagicMock(
+        return_value=PatchApplicationResult(
+            success=True, applied_diffs=["+++ b/calc_test.py\nnew\n"], error_reason=""
+        )
+    )
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="w2975-fail",
+            repo_dir=tmp_path,
+            problem_statement="fix sub",
+            python_executable=sys.executable,
+        ),
+        gov=GovernanceContext(),
+    )
+    result = phase.execute(ctx)
+    assert result.success is False
+    assert result.failure_reason.startswith("MICRO_VERIFY_TEST_FAILURE:")
+    assert ctx.op.micro_verify["test_step"] == "failed"
+    assert ctx.op.micro_verify["passed"] is False
+
+
+def test_patch_synthesis_execute_clears_a_previous_attempts_record(tmp_path):
+    from nexus.services.local_heal.context import (
+        GovernanceContext,
+        HealContext,
+        OperationalContext,
+    )
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
+    phase = PatchSynthesisPhase(SolidSearchReplaceProtocol(), Patcher(), llm_client=MagicMock())
+    # The attempt dies before producing an output (PhaseRunner records it as failed).
+    phase.run = MagicMock(side_effect=RuntimeError("model down"))
+    ctx = HealContext(
+        op=OperationalContext(instance_id="w2975-stale", repo_dir=tmp_path, problem_statement="x"),
+        gov=GovernanceContext(),
+    )
+    ctx.op.micro_verify = {"test_step": "skipped", "test_skip_reason": "pytest_unavailable"}
+    try:
+        phase.execute(ctx)
+    except RuntimeError:
+        pass
+    assert ctx.op.micro_verify == {}

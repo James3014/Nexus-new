@@ -27,7 +27,8 @@ _IMPORT_PROBE = (
 )
 
 # Asks the interpreter whether it can import pytest at all, without importing it (#2975). Exit 0
-# with no output = present; exit 0 with the marker = absent; anything else = the probe failed.
+# with the marker = absent (step skipped); exit 0 without it = present (pytest runs); a non-zero
+# exit or an error = the probe failed (fails closed).
 _PYTEST_ABSENT_MARKER = "NEXUS_MICRO_VERIFY_PYTEST_ABSENT"
 _PYTEST_PROBE = (
     "import importlib.util; "
@@ -60,6 +61,7 @@ class MicroVerifyResult:
     test_step: str = "not_applicable"
     test_skip_reason: str = ""
     test_files: List[str] = field(default_factory=list)
+    no_tests_collected: List[str] = field(default_factory=list)
 
     @property
     def can_proceed_to_full_verifier(self) -> bool:
@@ -74,6 +76,7 @@ class MicroVerifyResult:
             "test_step": self.test_step,
             "test_skip_reason": self.test_skip_reason,
             "test_files": list(self.test_files),
+            "no_tests_collected": list(self.no_tests_collected),
             "classifications": list(self.classifications),
         }
 
@@ -228,6 +231,7 @@ class MicroVerifier:
         test_files = [file_path for file_path in patched_files if is_test_file(file_path)]
         test_skip_reason = ""
         tests_collected = 0
+        no_tests_collected: List[str] = []
 
         if test_files:
             # Determine pytest executable — prefer task-scoped
@@ -272,6 +276,10 @@ class MicroVerifier:
                     test_ok = False
                     classifications.append("verifier_unavailable")
                     test_errors.append("Timeout expired during pytest probe.")
+                except Exception as e:
+                    test_ok = False
+                    classifications.append("verifier_unavailable")
+                    test_errors.append(f"pytest_probe_failed: {e}")
 
             for test_file in test_files if test_ok and not test_skip_reason else []:
                 full_path = repo_dir / test_file
@@ -285,7 +293,10 @@ class MicroVerifier:
                             readable=interpreter_readable_roots(run_cmd[0]),
                         )
                         if result.returncode == _PYTEST_NO_TESTS_COLLECTED:
-                            continue  # a *_test.py module with no tests in it (#2975)
+                            # A *_test.py module with no tests in it (#2975): not a failure,
+                            # but recorded so the receipt never claims it ran.
+                            no_tests_collected.append(test_file)
+                            continue
                         if result.returncode != 0:
                             test_ok = False
                             test_errors.append(
@@ -339,6 +350,9 @@ class MicroVerifier:
         elif test_files:
             test_step = "ran"
             classifications.append("verifier_command_check")
+            if no_tests_collected:
+                classifications.extend(["no_tests_collected", "false_pass_risk"])
+                details = f"no tests collected: {', '.join(no_tests_collected)}"
         else:
             # If no test files existed, we only did syntax + import.
             # Record false_pass_risk since we didn't run real tests.
@@ -357,4 +371,5 @@ class MicroVerifier:
             test_step=test_step,
             test_skip_reason=test_skip_reason,
             test_files=test_files,
+            no_tests_collected=no_tests_collected,
         )
