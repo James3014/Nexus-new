@@ -7608,8 +7608,44 @@ def _refuse_prompt_conflicts(args: argparse.Namespace) -> None:
         )
 
 
+POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
+POOL_STOPPED_EXIT_CODE = 3
+POOL_STOPPED_MESSAGE = (
+    "nexus-agy-dispatch: Agy 帳號池已停用（James 10/30：Agy 只走原生 Cord 管道 agy-lane），"
+    "拒絕新派工。改用 Claude 子代理、Codex，或寄協調者走 agy-lane。"
+)
+
+
+def _pool_stopped_refusal(args: argparse.Namespace) -> Optional[int]:
+    """Refuse every new dispatch by default: the Agy account pool is stopped.
+
+    James 2026-10-30: Agy runs only through the native agy-lane; pool rotation
+    is stopped, not paused.  A host wrapper enforced this on the Mac mini, but
+    host-sync swaps that wrapper back to a symlink on the next release, so the
+    refusal lives here and ships with the release.  Only
+    NEXUS_AGY_POOL_STOPPED_OVERRIDE=1 (exactly "1") runs the original logic.
+
+    Journal maintenance on operations that already exist (--status,
+    --reconcile, --finalize-no-effect, --ack-unclean-sweep) still runs: it
+    starts no provider and is how a stopped pool's leftovers get cleaned up.
+    Everything else, including --hcom-collab and the internal --operation-run
+    child, is refused before any journal, lease or provider side effect.  A
+    background child inherits its parent's environment, so an overridden
+    parent's child still runs.
+    """
+    if os.environ.get(POOL_STOPPED_OVERRIDE_ENV) == "1":
+        return None
+    if args.status or args.reconcile or args.finalize_no_effect or args.ack_unclean_sweep:
+        return None
+    print(POOL_STOPPED_MESSAGE, file=sys.stderr)
+    return POOL_STOPPED_EXIT_CODE
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    refused = _pool_stopped_refusal(args)
+    if refused is not None:
+        return refused
     _refuse_prompt_conflicts(args)
 
     operation_root = Path(args.operation_root).expanduser()
