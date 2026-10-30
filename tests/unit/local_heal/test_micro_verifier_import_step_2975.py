@@ -165,6 +165,25 @@ def test_model_printed_marker_cannot_skip_a_failing_test(tmp_path):
     assert res.import_skipped == ["oracle_test.py"]
 
 
+def test_probes_disagreeing_on_pytest_is_not_a_clean_pass(tmp_path, python_without_pytest):
+    """A repo-local pytest shim (model output) that fails `import pytest` but exits 0 under
+    `-m pytest`: the import step records a skip, the test step "runs". The two disagree, so the
+    result carries false_pass_risk instead of looking like a real test run (review of #3000)."""
+    _write(
+        tmp_path,
+        "pytest.py",
+        "import sys\nif __name__ == '__main__':\n    sys.exit(0)\n"
+        "raise ModuleNotFoundError('x', name='pytest')\n",
+    )
+    _write(tmp_path, "oracle_test.py", "import pytest\n\ndef test_x():\n    assert False\n")
+    res = _verify(tmp_path, ["oracle_test.py"], python_without_pytest)
+    assert res.import_skipped == ["oracle_test.py"]
+    assert res.passed is True and res.test_step == "ran"  # the shim "passes" the test step
+    assert "import_step_skipped" in res.classifications
+    assert "false_pass_risk" in res.classifications
+    assert "false_pass_risk" in res.receipt_fields()["classifications"]
+
+
 def test_marker_on_a_non_test_module_is_ignored(tmp_path, monkeypatch):
     def fake(argv, **kw):
         return subprocess.CompletedProcess(argv, 0, mv._PYTEST_IMPORT_MISSING_MARKER + "\n", "")
