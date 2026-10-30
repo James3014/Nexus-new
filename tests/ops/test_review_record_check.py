@@ -212,7 +212,10 @@ def test_rebuttal_at_cap_needs_past_tense_and_a_round_number_or_cap():
     claude_section = split.replace(
         "**Codex adversarial review** (codex exec, read-only)", "Notes"
     ).replace("Codex confirmed", "confirmed")
-    assert rrc.evaluate(HEAD, RISKY, [_c(claude_section)], [])["status"] == "MISSING_CROSS_MODEL"
+    assert (rrc.classify_record(claude_section, HEAD) or {}).get("rebuttal_at_cap") is False
+    # Since #2992 the unresolved "r3 REJECT" in the Claude section also withdraws the
+    # Claude ACCEPT above it, so the record is missing before the cross-model check.
+    assert rrc.evaluate(HEAD, RISKY, [_c(claude_section)], [])["status"] == "MISSING_RECORD"
 
 
 # -- high-risk paths -----------------------------------------------------------------
@@ -1442,3 +1445,283 @@ def test_run_cairnwork_merge_only_delta_ignores_an_old_rebuttal():
         results[repo] = (rrc.run(repo, 7, TOKEN, wrapped, post), posted[0][1]["state"])
     assert results["James3014/Nexus-new"] == (0, "success")
     assert results["cairnwork/cairnwork"] == (1, "failure")
+
+
+# -- #2992: a record for another head, a later REJECT, a capped file list ---------------
+
+STALE_LABEL_RECORD = (
+    "## Review record — Claude (claude-opus-5-5)\n"
+    f"- Head reviewed: `{R_OLD}`\n- Verdict: **ACCEPT**\n"
+    f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n",
+        f"- Merged main → final head {HEAD}\n",
+    ],
+)
+def test_a_bare_verdict_under_an_older_head_label_is_not_read_as_the_new_head(tail):
+    body = (
+        "## Review record — Claude (claude-opus-5-5)\n"
+        f"- Head reviewed: `{R_OLD}`\n- Verdict: **ACCEPT**\n" + tail
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is False
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+    # The record still belongs to the head it names, so a merge-only delta can carry it.
+    old = rrc.classify_record(body, R_OLD)
+    assert old is not None and old["claude"] is True
+
+
+def test_a_head_label_after_the_verdict_still_binds_when_it_is_the_only_head():
+    body = f"**Claude review** (Opus)\nVerdict: **ACCEPT**\nHead reviewed: `{HEAD}`\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_prose_naming_another_sha_after_the_word_head_does_not_unbind_the_record():
+    # Shape of a real record: the title labels the head, a finding mentions main's sha.
+    body = (
+        f"## Review record — head `{HEAD}`\n\n"
+        "**Independent Claude review** (Claude Opus 5.5): **VERDICT: ACCEPT**.\n"
+        f"- Checked on this head and on origin/main {OLD[:9]}.\n\n"
+        "**Cross-model review** (Gemini via agy-bulk) @ `8d70e3ff`: **VERDICT: ACCEPT**.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] and record["cross_model"]
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+
+
+def test_run_carries_an_older_head_label_record_only_through_a_verified_merge_delta():
+    body = STALE_LABEL_RECORD.replace(
+        f"- Pushed a fix after review, head is now {HEAD}; not re-reviewed.\n",
+        f"- Merged main → final head {HEAD}\n",
+    )
+    rc, status = _delta_case(comments=[_c(body)])
+    assert rc == 0 and status["state"] == "success"
+    assert f"record at {R_OLD[:9]}, merge-only delta verified" in status["description"]
+    rc, status = _delta_case(comments=[_c(body)], changed=({"filename": "docs/a.md"},))
+    assert rc == 1 and status["state"] == "failure"
+
+
+CLAUDE_AT_HEAD = f"**Claude review** (Claude Opus 5.5): **ACCEPT@{HEAD[:9]}**.\n"
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        [
+            f"Head reviewed: {HEAD}\n**Codex**: r1 ACCEPT\n**Codex**: r2 REJECT — data-loss bug\n"
+            "**Claude**: ACCEPT\n"
+        ],
+        [f"Codex ACCEPT@{HEAD}", f"Codex r2 REJECT@{HEAD}: found a data-loss bug", CLAUDE_AT_HEAD],
+        [f"Codex r2: ACCEPT. After the rebase, Codex r3 on head {HEAD}: REJECT\n", CLAUDE_AT_HEAD],
+    ],
+)
+def test_a_later_cross_model_reject_at_the_head_withdraws_its_accept(comments):
+    report = rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    assert "later Codex/Gemini REJECT" in report["reason"]
+
+
+def test_a_later_claude_reject_at_the_head_withdraws_the_independent_record():
+    comments = [_c(OPUS_RECORD), _c(f"**Claude review** (Opus) r2: REJECT at {HEAD}: a regression")]
+    report = rrc.evaluate(HEAD, DOCS, comments, [])
+    assert report["status"] == "MISSING_RECORD" and "later Claude/Opus REJECT" in report["reason"]
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        # A later round accepts again.
+        [f"Codex r1 REJECT@{HEAD}: two findings", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
+        # A round history listed after the summary verdict that ends in an ACCEPT.
+        [
+            f"**Codex review** @ {HEAD}: **ACCEPT**\n- r1: REJECT (missing test)\n- r2: ACCEPT\n",
+            CLAUDE_AT_HEAD,
+        ],
+        # A numbered later round survives an earlier round listed after it.
+        [f"Codex r3 ACCEPT@{HEAD}", f"Recap: Codex r2 REJECT@{HEAD}: one finding", CLAUDE_AT_HEAD],
+        # Resolved, negated or quoted rejections and tables withdraw nothing.
+        [f"Codex ACCEPT@{HEAD}", f"Codex r2 REJECT@{HEAD} (rebutted, see above)", CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f"Codex did not REJECT at {HEAD}", CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f'Codex said "REJECT" at {HEAD} in a dry run', CLAUDE_AT_HEAD],
+        [f"Codex ACCEPT@{HEAD}", f"| Codex | r2 | REJECT@{HEAD} |", CLAUDE_AT_HEAD],
+        # A REJECT at another head is about that head.
+        [f"Codex r1 REJECT@{OLD[:9]}: fixed later", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
+        [CODEX_RECORD, CLAUDE_AT_HEAD],
+    ],
+)
+def test_resolved_or_superseded_rejects_do_not_withdraw(comments):
+    assert rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+def test_a_reject_is_credited_to_the_model_named_closest_before_it():
+    # Shape of a real cairnwork disposition: the Claude ACCEPT stands, Gemini's REJECT is
+    # Gemini's own.
+    body = (
+        f"Round 3 split: **Independent Claude review** ACCEPT at {HEAD}; "
+        f"**Cross-model review** (Gemini 3.8 Flash High) REJECT at {HEAD}.\n"
+    )
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["claude"] is True and record["cross_model"] is False
+    assert [e["family"] for e in record["events"] if e["kind"] == "reject"] == ["cross_model"]
+
+
+def test_a_pr_file_list_at_the_api_cap_counts_as_high_risk():
+    files = [{"filename": f"docs/f{i:04}.md"} for i in range(rrc.MAX_PR_FILES)]
+    assert rrc.high_risk_paths(files) == [rrc.TRUNCATED_FILES]
+    assert rrc.high_risk_paths(files[:-1]) == []
+    comments = [_c(OPUS_RECORD)]
+    posted, post = _posts()
+    assert rrc.run("o/r", 7, TOKEN, _fake(files=files, comments=comments), post) == 1
+    assert posted[0][1]["state"] == "failure"
+    assert "MISSING_CROSS_MODEL" in posted[0][1]["description"]
+
+
+def test_a_reviewed_commit_label_without_the_word_head_also_names_the_older_head():
+    body = (
+        f"**Claude review** (Opus)\nReviewed commit {R_OLD[:12]}\nVerdict: **ACCEPT**\n"
+        f"Pushed one more fix; head is now {HEAD}.\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "reject_line",
+    ["- r3 Codex did not REJECT", '- r3: Codex never said "REJECT"', "- r3: no REJECT this round"],
+)
+def test_a_negated_or_quoted_round_three_reject_opens_no_rebuttal_at_the_cap(reject_line):
+    body = f"Head: {HEAD}\n**Codex review**\n{reject_line}\n- Rebutted\n"
+    record = rrc.classify_record(body, HEAD)
+    assert record is not None and record["rebuttal_at_cap"] is False
+    report = rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    # The stated shape still counts.
+    assert (rrc.classify_record(CODEX_REBUTTAL, HEAD) or {}).get("rebuttal_at_cap") is True
+
+
+REBUTTAL_SECTION = (
+    f"Head: {HEAD}\n**Codex review**\n- r3 REJECT@{HEAD[:9]}: one finding\n- Rebutted: see #1\n"
+)
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        f"Codex r4 REJECT@{HEAD}: a new finding",  # a later comment, a later round
+        f"Codex REJECT@{HEAD}: a new finding",  # a later comment, no round
+    ],
+)
+def test_a_later_reject_withdraws_an_earlier_rebuttal_at_the_cap(later):
+    assert (rrc.classify_record(REBUTTAL_SECTION, HEAD) or {}).get("rebuttal_at_cap") is True
+    ok = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(CLAUDE_AT_HEAD)], [])
+    assert ok["status"] == "OK"
+    report = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(later), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    same_comment = REBUTTAL_SECTION + f"- r4: REJECT at {HEAD}: a new finding\n"
+    report = rrc.evaluate(HEAD, RISKY, [_c(same_comment), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_an_earlier_round_reject_recapped_later_keeps_the_rebuttal():
+    recap = f"Recap: Codex r2 REJECT@{HEAD}: one finding"
+    report = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(recap), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Claude: ACCEPT@{HEAD}\nClaude r2 REJECT@{HEAD}: a regression\n",
+        f"**Claude review** (Opus)\nHead reviewed: {HEAD}\nVerdict: **ACCEPT**\n- r1: REJECT (missing test)\n",
+    ],
+)
+def test_a_numbered_reject_after_an_unnumbered_accept_in_one_comment_withdraws_it(body):
+    # Codex r3 on #2993: a round history that ends in a REJECT is an open rejection.
+    report = rrc.evaluate(HEAD, DOCS, [_c(body)], [])
+    assert report["status"] == "MISSING_RECORD" and "later Claude/Opus REJECT" in report["reason"]
+
+
+# -- #2993 review: shapes an honest record uses must not read as an open REJECT --------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # cairnwork #269: a history line about an earlier round, short sha.
+        f"## Review record — head `{HEAD}`\n"
+        f"**Independent Claude review** (Claude Opus 5.5): **ACCEPT at {HEAD}**.\n"
+        "Previous round (Claude, REJECT at f9ccbf67):\n- MUST-FIX 1: fixed in 9b536cd.\n",
+        # Gate verdict values inside a Claude review's findings.
+        OPUS_RECORD
+        + "- Tested: a missing receipt yields REPAIR_REQUIRED; a tampered one: REJECT.\n",
+        OPUS_RECORD + "- Core verdict mapping: stale lease - REJECT, expired - REPAIR_REQUIRED.\n",
+        OPUS_RECORD + "- Edge case: verdict: REJECT is returned for an unsigned receipt.\n",
+        OPUS_RECORD + "1. CHANGES_REQUESTED reviews are ignored by the gate — intentional.\n",
+        # Prose about an earlier head is not a Head label.
+        "## Review record — Claude (Opus)\n"
+        f"Head reviewed: {HEAD}\nRe-review after fixes from head {OLD[:9]}.\n- Verdict: **ACCEPT**\n",
+        f"## Claude review (Opus 5.5): ACCEPT\nHead reviewed: {HEAD}\nPrevious head {OLD[:9]}.\n",
+    ],
+)
+def test_history_lines_gate_words_and_head_prose_keep_an_honest_record(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_round_history_heading_keeps_the_cross_model_accept():
+    # cairnwork #318: "Round 1 (<sha>) REJECT items:" heads a list of earlier findings.
+    body = (
+        f"Head reviewed: {HEAD}\n"
+        f"**Cross-model review** (Gemini), round 2: **ACCEPT at {HEAD}**.\n"
+        "Round 1 (f01100e) REJECT items:\n1. MAJOR: disputed. Gemini: resolved.\n"
+        "**Claude** (Opus): ACCEPT\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_history_before_the_final_round_keeps_the_record():
+    body = (
+        f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\n**Codex adversarial review**\n"
+        f"- r1 at head {OLD[:9]}: REJECT — race in X (fixed)\n- r2: ACCEPT\n"
+    )
+    assert rrc.evaluate(HEAD, RISKY, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "P1 data loss, not fixed yet",
+        "P1 data loss, not addressed",
+        "P1 data loss, will be addressed in a follow-up",
+        "P1 data loss, needs to be fixed before merge",
+    ],
+)
+def test_a_reject_whose_fix_is_negated_or_postponed_is_still_open(tail):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD}: {tail}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_model_named_in_an_aside_does_not_take_the_reject():
+    comments = [
+        _c(OPUS_RECORD),
+        _c(f"**Claude review** (Opus, after the Codex findings) r2: REJECT at {HEAD}"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_a_line_with_too_many_verdict_tokens_is_skipped_and_parsing_stays_fast():
+    import time
+
+    crowded = "r1 ACCEPT; " * (rrc.MAX_VERDICTS_PER_LINE + 1)
+    assert rrc.verdict_clauses(crowded) == [] and rrc.reject_clauses(crowded) == []
+    started = time.monotonic()
+    for body in ("r1 ACCEPT; " * 6000, "r1 REJECT; " * 6000, "head" + " " * 65000 + "x"):
+        rrc.classify_record(f"{body}\n{HEAD}", HEAD)
+    assert time.monotonic() - started < 5  # about 40 s before the bound
