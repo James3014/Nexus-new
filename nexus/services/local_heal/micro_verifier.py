@@ -406,9 +406,9 @@ class MicroVerifier:
             classifications.append("false_pass_risk")
 
         if import_skipped:
+            # The test step above already recorded its own skip (and false_pass_risk) unless
+            # pytest really ran these files.
             classifications.append("import_step_skipped")
-            if test_step != "ran" and "false_pass_risk" not in classifications:
-                classifications.append("false_pass_risk")
             skipped_note = f"import check skipped (pytest_unavailable): {', '.join(import_skipped)}"
             details = f"{details}\n{skipped_note}" if details else skipped_note
 

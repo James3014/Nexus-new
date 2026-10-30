@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -341,7 +342,9 @@ def test_patch_synthesis_keeps_a_test_module_needing_pytest(tmp_path, python_wit
         def generate(self, **kwargs):
             return "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
 
-    phase = PatchSynthesisPhase(SolidSearchReplaceProtocol(), Patcher(), llm_client=MockLLM())
+    phase = PatchSynthesisPhase(
+        SolidSearchReplaceProtocol(), Patcher(), llm_client=cast(Any, MockLLM())
+    )
     phase.patch_applier.apply_and_validate = MagicMock(
         return_value=PatchApplicationResult(
             success=True, applied_diffs=["+++ b/oracle_test.py\nnew\n"], error_reason=""
