@@ -1595,3 +1595,32 @@ def test_a_negated_or_quoted_round_three_reject_opens_no_rebuttal_at_the_cap(rej
     assert report["status"] == "MISSING_CROSS_MODEL"
     # The stated shape still counts.
     assert rrc.classify_record(CODEX_REBUTTAL, HEAD)["rebuttal_at_cap"] is True
+
+
+REBUTTAL_SECTION = (
+    f"Head: {HEAD}\n**Codex review**\n- r3 REJECT@{HEAD[:9]}: one finding\n- Rebutted: see #1\n"
+)
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        f"Codex r4 REJECT@{HEAD}: a new finding",  # a later comment, a later round
+        f"Codex REJECT@{HEAD}: a new finding",  # a later comment, no round
+    ],
+)
+def test_a_later_reject_withdraws_an_earlier_rebuttal_at_the_cap(later):
+    assert rrc.classify_record(REBUTTAL_SECTION, HEAD)["rebuttal_at_cap"] is True
+    ok = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(CLAUDE_AT_HEAD)], [])
+    assert ok["status"] == "OK"
+    report = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(later), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    same_comment = REBUTTAL_SECTION + f"- r4: REJECT at {HEAD}: a new finding\n"
+    report = rrc.evaluate(HEAD, RISKY, [_c(same_comment), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_an_earlier_round_reject_recapped_later_keeps_the_rebuttal():
+    recap = f"Recap: Codex r2 REJECT@{HEAD}: one finding"
+    report = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(recap), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "OK"

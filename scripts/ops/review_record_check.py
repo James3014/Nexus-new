@@ -539,30 +539,33 @@ def _stated_reject(text: str) -> bool:
     return False
 
 
-def _rebuttal_at_cap(section: list[str], head: str) -> bool:
-    """A cross-model REJECT at round >= 3 followed (or joined) by a past-tense rebuttal.
+def _rebuttal_point(section: list[str], head: str) -> tuple[int, int] | None:
+    """Where a cross-model REJECT at round >= 3 is followed (or joined) by a past-tense
+    rebuttal: (offset of the rebuttal line in the section, the REJECT's round), else None.
 
     A later REJECT line that names the current head withdraws it: a rebuttal of an
     earlier round does not cover a fresh rejection of this head.
     """
-    reject_round_seen = False
-    rebutted = False
-    for line in section:
+    reject_round = 0
+    point: tuple[int, int] | None = None
+    for offset, line in enumerate(section):
         plain = _plain(line, keep_parens=True)
-        if _stated_reject(plain) and any(int(n) >= 3 for n in _ROUND.findall(plain)):
-            reject_round_seen = True
-            if rebutted and names_head(plain, head):
-                return False
+        rounds = [int(n) for n in _ROUND.findall(plain) if int(n) >= 3]
+        if _stated_reject(plain) and rounds:
+            if point is not None and names_head(plain, head):
+                return None
+            reject_round = max(reject_round, *rounds)
         if (
-            reject_round_seen
+            reject_round
+            and point is None
             and not _REBUTTAL_BUT_NOT.search(plain)
             and any(
                 _REBUTTED.search(clause) and not _REBUTTAL_DENY.search(clause)
                 for clause in _clauses(plain)
             )
         ):
-            rebutted = True
-    return rebutted
+            point = (offset, reject_round)
+    return point
 
 
 def _reject_match(clause: str) -> tuple[int, int] | None:
@@ -657,11 +660,28 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             lines.append(raw)
     labels = _head_labels(lines)
     verdicts: list[dict[str, Any]] = []
-    events: list[dict[str, Any]] = []
-    rebuttal_at_cap = False
+    events: list[tuple[tuple[int, int], dict[str, Any]]] = []
+    rebuttals: list[tuple[tuple[int, int], dict[str, Any]]] = []
     section: list[str] = []
+    section_start = 0
     header_family: str | None = None
     header_level = 0  # heading level that opened the section; 99 for a non-heading label
+
+    def close_section() -> None:
+        # A rebuttal at the cap is a cross-model event at its rebuttal line, so a later
+        # REJECT of a later round withdraws it like an ACCEPT (#2992).
+        point = _rebuttal_point(section, head) if header_family == "cross_model" else None
+        if point is not None:
+            event = {
+                "family": "cross_model",
+                "kind": "accept",
+                "rebuttal": True,
+                "round": point[1],
+                "comment": 0,
+                "line": section[point[0]].strip(),
+            }
+            rebuttals.append(((section_start + point[0], 1 << 30), event))
+
     for index, line in enumerate(lines):
         label = _label_family(line)
         level = re.match(r"^\s*(#+)\s", line)
@@ -673,9 +693,10 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             label is None and level is not None and len(level.group(1)) <= header_level
         )
         if (label is not None and label != header_family) or neutral_heading:
-            if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
-                rebuttal_at_cap = True
+            close_section()
             section, header_family = [], label  # "## Notes" opens a section with no family
+        if not section:
+            section_start = index
         section.append(line)
         comment_head = _label_binds(labels, index, head)
         plain_line = _plain(line, keep_parens=True)
@@ -700,23 +721,22 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
                         "line": clause.strip(),
                     }
                     line_events.append((start + (span[0] if span else 0), event))
-        events.extend(event for _, event in sorted(line_events, key=lambda item: item[0]))
+        events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not accept_clauses:
             continue
-        if header_family == "cross_model" and _rebuttal_at_cap(section, head):
-            rebuttal_at_cap = True
+        close_section()
         section = []  # the header family persists: a reviewer block lists its rounds
-    if section and header_family == "cross_model" and _rebuttal_at_cap(section, head):
-        rebuttal_at_cap = True
-    standing = standing_families(events)
+    close_section()
+    ordered = [event for _, event in sorted(events + rebuttals, key=lambda item: item[0])]
+    standing = standing_families([e for e in ordered if not e.get("rebuttal")])
     return {
         "verdict": bool(verdicts),
         "claude": "claude" in standing,
         "cross_model": "cross_model" in standing,
-        "rebuttal_at_cap": rebuttal_at_cap,
+        "rebuttal_at_cap": bool(rebuttals),
         "verdict_lines": [v["line"] for v in verdicts],
-        "events": events,
+        "events": ordered,
     }
 
 
@@ -786,9 +806,10 @@ def _evidence_at(
             ):
                 stale = True
             continue
-        events.extend(dict(event, comment=number) for event in record["events"])
         if not allow_rebuttal:
-            record = dict(record, rebuttal_at_cap=False)
+            kept = [event for event in record["events"] if not event.get("rebuttal")]
+            record = dict(record, rebuttal_at_cap=False, events=kept)
+        events.extend(dict(event, comment=number) for event in record["events"])
         if record["verdict"] or record["rebuttal_at_cap"]:
             records.append(record)
         else:
@@ -806,7 +827,7 @@ def _contributes(
     )
     return (
         approved > 0 or "claude" in standing,
-        "cross_model" in standing or any(r["rebuttal_at_cap"] for r in records),
+        "cross_model" in standing,
     )
 
 
@@ -833,7 +854,7 @@ def evaluate(
     # cross-model record alone satisfies only the cross-model requirement. A family's
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
     independent_head = approved_reviews > 0 or "claude" in standing
-    cross_head = "cross_model" in standing or any(r["rebuttal_at_cap"] for r in records)
+    cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
     withdrawn = {
         event["family"]
         for record in records
