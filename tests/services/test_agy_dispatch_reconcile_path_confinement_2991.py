@@ -439,3 +439,55 @@ def test_update_writes_into_the_directory_it_opened_when_swapped_mid_update(
     moved_record = moved / operation_id if swap == "operations_dir" else moved
     record = json.loads((moved_record / "operation.json").read_text(encoding="utf-8"))
     assert record["phase"] == "RECONCILE_REQUIRED"
+
+
+def test_create_cannot_make_its_directory_outside_the_root_when_swapped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``operations`` swapped for a symlink right before create makes ``<id>``: refused, decoy untouched."""
+    doj = import_module("nexus.services.direct_operation_journal")
+    journal = dispatch.AgyOperationJournal(tmp_path / "root")
+    _completed_operation(journal, tmp_path, alias_hash=VALID_ALIAS)
+    operations = journal.operations_dir
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    moved = tmp_path / "moved"
+    original_validate = doj._validate_continuity_fields
+    calls = []
+
+    def swap_then_validate(record):
+        if not calls:
+            os.rename(operations, moved)
+            operations.symlink_to(decoy, target_is_directory=True)
+        calls.append(1)
+        return original_validate(record)
+
+    monkeypatch.setattr(doj, "_validate_continuity_fields", swap_then_validate)
+    fds_before = _open_fd_count()
+
+    with pytest.raises(doj.DirectOperationJournalError, match="OPERATION_PATH_SYMLINK"):
+        _completed_operation(journal, tmp_path, alias_hash=VALID_ALIAS)
+
+    assert calls
+    assert list(decoy.iterdir()) == []
+    assert _open_fd_count() == fds_before
+
+
+def test_create_on_a_fresh_root_makes_operations_and_rejects_a_duplicate(tmp_path: Path) -> None:
+    """The dir-fd create still builds a missing root and ``operations``; a reused id is refused."""
+    doj = import_module("nexus.services.direct_operation_journal")
+    journal = dispatch.AgyOperationJournal(tmp_path / "missing" / "root")
+    operation_id = _completed_operation(journal, tmp_path, alias_hash=VALID_ALIAS)
+    assert (journal.operation_dir(operation_id) / "operation.json").is_file()
+    assert oct(journal.operation_dir(operation_id).stat().st_mode & 0o777) == "0o700"
+    with pytest.raises(doj.DirectOperationJournalError, match="OPERATION_ALREADY_EXISTS"):
+        journal.create(
+            operation_id=operation_id,
+            attempt_id=dispatch.new_attempt_id(),
+            cwd=str(tmp_path),
+            provider="agy",
+            model="gemini-test",
+            effort="medium",
+            prompt_sha256="a" * 64,
+            runtime_revision="b" * 40,
+        )

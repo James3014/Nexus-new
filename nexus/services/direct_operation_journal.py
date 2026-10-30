@@ -584,22 +584,37 @@ class DirectOperationJournal:
                 raise DirectOperationJournalError("OPERATION_PATH_OUTSIDE_ROOT")
         return path
 
-    def _open_operation_dir_fd(self, operation_id: str) -> int:
+    def _open_operation_dir_fd(self, operation_id: str, *, create: bool = False) -> int:
         """Open ``operations/<id>`` without following a symlink at either level (#2991).
 
         The configured root may itself be a symlink (trusted configuration).
         Every later open, write and rename of the record or lock goes through
         the returned descriptor, so swapping a directory for a symlink after
-        this call cannot redirect them.
+        this call cannot redirect them. ``create`` makes ``operations`` (if
+        missing) and ``<id>`` (must be new) relative to those descriptors, so a
+        swap cannot place the new directory outside the root either.
         """
         name = self._validate_operation_id(operation_id)
         flags = os.O_RDONLY | os.O_DIRECTORY
+        ops_name = self.operations_dir.name
+        if create:
+            self.root.mkdir(parents=True, exist_ok=True)
         root_fd = os.open(str(self.root), flags)
         try:
-            ops_fd = _open_at_nofollow(self.operations_dir.name, flags, root_fd)
+            if create:
+                try:
+                    os.mkdir(ops_name, dir_fd=root_fd)
+                except FileExistsError:
+                    pass  # an existing symlink or file is refused by the open below
+            ops_fd = _open_at_nofollow(ops_name, flags, root_fd)
         finally:
             os.close(root_fd)
         try:
+            if create:
+                try:
+                    os.mkdir(name, 0o700, dir_fd=ops_fd)
+                except FileExistsError as exc:
+                    raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
             return _open_at_nofollow(name, flags, ops_fd)
         finally:
             os.close(ops_fd)
@@ -748,11 +763,7 @@ class DirectOperationJournal:
                 raise DirectOperationJournalError("INITIAL_FIELD_RESERVED")
             record.update(initial_fields)
         _validate_continuity_fields(record)
-        try:
-            op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
-        except FileExistsError as exc:
-            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
-        op_fd = self._open_operation_dir_fd(operation_id)
+        op_fd = self._open_operation_dir_fd(operation_id, create=True)
         try:
             _atomic_json_write_at(op_fd, "operation.json", record)
         finally:
