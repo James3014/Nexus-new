@@ -16,7 +16,8 @@ quotes the words never counts):
   colon or dash, after a round marker (``r3 ACCEPT``) or alone on its line. Nothing
   before it in the clause may be a wish, condition or negation, and nothing right
   after it may withdraw it. Table rows, block quotes, unticked checklist items,
-  fenced code and pasted ``coord ready`` lines are skipped.
+  fenced code, pasted ``coord ready`` lines and lines with more than
+  ``MAX_VERDICTS_PER_LINE`` verdict tokens are skipped.
 - The verdict is *bound to the head* when its clause names the head sha (full, or
   a hex prefix of at least ``MIN_PREFIX`` characters), else when its line does,
   else when the comment has a ``Head`` label naming it (``Head reviewed: <sha>``,
@@ -57,6 +58,7 @@ required check without a source-bound mechanism; that is an Owner decision.
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import os
 import re
@@ -73,6 +75,9 @@ STATUS_CONTEXT = "Review record present (advisory)"
 NO_REBUTTAL_AT_CAP_REPOS = frozenset({"cairnwork/cairnwork"})
 MIN_PREFIX = 9
 MAX_DESCRIPTION = 140
+# A line with more verdict tokens than this is not a record line; skipping it keeps
+# parsing linear on a crafted comment (#2992).
+MAX_VERDICTS_PER_LINE = 64
 # The PR files API lists at most 3000 files and then stops without an error (#2992).
 MAX_PR_FILES = 3000
 TRUNCATED_FILES = f"(file list of {MAX_PR_FILES}+ entries may be truncated)"
@@ -129,9 +134,41 @@ _REJECT_PRE_DENY = re.compile(
 )
 _RESOLVED = re.compile(
     r"\b(?:fixed|rebutted|addressed|resolved|superseded|withdrawn|retracted|overturned"
-    r"|dismissed|overridden|cleared)\b",
+    r"|dismissed|overridden|cleared|triaged|non-defects?|false[- ]positives?|disputed|declined"
+    r"|deferred|waived|moot|answered|out of scope)\b",
     re.IGNORECASE,
 )
+# A resolution word right after one of these is still open ("not fixed yet", "will be
+# addressed", "needs to be fixed").
+_UNRESOLVED = re.compile(
+    r"\b(?:not|no|never|yet|will|would|to be|needs?|pending|un)(?:\W+be(?:ing)?)?\W*$", re.I
+)
+_ANY_VERDICT_TOKEN = re.compile(rf"\b(?:{_TOKEN}|{_REJECT_TOKEN})\b")
+# What may stand between the previous verdict on the line (or its start) and a REJECT
+# for it to be a reviewer's verdict: reviewer labels, round markers and shas only. A
+# finding that quotes a gate's verdict value ("a tampered receipt: REJECT") is not one.
+_REJECT_LABEL_WORDS = frozenset({
+    "independent",
+    "cross-model",
+    "adversarial",
+    "review",
+    "reviewer",
+    "re-review",
+    "verdict",
+    "final",
+    "latest",
+    "round",
+    "on",
+    "at",
+    "head",
+    "sha",
+    "commit",
+})
+_REJECT_LABEL_WORD = re.compile(
+    r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}|[0-9a-f]{7,40}"
+)
+# What may follow the token: end, punctuation, a sha binding or a parenthesis.
+_REJECT_AFTER = re.compile(r"\s*(?:$|[.:;,!)\]\-\u2013\u2014(@]|at\b|on\b)")
 _VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
 _QUOTE = re.compile("[\"\u201c\u2018]|(?<![A-Za-z])'")  # an apostrophe inside a word is possessive
 # Words before the token in its clause that make it a wish, a condition or a negation.
@@ -163,12 +200,16 @@ _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
 _HEAD_BIND = re.compile(
     rf"\bhead\b[^\n]{{0,48}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
 )
-# A Head label proper ("Head reviewed: <sha>", "final head <sha>", "head is now <sha>",
-# "Reviewed commit <sha>"), not prose that merely has a sha within reach of the word
-# ("this head and main <sha>").
+# A Head label proper, at the start of its line or in a heading ("Head reviewed: <sha>",
+# "- final head <sha>", "Reviewed commit <sha>", "## Review record — head <sha>"), not
+# prose that mentions a head ("re-review after fixes from head <sha>"). Whitespace runs
+# are bounded so a long line cannot make the match quadratic.
 _HEAD_LABEL = re.compile(
-    r"\b(?:head|reviewed)\b(?:\s+(?:reviewed|sha|commit))?(?:\s+(?:is|was))?(?:\s+now)?(?:\s+at)?"
-    rf"\s*[:=@]?\s*(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
+    r"^[ \t]{0,4}(?:#{1,6}[ \t][^\n]{0,200}?\bhead"
+    r"|(?:[-*+][ \t]{1,4}|\d{1,3}\.[ \t]{1,4})?(?:(?:final|current|new)[ \t]{1,4})?"
+    r"(?:head(?:[ \t]{1,4}(?:reviewed|sha|commit|is|was|now|at)){0,3}"
+    r"|reviewed[ \t]{1,4}(?:head|commit)))"
+    rf"[ \t]{{0,4}}[:=@]?[ \t]{{0,4}}(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
 )
 _SKIP_LINE = re.compile(
     r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)"
@@ -321,6 +362,8 @@ def verdict_clauses(line: str) -> list[str]:
         return []
     out: list[str] = []
     plain_line = _plain(line, keep_parens=True)
+    if len(_ANY_VERDICT_TOKEN.findall(plain_line)) > MAX_VERDICTS_PER_LINE:
+        return []
     consumed = 0
     prev_token_end = 0
     for clause in _clauses(plain_line):
@@ -374,36 +417,74 @@ def is_verdict_line(line: str) -> bool:
     return bool(verdict_clauses(line))
 
 
+def _reject_label_only(prefix: str) -> bool:
+    """The text before a REJECT holds reviewer labels, round markers and shas only."""
+    words = re.findall(r"[a-z0-9][a-z0-9.-]*", _plain(prefix).lower())
+    return all(
+        word.rstrip(".") in _REJECT_LABEL_WORDS or _REJECT_LABEL_WORD.fullmatch(word.rstrip("."))
+        for word in words
+    )
+
+
+def _resolved_after(text: str, start: int, end: int) -> bool:
+    """A resolution word between ``start`` and ``end`` that is not negated or postponed."""
+    return any(
+        not _UNRESOLVED.search(text[max(start, match.start() - 24) : match.start()])
+        for match in _RESOLVED.finditer(text, start, end)
+    )
+
+
 def reject_clauses(line: str) -> list[str]:
     """Clauses of the line that carry an open rejecting verdict (#2992).
 
     The token (``REJECT``, ``REPAIR_REQUIRED``, ``REQUEST_CHANGES``, ``CHANGES_REQUESTED``)
-    sits in the same verdict positions as an accepting one; it is not negated, conditional
-    or quoted, and nothing from it to the next verdict on the line says it was resolved
-    (``r1 REJECT (fixed)``, ``REJECT, rebutted``). Lines skipped for accepting verdicts
-    (tables, quotes, unticked checklist items, pasted commands) are skipped here too.
+    sits in the same verdict positions as an accepting one and reads as a reviewer's
+    verdict: only reviewer labels, round markers and shas stand between it and the
+    previous verdict on the line (or the line start), and only punctuation, a sha
+    binding or a parenthesis follows it ("**Codex**: r2 REJECT — data loss",
+    "r3 @<sha>: REJECT"). It is not negated, conditional or quoted, and nothing from it
+    to the next verdict on the line says it was resolved (``r1 REJECT (fixed)``,
+    ``REJECT, rebutted``; "not fixed yet" is not resolved). A gate's verdict value in a
+    finding ("a tampered receipt: REJECT", "REJECT is returned") and a history heading
+    ("Round 1 (<sha>) REJECT items:") are not verdicts. Lines skipped for accepting
+    verdicts (tables, quotes, unticked checklist items, pasted commands) are skipped too.
     """
     if _SKIP_LINE.match(line):
         return []
     out: list[str] = []
     plain_line = _plain(line, keep_parens=True)
+    tokens = [(m.start(), m.end()) for m in _ANY_VERDICT_TOKEN.finditer(plain_line)]
+    if len(tokens) > MAX_VERDICTS_PER_LINE:
+        return []
+    starts = [start for start, _end in tokens]
     consumed = 0
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
         match = _REJECT_POS.search(clause)
-        if not match:
+        if not match or start < 0:
             continue
         token_start = match.start(1) if match.group(1) else match.start(2)
+        token_end = match.end(1) if match.group(1) else match.end(2)
         if _REJECT_PRE_DENY.search(_plain(clause[:token_start])) or _QUOTE.search(
             clause[:token_start]
         ):
             continue
-        rest = plain_line[start + token_start :] if start >= 0 else clause[token_start:]
-        following = _VERDICT_POS.search(rest, 1)
-        following_reject = _REJECT_POS.search(rest, 1)
-        cut = min([m.start() for m in (following, following_reject) if m is not None] + [len(rest)])
-        if _RESOLVED.search(rest[:cut]):
+        at, end = start + token_start, start + token_end
+        index = bisect.bisect_left(starts, at)
+        window = plain_line[tokens[index - 1][1] if index > 0 else 0 : at]
+        if len(window) > 400:
+            window = window[-400:]  # keeps the scan linear on a very long line
+        # From the last model named before it ("After the rebase, Codex r3 on head <sha>:"),
+        # else from the previous verdict or the line start.
+        window = _plain(window)  # a parenthetical is an aside: "(Gemini 3.8 Flash High)"
+        models = list(_NEAREST_MODEL.finditer(window))
+        if not _reject_label_only(window[models[-1].end() :] if models else window):
+            continue
+        if not _REJECT_AFTER.match(plain_line, end):
+            continue
+        following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
+        if _resolved_after(plain_line, end, following):
             continue
         out.append(clause)
     return out
@@ -451,6 +532,15 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
     if _hex_tokens(line):
         return names_head(line, head)
     return comment_head
+
+
+_SHORT_SHA = re.compile(r"(?<![0-9a-f])(?=[0-9a-f]{0,39}[a-f])([0-9a-f]{7,40})(?![0-9a-f])")
+
+
+def _short_sha_elsewhere(clause: str, head: str) -> bool:
+    """The clause names a sha of 7+ characters and none of them is the head's prefix."""
+    found = _SHORT_SHA.findall(clause.lower())
+    return bool(found) and not any(head.lower().startswith(token) for token in found)
 
 
 _MODEL_WORDS = re.compile(r"\b(?:codex|gemini|gpt|claude|opus|sonnet)\b", re.IGNORECASE)
@@ -603,7 +693,7 @@ def _clause_family(
     ):
         return None
     if nearest:
-        named = _NEAREST_MODEL.findall(line_before)
+        named = _NEAREST_MODEL.findall(_plain(line_before))  # "(after the Codex fix)" is an aside
         if not named:
             return header_family
         return "cross_model" if named[-1].lower() == "cross-model" else _family(named[-1])
@@ -709,6 +799,8 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
                 family = _clause_family(
                     clause, span, plain_line, start, header_family, nearest=kind == "reject"
                 )
+                if kind == "reject" and _short_sha_elsewhere(clause, head):
+                    continue  # "REJECT at f9ccbf67": a short sha of an earlier round
                 if family and _binding(clause, line, head, comment_head):
                     rounds = _ROUND.findall(clause[: span[0]]) if span else []
                     event = {
