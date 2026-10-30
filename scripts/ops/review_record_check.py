@@ -44,6 +44,8 @@ Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
   record at head (an accepting verdict, or a rebuttal at the cap where it counts).
   A PR file list at the API cap (3000 files) may hide a path, so it is high-risk.
+  A repo in ``REPO_HIGH_RISK_PREFIXES`` adds its own high-risk paths (cairnwork:
+  ``src/``, ``scripts/``, ``REVIEW.md``).
 - ``MISSING_RECORD`` / ``MISSING_CROSS_MODEL``: what is absent; the reason tells a
   stale-head record from a comment with no verdict.
 - ``ERROR``: the API could not be read; fails closed and, when the head is known,
@@ -107,6 +109,15 @@ HIGH_RISK_FILES = frozenset({
     "AGENTS.md",
     "MUSE_PROTO.md",
 })
+# Repo-specific high-risk paths on top of the lists above, keyed like
+# NO_REBUTTAL_AT_CAP_REPOS (#2994). cairnwork: the HIGH tier of its AGENTS.md "Review
+# speed and risk tiers" that a path can express (experimental/, docs/, tests/ are LOW).
+REPO_HIGH_RISK_PREFIXES: dict[str, tuple[str, ...]] = {
+    "cairnwork/cairnwork": ("src/", "scripts/"),
+}
+REPO_HIGH_RISK_FILES: dict[str, frozenset[str]] = {
+    "cairnwork/cairnwork": frozenset({"REVIEW.md"}),
+}
 
 _HEX_TOKEN = re.compile(rf"(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])")
 _TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
@@ -830,14 +841,21 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
     }
 
 
-def _is_high_risk(name: str) -> bool:
-    return name in HIGH_RISK_FILES or name.startswith(HIGH_RISK_PREFIXES)
+def _is_high_risk(name: str, repo: str = "") -> bool:
+    key = repo.strip().lower()
+    return (
+        name in HIGH_RISK_FILES
+        or name.startswith(HIGH_RISK_PREFIXES)
+        or name in REPO_HIGH_RISK_FILES.get(key, frozenset())
+        or name.startswith(REPO_HIGH_RISK_PREFIXES.get(key, ()))
+    )
 
 
-def high_risk_paths(files: list[Any]) -> list[str]:
+def high_risk_paths(files: list[Any], repo: str = "") -> list[str]:
     """High-risk paths touched by the PR; a rename counts by its old name too.
 
-    A list at the API's file cap may hide a high-risk path, so it counts as high-risk.
+    ``repo`` adds that repo's own high-risk paths (``REPO_HIGH_RISK_PREFIXES``). A list
+    at the API's file cap may hide a high-risk path, so it counts as high-risk.
     """
     paths: set[str] = {TRUNCATED_FILES} if len(files) >= MAX_PR_FILES else set()
     for entry in files:
@@ -845,7 +863,7 @@ def high_risk_paths(files: list[Any]) -> list[str]:
             continue
         for key in ("filename", "previous_filename"):
             name = entry.get(key)
-            if isinstance(name, str) and _is_high_risk(name):
+            if isinstance(name, str) and _is_high_risk(name, repo):
                 paths.add(name)
     return sorted(paths)
 
@@ -928,6 +946,7 @@ def evaluate(
     reviews: list[Any],
     delta_verified: tuple[str, ...] = (),
     allow_rebuttal: bool = True,
+    repo: str = "",
 ) -> dict[str, Any]:
     """Pure classification of the PR's review evidence at ``head``.
 
@@ -935,8 +954,9 @@ def evaluate(
     verified as merge-only (#2308); a record at one of those counts as a record at the head.
     The caller is the only place that may verify a delta; this function trusts nothing else.
     ``allow_rebuttal`` False (``rebuttal_counts(repo)``) drops rebuttals at the cap.
+    ``repo`` adds that repo's own high-risk paths.
     """
-    risky = high_risk_paths(files)
+    risky = high_risk_paths(files, repo)
     records, stale, unbound, approved_reviews, standing = _evidence_at(
         head, comments, reviews, allow_rebuttal
     )
@@ -1238,11 +1258,13 @@ def run(
         comments = _paginate(fetch, f"{base}/issues/{pr}/comments", token)
         reviews = _paginate(fetch, f"{base}/pulls/{pr}/reviews", token)
         allow = rebuttal_counts(repo)
-        report = evaluate(head, files, comments, reviews, allow_rebuttal=allow)
+        report = evaluate(head, files, comments, reviews, allow_rebuttal=allow, repo=repo)
         if report["status"] != "OK":
             deltas = _verify_deltas(fetch, base, token, head, pull, files, comments, reviews, allow)
             if deltas:
-                report = evaluate(head, files, comments, reviews, deltas, allow_rebuttal=allow)
+                report = evaluate(
+                    head, files, comments, reviews, deltas, allow_rebuttal=allow, repo=repo
+                )
     except Exception as exc:  # noqa: BLE001 - any read failure must fail closed
         report = {
             "schema": "nexus.review_record_check.v1",
