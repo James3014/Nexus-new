@@ -212,7 +212,10 @@ def test_rebuttal_at_cap_needs_past_tense_and_a_round_number_or_cap():
     claude_section = split.replace(
         "**Codex adversarial review** (codex exec, read-only)", "Notes"
     ).replace("Codex confirmed", "confirmed")
-    assert rrc.evaluate(HEAD, RISKY, [_c(claude_section)], [])["status"] == "MISSING_CROSS_MODEL"
+    assert rrc.classify_record(claude_section, HEAD)["rebuttal_at_cap"] is False
+    # Since #2992 the unresolved "r3 REJECT" in the Claude section also withdraws the
+    # Claude ACCEPT above it, so the record is missing before the cross-model check.
+    assert rrc.evaluate(HEAD, RISKY, [_c(claude_section)], [])["status"] == "MISSING_RECORD"
 
 
 # -- high-risk paths -----------------------------------------------------------------
@@ -1534,8 +1537,11 @@ def test_a_later_claude_reject_at_the_head_withdraws_the_independent_record():
     [
         # A later round accepts again.
         [f"Codex r1 REJECT@{HEAD}: two findings", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
-        # A round history listed after the summary verdict.
-        [f"**Codex review** @ {HEAD}: **ACCEPT**\n- r1: REJECT (missing test)\n", CLAUDE_AT_HEAD],
+        # A round history listed after the summary verdict that ends in an ACCEPT.
+        [
+            f"**Codex review** @ {HEAD}: **ACCEPT**\n- r1: REJECT (missing test)\n- r2: ACCEPT\n",
+            CLAUDE_AT_HEAD,
+        ],
         # A numbered later round survives an earlier round listed after it.
         [f"Codex r3 ACCEPT@{HEAD}", f"Recap: Codex r2 REJECT@{HEAD}: one finding", CLAUDE_AT_HEAD],
         # Resolved, negated or quoted rejections and tables withdraw nothing.
@@ -1624,3 +1630,16 @@ def test_an_earlier_round_reject_recapped_later_keeps_the_rebuttal():
     recap = f"Recap: Codex r2 REJECT@{HEAD}: one finding"
     report = rrc.evaluate(HEAD, RISKY, [_c(REBUTTAL_SECTION), _c(recap), _c(CLAUDE_AT_HEAD)], [])
     assert report["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Claude: ACCEPT@{HEAD}\nClaude r2 REJECT@{HEAD}: a regression\n",
+        f"**Claude review** (Opus)\nHead reviewed: {HEAD}\nVerdict: **ACCEPT**\n- r1: REJECT (missing test)\n",
+    ],
+)
+def test_a_numbered_reject_after_an_unnumbered_accept_in_one_comment_withdraws_it(body):
+    # Codex r3 on #2993: a round history that ends in a REJECT is an open rejection.
+    report = rrc.evaluate(HEAD, DOCS, [_c(body)], [])
+    assert report["status"] == "MISSING_RECORD" and "later Claude/Opus REJECT" in report["reason"]

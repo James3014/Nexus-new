@@ -615,9 +615,9 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
 
     Events are in posting order (comments oldest first, lines top to bottom). A REJECT
     withdraws every earlier ACCEPT of its family except one from a later round
-    (``r3 ACCEPT`` survives an ``r2 REJECT`` listed after it) and, inside one comment, an
-    unnumbered ACCEPT ahead of a numbered round history ("Verdict: ACCEPT" then
-    "r1: REJECT"). A later ACCEPT stands again.
+    (``r3 ACCEPT`` survives an ``r2 REJECT`` listed after it). A later ACCEPT stands
+    again. An unnumbered ACCEPT followed by a numbered REJECT is withdrawn: a round
+    history that ends in a REJECT at the head is an open rejection.
     """
     accepts: dict[str, list[dict[str, Any]]] = {}
     for event in events:
@@ -626,15 +626,13 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
             accepts.setdefault(family, []).append(event)
             continue
         reject_round = event["round"]
-
-        def survives(accept: dict[str, Any], reject: dict[str, Any] = event) -> bool:
-            if reject_round is None:
-                return False
-            if accept["round"] is None:
-                return accept["comment"] == reject["comment"]
-            return accept["round"] > reject_round
-
-        accepts[family] = [a for a in accepts.get(family, []) if survives(a)]
+        accepts[family] = [
+            accept
+            for accept in accepts.get(family, [])
+            if reject_round is not None
+            and accept["round"] is not None
+            and accept["round"] > reject_round
+        ]
     return {family for family, kept in accepts.items() if kept}
 
 
