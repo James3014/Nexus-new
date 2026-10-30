@@ -48,6 +48,7 @@ from nexus.services.agy_account_pool import (
     AgyAccountPoolExhaustedError,
     AgyAccountPoolManager,
     CrossProcessLeaseCoordinator,
+    agy_pool_stopped,
     build_isolated_env,
 )
 from nexus.services.external_account_pool import AccountFailureKind
@@ -192,6 +193,8 @@ NO_ELIGIBLE_ACCOUNT = "AGY_NO_ELIGIBLE_ACCOUNT"
 POOL_BUSY = "AGY_ACCOUNT_POOL_BUSY"
 POOL_EXHAUSTED = "AGY_ACCOUNT_POOL_EXHAUSTED"
 POOL_RUNTIME_MISSING = "AGY_ACCOUNT_POOL_RUNTIME_MISSING"
+# #2998: the Agy pool is stopped (NEXUS_AGY_POOL_STOPPED_OVERRIDE not "1").
+POOL_STOPPED = "AGY_ACCOUNT_POOL_STOPPED"
 QUOTA_EXHAUSTED_PRE_EFFECT = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
 QUOTA_EXHAUSTED_AFTER_EFFECT = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
 QUOTA_EXHAUSTED_UNKNOWN_EFFECT = "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
@@ -203,6 +206,7 @@ PRE_CALL_LEASE_FAILURES = frozenset({
     POOL_BUSY,
     POOL_EXHAUSTED,
     POOL_RUNTIME_MISSING,
+    POOL_STOPPED,
 })
 
 
@@ -528,6 +532,10 @@ def run_with_account_lease(
     """Run ``attempt`` under one leased, allowlisted, 5h-available account; always release."""
     family = agy_model_family(model)
     run = LeasedRunResult(status="failed", pool_source=pool_source)
+    if agy_pool_stopped():
+        # #2998: refuse before reading the pool; acquire_claim refuses too.
+        run.failure_kind = POOL_STOPPED
+        return run
     try:
         inventory = _pool_inventory(coordinator)
     except AgyAccountPoolError as exc:
