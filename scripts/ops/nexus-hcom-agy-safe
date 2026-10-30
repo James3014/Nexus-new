@@ -26,8 +26,24 @@ SENSITIVE_API_KEYS = (
 EXCLUDED_DIR_NAMES = {"conversations", "brain", "log"}
 EXCLUDED_FILE_NAMES = {"history.jsonl", "conversation_summaries.db"}
 
+# Agy pool stopped (James 2026-10-30, #2998): a direct launch on a leased pool
+# profile is refused unless NEXUS_AGY_POOL_STOPPED_OVERRIDE is exactly "1" --
+# the same switch nexus-agy-dispatch checks.  The dispatcher's --hcom-collab
+# launch passes its own environment on, so a dispatch that was allowed to
+# lease still gets here; the delegate path is refused by the dispatcher itself.
+POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
+POOL_STOPPED_EXIT_CODE = 3
+POOL_STOPPED_MESSAGE = (
+    "hcom-agy-safe: AGY_ACCOUNT_POOL_STOPPED: Agy 帳號池已停用（James 10/30：Agy 只走原生 Cord 管道 agy-lane），"
+    "拒絕在帳號池帳號上啟動。改用 Claude 子代理、Codex，或寄協調者走 agy-lane。"
+)
+
 
 class SafeLauncherError(RuntimeError):
+    pass
+
+
+class PoolStoppedError(SafeLauncherError):
     pass
 
 
@@ -278,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     _reject_sensitive_hcom_env(hcom_dir)
     if not os.environ.get("NEXUS_HCOM_AGY_LEASE_ACCOUNT", "").strip():
         return _delegate_to_dispatcher(args)
+    if os.environ.get(POOL_STOPPED_OVERRIDE_ENV) != "1":
+        raise PoolStoppedError("AGY_ACCOUNT_POOL_STOPPED")
 
     hcom_raw = os.environ.get("NEXUS_HCOM_BIN") or shutil.which("hcom")
     if not hcom_raw:
@@ -329,6 +347,10 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except PoolStoppedError:
+        _emit_collab_status("pre_provider_failed")
+        print(POOL_STOPPED_MESSAGE, file=sys.stderr)
+        raise SystemExit(POOL_STOPPED_EXIT_CODE)
     except SafeLauncherError as exc:
         _emit_collab_status("pre_provider_failed")
         print(f"hcom-agy-safe: {exc}", file=sys.stderr)

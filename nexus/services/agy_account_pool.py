@@ -116,6 +116,34 @@ class AgyAccountPoolManagerError(AgyAccountPoolError):
     """Raised when the account pool manager CLI fails or returns invalid data."""
 
 
+# Agy pool stopped (James 2026-10-30, #2989/#2998): every new lease is refused
+# unless NEXUS_AGY_POOL_STOPPED_OVERRIDE is exactly "1" -- the same switch
+# scripts/ops/nexus-agy-dispatch checks (the dispatcher refuses before it
+# imports this module, so it keeps its own copy of the name).  Checking it at
+# the shared lease points covers every path that leases a pool account:
+# the dispatcher, bench run_with_account_lease, and the Gateway in process.
+POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
+POOL_STOPPED_MESSAGE = (
+    "AGY_ACCOUNT_POOL_STOPPED: Agy 帳號池已停用（James 10/30：Agy 只走原生 Cord 管道 agy-lane），"
+    "拒絕租用帳號池帳號。改用 Claude 子代理、Codex，或寄協調者走 agy-lane。"
+)
+
+
+class AgyAccountPoolStoppedError(AgyAccountPoolError):
+    """Raised when a lease is requested while the Agy account pool is stopped."""
+
+
+def agy_pool_stopped() -> bool:
+    """True unless the stop override is set to exactly ``"1"`` (fail closed)."""
+    return os.environ.get(POOL_STOPPED_OVERRIDE_ENV) != "1"
+
+
+def refuse_if_agy_pool_stopped() -> None:
+    """Raise :class:`AgyAccountPoolStoppedError` before any lease side effect."""
+    if agy_pool_stopped():
+        raise AgyAccountPoolStoppedError(POOL_STOPPED_MESSAGE)
+
+
 def is_agy_rotation_eligible(failure_kind: AccountFailureKind) -> bool:
     """Agy provider timeouts cool down the current account before another attempt."""
     return failure_kind == AccountFailureKind.TIMEOUT or is_rotation_eligible(failure_kind)
@@ -871,6 +899,7 @@ class AgyAccountPoolManager:
                 self._pool.register_account(new_rec)
 
     def acquire(self, consumer_id: str) -> AccountLease:
+        refuse_if_agy_pool_stopped()
         # Trigger ensure_active and build_isolated_env to respect subclass overrides
         try:
             self.ensure_active()
@@ -1294,6 +1323,7 @@ class CrossProcessLeaseCoordinator:
         import fcntl
         import time
 
+        refuse_if_agy_pool_stopped()
         timeout = wait_timeout if wait_timeout is not None else self.default_wait_timeout
         deadline = time.monotonic() + max(0.0, timeout)
 

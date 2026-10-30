@@ -37,7 +37,11 @@ from nexus.executors.claude_measurement_worker import (
     measurement_claude_enabled,
     measurement_claude_preflight,
 )
-from nexus.services.agy_account_pool import AgyAccountPoolBusyError, AgyAccountPoolExhaustedError
+from nexus.services.agy_account_pool import (
+    AgyAccountPoolBusyError,
+    AgyAccountPoolExhaustedError,
+    AgyAccountPoolStoppedError,
+)
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
 if TYPE_CHECKING:
@@ -235,6 +239,8 @@ class _ModelProbeMixin(_ModelProbeBase):
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_BUSY") from exc
         except AgyAccountPoolExhaustedError as exc:
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_EXHAUSTED") from exc
+        except AgyAccountPoolStoppedError as exc:
+            raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED") from exc
 
     def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool:
         with self._assist_lock:
