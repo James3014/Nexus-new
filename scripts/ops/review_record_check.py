@@ -606,10 +606,40 @@ def _label_binds(labels: list[tuple[list[str], str | None]], index: int, head: s
     return False
 
 
-def _bound_after(clause: str, span: tuple[int, int]) -> str | None:
-    """The sha the token itself is bound to (``ACCEPT@<sha>``, ``REJECT at [head] <sha>``)."""
+def _bound_after(clause: str, span: tuple[int, int], prose_ok: bool = True) -> str | None:
+    """The sha the token itself is bound to (``ACCEPT@<sha>``, ``REJECT at [head] <sha>``).
+
+    ``prose_ok`` False (a REJECT): after ``at``/``on`` the sha must end the binding
+    (end, punctuation, a parenthesis or a dash), so "REJECT on ed25519 verification" or
+    "REJECT at deadbeef sentinel handling" names a finding, not a commit.
+    """
     match = _BOUND_AFTER.match(clause, span[1])
-    return match.group(1).lower() if match else None
+    if match is None:
+        return None
+    if not prose_ok and match.group(1) != "@" and not _BOUND_END.match(clause, match.end()):
+        return None
+    return match.group(2).lower()
+
+
+def _sha_tokens(text: str) -> list[str]:
+    """Shas of 7+ hex characters the text names: any with a letter a-f, and an all-digit
+    one only where a sha is meant (after ``@``, ``at``, ``reviewed``, ``head`` ..., before
+    a colon, in backticks or alone in parentheses), so "317 passed, 1234567 assertions"
+    names no sha."""
+    text = text.lower()
+    out = []
+    for match in _ANY_SHA.finditer(text):
+        token = match.group(1)
+        before, after = text[: match.start()], text[match.end() :]
+        if (
+            re.search(r"[a-f]", token)
+            or _DIGIT_SHA_BEFORE.search(before)
+            or re.match(r"\s*:", after)  # "- 8552809: ACCEPT"
+            or (before.endswith("`") and after.startswith("`"))
+            or (re.search(r"\(\s*$", before) and re.match(r"\s*\)", after))
+        ):
+            out.append(token)
+    return out
 
 
 def _binding(
@@ -618,57 +648,74 @@ def _binding(
     """An ACCEPT binds to the head by its own sha, else its clause, else its line, else a
     Head label.
 
-    ``ACCEPT@<sha>`` / ``ACCEPT at <sha>`` decides alone. Otherwise every sha of 7+ hex
-    characters (all-digit ones too) in the clause, else on the line, must be the head's:
-    a clause or line that also names another commit ("ACCEPT — reviewed <old>, head is
-    now <head>") is ambiguous and binds nothing (r5 R3, R7). A later ``Head`` line cannot
-    rebind a verdict whose clause or line names a sha.
+    ``ACCEPT@<sha>`` / ``ACCEPT at <sha>`` decides alone. Otherwise every sha in the
+    clause, else on the line, must be the head's (an all-digit one too where a sha is
+    meant, ``_sha_tokens``): a clause or line that also names another commit ("ACCEPT —
+    reviewed <old>, head is now <head>") is ambiguous and binds nothing (r5 R3, R7). A
+    later ``Head`` line cannot rebind a verdict whose clause or line names a sha.
     """
     head = head.lower()
     own = _bound_after(clause, span) if span else None
     if own is not None:
         return head.startswith(own)
     for text in (clause, line):
-        found = _ANY_SHA.findall(text.lower())
+        found = _sha_tokens(text)
         if found:
             return all(head.startswith(token) for token in found)
     return comment_head
 
 
-def _reject_binding(clause: str, span: tuple[int, int], head: str, comment_head: bool) -> bool:
+def _label_sha_binds(label: str, match: re.Match[str]) -> bool:
+    """Whether a sha in a REJECT's label binds it: after ``@``/``at``/``on``/``head``/
+    ``commit``/``sha``, alone in a parenthetical ("Round 1 (<sha>):"), or a sha with a
+    letter that ends the label ("r2 <sha>: REJECT"). A word in an aside ("(ed25519
+    signer)") or an all-digit word elsewhere binds nothing."""
+    before, after = label[: match.start()], label[match.end() :]
+    if _LABEL_SHA_BEFORE.search(before):
+        return True
+    if re.search(r"\(\s*$", before) and re.match(r"\s*\)", after):
+        return True
+    return bool(re.search(r"[a-f]", match.group(1))) and bool(re.match(r"\s*(?:[:\]]|$)", after))
+
+
+def _reject_binding(
+    clause: str, span: tuple[int, int], line: str, head: str, comment_head: bool
+) -> bool:
     """A REJECT is about the head unless its label binds it to another commit (fail closed).
 
-    Only a sha in binding position counts: right after the token (``REJECT@<sha>``,
-    ``REJECT at <sha>``) or in the label after the last model name before it
-    (``r2 @<sha>: REJECT``, ``Round 1 @ <sha>: REJECT``). A hex-looking word in the
-    finding ("the ed25519 signature", "same bug as fix 1a2b3c4d") never unbinds it, and an
-    all-digit word never binds it elsewhere (r5 R1, R2).
+    Only a sha in binding position binds it elsewhere: right after the token
+    (``REJECT@<sha>``, ``REJECT at <sha>.``) or in its label after the last model name
+    (``r2 @<sha>: REJECT``, ``Round 1 (<sha>): REJECT``). A hex-looking word in the
+    finding ("the ed25519 signature", "same bug as fix 1a2b3c4d") never unbinds it (r5
+    R1). Otherwise it is about the head when its line names the head anywhere (7+
+    characters, all-digit too, r5 R2), else when the comment's Head labels bind it.
     """
     head = head.lower()
-    own = _bound_after(clause, span)
+    own = _bound_after(clause, span, prose_ok=False)
     if own is not None:
         return head.startswith(own)
     label = _plain(clause[: span[0]], keep_parens=True).lower()  # "Round 1 (<sha>): REJECT"
     models = list(_NEAREST_MODEL.finditer(label))
     label = label[models[-1].end() :] if models else label
-    found = _ANY_SHA.findall(label)
-    if any(head.startswith(token) for token in found):
+    found = list(_ANY_SHA.finditer(label))
+    if any(head.startswith(match.group(1)) for match in found):
         return True
-    # "@ 9154965" binds even an all-digit sha; a bare all-digit word binds nothing.
-    bound = _BOUND_LABEL.findall(label)
-    if bound or any(re.search(r"[a-f]", token) for token in found):
+    if any(_label_sha_binds(label, match) for match in found):
         return False
-    return comment_head
+    return names_head_loosely(line, head) or comment_head
 
 
 # Any 7-40 hex characters, all-digit runs included: what a short sha may look like.
 _ANY_SHA = re.compile(r"(?<![0-9a-f])([0-9a-f]{7,40})(?![0-9a-f])")
-_BOUND_LABEL = re.compile(
-    r"(?:@|\b(?:at|on|head|commit|sha))\s*:?\s*(?<![0-9a-f])([0-9a-f]{7,40})(?![0-9a-f])"
+_LABEL_SHA_BEFORE = re.compile(r"(?:@|\b(?:at|on|head|commit|sha))\s*:?\s*$")
+_DIGIT_SHA_BEFORE = re.compile(
+    r"(?:@|\b(?:at|on|head|commit|sha|reviewed|checked|from|since|vs))\s*:?\s*`?\s*\Z"
 )
 _BOUND_AFTER = re.compile(
-    r"\s*(?:@|at\b|on\b)\s*(?:head\s+)?([0-9a-fA-F]{7,40})(?![0-9a-fA-F])", re.IGNORECASE
+    r"\s*(@|at\b|on\b)\s*(?:head\s+)?([0-9a-fA-F]{7,40})(?![0-9a-fA-F])", re.IGNORECASE
 )
+# What ends a sha binding after a REJECT: end, punctuation, a parenthesis or a dash.
+_BOUND_END = re.compile(r"\s*(?:$|[.:;,!)\](\-\u2013\u2014])")
 _SHORT_SHA = re.compile(
     r"(?<![0-9a-f])(?=[0-9a-f]{0,39}[a-f])([0-9a-f]{7,40})(?![0-9a-f])",
     re.IGNORECASE,
@@ -1012,7 +1059,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             consumed = start + len(clause) if start >= 0 else consumed
             if span is None or start < 0:
                 continue
-            if not _reject_binding(clause, span, head, reject_head):
+            if not _reject_binding(clause, span, plain_reject, head, reject_head):
                 continue
             families, reviewer = _reject_families(plain_reject[: start + span[0]], reject_header)
             rounds = _ROUND.findall(clause[: span[0]])
