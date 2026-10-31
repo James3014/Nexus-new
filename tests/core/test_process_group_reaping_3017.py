@@ -15,6 +15,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -242,9 +243,6 @@ def test_a_live_member_is_not_mistaken_for_an_exited_leader_alone(tmp_path, monk
         _assert_reaped(background)
 
 
-darwin_only = pytest.mark.skipif(sys.platform != "darwin", reason="kqueue and libproc are macOS")
-
-
 def _no_spawn(monkeypatch):
     def popen(*_a, **_k):
         raise AssertionError("nothing may be spawned")
@@ -271,17 +269,17 @@ def test_without_waitid_macos_waits_through_kqueue_and_others_refuse(tmp_path, m
     _assert_reaped(_background_pid(tmp_path))
 
 
-@darwin_only
 def test_kqueue_wait_neither_reaps_nor_misses_an_exit(monkeypatch):
-    monkeypatch.delattr(os, "waitid", raising=False)
+    # macOS: through kqueue (os.waitid removed); elsewhere the same promise through waitid.
+    if sys.platform == "darwin":
+        monkeypatch.delattr(os, "waitid", raising=False)
     sleeper = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
     quick = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
     try:
         assert argv_command._wait_leader_unreaped(sleeper.pid, time.monotonic() + 0.2) is False
-        # Exited before the wait starts: kqueue answers ESRCH; the zombie is still unreaped.
+        # Exited before the wait starts (kqueue answers ESRCH); the zombie is still unreaped.
         for _ in range(200):
-            info = argv_command._darwin_proc(quick.pid)
-            if info is not None and info.pbi_status == argv_command._SZOMB:
+            if _gone(quick.pid):
                 break
             time.sleep(0.01)
         assert argv_command._wait_leader_unreaped(quick.pid, None) is True
@@ -500,23 +498,29 @@ def test_a_character_split_across_reads_decodes_whole():
     assert result.stdout == "中\n"
 
 
-@darwin_only
 def test_a_live_leader_alone_is_not_an_exited_leader_alone(tmp_path):
-    # Only an exited (zombie) leader with no other member counts as an empty group.
+    # Only an exited (zombie) leader with no other member counts as an empty group: through
+    # libproc's quick check on macOS, and the full listing (/proc on Linux, ps elsewhere).
+    darwin = sys.platform == "darwin"
     leader = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
     with_child = subprocess.Popen(["/bin/sh", "-c", DETACH], cwd=tmp_path, start_new_session=True)
     background = _background_pid(tmp_path)
     try:
-        assert argv_command._only_exited_leader_left(leader.pid) is False
+        assert argv_command._live_group_members(leader.pid) == [leader.pid]
+        assert not darwin or argv_command._only_exited_leader_left(leader.pid) is False
         leader.kill()
         for _ in range(200):
-            if argv_command._only_exited_leader_left(leader.pid):
+            if _gone(leader.pid) and (
+                not darwin or argv_command._only_exited_leader_left(leader.pid)
+            ):
                 break
             time.sleep(0.01)
-        assert argv_command._only_exited_leader_left(leader.pid) is True
+        assert argv_command._live_group_members(leader.pid) == []
+        assert not darwin or argv_command._only_exited_leader_left(leader.pid) is True
         # The leader exited, but its background child still runs in the group.
-        argv_command._wait_leader_unreaped(with_child.pid, time.monotonic() + 10)
-        assert argv_command._only_exited_leader_left(with_child.pid) is False
+        assert argv_command._wait_leader_unreaped(with_child.pid, time.monotonic() + 10)
+        assert argv_command._live_group_members(with_child.pid) == [background]
+        assert not darwin or argv_command._only_exited_leader_left(with_child.pid) is False
     finally:
         os.kill(background, signal.SIGKILL)
         for child in (leader, with_child):
@@ -568,3 +572,54 @@ def test_a_kqueue_exit_waits_until_the_leader_is_a_zombie(monkeypatch):
     monkeypatch.setattr(argv_command, "_darwin_proc", proc)
     argv_command._await_zombie(4242)
     assert asked == [4242] * 4
+
+
+class _FakeKqueue:
+    """Stands in for ``select.kqueue`` so the kqueue wait runs on any platform."""
+
+    def __init__(self, register_error=None, events=()):
+        self.register_error, self.events, self.closed = register_error, list(events), False
+
+    def control(self, changes, max_events, timeout=None):
+        if changes:
+            if self.register_error:
+                raise self.register_error
+            return []
+        return [self.events.pop(0)] if self.events else []
+
+    def close(self):
+        self.closed = True
+
+
+def _fake_select(monkeypatch, kq):
+    fake = SimpleNamespace(
+        kqueue=lambda: kq,
+        kevent=lambda *a, **k: (a, k),
+        KQ_FILTER_PROC=-5,
+        KQ_EV_ADD=1,
+        KQ_EV_ERROR=0x4000,
+        KQ_NOTE_EXIT=0x80000000,
+    )
+    monkeypatch.setattr(argv_command, "select", fake)
+    zombie_waits = []
+    monkeypatch.setattr(argv_command, "_await_zombie", zombie_waits.append)
+    return zombie_waits
+
+
+@pytest.mark.parametrize("already_exited", [False, True])
+def test_a_kqueue_exit_is_followed_by_the_zombie_wait(monkeypatch, already_exited):
+    exit_event = SimpleNamespace(ident=4242, flags=0, fflags=0x80000000, data=0)
+    kq = _FakeKqueue(
+        register_error=ProcessLookupError(3, "No such process") if already_exited else None,
+        events=[exit_event],
+    )
+    zombie_waits = _fake_select(monkeypatch, kq)
+    assert argv_command._kqueue_wait_exit(4242, None) is True
+    assert zombie_waits == [4242] and kq.closed
+
+
+def test_a_kqueue_wait_past_its_deadline_is_a_timeout(monkeypatch):
+    kq = _FakeKqueue()
+    zombie_waits = _fake_select(monkeypatch, kq)
+    assert argv_command._kqueue_wait_exit(4242, time.monotonic() + 0.05) is False
+    assert zombie_waits == [] and kq.closed

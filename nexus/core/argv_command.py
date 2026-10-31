@@ -451,13 +451,14 @@ def _kqueue_wait_exit(pid: int, deadline: float | None) -> bool:
 
     ESRCH on registration means the pid no longer runs: it exited and waits unreaped (only this
     module reaps it), or something else reaped it, which ``_leader_unreaped`` then reports."""
-    kq = select.kqueue()
+    # CI's pyright uses Linux stubs, which have no kqueue; only macOS runs this.
+    kq = select.kqueue()  # pyright: ignore[reportAttributeAccessIssue]
     try:
-        change = select.kevent(
+        change = select.kevent(  # pyright: ignore[reportAttributeAccessIssue]
             pid,
-            filter=select.KQ_FILTER_PROC,
-            flags=select.KQ_EV_ADD,
-            fflags=select.KQ_NOTE_EXIT,
+            filter=select.KQ_FILTER_PROC,  # pyright: ignore[reportAttributeAccessIssue]
+            flags=select.KQ_EV_ADD,  # pyright: ignore[reportAttributeAccessIssue]
+            fflags=select.KQ_NOTE_EXIT,  # pyright: ignore[reportAttributeAccessIssue]
         )
         try:
             kq.control([change], 0)
@@ -467,9 +468,9 @@ def _kqueue_wait_exit(pid: int, deadline: float | None) -> bool:
         while True:
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
             for event in kq.control(None, 1, remaining):
-                if event.flags & select.KQ_EV_ERROR:
+                if event.flags & select.KQ_EV_ERROR:  # pyright: ignore[reportAttributeAccessIssue]
                     raise OSError(event.data, os.strerror(event.data))
-                if event.ident == pid and event.fflags & select.KQ_NOTE_EXIT:
+                if event.ident == pid and event.fflags & select.KQ_NOTE_EXIT:  # pyright: ignore[reportAttributeAccessIssue]
                     _await_zombie(pid)
                     return True
             if deadline is not None and time.monotonic() >= deadline:
