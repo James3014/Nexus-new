@@ -2802,3 +2802,194 @@ def test_an_apostrophe_is_a_quote_again_in_an_aside_stating_a_condition(conditio
 def test_the_scope_phrase_may_follow_the_marker_after_a_space_comma_or_colon(label):
     body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+# A REJECT whose label carries an aside, and the label shapes the review desks post: the
+# same shapes with ACCEPT are read, so a REJECT there must withdraw the earlier ACCEPT.
+_CLAUDE_HEADER = "**Independent Claude review**"
+
+
+@pytest.mark.parametrize(
+    "aside",
+    [
+        "(Claude Opus 5.5, separate agent, not the author)",
+        "(Claude Opus 5.5, separate agent; dispatched by the desk, not in the author's chain)",
+        "(Claude Opus 5.5, code review that writes no new attack scripts)",
+        '(Claude Opus 5.5, prompt "find bugs")',
+        "(Claude Opus 5.5, dispatched by the desk (review lane), not the author)",
+    ],
+)
+def test_a_denial_or_quote_inside_a_closed_label_aside_does_not_drop_a_reject(aside):
+    accept = f"{_CLAUDE_HEADER} (Claude Opus 5.5, separate agent): **ACCEPT at {HEAD}**.\n"
+    reject = f"{_CLAUDE_HEADER} {aside}: **REJECT at {HEAD}**.\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(accept), _c(reject)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "reject",
+    [
+        f"{_CLAUDE_HEADER} (Claude Opus 5.5, separate agent): we would REJECT at {HEAD}.",
+        f"{_CLAUDE_HEADER} (Claude Opus 5.5, separate agent): not REJECT at {HEAD}.",
+        f'{_CLAUDE_HEADER} (Claude Opus 5.5, separate agent): "REJECT" at {HEAD}.',
+        f"{_CLAUDE_HEADER} (Claude Opus 5.5, not the author: REJECT at {HEAD}.",
+        # The aside around the token itself is the verdict's own clause.
+        f"{_CLAUDE_HEADER} (Claude Opus 5.5; separate agent, not REJECT at {HEAD}).",
+    ],
+)
+def test_a_denial_or_quote_outside_a_closed_aside_still_drops_a_reject(reject):
+    accept = f"{_CLAUDE_HEADER} (Claude Opus 5.5, separate agent): **ACCEPT at {HEAD}**.\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(accept), _c(reject + "\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "files, accept, reject, status",
+    [
+        (
+            RISKY,
+            f"**Codex adversarial review** r1: ACCEPT@{HEAD}\n",
+            "**Cross-family review** (Gemini via Agy native lane, read-only; dispatched by the"
+            f" desk (review lane), task X-REV1): **REJECT at {HEAD}**\n",
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            RISKY,
+            f"Head reviewed: {HEAD}\n**Codex gpt-6.1-sol (high), round 1 — ACCEPT**\n",
+            f"Head reviewed: {HEAD}\n**Codex gpt-6.1-sol (high), round 2 — REJECT**\n",
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\nOne new finding (data loss). Verdict: **REJECT**.\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\nA data-loss path in the writer. **r2 @{HEAD[:9]}: REJECT**\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\nOne data-loss path, verdict: REJECT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"**Claude review**\n- Full review at {HEAD}: ACCEPT\n",
+            f"**Claude review**\n- Delta at {HEAD} (high): REJECT — class still open\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\n- r2 on the delta: REJECT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1 result: ACCEPT\n",
+            f"Head reviewed: {HEAD}\nClaude r2 result: REJECT — data loss\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\nData loss in the writer。**r2 @{HEAD[:9]}: REJECT**\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"Head reviewed: {HEAD}\nClaude found data loss in the writer. r2 @{HEAD[:9]}: REJECT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\n- r2, delta a1b2c3d..{HEAD[:9]}: REJECT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\n- r1b @{HEAD[:9]}: REJECT\n",
+            "MISSING_RECORD",
+        ),
+    ],
+)
+def test_a_reject_in_a_label_shape_an_accept_is_read_in_withdraws_the_accept(
+    files, accept, reject, status
+):
+    comments = [_c(accept), _c(reject)]
+    if status == "MISSING_CROSS_MODEL":
+        # The Claude record stands; only the cross-model one is withdrawn.
+        comments.append(_c(CLAUDE_AT_HEAD))
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Finding prose after a sentence end or a clause break is still not a label.
+        "- Probe 3 ran at the head. On a mismatch: REJECT.",
+        "- Probe 3, run at the head — REJECT as expected.",
+        "- The receipt was tampered with; the gate: REJECT.",
+        "- Previous round: REJECT at 1e9f3d4ec, fixed since.",
+        "- Earlier: REJECT at 1e9f3d4ec.",
+        # A stray ")" after a closed aside does not hide the words before it.
+        "- (Claude Opus 5.5) the gate): REJECT.",
+    ],
+)
+def test_finding_prose_after_a_sentence_or_clause_break_is_not_a_reject_label(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(OPUS_RECORD + line + "\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        f"r1, full diff at {HEAD[:9]}",
+        f"r1 addendum @ {HEAD[:9]}",
+        f"PR r1 @{HEAD[:9]}",
+        f"r2 status at {HEAD[:9]}",
+        f"r2 outcome at {HEAD[:9]}",
+        f"r2, delta a1b2c3d...{HEAD[:9]}",
+    ],
+)
+def test_each_review_label_word_before_a_reject_keeps_it_a_verdict(label):
+    body = f"## Claude review\nHead reviewed: {HEAD}\n- r1: ACCEPT\n- {label}: REJECT\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        (
+            DOCS,
+            [
+                CLAUDE_AT_HEAD,
+                f"**Second opinion** (round 2 (delta only), Claude Opus 5.5): **REJECT at {HEAD}**.\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [CLAUDE_AT_HEAD, f"Summary (see (1) Claude): REJECT at {HEAD}\n"],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [
+                f"**Codex adversarial review** r1: ACCEPT@{HEAD}\n",
+                f"**Adversarial pass** (r2 (delta), Codex gpt-5.5 high): REJECT at {HEAD}\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_model_named_after_a_nested_aside_still_starts_the_reject_label(files, comments, status):
+    # Main reads the model after the inner ")" and starts the label there; blanking the
+    # whole outer aside must not lose that reading.
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status

@@ -177,6 +177,15 @@ _REJECT_LABEL_WORDS = frozenset({
     "head",
     "sha",
     "commit",
+    "delta",
+    "full",
+    "diff",
+    "addendum",
+    "pr",
+    "the",
+    "result",
+    "status",
+    "outcome",
 })
 # More label words before a REJECT: a status the label carries ("**Codex r2 fix in
 # progress**: REJECT", #3004) and a model's tier ("Codex gpt-5.5 xhigh", "Gemini 3.1 Pro",
@@ -213,7 +222,8 @@ _REJECT_LABEL_EXTRA = frozenset({
     "substitute",
 })
 _REJECT_LABEL_WORD = re.compile(
-    r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}|[0-9a-f]{7,40}"
+    r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}[a-z]?|[0-9a-f]{7,40}"
+    r"|[0-9a-f]{7,40}\.\.\.?[0-9a-f]{7,40}"
     r"|v?\d{1,3}(?:\.\d{1,3}){1,3}[a-z]{0,8}"
 )
 # What may NOT follow the token: a verb or noun that makes it a value in prose ("REJECT is
@@ -565,6 +575,40 @@ def is_verdict_line(line: str) -> bool:
     return bool(verdict_clauses(line))
 
 
+def _outside_closed_asides(text: str, start: int, end: int, closes: list[int | None] | None) -> str:
+    """``text[start:end]`` with every parenthetical that closes before ``end`` blanked,
+    including one that opened before ``start``; ``closes`` is ``_aside_closes(text)``."""
+    if closes is None:
+        return text[start:end]
+    out = []
+    for index in range(start, end):
+        close = closes[index]
+        if close is None and text[index] == "(" and index + 1 < len(closes):
+            close = closes[index + 1]  # an outermost "(" is not inside its own aside
+        out.append(" " if close is not None and close < end else text[index])
+    return "".join(out)
+
+
+_LABEL_START = re.compile(
+    r"\b(?:codex|gemini|gpt|claude|opus|sonnet|cross-model|cross-family)[a-z0-9.-]*"
+    r"|[.!?](?:\s+|$)|\u3002\s*|(?=\b(?i:verdict)\s*:)",
+    re.IGNORECASE,
+)
+
+
+def _label_start(window: str) -> int:
+    """Where a REJECT's label starts in the window before it: after the last model name
+    (with its version, "gpt-5.5-codex"), after the last sentence end, or at the last
+    ``Verdict:``."""
+    found = list(_LABEL_START.finditer(window))
+    return found[-1].end() if found else 0
+
+
+def _denies_reject(before: str) -> bool:
+    """A negation, condition or quote before a REJECT token in its clause."""
+    return bool(_REJECT_PRE_DENY.search(_plain(before)) or _QUOTE.search(before))
+
+
 def _reject_label_only(prefix: str) -> bool:
     """The text before a REJECT holds reviewer labels, round markers and shas only."""
     words = re.findall(r"[a-z0-9][a-z0-9.-]*", _plain(prefix).lower())
@@ -638,6 +682,7 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         return []
     starts = [start for start, _end in tokens]
     consumed = 0
+    aside_closes: list[int | None] | None = None
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
@@ -646,21 +691,32 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
             continue
         token_start = match.start(1) if match.group(1) else match.start(2)
         token_end = match.end(1) if match.group(1) else match.end(2)
-        if _REJECT_PRE_DENY.search(_plain(clause[:token_start])) or _QUOTE.search(
-            clause[:token_start]
-        ):
-            continue
         at, end = start + token_start, start + token_end
+        # Each check below has two readings, main's and one that blanks every label aside
+        # closing before the token (nested ones included); the REJECT is read when either
+        # reading reads it, so nothing main read is dropped (fail closed).
+        # Denial: the clause may start inside an aside that closes before the token ("(Opus,
+        # separate agent, not the author): REJECT"); the aside's words are not the verdict's,
+        # as for an accepting verdict, whose window drops parentheticals.
+        if aside_closes is None and "(" in plain_line:
+            aside_closes = _aside_closes(plain_line)
+        before = _outside_closed_asides(plain_line, start, at, aside_closes)
+        if _denies_reject(clause[:token_start]) and _denies_reject(before):
+            continue
         index = bisect.bisect_left(starts, at)
-        window = plain_line[tokens[index - 1][1] if index > 0 else 0 : at]
-        if len(window) > 400:
-            window = window[-400:]  # keeps the scan linear on a very long line
-        # From the last model named before it ("After the rebase, Codex r3 on head <sha>:"),
-        # else from the previous verdict or the line start.
-        window = _plain(window)  # a parenthetical is an aside: "(Gemini 3.8 Flash High)"
+        window_start = max(tokens[index - 1][1] if index > 0 else 0, at - 400)
+        # (the 400 cap keeps the scan linear on a very long line)
+        # Label: from the last model named before it ("After the rebase, Codex r3 on head
+        # <sha>:"), else from the previous verdict or the line start; in the blanked reading
+        # also from a sentence end or a "Verdict:" label, since what an earlier sentence says
+        # is not this verdict's label ("(Gemini via agy, dispatched by the desk (review lane),
+        # task X): REJECT", "One finding. Verdict: REJECT").
+        window = _plain(plain_line[window_start:at])
         models = list(_NEAREST_MODEL.finditer(window))
         if not _reject_label_only(window[models[-1].end() :] if models else window):
-            continue
+            window = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
+            if not _reject_label_only(window[_label_start(window) :]):
+                continue
         if _REJECT_NOT_AFTER.match(plain_line, end):
             continue
         following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
