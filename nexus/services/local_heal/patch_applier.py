@@ -445,8 +445,10 @@ class PatchApplier:
                     source_text_for_check = read_text_in_root(
                         repo_dir, contained_relative_path(repo_dir, target_path)
                     )
-                    # The read turns non-UTF-8 bytes into U+FFFD; apply would refuse this file.
-                    if "\ufffd" in source_text_for_check:
+                    # The read turns non-UTF-8 bytes into U+FFFD; apply would refuse this file
+                    # if the patch goes here. Without the SEARCH here the cross-file fallback
+                    # may still pick a UTF-8 file, and apply checks whichever file it writes.
+                    if intent.search in source_text_for_check and "\ufffd" in source_text_for_check:
                         telemetry["preflight_checks"].append({
                             "check": "target_utf8",
                             "passed": False,

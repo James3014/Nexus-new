@@ -72,6 +72,20 @@ def test_patch_file_in_a_lock_dir_inside_the_root_is_not_written_through_a_link(
     assert mock_run.called is False
 
 
+def test_patch_file_in_a_lock_dir_outside_the_root_is_not_written_through_a_link(tmp_path, layout):
+    # reviewer.py passes lock_dir="/tmp": a shared directory where anyone can leave a link.
+    root, outside, uid = layout
+    lock = tmp_path / "lock"
+    lock.mkdir()
+    planted = lock / f"auto_{uid}.patch"
+    os.symlink(outside, planted)
+    applied, mock_run = _run(SafePatcher(lock, root))
+    assert outside.read_text(encoding="utf-8") == ORIGINAL
+    assert planted.is_symlink()
+    assert applied is False
+    assert mock_run.called is False
+
+
 @pytest.mark.parametrize("lock_inside_root", [True, False])
 def test_repro_script_and_patch_file_are_still_written(tmp_path, layout, lock_inside_root):
     root, outside, uid = layout

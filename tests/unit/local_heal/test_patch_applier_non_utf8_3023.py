@@ -100,6 +100,28 @@ def test_preflight_full_file_parse_refuses_a_non_utf8_target(tmp_path):
     assert (tmp_path / "calc.py").read_bytes() == original
 
 
+def test_preflight_does_not_refuse_a_non_utf8_target_the_search_is_not_in(tmp_path):
+    # Indented REPLACE (preflight parses the whole file), the named target is not UTF-8 and does
+    # not hold the SEARCH, a UTF-8 localized file does: the cross-file fallback applies there.
+    target = b"# caf\xe9\nclass D:\n    pass\n"
+    (tmp_path / "calc.py").write_bytes(target)
+    (tmp_path / "other.py").write_text(
+        "class C:\n    def add(self, a, b):\n        return a - b\n", encoding="utf-8"
+    )
+    parser, intents = _intents(
+        "FILE: calc.py\n<<<<<<< SEARCH\n        return a - b\n=======\n"
+        "        if a:\n            return a + b\n        return b\n>>>>>>> REPLACE\n"
+    )
+    result = PatchApplier(parser, Patcher()).apply_and_validate(
+        intents=intents,
+        repo_dir=tmp_path,
+        localized_files=[LocalizedFile(path="other.py", content="")],
+    )
+    assert result.success is True, result.error_reason
+    assert "return a + b" in (tmp_path / "other.py").read_text(encoding="utf-8")
+    assert (tmp_path / "calc.py").read_bytes() == target
+
+
 def test_valid_utf8_target_with_non_ascii_text_still_applies(tmp_path):
     original = "# café, naïve, 日本語\n" + WRONG
     (tmp_path / "calc.py").write_text(original, encoding="utf-8")
