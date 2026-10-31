@@ -2746,6 +2746,8 @@ def test_deeply_nested_asides_stay_linear():
         "(Opus; round 3, merge only a1b2c3d..e4f5a6b)",
         "(Opus; round 3, docs only)",
         "(Opus; r3-once docs-only)",
+        "(Opus; round 3? docs-only)",
+        "(Opus; round 3! docs-only)",
         "(Opus; round 3's items, subject to CI)",
         "(Opus; round 3, with CI green, test-only)",
         "(Opus; round 3, merge only)",
@@ -2792,3 +2794,11 @@ def test_an_apostrophe_is_a_quote_again_in_an_aside_stating_a_condition(conditio
     label = f"(Opus; round 3's items, {condition})"
     body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
+
+
+@pytest.mark.parametrize(
+    "label", ["(Opus; round 3 docs-only)", "(Opus; round 3 , docs-only)", "(Opus; r3: docs-only)"]
+)
+def test_the_scope_phrase_may_follow_the_marker_after_a_space_comma_or_colon(label):
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
