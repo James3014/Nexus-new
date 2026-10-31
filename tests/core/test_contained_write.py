@@ -293,7 +293,9 @@ def test_host_run_subtree_refused_even_when_it_exists(layout):
         assert (root / relative).read_text(encoding="utf-8") == "orig"
 
 
-@pytest.mark.parametrize("relative", [".gitignore", ".github/workflows/ci.yml", "git/x.py", "venv.py"])
+@pytest.mark.parametrize(
+    "relative", [".gitignore", ".github/workflows/ci.yml", "git/x.py", "venv.py"]
+)
 def test_names_near_host_run_subtrees_still_write(layout, relative):
     root, _ = layout
     write_text_in_root(root, relative, "ok", create_parents=True)
