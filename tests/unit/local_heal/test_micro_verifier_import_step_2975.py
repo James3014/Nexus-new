@@ -168,7 +168,9 @@ def test_model_printed_marker_cannot_skip_a_failing_test(tmp_path):
 def test_probes_disagreeing_on_pytest_is_not_a_clean_pass(tmp_path, python_without_pytest):
     """A repo-local pytest shim (model output) that fails `import pytest` but exits 0 under
     `-m pytest`: the import step records a skip, the test step "runs". The two disagree, so the
-    result carries false_pass_risk instead of looking like a real test run (review of #3000)."""
+    result carries false_pass_risk instead of looking like a real test run (review of #3000).
+    #2975 R3: the pytest probe and run no longer see the repo's own pytest.py, so the test step is
+    a recorded skip too and the shim can never make the step "run"."""
     _write(
         tmp_path,
         "pytest.py",
@@ -178,7 +180,8 @@ def test_probes_disagreeing_on_pytest_is_not_a_clean_pass(tmp_path, python_witho
     _write(tmp_path, "oracle_test.py", "import pytest\n\ndef test_x():\n    assert False\n")
     res = _verify(tmp_path, ["oracle_test.py"], python_without_pytest)
     assert res.import_skipped == ["oracle_test.py"]
-    assert res.passed is True and res.test_step == "ran"  # the shim "passes" the test step
+    assert res.passed is True and res.test_step == "skipped"  # the shim is never run (R3)
+    assert res.test_skip_reason == "pytest_unavailable"
     assert "import_step_skipped" in res.classifications
     assert "false_pass_risk" in res.classifications
     assert "false_pass_risk" in res.receipt_fields()["classifications"]
