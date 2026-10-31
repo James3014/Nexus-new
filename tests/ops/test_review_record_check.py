@@ -1867,3 +1867,19 @@ def test_3002_f5_in_progress_label_does_not_drop_a_reject():
         _c(CLAUDE_AT_HEAD),
     ]
     assert _status3002(comments) != "OK"
+
+
+def test_3002_f3_delta_path_folds_a_short_prefix_reject_of_the_new_head():
+    reject = f"**Claude review** (Opus) r2: REJECT@{HEAD[:7]}: a regression"
+    rc, status = _delta_case(comments=[_c(OPUS_RECORD.replace(HEAD, R_OLD[:12])), _c(reject)])
+    assert rc == 1 and status["state"] == "failure"
+
+
+@pytest.mark.parametrize("label", ["(fixing now)", "(fixes in progress)", "(review in-progress)"])
+def test_3002_f5_other_in_progress_wordings_do_not_drop_a_reject(label):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"**Codex r2** {label}: REJECT@{HEAD}: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"

@@ -578,7 +578,7 @@ def _own_status(line: str) -> bool:
     plain = _plain(line, keep_parens=True)
     return any(
         _NOT_A_HEADER.search(part)
-        and not re.search(r"\bfix\s+in\s+progress\b", part, re.IGNORECASE)
+        and not re.search(r"\bin[ -]progress\b|\bfix(?:es|ing)\b", part, re.IGNORECASE)
         and {m.lower() for m in _MODEL_WORDS.findall(part)} <= own
         for paren in re.findall(r"\(([^)]*)\)", plain)
         for part in re.split(r"[;,]", paren)
@@ -919,6 +919,41 @@ def rebuttal_counts(repo: str) -> bool:
     return repo.strip().lower() not in NO_REBUTTAL_AT_CAP_REPOS
 
 
+def _short_prefix_rejects(body: str, head: str, number: int) -> list[dict[str, Any]]:
+    """REJECT events whose 7-8 char sha is the head's own prefix (the comment does not
+    name the full head, so ``classify_record`` returned None for it)."""
+    out: list[dict[str, Any]] = []
+    for line in body.splitlines():
+        for clause in reject_clauses(line):
+            short_shas = _SHORT_SHA.findall(clause.lower())
+            if not any(
+                7 <= len(token) <= 8 and head.lower().startswith(token) for token in short_shas
+            ):
+                continue  # only a short sha that is the head's own prefix binds
+            span = _reject_match(clause)
+            plain_line = _plain(line, keep_parens=True)
+            start = plain_line.find(clause)
+            if span is None or not _reject_label_only(_plain(plain_line[: start + span[0]])):
+                continue
+            family = _clause_family(clause, span, plain_line, start, None, nearest=True)
+            if not family:
+                continue
+            named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
+            reviewer = (
+                (named[-1].lower() if named else family) if family == "cross_model" else family
+            )
+            rounds = _ROUND.findall(clause[: span[0]])
+            out.append({
+                "family": family,
+                "reviewer": reviewer,
+                "kind": "reject",
+                "round": int(rounds[-1]) if rounds else None,
+                "comment": number,
+                "line": clause.strip(),
+            })
+    return out
+
+
 def _evidence_at(
     head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
 ) -> tuple[list[dict[str, Any]], bool, bool, int, set[str]]:
@@ -936,39 +971,7 @@ def _evidence_at(
         if record is None:
             # A 7-8 char sha that is a prefix of the head still binds a REJECT to it. Fold
             # that rejection against an earlier ACCEPT instead of treating it as absent.
-            for line in body.splitlines():
-                for clause in reject_clauses(line):
-                    short_shas = _SHORT_SHA.findall(clause.lower())
-                    if not any(
-                        7 <= len(token) <= 8 and head.lower().startswith(token)
-                        for token in short_shas
-                    ):
-                        continue  # only a short sha that is the head's own prefix binds
-                    span = _reject_match(clause)
-                    plain_line = _plain(line, keep_parens=True)
-                    start = plain_line.find(clause)
-                    if span is None or not _reject_label_only(
-                        _plain(plain_line[: start + span[0]])
-                    ):
-                        continue
-                    family = _clause_family(clause, span, plain_line, start, None, nearest=True)
-                    if not family:
-                        continue
-                    named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
-                    reviewer = (
-                        (named[-1].lower() if named else family)
-                        if family == "cross_model"
-                        else family
-                    )
-                    rounds = _ROUND.findall(clause[: span[0]])
-                    events.append({
-                        "family": family,
-                        "reviewer": reviewer,
-                        "kind": "reject",
-                        "round": int(rounds[-1]) if rounds else None,
-                        "comment": number,
-                        "line": clause.strip(),
-                    })
+            events.extend(_short_prefix_rejects(body, head, number))
             if names_other_sha(body, head) and any(
                 is_verdict_line(line) for line in body.splitlines()
             ):
@@ -1008,6 +1011,7 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
             continue
         record = classify_record(body, head)
         if record is None:
+            events.extend(_short_prefix_rejects(body, head, number))
             continue
         for event in record["events"]:
             if allow_rebuttal or not event.get("rebuttal"):
