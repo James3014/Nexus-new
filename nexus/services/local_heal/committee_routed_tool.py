@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence
 
+from nexus.core.contained_write import write_text_in_root
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 
 
@@ -396,12 +397,15 @@ def _apply_candidate(candidate: CanonicalPatchCandidate, request: CommitteeRoute
         return {"applied": False, "hash_matches": False, "error": "mutation_not_allowed"}
 
     try:
-        target_path = os.path.join(request.repo_root, request.target_file)
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-
-        # Write candidate patch content
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(candidate.normalized_patch)
+        # Write candidate patch content. repo_root is a work dir model code can write, so the
+        # write never follows a link and never leaves repo_root (#3023); a refusal is an
+        # OSError, reported below as not applied.
+        write_text_in_root(
+            request.repo_root,
+            os.path.normpath(request.target_file),
+            candidate.normalized_patch,
+            create_parents=True,
+        )
 
         # Compute hash of applied content
         applied_hash = hashlib.sha256(candidate.normalized_patch.encode("utf-8")).hexdigest()

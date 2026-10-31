@@ -101,6 +101,10 @@ def holds_host_code(path: Path | str) -> bool:
     for root in host_code_roots():
         if in_tree(root, (target,)):
             return True
+        # Below the filesystem root (cwd "/" with an empty sys.path entry) every path qualifies
+        # by this rule, e.g. /tmp/tmpab12_x; only containing "/" itself counts there (#3023).
+        if root.parent == root:
+            continue
         if target.is_relative_to(root) and all(
             part.isidentifier() for part in target.relative_to(root).parts
         ):
