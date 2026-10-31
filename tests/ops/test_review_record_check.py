@@ -2337,3 +2337,211 @@ def test_r5_rr2_a_nine_digit_run_is_a_sha_even_before_a_unit():
     # Only a 7-8 digit count before its unit is not a sha; 9+ digits are a sha as on main.
     body = f"Head reviewed: {HEAD}\nCodex r2: ACCEPT (317 passed, 492038155 assertions)\n"
     assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+# -- burn r10 04 (refs #3011): REJECT shapes that were silently dropped ----------------
+
+
+@pytest.mark.parametrize(
+    ("files", "comments", "status"),
+    [
+        # The comment names the head only in an ACCEPT@<sha> binding, not after "head".
+        (DOCS, [f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression\n"], "MISSING_RECORD"),
+        (
+            RISKY,
+            [f"Codex r1 ACCEPT@{HEAD}\nCodex r2: REJECT — data-loss bug\n", CLAUDE_AT_HEAD],
+            "MISSING_CROSS_MODEL",
+        ),
+        # A later ACCEPT of an EARLIER round does not answer the REJECT.
+        (
+            DOCS,
+            [f"Claude r2: ACCEPT@{HEAD}\nClaude r3: REJECT — a regression\nClaude r1: ACCEPT\n"],
+            "MISSING_RECORD",
+        ),
+        # Nor does a later ACCEPT by another reviewer.
+        (
+            RISKY,
+            [
+                f"Codex r1 ACCEPT@{HEAD}\nCodex r2: REJECT — race\nGemini r3: ACCEPT\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_bare_reject_in_a_comment_naming_the_head_only_in_a_binding_withdraws(
+    files, comments, status
+):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+def test_a_bare_reject_under_a_head_label_for_another_commit_stays_there():
+    body = f"Head reviewed: {OLD[:9]}\nCodex r1: REJECT — race\n\nCodex r2: ACCEPT@{HEAD}\n"
+    assert rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])["status"] == "OK"
+
+
+def test_a_later_round_by_the_same_reviewer_answers_a_bare_reject():
+    body = f"Claude r1: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression\nClaude r3: ACCEPT\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "because the lock is never released",
+        "with two findings",
+        "due to a race in the writer",
+        "since the receipt is unsigned",
+        "for missing tests",
+        "data loss on retry",
+    ],
+)
+def test_a_reject_followed_by_its_reason_withdraws(reason):
+    claude = [
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\n"),
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus) r2\nVerdict: REJECT {reason}\n"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, claude, [])["status"] == "MISSING_RECORD"
+    codex = f"Head reviewed: {HEAD}\nCodex r1: ACCEPT\nCodex r2: REJECT {reason}\n"
+    report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- Gate: REJECT is returned for an unsigned receipt.",
+        "- REJECT items were all fixed in the last round.",
+        "- REQUEST_CHANGES reviews are not read by the gate.",
+        "- The REJECT path now logs the reason.",
+    ],
+)
+def test_a_reject_word_used_as_a_value_in_prose_is_not_a_verdict(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(OPUS_RECORD + line + "\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Replayed honest shapes (#2959, cairnwork#289, cairnwork#448).
+        "- r1: ACCEPT, superseded by the Claude r1 REJECT finding, which Gemini missed.",
+        "Rounds above (Claude r1-r4 REJECT then r5 ACCEPT).",
+        "- Claude R2 REJECT / Codex R2 nit 1, a missing guard: fixed in c919c6d.",
+    ],
+)
+def test_a_reject_word_in_a_history_or_disposition_note_is_not_a_verdict(line):
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\n{line}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_round_history_item_fixed_later_on_its_line_keeps_the_accept():
+    # cairnwork#296: the comment names the head only in ACCEPT@<sha>; each REJECT item
+    # names the commit that fixed it at the end of its line.
+    body = (
+        f"## Independent review (Claude Opus)\nVerdict: ACCEPT@{HEAD}\n"
+        "- R1 — REJECT: an import-root bypass, reproduced. fixed in f638ca3 + a test.\n"
+        "- R3 — REJECT: another vector; verified and fixed in 4dca238.\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Not fixed: still open.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression, not fixed in f638ca3\n",
+        # The fix belongs to the next verdict on the line, not to this REJECT.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT — race; r1 REJECT — leak fixed in f638ca3\n",
+        # A REJECT main already read (bound by its own sha, punctuation after it) is not
+        # closed by a fix named later on its line: never looser than main.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT@{HEAD}: a regression; fixed in f638ca3\n",
+    ],
+)
+def test_a_later_fix_closes_only_a_weak_reject_and_only_its_own(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    ("files", "body", "status"),
+    [
+        # Only a REJECT main did not read can be answered: one bound to the head by its
+        # own sha stays open under a later ACCEPT that is not bound itself.
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2 @{HEAD[:9]}: REJECT — a regression\n"
+            "Claude r3: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2: REJECT@{HEAD[:9]} — a regression\n"
+            "Claude r3: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        # The answer must be a later round ...
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression\nClaude r2: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        # ... listed after the REJECT ...
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r3: ACCEPT\nClaude r2: REJECT — a regression\n",
+            "MISSING_RECORD",
+        ),
+        # ... of the same family.
+        (
+            RISKY,
+            f"Codex r1 ACCEPT@{HEAD}\nCodex r2: REJECT — race\nClaude r3: ACCEPT\n",
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_an_answer_closes_only_a_weak_reject_by_a_later_round_of_the_same_reviewer(
+    files, body, status
+):
+    comments = [_c(body)] + ([_c(CLAUDE_AT_HEAD)] if files is RISKY else [])
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "rest",
+    [
+        "is returned for an unsigned receipt.",
+        "items were all fixed.",
+        "reviews are not read by the gate.",
+        "finding was a false alarm.",
+        "then r3 ACCEPT.",
+        "/ nit 1, a missing guard.",
+    ],
+)
+def test_a_prose_word_right_after_the_token_decides_alone(rest):
+    # Label and position both pass ("Claude r2: REJECT"), so only the word after the
+    # token keeps the line from reading as a verdict.
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\nClaude r2: REJECT {rest}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "path traversal in the writer",
+        "status: the lease is never released",
+        "case-sensitive match lets a renamed file through",
+        "result cache is never invalidated",
+        "token leak in the log",
+        "branch protection bypass",
+    ],
+)
+def test_a_reject_reason_starting_with_a_noun_withdraws(reason):
+    # Only words honest records were seen to use after the token make it prose; a reason
+    # that happens to start with another noun is still a verdict.
+    claude = [
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\n"),
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus) r2\nVerdict: REJECT {reason}\n"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, claude, [])["status"] == "MISSING_RECORD"
+    codex = f"Head reviewed: {HEAD}\nCodex r1: ACCEPT\nCodex r2: REJECT {reason}\n"
+    report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
