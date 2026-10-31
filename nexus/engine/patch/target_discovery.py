@@ -1,12 +1,27 @@
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import List, Optional
 import re
+
+from nexus.core.contained_write import contained_relative_path
 
 @dataclass
 class TargetFileResolutionResult:
     resolved: bool
     target_file: Optional[str] = None
     reason: Optional[str] = None
+
+def _outside_root(candidate: str, project_root: Optional[str]) -> bool:
+    """模型給的路徑不得是絕對路徑、含 ..，或（有 project_root 時）經連結落在 root 外。"""
+    path = PurePath(candidate)
+    if path.is_absolute() or ".." in path.parts:
+        return True
+    if project_root:
+        try:
+            contained_relative_path(project_root, candidate)
+        except (OSError, RuntimeError, ValueError):  # PathContainmentError、連結迴圈、NUL
+            return True
+    return False
 
 class TargetFileDiscovery:
     """
@@ -77,6 +92,14 @@ class TargetFileDiscovery:
                 if f and str(f).strip():
                     candidates.add(str(f).strip())
 
+        # 3.4. 落在 project_root 外的目標一律拒絕 (Fail-closed)
+        outside = sorted(c for c in candidates if _outside_root(c, project_root))
+        if outside:
+            return TargetFileResolutionResult(
+                resolved=False,
+                reason=f"TARGET_OUTSIDE_PROJECT_ROOT: {outside}"
+            )
+
         # 3.5. 過濾與自動補齊 (如果有提供 project_root)
         if project_root:
             # A. 過濾在 project_root 中不存在的 candidates
@@ -94,7 +117,7 @@ class TargetFileDiscovery:
                         elif cand.startswith("b/"):
                             cleaned = cand[2:]
                         cleaned_path = Path(project_root) / cleaned
-                        if cleaned_path.exists():
+                        if cleaned_path.exists() and not _outside_root(cleaned, project_root):
                             filtered.add(cleaned)
                 candidates = filtered
 
@@ -106,7 +129,7 @@ class TargetFileDiscovery:
 
             # C. 當無候選檔案時，若 Git 變更檔案只有唯一一個，則 fallback 作為目標檔案
             if not candidates and git_changes:
-                if len(git_changes) == 1:
+                if len(git_changes) == 1 and not _outside_root(list(git_changes)[0], project_root):
                     candidates.add(list(git_changes)[0])
                     
         # 4. 唯一性判斷 (Fail-closed)

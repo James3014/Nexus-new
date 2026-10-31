@@ -3,6 +3,12 @@ import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
+from nexus.core.contained_write import (
+    PathContainmentError,
+    contained_relative_path,
+    read_text_in_root,
+    write_text_in_root,
+)
 from nexus.engine.contracts.patch import PatchIntent, SearchReplaceBlock, ApplyVerdict
 from nexus.engine.patch.envelope_parser import PatchEnvelopeParser
 from nexus.engine.patch.block_normalizer import SearchBlockNormalizer
@@ -44,11 +50,19 @@ class PatchApplyEngine:
     def apply_patch(self, task_id: str, target_file: str, raw_patch: str) -> Dict[str, Any]:
         logger.info("🔪 [PatchEngine] Applying patch to %s for task %s", target_file, task_id)
         
-        file_path = self.project_root / target_file
+        # target_file 可能來自模型原文：只在 project_root 內讀寫，不跟隨指向外部的連結。
+        try:
+            relative = contained_relative_path(self.project_root, target_file)
+        except (OSError, RuntimeError, ValueError):
+            return {"status": "FAIL", "reason": f"TARGET_OUTSIDE_PROJECT_ROOT: {target_file}"}
+        file_path = self.project_root / relative
         if not file_path.exists():
             return {"status": "FAIL", "reason": f"FILE_NOT_FOUND: {target_file}"}
-            
-        original_content = file_path.read_text(encoding="utf-8")
+
+        try:
+            original_content = read_text_in_root(self.project_root, relative)
+        except PathContainmentError as exc:
+            return {"status": "FAIL", "reason": f"TARGET_FILE_REFUSED: {exc}"}
         current_content = original_content
         
         # 1. Parse & Classify Health
@@ -118,8 +132,11 @@ class PatchApplyEngine:
                 # ... run heavy AST parsing here ...
                 self.timer.stop(ExecutionPhase.VERIFY_HEAVY)
 
-            file_path.write_text(current_content, encoding="utf-8")
-            logger.info("✅ [PatchEngine] Patch applied successfully.")
+            try:
+                write_text_in_root(self.project_root, relative, current_content)
+                logger.info("✅ [PatchEngine] Patch applied successfully.")
+            except PathContainmentError as exc:
+                success, v_msg = False, f"TARGET_FILE_REFUSED: {exc}"
         
         # 4. Receipt
         self.timer.start(ExecutionPhase.RECEIPT_WRITE)
