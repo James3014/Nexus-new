@@ -2418,3 +2418,44 @@ def test_a_reject_followed_by_its_reason_withdraws(reason):
 )
 def test_a_reject_word_used_as_a_value_in_prose_is_not_a_verdict(line):
     assert rrc.evaluate(HEAD, DOCS, [_c(OPUS_RECORD + line + "\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Replayed honest shapes (#2959, cairnwork#289, cairnwork#448).
+        "- r1: ACCEPT, superseded by the Claude r1 REJECT finding, which Gemini missed.",
+        "Rounds above (Claude r1-r4 REJECT then r5 ACCEPT).",
+        "- Claude R2 REJECT / Codex R2 nit 1, a missing guard: fixed in c919c6d.",
+    ],
+)
+def test_a_reject_word_in_a_history_or_disposition_note_is_not_a_verdict(line):
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\n{line}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_round_history_item_fixed_later_on_its_line_keeps_the_accept():
+    # cairnwork#296: the comment names the head only in ACCEPT@<sha>; each REJECT item
+    # names the commit that fixed it at the end of its line.
+    body = (
+        f"## Independent review (Claude Opus)\nVerdict: ACCEPT@{HEAD}\n"
+        "- R1 — REJECT: an import-root bypass, reproduced. fixed in f638ca3 + a test.\n"
+        "- R3 — REJECT: another vector; verified and fixed in 4dca238.\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Not fixed: still open.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression, not fixed in f638ca3\n",
+        # The fix belongs to the next verdict on the line, not to this REJECT.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT — race; r1 REJECT — leak fixed in f638ca3\n",
+        # A REJECT main already read (bound by its own sha, punctuation after it) is not
+        # closed by a fix named later on its line: never looser than main.
+        f"Claude: ACCEPT@{HEAD}\nClaude r2: REJECT@{HEAD}: a regression; fixed in f638ca3\n",
+    ],
+)
+def test_a_later_fix_closes_only_a_weak_reject_and_only_its_own(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"

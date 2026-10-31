@@ -222,9 +222,16 @@ _REJECT_LABEL_WORD = re.compile(
 # the list stays short and a new wording fails closed.
 _REJECT_NOT_AFTER = re.compile(
     r"\s+(?:is|was|are|were|be|been|being|items?|reviews?|values?|states?|status(?:es)?"
-    r"|paths?|branch(?:es)?|cases?|results?|outcomes?|verdicts?|labels?|tokens?)\b",
+    r"|paths?|branch(?:es)?|cases?|results?|outcomes?|verdicts?|labels?|tokens?|findings?"
+    r"|then)\b|\s*/",  # "the r1 REJECT finding", "r1 REJECT then r2 ACCEPT", "REJECT / nit 1"
     re.IGNORECASE,
 )
+# What main read after the token before #3038 (end, punctuation, a sha binding, a
+# parenthesis). A REJECT read only because of the wider rule above, or placed on the head
+# only by _reject_label_binds, is "weak": main never read it, so a later answer or a
+# later "fixed in <sha>" on its line may close it without ever being looser than main.
+_REJECT_AFTER_PUNCT = re.compile(r"\s*(?:$|[.:;,!)\]\-\u2013\u2014(@]|at\b|on\b)")
+_LATER_FIX = re.compile(rf"\b{_RESOLUTION_WORD}\s+(?:in|by|at)\s+[0-9a-f]{{7,40}}\b", re.IGNORECASE)
 _VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
 _QUOTE = re.compile("[\"\u201c\u2018]|(?<![A-Za-z])'")  # an apostrophe inside a word is possessive
 # Words before the token in its clause that make it a wish, a condition or a negation.
@@ -928,6 +935,14 @@ def _reject_families(
     return families, (reviewer if len(families) == 1 else None)
 
 
+def _fixed_later(text: str, end: int) -> bool:
+    """A resolution naming its commit ("fixed in <sha>") after the token, before the next
+    verdict on the line, and not negated ("not fixed in <sha>")."""
+    following = _ANY_VERDICT_TOKEN.search(text, end)
+    tail = text[end : following.start() if following else len(text)]
+    return any(not _UNRESOLVED.search(tail[: match.start()]) for match in _LATER_FIX.finditer(tail))
+
+
 def _answered(
     at: tuple[int, int],
     event: dict[str, Any],
@@ -1118,10 +1133,15 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 continue
             if not _reject_binding(clause, span, plain_reject, head, reject_head):
                 continue
-            # Placed on the head only because nothing places it elsewhere (#3011 F1): a
-            # later round's ACCEPT by the same reviewer in this comment, placed the same
-            # way, answers it.
-            weak = not _reject_binding(clause, span, plain_reject, head, strict_head)
+            # Weak (see _REJECT_AFTER_PUNCT): a later "fixed in <sha>" before the next
+            # verdict on its line closes it, and so does a later round's ACCEPT by the same
+            # reviewer in this comment, placed the same way.
+            end = start + span[1]
+            weak = not _reject_binding(
+                clause, span, plain_reject, head, strict_head
+            ) or not _REJECT_AFTER_PUNCT.match(plain_reject, end)
+            if weak and _fixed_later(plain_reject, end):
+                continue
             families, reviewer = _reject_families(plain_reject[: start + span[0]], reject_header)
             rounds = _ROUND.findall(clause[: span[0]])
             for family in families:
