@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -158,6 +159,57 @@ def _split_assignments(
     return env, [text for text, _assignment in words[index:]]
 
 
+def _kill_process_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass  # the group is already empty
+
+
+def run_reaping_process_group(
+    argv: Sequence[str],
+    *,
+    cwd: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+    capture_output: bool = True,
+    text: bool = True,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """``subprocess.run(argv, check=False)`` in a new session, whose process group is killed after.
+
+    A child that forks and closes its output lets ``subprocess.run`` return while the fork keeps
+    running, and a timeout kills only the direct child (#3017). Here the child leads its own
+    process group, and that whole group gets SIGKILL on every return path, normal or timeout
+    (as ``sandboxed_lane`` does on timeout for its lane runs, #2650). A descendant that calls
+    ``setsid()`` itself leaves the group and is not reached.
+    ``subprocess.TimeoutExpired`` propagates, as it does from ``subprocess.run``."""
+
+    pipe = subprocess.PIPE if capture_output else None
+    with subprocess.Popen(  # noqa: S603 - argv list, no shell
+        list(argv),
+        cwd=None if cwd is None else str(cwd),
+        env=None if env is None else dict(env),
+        stdout=pipe,
+        stderr=pipe,
+        text=text,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:  # TimeoutExpired included
+            # Killed before the child is reaped, so its id still names this group. Only wait:
+            # a descendant that left the group may still hold the pipes.
+            _kill_process_group(process.pid)
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            # After a normal exit the child is already reaped; the group id stays reserved
+            # while any member is left, so this reaches exactly what the command left running.
+            _kill_process_group(process.pid)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
 def run_command_string(
     command: str,
     *,
@@ -166,13 +218,15 @@ def run_command_string(
     timeout: float | None = None,
     capture_output: bool = True,
     argv_prefix: Sequence[str] = (),
+    reap_process_group: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run *command* without a shell and return one combined result.
 
     ``subprocess.TimeoutExpired`` propagates, as it does from
     ``subprocess.run``; callers keep their existing timeout handling.
     ``argv_prefix`` is prepended to every segment's argv (e.g. a
-    ``sandbox-exec`` wrapper, #2936).
+    ``sandbox-exec`` wrapper, #2936). With ``reap_process_group`` each
+    segment runs through ``run_reaping_process_group`` (#3017).
     """
     try:
         segments = _split_chain(command)
@@ -190,15 +244,24 @@ def run_command_string(
             # Bare assignments set nothing for later segments, like a subshell.
             continue
         try:
-            completed = subprocess.run(
-                [*argv_prefix, *argv],
-                cwd=None if cwd is None else str(cwd),
-                env={**base_env, **assignments},
-                capture_output=capture_output,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if reap_process_group:
+                completed = run_reaping_process_group(
+                    [*argv_prefix, *argv],
+                    cwd=cwd,
+                    env={**base_env, **assignments},
+                    capture_output=capture_output,
+                    timeout=timeout,
+                )
+            else:
+                completed = subprocess.run(
+                    [*argv_prefix, *argv],
+                    cwd=None if cwd is None else str(cwd),
+                    env={**base_env, **assignments},
+                    capture_output=capture_output,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except (FileNotFoundError, PermissionError, NotADirectoryError) as exc:
             stderr_parts.append(f"{argv[0]}: {exc}\n")
             returncode = COMMAND_NOT_FOUND_EXIT

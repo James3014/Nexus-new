@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from nexus.engine import model_output_sandbox
 from nexus.services.local_heal.reproduction import ReproductionRunner, SyntaxValidator
 from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
 
@@ -155,13 +156,14 @@ def test_run_repro_preserves_actual_nonzero_exit_status(tmp_path):
 
 
 def test_run_repro_rejects_arbitrary_nonzero_crash(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
+    def crash(*args, **kwargs):
+        return subprocess.CompletedProcess(
             args, 9, stdout="", stderr="RuntimeError: unrelated crash"
-        ),
-    )
+        )
+
+    monkeypatch.setattr(subprocess, "run", crash)
+    # The model's script runs through the process-group runner (#3017).
+    monkeypatch.setattr(model_output_sandbox, "run_reaping_process_group", crash)
     runner = ReproductionRunner(tmp_path)
     reproduced, evidence = runner.run_repro("raise RuntimeError('unrelated crash')")
     assert reproduced is False
@@ -222,6 +224,7 @@ def test_run_repro_timeout_is_not_physical(tmp_path, monkeypatch):
         raise subprocess.TimeoutExpired(args[0], timeout=5)
 
     monkeypatch.setattr(subprocess, "run", raise_timeout)
+    monkeypatch.setattr(model_output_sandbox, "run_reaping_process_group", raise_timeout)
     runner = ReproductionRunner(tmp_path)
     reproduced, _ = runner.run_repro("assert False")
     assert reproduced is False
@@ -234,6 +237,7 @@ def test_run_repro_exception_is_not_physical(tmp_path, monkeypatch):
         raise OSError("cannot execute")
 
     monkeypatch.setattr(subprocess, "run", raise_exception)
+    monkeypatch.setattr(model_output_sandbox, "run_reaping_process_group", raise_exception)
     runner = ReproductionRunner(tmp_path)
     reproduced, evidence = runner.run_repro("assert False")
     assert reproduced is False
