@@ -34,6 +34,8 @@ class SyntaxValidator:
 
 
 _FAILURE_RECORD_MAX_BYTES = 1024 * 1024
+# Total bytes of untracked files hashed into the workspace identity; more leaves it unbound.
+_WORKSPACE_UNTRACKED_MAX_BYTES = 64 * 1024 * 1024
 
 
 class ReproductionRunner:
@@ -78,15 +80,43 @@ class ReproductionRunner:
             tracked_diff = git("diff", "--binary")
             staged_diff = git("diff", "--cached", "--binary")
             untracked = []
+            budget = [_WORKSPACE_UNTRACKED_MAX_BYTES]
             for line in status.splitlines():
                 if line.startswith("?? "):
-                    path = self.repo_dir / line[3:]
-                    untracked.append((line[3:], path.read_bytes()))
+                    digest = self._untracked_digest(self.repo_dir / line[3:], budget)
+                    if digest is None:
+                        return "", False
+                    untracked.append((line[3:], digest))
             payload = repr((head, status, tracked_diff, staged_diff, untracked)).encode("utf-8")
             digest = hashlib.sha256(payload).hexdigest()
             return f"HEAD={head};WORKSPACE_SHA256={digest}", True
         except (OSError, subprocess.SubprocessError, UnicodeError):
             return "", False
+
+    @staticmethod
+    def _untracked_digest(path: Path, budget: list[int]) -> str | None:
+        # The repro script can write repo_dir: an untracked entry may be a link to a device or
+        # FIFO, or a huge sparse file. A link is bound by its text (as git records it), never
+        # followed; a regular file is read without blocking, within one byte budget shared by
+        # all entries. Anything else, or going over the budget, leaves the source unbound.
+        info = os.lstat(path)
+        if stat.S_ISLNK(info.st_mode):
+            return "link:" + hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                budget[0] -= len(chunk)
+                if budget[0] < 0:
+                    return None
+                digest.update(chunk)
+        finally:
+            os.close(fd)
+        return "file:" + digest.hexdigest()
 
     @staticmethod
     def clean_repro_script(script: str) -> str:
