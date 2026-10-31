@@ -33,7 +33,8 @@ quotes the words never counts):
   the head withdraws the earlier ACCEPTs of its reviewer family (the model named closest
   before it, else its section's), in the same comment or a later one, unless it says it
   was resolved (``fixed``, ``rebutted``) or an ACCEPT is from a later round by the same
-  model; a later ACCEPT stands again (#2992). REJECTs fail closed: one is about the head
+  model in the same numbering (a round 1 in a later comment starts a new one, #3041);
+  a later ACCEPT stands again (#2992). REJECTs fail closed: one is about the head
   unless its own label binds it to another commit (``r1 @<old>: REJECT``), a hex-looking
   word in the finding never unbinds it, a 7-character head prefix binds it, and it is
   read in table rows, quotes, fenced and indented code too.
@@ -1107,19 +1108,36 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
     the same model; an unknown reviewer is never the same, r5 R4). A later ACCEPT stands
     again. An unnumbered ACCEPT followed by a numbered REJECT is withdrawn: a round
     history that ends in a REJECT at the head is an open rejection.
+
+    Rounds are compared within one numbering only. A round 1 of a reviewer in a later
+    comment than one of its rounds above 1 starts a new numbering (a new session counts
+    from r1 again), so ``r3 ACCEPT`` does not outrank a later comment's ``r1 REJECT``, or
+    its ``r2 REJECT`` after a later comment's ``r1`` (#3041). A recap of round 2 or later
+    in a later comment keeps the numbering.
     """
-    accepts: dict[str, list[dict[str, Any]]] = {}
+    accepts: dict[str, list[tuple[dict[str, Any], int]]] = {}
+    numbering: dict[tuple[str, str], tuple[int, set[Any]]] = {}
     for event in events:
         family = event["family"]
         reviewer = event.get("reviewer")
+        epoch = 0
+        if reviewer is not None:
+            epoch, later_round_comments = numbering.get((family, reviewer), (0, set()))
+            comment = event.get("comment")
+            if event["round"] == 1 and later_round_comments - {comment}:
+                epoch, later_round_comments = epoch + 1, set()
+            elif event["round"] is not None and event["round"] > 1:
+                later_round_comments = later_round_comments | {comment}
+            numbering[(family, reviewer)] = (epoch, later_round_comments)
         if event["kind"] == "accept":
-            accepts.setdefault(family, []).append(event)
+            accepts.setdefault(family, []).append((event, epoch))
             continue
         reject_round = event["round"]
         accepts[family] = [
-            accept
-            for accept in accepts.get(family, [])
+            (accept, accept_epoch)
+            for accept, accept_epoch in accepts.get(family, [])
             if reviewer is not None and accept.get("reviewer") == reviewer
+            if accept_epoch == epoch
             if reject_round is not None
             and accept["round"] is not None
             and accept["round"] > reject_round

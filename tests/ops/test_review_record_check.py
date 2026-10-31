@@ -2993,3 +2993,95 @@ def test_a_model_named_after_a_nested_aside_still_starts_the_reject_label(files,
     # Main reads the model after the inner ")" and starts the label there; blanking the
     # whole outer aside must not lose that reading.
     assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A later comment counts from r1 again (a new session): its REJECT withdraws.
+        (
+            DOCS,
+            [
+                f"Head reviewed: {HEAD}\nClaude r3: ACCEPT\n",
+                f"Head reviewed: {HEAD}\nClaude r1: REJECT — new bug\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [f"Codex r3 ACCEPT@{HEAD}", f"Codex r1 REJECT@{HEAD}: race in X", CLAUDE_AT_HEAD],
+            "MISSING_CROSS_MODEL",
+        ),
+        # The new numbering goes on past r1: its r2 REJECT is not outranked by the old r3.
+        (
+            RISKY,
+            [
+                f"Codex r3 ACCEPT@{HEAD}",
+                f"Codex r1 ACCEPT@{HEAD}",
+                f"Codex r2 REJECT@{HEAD}: race in X",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            RISKY,
+            [
+                f"Head reviewed: {HEAD}\n### Codex review\nr3: ACCEPT",
+                f"Head reviewed: {HEAD}\n### Codex review\nr1: ACCEPT\nr2: REJECT — data loss",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_round_one_in_a_later_comment_starts_a_new_numbering(files, comments, status):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        # Within one comment the numbering is one: a later round listed first survives.
+        [f"Codex r3 ACCEPT@{HEAD}\nCodex r1 REJECT@{HEAD}: one finding", CLAUDE_AT_HEAD],
+        # A later round of the new numbering accepts again.
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Codex r1 REJECT@{HEAD}: race in X",
+            f"Codex r2 ACCEPT@{HEAD}",
+            CLAUDE_AT_HEAD,
+        ],
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Codex r1 REJECT@{HEAD}: race\nCodex r2 ACCEPT@{HEAD}",
+            CLAUDE_AT_HEAD,
+        ],
+        # The new numbering is one numbering again within its comment.
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Codex r1 REJECT@{HEAD}: race in X",
+            f"Codex r2 ACCEPT@{HEAD}\nCodex r1 REJECT@{HEAD}: race in X",
+            CLAUDE_AT_HEAD,
+        ],
+        # Round 1 alone in an earlier comment is no numbering to restart.
+        [
+            f"Codex r1 ACCEPT@{HEAD}",
+            f"Codex r3 ACCEPT@{HEAD}\nCodex r1 REJECT@{HEAD}: one finding",
+            CLAUDE_AT_HEAD,
+        ],
+        # Another reviewer's round 1 does not restart this reviewer's numbering.
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Gemini r1 ACCEPT@{HEAD}",
+            f"Recap: Codex r2 REJECT@{HEAD}: one finding",
+            CLAUDE_AT_HEAD,
+        ],
+        # Rounds 1 to 3 in one comment, then a recap of round 2: one numbering.
+        [
+            f"Codex r1 ACCEPT@{HEAD}\nCodex r3 ACCEPT@{HEAD}",
+            f"Recap: Codex r2 REJECT@{HEAD}: one finding",
+            CLAUDE_AT_HEAD,
+        ],
+    ],
+)
+def test_one_numbering_keeps_its_later_round(comments):
+    assert rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])["status"] == "OK"
