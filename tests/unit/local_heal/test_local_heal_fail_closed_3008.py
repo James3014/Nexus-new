@@ -16,8 +16,8 @@ import sys
 import pytest
 
 from nexus.engine.model_output_sandbox import SandboxError
-from nexus.services.local_heal import micro_verifier as mv
 from nexus.services.local_heal import evaluation_gate as eg
+from nexus.services.local_heal import micro_verifier as mv
 from nexus.services.local_heal.micro_verifier import MicroVerifier
 
 PY = sys.executable
