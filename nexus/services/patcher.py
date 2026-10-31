@@ -1,8 +1,15 @@
 from pathlib import Path
+import os
 import re
 import hashlib
 import time
 import subprocess
+
+from nexus.core.contained_write import (
+    contained_relative_path,
+    read_text_in_root,
+    write_text_in_root,
+)
 
 class SafePatcher:
     """負責補丁的安全校驗與套用。"""
@@ -60,6 +67,14 @@ if __name__ == "__main__":
                 print(f"   ⚠️ [Skipped] {file_path}: Patch target mismatch.")
                 continue
 
+            # file 來自模型輸出：必須落在專案根目錄內（不含經連結逃出）
+            root = self.project_root if self.project_root else Path(".")
+            try:
+                relative = contained_relative_path(root, file_path)
+            except (OSError, RuntimeError, ValueError):
+                print(f"   ⚠️ [Skipped] {file_path}: Patch target outside project root.")
+                continue
+
             # 生成 TDD 復現腳本
             uid = hashlib.md5(f"{time.time()}_{file_path}".encode()).hexdigest()[:8]
             self._generate_tdd_repro(v, uid)
@@ -82,12 +97,15 @@ if __name__ == "__main__":
                     # 模擬測試或緊急情況下的直寫回退
                     print(f"   ⚠️ [Git Failed] {file_path}")
                     print(f"   ⚠️ Trying Direct Application (Mock Mode)...")
-                    target_file = self.project_root / file_path if self.project_root else Path(file_path)
+                    target_file = root / relative
                     if target_file.exists():
-                        content = target_file.read_text()
+                        content = read_text_in_root(root, relative)
+                        # 非 UTF-8（讀出含 U+FFFD）或唯讀的檔不改寫，避免改掉原有位元組
+                        if "\ufffd" in content or not os.access(target_file, os.W_OK):
+                            raise ValueError(f"{file_path} is not a writable UTF-8 file")
                         # 極簡模擬：如果補丁包含 +, 就加上去
                         new_lines = [l[1:] for l in patch.splitlines() if l.startswith("+") and not l.startswith("+++")]
-                        target_file.write_text(content + "\n" + "\n".join(new_lines))
+                        write_text_in_root(root, relative, content + "\n" + "\n".join(new_lines))
                         print(f"   ✅ [Applied: Direct] {file_path}")
                         patch_applied = True
             except Exception as e:

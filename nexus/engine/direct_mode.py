@@ -50,7 +50,8 @@ def extract_target_files(task_desc: str) -> list[str]:
     if not task_desc:
         return []
     paths = [m.group("path") for m in _FILE_PATTERN.finditer(task_desc)]
-    return _dedupe(paths)
+    # 模型原文也會走這裡：含 .. 的路徑可能指向專案外，不當目標。
+    return _dedupe(p for p in paths if ".." not in p.split("/"))
 
 
 def extract_verify_commands(task_desc: str) -> list[str]:
