@@ -122,6 +122,24 @@ def test_preflight_does_not_refuse_a_non_utf8_target_the_search_is_not_in(tmp_pa
     assert (tmp_path / "calc.py").read_bytes() == target
 
 
+def test_indented_replace_on_a_valid_utf8_target_with_the_search_still_applies(tmp_path):
+    # Preflight parses the whole file (indented REPLACE) and the target holds the SEARCH: a
+    # UTF-8 target passes both the preflight and the apply-time check and is patched.
+    original = "# café\nclass C:\n    def add(self, a, b):\n        return a - b\n"
+    (tmp_path / "calc.py").write_text(original, encoding="utf-8")
+    parser, intents = _intents(
+        "FILE: calc.py\n<<<<<<< SEARCH\n        return a - b\n=======\n"
+        "        if a:\n            return a + b\n        return b\n>>>>>>> REPLACE\n"
+    )
+    result = PatchApplier(parser, Patcher()).apply_and_validate(
+        intents=intents, repo_dir=tmp_path, localized_files=[]
+    )
+    assert result.success is True, result.error_reason
+    assert (tmp_path / "calc.py").read_text(encoding="utf-8") == original.replace(
+        "        return a - b\n", "        if a:\n            return a + b\n        return b\n"
+    )
+
+
 def test_valid_utf8_target_with_non_ascii_text_still_applies(tmp_path):
     original = "# café, naïve, 日本語\n" + WRONG
     (tmp_path / "calc.py").write_text(original, encoding="utf-8")
