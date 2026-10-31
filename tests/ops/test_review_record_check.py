@@ -984,14 +984,15 @@ def test_a_later_word_only_withdraws_a_verdict_when_the_line_borrows_a_sha():
 
 def test_a_parenthetical_aside_does_not_disable_a_reviewer_header():
     # #2296's record (#2299): the Gemini header carries a "Codex ... out of credits" aside.
+    # Its round-2 sha was that PR's head; an all-digit sha of another commit binds nothing.
     body = (
         f"## Review record (coordinator workspace-c6), head {HEAD}\n\n"
         "**Independent Claude review (Opus 5.5, separate agent)**\n"
-        "- Round 2 @6391634: **ACCEPT.** Mutants killed.\n\n"
+        f"- Round 2 @{HEAD[:7]}: **ACCEPT.** Mutants killed.\n\n"
         "**Cross-model review (agy Gemini 3.8 Flash High, Owner-approved Codex substitute; "
         'Codex: "Your workspace is out of credits")**\n'
         "- Round 1 @9154965: REJECT. F-01 rebutted.\n"
-        "- Round 2 @6391634: **ACCEPT.** Rebuttal accepted; F-03 judged fixed.\n"
+        f"- Round 2 @{HEAD[:7]}: **ACCEPT.** Rebuttal accepted; F-03 judged fixed.\n"
     )
     record = rrc.classify_record(body, HEAD)
     assert record is not None and record["claude"] is True and record["cross_model"] is True
@@ -1544,11 +1545,16 @@ def test_a_later_claude_reject_at_the_head_withdraws_the_independent_record():
         ],
         # A numbered later round survives an earlier round listed after it.
         [f"Codex r3 ACCEPT@{HEAD}", f"Recap: Codex r2 REJECT@{HEAD}: one finding", CLAUDE_AT_HEAD],
-        # Resolved, negated or quoted rejections and tables withdraw nothing.
+        # Resolved, negated or quoted rejections withdraw nothing; a table row is read like
+        # any line, so a resolved one withdraws nothing either (r5 R6).
         [f"Codex ACCEPT@{HEAD}", f"Codex r2 REJECT@{HEAD} (rebutted, see above)", CLAUDE_AT_HEAD],
         [f"Codex ACCEPT@{HEAD}", f"Codex did not REJECT at {HEAD}", CLAUDE_AT_HEAD],
         [f"Codex ACCEPT@{HEAD}", f'Codex said "REJECT" at {HEAD} in a dry run', CLAUDE_AT_HEAD],
-        [f"Codex ACCEPT@{HEAD}", f"| Codex | r2 | REJECT@{HEAD} |", CLAUDE_AT_HEAD],
+        [
+            f"Codex ACCEPT@{HEAD}",
+            f"| Codex | r2 | REJECT@{HEAD} | fixed in 1a2b3c4d5 |",
+            CLAUDE_AT_HEAD,
+        ],
         # A REJECT at another head is about that head.
         [f"Codex r1 REJECT@{OLD[:9]}: fixed later", f"Codex r2 ACCEPT@{HEAD}", CLAUDE_AT_HEAD],
         [CODEX_RECORD, CLAUDE_AT_HEAD],
@@ -1934,3 +1940,400 @@ def test_3002_later_short_prefix_reject_on_the_same_line_is_kept():
 def test_3002_line_level_short_sha_of_an_older_commit_does_not_bind_to_the_head():
     body = f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\nCodex: ACCEPT. Last checked 1a2b3c4\n"
     assert _status3002([_c(body)]) == "MISSING_CROSS_MODEL"
+
+
+# -- r5: REJECTs fail closed, ACCEPTs bind only to an unambiguous head -------------------
+
+H7 = HEAD[:7]  # 8d70e3f, the GitHub UI's short sha
+NUM_HEAD = "1234567" + HEAD[7:]  # a head whose 7-char prefix is all digits
+
+
+def _codex_accept_then(*bodies):
+    return [_c(f"Codex ACCEPT@{HEAD}"), *[_c(b) for b in bodies], _c(CLAUDE_AT_HEAD)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Head reviewed: {HEAD}\n**Codex review**\nr2 REJECT — the ed25519 signature is never checked",
+        f"Head reviewed: {HEAD}\n**Codex review**\nr2 REJECT — same bug as fix 1a2b3c4d",
+        f"Head reviewed: {HEAD}\nCodex r2: REJECT — deadbeef sentinel leaks into the log",
+        f"Head reviewed: {HEAD}\nCodex r2 REJECT: reverts the fix from 1a2b3c4",
+    ],
+)
+def test_r5_r1_a_hex_looking_word_in_the_finding_keeps_the_reject(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_r1_claude_reject_with_a_hex_word_withdraws_the_independent_record():
+    comments = [
+        _c(f"Head reviewed: {HEAD}\nOpus r1: ACCEPT"),
+        _c(f"Head reviewed: {HEAD}\nOpus r2: REJECT — same bug as fix 1a2b3c4d"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Codex r1 REJECT@1a2b3c4d5: race in X\nHead reviewed: {HEAD}",
+        f"Head reviewed: {HEAD}\n- Round 1 @ 09e25e8f5: REJECT, 2 findings",
+        f"Head reviewed: {HEAD}\n**Codex review**\n- Round 1 (dd2a5cd): REJECT, 1 finding",
+    ],
+)
+def test_r5_r1_a_reject_whose_label_binds_another_commit_is_about_that_commit(body):
+    assert _status3002(_codex_accept_then(body)) == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"**Codex review**\nr2 REJECT@{H7}: race in X",
+        f"Head reviewed: {H7}\nCodex r2: REJECT — race in X",
+        f"Re-review at head {H7}\nCodex r2: REJECT — race in X",
+        f"### Codex review\nr2 @{H7}: REJECT",
+    ],
+)
+def test_r5_r2_a_short_prefix_reject_withdraws_the_accept(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_r2_a_short_prefix_claude_reject_on_a_head_line_withdraws():
+    comments = [
+        _c(f"Head reviewed: {HEAD}\nOpus r1: ACCEPT"),
+        _c(f"Head reviewed: {H7}\nOpus r2: REJECT — regression"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_r5_r2_an_all_digit_short_prefix_reject_withdraws():
+    comments = [
+        _c(f"Head reviewed: {NUM_HEAD}\nOpus r1: ACCEPT"),
+        _c("Opus r2 @1234567: REJECT"),
+    ]
+    assert rrc.evaluate(NUM_HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize("old", ["4920381", "49203815"])
+def test_r5_r3_an_all_digit_older_sha_does_not_bind_an_accept(old):
+    for body in (
+        f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\n"
+        f"**Codex review**: r1 ACCEPT at {old} (before the last fix)\n",
+        f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\nCodex: ACCEPT. Last checked {old}\n",
+    ):
+        assert _status3002([_c(body)]) == "MISSING_CROSS_MODEL", body
+
+
+def test_r5_r4_opus_and_sonnet_are_different_reviewers():
+    comments = [_c(f"Opus r3 ACCEPT@{HEAD}"), _c(f"Sonnet r1 REJECT@{HEAD}: data loss")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_r5_r4_reviewers_named_only_by_their_section_header_are_different():
+    comments = [
+        _c(f"Head reviewed: {HEAD}\n### Codex review\nr3: ACCEPT"),
+        _c(f"Head reviewed: {HEAD}\n### Gemini review\nr1: REJECT — data loss"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_r4_the_same_header_named_reviewer_keeps_its_later_round():
+    comments = [
+        _c(f"Head reviewed: {HEAD}\n### Codex review\nr3: ACCEPT"),
+        _c(f"Head reviewed: {HEAD}\n### Codex review\nr2: REJECT — data loss"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "OK"
+
+
+@pytest.mark.parametrize(
+    ("accepts", "reject", "files", "status"),
+    [
+        (
+            f"Opus 4.7 r1 @{HEAD}: ACCEPT",
+            f"Opus 4.7 r2 @{HEAD}: REJECT — data loss",
+            DOCS,
+            "MISSING_RECORD",
+        ),
+        (
+            f"Codex gpt-5.5 r1 @{HEAD}: ACCEPT",
+            f"Codex gpt-5.5 xhigh r2 @{HEAD}: REJECT — x",
+            RISKY,
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            f"Codex ACCEPT@{HEAD}",
+            f"Gemini 3.1 Pro r1 @{HEAD}: REJECT — data loss",
+            RISKY,
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            f"Codex ACCEPT@{HEAD}",
+            f"Gemini 3.8 Flash High r2 @{HEAD}: REJECT",
+            RISKY,
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_r5_r5_a_versioned_reviewer_label_still_rejects(accepts, reject, files, status):
+    comments = [_c(accepts), _c(reject)]
+    if files is RISKY:
+        comments.append(_c(CLAUDE_AT_HEAD))
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Head reviewed: {HEAD}\n**Codex review**\n```\nVERDICT: REJECT\n```",
+        f"Head reviewed: {HEAD}\n| Gemini | r1 | REJECT |",
+        f"Head reviewed: {HEAD}\n| Reviewer | Round | Verdict |\n|---|---|---|\n| Codex | r2 | REJECT |",
+        f"Head reviewed: {HEAD}\n- Round 2\n    Codex: REJECT — X",
+        f"Head reviewed: {HEAD}\n> Codex r2: REJECT — X",
+        f"Head reviewed: {HEAD}\n- [ ] Codex r2: REJECT — X",
+    ],
+)
+def test_r5_r6_a_reject_on_a_line_skipped_for_accepts_still_withdraws(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_r6_a_fenced_or_tabled_accept_still_does_not_count():
+    for body in (f"Head {HEAD}\n```\nCodex ACCEPT@{HEAD}\n```", f"| Codex | ACCEPT@{HEAD} |"):
+        assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Codex r2: ACCEPT — reviewed 1a2b3c4d5, head is now {HEAD} (not reviewed)",
+        f"Codex r2: ACCEPT, reviewed 4920381; head now {HEAD}",
+    ],
+)
+def test_r5_r7_an_accept_on_a_line_naming_an_older_sha_and_the_head_is_not_bound(line):
+    assert _status3002([_c(line), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_r7_an_accept_bound_by_its_own_sha_still_counts():
+    line = f"Codex r2: ACCEPT@{HEAD} (r1 at 1a2b3c4d5 was fixed)"
+    assert _status3002([_c(line), _c(CLAUDE_AT_HEAD)]) == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"**Codex review** (fix in progress)\nVerdict: REJECT at {HEAD} — race in X",
+        f"### Codex review (pending)\nVerdict: REJECT at {HEAD} — race in X",
+        f"**Codex r2 fix in progress**: REJECT@{HEAD} — race in X",
+    ],
+)
+def test_r5_3004_a_status_label_on_the_header_line_does_not_drop_a_reject(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_3004_a_disabled_header_under_a_claude_section_withdraws_both_families():
+    body = (
+        f"Head reviewed: {HEAD}\n**Claude review** (Opus)\n- Verdict: ACCEPT\n"
+        "**Codex review** (fix in progress)\nVerdict: REJECT — race in X\n"
+    )
+    report = rrc.evaluate(HEAD, RISKY, [_c(f"Codex ACCEPT@{HEAD}"), _c(body)], [])
+    assert report["status"] == "MISSING_RECORD"
+
+
+def test_r5_r2_a_reject_under_an_older_short_head_label_is_about_that_commit():
+    body = f"Head reviewed: {R_OLD[:7]}\nCodex r2: REJECT — race in X\nPushed a fix; head is now {HEAD}.\n"
+    assert _status3002(_codex_accept_then(body)) == "OK"
+
+
+def test_r5_r7_an_accept_at_head_carried_from_identical_content_still_counts():
+    # #2697's carried record: the verdict names the head itself; the older sha is an aside.
+    body = (
+        f"- Claude (Opus) independent review — Verdict: ACCEPT at head {HEAD} "
+        "(reviewed content identical to 18de0befa)\n"
+        f"- Codex adversarial review r3 — Verdict: ACCEPT at head {HEAD} "
+        "(reviewed content identical to 18de0befa)\n"
+    )
+    assert _status3002([_c(body)]) == "OK"
+
+
+# -- r5 review round 1: a REJECT whose line names the head, prose after at/on -----------
+
+H9 = HEAD[:9]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Codex r2 REJECT ({HEAD}): race",
+        f"**Codex adversarial review**\n- Verdict: REJECT ({H9}) — race in X",
+        f"Codex r2: REJECT — the fix in {H9} reintroduces the race",
+        f"**Codex review**: REJECT — reviewed {HEAD}, race in X",
+        f"**Codex review**\nVERDICT: REJECT — race. Reviewed {HEAD}.",
+        f"Claude ACCEPT@{HEAD}\n**Codex review** r2: REJECT — {HEAD} breaks X",
+    ],
+)
+def test_r5_rr1_a_reject_whose_line_names_the_head_withdraws(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_rr1_a_claude_reject_whose_line_names_the_head_withdraws():
+    comments = [
+        _c(OPUS_RECORD),
+        _c(f"**Independent Claude review** (Opus): REJECT — {HEAD} breaks X"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Head reviewed: {HEAD}\nCodex r2: REJECT on ed25519 verification — the key is never checked",
+        f"Head reviewed: {HEAD}\nCodex r2: REJECT at deadbeef sentinel handling",
+        f"Head reviewed: {HEAD}\n**Codex review (ed25519 signer)**: REJECT — the key is never checked",
+        f"Head reviewed: {HEAD}\nCodex (run 20261031) r2: REJECT — race",
+    ],
+)
+def test_r5_rr1_a_finding_word_after_at_or_in_the_label_does_not_unbind(body):
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_rr1_a_claude_reject_on_a_finding_word_withdraws():
+    comments = [_c(OPUS_RECORD), _c(f"Head reviewed: {HEAD}\nOpus r2: REJECT on ed25519 path")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"Head reviewed: {HEAD}\nCodex r1: REJECT at 1a2b3c4d5.",
+        f"Head reviewed: {HEAD}\nCodex r1: REJECT on 1a2b3c4d5 — race",
+        f"Head reviewed: {HEAD}\nCodex r1 1a2b3c4d5: REJECT — race",
+    ],
+)
+def test_r5_rr1_a_reject_bound_to_an_older_sha_stays_with_it(body):
+    assert _status3002(_codex_accept_then(body)) == "OK"
+
+
+def test_r5_rr1_header_named_reviewers_without_a_model_on_the_label_are_never_the_same():
+    comments = [
+        _c(f"Head reviewed: {HEAD}\n### Review (Codex)\nr3: ACCEPT"),
+        _c(f"Head reviewed: {HEAD}\n### Review (Gemini)\nr1: REJECT — data loss"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_rr1_a_big_number_on_an_accept_line_is_not_a_sha():
+    body = (
+        f"## Review record — Claude (claude-opus-5-5), head {HEAD}\n"
+        "- Verdict: **ACCEPT** (317 passed, 1234567 assertions)\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line", ["- 4920381: **ACCEPT**", "Codex (4920381): ACCEPT", "Codex `4920381` ACCEPT"]
+)
+def test_r5_rr1_an_all_digit_older_sha_in_a_label_does_not_bind_an_accept(line):
+    body = f"Head reviewed: {HEAD}\n**Codex review**\n{line}\n"
+    assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+# -- r5 review round 2: an ACCEPT line naming any other sha-like run binds nothing ------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "**Codex review**: ACCEPT for 492038155",
+        "**Codex review**: ACCEPT (last run against 492038155)",
+        "Codex r2: ACCEPT, reviewing 492038155",
+        "Codex r2: ACCEPT 492038155",
+        "Codex r2: ACCEPT — fixed in 492038155123",
+        "**Codex review**: ACCEPT for 4920381",
+    ],
+)
+def test_r5_rr2_an_all_digit_older_sha_anywhere_on_the_line_does_not_bind(line):
+    body = f"Head reviewed: {HEAD}\n{line}\n"
+    assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_rr2_an_all_digit_word_ending_a_reject_label_does_not_unbind_it():
+    body = f"Head reviewed: {HEAD}\nCodex r2 4920381: REJECT — race"
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+_OLD_SHAS = (
+    "1a2b3c4",
+    "4920381",
+    "49203815",
+    "492038155",
+    "492038155123",
+    "1a2b3c4d5e6f",
+    OLD,
+    "1234567890" * 4,
+)
+_ACCEPT_WITH_OLD = (
+    "Codex r2 @{x}: ACCEPT",
+    "Codex r2 ({x}): ACCEPT",
+    "- {x}: **ACCEPT**",
+    "Codex r2: ACCEPT@{x}",
+    "Codex r2: ACCEPT at head {x}",
+    "**Codex review**: ACCEPT for {x}",
+    "**Codex review**: ACCEPT (last run against {x})",
+    "Codex r2: ACCEPT, reviewing {x}",
+    "Codex r2: ACCEPT {x}",
+    "Codex r2: ACCEPT — fixed in {x}",
+    "Codex r2: ACCEPT `{x}`",
+    "Codex r2: ACCEPT; {x}",
+    "Codex r2: ACCEPT — reviewed {x}, head is now {h}",
+    "Codex r2: ACCEPT ({x} and {h})",
+)
+_REJECT_WORDS = (
+    HEAD,
+    HEAD[:9],
+    HEAD[:7],
+    "ed25519",
+    "deadbeef",
+    "1234567",
+    "20261031",
+    "492038155",
+)
+_REJECT_SHAPES = (
+    "Codex r2: REJECT — {w}",
+    "Codex r2 REJECT ({w}): race",
+    "Codex r2: REJECT on {w} path",
+    "Codex r2: REJECT at {w} handling",
+    "Codex r2: REJECT — the fix in {w} reintroduces the race",
+    "Codex r2: REJECT — reviewed {w}, race",
+    "**Codex review** ({w} signer): REJECT — x",
+    "| Codex | r2 | REJECT | {w} |",
+    "> Codex r2: REJECT — {w}",
+    "Codex r2: REJECT — race. Reviewed {w}.",
+    "- Codex r2: REJECT (see {w})",
+)
+
+
+def test_r5_rr2_binding_matrix_fails_closed():
+    # An ACCEPT whose line names an older sha anywhere never binds to the head; a REJECT
+    # whose line binds it to no older commit is never dropped.
+    wrong = []
+    for shape in _ACCEPT_WITH_OLD:
+        for old in _OLD_SHAS:
+            for header in ("", "**Codex review**\n"):
+                body = f"Head reviewed: {HEAD}\n{header}{shape.format(x=old, h=HEAD)}\n"
+                if _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "OK":
+                    wrong.append(body)
+    for shape in _REJECT_SHAPES:
+        for word in _REJECT_WORDS:
+            for header in ("", "**Codex review**\n"):
+                body = f"Head reviewed: {HEAD}\n{header}{shape.format(w=word)}\n"
+                if _status3002(_codex_accept_then(body)) == "OK":
+                    wrong.append(body)
+    assert wrong == []
+
+
+def test_r5_rr2_a_nine_digit_run_is_a_sha_even_before_a_unit():
+    # Only a 7-8 digit count before its unit is not a sha; 9+ digits are a sha as on main.
+    body = f"Head reviewed: {HEAD}\nCodex r2: ACCEPT (317 passed, 492038155 assertions)\n"
+    assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"

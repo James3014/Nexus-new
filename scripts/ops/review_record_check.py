@@ -18,21 +18,25 @@ quotes the words never counts):
   after it may withdraw it. Table rows, block quotes, unticked checklist items,
   fenced code, pasted ``coord ready`` lines and lines with more than
   ``MAX_VERDICTS_PER_LINE`` verdict tokens are skipped.
-- The verdict is *bound to the head* when its clause names the head sha (full, or
-  a hex prefix of at least ``MIN_PREFIX`` characters), else when its line does,
-  else when the comment has a ``Head`` label naming it (``Head reviewed: <sha>``,
-  ``final head <sha>``). A clause bound to another sha cannot be rebound. When the
-  comment's Head labels name different commits, only the nearest label above the
-  verdict binds it (#2992).
+- The verdict is *bound to the head* by its own sha (``ACCEPT@<sha>``, ``ACCEPT at
+  [head] <sha>``), else when every sha in its clause (7+ hex characters, all-digit
+  ones too) is a prefix of the head, else every sha on its line, else when the comment
+  names the head (at least ``MIN_PREFIX`` characters) and has a ``Head`` label naming it
+  (``Head reviewed: <sha>``, ``final head <sha>``). A clause or line that also names
+  another commit binds nothing. When the comment's Head labels name different commits,
+  only the nearest label above the verdict binds it (#2992).
 - The *reviewer family* comes from the words before the token in its clause, else
   from the header of its section (a heading, bold label or ``Reviewer:`` line):
   ``claude``/``opus``/``sonnet``, or cross-model ``codex``/``gemini``/``gpt``. When
   both appear, the family is Claude. A verdict with no family is not a record.
 - A later *REJECT* (or ``REPAIR_REQUIRED`` / ``REQUEST_CHANGES``) in verdict position at
   the head withdraws the earlier ACCEPTs of its reviewer family (the model named closest
-  before it), in the same comment or a later one, unless it says it was resolved
-  (``fixed``, ``rebutted``) or an ACCEPT is from a later round; a later ACCEPT stands
-  again (#2992).
+  before it, else its section's), in the same comment or a later one, unless it says it
+  was resolved (``fixed``, ``rebutted``) or an ACCEPT is from a later round by the same
+  model; a later ACCEPT stands again (#2992). REJECTs fail closed: one is about the head
+  unless its own label binds it to another commit (``r1 @<old>: REJECT``), a hex-looking
+  word in the finding never unbinds it, a 7-character head prefix binds it, and it is
+  read in table rows, quotes, fenced and indented code too.
 - A *rebuttal at the cap* is a cross-model section with a REJECT line at round
   three or later followed by a past-tense ``rebutted`` line. It does not count for
   the repos in ``NO_REBUTTAL_AT_CAP_REPOS`` (cairnwork/cairnwork since cairnwork#344:
@@ -174,8 +178,43 @@ _REJECT_LABEL_WORDS = frozenset({
     "sha",
     "commit",
 })
+# More label words before a REJECT: a status the label carries ("**Codex r2 fix in
+# progress**: REJECT", #3004) and a model's tier ("Codex gpt-5.5 xhigh", "Gemini 3.1 Pro",
+# "Gemini 3.8 Flash High via agy"; versions are in _REJECT_LABEL_WORD, r5 R5).
+_REJECT_LABEL_EXTRA = frozenset({
+    "fix",
+    "fixes",
+    "fixing",
+    "in",
+    "progress",
+    "in-progress",
+    "pending",
+    "queued",
+    "running",
+    "now",
+    "pro",
+    "flash",
+    "high",
+    "xhigh",
+    "low",
+    "medium",
+    "max",
+    "mini",
+    "nano",
+    "ultra",
+    "lite",
+    "fast",
+    "thinking",
+    "preview",
+    "via",
+    "agy",
+    "cli",
+    "exec",
+    "substitute",
+})
 _REJECT_LABEL_WORD = re.compile(
     r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}|[0-9a-f]{7,40}"
+    r"|v?\d{1,3}(?:\.\d{1,3}){1,3}[a-z]{0,8}"
 )
 # What may follow the token: end, punctuation, a sha binding or a parenthesis.
 _REJECT_AFTER = re.compile(r"\s*(?:$|[.:;,!)\]\-\u2013\u2014(@]|at\b|on\b)")
@@ -207,20 +246,33 @@ _REBUTTAL_DENY = re.compile(
 _ROUND = re.compile(r"\b(?:r|round\s*)(\d+)\b", re.IGNORECASE)
 _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
-_HEAD_BIND = re.compile(
-    rf"\bhead\b[^\n]{{0,48}}?(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
-)
+
+
+def _head_bind(min_len: int) -> re.Pattern[str]:
+    return re.compile(rf"\bhead\b[^\n]{{0,48}}?(?<![0-9a-f])([0-9a-f]{{{min_len},40}})(?![0-9a-f])")
+
+
+_HEAD_BIND = _head_bind(MIN_PREFIX)
 # A Head label proper, at the start of its line or in a heading ("Head reviewed: <sha>",
 # "- final head <sha>", "Reviewed commit <sha>", "## Review record — head <sha>"), not
 # prose that mentions a head ("re-review after fixes from head <sha>"). Whitespace runs
 # are bounded so a long line cannot make the match quadratic.
-_HEAD_LABEL = re.compile(
-    r"^[ \t]{0,4}(?:#{1,6}[ \t][^\n]{0,200}?\bhead"
-    r"|(?:[-*+][ \t]{1,4}|\d{1,3}\.[ \t]{1,4})?(?:(?:final|current|new)[ \t]{1,4})?"
-    r"(?:head(?:[ \t]{1,4}(?:reviewed|sha|commit|is|was|now|at)){0,3}"
-    r"|reviewed[ \t]{1,4}(?:head|commit)))"
-    rf"[ \t]{{0,4}}[:=@]?[ \t]{{0,4}}(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])"
-)
+
+
+def _head_label(min_len: int) -> re.Pattern[str]:
+    return re.compile(
+        r"^[ \t]{0,4}(?:#{1,6}[ \t][^\n]{0,200}?\bhead"
+        r"|(?:[-*+][ \t]{1,4}|\d{1,3}\.[ \t]{1,4})?(?:(?:final|current|new)[ \t]{1,4})?"
+        r"(?:head(?:[ \t]{1,4}(?:reviewed|sha|commit|is|was|now|at)){0,3}"
+        r"|reviewed[ \t]{1,4}(?:head|commit)))"
+        rf"[ \t]{{0,4}}[:=@]?[ \t]{{0,4}}(?<![0-9a-f])([0-9a-f]{{{min_len},40}})(?![0-9a-f])"
+    )
+
+
+_HEAD_LABEL = _head_label(MIN_PREFIX)
+# A REJECT is bound by a Head label naming 7+ characters (the GitHub UI's short sha).
+_HEAD_BIND_SHORT = _head_bind(7)
+_HEAD_LABEL_SHORT = _head_label(7)
 _SKIP_LINE = re.compile(
     r"^\s*(?:\||>|(?:[-*+]|\d+\.)\s+\[ \]|\$ |coord ready\b|gh pr\b)"
     r"|^(?: {4}|\t)(?![-*+]\s|\d+\.\s)"  # indented code, but not a nested list item
@@ -432,7 +484,9 @@ def _reject_label_only(prefix: str) -> bool:
     """The text before a REJECT holds reviewer labels, round markers and shas only."""
     words = re.findall(r"[a-z0-9][a-z0-9.-]*", _plain(prefix).lower())
     return all(
-        word.rstrip(".") in _REJECT_LABEL_WORDS or _REJECT_LABEL_WORD.fullmatch(word.rstrip("."))
+        word.rstrip(".") in _REJECT_LABEL_WORDS
+        or word.rstrip(".") in _REJECT_LABEL_EXTRA
+        or _REJECT_LABEL_WORD.fullmatch(word.rstrip("."))
         for word in words
     )
 
@@ -454,6 +508,16 @@ def _resolved_after(text: str, start: int, end: int) -> bool:
     return bool(match and not _UNRESOLVED.search(tail[: match.start(1)]))
 
 
+def _reject_view(line: str) -> str:
+    """The line as read for a REJECT: block-quote markers and an unticked checkbox removed,
+    table cell borders read as ``:`` separators."""
+    text = re.sub(r"^\s*(?:>\s?)+", "", line)
+    text = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+\[ \]\s*", "", text)
+    if text.lstrip().startswith("|"):
+        text = text.replace("|", " : ")
+    return text
+
+
 def reject_clauses(line: str) -> list[str]:
     """Clauses of the line that carry an open rejecting verdict (#2992).
 
@@ -467,12 +531,12 @@ def reject_clauses(line: str) -> list[str]:
     ``REJECT, rebutted``; "not fixed yet" is not resolved). A gate's verdict value in a
     finding ("a tampered receipt: REJECT", "REJECT is returned") and a history heading
     ("Round 1 (<sha>) REJECT items:") are not verdicts. Lines skipped for accepting
-    verdicts (tables, quotes, unticked checklist items, pasted commands) are skipped too.
+    verdicts are read here (r5 R6): a REJECT in a table row (``| Gemini | r1 | REJECT |``,
+    cells read as ``:``-separated), a block quote, an unticked checklist item or indented
+    code is still a rejection, so a missed one can never let an ACCEPT stand.
     """
-    if _SKIP_LINE.match(line):
-        return []
     out: list[str] = []
-    plain_line = _plain(line, keep_parens=True)
+    plain_line = _plain(_reject_view(line), keep_parens=True)
     tokens = [(m.start(), m.end()) for m in _ANY_VERDICT_TOKEN.finditer(plain_line)]
     if len(tokens) > MAX_VERDICTS_PER_LINE:
         return []
@@ -510,15 +574,16 @@ def reject_clauses(line: str) -> list[str]:
     return out
 
 
-def _head_labels(lines: list[str]) -> list[tuple[list[str], str | None]]:
+def _head_labels(lines: list[str], short: bool = False) -> list[tuple[list[str], str | None]]:
     """Per line: every sha a loose ``head ... <sha>`` mention names, and the sha its first
     Head label proper names (``Head reviewed: <sha>``, ``final head <sha>``) or None.
-    A parenthetical is neither."""
+    A parenthetical is neither. ``short`` reads shas of 7+ characters (for a REJECT)."""
+    bind, label = (_HEAD_BIND_SHORT, _HEAD_LABEL_SHORT) if short else (_HEAD_BIND, _HEAD_LABEL)
     out: list[tuple[list[str], str | None]] = []
     for line in lines:
         text = _plain(line).lower()
-        strict = _HEAD_LABEL.search(text)
-        out.append((_HEAD_BIND.findall(text), strict.group(1) if strict else None))
+        strict = label.search(text)
+        out.append((bind.findall(text), strict.group(1) if strict else None))
     return out
 
 
@@ -541,33 +606,122 @@ def _label_binds(labels: list[tuple[list[str], str | None]], index: int, head: s
     return False
 
 
-def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
-    """A verdict binds to the head by its own clause's sha, else the line, else a Head label.
+def _bound_after(clause: str, span: tuple[int, int], prose_ok: bool = True) -> str | None:
+    """The sha the token itself is bound to (``ACCEPT@<sha>``, ``REJECT at [head] <sha>``).
 
-    A clause that names a different sha is bound to that sha: a later ``Head`` line
-    or another sha on the same line cannot rebind it.
+    ``prose_ok`` False (a REJECT): after ``at``/``on`` the sha must end the binding
+    (end, punctuation, a parenthesis or a dash), so "REJECT on ed25519 verification" or
+    "REJECT at deadbeef sentinel handling" names a finding, not a commit.
     """
-    if _SHORT_SHA.search(clause):
-        return any(head.lower().startswith(token) for token in _SHORT_SHA.findall(clause.lower()))
-    if _hex_tokens(clause):
-        return names_head(clause, head)
-    if _SHORT_SHA.search(line):
-        return any(head.lower().startswith(token) for token in _SHORT_SHA.findall(line.lower()))
-    if _hex_tokens(line):
-        return names_head(line, head)
+    match = _BOUND_AFTER.match(clause, span[1])
+    if match is None:
+        return None
+    if not prose_ok and match.group(1) != "@" and not _BOUND_END.match(clause, match.end()):
+        return None
+    return match.group(2).lower()
+
+
+def _sha_tokens(text: str) -> list[str]:
+    """Shas the text names: every run of 7-40 hex characters, all-digit ones too, except a
+    7-8 digit count followed by its unit ("317 passed, 1234567 assertions"). Fail closed:
+    a token that may be a sha is one."""
+    text = text.lower()
+    return [
+        match.group(1)
+        for match in _ANY_SHA.finditer(text)
+        if not (len(match.group(1)) <= 8 and _COUNT_UNIT.match(text, match.end()))
+        or re.search(r"[a-f]", match.group(1))
+    ]
+
+
+def _binding(
+    clause: str, span: tuple[int, int] | None, line: str, head: str, comment_head: bool
+) -> bool:
+    """An ACCEPT binds to the head by its own sha, else its clause, else its line, else a
+    Head label.
+
+    ``ACCEPT@<sha>`` / ``ACCEPT at <sha>`` decides alone. Otherwise every sha in the
+    clause, else on the line, must be the head's (``_sha_tokens``: any 7+ hex run,
+    all-digit too): a clause or line that also names another commit ("ACCEPT — reviewed
+    <old>, head is now <head>") is ambiguous and binds nothing (r5 R3, R7). Only a line
+    with no sha-like token at all borrows the comment's Head label.
+    """
+    head = head.lower()
+    own = _bound_after(clause, span) if span else None
+    if own is not None:
+        return head.startswith(own)
+    for text in (clause, line):
+        found = _sha_tokens(text)
+        if found:
+            return all(head.startswith(token) for token in found)
     return comment_head
 
 
+def _label_sha_binds(label: str, match: re.Match[str]) -> bool:
+    """Whether a sha in a REJECT's label binds it to that commit: after ``@``/``at``/``on``/
+    ``head``/``commit``/``sha``; or, for a sha with a letter a-f, alone in a parenthetical
+    ("Round 1 (<sha>):") or ending the label ("r2 <sha>: REJECT"). A word in an aside
+    ("(ed25519 signer)") or a bare all-digit word binds nothing (fail closed)."""
+    before, after = label[: match.start()], label[match.end() :]
+    if _LABEL_SHA_BEFORE.search(before):
+        return True
+    if not re.search(r"[a-f]", match.group(1)):
+        return False
+    if re.search(r"\(\s*$", before) and re.match(r"\s*\)", after):
+        return True
+    return bool(re.match(r"\s*(?:[:\]]|$)", after))
+
+
+def _reject_binding(
+    clause: str, span: tuple[int, int], line: str, head: str, comment_head: bool
+) -> bool:
+    """A REJECT is about the head unless its label binds it to another commit (fail closed).
+
+    Only a sha in binding position binds it elsewhere: right after the token
+    (``REJECT@<sha>``, ``REJECT at <sha>.``) or in its label after the last model name
+    (``r2 @<sha>: REJECT``, ``Round 1 (<sha>): REJECT``). A hex-looking word in the
+    finding ("the ed25519 signature", "same bug as fix 1a2b3c4d") never unbinds it (r5
+    R1). Otherwise it is about the head when its line names the head anywhere (7+
+    characters, all-digit too, r5 R2), else when the comment's Head labels bind it.
+    """
+    head = head.lower()
+    own = _bound_after(clause, span, prose_ok=False)
+    if own is not None:
+        return head.startswith(own)
+    label = _plain(clause[: span[0]], keep_parens=True).lower()  # "Round 1 (<sha>): REJECT"
+    models = list(_NEAREST_MODEL.finditer(label))
+    label = label[models[-1].end() :] if models else label
+    found = list(_ANY_SHA.finditer(label))
+    if any(head.startswith(match.group(1)) for match in found):
+        return True
+    if any(_label_sha_binds(label, match) for match in found):
+        return False
+    return names_head_loosely(line, head) or comment_head
+
+
+# Any 7-40 hex characters, all-digit runs included: what a short sha may look like.
+_ANY_SHA = re.compile(r"(?<![0-9a-f])([0-9a-f]{7,40})(?![0-9a-f])")
+_LABEL_SHA_BEFORE = re.compile(r"(?:@|\b(?:at|on|head|commit|sha))\s*:?\s*$")
+# A count's unit after a 7-8 digit number: not a sha.
+_COUNT_UNIT = re.compile(
+    r"\s+(?:tests?|assertions?|passed|failed|errors?|lines?|bytes?|files?|rows?|runs?"
+    r"|items?|cases?|mutants?|tokens?|chars?|characters?|seconds?|ms|calls?|records?)\b"
+)
+_BOUND_AFTER = re.compile(
+    r"\s*(@|at\b|on\b)\s*(?:head\s+)?([0-9a-fA-F]{7,40})(?![0-9a-fA-F])", re.IGNORECASE
+)
+# What ends a sha binding after a REJECT: end, punctuation, a parenthesis or a dash.
+_BOUND_END = re.compile(r"\s*(?:$|[.:;,!)\](\-\u2013\u2014])")
 _SHORT_SHA = re.compile(
     r"(?<![0-9a-f])(?=[0-9a-f]{0,39}[a-f])([0-9a-f]{7,40})(?![0-9a-f])",
     re.IGNORECASE,
 )
 
 
-def _short_sha_elsewhere(clause: str, head: str) -> bool:
-    """The clause names a sha of 7+ characters and none of them is the head's prefix."""
-    found = _SHORT_SHA.findall(clause.lower())
-    return bool(found) and not any(head.lower().startswith(token) for token in found)
+def names_head_loosely(text: str, head: str) -> bool:
+    """True when the text names the head by a prefix of 7+ hex characters (digits too)."""
+    head = head.lower()
+    return any(head.startswith(token) for token in _ANY_SHA.findall(text.lower()))
 
 
 _MODEL_WORDS = re.compile(r"\b(?:codex|gemini|gpt|claude|opus|sonnet)\b", re.IGNORECASE)
@@ -618,10 +772,14 @@ def _disabled_verdict_label(label_part: str) -> bool:
     return bool(_MODEL_WORDS.search(label_part)) and _not_run_label(label_part)
 
 
-def _label_family(line: str) -> str | None:
-    """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix."""
+def _label_family(line: str, ignore_status: bool = False) -> str | None:
+    """Family named by a heading, bold label, ``Reviewer:`` line or ``<label>:`` prefix.
+
+    ``ignore_status`` reads a label disabled by a not-run word too ("**Codex review** (fix
+    in progress)"): a REJECT under it is still that family's (#3004).
+    """
     plain = _plain(line, keep_parens=True).strip()
-    if _not_run_label(line):
+    if not ignore_status and _not_run_label(line):
         # "Codex: unavailable", "Codex adversarial review: pending" open no section; a
         # not-run word inside a parenthetical aside ("Gemini ... (Codex: out of credits)")
         # does not disable the header (#2299, first live false negative on #2296).
@@ -699,50 +857,65 @@ def _clause_family(
     plain_line: str,
     start: int,
     header_family: str | None,
-    nearest: bool = False,
 ) -> str | None:
-    """Reviewer family of a verdict clause: named before the token in the clause, else on
-    the line before it ("Claude: r1 ..., r2 ACCEPT"), else the section header's. None when
-    the label naming the model is disabled ("**Codex (not run)**: ACCEPT @ sha").
-
-    ``nearest`` (a REJECT) takes the model named closest before the token instead, so
-    "Claude ACCEPT at <sha>; Cross-model review (Gemini) REJECT at <sha>" rejects for
-    the cross-model family only.
+    """Reviewer family of an accepting clause: named before the token in the clause, else
+    on the line before it ("Claude: r1 ..., r2 ACCEPT"), else the section header's. None
+    when the label naming the model is disabled ("**Codex (not run)**: ACCEPT @ sha").
+    A REJECT's family is ``_reject_families``.
     """
     before = clause[: span[0]] if span else ""
     line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
     label_part, status_part = _split_label(line_before)
-    if not nearest and (
-        _disabled_verdict_label(label_part)
-        or (
-            label_part != line_before
-            and bool(_MODEL_WORDS.search(label_part))
-            and len(status_part.split()) <= 4
-            and bool(_NOT_A_HEADER.search(_plain(status_part)))
-        )
+    if _disabled_verdict_label(label_part) or (
+        label_part != line_before
+        and bool(_MODEL_WORDS.search(label_part))
+        and len(status_part.split()) <= 4
+        and bool(_NOT_A_HEADER.search(_plain(status_part)))
     ):
-        return None  # a REJECT is never disabled by a status label (#3002 F5)
-    if nearest:
-        named = _NEAREST_MODEL.findall(_plain(line_before))  # "(after the Codex fix)" is an aside
-        if not named:
-            return header_family
-        return "cross_model" if named[-1].lower() == "cross-model" else _family(named[-1])
+        return None
     return _family(before) or _family(line_before) or header_family
+
+
+def _reviewer_word(text: str) -> str | None:
+    """The model named last in the text (a parenthetical is an aside), lowercased."""
+    named = _NEAREST_MODEL.findall(_plain(text))
+    return named[-1].lower() if named else None
+
+
+def _reject_families(
+    line_before: str, header: tuple[list[str], str | None]
+) -> tuple[list[str], str | None]:
+    """Families a REJECT withdraws, and its reviewer (None: unknown, never the same).
+
+    The model named closest before the token decides ("Claude ACCEPT at <sha>;
+    Cross-model review (Gemini) REJECT at <sha>" rejects for the cross-model family only);
+    a status label never disables it (#3002 F5). With no model on the line it is the
+    section's, including a label a not-run word disabled (#3004); when that label and the
+    section name different families, the REJECT withdraws both (fail closed). A REJECT
+    that no model name reaches (pasted tool output under a plain heading) has no family.
+    """
+    word = _reviewer_word(line_before)
+    if word is not None:
+        family = "cross_model" if word == "cross-model" else _family(word)
+        return [family or "cross_model"], word
+    families, reviewer = header
+    return families, (reviewer if len(families) == 1 else None)
 
 
 def standing_families(events: list[dict[str, Any]]) -> set[str]:
     """Reviewer families whose ACCEPT at the head still stands after later REJECTs (#2992).
 
     Events are in posting order (comments oldest first, lines top to bottom). A REJECT
-    withdraws every earlier ACCEPT of its family except one from a later round
-    (``r3 ACCEPT`` survives an ``r2 REJECT`` listed after it). A later ACCEPT stands
+    withdraws every earlier ACCEPT of its family except one from a later round by the
+    same reviewer (``r3 ACCEPT`` survives an ``r2 REJECT`` listed after it when both name
+    the same model; an unknown reviewer is never the same, r5 R4). A later ACCEPT stands
     again. An unnumbered ACCEPT followed by a numbered REJECT is withdrawn: a round
     history that ends in a REJECT at the head is an open rejection.
     """
     accepts: dict[str, list[dict[str, Any]]] = {}
     for event in events:
         family = event["family"]
-        reviewer = event.get("reviewer", family)
+        reviewer = event.get("reviewer")
         if event["kind"] == "accept":
             accepts.setdefault(family, []).append(event)
             continue
@@ -750,7 +923,7 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
         accepts[family] = [
             accept
             for accept in accepts.get(family, [])
-            if accept.get("reviewer", family) == reviewer
+            if reviewer is not None and accept.get("reviewer") == reviewer
             if reject_round is not None
             and accept["round"] is not None
             and accept["round"] > reject_round
@@ -770,35 +943,50 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
     """
     if not isinstance(body, str) or not names_head(body, head):
         return None
+    return _classify(body, head)
+
+
+def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any]:
+    """``classify_record``'s parse; ``rejects_only`` keeps only the REJECT events (a comment
+    that names the head by a 7-8 character prefix only binds no ACCEPT, #3002 F1).
+
+    ACCEPTs are read strictly and REJECTs fail closed: a REJECT is also read inside fenced
+    code, a table row, a block quote or indented code (r5 R6), is about the head unless its
+    own label binds it to another commit (r5 R1, R2), and is credited to the section's
+    family even under a label a not-run word disabled (#3004).
+    """
     lines: list[str] = []
+    fenced_lines: set[int] = set()
     fenced = False
     for raw in _HTML_COMMENT.sub(" ", body).splitlines():
         if raw.strip().startswith(("```", "~~~")):
             fenced = not fenced
             continue
-        if not fenced:
-            lines.append(raw)
-    labels = _head_labels(lines)
+        if fenced:
+            fenced_lines.add(len(lines))
+        lines.append(raw)
+    unfenced = ["" if index in fenced_lines else line for index, line in enumerate(lines)]
+    labels = _head_labels(unfenced)
+    reject_labels = _head_labels(unfenced, short=True)
     verdicts: list[dict[str, Any]] = []
     events: list[tuple[tuple[int, int], dict[str, Any]]] = []
     rebuttals: list[tuple[tuple[int, int], dict[str, Any]]] = []
     section: list[str] = []
     section_start = 0
     header_family: str | None = None
+    header_reviewer: str | None = None
+    # The families (and reviewer) a REJECT with no model on its line is credited to.
+    reject_header: tuple[list[str], str | None] = ([], None)
     header_level = 0  # heading level that opened the section; 99 for a non-heading label
 
     def close_section() -> None:
         # A rebuttal at the cap is a cross-model event at its rebuttal line, so a later
         # REJECT of a later round withdraws it like an ACCEPT (#2992).
         point = _rebuttal_point(section, head) if header_family == "cross_model" else None
-        if point is not None:
+        if point is not None and not rejects_only:
             event = {
                 "family": "cross_model",
-                "reviewer": (
-                    _NEAREST_MODEL.findall(_plain(section[0]))[-1].lower()
-                    if section and _NEAREST_MODEL.findall(_plain(section[0]))
-                    else "cross_model"
-                ),
+                "reviewer": _reviewer_word(section[0]) if section else None,
                 "kind": "accept",
                 "rebuttal": True,
                 "round": point[1],
@@ -808,52 +996,81 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
     for index, line in enumerate(lines):
-        label = _label_family(line)
-        level = re.match(r"^\s*(#+)\s", line)
-        if label is not None:
-            header_level = len(level.group(1)) if level else 99
-        # A plain heading closes the section only at the same or a higher level than
-        # the heading that opened it ("### Findings" inside "## Review record" does not).
-        neutral_heading = (
-            label is None and level is not None and len(level.group(1)) <= header_level
-        )
-        if (label is not None and label != header_family) or neutral_heading:
-            close_section()
-            section, header_family = [], label  # "## Notes" opens a section with no family
-        if not section:
-            section_start = index
-        section.append(line)
-        comment_head = _label_binds(labels, index, head)
-        plain_line = _plain(line, keep_parens=True)
-        accept_clauses = verdict_clauses(line)
+        in_fence = index in fenced_lines
+        accept_clauses: list[str] = []
+        if not in_fence:
+            label = _label_family(line)
+            disabled = _label_family(line, ignore_status=True) if label is None else None
+            level = re.match(r"^\s*(#+)\s", line)
+            if label is not None:
+                header_level = len(level.group(1)) if level else 99
+            # A plain heading closes the section only at the same or a higher level than
+            # the heading that opened it ("### Findings" inside "## Review record" does not).
+            neutral_heading = (
+                label is None and level is not None and len(level.group(1)) <= header_level
+            )
+            if (label is not None and label != header_family) or neutral_heading:
+                close_section()
+                section, header_family = [], label  # "## Notes" opens a section with no family
+            if label is not None or neutral_heading:
+                header_reviewer = _reviewer_word(line) if label is not None else None
+                reject_header = ([label] if label is not None else [], header_reviewer)
+            if disabled is not None:
+                families = sorted(set(reject_header[0]) | {disabled})
+                reject_header = (families, _reviewer_word(line) if len(families) == 1 else None)
+            if not section:
+                section_start = index
+            section.append(line)
+            accept_clauses = verdict_clauses(line)
         line_events: list[tuple[int, dict[str, Any]]] = []
-        for kind, clauses in (("accept", accept_clauses), ("reject", reject_clauses(line))):
+        if not rejects_only:
+            comment_head = _label_binds(labels, index, head)
+            plain_line = _plain(line, keep_parens=True)
             consumed = 0
-            for clause in clauses:
-                span = _verdict_match(clause) if kind == "accept" else _reject_match(clause)
+            for clause in accept_clauses:
+                span = _verdict_match(clause)
                 start = plain_line.find(clause, consumed)
                 consumed = start + len(clause) if start >= 0 else consumed
-                family = _clause_family(
-                    clause, span, plain_line, start, header_family, nearest=kind == "reject"
-                )
-                if kind == "reject" and _short_sha_elsewhere(clause, head):
-                    continue  # "REJECT at f9ccbf67": a short sha of an earlier round
-                if family and _binding(clause, line, head, comment_head):
+                family = _clause_family(clause, span, plain_line, start, header_family)
+                if family and _binding(clause, span, line, head, comment_head):
+                    before = plain_line[: start + span[0]] if (span and start >= 0) else ""
                     rounds = _ROUND.findall(clause[: span[0]]) if span else []
-                    reviewer = family
-                    if family == "cross_model" and span:
-                        named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
-                        if named:
-                            reviewer = named[-1].lower()
-                    event = {
+                    line_events.append((
+                        start + (span[0] if span else 0),
+                        {
+                            "family": family,
+                            "reviewer": _reviewer_word(before) or header_reviewer,
+                            "kind": "accept",
+                            "round": int(rounds[-1]) if rounds else None,
+                            "comment": 0,
+                            "line": clause.strip(),
+                        },
+                    ))
+        reject_head = _label_binds(reject_labels, index, head)
+        plain_reject = _plain(_reject_view(line), keep_parens=True)
+        consumed = 0
+        for clause in reject_clauses(line):
+            span = _reject_match(clause)
+            start = plain_reject.find(clause, consumed)
+            consumed = start + len(clause) if start >= 0 else consumed
+            if span is None or start < 0:
+                continue
+            if not _reject_binding(clause, span, plain_reject, head, reject_head):
+                continue
+            families, reviewer = _reject_families(plain_reject[: start + span[0]], reject_header)
+            rounds = _ROUND.findall(clause[: span[0]])
+            for family in families:
+                line_events.append((
+                    start + span[0],
+                    {
                         "family": family,
                         "reviewer": reviewer,
-                        "kind": kind,
+                        "kind": "reject",
                         "round": int(rounds[-1]) if rounds else None,
                         "comment": 0,
                         "line": clause.strip(),
-                    }
-                    line_events.append((start + (span[0] if span else 0), event))
+                    },
+                ))
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not accept_clauses:
@@ -927,38 +1144,16 @@ def rebuttal_counts(repo: str) -> bool:
 
 
 def _short_prefix_rejects(body: str, head: str, number: int) -> list[dict[str, Any]]:
-    """REJECT events whose 7-8 char sha is the head's own prefix (the comment does not
-    name the full head, so ``classify_record`` returned None for it)."""
-    out: list[dict[str, Any]] = []
-    for line in body.splitlines():
-        for clause in reject_clauses(line):
-            short_shas = _SHORT_SHA.findall(clause.lower())
-            if not any(
-                7 <= len(token) <= 8 and head.lower().startswith(token) for token in short_shas
-            ):
-                continue  # only a short sha that is the head's own prefix binds
-            span = _reject_match(clause)
-            plain_line = _plain(line, keep_parens=True)
-            start = plain_line.find(clause)
-            if span is None or not _reject_label_only(_plain(clause[: span[0]])):
-                continue
-            family = _clause_family(clause, span, plain_line, start, None, nearest=True)
-            if not family:
-                continue
-            named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
-            reviewer = (
-                (named[-1].lower() if named else family) if family == "cross_model" else family
-            )
-            rounds = _ROUND.findall(clause[: span[0]])
-            out.append({
-                "family": family,
-                "reviewer": reviewer,
-                "kind": "reject",
-                "round": int(rounds[-1]) if rounds else None,
-                "comment": number,
-                "line": clause.strip(),
-            })
-    return out
+    """REJECT events of a comment that names the head by a 7-8 character prefix only
+    (``classify_record`` returned None for it): parsed like any record, so a model named
+    in the section header or a short sha on a Head line binds them too (r5 R2)."""
+    if not names_head_loosely(body, head):
+        return []
+    return [
+        dict(event, comment=number)
+        for event in _classify(body, head, rejects_only=True)["events"]
+        if event["kind"] == "reject"
+    ]
 
 
 def _evidence_at(
