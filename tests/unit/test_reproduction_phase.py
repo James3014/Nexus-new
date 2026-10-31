@@ -17,10 +17,10 @@ from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unco
 pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
-def test_reproduction_phase_success():
+def test_reproduction_phase_success(tmp_path):
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="print('bug')",
     )
@@ -56,10 +56,10 @@ def test_reproduction_phase_success():
     assert ctx.op.reproduction_provenance.evidence_sha256
 
 
-def test_reproduction_phase_env_failure():
+def test_reproduction_phase_env_failure(tmp_path):
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="print('bug')",
     )
@@ -82,9 +82,9 @@ def test_reproduction_phase_env_failure():
     assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
 
 
-def test_reproduction_phase_provider_error():
+def test_reproduction_phase_provider_error(tmp_path):
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug", repro_script=""
+        instance_id="test", repo_dir=tmp_path, problem_statement="bug", repro_script=""
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
@@ -103,9 +103,9 @@ def test_reproduction_phase_provider_error():
     assert "MODEL_PROVIDER_ERROR" in ctx.op.model_decisions[-1]["status"]
 
 
-def test_reproduction_phase_empty_response():
+def test_reproduction_phase_empty_response(tmp_path):
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug", repro_script=""
+        instance_id="test", repo_dir=tmp_path, problem_statement="bug", repro_script=""
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
@@ -123,10 +123,10 @@ def test_reproduction_phase_empty_response():
     assert ctx.op.model_decisions[-1]["status"] == "NO_REPRO_SCRIPT"
 
 
-def test_reproduction_phase_env_denoise_failed():
+def test_reproduction_phase_env_denoise_failed(tmp_path):
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="print('bug')",
         auto_heal_enabled=True,
@@ -157,10 +157,10 @@ def test_reproduction_phase_env_denoise_failed():
     assert ctx.op.env_denoise.get("succeeded") is False
 
 
-def test_reproduction_phase_skip_reproduction():
+def test_reproduction_phase_skip_reproduction(tmp_path):
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="long bug description",
         repro_script="",
         skip_reproduction=True,
@@ -184,10 +184,10 @@ def test_reproduction_phase_skip_reproduction():
     assert ctx.op.reproduction_provenance.physical is False
 
 
-def test_reproduction_phase_pre_supplied_evidence_is_not_physical():
+def test_reproduction_phase_pre_supplied_evidence_is_not_physical(tmp_path):
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_evidence="copied evidence",
     )
@@ -207,7 +207,7 @@ def test_reproduction_phase_descriptive_evidence_is_not_physical():
     assert output.provenance.physical is False
 
 
-def test_reproduction_phase_unbound_source_cannot_be_physical():
+def test_reproduction_phase_unbound_source_cannot_be_physical(tmp_path):
     runner = MagicMock()
     runner.run_repro.return_value = (True, "bug evidence")
     runner.last_exit_status = 3
@@ -217,7 +217,7 @@ def test_reproduction_phase_unbound_source_cannot_be_physical():
     runner.workspace_identity.return_value = ("", False)
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="raise AssertionError('bug')",
     )
@@ -228,7 +228,7 @@ def test_reproduction_phase_unbound_source_cannot_be_physical():
     assert ctx.op.reproduction_provenance.reason_code == "unbound_source"
 
 
-def test_reproduction_phase_missing_exit_status_cannot_be_physical():
+def test_reproduction_phase_missing_exit_status_cannot_be_physical(tmp_path):
     runner = MagicMock()
     runner.run_repro.return_value = (False, "timed out")
     runner.last_exit_status = None
@@ -238,7 +238,7 @@ def test_reproduction_phase_missing_exit_status_cannot_be_physical():
     runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="assert False",
     )
@@ -248,7 +248,7 @@ def test_reproduction_phase_missing_exit_status_cannot_be_physical():
     assert ctx.op.reproduction_provenance.reason_code == "execution_timeout"
 
 
-def test_reproduction_phase_bool_exit_status_cannot_be_physical():
+def test_reproduction_phase_bool_exit_status_cannot_be_physical(tmp_path):
     runner = MagicMock()
     runner.run_repro.return_value = (True, "bug evidence")
     runner.last_exit_status = True
@@ -258,7 +258,7 @@ def test_reproduction_phase_bool_exit_status_cannot_be_physical():
     runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="assert False",
     )
@@ -268,7 +268,7 @@ def test_reproduction_phase_bool_exit_status_cannot_be_physical():
     assert ctx.op.reproduction_provenance.reason_code == "missing_exit_status"
 
 
-def test_reproduction_phase_arbitrary_crash_cannot_be_physical():
+def test_reproduction_phase_arbitrary_crash_cannot_be_physical(tmp_path):
     runner = MagicMock()
     runner.run_repro.return_value = (False, "RuntimeError: unrelated crash")
     runner.last_exit_status = 9
@@ -278,7 +278,7 @@ def test_reproduction_phase_arbitrary_crash_cannot_be_physical():
     runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
         instance_id="test",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="bug",
         repro_script="raise RuntimeError('unrelated crash')",
     )

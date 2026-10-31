@@ -9,6 +9,16 @@ from nexus.services.local_heal.committee_routed_tool import (
 )
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 def _run_counterfactual(raw_candidates, request_overrides=None):
     """Run P5 off and P5 on with same candidates, return both results."""
     def producer(req):
@@ -16,7 +26,7 @@ def _run_counterfactual(raw_candidates, request_overrides=None):
 
     base = {
         "task_id": "p5-v1",
-        "repo_root": "/tmp",
+        "repo_root": _REPO_ROOT,
         "target_file": "foo.py",
         "difficulty": "hard",
         "execution_topology": "cloud_with_local_assist",

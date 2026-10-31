@@ -19,6 +19,16 @@ from nexus.services.local_heal.local_model_executor import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 # ── Shared helpers ──
 
 _VALID_PATCH = "def foo():\n    return 42\n"
@@ -36,7 +46,7 @@ def _valid_candidate(model: str = "qwen") -> dict:
 def _e2e_request(**overrides):
     defaults = {
         "task_id": "p4-e2e-r4",
-        "repo_root": "/tmp",
+        "repo_root": _REPO_ROOT,
         "target_file": "foo.py",
         "difficulty": "hard",
         "execution_topology": "cloud_with_local_assist",
@@ -90,7 +100,7 @@ def _run_executor(signal_snapshot, provider=None):
     req = LocalModelExecutorRequest(
         task_id="p4-e2e-test",
         problem_statement="Complex cross-module refactoring",
-        repo_root="/tmp",
+        repo_root=_REPO_ROOT,
         target_file="complex.py",
         selected_capabilities=(),
         evidence_refs=(),

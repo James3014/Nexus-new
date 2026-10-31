@@ -47,15 +47,13 @@ def test_delegated_retry_candidate_models_survives_shallow_copy():
     assert len(candidate_models) == 1
 
 
-def test_delegated_retry_candidate_models_survives_pipeline_context():
+def test_delegated_retry_candidate_models_survives_pipeline_context(tmp_path):
     """delegated_retry_candidate_models must survive HealContext.to_v2() round-trip."""
-    from pathlib import Path
-
     from nexus.services.local_heal.pipeline import HealContext
 
     ctx = HealContext(
         instance_id="test-1",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="test",
         route_context={
             "signal_snapshot": {
@@ -102,7 +100,7 @@ def test_build_c15_benchmark_row_includes_delegated_retry():
     assert "deepseek-coder:6.7b-instruct" in candidate_models
 
 
-def test_delegated_retry_signal_survives_executor_bridge():
+def test_delegated_retry_signal_survives_executor_bridge(tmp_path):
     """delegated_retry_candidate_models must survive from row to executor request."""
     from nexus.services.local_heal.local_model_executor import LocalModelExecutorRequest
 
@@ -121,7 +119,7 @@ def test_delegated_retry_signal_survives_executor_bridge():
     req = LocalModelExecutorRequest(
         task_id="test-1",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="app.py",
         selected_capabilities=("local_model_executor",),
         evidence_refs=(),

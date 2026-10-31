@@ -14,6 +14,16 @@ from nexus.services.local_heal.committee_routed_tool import (
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 _VALID_PATCH = "def foo():\n    return 42\n"
 
 
@@ -29,7 +39,7 @@ def _valid_candidate(model: str = "qwen") -> dict:
 def _valid_request(**overrides):
     defaults = {
         "task_id": "r2-test",
-        "repo_root": "/tmp",
+        "repo_root": _REPO_ROOT,
         "target_file": "foo.py",
         "difficulty": "hard",
         "execution_topology": "cloud_with_local_assist",

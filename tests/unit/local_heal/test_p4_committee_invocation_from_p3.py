@@ -86,12 +86,12 @@ def _hard_case_signal_snapshot():
     }
 
 
-def test_p3_hard_case_invokes_p4_when_gate_passes():
+def test_p3_hard_case_invokes_p4_when_gate_passes(tmp_path):
     """P4-I4: Hard case with valid specs invokes P4 committee."""
     req = LocalModelExecutorRequest(
         task_id="p4-inv-1",
         problem_statement="Complex cross-module refactoring",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="complex.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -107,14 +107,14 @@ def test_p3_hard_case_invokes_p4_when_gate_passes():
     assert "committee_routed_tool" in meta.get("assist_stages_activated", [])
 
 
-def test_p3_hard_case_skips_p4_when_gate_blocks():
+def test_p3_hard_case_skips_p4_when_gate_blocks(tmp_path):
     """P4-I4: Hard case with missing specs → gate blocks."""
     signal = _hard_case_signal_snapshot()
     signal["proposer_specs"] = []  # insufficient
     req = LocalModelExecutorRequest(
         task_id="p4-inv-2",
         problem_statement="Complex bug",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="bug.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -129,12 +129,12 @@ def test_p3_hard_case_skips_p4_when_gate_blocks():
     assert "committee_gate_blocked" in meta.get("assist_stages_activated", [])
 
 
-def test_p3_local_only_never_invokes_p4():
+def test_p3_local_only_never_invokes_p4(tmp_path):
     """P4-I4: local_only topology never invokes P4."""
     req = LocalModelExecutorRequest(
         task_id="p4-inv-3",
         problem_statement="Simple typo fix",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -153,7 +153,7 @@ def test_p3_local_only_never_invokes_p4():
     assert meta.get("p4_committee_invoked") is None or meta.get("p4_committee_invoked") is False
 
 
-def test_p3_medium_task_never_invokes_p4():
+def test_p3_medium_task_never_invokes_p4(tmp_path):
     """P4-I4: medium task never invokes P4 (difficulty gate blocks)."""
     signal = _hard_case_signal_snapshot()
     signal["difficulty"] = "medium"
@@ -161,7 +161,7 @@ def test_p3_medium_task_never_invokes_p4():
     req = LocalModelExecutorRequest(
         task_id="p4-inv-4",
         problem_statement="Fix database connection",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="db.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -197,12 +197,12 @@ def test_p4_committee_invoked_is_false_when_not_allowed():
     assert receipt["p4_committee_invoked"] is False
 
 
-def test_assist_stages_activated_contains_committee_routed_tool():
+def test_assist_stages_activated_contains_committee_routed_tool(tmp_path):
     """P4-I4: assist_stages_activated includes committee_routed_tool."""
     req = LocalModelExecutorRequest(
         task_id="p4-inv-7",
         problem_statement="Complex cross-module refactoring",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="complex.py",
         selected_capabilities=(),
         evidence_refs=(),

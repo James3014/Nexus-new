@@ -15,6 +15,16 @@ from nexus.services.local_heal.committee_routed_tool import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 # ── Helpers ──
 
 _VALID_RAW_CANDIDATE = {
@@ -29,7 +39,7 @@ def _valid_request(**overrides):
     """Build a CommitteeRoutedToolRequest that passes the activation gate."""
     defaults = {
         "task_id": "t1",
-        "repo_root": "/tmp",
+        "repo_root": _REPO_ROOT,
         "target_file": "foo.py",
         "difficulty": "hard",
         "execution_topology": "cloud_with_local_assist",
@@ -125,11 +135,11 @@ def test_producer_fields_in_receipt():
         assert result.receipt_fragment.get("p4_raw_candidate_count") == 1
 
 
-def test_request_contract_serializable():
+def test_request_contract_serializable(tmp_path):
     """P4-I1: Request can be created with defaults."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
     )
     assert req.task_id == "t1"
@@ -146,11 +156,11 @@ def test_result_contract_serializable():
     assert result.receipt_fragment == {}
 
 
-def test_validate_missing_target_file_fails():
+def test_validate_missing_target_file_fails(tmp_path):
     """P4-I1: Missing target_file fails validation."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="",
         proposer_specs=[{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
         judge_model="judge",
@@ -159,11 +169,11 @@ def test_validate_missing_target_file_fails():
     assert "missing_target_file" in failures
 
 
-def test_validate_insufficient_proposer_specs_fails():
+def test_validate_insufficient_proposer_specs_fails(tmp_path):
     """P4-I1: Less than 2 proposer specs fails validation."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         proposer_specs=[{"model": "a", "role": "primary"}],
         judge_model="judge",
@@ -172,11 +182,11 @@ def test_validate_insufficient_proposer_specs_fails():
     assert "insufficient_proposer_specs" in failures
 
 
-def test_validate_missing_judge_model_fails():
+def test_validate_missing_judge_model_fails(tmp_path):
     """P4-I1: Missing judge_model fails validation."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         proposer_specs=[{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
         judge_model="",
@@ -185,11 +195,11 @@ def test_validate_missing_judge_model_fails():
     assert "missing_judge_model" in failures
 
 
-def test_validate_valid_request_passes():
+def test_validate_valid_request_passes(tmp_path):
     """P4-I1: Valid request passes validation."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         proposer_specs=[{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
         judge_model="judge",
@@ -259,11 +269,11 @@ def test_receipt_fields_present_in_build_repair_receipt():
     assert receipt["p4_solved_by_committee"] is True
 
 
-def test_fail_closed_when_invalid_request():
+def test_fail_closed_when_invalid_request(tmp_path):
     """P4-I1: Invalid request produces failure reasons."""
     req = CommitteeRoutedToolRequest(
         task_id="",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="",
         proposer_specs=[],
         judge_model="",

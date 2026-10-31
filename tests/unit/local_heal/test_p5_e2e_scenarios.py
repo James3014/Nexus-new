@@ -11,6 +11,16 @@ from nexus.services.local_heal.output_understanding import CanonicalPatchCandida
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 def _make_candidate(patch, safety_flags=(), target_file="foo.py"):
     raw_hash = __import__("hashlib").sha256(patch.encode("utf-8")).hexdigest()
     return CanonicalPatchCandidate(
@@ -38,7 +48,7 @@ def _make_raw_candidate(patch, model="qwen", safety_flags=(), target_file="foo.p
 def _valid_request(**overrides):
     defaults = {
         "task_id": "p5-e2e",
-        "repo_root": "/tmp",
+        "repo_root": _REPO_ROOT,
         "target_file": "foo.py",
         "difficulty": "hard",
         "execution_topology": "cloud_with_local_assist",

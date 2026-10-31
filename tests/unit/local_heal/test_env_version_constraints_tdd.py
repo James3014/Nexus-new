@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-from pathlib import Path
 import pytest
 from nexus.services.local_heal.env_resolver import (
     EnvResolver,
@@ -44,7 +43,7 @@ def test_env_resolver_detects_incompatible_package_version():
     assert "numpy:2.0.0 not in <2.0.0" in resolution.probes[0]["violations"]
 
 
-def test_env_denoiser_heals_dependency_violation():
+def test_env_denoiser_heals_dependency_violation(tmp_path):
     # 1. 初始狀態：環境有問題 (NumPy 2.0.0, 要求 <2.0.0)
     def mock_package_version_probe(executable, package_name):
         if not hasattr(mock_package_version_probe, "called_count"):
@@ -73,7 +72,7 @@ def test_env_denoiser_heals_dependency_violation():
     assert resolution.ready is False
 
     # 2. 執行修復
-    denoiser = EnvDenoiser(repo_dir=Path("/tmp"))
+    denoiser = EnvDenoiser(repo_dir=tmp_path)
     
     captured_commands = []
     def mock_run_command(cmd, cwd, timeout):
@@ -93,7 +92,7 @@ def test_env_denoiser_heals_dependency_violation():
     assert new_resolution.ready is True
 
 
-def test_env_denoiser_skips_unhealable_attribute_probe_and_heals_later_constraint():
+def test_env_denoiser_skips_unhealable_attribute_probe_and_heals_later_constraint(tmp_path):
     resolution = EnvResolution(
         profile="astropy-legacy",
         ready=False,
@@ -121,7 +120,7 @@ def test_env_denoiser_skips_unhealable_attribute_probe_and_heals_later_constrain
     commands = []
 
     denoiser = EnvDenoiser(
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         run_command=lambda cmd, cwd, timeout: commands.append(cmd) or (0, "installed"),
     )
 

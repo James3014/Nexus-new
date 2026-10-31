@@ -119,11 +119,11 @@ def test_gate_not_evaluated_when_not_cloud_topology():
     assert gate["invocation_allowed"] is False
 
 
-def test_evaluate_and_execute_blocks_invalid():
+def test_evaluate_and_execute_blocks_invalid(tmp_path):
     """P4-I2: evaluate_and_execute blocks invalid requests."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         difficulty="medium",
         proposer_specs=[{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
@@ -135,11 +135,11 @@ def test_evaluate_and_execute_blocks_invalid():
     assert result.blocked_reason != ""
 
 
-def test_evaluate_and_execute_allows_valid():
+def test_evaluate_and_execute_allows_valid(tmp_path):
     """P4-I2: evaluate_and_execute allows valid requests."""
     req = CommitteeRoutedToolRequest(
         task_id="t1",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         difficulty="hard",
         execution_topology="cloud_with_local_assist",

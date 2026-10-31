@@ -10,12 +10,12 @@ from nexus.services.local_heal.local_model_executor import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
-def test_cheap_verifier_empty_patch_fails():
+def test_cheap_verifier_empty_patch_fails(tmp_path):
     """P3-I5: Empty patch fails verification."""
     req = LocalModelExecutorRequest(
         task_id="p3-s3-1",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -28,12 +28,12 @@ def test_cheap_verifier_empty_patch_fails():
     assert result["stage3_verifier_model"] == "deterministic"
 
 
-def test_cheap_verifier_nonempty_patch_passes():
+def test_cheap_verifier_nonempty_patch_passes(tmp_path):
     """P3-I5: Non-empty patch with structural markers passes."""
     req = LocalModelExecutorRequest(
         task_id="p3-s3-2",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -46,12 +46,12 @@ def test_cheap_verifier_nonempty_patch_passes():
     assert result["stage3_verifier_reason"] == "basic_checks_passed"
 
 
-def test_cheap_verifier_trash_content_fails():
+def test_cheap_verifier_trash_content_fails(tmp_path):
     """P3-I5: Trash content (no markers, short) fails."""
     req = LocalModelExecutorRequest(
         task_id="p3-s3-3",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -63,12 +63,12 @@ def test_cheap_verifier_trash_content_fails():
     assert result["stage3_verifier_reason"] == "patch_too_short"
 
 
-def test_cheap_verifier_destructive_content_fails():
+def test_cheap_verifier_destructive_content_fails(tmp_path):
     """P3-I5: Destructive content (rm -rf) fails."""
     req = LocalModelExecutorRequest(
         task_id="p3-s3-4",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -80,7 +80,7 @@ def test_cheap_verifier_destructive_content_fails():
     assert "destructive_content" in result["stage3_verifier_reason"]
 
 
-def test_executor_shadow_runs_verifier():
+def test_executor_shadow_runs_verifier(tmp_path):
     """P3-I5: Executor runs stage3 verifier in shadow topology."""
     class FakeProvider:
         def generate(self, req):
@@ -100,7 +100,7 @@ def test_executor_shadow_runs_verifier():
     req = LocalModelExecutorRequest(
         task_id="p3-s3-5",
         problem_statement="Fix zeta function",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="zeta.py",
         selected_capabilities=(),
         evidence_refs=("patch.diff",),
@@ -131,7 +131,7 @@ def test_executor_shadow_runs_verifier():
     )
 
 
-def test_executor_shadow_verifier_blocked():
+def test_executor_shadow_verifier_blocked(tmp_path):
     """P3-I5: Empty candidate → verifier blocks → route status reflects."""
     class FakeProvider:
         def generate(self, req):
@@ -151,7 +151,7 @@ def test_executor_shadow_verifier_blocked():
     req = LocalModelExecutorRequest(
         task_id="p3-s3-6",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

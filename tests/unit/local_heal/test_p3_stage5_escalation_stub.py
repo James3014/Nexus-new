@@ -98,7 +98,7 @@ def test_escalation_receipt_fields():
     assert receipt["stage5_escalation_target"] == "committee"
 
 
-def test_executor_runs_stage5_and_updates_p3_status():
+def test_executor_runs_stage5_and_updates_p3_status(tmp_path):
     class FakeProvider:
         def generate(self, req):
             class R:
@@ -118,7 +118,7 @@ def test_executor_runs_stage5_and_updates_p3_status():
     req = LocalModelExecutorRequest(
         task_id="p3-stage5-1",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

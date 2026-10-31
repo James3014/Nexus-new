@@ -10,12 +10,12 @@ from nexus.services.local_heal.local_model_executor import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
-def test_stage1_diagnosis_extracts_error_context():
+def test_stage1_diagnosis_extracts_error_context(tmp_path):
     """P3-I3: Diagnosis extracts problem statement as error context."""
     req = LocalModelExecutorRequest(
         task_id="p3-s1-1",
         problem_statement="Fix zeta function evaluation by replacing 'a is S.One' with 'a == S.One'",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="sympy/functions/special/zeta_functions.py",
         selected_capabilities=(),
         evidence_refs=("patch.diff", "repro.log"),
@@ -31,13 +31,13 @@ def test_stage1_diagnosis_extracts_error_context():
     assert result["stage1_diagnosis_model"] == "deterministic"
 
 
-def test_stage1_diagnosis_compact_prompt_respects_limit():
+def test_stage1_diagnosis_compact_prompt_respects_limit(tmp_path):
     """P3-I3: Compact prompt is ≤500 chars."""
     long_problem = "x" * 1000
     req = LocalModelExecutorRequest(
         task_id="p3-s1-2",
         problem_statement=long_problem,
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -47,12 +47,12 @@ def test_stage1_diagnosis_compact_prompt_respects_limit():
     assert len(result["stage1_compact_prompt"]) <= 500
 
 
-def test_stage1_diagnosis_includes_target_info():
+def test_stage1_diagnosis_includes_target_info(tmp_path):
     """P3-I3: Compact prompt includes file and symbol."""
     req = LocalModelExecutorRequest(
         task_id="p3-s1-3",
         problem_statement="fix bug",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="src/main.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -63,7 +63,7 @@ def test_stage1_diagnosis_includes_target_info():
     assert "process" in result["stage1_compact_prompt"]
 
 
-def test_executor_shadow_runs_stage1():
+def test_executor_shadow_runs_stage1(tmp_path):
     """P3-I3: Executor runs stage1 diagnosis in shadow topology."""
     class FakeProvider:
         def generate(self, req):
@@ -83,7 +83,7 @@ def test_executor_shadow_runs_stage1():
     req = LocalModelExecutorRequest(
         task_id="p3-s1-4",
         problem_statement="Fix zeta function",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="zeta.py",
         selected_capabilities=(),
         evidence_refs=("patch.diff",),
@@ -131,12 +131,12 @@ def test_stage1_receipt_fields():
     assert "foo.py" in receipt["stage1_compact_prompt"]
 
 
-def test_stage1_empty_problem_statement():
+def test_stage1_empty_problem_statement(tmp_path):
     """P3-I3: Diagnosis handles empty problem statement."""
     req = LocalModelExecutorRequest(
         task_id="p3-s1-6",
         problem_statement="",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
