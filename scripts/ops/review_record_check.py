@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import itertools
 import json
 import os
 import re
@@ -269,6 +270,7 @@ _REBUTTAL_DENY = re.compile(
     r"\b(?:not|nothing|never|none|no|un-?rebutted|without)\b", re.IGNORECASE
 )
 _ROUND = re.compile(r"\b(?:r|round\s*)(\d+)\b", re.IGNORECASE)
+_ROUND_ONE = re.compile(r"\b(?:r|round\s*)0*1\b", re.IGNORECASE)
 _CLAUDE = re.compile(r"\b(?:claude|opus|sonnet)\b", re.IGNORECASE)
 _CROSS = re.compile(r"\b(?:codex|gemini|gpt)\b", re.IGNORECASE)
 
@@ -1099,7 +1101,7 @@ def _answered(
     )
 
 
-def standing_families(events: list[dict[str, Any]]) -> set[str]:
+def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> set[str]:
     """Reviewer families whose ACCEPT at the head still stands after later REJECTs (#2992).
 
     Events are in posting order (comments oldest first, lines top to bottom). A REJECT
@@ -1109,29 +1111,41 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
     again. An unnumbered ACCEPT followed by a numbered REJECT is withdrawn: a round
     history that ends in a REJECT at the head is an open rejection.
 
-    Rounds are compared within one numbering only. A round 1 of a reviewer in a later
-    comment than one of its rounds above 1 starts a new numbering (a new session counts
-    from r1 again), so ``r3 ACCEPT`` does not outrank a later comment's ``r1 REJECT``, or
-    its ``r2 REJECT`` after a later comment's ``r1`` (#3041). A recap of round 2 or later
-    in a later comment keeps the numbering.
+    Rounds are compared within one numbering only (``renumber``; off only to choose
+    merge-only delta heads as before). A later comment that names a round 1 of the
+    reviewer (an event, or a ``round`` marker for a resolved or short-sha line) after an
+    earlier comment with one of its rounds above 1 starts a new numbering for all of
+    that reviewer's events in it: a new session counts from r1 again, so an older
+    ``r3 ACCEPT`` does not outrank its ``r1`` or ``r2 REJECT`` (#3041). A later comment
+    without a round 1 (a recap of round 2) keeps the numbering.
     """
+    round_one = {
+        (event.get("comment"), event["family"], event.get("reviewer"))
+        for event in events
+        if renumber and event["round"] == 1
+    }
     accepts: dict[str, list[tuple[dict[str, Any], int]]] = {}
+    # (family, reviewer) -> (epoch, comments of this numbering with a round above 1)
     numbering: dict[tuple[str, str], tuple[int, set[Any]]] = {}
     for event in events:
         family = event["family"]
         reviewer = event.get("reviewer")
         epoch = 0
         if reviewer is not None:
-            epoch, later_round_comments = numbering.get((family, reviewer), (0, set()))
             comment = event.get("comment")
-            if event["round"] == 1 and later_round_comments - {comment}:
-                epoch, later_round_comments = epoch + 1, set()
-            elif event["round"] is not None and event["round"] > 1:
-                later_round_comments = later_round_comments | {comment}
-            numbering[(family, reviewer)] = (epoch, later_round_comments)
+            epoch, later = numbering.get((family, reviewer), (0, set()))
+            if (comment, family, reviewer) in round_one and (
+                len(later) > 1 or (later and comment not in later)
+            ):
+                epoch, later = epoch + 1, set()  # once per comment: it joins ``later`` below
+            if event["round"] is not None and event["round"] > 1:
+                later.add(comment)
+            numbering[(family, reviewer)] = (epoch, later)
         if event["kind"] == "accept":
             accepts.setdefault(family, []).append((event, epoch))
             continue
+        if event["kind"] != "reject":
+            continue  # a round marker only numbers
         reject_round = event["round"]
         accepts[family] = [
             (accept, accept_epoch)
@@ -1319,6 +1333,28 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 if weak:
                     weak_rejects.add(id(event))
                 line_events.append((start + span[0], event))
+        tokens = len(_ANY_VERDICT_TOKEN.findall(line))
+        if 0 < tokens <= MAX_VERDICTS_PER_LINE and not names_other_sha(line, head):
+            # A round 1 named on a verdict line at the head, read or not (resolved, a
+            # short sha): it may start a new numbering in standing_families (#3041).
+            marked = _plain(line, keep_parens=True)
+            markers = itertools.islice(_ROUND_ONE.finditer(marked), MAX_VERDICTS_PER_LINE)
+            for marker in markers:
+                families, reviewer = _reject_families(marked[: marker.start()], reject_header)
+                if reviewer is None:
+                    continue
+                for family in families:
+                    line_events.append((
+                        marker.start(),
+                        {
+                            "family": family,
+                            "reviewer": reviewer,
+                            "kind": "round",
+                            "round": 1,
+                            "comment": 0,
+                            "line": line.strip(),
+                        },
+                    ))
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not accept_clauses:
@@ -1397,20 +1433,25 @@ def rebuttal_counts(repo: str) -> bool:
 
 
 def _short_prefix_rejects(body: str, head: str, number: int) -> list[dict[str, Any]]:
-    """REJECT events of a comment that names the head by a 7-8 character prefix only
-    (``classify_record`` returned None for it): parsed like any record, so a model named
-    in the section header or a short sha on a Head line binds them too (r5 R2)."""
+    """REJECT events (and round markers) of a comment that names the head by a 7-8
+    character prefix only (``classify_record`` returned None for it): parsed like any
+    record, so a model named in the section header or a short sha on a Head line binds
+    them too (r5 R2)."""
     if not names_head_loosely(body, head):
         return []
     return [
         dict(event, comment=number)
         for event in _classify(body, head, rejects_only=True)["events"]
-        if event["kind"] == "reject"
+        if event["kind"] in ("reject", "round")
     ]
 
 
 def _evidence_at(
-    head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
+    head: str,
+    comments: list[Any],
+    reviews: list[Any],
+    allow_rebuttal: bool = True,
+    renumber: bool = True,
 ) -> tuple[list[dict[str, Any]], bool, bool, int, set[str]]:
     """Records, stale flag, unbound flag, approved-review count and the reviewer families
     whose ACCEPT still stands at one head (comments in API order: oldest first)."""
@@ -1440,16 +1481,20 @@ def _evidence_at(
             records.append(record)
         else:
             unbound = True
-    standing = standing_families(events)
+    standing = standing_families(events, renumber)
     return records, stale, unbound, approved_reviews_at_head(reviews, head), standing
 
 
 def _contributes(
-    head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
+    head: str,
+    comments: list[Any],
+    reviews: list[Any],
+    allow_rebuttal: bool = True,
+    renumber: bool = True,
 ) -> tuple[bool, bool]:
     """(independent, cross_model) evidence a record at ``head`` provides."""
     records, _stale, _unbound, approved, standing = _evidence_at(
-        head, comments, reviews, allow_rebuttal
+        head, comments, reviews, allow_rebuttal, renumber
     )
     return (
         approved > 0 or "claude" in standing,
@@ -1507,15 +1552,19 @@ def evaluate(
         if event["kind"] == "accept"
     } - standing
     independent, cross_model = independent_head, cross_head
+    # Delta heads are chosen as before #3041 (rounds compared across numberings), so the
+    # stricter numbering never folds fewer events than that reading does; it only
+    # withdraws more in the fold below.
+    floor = _evidence_at(head, comments, reviews, allow_rebuttal, renumber=False)[4]
+    floor_ind = approved_reviews > 0 or "claude" in floor
     delta_heads: list[str] = []
     for old in delta_verified:
         if old.lower() == head.lower():
             continue
-        old_ind, old_cross = _contributes(old, comments, reviews, allow_rebuttal)
-        used = (old_ind and not independent_head) or (old_cross and not cross_head and bool(risky))
-        independent = independent or old_ind
-        cross_model = cross_model or old_cross
-        if used:
+        old_ind, old_cross = _contributes(old, comments, reviews, allow_rebuttal, renumber=False)
+        if (old_ind and not floor_ind) or (
+            old_cross and "cross_model" not in floor and bool(risky)
+        ):
             delta_heads.append(old)
     if delta_heads:
         carried_events = [
@@ -1769,9 +1818,9 @@ def _verify_deltas(
         pr_paths = _names(files)
         verified = []
         for old in _delta_candidates(fetch, base, token, head, comments, reviews):
-            if any(_contributes(old, comments, reviews, allow_rebuttal)) and merge_only_delta(
-                fetch, base, token, old, head, pr_paths, base_ref
-            ):
+            if any(
+                _contributes(old, comments, reviews, allow_rebuttal, renumber=False)
+            ) and merge_only_delta(fetch, base, token, old, head, pr_paths, base_ref):
                 verified.append(old)
         return tuple(verified)
     except Exception:  # noqa: BLE001 - fail closed

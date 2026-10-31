@@ -3032,6 +3032,42 @@ def test_a_model_named_after_a_nested_aside_still_starts_the_reject_label(files,
             ],
             "MISSING_CROSS_MODEL",
         ),
+        # The new round 1 is resolved or binds by a short sha only: it still restarts.
+        (
+            RISKY,
+            [
+                f"Codex r3 ACCEPT@{HEAD}",
+                f"Codex r1 REJECT@{HEAD} (rebutted, see thread)\nCodex r2 REJECT@{HEAD}: data loss",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            RISKY,
+            [
+                f"Codex r3 ACCEPT@{HEAD}",
+                f"Codex r1 ACCEPT@{HEAD[:7]}",
+                f"Codex r2 REJECT@{HEAD}: race",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        # An earlier numbering that reached round 2 only, or only by a REJECT.
+        (
+            DOCS,
+            [f"Claude r2 ACCEPT@{HEAD}", f"Claude r1 REJECT@{HEAD}: data loss"],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [
+                f"Codex r3 ACCEPT@{HEAD}",
+                f"Codex r4 REJECT@{HEAD}: race\nCodex r5 ACCEPT@{HEAD}",
+                f"Codex r1 REJECT@{HEAD}: race",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
     ],
 )
 def test_a_round_one_in_a_later_comment_starts_a_new_numbering(files, comments, status):
@@ -3068,6 +3104,24 @@ def test_a_round_one_in_a_later_comment_starts_a_new_numbering(files, comments, 
             f"Codex r3 ACCEPT@{HEAD}\nCodex r1 REJECT@{HEAD}: one finding",
             CLAUDE_AT_HEAD,
         ],
+        # A later comment listing its rounds newest first is one numbering.
+        [
+            f"Codex r2 ACCEPT@{HEAD}",
+            f"Codex r2 ACCEPT@{HEAD}\nCodex r1 REJECT@{HEAD}: race in X",
+            CLAUDE_AT_HEAD,
+        ],
+        # A round 1 on a line with no verdict is no restart.
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Codex r1 notes: see thread\nRecap: Codex r2 REJECT@{HEAD}: one finding",
+            CLAUDE_AT_HEAD,
+        ],
+        # A round 1 at another head is no restart at this one.
+        [
+            f"Codex r3 ACCEPT@{HEAD}",
+            f"Codex r1 REJECT@{OLD}: race in X\nRecap: Codex r2 REJECT@{HEAD}: one finding",
+            CLAUDE_AT_HEAD,
+        ],
         # Another reviewer's round 1 does not restart this reviewer's numbering.
         [
             f"Codex r3 ACCEPT@{HEAD}",
@@ -3085,3 +3139,38 @@ def test_a_round_one_in_a_later_comment_starts_a_new_numbering(files, comments, 
 )
 def test_one_numbering_keeps_its_later_round(comments):
     assert rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+def test_the_new_numbering_never_folds_fewer_merge_only_delta_heads():
+    # Delta heads are chosen with rounds compared across numberings, as before, so the
+    # stricter numbering cannot drop a head whose later REJECT withdraws another's ACCEPT.
+    old_a, old_b = "a1" * 20, "b2" * 20
+    comments = [
+        _c(f"Head reviewed: {old_b}\nClaude r3: ACCEPT"),
+        _c(f"Head reviewed: {old_a}\nClaude: REJECT — data loss"),
+        _c(f"Head reviewed: {old_a}\nClaude: ACCEPT"),
+        _c(f"Head reviewed: {old_b}\nClaude r1: REJECT — data loss"),
+    ]
+    report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(old_a, old_b))
+    assert report["status"] == "MISSING_RECORD"
+
+
+def test_a_restart_at_a_merge_only_delta_head_withdraws_too():
+    comments = [
+        _c(f"Head reviewed: {OLD}\nClaude r3: ACCEPT"),
+        _c(f"Head reviewed: {OLD}\nClaude r1: REJECT — data loss"),
+    ]
+    report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"
+
+
+def test_a_delta_head_is_not_folded_for_a_reject_only_the_new_numbering_reads():
+    # Fail closed: delta heads are chosen as before #3041, so a head REJECT that only
+    # the new numbering reads is not answered by an ACCEPT at a merge-only delta head.
+    comments = [
+        _c(f"Head reviewed: {HEAD}\nClaude r3: ACCEPT"),
+        _c(f"Head reviewed: {HEAD}\nClaude r1: REJECT — data loss"),
+        _c(f"Head reviewed: {OLD}\nClaude: ACCEPT"),
+    ]
+    report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"
