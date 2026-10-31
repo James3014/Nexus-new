@@ -10,8 +10,9 @@ so no link swapped in after a check is followed. A write never opens the existin
 a new file created in the same directory and renames it over the name, which replaces the
 directory entry and leaves whatever inode was there untouched (a hard link to a host file, made
 or unlinked at any moment, is never written through). An existing entry that is not a regular
-single-link file is refused up front, and reads accept only such a file. A refusal raises
-``PathContainmentError`` (an ``OSError``) and nothing is written.
+single-link file is refused up front, and reads accept only such a file. A write into a
+directory the host itself runs from later (``HOST_RUN_SUBTREES``) is refused too. A refusal
+raises ``PathContainmentError`` (an ``OSError``) and nothing is written.
 """
 
 from __future__ import annotations
@@ -19,9 +20,11 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+import unicodedata
 from pathlib import Path, PurePath
 
 __all__ = [
+    "HOST_RUN_SUBTREES",
     "PathContainmentError",
     "contained_relative_path",
     "read_text_in_root",
@@ -29,6 +32,10 @@ __all__ = [
 ]
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+# Work-dir entries the host itself runs from after model code has run there (#2945): git reads
+# its config and hooks from .git, and the task interpreter starts from .venv. The model sandbox
+# keeps them read-only, and model-driven writes here refuse them at any depth (#3024).
+HOST_RUN_SUBTREES = (".git", ".venv")
 
 
 class PathContainmentError(OSError):
@@ -59,6 +66,12 @@ def _parts(relative: PurePath | str) -> tuple[str, ...]:
     if PurePath(text).is_absolute() or not parts or any(p in ("", ".", "..") for p in parts):
         raise PathContainmentError(f"path_not_relative:{text}")
     return parts
+
+
+def _is_host_run_name(name: str) -> bool:
+    # APFS and HFS+ match names without case, and HFS+ also skips format characters (U+200C…).
+    folded = "".join(c for c in name if unicodedata.category(c) != "Cf").casefold()
+    return folded in HOST_RUN_SUBTREES
 
 
 def _open_parent(root: Path | str, parts: tuple[str, ...], *, create_parents: bool) -> int:
@@ -106,6 +119,8 @@ def write_text_in_root(
     existing regular file keeps its permission bits, a new one gets 0o666 less the umask."""
 
     parts = _parts(relative)
+    if any(_is_host_run_name(part) for part in parts):
+        raise PathContainmentError(f"path_in_host_run_subtree:{os.fspath(relative)}")
     name = parts[-1]
     parent = _open_parent(root, parts, create_parents=create_parents)
     try:

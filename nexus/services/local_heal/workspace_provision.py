@@ -7,6 +7,8 @@ Supports auto-provisioning via SWE-bench repo_map.
 """
 from __future__ import annotations
 
+import os
+import secrets
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -92,8 +94,15 @@ class WorkspaceProvisionChecker:
         workspace_writable = False
         if repo_root_exists:
             try:
-                test_file = repo_dir / ".nexus_workspace_test"
-                test_file.write_text("ok", encoding="utf-8")
+                # Model code may have run in repo_dir: a new, unguessable name, created without
+                # following a link, so a link left there is never written through.
+                test_file = repo_dir / f".nexus_workspace_test-{secrets.token_hex(8)}"
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+                fd = os.open(test_file, flags, 0o600)
+                try:
+                    os.write(fd, b"ok")
+                finally:
+                    os.close(fd)
                 test_file.unlink()
                 workspace_writable = True
             except Exception:
