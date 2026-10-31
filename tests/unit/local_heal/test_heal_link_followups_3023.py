@@ -462,6 +462,28 @@ def test_existence_helper_answers_plain_paths_without_links(repo_and_host, targe
     assert _target_entry_exists(str(repo), target_file) is expected
 
 
+def test_existence_helper_refuses_a_path_it_cannot_inspect(repo_and_host, monkeypatch):
+    # Any lstat error other than "missing" (here: no permission) is a refusal, not "nothing
+    # there". Simulated so the test also holds when the suite runs as root.
+    import os
+
+    from nexus.core.contained_write import PathContainmentError
+    from nexus.services.local_heal.local_model_executor import _target_entry_exists
+
+    repo, _host_dir = repo_and_host
+    blocked = os.path.join(str(repo), TARGET)
+    real_lstat = os.lstat
+
+    def lstat(path, *args, **kwargs):
+        if os.fspath(path) == blocked:
+            raise PermissionError(13, "Permission denied", blocked)
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    with pytest.raises(PathContainmentError, match="path_unresolvable"):
+        _target_entry_exists(str(repo), TARGET)
+
+
 def test_committee_restore_stops_at_a_link_loop(repo_and_host):
     repo, _host_dir = repo_and_host
     calls = []
