@@ -2,7 +2,9 @@
 
 - LocalModelExecutor restores the original target file after the pipeline run and after each
   committee candidate. Model code may have run in repo_root by then and left a link at the
-  target: the restore must not write through it to a file outside repo_root.
+  target or on the way to it: the restore must not write through it to a file outside
+  repo_root, the snapshot reads around it must not record that file's text, and a refused
+  committee restore stops the committee loop and is recorded.
 - The committee routed tool writes the winning candidate to repo_root / target_file: a link
   there, or a target_file that leaves repo_root, is refused.
 - contained_write gives a new file the permission bits a plain create would (0o666 & ~umask).
@@ -12,6 +14,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -63,6 +67,22 @@ def _plant_link(repo: Path, host: Path) -> None:
     target = repo / TARGET
     target.unlink()
     target.symlink_to(host)
+
+
+def _plant_parent_link(repo: Path, host: Path) -> None:
+    """Same, one level up: the target's directory becomes a link to a host dir."""
+    (host.parent / Path(TARGET).name).write_text(HOST)
+    toy = repo / Path(TARGET).parent
+    for child in toy.iterdir():
+        child.unlink()
+    toy.rmdir()
+    toy.symlink_to(host.parent, target_is_directory=True)
+
+
+def _assert_no_host_text_recorded(meta) -> None:
+    dumped = json.dumps(meta, default=str)
+    assert HOST.strip() not in dumped
+    assert hashlib.sha256(HOST.encode()).hexdigest() not in dumped
 
 
 def _request(repo: Path, task_id: str, candidate_models: list[str]) -> LocalModelExecutorRequest:
@@ -208,6 +228,29 @@ def test_restore_after_the_pipeline_run_does_not_write_through_a_planted_link(re
     assert meta["isolated_apply_status"] == "restore_refused"
     assert meta["isolated_apply_error"].startswith("TARGET_RESTORE_REFUSED:")
     assert meta["isolated_verifier_status"] == "not_run"
+    _assert_no_host_text_recorded(meta)
+
+
+def test_restore_refuses_a_link_on_the_way_to_the_target_and_records_nothing_from_it(
+    repo_and_host,
+):
+    repo, host = repo_and_host
+
+    def pipeline_execute(*_a, **_kw):
+        _plant_parent_link(repo, host)
+        return _pipeline_result()
+
+    resp = _run(
+        _request(repo, "restore-3023-d", []),
+        pipeline_execute=pipeline_execute,
+        committee_run=_committee_run_result,
+    )
+    assert host.read_text() == HOST
+    assert (host.parent / Path(TARGET).name).read_text() == HOST
+    meta = resp.raw_model_metadata
+    assert meta["isolated_apply_status"] == "restore_refused"
+    assert meta["isolated_verifier_status"] == "not_run"
+    _assert_no_host_text_recorded(meta)
 
 
 def test_restore_after_a_committee_candidate_does_not_write_through_a_planted_link(
@@ -215,12 +258,15 @@ def test_restore_after_a_committee_candidate_does_not_write_through_a_planted_li
 ):
     repo, host = repo_and_host
 
+    calls = []
+
     def committee_run(heal_ctx):
+        calls.append(heal_ctx)
         if (repo / TARGET).is_symlink() is False:
             _plant_link(repo, host)
         return _committee_run_result(heal_ctx)
 
-    _run(
+    resp = _run(
         _request(
             repo,
             "restore-3023-b",
@@ -230,6 +276,13 @@ def test_restore_after_a_committee_candidate_does_not_write_through_a_planted_li
         committee_run=committee_run,
     )
     assert host.read_text() == HOST
+    meta = resp.raw_model_metadata
+    # The refusal is recorded and no later candidate runs against the planted link.
+    assert meta["delegated_retry_committee_restore_refused"] is True
+    assert meta["delegated_retry_committee_restore_refused_reason"].startswith(
+        "restore-3023-b#delegated-retry-01-"
+    )
+    assert len(calls) == 1
 
 
 def test_restore_still_puts_the_original_back_when_nothing_was_planted(repo_and_host):
@@ -311,3 +364,24 @@ def test_cwd_at_filesystem_root_does_not_make_a_temp_dir_host_code(monkeypatch):
         assert holds_host_code("/") is True
     finally:
         work.rmdir()
+
+
+def test_removing_a_new_target_does_not_remove_a_file_behind_a_directory_link(repo_and_host):
+    # The target did not exist before the run, so the cleanup removes it; a directory link
+    # planted on the way must not turn that into removing a host file.
+    repo, host = repo_and_host
+    (repo / TARGET).unlink()
+
+    def pipeline_execute(*_a, **_kw):
+        _plant_parent_link(repo, host)
+        return _pipeline_result()
+
+    resp = _run(
+        _request(repo, "restore-3023-e", []),
+        pipeline_execute=pipeline_execute,
+        committee_run=_committee_run_result,
+    )
+    assert (host.parent / Path(TARGET).name).read_text() == HOST
+    meta = resp.raw_model_metadata
+    assert meta["isolated_apply_status"] == "restore_refused"
+    _assert_no_host_text_recorded(meta)

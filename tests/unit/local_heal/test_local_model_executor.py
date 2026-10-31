@@ -5334,7 +5334,7 @@ def test_apply_failure_root_cause_target_file_state_drift(tmp_path):
     ]
 
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
-         patch("nexus.services.local_heal.local_model_executor._read_text_snapshot", side_effect=snapshots), \
+         patch("nexus.services.local_heal.local_model_executor._read_target_snapshot", side_effect=snapshots), \
          patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
         mock_exec.return_value = CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
