@@ -2567,3 +2567,14 @@ def test_a_reject_is_judged_at_its_own_position_on_the_line(body):
     codex = body.replace("Claude", "Codex")
     report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
     assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_reject_also_counts_for_the_family_read_where_its_text_first_appears():
+    # Before #3039 the bare REJECT below was placed at the same text inside the Claude
+    # clause and withdrew Claude's ACCEPT; read at its own position it is Codex's. Both
+    # readings count (fail closed), so the record stays missing as it was.
+    body = (
+        f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n"
+        "Claude r3: REJECT — fixed in f638ca3; Codex r3: ACCEPT@8d70e3f; REJECT — data loss\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"

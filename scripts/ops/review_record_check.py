@@ -1133,7 +1133,12 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     ))
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
+        searched = 0
         for clause, start in _reject_clause_starts(line):
+            # Where the clause text is first found: before #3039 the REJECT was placed
+            # there, and its family read from there still counts (fail closed).
+            found = plain_reject.find(clause, searched)
+            searched = found + len(clause) if found >= 0 else searched
             span = _reject_match(clause)
             if span is None:
                 continue
@@ -1149,6 +1154,11 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             if weak and _fixed_later(plain_reject, end):
                 continue
             families, reviewer = _reject_families(plain_reject[: start + span[0]], reject_header)
+            if 0 <= found < start:
+                earlier, _reviewer = _reject_families(
+                    plain_reject[: found + span[0]], reject_header
+                )
+                families = sorted(set(families) | set(earlier))
             rounds = _ROUND.findall(clause[: span[0]])
             for family in families:
                 event = {
