@@ -445,6 +445,14 @@ class PatchApplier:
                     source_text_for_check = read_text_in_root(
                         repo_dir, contained_relative_path(repo_dir, target_path)
                     )
+                    # The read turns non-UTF-8 bytes into U+FFFD; apply would refuse this file.
+                    if "\ufffd" in source_text_for_check:
+                        telemetry["preflight_checks"].append({
+                            "check": "target_utf8",
+                            "passed": False,
+                            "file": intent.file_path,
+                        })
+                        return False, f"TARGET_NOT_UTF8:{intent.file_path}", telemetry
                     patched_full = source_text_for_check.replace(intent.search, intent.replace)
                     patched_hash = hashlib.sha256(patched_full.encode()).hexdigest()[:16]
                     ast.parse(patched_full)
@@ -626,6 +634,17 @@ class PatchApplier:
                         preflight_telemetry=preflight_telemetry,
                         errors=patch_errors,
                     )
+
+            # The read turns non-UTF-8 bytes into U+FFFD; writing that back would change bytes
+            # the patch never touched, so the file the patch would go to (this target or the
+            # cross-file match) is not rewritten.
+            if "\ufffd" in source_text:
+                return PatchApplicationResult(
+                    success=False,
+                    applied_diffs=applied_diffs,
+                    error_reason=f"TARGET_NOT_UTF8:{intent.file_path}",
+                    preflight_telemetry=preflight_telemetry
+                )
 
             # B. [SyntaxGate] 語法編譯檢查 (ast.parse)
             syntax_res = SyntaxGate.check(intent, source_text)
