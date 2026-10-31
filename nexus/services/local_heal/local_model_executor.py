@@ -318,8 +318,11 @@ def _build_unified_diff_from_search_and_replacement(
         try:
             if original_source_text is not None:
                 _lines = original_source_text.splitlines()
+            elif request.repo_root:
+                # Model code may have run in repo_root: never through a link (#3023).
+                _lines = _read_target_snapshot(request.repo_root, target_file)[1].splitlines()
             else:
-                _fp = _Path(request.repo_root) / target_file if request.repo_root else _Path(target_file)
+                _fp = _Path(target_file)
                 _lines = _fp.read_text(encoding="utf-8").splitlines() if _fp.exists() else []
 
             if _lines:
@@ -390,10 +393,17 @@ def _reanchor_pipeline_patch_to_locked_search(
     if original_source_text is not None:
         current_exists = True
         current_text = original_source_text
+    elif request.repo_root and request.target_file:
+        # No original (a new target): what is there now may be model output, read without
+        # following a link (#3023); a refused read means no re-anchor.
+        try:
+            current_exists, current_text = _read_target_snapshot(
+                request.repo_root, request.target_file
+            )
+        except PathContainmentError:
+            current_exists, current_text = False, ""
     else:
-        current_exists, current_text = _read_text_snapshot(
-            os.path.join(request.repo_root, request.target_file) if request.repo_root and request.target_file else ""
-        )
+        current_exists, current_text = False, ""
 
     if not current_exists or locked_search.strip() not in current_text:
         return projected_patch, {"pipeline_locked_search_reanchored": False}
@@ -403,7 +413,7 @@ def _reanchor_pipeline_patch_to_locked_search(
         request.target_file,
         locked_search,
         new_text,
-        original_source_text=original_source_text,
+        original_source_text=current_text,
     ).strip()
     if not rebuilt:
         return projected_patch, {"pipeline_locked_search_reanchored": False}
@@ -478,11 +488,16 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _read_text_snapshot(path: str) -> tuple[bool, str]:
-    if not path or not os.path.exists(path):
-        return False, ""
-    with open(path, "r", encoding="utf-8") as f:
-        return True, f.read()
+def _target_entry_exists(repo_root: str, target_file: str) -> bool:
+    """Whether anything, a link included, is at repo_root/target_file (#3023).
+
+    os.path.lexists alone follows a linked directory on the way, so a directory link to a host
+    dir without the file would read as "nothing there". A link on the way to the target, or a
+    target_file that leaves repo_root, raises PathContainmentError instead."""
+    relative = os.path.normpath(target_file)
+    if os.fspath(contained_relative_path(repo_root, relative)) != relative:
+        raise PathContainmentError(f"path_crosses_link:{target_file}")
+    return os.path.lexists(os.path.join(repo_root, relative))
 
 
 def _read_target_snapshot(repo_root: str, target_file: str) -> tuple[bool, str]:
@@ -498,10 +513,8 @@ def _read_target_snapshot(repo_root: str, target_file: str) -> tuple[bool, str]:
 
 def _remove_target_file(repo_root: str, target_file: str) -> None:
     """Remove repo_root/target_file unless a link sits on the way to it (#3023)."""
-    relative = os.path.normpath(target_file)
-    if os.fspath(contained_relative_path(repo_root, relative)) != relative:
-        raise PathContainmentError(f"path_crosses_link:{target_file}")
-    os.remove(os.path.join(repo_root, relative))
+    if _target_entry_exists(repo_root, target_file):
+        os.remove(os.path.join(repo_root, os.path.normpath(target_file)))
 
 
 def _restore_target_text(repo_root: str, target_file: str, text: str) -> None:
@@ -2435,7 +2448,7 @@ class LocalModelExecutor:
                             _restore_target_text(
                                 request.repo_root, target_file, original_target_content or ""
                             )
-                        elif os.path.lexists(original_target_path):
+                        else:
                             _remove_target_file(request.repo_root, target_file)
                         after_exists, after_text = _read_target_snapshot(
                             request.repo_root, target_file
@@ -3143,16 +3156,18 @@ class LocalModelExecutor:
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
 
                             # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
-                            if request.target_file and original_target_path and os.path.lexists(original_target_path):
+                            if request.target_file and original_target_path:
                                 try:
-                                    _restore_target_text(
-                                        request.repo_root,
-                                        request.target_file,
-                                        original_target_content or "",
-                                    )
+                                    if _target_entry_exists(request.repo_root, request.target_file):
+                                        _restore_target_text(
+                                            request.repo_root,
+                                            request.target_file,
+                                            original_target_content or "",
+                                        )
                                 except PathContainmentError as exc:
-                                    # A link left at the target (#3023): later candidates would
-                                    # run against it too, so the committee loop stops here.
+                                    # A link left at the target or on the way to it (#3023):
+                                    # later candidates would run against it too, so the
+                                    # committee loop stops here.
                                     raw_meta["delegated_retry_committee_restore_refused"] = True
                                     raw_meta["delegated_retry_committee_restore_refused_reason"] = (
                                         f"{_cand_id}:{exc}"
