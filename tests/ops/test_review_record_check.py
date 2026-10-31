@@ -2581,3 +2581,35 @@ def test_a_round_marker_inside_a_label_aside_keeps_an_honest_accept(label):
 )
 def test_a_round_marker_inside_an_aside_does_not_hide_a_denial(line):
     assert rrc.evaluate(HEAD, DOCS, [_c(line + "\n")], [])["status"] != "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "(r2 not fixed)",
+        "(Round 2 REJECT still open)",
+        "(Opus; round 3, not yet re-run)",
+        "(Opus; round 3, cannot merge yet)",
+        "(Opus; round 3, pending CI)",
+        '(Opus; round 3, "approved" by the author)',
+    ],
+)
+def test_a_denial_inside_a_round_marked_aside_still_denies(label):
+    # Only the scope word "only" and an apostrophe stop denying inside such an aside.
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
+
+
+def test_an_apostrophe_inside_a_round_marked_aside_is_no_quote():
+    # cairnwork#257's round-4 record shape.
+    label = "(separate agent; round 4, a confirmation of round 3's items beyond the usual cap)"
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_round_history_inside_an_aside_is_read_from_its_last_round():
+    # cairnwork#268's record shape: the aside's earlier round was a REJECT, its last an
+    # ACCEPT; as on main, only the words from the last round marker on are checked.
+    label = "(Claude Opus 5.5, separate agent; round 1 at 6ed031de REJECT, delta round 2)"
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"

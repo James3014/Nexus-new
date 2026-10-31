@@ -425,15 +425,39 @@ def _clauses(line: str) -> list[str]:
     return [clause for clause in _CLAUSE_SPLIT.split(line) if clause.strip()]
 
 
-def _in_parenthetical(text: str, at: int) -> bool:
-    """Whether position ``at`` lies inside a parenthetical that closes later on the line."""
+def _aside_end(text: str, at: int) -> int | None:
+    """Index of the ``)`` closing the parenthetical that position ``at`` lies in, if any."""
     depth = 0
     for char in text[:at]:
         if char == "(":
             depth += 1
         elif char == ")" and depth:
             depth -= 1
-    return depth > 0 and ")" in text[at:]
+    if not depth:
+        return None
+    level = 0
+    for index in range(at, len(text)):
+        if text[index] == "(":
+            level += 1
+        elif text[index] == ")":
+            if not level:
+                return index
+            level -= 1
+    return None
+
+
+def _aside_denies(aside: str) -> bool:
+    """Whether the part of a label aside from its round marker on denies the verdict.
+
+    The same words deny here as in the window, except ``only`` ("delta only <a>..<b>",
+    "test-only delta"), which in an aside names the scope reviewed, and an apostrophe
+    ("round 3's items"), which is no quote. Double quotes, REJECT words and every other
+    denial still deny (#3040).
+    """
+    text = _plain(aside, keep_parens=True)
+    if _REJECT.search(text) or re.search('["\u201c\u2018]', text):
+        return True
+    return any(match.group().lower() != "only" for match in _PRE_DENY.finditer(text))
 
 
 def verdict_clauses(line: str) -> list[str]:
@@ -462,13 +486,18 @@ def verdict_clauses(line: str) -> list[str]:
             continue
         token_at = start + span[0]
         window_start = prev_token_end
+        asides: dict[int, str] = {}
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
             # A marker inside a parenthetical is part of that aside ("(Round 3, delta only
             # <a>..<b>): ACCEPT", #3040): starting the window there would cut the aside open
-            # and read its words as the verdict's own.
-            if _in_parenthetical(plain_line, marker.start()):
+            # and read its scope words as the verdict's own. The aside's words from its last
+            # marker on ("(round 1 REJECT, round 2)") are still checked, by _aside_denies.
+            aside_end = _aside_end(plain_line, marker.start())
+            if aside_end is not None:
+                asides[aside_end] = plain_line[marker.start() : aside_end]
                 continue
             window_start = marker.start()  # "r1 ... with one should-fix, r2 ACCEPT": new round
+            asides = {}
         prev_token_end = max(prev_token_end, start + span[1])
         if (
             start > 0
@@ -487,6 +516,8 @@ def verdict_clauses(line: str) -> list[str]:
         after = clause[span[1] :]
         if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
             continue  # a quoted or negated verdict is prose about a verdict, not one
+        if any(_aside_denies(aside) for aside in asides.values()):
+            continue  # "(r2 not fixed): ACCEPT": a denial inside the aside still denies
         if _VERDICT_NEGATIVE.search(line_before) or _REJECT.search(_plain(clause[span[1] :])):
             continue  # "Verdict: REJECT — ACCEPT after the fixes" is a rejection
         head_of_after = _STOP.split(after, 1)[0]
