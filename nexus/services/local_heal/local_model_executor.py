@@ -2368,7 +2368,11 @@ class LocalModelExecutor:
                 except PathContainmentError as exc:
                     original_target_read_refused = str(exc)
                 else:
-                    if original_target_exists:
+                    if original_target_exists and "\ufffd" in _original_text:
+                        # The contained read decodes with replacement characters: writing that text
+                        # back would change the bytes of a non-UTF-8 target, so nothing is restored.
+                        original_target_read_refused = f"target_not_utf8:{target_file}"
+                    elif original_target_exists:
                         original_target_content = _original_text
 
             # Execute repair_loop (localheal pipeline bridge)

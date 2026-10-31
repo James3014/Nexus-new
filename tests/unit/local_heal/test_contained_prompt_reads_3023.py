@@ -331,6 +331,40 @@ def test_original_snapshot_of_a_regular_target_is_still_restored(repo_and_host):
     assert meta["isolated_apply_status"] == "applied"
 
 
+def test_original_snapshot_of_a_non_utf8_target_is_not_rewritten(repo_and_host):
+    # The contained read decodes with replacement characters; writing that text back would change
+    # the target's bytes, so the run takes the refused-restore path and the bytes stay as found.
+    repo, _host = repo_and_host
+    original = b"# caf\xe9\ndef double(x):\n    return x * 2\n"
+    (repo / TARGET).write_bytes(original)
+    applied = []
+
+    def apply(req):
+        applied.append(req)
+        return _apply_receipt(req)
+
+    def pipeline_execute(*_a, **_kw):
+        (repo / TARGET).write_bytes(original)  # model code ran; the target is as it was
+        return _pipeline_result()
+
+    with patch(
+        "nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply",
+        side_effect=apply,
+    ):
+        resp = _run_pipeline(
+            _pipeline_request(repo, "prompt-3023-original-not-utf8", []),
+            pipeline_execute=pipeline_execute,
+            verifier=_verifier_fail,
+            committee_run=_committee_run_result,
+        )
+    assert (repo / TARGET).read_bytes() == original
+    meta = resp.raw_model_metadata
+    assert meta["original_target_read_refused"] == f"target_not_utf8:{TARGET}"
+    assert meta["isolated_apply_status"] == "restore_refused"
+    assert meta["isolated_verifier_status"] == "not_run"
+    assert applied == []
+
+
 # --- source_context in the single-model unified-diff prompt --------------------------------
 
 
