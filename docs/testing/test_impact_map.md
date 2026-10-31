@@ -104,6 +104,8 @@
 | nexus/core/memory_manager.py | tests/core/test_state_read_only_p1_writers_2721.py, tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
 | nexus/core/argv_command.py | tests/security/test_low_severity_hardening_2635.py, tests/core, tests/delivery, tests/health | active | high | no_shell_legacy_command_runner_2635 |
 | nexus/core/notifier.py | tests/security/test_low_severity_hardening_2635.py, tests/core | active | medium | notifier_osascript_argv_2635 |
+| nexus/core/contained_write.py | tests/core/test_contained_write.py, tests/core/test_drone_file_edit_containment_2949.py, tests/unit/local_heal/test_host_writes_stay_in_work_dir.py, tests/unit/local_heal/test_patch_applier.py | active | high | host_writes_contained_to_work_dir_3013 |
+| benchmarking/swebench_lite/swe_local_heal.py | tests/unit/test_swe_local_heal_manifest_runner.py, tests/unit/local_heal/test_host_writes_stay_in_work_dir.py | active | medium | research_harness_local_mode_scratch_copy_3013 |
 | scripts/core/guard_executor.py | tests/security/test_low_severity_hardening_2635.py, tests/test_guard_allowlist.py | active | medium | guard_executor_no_shell_2635 |
 | scripts/guard_executor.py | tests/security/test_low_severity_hardening_2635.py | active | medium | legacy_guard_executor_no_shell_2635 |
 | scripts/core/morning_report.py | tests/security/test_low_severity_hardening_2635.py | active | low | morning_report_voice_notify_no_shell_2635 |

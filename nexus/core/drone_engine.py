@@ -10,6 +10,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from nexus.core.contained_write import write_text_in_root
 from nexus.core.layer_ports import resolve_port
 from nexus.core.drone_protocol import DroneProtocol
 
@@ -106,8 +107,14 @@ class DroneToolBox:
             # Path containment, not a string prefix: "<dir>EXTRA" must not pass for "<dir>" (#2949).
             if not path.is_relative_to(self.sandbox_dir.resolve()):
                 return {"status": "FAIL", "error": "Path traversal blocked"}
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            # Sandboxed BASH runs may still be changing sandbox_dir: the write walks the checked
+            # path again without following any link, and only into a regular single-link file.
+            write_text_in_root(
+                self.sandbox_dir,
+                path.relative_to(self.sandbox_dir.resolve()),
+                content,
+                create_parents=True,
+            )
             return {"status": "SUCCESS"}
         except Exception as e:
             return {"status": "FAIL", "error": str(e)}

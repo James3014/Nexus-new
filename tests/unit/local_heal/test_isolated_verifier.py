@@ -320,10 +320,11 @@ def test_isolated_verifier_not_allowed() -> None:
     assert receipt.verifier_error == "verifier_not_allowed"
 
 
-def test_isolated_verifier_pass() -> None:
+def test_isolated_verifier_pass(tmp_path: Path) -> None:
+    # Not the checkout itself: a model run may not write where the host imports from.
     request = IsolatedVerifierRequest(
         task_id="t2",
-        workspace_path=".",
+        workspace_path=str(tmp_path),
         verifier_command=("python3", "-c", "import sys; sys.exit(0)"),
         verifier_allowed=True,
     )
@@ -333,10 +334,11 @@ def test_isolated_verifier_pass() -> None:
     assert receipt.verifier_error == ""
 
 
-def test_isolated_verifier_fail() -> None:
+def test_isolated_verifier_fail(tmp_path: Path) -> None:
+    # Not the checkout itself: a model run may not write where the host imports from.
     request = IsolatedVerifierRequest(
         task_id="t3",
-        workspace_path=".",
+        workspace_path=str(tmp_path),
         verifier_command=("python3", "-c", "import sys; sys.exit(1)"),
         verifier_allowed=True,
     )
@@ -345,10 +347,11 @@ def test_isolated_verifier_fail() -> None:
     assert receipt.exit_code == 1
 
 
-def test_isolated_verifier_timeout() -> None:
+def test_isolated_verifier_timeout(tmp_path: Path) -> None:
+    # Not the checkout itself: a model run may not write where the host imports from.
     request = IsolatedVerifierRequest(
         task_id="t4",
-        workspace_path=".",
+        workspace_path=str(tmp_path),
         verifier_command=("python3", "-c", "import time; time.sleep(2)"),
         timeout_sec=0.1,
         verifier_allowed=True,
