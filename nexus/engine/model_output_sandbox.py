@@ -33,6 +33,7 @@ from pathlib import Path
 from nexus.core.argv_command import (
     UnsupportedShellSyntax,
     run_command_string,
+    run_reaping_process_group,
     split_command_chain,
 )
 from nexus.core.contained_write import HOST_RUN_SUBTREES
@@ -258,7 +259,8 @@ def run_model_argv(
     writable: Iterable[Path | str] = (),
     text: bool = True,
 ) -> subprocess.CompletedProcess:
-    """``subprocess.run(argv, cwd=work_dir)`` inside the model sandbox (no shell).
+    """``subprocess.run(argv, cwd=work_dir)`` inside the model sandbox (no shell), its process
+    group killed afterwards.
 
     ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran. A program that
     does not exist raises FileNotFoundError, as ``subprocess.run`` would, rather than surfacing
@@ -284,14 +286,14 @@ def run_model_argv(
         # Raised after the barrier check, so a missing barrier is reported first.
         if not found or not os.path.exists(found):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
-        return subprocess.run(  # noqa: S603 - argv list, no shell
+        # Nothing the command started outlives it in its process group (#3017).
+        return run_reaping_process_group(
             [*prefix, *command],
             cwd=str(Path(work_dir).resolve()),
             env=run_env,
             capture_output=True,
             text=text,
             timeout=timeout,
-            check=False,
         )
 
 
@@ -303,5 +305,10 @@ def run_model_command_string(
     readable = _command_readable_roots(command, Path(work_dir).resolve())
     with model_sandbox(work_dir, readable=readable) as (prefix, env):
         return run_command_string(
-            command, cwd=Path(work_dir).resolve(), env=env, timeout=timeout, argv_prefix=prefix
+            command,
+            cwd=Path(work_dir).resolve(),
+            env=env,
+            timeout=timeout,
+            argv_prefix=prefix,
+            reap_process_group=True,
         )
