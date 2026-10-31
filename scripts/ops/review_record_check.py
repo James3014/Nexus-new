@@ -551,7 +551,16 @@ def reject_clauses(line: str) -> list[str]:
     cells read as ``:``-separated), a block quote, an unticked checklist item or indented
     code is still a rejection, so a missed one can never let an ACCEPT stand.
     """
-    out: list[str] = []
+    return [clause for clause, _start in _reject_clause_starts(line)]
+
+
+def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
+    """reject_clauses with each clause's start in ``_plain(_reject_view(line), keep_parens=True)``.
+
+    The caller places the token by this start: finding the clause text again would land on
+    an earlier, unread clause of the same text and judge the REJECT there (#3039).
+    """
+    out: list[tuple[str, int]] = []
     plain_line = _plain(_reject_view(line), keep_parens=True)
     tokens = [(m.start(), m.end()) for m in _ANY_VERDICT_TOKEN.finditer(plain_line)]
     if len(tokens) > MAX_VERDICTS_PER_LINE:
@@ -586,7 +595,7 @@ def reject_clauses(line: str) -> list[str]:
         following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
         if _resolved_after(plain_line, end, following):
             continue
-        out.append(clause)
+        out.append((clause, start))
     return out
 
 
@@ -1124,12 +1133,9 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     ))
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
-        consumed = 0
-        for clause in reject_clauses(line):
+        for clause, start in _reject_clause_starts(line):
             span = _reject_match(clause)
-            start = plain_reject.find(clause, consumed)
-            consumed = start + len(clause) if start >= 0 else consumed
-            if span is None or start < 0:
+            if span is None:
                 continue
             if not _reject_binding(clause, span, plain_reject, head, reject_head):
                 continue
