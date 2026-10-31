@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 from pathlib import Path
 
@@ -2613,3 +2614,30 @@ def test_a_round_history_inside_an_aside_is_read_from_its_last_round():
     label = "(Claude Opus 5.5, separate agent; round 1 at 6ed031de REJECT, delta round 2)"
     body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # Each is the only denial in its aside, so each check is pinned on its own.
+        "(Opus; round 3, only once CI is green)",
+        "(Opus; round 3, only-if the rebase is clean)",
+        "(Opus; round 3, only after the rebase)",
+        "(Opus; round 3, Verdict: REJECTION)",
+        # A REJECT in an earlier segment of the aside: no other check reaches it.
+        "(Opus; round 3, REJECT items open, delta)",
+        '(Opus; round 3, "approved")',
+        "(Opus; round 3, “approved”)",
+    ],
+)
+def test_each_denial_inside_a_round_marked_aside_denies_alone(label):
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
+
+
+def test_many_round_markers_in_asides_stay_linear():
+    # Thousands of markers inside asides on one line: one pass per line, not per marker.
+    line = "(" + " r1" * 4000 + ") " * 1 + "(" + " r2" * 4000 + ")"
+    started = time.monotonic()
+    rrc.verdict_clauses(f"**Claude review** {line}: ACCEPT at {HEAD}")
+    assert time.monotonic() - started < 2.0
