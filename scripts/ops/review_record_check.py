@@ -143,11 +143,10 @@ _REJECT_PRE_DENY = re.compile(
     r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
     re.IGNORECASE,
 )
-_RESOLVED = re.compile(
-    r"\b(?:fixed|rebutted|addressed|resolved|superseded|withdrawn|retracted|overturned"
+_RESOLUTION_WORD = (
+    r"(?:fixed|rebutted|addressed|resolved|superseded|withdrawn|retracted|overturned"
     r"|dismissed|overridden|cleared|triaged|non-defects?|false[- ]positives?|disputed|declined"
-    r"|deferred|waived|moot|answered|out of scope)\b",
-    re.IGNORECASE,
+    r"|deferred|waived|moot|answered|out of scope)"
 )
 # A resolution word right after one of these is still open ("not fixed yet", "will be
 # addressed", "needs to be fixed").
@@ -329,7 +328,8 @@ def names_head(text: str, head: str) -> bool:
 def names_other_sha(text: str, head: str) -> bool:
     """True when the text names a sha that is not (a prefix of) the head."""
     head = head.lower()
-    return any(not head.startswith(token) for token in _hex_tokens(text))
+    tokens = set(_hex_tokens(text)) | set(_SHORT_SHA.findall(text.lower()))
+    return any(not head.startswith(token) for token in tokens)
 
 
 def _family(text: str) -> str | None:
@@ -438,11 +438,20 @@ def _reject_label_only(prefix: str) -> bool:
 
 
 def _resolved_after(text: str, start: int, end: int) -> bool:
-    """A resolution word between ``start`` and ``end`` that is not negated or postponed."""
-    return any(
-        not _UNRESOLVED.search(text[max(start, match.start() - 24) : match.start()])
-        for match in _RESOLVED.finditer(text, start, end)
+    """A status word immediately after a REJECT, not ordinary finding prose."""
+    tail = text[start:end]
+    tail = re.sub(r"^\s*(?:@|\bat\s+)[0-9a-f]{7,40}\b", "", tail, count=1, flags=re.I)
+    tail = re.sub(  # "REJECT at <sha> (why): fixed"; "(fixed ...)" itself is kept
+        rf"^\s*\((?!\s*{_RESOLUTION_WORD}\b)[^()]{{0,300}}\)", "", tail, count=1, flags=re.I
     )
+    match = re.match(
+        rf"\s*(?:[,.:;—–-]\s*|(?:→|->|=>)\s*)?\(?\s*({_RESOLUTION_WORD})(?![\w-])"
+        rf"(?=\s*(?:$|[,.;:)(—–→]|-\s|->|=>|(?:in|at|by|as|with|per|via|see|after|before"
+        rf"|because|since|to|on|and|all|both|it|them)\b))",
+        tail,
+        re.I,
+    )
+    return bool(match and not _UNRESOLVED.search(tail[: match.start(1)]))
 
 
 def reject_clauses(line: str) -> list[str]:
@@ -538,14 +547,21 @@ def _binding(clause: str, line: str, head: str, comment_head: bool) -> bool:
     A clause that names a different sha is bound to that sha: a later ``Head`` line
     or another sha on the same line cannot rebind it.
     """
+    if _SHORT_SHA.search(clause):
+        return any(head.lower().startswith(token) for token in _SHORT_SHA.findall(clause.lower()))
     if _hex_tokens(clause):
         return names_head(clause, head)
+    if _SHORT_SHA.search(line):
+        return any(head.lower().startswith(token) for token in _SHORT_SHA.findall(line.lower()))
     if _hex_tokens(line):
         return names_head(line, head)
     return comment_head
 
 
-_SHORT_SHA = re.compile(r"(?<![0-9a-f])(?=[0-9a-f]{0,39}[a-f])([0-9a-f]{7,40})(?![0-9a-f])")
+_SHORT_SHA = re.compile(
+    r"(?<![0-9a-f])(?=[0-9a-f]{0,39}[a-f])([0-9a-f]{7,40})(?![0-9a-f])",
+    re.IGNORECASE,
+)
 
 
 def _short_sha_elsewhere(clause: str, head: str) -> bool:
@@ -696,13 +712,16 @@ def _clause_family(
     before = clause[: span[0]] if span else ""
     line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
     label_part, status_part = _split_label(line_before)
-    if _disabled_verdict_label(label_part) or (
-        label_part != line_before
-        and bool(_MODEL_WORDS.search(label_part))
-        and len(status_part.split()) <= 4
-        and bool(_NOT_A_HEADER.search(_plain(status_part)))
+    if not nearest and (
+        _disabled_verdict_label(label_part)
+        or (
+            label_part != line_before
+            and bool(_MODEL_WORDS.search(label_part))
+            and len(status_part.split()) <= 4
+            and bool(_NOT_A_HEADER.search(_plain(status_part)))
+        )
     ):
-        return None
+        return None  # a REJECT is never disabled by a status label (#3002 F5)
     if nearest:
         named = _NEAREST_MODEL.findall(_plain(line_before))  # "(after the Codex fix)" is an aside
         if not named:
@@ -723,6 +742,7 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
     accepts: dict[str, list[dict[str, Any]]] = {}
     for event in events:
         family = event["family"]
+        reviewer = event.get("reviewer", family)
         if event["kind"] == "accept":
             accepts.setdefault(family, []).append(event)
             continue
@@ -730,6 +750,7 @@ def standing_families(events: list[dict[str, Any]]) -> set[str]:
         accepts[family] = [
             accept
             for accept in accepts.get(family, [])
+            if accept.get("reviewer", family) == reviewer
             if reject_round is not None
             and accept["round"] is not None
             and accept["round"] > reject_round
@@ -773,6 +794,11 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
         if point is not None:
             event = {
                 "family": "cross_model",
+                "reviewer": (
+                    _NEAREST_MODEL.findall(_plain(section[0]))[-1].lower()
+                    if section and _NEAREST_MODEL.findall(_plain(section[0]))
+                    else "cross_model"
+                ),
                 "kind": "accept",
                 "rebuttal": True,
                 "round": point[1],
@@ -814,8 +840,14 @@ def classify_record(body: str, head: str) -> dict[str, Any] | None:
                     continue  # "REJECT at f9ccbf67": a short sha of an earlier round
                 if family and _binding(clause, line, head, comment_head):
                     rounds = _ROUND.findall(clause[: span[0]]) if span else []
+                    reviewer = family
+                    if family == "cross_model" and span:
+                        named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
+                        if named:
+                            reviewer = named[-1].lower()
                     event = {
                         "family": family,
+                        "reviewer": reviewer,
                         "kind": kind,
                         "round": int(rounds[-1]) if rounds else None,
                         "comment": 0,
@@ -894,6 +926,41 @@ def rebuttal_counts(repo: str) -> bool:
     return repo.strip().lower() not in NO_REBUTTAL_AT_CAP_REPOS
 
 
+def _short_prefix_rejects(body: str, head: str, number: int) -> list[dict[str, Any]]:
+    """REJECT events whose 7-8 char sha is the head's own prefix (the comment does not
+    name the full head, so ``classify_record`` returned None for it)."""
+    out: list[dict[str, Any]] = []
+    for line in body.splitlines():
+        for clause in reject_clauses(line):
+            short_shas = _SHORT_SHA.findall(clause.lower())
+            if not any(
+                7 <= len(token) <= 8 and head.lower().startswith(token) for token in short_shas
+            ):
+                continue  # only a short sha that is the head's own prefix binds
+            span = _reject_match(clause)
+            plain_line = _plain(line, keep_parens=True)
+            start = plain_line.find(clause)
+            if span is None or not _reject_label_only(_plain(clause[: span[0]])):
+                continue
+            family = _clause_family(clause, span, plain_line, start, None, nearest=True)
+            if not family:
+                continue
+            named = _NEAREST_MODEL.findall(_plain(plain_line[: start + span[0]]))
+            reviewer = (
+                (named[-1].lower() if named else family) if family == "cross_model" else family
+            )
+            rounds = _ROUND.findall(clause[: span[0]])
+            out.append({
+                "family": family,
+                "reviewer": reviewer,
+                "kind": "reject",
+                "round": int(rounds[-1]) if rounds else None,
+                "comment": number,
+                "line": clause.strip(),
+            })
+    return out
+
+
 def _evidence_at(
     head: str, comments: list[Any], reviews: list[Any], allow_rebuttal: bool = True
 ) -> tuple[list[dict[str, Any]], bool, bool, int, set[str]]:
@@ -909,6 +976,9 @@ def _evidence_at(
             continue
         record = classify_record(body, head)
         if record is None:
+            # A 7-8 char sha that is a prefix of the head still binds a REJECT to it. Fold
+            # that rejection against an earlier ACCEPT instead of treating it as absent.
+            events.extend(_short_prefix_rejects(body, head, number))
             if names_other_sha(body, head) and any(
                 is_verdict_line(line) for line in body.splitlines()
             ):
@@ -937,6 +1007,23 @@ def _contributes(
         approved > 0 or "claude" in standing,
         "cross_model" in standing,
     )
+
+
+def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> list[dict[str, Any]]:
+    """Events bound to one head in comment order, for carrying a verified delta."""
+    events: list[dict[str, Any]] = []
+    for number, comment in enumerate(comments):
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str):
+            continue
+        record = classify_record(body, head)
+        if record is None:
+            events.extend(_short_prefix_rejects(body, head, number))
+            continue
+        for event in record["events"]:
+            if allow_rebuttal or not event.get("rebuttal"):
+                events.append(dict(event, comment=number))
+    return events
 
 
 def evaluate(
@@ -982,6 +1069,22 @@ def evaluate(
         cross_model = cross_model or old_cross
         if used:
             delta_heads.append(old)
+    if delta_heads:
+        carried_events = [
+            event for old in delta_heads for event in _fold_events_at(old, comments, allow_rebuttal)
+        ]
+        folded = standing_families(
+            sorted(
+                carried_events + _fold_events_at(head, comments, allow_rebuttal),
+                key=lambda event: event["comment"],
+            )
+        )
+        independent = (
+            approved_reviews > 0
+            or "claude" in folded
+            or any(approved_reviews_at_head(reviews, old) > 0 for old in delta_heads)
+        )
+        cross_model = "cross_model" in folded
     short = head[:12]
     if not independent:
         status = "MISSING_RECORD"

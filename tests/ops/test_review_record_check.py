@@ -1781,3 +1781,156 @@ def test_run_cairnwork_merge_only_delta_still_requires_a_cross_model_record_for_
     assert results["James3014/Nexus-new"]["state"] == "success"
     assert results["cairnwork/cairnwork"]["state"] == "failure"
     assert "MISSING_CROSS_MODEL" in results["cairnwork/cairnwork"]["description"]
+
+
+# -- #3002: false passes (short sha, resolution words, delta REJECT, rounds, labels) -------
+
+
+def _eval3002(comments):
+    return rrc.evaluate(HEAD, RISKY, comments, [])
+
+
+def _status3002(comments):
+    return _eval3002(comments)["status"]
+
+
+def test_3002_f1_short_sha_accept_is_not_bound_to_the_head():
+    # A 7-char sha of an older commit under a comment-level head label is not the head.
+    body = (
+        f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\n"
+        "**Codex review**: r1 ACCEPT at 1a2b3c4 (before the last fix)\n"
+    )
+    result = _eval3002([_c(body)])
+    assert result["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_3002_f1_short_sha_reject_withdraws_the_accept():
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c("Codex r2 REJECT@8d70e3f: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the symlink is resolved after the containment check",
+        "the env path can be overridden by PR text",
+        "the cache is cleared before the write",
+    ],
+)
+def test_3002_f2_ordinary_words_do_not_resolve_a_reject(text):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD}: {text}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+def test_3002_f2_a_status_word_still_resolves_a_reject():
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD} (fixed in 1a2b3c4d5)"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "OK"
+
+
+def test_3002_f3_delta_path_folds_a_reject_bound_to_the_new_head():
+    reject = f"**Claude review** (Opus) r2: REJECT at {HEAD}: a regression"
+    rc, status = _delta_case(comments=[_c(OPUS_RECORD.replace(HEAD, R_OLD[:12])), _c(reject)])
+    assert rc == 1 and status["state"] == "failure"
+
+
+def test_3002_f4_rounds_are_compared_within_one_reviewer_only():
+    comments = [
+        _c(f"Codex r3 ACCEPT@{HEAD}"),
+        _c(f"Gemini r1 REJECT@{HEAD}: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+    same = [
+        _c(f"Codex r3 ACCEPT@{HEAD}"),
+        _c(f"Codex r4 REJECT@{HEAD}: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(same) != "OK"
+
+
+def test_3002_f5_in_progress_label_does_not_drop_a_reject():
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"**Codex r2** (fix in progress): REJECT@{HEAD}: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+def test_3002_f3_delta_path_folds_a_short_prefix_reject_of_the_new_head():
+    reject = f"**Claude review** (Opus) r2: REJECT@{HEAD[:7]}: a regression"
+    rc, status = _delta_case(comments=[_c(OPUS_RECORD.replace(HEAD, R_OLD[:12])), _c(reject)])
+    assert rc == 1 and status["state"] == "failure"
+
+
+@pytest.mark.parametrize("label", ["(fixing now)", "(fixes in progress)", "(review in-progress)"])
+def test_3002_f5_other_in_progress_wordings_do_not_drop_a_reject(label):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"**Codex r2** {label}: REJECT@{HEAD}: race in X"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+def test_3002_in_progress_label_cannot_make_an_accept_count():
+    for body in (
+        f"**Codex r2** (fix in progress): ACCEPT@{HEAD}",
+        f"**Codex review** (fix in progress)\nVerdict: **ACCEPT** at {HEAD}",
+    ):
+        assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+def test_3002_delta_path_keeps_an_approved_review_at_the_old_head():
+    approved = {"state": "APPROVED", "commit_id": R_OLD, "user": {"login": "x"}}
+    rc, status = _delta_case(comments=[], reviews=[approved])
+    assert rc == 0 and status["state"] == "success"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "resolved path escapes the root",
+        "fixed-size buffer overflow",
+        "(deferred cleanup frees twice)",
+    ],
+)
+def test_3002_finding_text_that_starts_with_a_status_word_stays_open(text):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD}: {text}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+@pytest.mark.parametrize("tail", ["-> rebutted: see test", "→ rebutted", ", fixed in 1a2b3c4d5"])
+def test_3002_arrow_and_comma_resolutions_still_resolve(tail):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD} {tail}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "OK"
+
+
+def test_3002_later_short_prefix_reject_on_the_same_line_is_kept():
+    line = f"Codex r1 REJECT@1a2b3c4d5 (fixed), r2 REJECT@{HEAD[:7]}: race"
+    assert _status3002([_c(f"Codex ACCEPT@{HEAD}"), _c(line), _c(CLAUDE_AT_HEAD)]) != "OK"
+
+
+def test_3002_line_level_short_sha_of_an_older_commit_does_not_bind_to_the_head():
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\nCodex: ACCEPT. Last checked 1a2b3c4\n"
+    assert _status3002([_c(body)]) == "MISSING_CROSS_MODEL"
