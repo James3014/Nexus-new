@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -24,7 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nexus.core.contained_write import write_text_in_root
+from nexus.core.contained_write import PathContainmentError, write_text_in_root
 from nexus.engine.model_output_sandbox import holds_host_code
 from nexus.services.local_heal.committee_routed_tool import (
     CommitteeRoutedToolRequest,
@@ -36,6 +37,7 @@ from nexus.services.local_heal.local_model_capability_executors import Capabilit
 from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutor,
     LocalModelExecutorRequest,
+    _restore_target_text,
 )
 from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
@@ -385,3 +387,98 @@ def test_removing_a_new_target_does_not_remove_a_file_behind_a_directory_link(re
     meta = resp.raw_model_metadata
     assert meta["isolated_apply_status"] == "restore_refused"
     _assert_no_host_text_recorded(meta)
+
+
+# #3024: a target under a directory the host runs from (.git, .venv) is never written back by
+# the restores; each refusal takes the existing restore-refused path.
+def _host_run_target_request(repo: Path, task_id: str, target: str, models: list[str]):
+    (repo / target).parent.mkdir(parents=True, exist_ok=True)
+    (repo / target).write_text(ORIGINAL)
+    return dataclasses.replace(_request(repo, task_id, models), target_file=target)
+
+
+def _diff_for(target: str) -> str:
+    return DIFF.replace(TARGET, target)
+
+
+def _pipeline_result_for(target: str):
+    result = _pipeline_result()
+    result.telemetries["pipeline_final_patch"] = _diff_for(target)
+    result.telemetries["patch_synthesis_output_len"] = len(_diff_for(target))
+    return result
+
+
+def test_restore_after_the_pipeline_run_refuses_a_host_run_target(repo_and_host):
+    repo, _host = repo_and_host
+    target = ".git/config"
+
+    def pipeline_execute(*_a, **_kw):
+        (repo / target).write_text("model wrote this\n")
+        return _pipeline_result_for(target)
+
+    resp = _run(
+        _host_run_target_request(repo, "restore-3024-a", target, []),
+        pipeline_execute=pipeline_execute,
+        committee_run=_committee_run_result,
+    )
+    assert (repo / target).read_text() == "model wrote this\n"
+    meta = resp.raw_model_metadata
+    assert meta["isolated_apply_status"] == "restore_refused"
+    assert meta["isolated_apply_error"].startswith("TARGET_RESTORE_REFUSED:")
+    assert meta["isolated_verifier_status"] == "not_run"
+
+
+def test_committee_never_runs_against_a_host_run_target(repo_and_host):
+    # The restore after the pipeline run is refused first, so no committee candidate runs and
+    # the restore after a candidate is never reached for such a target.
+    repo, _host = repo_and_host
+    target = ".venv/lib/helper.py"
+    calls = []
+
+    def pipeline_execute(*_a, **_kw):
+        (repo / target).write_text("model wrote this\n")
+        return _pipeline_result_for(target)
+
+    def committee_run(heal_ctx):
+        calls.append(heal_ctx)
+        return _committee_run_result(heal_ctx)
+
+    resp = _run(
+        _host_run_target_request(
+            repo,
+            "restore-3024-b",
+            target,
+            ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+        ),
+        pipeline_execute=pipeline_execute,
+        committee_run=committee_run,
+    )
+    assert (repo / target).read_text() == "model wrote this\n"
+    meta = resp.raw_model_metadata
+    assert meta["isolated_apply_status"] == "restore_refused"
+    assert meta["retry_not_invoked_reason"] == "patch_apply_failed"
+    assert not meta.get("delegated_retry_committee_path_used")
+    assert calls == []
+
+
+@pytest.mark.parametrize("target", [".git/config", ".venv/lib/helper.py", ".Git/config"])
+def test_committee_candidate_restore_refuses_a_host_run_target(repo_and_host, target):
+    # The call the restore after each committee candidate makes; its PathContainmentError is
+    # what stops the committee loop (see the planted-link test above).
+    repo, _host = repo_and_host
+    (repo / target).parent.mkdir(parents=True, exist_ok=True)
+    (repo / target).write_text("model wrote this\n")
+    with pytest.raises(PathContainmentError):
+        _restore_target_text(str(repo), target, ORIGINAL)
+    assert (repo / target).read_text() == "model wrote this\n"
+
+
+@pytest.mark.parametrize("target", [".git/config", ".venv/lib/helper.py", ".GIT/hooks/x"])
+def test_committee_routed_apply_refuses_a_host_run_target(repo_and_host, target):
+    repo, _host = repo_and_host
+    result = _apply_candidate(
+        _candidate("payload\n"),
+        CommitteeRoutedToolRequest(task_id="t", repo_root=str(repo), target_file=target),
+    )
+    assert result["applied"] is False
+    assert not (repo / target).exists()
