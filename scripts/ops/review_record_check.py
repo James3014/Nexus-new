@@ -426,16 +426,17 @@ def _clauses(line: str) -> list[str]:
 
 
 def _aside_closes(text: str) -> list[int | None]:
-    """Per position, the index of the ``)`` closing the innermost parenthetical it lies in.
+    """Per position, the index of the ``)`` closing the outermost parenthetical it lies in.
 
     One pass over the line; None where no parenthetical encloses the position or the
-    enclosing one never closes on the line.
+    outermost one never closes on the line. Nested asides are read as part of the
+    outermost one, so each aside is checked once.
     """
     opens: list[int] = []
     enclosing: list[int | None] = []
     close_of: dict[int, int] = {}
     for index, char in enumerate(text):
-        enclosing.append(opens[-1] if opens else None)
+        enclosing.append(opens[0] if opens else None)
         if char == "(":
             opens.append(index)
         elif char == ")" and opens:
@@ -443,27 +444,48 @@ def _aside_closes(text: str) -> list[int | None]:
     return [None if at is None else close_of.get(at) for at in enclosing]
 
 
-# "only" that makes the verdict conditional ("only once CI is green", "only-if").
-_ONLY_COND = re.compile(
-    r"only[\s-]+(?:if|after|once|when|unless|until|provided|assuming|upon|on\s+condition)\b",
+# The only places "only" names the scope reviewed rather than a condition, both at the
+# end of the aside: "<word>-only" plus at most one word ("test-only delta"), and
+# "<word> only" plus at most a commit or range ("delta only <a>..<b>").
+_SCOPE_ONLY_HYPHEN = re.compile(r"(?:\s+[A-Za-z]+)?\s*")
+_SCOPE_ONLY_SPACED = re.compile(r"(?:\s+[0-9a-f]{7,40}(?:\.{2,3}[0-9a-f]{7,40})?)?\s*")
+# A condition anywhere in the aside keeps every "only" in it a denial.
+_ASIDE_COND = re.compile(
+    r"\b(?:if|unless|provided|conditional\w*|once|when|after|with|subject|as\s+long\s+as|till"
+    r"|until|upon|assuming|on\s+condition)\b|\?",
     re.IGNORECASE,
 )
+
+
+def _scope_only(text: str, start: int, end: int) -> bool:
+    """Whether the ``only`` at ``text[start:end]`` names the scope reviewed (#3040)."""
+    if _ASIDE_COND.search(text):
+        return False
+    before = text[:start]
+    if before.endswith("-") and before[:-1][-1:].isalpha():
+        return bool(_SCOPE_ONLY_HYPHEN.fullmatch(text, end))
+    stripped = before.rstrip()
+    return (
+        len(stripped) < len(before)
+        and stripped[-1:].isalpha()
+        and bool(_SCOPE_ONLY_SPACED.fullmatch(text, end))
+    )
 
 
 def _aside_denies(aside: str) -> bool:
     """Whether the part of a label aside from its round marker on denies the verdict.
 
-    The same words deny here as in the window, except ``only`` naming the scope reviewed
-    ("delta only <a>..<b>", "test-only delta") and an apostrophe ("round 3's items"),
-    which is no quote. An ``only`` that makes the verdict conditional ("only once CI is
-    green"), double quotes, REJECT words, a negative ``Verdict:`` and every other denial
-    still deny (#3040).
+    The same words deny here as in the window, with two exceptions that misread honest
+    records: an ``only`` naming the scope reviewed at the end of an aside that states no
+    condition (see _scope_only; any other ``only`` still denies, "only once CI is green",
+    "once CI is green, test-only"), and an apostrophe ("round 3's items"), which is no quote. Double quotes,
+    REJECT words, a negative ``Verdict:`` and every other denial still deny (#3040).
     """
     text = _plain(aside, keep_parens=True)
     if _REJECT.search(text) or _VERDICT_NEGATIVE.search(text) or re.search('["\u201c\u2018]', text):
         return True
     return any(
-        match.group().lower() != "only" or _ONLY_COND.match(text, match.start())
+        match.group().lower() != "only" or not _scope_only(text, match.start(), match.end())
         for match in _PRE_DENY.finditer(text)
     )
 

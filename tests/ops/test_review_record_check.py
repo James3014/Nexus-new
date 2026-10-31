@@ -2617,7 +2617,7 @@ _DELTA = f"{OLD}..{HEAD}"
     [
         # #3029's round-3 record shape.
         f"(Claude Haiku 5.5, separate agent; Round 3, delta only `{_DELTA}`)",
-        f"(Claude Opus 5.5; r2, only the test file changed since {OLD[:9]})",
+        "(Claude Opus 5.5; r2, docs-only delta)",
     ],
 )
 def test_a_round_marker_inside_a_label_aside_keeps_an_honest_accept(label):
@@ -2682,6 +2682,21 @@ def test_a_round_history_inside_an_aside_is_read_from_its_last_round():
         "(Opus; round 3, only once CI is green)",
         "(Opus; round 3, only-if the rebase is clean)",
         "(Opus; round 3, only after the rebase)",
+        "(Opus; round 3, only-after the rebase)",
+        "(Opus; round 3, only\u2010after the rebase)",
+        "(Opus; round 3, only, once CI is green)",
+        "(Opus; round 3, only)",
+        "(Opus; round 3, once CI is green, test-only)",
+        "(Opus; round 3, when only)",
+        "(Opus; round 3, subject to CI, delta only a1b2c3d..e4f5a6b)",
+        "(Opus; round 3, only subject to CI passing)",
+        "(Opus; round 3, only with CI green)",
+        "(Opus; round 3, only: CI green)",
+        "(Opus; round 3, only (CI green))",
+        "(Opus; round 3 only, once CI is green)",
+        "(Opus; round 3, delta only a1b2c3d..e4f5a6b, once CI is green)",
+        "(Opus; round 3, test-only, once CI is green)",
+        "(Opus; round 3 (not fixed))",
         "(Opus; round 3, Verdict: REJECTION)",
         # A REJECT in an earlier segment of the aside: no other check reaches it.
         "(Opus; round 3, REJECT items open, delta)",
@@ -2697,6 +2712,13 @@ def test_each_denial_inside_a_round_marked_aside_denies_alone(label):
 def test_many_round_markers_in_asides_stay_linear():
     # Thousands of markers inside asides on one line: one pass per line, not per marker.
     line = "(" + " r1" * 4000 + ") " * 1 + "(" + " r2" * 4000 + ")"
+    started = time.monotonic()
+    rrc.verdict_clauses(f"**Claude review** {line}: ACCEPT at {HEAD}")
+    assert time.monotonic() - started < 2.0
+
+
+def test_deeply_nested_asides_stay_linear():
+    line = "(r1 " * 3000 + ")" * 3000
     started = time.monotonic()
     rrc.verdict_clauses(f"**Claude review** {line}: ACCEPT at {HEAD}")
     assert time.monotonic() - started < 2.0
