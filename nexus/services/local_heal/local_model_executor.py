@@ -5,6 +5,8 @@ import hashlib
 import os
 from typing import Any, Mapping
 
+from nexus.core.contained_write import PathContainmentError, write_text_in_root
+
 from nexus.services.local_heal.local_model_provider import (
     LocalModelProvider,
     LocalModelProviderRequest,
@@ -477,6 +479,15 @@ def _read_text_snapshot(path: str) -> tuple[bool, str]:
         return False, ""
     with open(path, "r", encoding="utf-8") as f:
         return True, f.read()
+
+
+def _restore_target_text(repo_root: str, target_file: str, text: str) -> None:
+    """Write the original target text back to repo_root/target_file, never through a link.
+
+    Model code may have run in repo_root since the original was read (#3023): a link it left at
+    the target or on the way to it, or a target_file that is absolute or leaves repo_root,
+    raises PathContainmentError and nothing is written."""
+    write_text_in_root(repo_root, os.path.normpath(target_file), text, create_parents=True)
 
 
 def _truncate_excerpt(text: str, limit: int = 400) -> str:
@@ -2316,6 +2327,7 @@ class LocalModelExecutor:
             pipeline_final_patch_len = len(pipeline_final_patch) if pipeline_final_patch else 0
             pipeline_result_projected = False
             candidate_isolation_attempted = False
+            target_restore_refused = ""
             candidate_isolated = False
             selected_candidate_hash = ""
             applied_patch_hash = ""
@@ -2388,9 +2400,15 @@ class LocalModelExecutor:
                     if before_exists or os.path.exists(original_target_path):
                         target_file_hash_before_apply = _sha256_text(before_text)
                     if original_target_exists:
-                        os.makedirs(os.path.dirname(original_target_path), exist_ok=True)
-                        with open(original_target_path, "w", encoding="utf-8") as f:
-                            f.write(original_target_content or "")
+                        try:
+                            _restore_target_text(
+                                request.repo_root, target_file, original_target_content or ""
+                            )
+                        except PathContainmentError as exc:
+                            # A link or escape left at the target: no apply from this repo_root.
+                            target_restore_refused = str(exc)
+                            isolated_apply_status = "restore_refused"
+                            isolated_apply_error = f"TARGET_RESTORE_REFUSED:{exc}"
                     elif os.path.exists(original_target_path):
                         os.remove(original_target_path)
                     after_exists, after_text = _read_text_snapshot(original_target_path)
@@ -2401,7 +2419,7 @@ class LocalModelExecutor:
                     if at_apply_exists or not original_target_exists:
                         target_file_hash_at_apply = _sha256_text(at_apply_text)
 
-                if candidate_isolation_attempted:
+                if candidate_isolation_attempted and not target_restore_refused:
                     _apply_search_text = str(locked_search) if locked_search else ""
                     apply_receipt = run_isolated_workspace_apply(
                         IsolatedApplyRequest(
@@ -3091,8 +3109,11 @@ class LocalModelExecutor:
                             # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
                             if request.target_file and original_target_path and os.path.exists(original_target_path):
                                 try:
-                                    with open(original_target_path, "w", encoding="utf-8") as f:
-                                        f.write(original_target_content or "")
+                                    _restore_target_text(
+                                        request.repo_root,
+                                        request.target_file,
+                                        original_target_content or "",
+                                    )
                                 except Exception:
                                     pass
 
