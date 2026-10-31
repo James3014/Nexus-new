@@ -253,3 +253,78 @@ def test_failed_replace_keeps_the_old_file_and_removes_the_temp_file(layout, mon
     monkeypatch.undo()
     assert (root / "a.py").read_text(encoding="utf-8") == "old"
     assert sorted(p.name for p in root.iterdir()) == ["a.py"]
+
+
+# The host runs git and the task interpreter in the work dir after model code (#2945, #3024):
+# model-driven writes may not land in .git or .venv, in any spelling, at any depth.
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ".git/config",
+        ".git/hooks/post-checkout",
+        ".git",
+        ".venv/lib/site-packages/helper.py",
+        ".venv/bin/python3",
+        ".venv",
+        ".GIT/config",
+        ".Git/hooks/pre-commit",
+        ".VENV/bin/python3",
+        ".g‌it/config",
+        "sub/.git/config",
+        "pkg/.venv/bin/python3",
+    ],
+)
+def test_host_run_subtrees_are_refused(layout, relative):
+    root, _ = layout
+    with pytest.raises(PathContainmentError):
+        write_text_in_root(root, relative, "x = 1\n", create_parents=True)
+    assert sorted(p.name for p in root.iterdir()) == []
+
+
+def test_host_run_subtree_refused_even_when_it_exists(layout):
+    root, _ = layout
+    (root / ".git").mkdir()
+    (root / ".git" / "config").write_text("orig", encoding="utf-8")
+    (root / ".venv" / "lib").mkdir(parents=True)
+    (root / ".venv" / "lib" / "helper.py").write_text("orig", encoding="utf-8")
+    for relative in (".git/config", ".venv/lib/helper.py"):
+        with pytest.raises(PathContainmentError):
+            write_text_in_root(root, relative, "changed")
+        assert (root / relative).read_text(encoding="utf-8") == "orig"
+
+
+@pytest.mark.parametrize("relative", [".gitignore", ".github/workflows/ci.yml", "git/x.py", "venv.py"])
+def test_names_near_host_run_subtrees_still_write(layout, relative):
+    root, _ = layout
+    write_text_in_root(root, relative, "ok", create_parents=True)
+    assert (root / relative).read_text(encoding="utf-8") == "ok"
+
+
+def test_model_sandbox_keeps_the_same_subtrees_read_only(tmp_path, monkeypatch):
+    # One list for both barriers: what the sandbox keeps read-only is exactly what the host-side
+    # writer refuses.
+    from nexus.core.contained_write import HOST_RUN_SUBTREES
+    from nexus.engine import model_output_sandbox
+
+    assert {".git", ".venv"} <= set(HOST_RUN_SUBTREES)
+    seen: dict = {}
+
+    class _Bound:
+        profile = "(version 1)"
+        env: dict = {}
+
+    def fake_confinement(**kwargs):
+        seen.update(kwargs)
+        return _Bound()
+
+    monkeypatch.setattr(model_output_sandbox, "confinement", fake_confinement)
+    monkeypatch.setattr(model_output_sandbox, "developer_toolchain_read_roots", lambda: ())
+    work = tmp_path / "work"
+    work.mkdir()
+    with model_output_sandbox.model_sandbox(work):
+        pass
+    expected = {str(work.resolve() / name) for name in HOST_RUN_SUBTREES}
+    assert set(seen["read_only_paths"]) == expected
+    for name in HOST_RUN_SUBTREES:
+        with pytest.raises(PathContainmentError):
+            write_text_in_root(work, f"{name}/x", "x", create_parents=True)

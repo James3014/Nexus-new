@@ -35,6 +35,7 @@ from nexus.core.argv_command import (
     run_command_string,
     split_command_chain,
 )
+from nexus.core.contained_write import HOST_RUN_SUBTREES
 from nexus.engine.sandboxed_lane import (
     SANDBOX_EXEC,
     SBPL_SAFE_PATH,
@@ -57,8 +58,6 @@ _DENIED_HOME_SUBTREES = (
     "Library/Application Support",
     "Library/Cookies",
 )
-# Work-dir entries the host itself runs from after a model command (#2945).
-_HOST_RUN_SUBTREES = (".git", ".venv")
 
 __all__ = [
     "SandboxError",
@@ -226,7 +225,7 @@ def model_sandbox(
     # a planted hook, git config (core.fsmonitor, diff.external) or venv file would run there,
     # unconfined. Both the path and, for a symlink, its target stay unwritable.
     read_only = sorted({
-        str(path) for name in _HOST_RUN_SUBTREES for path in (work / name, (work / name).resolve())
+        str(path) for name in HOST_RUN_SUBTREES for path in (work / name, (work / name).resolve())
     })
     if not all(SBPL_SAFE_PATH.fullmatch(path) for path in read_only):
         raise SandboxError("sandbox_path_unsafe")

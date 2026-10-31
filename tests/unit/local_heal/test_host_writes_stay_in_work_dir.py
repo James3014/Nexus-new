@@ -378,3 +378,40 @@ def test_sympy_patch_marker_write_refuses_a_link_swapped_in(tmp_path, monkeypatc
     with pytest.raises(PathContainmentError):
         harness.ensure_workspace_state(_SYMPY_TASK | {"repo_dir": repo})
     assert not real_lexists(outside / "planted")
+
+
+# The host runs git and the task interpreter in repo_dir later (#2945, #3024): a model patch
+# that names a file under .git or .venv is refused, even one Python can parse.
+@pytest.mark.parametrize(
+    "file_path", [".git/config", ".venv/lib/site-packages/helper.py", ".GIT/config"]
+)
+def test_patch_into_a_host_run_subtree_is_refused(dirs, file_path):
+    repo, _ = dirs
+    real = repo / file_path
+    real.parent.mkdir(parents=True, exist_ok=True)
+    real.write_text(WRONG, encoding="utf-8")
+    result = _apply(repo, file_path)
+    assert result.success is False
+    assert (result.error_reason or "").startswith("PATH_OUTSIDE_REPO")
+    assert real.read_text(encoding="utf-8") == WRONG
+
+
+def test_workspace_writable_probe_does_not_write_through_a_link(dirs):
+    from nexus.services.local_heal.workspace_provision import WorkspaceProvisionChecker
+
+    repo, outside = dirs
+    (repo / ".nexus_workspace_test").symlink_to(outside / "calc.py")
+    result = WorkspaceProvisionChecker.check(repo)
+    assert (outside / "calc.py").read_text(encoding="utf-8") == WRONG
+    assert os.path.islink(repo / ".nexus_workspace_test")
+    assert result.repo_root_exists is True
+
+
+def test_workspace_writable_probe_leaves_nothing_behind(dirs):
+    from nexus.services.local_heal.workspace_provision import WorkspaceProvisionChecker
+
+    repo, _ = dirs
+    (repo / "calc.py").write_text(WRONG, encoding="utf-8")
+    result = WorkspaceProvisionChecker.check(repo)
+    assert result.ready is True
+    assert sorted(p.name for p in repo.iterdir()) == ["calc.py"]
