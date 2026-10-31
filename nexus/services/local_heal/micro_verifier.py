@@ -11,7 +11,6 @@ import ast
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
@@ -22,6 +21,7 @@ from nexus.engine.model_output_sandbox import (
     run_model_argv,
 )
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
+from nexus.services.local_heal.scratch_copy import copy_repo_entries
 
 # Imports one module of the patched repo; the repo dir and module name arrive as argv, never
 # interpolated into the code.
@@ -478,42 +478,8 @@ def micro_verify_in_scratch_copy(
         )
 
     try:
-        repo_path = Path(repo_dir).resolve()
-        scratch_path = Path(scratch_dir).resolve()
         try:
-            for entry in repo_path.iterdir():
-                entry_resolved = entry.resolve()
-                if entry_resolved == scratch_path:
-                    continue
-                try:
-                    scratch_path.relative_to(entry_resolved)
-                    continue
-                except ValueError:
-                    pass
-
-                target = scratch_path / entry.name
-                copied = False
-                if sys.platform == "darwin" and not entry.is_symlink():
-                    try:
-                        subprocess.run(
-                            ["cp", "-cR", str(entry), str(target)],
-                            capture_output=True,
-                            check=True,
-                        )
-                        copied = True
-                    except Exception:
-                        if target.is_dir() and not target.is_symlink():
-                            shutil.rmtree(target, ignore_errors=True)
-                        elif target.exists() or target.is_symlink():
-                            target.unlink(missing_ok=True)
-                        copied = False
-                if not copied:
-                    if entry.is_symlink():
-                        shutil.copy2(entry, target, follow_symlinks=False)
-                    elif entry.is_dir():
-                        shutil.copytree(entry, target, symlinks=True)
-                    else:
-                        shutil.copy2(entry, target, follow_symlinks=False)
+            copy_repo_entries(Path(repo_dir), Path(scratch_dir))
         except Exception as e:
             return MicroVerifyResult(
                 passed=False,

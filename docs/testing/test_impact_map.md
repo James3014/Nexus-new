@@ -213,6 +213,7 @@
 | nexus/services/local_heal/linear_replay_runner.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/local_model_capability_executor_registry.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/local_qwen_evidence_gate.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
+| nexus/services/local_heal/scratch_copy.py | tests/unit/local_heal/test_model_runs_leave_verification_dir_clean.py, tests/unit/local_heal/test_micro_verifier_pytest_shadow_2975_r3.py, tests/unit/local_heal/test_micro_verifier_pytest_absent_2975.py | active | high | local_heal_model_runs_on_disposable_copy_3012 |
 | nexus/services/local_heal/memory_belief_signal.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/micromerger.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/parser.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |

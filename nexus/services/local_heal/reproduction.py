@@ -17,6 +17,7 @@ from nexus.engine.model_output_sandbox import (
     interpreter_readable_roots,
     run_model_argv,
 )
+from nexus.services.local_heal.scratch_copy import disposable_repo_copy
 
 
 class SyntaxValidator:
@@ -331,11 +332,12 @@ class ReproductionRunner:
         record_dir: Path | None = None
         try:
             # 硬化：路徑注入必須在最前面，否則會載入到 venv 裡已安裝的 astropy
-            benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
+            # The script runs in a copy of repo_dir (below) and later, as the verification
+            # oracle, in another: the path is the run's cwd, never a fixed directory.
             path_injection = (
                 "import sys, os\n"
-                f"sys.path.insert(0, {str(self.repo_dir)!r})\n"
-                f"sys.path.insert(1, {benchmarks_dir!r})\n"
+                "sys.path.insert(0, os.getcwd())\n"
+                "sys.path.insert(1, os.path.join(os.getcwd(), 'scripts/benchmarks'))\n"
             )
             executed_script = self._execution_wrapper(path_injection, script_code)
             repro_path.write_text(executed_script, encoding="utf-8")
@@ -350,17 +352,22 @@ class ReproductionRunner:
             # never the host's (no tokens or provider keys reach the model's script).
             repro_run_timeout = int(os.environ.get("NEXUS_REPRO_RUN_TIMEOUT_SECONDS", "180"))
             self.last_command = (self.python_executable, "reproduce_bug.py")
-            subprocess_started = True
-            # The script is model-written: OS sandbox, no network, writes only in repo_dir and
-            # record_dir; no barrier means nothing runs (#2945).
-            res = run_model_argv(
-                [self.python_executable, "reproduce_bug.py"],
-                work_dir=self.repo_dir,
-                timeout=repro_run_timeout,
-                extra_env={self._FAILURE_RECORD_ENV: str(record_path)},
-                readable=interpreter_readable_roots(self.python_executable),
-                writable=(record_dir,),
-            )
+            # The script is model-written: OS sandbox, no network, writes only in a disposable
+            # copy of repo_dir and in record_dir; no barrier means nothing runs (#2945). Nothing
+            # it writes is left in repo_dir, where verification later runs.
+            with disposable_repo_copy(self.repo_dir, prefix="repro-run-") as work:
+                subprocess_started = True
+                res = run_model_argv(
+                    [self.python_executable, "reproduce_bug.py"],
+                    work_dir=work,
+                    timeout=repro_run_timeout,
+                    extra_env={self._FAILURE_RECORD_ENV: str(record_path)},
+                    readable=(
+                        *interpreter_readable_roots(self.python_executable),
+                        Path(self.repo_dir).resolve(),
+                    ),
+                    writable=(record_dir,),
+                )
             self.last_exit_status = res.returncode
 
             output = res.stdout + res.stderr
