@@ -2896,6 +2896,18 @@ def test_a_denial_or_quote_outside_a_closed_aside_still_drops_a_reject(reject):
         (
             DOCS,
             f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"## Claude review\nHead reviewed: {HEAD}\nData loss in the writer。**r2 @{HEAD[:9]}: REJECT**\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
+            f"Head reviewed: {HEAD}\nClaude found data loss in the writer. r2 @{HEAD[:9]}: REJECT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n",
             f"## Claude review\nHead reviewed: {HEAD}\n- r2, delta a1b2c3d..{HEAD[:9]}: REJECT\n",
             "MISSING_RECORD",
         ),
@@ -2948,3 +2960,36 @@ def test_finding_prose_after_a_sentence_or_clause_break_is_not_a_reject_label(li
 def test_each_review_label_word_before_a_reject_keeps_it_a_verdict(label):
     body = f"## Claude review\nHead reviewed: {HEAD}\n- r1: ACCEPT\n- {label}: REJECT\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        (
+            DOCS,
+            [
+                CLAUDE_AT_HEAD,
+                f"**Second opinion** (round 2 (delta only), Claude Opus 5.5): **REJECT at {HEAD}**.\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [CLAUDE_AT_HEAD, f"Summary (see (1) Claude): REJECT at {HEAD}\n"],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [
+                f"**Codex adversarial review** r1: ACCEPT@{HEAD}\n",
+                f"**Adversarial pass** (r2 (delta), Codex gpt-5.5 high): REJECT at {HEAD}\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_model_named_after_a_nested_aside_still_starts_the_reject_label(files, comments, status):
+    # Main reads the model after the inner ")" and starts the label there; blanking the
+    # whole outer aside must not lose that reading.
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
