@@ -2237,3 +2237,103 @@ def test_r5_rr1_a_big_number_on_an_accept_line_is_not_a_sha():
 def test_r5_rr1_an_all_digit_older_sha_in_a_label_does_not_bind_an_accept(line):
     body = f"Head reviewed: {HEAD}\n**Codex review**\n{line}\n"
     assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+# -- r5 review round 2: an ACCEPT line naming any other sha-like run binds nothing ------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "**Codex review**: ACCEPT for 492038155",
+        "**Codex review**: ACCEPT (last run against 492038155)",
+        "Codex r2: ACCEPT, reviewing 492038155",
+        "Codex r2: ACCEPT 492038155",
+        "Codex r2: ACCEPT — fixed in 492038155123",
+        "**Codex review**: ACCEPT for 4920381",
+    ],
+)
+def test_r5_rr2_an_all_digit_older_sha_anywhere_on_the_line_does_not_bind(line):
+    body = f"Head reviewed: {HEAD}\n{line}\n"
+    assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+def test_r5_rr2_an_all_digit_word_ending_a_reject_label_does_not_unbind_it():
+    body = f"Head reviewed: {HEAD}\nCodex r2 4920381: REJECT — race"
+    assert _status3002(_codex_accept_then(body)) == "MISSING_CROSS_MODEL"
+
+
+_OLD_SHAS = (
+    "1a2b3c4",
+    "4920381",
+    "49203815",
+    "492038155",
+    "492038155123",
+    "1a2b3c4d5e6f",
+    OLD,
+    "1234567890" * 4,
+)
+_ACCEPT_WITH_OLD = (
+    "Codex r2 @{x}: ACCEPT",
+    "Codex r2 ({x}): ACCEPT",
+    "- {x}: **ACCEPT**",
+    "Codex r2: ACCEPT@{x}",
+    "Codex r2: ACCEPT at head {x}",
+    "**Codex review**: ACCEPT for {x}",
+    "**Codex review**: ACCEPT (last run against {x})",
+    "Codex r2: ACCEPT, reviewing {x}",
+    "Codex r2: ACCEPT {x}",
+    "Codex r2: ACCEPT — fixed in {x}",
+    "Codex r2: ACCEPT `{x}`",
+    "Codex r2: ACCEPT; {x}",
+    "Codex r2: ACCEPT — reviewed {x}, head is now {h}",
+    "Codex r2: ACCEPT ({x} and {h})",
+)
+_REJECT_WORDS = (
+    HEAD,
+    HEAD[:9],
+    HEAD[:7],
+    "ed25519",
+    "deadbeef",
+    "1234567",
+    "20261031",
+    "492038155",
+)
+_REJECT_SHAPES = (
+    "Codex r2: REJECT — {w}",
+    "Codex r2 REJECT ({w}): race",
+    "Codex r2: REJECT on {w} path",
+    "Codex r2: REJECT at {w} handling",
+    "Codex r2: REJECT — the fix in {w} reintroduces the race",
+    "Codex r2: REJECT — reviewed {w}, race",
+    "**Codex review** ({w} signer): REJECT — x",
+    "| Codex | r2 | REJECT | {w} |",
+    "> Codex r2: REJECT — {w}",
+    "Codex r2: REJECT — race. Reviewed {w}.",
+    "- Codex r2: REJECT (see {w})",
+)
+
+
+def test_r5_rr2_binding_matrix_fails_closed():
+    # An ACCEPT whose line names an older sha anywhere never binds to the head; a REJECT
+    # whose line binds it to no older commit is never dropped.
+    wrong = []
+    for shape in _ACCEPT_WITH_OLD:
+        for old in _OLD_SHAS:
+            for header in ("", "**Codex review**\n"):
+                body = f"Head reviewed: {HEAD}\n{header}{shape.format(x=old, h=HEAD)}\n"
+                if _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "OK":
+                    wrong.append(body)
+    for shape in _REJECT_SHAPES:
+        for word in _REJECT_WORDS:
+            for header in ("", "**Codex review**\n"):
+                body = f"Head reviewed: {HEAD}\n{header}{shape.format(w=word)}\n"
+                if _status3002(_codex_accept_then(body)) == "OK":
+                    wrong.append(body)
+    assert wrong == []
+
+
+def test_r5_rr2_a_nine_digit_run_is_a_sha_even_before_a_unit():
+    # Only a 7-8 digit count before its unit is not a sha; 9+ digits are a sha as on main.
+    body = f"Head reviewed: {HEAD}\nCodex r2: ACCEPT (317 passed, 492038155 assertions)\n"
+    assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"

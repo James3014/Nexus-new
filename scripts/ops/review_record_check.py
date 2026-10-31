@@ -622,24 +622,16 @@ def _bound_after(clause: str, span: tuple[int, int], prose_ok: bool = True) -> s
 
 
 def _sha_tokens(text: str) -> list[str]:
-    """Shas of 7+ hex characters the text names: any with a letter a-f, and an all-digit
-    one only where a sha is meant (after ``@``, ``at``, ``reviewed``, ``head`` ..., before
-    a colon, in backticks or alone in parentheses), so "317 passed, 1234567 assertions"
-    names no sha."""
+    """Shas the text names: every run of 7-40 hex characters, all-digit ones too, except a
+    7-8 digit count followed by its unit ("317 passed, 1234567 assertions"). Fail closed:
+    a token that may be a sha is one."""
     text = text.lower()
-    out = []
-    for match in _ANY_SHA.finditer(text):
-        token = match.group(1)
-        before, after = text[: match.start()], text[match.end() :]
-        if (
-            re.search(r"[a-f]", token)
-            or _DIGIT_SHA_BEFORE.search(before)
-            or re.match(r"\s*:", after)  # "- 8552809: ACCEPT"
-            or (before.endswith("`") and after.startswith("`"))
-            or (re.search(r"\(\s*$", before) and re.match(r"\s*\)", after))
-        ):
-            out.append(token)
-    return out
+    return [
+        match.group(1)
+        for match in _ANY_SHA.finditer(text)
+        if not (len(match.group(1)) <= 8 and _COUNT_UNIT.match(text, match.end()))
+        or re.search(r"[a-f]", match.group(1))
+    ]
 
 
 def _binding(
@@ -649,10 +641,10 @@ def _binding(
     Head label.
 
     ``ACCEPT@<sha>`` / ``ACCEPT at <sha>`` decides alone. Otherwise every sha in the
-    clause, else on the line, must be the head's (an all-digit one too where a sha is
-    meant, ``_sha_tokens``): a clause or line that also names another commit ("ACCEPT —
-    reviewed <old>, head is now <head>") is ambiguous and binds nothing (r5 R3, R7). A
-    later ``Head`` line cannot rebind a verdict whose clause or line names a sha.
+    clause, else on the line, must be the head's (``_sha_tokens``: any 7+ hex run,
+    all-digit too): a clause or line that also names another commit ("ACCEPT — reviewed
+    <old>, head is now <head>") is ambiguous and binds nothing (r5 R3, R7). Only a line
+    with no sha-like token at all borrows the comment's Head label.
     """
     head = head.lower()
     own = _bound_after(clause, span) if span else None
@@ -666,16 +658,18 @@ def _binding(
 
 
 def _label_sha_binds(label: str, match: re.Match[str]) -> bool:
-    """Whether a sha in a REJECT's label binds it: after ``@``/``at``/``on``/``head``/
-    ``commit``/``sha``, alone in a parenthetical ("Round 1 (<sha>):"), or a sha with a
-    letter that ends the label ("r2 <sha>: REJECT"). A word in an aside ("(ed25519
-    signer)") or an all-digit word elsewhere binds nothing."""
+    """Whether a sha in a REJECT's label binds it to that commit: after ``@``/``at``/``on``/
+    ``head``/``commit``/``sha``; or, for a sha with a letter a-f, alone in a parenthetical
+    ("Round 1 (<sha>):") or ending the label ("r2 <sha>: REJECT"). A word in an aside
+    ("(ed25519 signer)") or a bare all-digit word binds nothing (fail closed)."""
     before, after = label[: match.start()], label[match.end() :]
     if _LABEL_SHA_BEFORE.search(before):
         return True
+    if not re.search(r"[a-f]", match.group(1)):
+        return False
     if re.search(r"\(\s*$", before) and re.match(r"\s*\)", after):
         return True
-    return bool(re.search(r"[a-f]", match.group(1))) and bool(re.match(r"\s*(?:[:\]]|$)", after))
+    return bool(re.match(r"\s*(?:[:\]]|$)", after))
 
 
 def _reject_binding(
@@ -708,8 +702,10 @@ def _reject_binding(
 # Any 7-40 hex characters, all-digit runs included: what a short sha may look like.
 _ANY_SHA = re.compile(r"(?<![0-9a-f])([0-9a-f]{7,40})(?![0-9a-f])")
 _LABEL_SHA_BEFORE = re.compile(r"(?:@|\b(?:at|on|head|commit|sha))\s*:?\s*$")
-_DIGIT_SHA_BEFORE = re.compile(
-    r"(?:@|\b(?:at|on|head|commit|sha|reviewed|checked|from|since|vs))\s*:?\s*`?\s*\Z"
+# A count's unit after a 7-8 digit number: not a sha.
+_COUNT_UNIT = re.compile(
+    r"\s+(?:tests?|assertions?|passed|failed|errors?|lines?|bytes?|files?|rows?|runs?"
+    r"|items?|cases?|mutants?|tokens?|chars?|characters?|seconds?|ms|calls?|records?)\b"
 )
 _BOUND_AFTER = re.compile(
     r"\s*(@|at\b|on\b)\s*(?:head\s+)?([0-9a-fA-F]{7,40})(?![0-9a-fA-F])", re.IGNORECASE
