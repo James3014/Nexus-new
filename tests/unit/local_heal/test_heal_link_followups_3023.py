@@ -411,3 +411,73 @@ def test_committee_routed_verify_still_checks_a_plain_file(repo_and_host):
     (repo / TARGET).write_text("def broken(:\n")
     assert _verify(repo)["status"] == "fail"
     assert _verify(repo, "toy/missing.py") == {"status": "fail", "reason": "file_not_found"}
+
+
+def test_committee_routed_verify_fails_a_target_that_is_not_utf8(repo_and_host):
+    repo, _host_dir = repo_and_host
+    (repo / TARGET).write_bytes(b"x = 1\n# \xff\xfe\n")
+    result = _verify(repo)
+    assert result["status"] == "fail"
+    assert result["reason"].startswith("TARGET_NOT_UTF8:")
+
+
+# --- link loops: Python 3.11/3.12 raise RuntimeError from Path.resolve --------------------
+
+
+@pytest.mark.parametrize("planted", ["target_loop", "parent_loop"])
+def test_existence_helper_refuses_a_link_loop(repo_and_host, planted):
+    from nexus.core.contained_write import PathContainmentError
+    from nexus.services.local_heal.local_model_executor import _target_entry_exists
+
+    repo, _host_dir = repo_and_host
+    if planted == "target_loop":
+        (repo / TARGET).unlink()
+        (repo / TARGET).symlink_to(repo / TARGET)
+    else:
+        toy = repo / Path(TARGET).parent
+        for child in toy.iterdir():
+            child.unlink()
+        toy.rmdir()
+        toy.symlink_to(toy, target_is_directory=True)
+    with pytest.raises(PathContainmentError):
+        _target_entry_exists(str(repo), TARGET)
+
+
+def test_committee_restore_stops_at_a_link_loop(repo_and_host):
+    repo, _host_dir = repo_and_host
+    calls = []
+
+    def committee_run(heal_ctx):
+        calls.append(heal_ctx)
+        if not (repo / TARGET).is_symlink():
+            (repo / TARGET).unlink()
+            (repo / TARGET).symlink_to(repo / TARGET)
+        return _committee_run_result(heal_ctx)
+
+    resp = _run(
+        _request(
+            repo,
+            "link-followups-3023-loop",
+            ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+        ),
+        pipeline_execute=lambda *_a, **_kw: _pipeline_result(),
+        committee_run=committee_run,
+    )
+    assert resp.raw_model_metadata["delegated_retry_committee_restore_refused"] is True
+    assert len(calls) == 1
+
+
+def test_a_new_target_that_became_a_link_loop_is_refused_not_raised(repo_and_host):
+    repo, _host_dir = repo_and_host
+    (repo / TARGET).unlink()
+
+    def pipeline_execute(*_a, **_kw):
+        (repo / TARGET).symlink_to(repo / TARGET)
+        return _pipeline_result()
+
+    resp = _run(
+        _request(repo, "link-followups-3023-loop-new", []),
+        pipeline_execute=pipeline_execute,
+        committee_run=_committee_run_result,
+    )
+    assert resp.raw_model_metadata["isolated_apply_status"] == "restore_refused"

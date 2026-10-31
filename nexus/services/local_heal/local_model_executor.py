@@ -495,7 +495,14 @@ def _target_entry_exists(repo_root: str, target_file: str) -> bool:
     dir without the file would read as "nothing there". A link on the way to the target, or a
     target_file that leaves repo_root, raises PathContainmentError instead."""
     relative = os.path.normpath(target_file)
-    if os.fspath(contained_relative_path(repo_root, relative)) != relative:
+    try:
+        contained = os.fspath(contained_relative_path(repo_root, relative))
+    except PathContainmentError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        # Python 3.11/3.12 raise RuntimeError for a link loop; fail closed as a refusal.
+        raise PathContainmentError(f"path_unresolvable:{target_file}") from exc
+    if contained != relative:
         raise PathContainmentError(f"path_crosses_link:{target_file}")
     return os.path.lexists(os.path.join(repo_root, relative))
 
