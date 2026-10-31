@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence
 
-from nexus.core.contained_write import write_text_in_root
+from nexus.core.contained_write import read_text_in_root, write_text_in_root
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 
 
@@ -427,8 +427,13 @@ def _verify_applied_candidate(candidate: CanonicalPatchCandidate, request: Commi
         if not os.path.exists(target_path):
             return {"status": "fail", "reason": "file_not_found"}
 
-        with open(target_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        # Model code may have run in repo_root: never read through a link (#3023).
+        content = read_text_in_root(request.repo_root, os.path.normpath(request.target_file))
+
+        # The read replaces undecodable bytes with U+FFFD; a target that is not UTF-8 does not
+        # verify (same reason as the patch engine's TARGET_NOT_UTF8).
+        if "\ufffd" in content:
+            return {"status": "fail", "reason": f"TARGET_NOT_UTF8: {request.target_file}"}
 
         if not content.strip():
             return {"status": "fail", "reason": "empty_file"}
