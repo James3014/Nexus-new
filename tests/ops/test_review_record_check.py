@@ -2739,6 +2739,8 @@ def test_deeply_nested_asides_stay_linear():
         "(Opus; round 3, delta only a1b2c3d..e4f5a6b?)",
         "(Opus; round 3, ok? test-only delta)",
         "(Opus; round 3, merge-only)",
+        "(Opus; round 3, given CI green, test-only delta)",
+        "(Opus; round 3, tentatively docs-only)",
         "(Opus; round 3's items, subject to CI)",
         "(Opus; round 3, with CI green, test-only)",
         "(Opus; round 3, merge only)",
