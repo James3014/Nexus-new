@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -421,3 +422,69 @@ def test_source_context_still_shows_a_regular_target(repo_and_host, monkeypatch)
     assert "1: def add(a, b):" in prompt
     assert "2:     return a - b" in prompt
     assert "source_context_read_refused" not in meta
+
+
+# --- single-model delegated retry ----------------------------------------------------------
+
+
+def _hard_link(repo: Path, host: Path) -> None:
+    target = repo / TARGET
+    target.unlink()
+    os.link(host, target)
+
+
+SINGLE_PLANTERS = {**PLANTERS, "hard_link": _hard_link}
+
+
+def _workspace_target_text(heal_ctx) -> str:
+    try:
+        return (Path(heal_ctx.repo_dir) / TARGET).read_text()
+    except OSError:
+        return ""
+
+
+@pytest.mark.parametrize("plant", sorted(SINGLE_PLANTERS))
+def test_single_retry_does_not_run_on_a_target_behind_a_link(repo_and_host, plant):
+    # The retry workspace is a copy of repo_root; copying follows a link, so a refused
+    # target read must stop the single retry before any workspace or prompt is built.
+    repo, host = repo_and_host
+    seen = []
+
+    def verifier(req):
+        if (repo / TARGET).read_text() == ORIGINAL and not (repo / TARGET).is_symlink():
+            SINGLE_PLANTERS[plant](repo, host)
+        return _verifier_fail(req)
+
+    def single_run(heal_ctx):
+        seen.append((_localized_contents(heal_ctx), _workspace_target_text(heal_ctx)))
+        return _committee_run_result(heal_ctx)
+
+    resp = _run_pipeline(
+        _pipeline_request(repo, f"prompt-3023-single-{plant}", []),
+        pipeline_execute=lambda *_a, **_kw: _pipeline_result(),
+        verifier=verifier,
+        committee_run=single_run,
+    )
+    _assert_no_host_text(seen)
+    assert seen == []
+    meta = resp.raw_model_metadata
+    assert meta["delegated_retry_target_read_refused"] is True
+    assert meta["delegated_retry_failure_reason"] == "delegated_retry_target_read_refused"
+
+
+def test_single_retry_still_runs_on_a_regular_target(repo_and_host):
+    repo, _host = repo_and_host
+    seen = []
+
+    def single_run(heal_ctx):
+        seen.append((_localized_contents(heal_ctx), _workspace_target_text(heal_ctx)))
+        return _committee_run_result(heal_ctx)
+
+    resp = _run_pipeline(
+        _pipeline_request(repo, "prompt-3023-single-control", []),
+        pipeline_execute=lambda *_a, **_kw: _pipeline_result(),
+        verifier=_verifier_fail,
+        committee_run=single_run,
+    )
+    assert seen == [([ORIGINAL], ORIGINAL)]
+    assert "delegated_retry_target_read_refused" not in resp.raw_model_metadata

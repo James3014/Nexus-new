@@ -3631,6 +3631,18 @@ class LocalModelExecutor:
                                 _orchestrator_retry_prompt_evidence_hash = str(raw_meta.get("verifier_command_hash", ""))
                                 _semantic_retry_telemetry = {}
                             result_ctx = DummyResultCtx()
+                        elif raw_meta.get("delegated_retry_target_read_refused"):
+                            # The target sits behind a link (#3023). Copying it into the retry
+                            # workspace follows the link, so the single retry does not run.
+                            class RefusedTargetResultCtx:
+                                final_patch = ""
+                                failure_reason = "delegated_retry_target_read_refused"
+                                model_decisions = []
+                                _orchestrator_verifier_evidence_passed = False
+                                _orchestrator_verifier_evidence_fields = ""
+                                _orchestrator_retry_prompt_evidence_hash = ""
+                                _semantic_retry_telemetry = {}
+                            result_ctx = RefusedTargetResultCtx()
                         else:
                             heal_ctx = LegacyHealContext(
                                 instance_id=request.task_id,
