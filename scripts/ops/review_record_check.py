@@ -449,7 +449,7 @@ def _aside_closes(text: str) -> list[int | None]:
 # (optionally followed by "delta"), or "delta only <sha>..<sha>". Any other "only"
 # denies as on main.
 _SCOPE_ONLY_ASIDE = re.compile(
-    r"(?i:r\d+|round\s*\d+)\s*[,;:]?\s*"
+    r"(?i:r\d+|round\s*\d+)\s*(?:[,;:]\s*)?"
     r"(?:(?:docs|test|typing|delta)-only(?:\s+delta)?|delta\s+only\s+[0-9a-f]{7,40}\.\.[0-9a-f]{7,40})\s*"
 )
 # A condition anywhere in the aside keeps every "only" in it a denial.
@@ -476,7 +476,7 @@ def _aside_denies(aside: str) -> bool:
     if _ASIDE_COND.search(text) and _QUOTE.search(text):
         return True  # the apostrophe is exempt only in an aside stating no condition
     return any(
-        match.group().lower() != "only" or not _SCOPE_ONLY_ASIDE.fullmatch(text)
+        match.group() != "only" or not _SCOPE_ONLY_ASIDE.fullmatch(text)
         for match in _PRE_DENY.finditer(text)
     )
 

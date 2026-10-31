@@ -2741,6 +2741,11 @@ def test_deeply_nested_asides_stay_linear():
         "(Opus; round 3, merge-only)",
         "(Opus; round 3, given CI green, test-only delta)",
         "(Opus; round 3, tentatively docs-only)",
+        "(Opus; round 3, delta only later..e4f5a6b)",
+        "(Opus; round 3, docs-only once)",
+        "(Opus; round 3, merge only a1b2c3d..e4f5a6b)",
+        "(Opus; round 3, docs only)",
+        "(Opus; r3-once docs-only)",
         "(Opus; round 3's items, subject to CI)",
         "(Opus; round 3, with CI green, test-only)",
         "(Opus; round 3, merge only)",
@@ -2764,3 +2769,26 @@ def test_only_outside_the_fixed_scope_phrases_at_the_aside_end_denies(label):
 def test_each_fixed_scope_phrase_at_the_aside_end_keeps_an_honest_accept(phrase):
     body = f"## Review record — head `{HEAD}`\n**Independent Claude review** (Opus; round 3, {phrase}): **ACCEPT at {HEAD}**\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "once CI is green",
+        "when CI is green",
+        "after the rebase",
+        "with CI green",
+        "green?",
+        "provided CI passes",
+        "upon CI passing",
+        "assuming CI passes",
+        "as long as CI passes",
+        "till CI passes",
+        "on condition CI passes",
+        "conditionally",
+    ],
+)
+def test_an_apostrophe_is_a_quote_again_in_an_aside_stating_a_condition(condition):
+    label = f"(Opus; round 3's items, {condition})"
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
