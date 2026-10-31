@@ -5,6 +5,12 @@ import hashlib
 import os
 from typing import Any, Mapping
 
+from nexus.core.contained_write import (
+    PathContainmentError,
+    contained_relative_path,
+    read_text_in_root,
+    write_text_in_root,
+)
 from nexus.services.local_heal.local_model_provider import (
     LocalModelProvider,
     LocalModelProviderRequest,
@@ -477,6 +483,34 @@ def _read_text_snapshot(path: str) -> tuple[bool, str]:
         return False, ""
     with open(path, "r", encoding="utf-8") as f:
         return True, f.read()
+
+
+def _read_target_snapshot(repo_root: str, target_file: str) -> tuple[bool, str]:
+    """(exists, text) of repo_root/target_file, read without following a link (#3023).
+
+    A link at the target or on the way to it raises PathContainmentError: its text would be a
+    file outside repo_root, which must not reach hashes or receipt excerpts."""
+    relative = os.path.normpath(target_file)
+    if not os.path.lexists(os.path.join(repo_root, relative)):
+        return False, ""
+    return True, read_text_in_root(repo_root, relative)
+
+
+def _remove_target_file(repo_root: str, target_file: str) -> None:
+    """Remove repo_root/target_file unless a link sits on the way to it (#3023)."""
+    relative = os.path.normpath(target_file)
+    if os.fspath(contained_relative_path(repo_root, relative)) != relative:
+        raise PathContainmentError(f"path_crosses_link:{target_file}")
+    os.remove(os.path.join(repo_root, relative))
+
+
+def _restore_target_text(repo_root: str, target_file: str, text: str) -> None:
+    """Write the original target text back to repo_root/target_file, never through a link.
+
+    Model code may have run in repo_root since the original was read (#3023): a link it left at
+    the target or on the way to it, or a target_file that is absolute or leaves repo_root,
+    raises PathContainmentError and nothing is written."""
+    write_text_in_root(repo_root, os.path.normpath(target_file), text, create_parents=True)
 
 
 def _truncate_excerpt(text: str, limit: int = 400) -> str:
@@ -2316,6 +2350,7 @@ class LocalModelExecutor:
             pipeline_final_patch_len = len(pipeline_final_patch) if pipeline_final_patch else 0
             pipeline_result_projected = False
             candidate_isolation_attempted = False
+            target_restore_refused = False
             candidate_isolated = False
             selected_candidate_hash = ""
             applied_patch_hash = ""
@@ -2384,24 +2419,43 @@ class LocalModelExecutor:
                     candidate_isolation_attempted = True
 
                 if candidate_isolation_attempted and original_target_path:
-                    before_exists, before_text = _read_text_snapshot(original_target_path)
-                    if before_exists or os.path.exists(original_target_path):
+                    # Model code may have run in repo_root: every read and write of the target
+                    # below refuses a link at it or on the way to it (#3023). After a refusal
+                    # nothing is read, so no text or hash of a file outside repo_root is recorded.
+                    try:
+                        before_exists, before_text = _read_target_snapshot(
+                            request.repo_root, target_file
+                        )
+                    except PathContainmentError:
+                        before_exists, before_text = False, ""
+                    if before_exists:
                         target_file_hash_before_apply = _sha256_text(before_text)
-                    if original_target_exists:
-                        os.makedirs(os.path.dirname(original_target_path), exist_ok=True)
-                        with open(original_target_path, "w", encoding="utf-8") as f:
-                            f.write(original_target_content or "")
-                    elif os.path.exists(original_target_path):
-                        os.remove(original_target_path)
-                    after_exists, after_text = _read_text_snapshot(original_target_path)
-                    if after_exists or not original_target_exists:
-                        target_file_hash_after_restore = _sha256_text(after_text)
-                    at_apply_exists, at_apply_text = _read_text_snapshot(original_target_path)
-                    apply_source_text_at_apply = at_apply_text
-                    if at_apply_exists or not original_target_exists:
-                        target_file_hash_at_apply = _sha256_text(at_apply_text)
+                    try:
+                        if original_target_exists:
+                            _restore_target_text(
+                                request.repo_root, target_file, original_target_content or ""
+                            )
+                        elif os.path.lexists(original_target_path):
+                            _remove_target_file(request.repo_root, target_file)
+                        after_exists, after_text = _read_target_snapshot(
+                            request.repo_root, target_file
+                        )
+                        at_apply_exists, at_apply_text = _read_target_snapshot(
+                            request.repo_root, target_file
+                        )
+                    except PathContainmentError as exc:
+                        # A link or escape left at the target: no apply from this repo_root.
+                        target_restore_refused = True
+                        isolated_apply_status = "restore_refused"
+                        isolated_apply_error = f"TARGET_RESTORE_REFUSED:{exc}"
+                    else:
+                        if after_exists or not original_target_exists:
+                            target_file_hash_after_restore = _sha256_text(after_text)
+                        apply_source_text_at_apply = at_apply_text
+                        if at_apply_exists or not original_target_exists:
+                            target_file_hash_at_apply = _sha256_text(at_apply_text)
 
-                if candidate_isolation_attempted:
+                if candidate_isolation_attempted and not target_restore_refused:
                     _apply_search_text = str(locked_search) if locked_search else ""
                     apply_receipt = run_isolated_workspace_apply(
                         IsolatedApplyRequest(
@@ -3089,10 +3143,21 @@ class LocalModelExecutor:
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
 
                             # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
-                            if request.target_file and original_target_path and os.path.exists(original_target_path):
+                            if request.target_file and original_target_path and os.path.lexists(original_target_path):
                                 try:
-                                    with open(original_target_path, "w", encoding="utf-8") as f:
-                                        f.write(original_target_content or "")
+                                    _restore_target_text(
+                                        request.repo_root,
+                                        request.target_file,
+                                        original_target_content or "",
+                                    )
+                                except PathContainmentError as exc:
+                                    # A link left at the target (#3023): later candidates would
+                                    # run against it too, so the committee loop stops here.
+                                    raw_meta["delegated_retry_committee_restore_refused"] = True
+                                    raw_meta["delegated_retry_committee_restore_refused_reason"] = (
+                                        f"{_cand_id}:{exc}"
+                                    )
+                                    break
                                 except Exception:
                                     pass
 

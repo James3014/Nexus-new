@@ -103,7 +103,7 @@ def write_text_in_root(
     """Write ``text`` (UTF-8) to ``root/relative``, created if missing, never through a link.
 
     The text goes to a new file in the same directory, which is then renamed over the name; an
-    existing regular file keeps its permission bits."""
+    existing regular file keeps its permission bits, a new one gets 0o666 less the umask."""
 
     parts = _parts(relative)
     name = parts[-1]
@@ -120,7 +120,7 @@ def write_text_in_root(
         temp = f".nexus-write-{secrets.token_hex(8)}.tmp"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
         try:
-            fd = os.open(temp, flags, 0o644, dir_fd=parent)
+            fd = os.open(temp, flags, 0o666, dir_fd=parent)  # umask applies, as for a plain create
         except OSError as exc:
             raise PathContainmentError(f"file_open_refused:{name}:{exc}") from exc
         try:

@@ -1177,12 +1177,12 @@ def test_local_model_executor_committee_delegated_retry_records_failed_second_at
     assert meta.get("delegated_retry_output_excerpt").startswith("Here is the fix:")
 
 
-def test_pipeline_legacy_context_promotes_semantic_retry_seed_to_v2():
+def test_pipeline_legacy_context_promotes_semantic_retry_seed_to_v2(tmp_path):
     from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
 
     legacy = LegacyHealContext(
         instance_id="seed-promo",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="fix bug",
         route_context={
             "semantic_retry_seed": {
@@ -1204,12 +1204,12 @@ def test_pipeline_legacy_context_promotes_semantic_retry_seed_to_v2():
     assert getattr(v2.op, "verifier_exit_code", "") == 1
 
 
-def test_pipeline_legacy_context_promotes_repair_specification_to_v2():
+def test_pipeline_legacy_context_promotes_repair_specification_to_v2(tmp_path):
     from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
 
     legacy = LegacyHealContext(
         instance_id="repair-spec-promo",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="fix bug",
         repair_specification="Replace x * 2 with x * 4 on the first patch attempt.",
     )
@@ -2893,7 +2893,7 @@ def test_committee_no_winner_marks_provider_called_in_summary(monkeypatch) -> No
 # C7: Output Classification Tests
 # ---------------------------------------------------------------------------
 
-def test_patch_synthesis_records_output_classification() -> None:
+def test_patch_synthesis_records_output_classification(tmp_path) -> None:
     from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
     from nexus.services.local_heal.patcher import Patcher
@@ -2915,7 +2915,7 @@ def test_patch_synthesis_records_output_classification() -> None:
         repro_evidence="test",
         plan=None,
         localized_files=[LocalizedFile(path="file.py", content="old\n")],
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         reasoning_mode="INTUITIVE",
         attempt=1,
         max_tries=1,
@@ -2945,7 +2945,7 @@ def test_patch_synthesis_records_output_classification() -> None:
         assert preflight.get("contains_natural_language_only") is False
 
 
-def test_patch_synthesis_retry_disables_interleaved_reasoning() -> None:
+def test_patch_synthesis_retry_disables_interleaved_reasoning(tmp_path) -> None:
     from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
     from nexus.services.local_heal.patcher import Patcher
@@ -2965,7 +2965,7 @@ def test_patch_synthesis_retry_disables_interleaved_reasoning() -> None:
         repro_evidence="failed",
         plan=None,
         localized_files=[LocalizedFile(path="file.py", content="old\n")],
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         reasoning_mode="INTUITIVE",
         attempt=2,
         max_tries=2,
@@ -3065,7 +3065,7 @@ def test_fence_output_classification_does_not_strip_fences() -> None:
 # C8: Recovery quarantine tests
 # ---------------------------------------------------------------------------
 
-def test_verifier_command_is_quarantined_during_c7_recovery() -> None:
+def test_verifier_command_is_quarantined_during_c7_recovery(tmp_path) -> None:
     from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
     from nexus.services.local_heal.patcher import Patcher
@@ -3089,7 +3089,7 @@ def test_verifier_command_is_quarantined_during_c7_recovery() -> None:
         repro_evidence="test",
         plan=None,
         localized_files=[LocalizedFile(path="file.py", content="old\n")],
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         reasoning_mode="INTUITIVE",
         attempt=1,
         max_tries=1,
@@ -3115,7 +3115,7 @@ def test_verifier_command_is_quarantined_during_c7_recovery() -> None:
 
 
 
-def test_missing_verifier_command_does_not_change_patch_synthesis_control_flow() -> None:
+def test_missing_verifier_command_does_not_change_patch_synthesis_control_flow(tmp_path) -> None:
     from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
     from nexus.services.local_heal.patcher import Patcher
@@ -3137,7 +3137,7 @@ def test_missing_verifier_command_does_not_change_patch_synthesis_control_flow()
         repro_evidence="test",
         plan=None,
         localized_files=[LocalizedFile(path="file.py", content="old\n")],
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         reasoning_mode="INTUITIVE",
         attempt=1,
         max_tries=1,
@@ -4380,17 +4380,16 @@ def test_m1_row_includes_verifier_failure_evidence_fields():
 # C15-3C: Orchestrator Verifier Evidence Pass-Through Tests
 # ---------------------------------------------------------------------------
 
-def test_orchestrator_passes_verifier_evidence_to_existing_retry_prompt():
+def test_orchestrator_passes_verifier_evidence_to_existing_retry_prompt(tmp_path):
     from nexus.services.local_heal.orchestrator import HealOrchestrator
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock, patch
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-evidence",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4417,16 +4416,15 @@ def test_orchestrator_passes_verifier_evidence_to_existing_retry_prompt():
     assert should_pass is True
 
 
-def test_orchestrator_does_not_pass_verifier_evidence_when_not_ready():
+def test_orchestrator_does_not_pass_verifier_evidence_when_not_ready(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-not-ready",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4447,16 +4445,15 @@ def test_orchestrator_does_not_pass_verifier_evidence_when_not_ready():
     assert should_pass is False
 
 
-def test_orchestrator_does_not_pass_verifier_evidence_when_unavailable():
+def test_orchestrator_does_not_pass_verifier_evidence_when_unavailable(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-unavailable",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4477,9 +4474,8 @@ def test_orchestrator_does_not_pass_verifier_evidence_when_unavailable():
     assert should_pass is False
 
 
-def test_orchestrator_verifier_evidence_pass_through_records_metadata():
+def test_orchestrator_verifier_evidence_pass_through_records_metadata(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
     import hashlib
 
@@ -4487,7 +4483,7 @@ def test_orchestrator_verifier_evidence_pass_through_records_metadata():
         op=OperationalContext(
             instance_id="test-orch-meta",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4620,16 +4616,15 @@ def test_orchestrator_semantic_retry_uses_shared_patch_phase_client(tmp_path, mo
     assert ctx.op._orchestrator_verifier_evidence_passed is True
 
 
-def test_orchestrator_verifier_evidence_pass_through_does_not_add_retry_loop():
+def test_orchestrator_verifier_evidence_pass_through_does_not_add_retry_loop(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-no-loop",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4638,16 +4633,15 @@ def test_orchestrator_verifier_evidence_pass_through_does_not_add_retry_loop():
     assert ctx.op.attempt == initial_attempt
 
 
-def test_orchestrator_verifier_evidence_pass_through_does_not_change_route():
+def test_orchestrator_verifier_evidence_pass_through_does_not_change_route(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-no-route",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4655,16 +4649,15 @@ def test_orchestrator_verifier_evidence_pass_through_does_not_change_route():
     assert not hasattr(ctx.op, "route_mode") or getattr(ctx.op, "route_mode", None) is None
 
 
-def test_orchestrator_verifier_evidence_pass_through_does_not_mark_solved():
+def test_orchestrator_verifier_evidence_pass_through_does_not_mark_solved(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-orch-no-solved",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -4673,9 +4666,8 @@ def test_orchestrator_verifier_evidence_pass_through_does_not_mark_solved():
     assert ctx.op.solve_eligible is False
 
 
-def test_m1_row_includes_orchestrator_verifier_evidence_pass_through_fields():
+def test_m1_row_includes_orchestrator_verifier_evidence_pass_through_fields(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext
-    from pathlib import Path
     from unittest.mock import MagicMock
     import hashlib
 
@@ -4683,7 +4675,7 @@ def test_m1_row_includes_orchestrator_verifier_evidence_pass_through_fields():
         op=OperationalContext(
             instance_id="test-orch-row",
             problem_statement="fix bug",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
         ),
         gov=MagicMock(),
     )
@@ -5342,7 +5334,7 @@ def test_apply_failure_root_cause_target_file_state_drift(tmp_path):
     ]
 
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
-         patch("nexus.services.local_heal.local_model_executor._read_text_snapshot", side_effect=snapshots), \
+         patch("nexus.services.local_heal.local_model_executor._read_target_snapshot", side_effect=snapshots), \
          patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
         mock_exec.return_value = CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
@@ -8385,6 +8377,28 @@ def retry_wc(monkeypatch, tmp_path):
     workspace.mkdir()
     monkeypatch.setattr(executor_module, "_delegated_retry_world_c", lambda _r, _c: workspace)
     return workspace
+
+
+@pytest.fixture(autouse=True)
+def _no_copy_of_a_temp_root(monkeypatch):
+    """The MicroVerifier and the verification phase copy repo_dir before running model code
+    (#3006); a test whose repo_dir is /tmp would copy the whole temp dir (#3023)."""
+    import tempfile
+
+    from nexus.services.local_heal import micro_verifier, scratch_copy
+
+    temp_roots = {
+        Path(p).resolve() for p in ("/", "/tmp", "/private/tmp", "/var/tmp", tempfile.gettempdir())
+    }
+    copy = scratch_copy.copy_repo_entries
+
+    def guarded(repo_dir, scratch_dir):
+        if Path(repo_dir).resolve() in temp_roots:
+            pytest.fail(f"test copies a temp root as repo_dir: {repo_dir}; use tmp_path")
+        return copy(repo_dir, scratch_dir)
+
+    monkeypatch.setattr(scratch_copy, "copy_repo_entries", guarded)
+    monkeypatch.setattr(micro_verifier, "copy_repo_entries", guarded)
 
 
 @pytest.fixture(autouse=True)
