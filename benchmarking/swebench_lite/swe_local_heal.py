@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import datasets
-from nexus.core.contained_write import write_text_in_root
 from nexus.services.local_heal.pipeline import HealPipeline, HealContext
 from nexus.services.local_heal.task_manifest import (
     LocalHealTaskSpec,
@@ -413,6 +412,8 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
     base_commit = task.get("base_commit")
     python_exe = task.get("python_executable", "python3")
     import subprocess
+
+    from nexus.core.contained_write import write_text_in_root
 
     if not task.get("local_mode"):
         nexus_workspaces_dir = (NEXUS_ROOT / ".nexus" / "workspaces").resolve()
