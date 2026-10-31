@@ -269,7 +269,7 @@ def test_failed_replace_keeps_the_old_file_and_removes_the_temp_file(layout, mon
         ".GIT/config",
         ".Git/hooks/pre-commit",
         ".VENV/bin/python3",
-        ".g‌it/config",
+        ".g\u200cit/config",  # U+200C ZERO WIDTH NON-JOINER, skipped by HFS+
         "sub/.git/config",
         "pkg/.venv/bin/python3",
     ],

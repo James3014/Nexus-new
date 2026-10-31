@@ -415,3 +415,25 @@ def test_workspace_writable_probe_leaves_nothing_behind(dirs):
     result = WorkspaceProvisionChecker.check(repo)
     assert result.ready is True
     assert sorted(p.name for p in repo.iterdir()) == ["calc.py"]
+
+
+@pytest.mark.parametrize("link", ["symlink", "hard link"])
+def test_workspace_writable_probe_does_not_write_through_a_link_at_its_own_name(
+    dirs, monkeypatch, link
+):
+    # A link already at the exact name the probe picks (pinned here): the probe must neither
+    # write through it nor remove it, and reports the work dir as not writable.
+    from nexus.services.local_heal import workspace_provision
+
+    repo, outside = dirs
+    monkeypatch.setattr(workspace_provision.secrets, "token_hex", lambda _n: "0" * 16)
+    probe = repo / f".nexus_workspace_test-{'0' * 16}"
+    if link == "symlink":
+        probe.symlink_to(outside / "calc.py")
+    else:
+        os.link(outside / "calc.py", probe)
+    result = workspace_provision.WorkspaceProvisionChecker.check(repo)
+    assert (outside / "calc.py").read_text(encoding="utf-8") == WRONG
+    assert os.path.lexists(probe)
+    assert result.ready is False
+    assert result.failure_reason == "REPO_NOT_WRITABLE"
