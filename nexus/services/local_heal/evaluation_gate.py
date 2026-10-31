@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 
 from nexus.engine.model_output_sandbox import interpreter_readable_roots, run_model_argv
+from nexus.services.local_heal.scratch_copy import disposable_repo_copy
 
 
 @dataclass
@@ -264,28 +265,32 @@ class EvaluationGate:
     def __init__(self, repo_dir: Path):
         self.repo_dir = repo_dir
 
-    def _run_confined(self, cmd: List[str], env: dict, timeout: int) -> subprocess.CompletedProcess:
+    def _run_confined(self, cmd: List[str], timeout: int) -> subprocess.CompletedProcess:
         # repo_dir holds a model-written patch: its tests run under the OS sandbox (no
-        # network, writes only in repo_dir, allowlisted env + PYTHONPATH). A missing barrier
-        # raises SandboxError, which the callers record as a failed test (#2936).
-        return run_model_argv(
-            cmd,
-            work_dir=self.repo_dir,
-            timeout=timeout,
-            extra_env=env,
-            readable=interpreter_readable_roots(cmd[0]) if cmd else (),
-        )
+        # network, allowlisted env + PYTHONPATH). A missing barrier raises SandboxError, which
+        # the callers record as a failed test (#2936). The run writes only in a disposable
+        # copy of repo_dir, so nothing it writes is left for a later verification of repo_dir;
+        # repo_dir itself stays readable for paths that name it.
+        with disposable_repo_copy(self.repo_dir, prefix="eval-gate-") as work:
+            benchmarks_dir = str(work / "scripts/benchmarks")
+            env = {"PYTHONPATH": f"{work}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"}
+            return run_model_argv(
+                cmd,
+                work_dir=work,
+                timeout=timeout,
+                extra_env=env,
+                readable=(
+                    *(interpreter_readable_roots(cmd[0]) if cmd else ()),
+                    Path(self.repo_dir).resolve(),
+                ),
+            )
 
     def run_visible_tests(self, test_cmds: List[List[str]]) -> List[TestResult]:
         results = []
         for cmd in test_cmds:
-            benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
-            env = {
-                "PYTHONPATH": f"{str(self.repo_dir)}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"
-            }
             test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = self._run_confined(cmd, env, test_timeout)
+                res = self._run_confined(cmd, test_timeout)
                 results.append(
                     TestResult(
                         test_id=" ".join(cmd),
@@ -309,13 +314,9 @@ class EvaluationGate:
             ]
         results = []
         for cmd in cmds:
-            benchmarks_dir = str(self.repo_dir / "scripts/benchmarks")
-            env = {
-                "PYTHONPATH": f"{str(self.repo_dir)}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"
-            }
             test_timeout = int(os.environ.get("NEXUS_TEST_TIMEOUT_SECONDS", "300"))
             try:
-                res = self._run_confined(cmd, env, test_timeout)
+                res = self._run_confined(cmd, test_timeout)
                 results.append(
                     TestResult(
                         test_id=" ".join(cmd),
