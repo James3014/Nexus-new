@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import re
 import hashlib
 import time
@@ -99,6 +100,9 @@ if __name__ == "__main__":
                     target_file = root / relative
                     if target_file.exists():
                         content = read_text_in_root(root, relative)
+                        # 非 UTF-8（讀出含 U+FFFD）或唯讀的檔不改寫，避免改掉原有位元組
+                        if "\ufffd" in content or not os.access(target_file, os.W_OK):
+                            raise ValueError(f"{file_path} is not a writable UTF-8 file")
                         # 極簡模擬：如果補丁包含 +, 就加上去
                         new_lines = [l[1:] for l in patch.splitlines() if l.startswith("+") and not l.startswith("+++")]
                         write_text_in_root(root, relative, content + "\n" + "\n".join(new_lines))

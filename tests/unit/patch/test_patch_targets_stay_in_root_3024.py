@@ -303,3 +303,59 @@ def test_patcher_fallback_write_does_not_follow_link_swapped_in_after_read(
     monkeypatch.setattr(patcher_module, "read_text_in_root", read_then_swap)
     assert _apply_with_git_failing(_patcher(tmp_path, root), "calc.py") is False
     assert outside.read_text(encoding="utf-8") == ORIGINAL
+
+
+# --- Files the helpers would change beyond the patch: not UTF-8, read-only ----------------------
+
+LATIN1 = b"# caf\xe9 latin-1\nx = 1\n"
+
+
+def test_apply_engine_refuses_non_utf8_target_and_keeps_its_bytes(layout):
+    root, _ = layout
+    (root / "legacy.py").write_bytes(LATIN1)
+    result = PatchApplyEngine(root).apply_patch("t3024", "legacy.py", BLOCK)
+    assert result.get("success") is not True
+    assert result.get("status") == "FAIL"
+    assert (root / "legacy.py").read_bytes() == LATIN1
+
+
+def test_patcher_fallback_refuses_non_utf8_target_and_keeps_its_bytes(tmp_path, layout):
+    root, _ = layout
+    (root / "legacy.py").write_bytes(LATIN1)
+    assert _apply_with_git_failing(_patcher(tmp_path, root), "legacy.py") is False
+    assert (root / "legacy.py").read_bytes() == LATIN1
+
+
+def test_apply_engine_refuses_read_only_target(layout):
+    root, _ = layout
+    (root / "calc.py").chmod(0o444)
+    result = PatchApplyEngine(root).apply_patch("t3024", "calc.py", BLOCK)
+    assert result.get("success") is not True
+    assert result.get("status") == "FAIL"
+    assert (root / "calc.py").read_text(encoding="utf-8") == ORIGINAL
+
+
+def test_patcher_fallback_refuses_read_only_target(tmp_path, layout):
+    root, _ = layout
+    (root / "calc.py").chmod(0o444)
+    assert _apply_with_git_failing(_patcher(tmp_path, root), "calc.py") is False
+    assert (root / "calc.py").read_text(encoding="utf-8") == ORIGINAL
+
+
+def test_discovery_git_change_fallback_skips_link_leaving_root(layout):
+    root, outside = layout
+    os.symlink(outside, root / "linked.py")
+    git_status = MagicMock(returncode=0, stdout=" M linked.py\n")
+    with patch("subprocess.run", return_value=git_status):
+        resolution = TargetFileDiscovery().resolve(BLOCK, context_files=[], project_root=str(root))
+    assert resolution.resolved is False
+    assert outside.read_text(encoding="utf-8") == ORIGINAL
+
+
+def test_discovery_git_change_fallback_still_takes_file_inside_root(layout):
+    root, _ = layout
+    git_status = MagicMock(returncode=0, stdout=" M calc.py\n")
+    with patch("subprocess.run", return_value=git_status):
+        resolution = TargetFileDiscovery().resolve(BLOCK, context_files=[], project_root=str(root))
+    assert resolution.resolved is True
+    assert resolution.target_file == "calc.py"

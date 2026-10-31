@@ -1,5 +1,6 @@
 import logging
 import hashlib
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -63,6 +64,12 @@ class PatchApplyEngine:
             original_content = read_text_in_root(self.project_root, relative)
         except PathContainmentError as exc:
             return {"status": "FAIL", "reason": f"TARGET_FILE_REFUSED: {exc}"}
+        # 讀取會把非 UTF-8 位元組換成 U+FFFD；寫回就會改掉補丁沒碰到的位元組，所以不改寫。
+        if "\ufffd" in original_content:
+            return {"status": "FAIL", "reason": f"TARGET_NOT_UTF8: {target_file}"}
+        # 寫入是建新檔再改名，不會因唯讀而失敗；唯讀檔照舊不改寫。
+        if not os.access(file_path, os.W_OK):
+            return {"status": "FAIL", "reason": f"TARGET_NOT_WRITABLE: {target_file}"}
         current_content = original_content
         
         # 1. Parse & Classify Health
