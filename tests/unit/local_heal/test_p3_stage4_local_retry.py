@@ -44,12 +44,12 @@ class EmptyProvider:
         return R()
 
 
-def test_stage4_fallback_generates_candidate():
+def test_stage4_fallback_generates_candidate(tmp_path):
     """P3-I6: Local retry generates candidate after cloud stages."""
     req = LocalModelExecutorRequest(
         task_id="p3-s4-1",
         problem_statement="Fix foo function",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -73,12 +73,12 @@ def test_stage4_fallback_generates_candidate():
     assert "stage4_local_retry" in meta.get("assist_stages_activated", [])
 
 
-def test_stage4_meta_includes_cloud_stages():
+def test_stage4_meta_includes_cloud_stages(tmp_path):
     """P3-I6: Stage4 meta includes all cloud stages."""
     req = LocalModelExecutorRequest(
         task_id="p3-s4-2",
         problem_statement="Fix foo",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -125,12 +125,12 @@ def test_stage4_receipt_fields_present():
     assert receipt["stage4_local_retry_success"] is True
 
 
-def test_stage4_fallback_empty_candidate():
+def test_stage4_fallback_empty_candidate(tmp_path):
     """P3-I6: Empty local model output → retry failed."""
     req = LocalModelExecutorRequest(
         task_id="p3-s4-4",
         problem_statement="Fix foo",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -153,12 +153,12 @@ def test_stage4_fallback_empty_candidate():
     assert meta.get("p3_route_status") in ("shadow_stage4_retry_failed", "shadow_stage5_escalation_recommended")
 
 
-def test_stage4_does_not_run_when_not_cloud_topology():
+def test_stage4_does_not_run_when_not_cloud_topology(tmp_path):
     """P3-I6: Stage4 does not run when topology is not cloud_with_local_assist."""
     req = LocalModelExecutorRequest(
         task_id="p3-s4-5",
         problem_statement="Fix foo",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

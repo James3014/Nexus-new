@@ -18,7 +18,7 @@ def _setup_env():
     os.environ.pop("NEXUS_ENABLE_P4_COMMITTEE_ROUTED_TOOL", None)
 
 
-def test_p4_r6b_executor_propagates_all_fields_with_stateful_provider():
+def test_p4_r6b_executor_propagates_all_fields_with_stateful_provider(tmp_path):
     """P4-R6b: Executor P4 path propagates all receipt fields into raw_meta.
 
     Stateful fake provider:
@@ -80,7 +80,7 @@ def test_p4_r6b_executor_propagates_all_fields_with_stateful_provider():
     req = LocalModelExecutorRequest(
         task_id="p4-r6b-propagation",
         problem_statement="Fix the function",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

@@ -7633,7 +7633,7 @@ def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
 # ============================================================
 
 
-def test_output_understanding_called_on_single_local_model_path(monkeypatch) -> None:
+def test_output_understanding_called_on_single_local_model_path(monkeypatch, tmp_path) -> None:
     """P1-2: Prove canonical understanding is called on the local output path."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7658,7 +7658,7 @@ def test_output_understanding_called_on_single_local_model_path(monkeypatch) -> 
     req = LocalModelExecutorRequest(
         task_id="t1",
         problem_statement="fix x",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7678,7 +7678,7 @@ def test_output_understanding_called_on_single_local_model_path(monkeypatch) -> 
     assert resp.raw_model_metadata.get("output_understanding_success") is True
 
 
-def test_search_replace_compatibility_unchanged(monkeypatch) -> None:
+def test_search_replace_compatibility_unchanged(monkeypatch, tmp_path) -> None:
     """P1-2: Existing search/replace path remains green."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7711,7 +7711,7 @@ def test_search_replace_compatibility_unchanged(monkeypatch) -> None:
     req = LocalModelExecutorRequest(
         task_id="t2",
         problem_statement="fix code",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7732,7 +7732,7 @@ def test_search_replace_compatibility_unchanged(monkeypatch) -> None:
     assert resp.raw_model_metadata.get("output_understanding_success") is True
 
 
-def test_malformed_output_fails_closed_through_executor() -> None:
+def test_malformed_output_fails_closed_through_executor(tmp_path) -> None:
     """P1-2: Malformed output maps to existing executor failure handling."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7757,7 +7757,7 @@ def test_malformed_output_fails_closed_through_executor() -> None:
     req = LocalModelExecutorRequest(
         task_id="t3",
         problem_statement="fix x",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7778,7 +7778,7 @@ def test_malformed_output_fails_closed_through_executor() -> None:
     assert resp.raw_model_metadata.get("output_understanding_success") is False
 
 
-def test_refusal_empty_output_fails_closed() -> None:
+def test_refusal_empty_output_fails_closed(tmp_path) -> None:
     """P1-2: Refusal/empty output fails closed through executor handling."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7803,7 +7803,7 @@ def test_refusal_empty_output_fails_closed() -> None:
     req = LocalModelExecutorRequest(
         task_id="t4",
         problem_statement="fix x",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7824,7 +7824,7 @@ def test_refusal_empty_output_fails_closed() -> None:
     assert resp.raw_model_metadata.get("output_understanding_success") is False
 
 
-def test_unified_diff_compatibility_unchanged(monkeypatch) -> None:
+def test_unified_diff_compatibility_unchanged(monkeypatch, tmp_path) -> None:
     """P1-2: Existing unified diff path remains green through executor."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7858,7 +7858,7 @@ def test_unified_diff_compatibility_unchanged(monkeypatch) -> None:
     req = LocalModelExecutorRequest(
         task_id="t5",
         problem_statement="fix foo",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7885,7 +7885,7 @@ def test_unified_diff_compatibility_unchanged(monkeypatch) -> None:
 # ============================================================
 
 
-def test_canonical_candidate_projection_search_replace() -> None:
+def test_canonical_candidate_projection_search_replace(tmp_path) -> None:
     """P1-4: Canonical candidate normalized content used for search/replace projection."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7918,7 +7918,7 @@ def test_canonical_candidate_projection_search_replace() -> None:
     req = LocalModelExecutorRequest(
         task_id="t6",
         problem_statement="fix code",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7940,7 +7940,7 @@ def test_canonical_candidate_projection_search_replace() -> None:
     assert resp.raw_model_metadata.get("output_understanding_projection_source") == "canonical_candidate"
 
 
-def test_canonical_candidate_projection_unified_diff() -> None:
+def test_canonical_candidate_projection_unified_diff(tmp_path) -> None:
     """P1-4: Canonical candidate normalized content used for unified diff projection."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -7974,7 +7974,7 @@ def test_canonical_candidate_projection_unified_diff() -> None:
     req = LocalModelExecutorRequest(
         task_id="t7",
         problem_statement="fix foo",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -7996,7 +7996,7 @@ def test_canonical_candidate_projection_unified_diff() -> None:
     assert resp.candidate_patch.strip().startswith("--- a/")
 
 
-def test_fallback_when_canonical_candidate_absent() -> None:
+def test_fallback_when_canonical_candidate_absent(tmp_path) -> None:
     """P1-4: Fallback to raw output when canonical candidate is absent or unsupported."""
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
@@ -8023,7 +8023,7 @@ def test_fallback_when_canonical_candidate_absent() -> None:
     req = LocalModelExecutorRequest(
         task_id="t8",
         problem_statement="fix x",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -8045,7 +8045,7 @@ def test_fallback_when_canonical_candidate_absent() -> None:
     assert resp.raw_model_metadata.get("output_understanding_projection_source") == "raw_output"
 
 
-def test_executor_respects_request_mutation_and_verifier_allowed() -> None:
+def test_executor_respects_request_mutation_and_verifier_allowed(tmp_path) -> None:
     """Verify that LocalModelExecutor respects request.mutation_allowed even if not enabled in signal_snapshot."""
     from unittest.mock import patch, MagicMock
     from nexus.services.local_heal.local_model_executor import (
@@ -8083,7 +8083,7 @@ def test_executor_respects_request_mutation_and_verifier_allowed() -> None:
     req = LocalModelExecutorRequest(
         task_id="t9",
         problem_statement="fix x",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

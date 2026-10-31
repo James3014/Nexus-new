@@ -15,26 +15,26 @@ _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_19
 class TestOrchestratorHookBehavior:
     """Test the orchestrator hook behavior via narrow adapter."""
 
-    def test_hook_uses_instance_id_as_task_id(self):
+    def test_hook_uses_instance_id_as_task_id(self, tmp_path):
         """Hook should use instance_id (not task_id) as task identifier."""
         # Simulate what _attach_evidence_harness does
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_hook"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_hook")
         # OperationalContext has instance_id, not task_id
         instance_id = "C_12481_instance"
         bundle = harness.start_task(task_id=instance_id)
         assert bundle.task_id == instance_id
 
-    def test_hook_does_not_raise_on_missing_fields(self):
+    def test_hook_does_not_raise_on_missing_fields(self, tmp_path):
         """Hook should not raise if fields are missing."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_hook"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_hook")
         bundle = harness.start_task(task_id="test")
         # All fields are default/empty - should not raise
         harness.finalize(bundle)
         assert bundle.task_id == "test"
 
-    def test_hook_does_not_modify_prompt_fields(self):
+    def test_hook_does_not_modify_prompt_fields(self, tmp_path):
         """Hook should not modify prompt/verifier fields in ctx.op."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_hook"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_hook")
         bundle = harness.start_task(task_id="test")
         # Prompt fields should remain at defaults
         assert bundle.prompt_length_chars == 0
@@ -42,9 +42,9 @@ class TestOrchestratorHookBehavior:
         assert bundle.failure_section_included is False
         assert bundle.evidence_section_included is False
 
-    def test_hook_produces_evidence_bundle(self):
+    def test_hook_produces_evidence_bundle(self, tmp_path):
         """Hook produces evidence_bundle.json."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_hook"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_hook")
         bundle = harness.start_task(task_id="C_12481")
         bundle.patch_produced = True
         bundle.patch_applied = True
@@ -56,14 +56,14 @@ class TestOrchestratorHookBehavior:
         assert data["task_id"] == "C_12481"
         assert data["final_status"] == "SOLVED"
 
-    def test_hook_produces_bottleneck_classification(self):
+    def test_hook_produces_bottleneck_classification(self, tmp_path):
         """Hook produces bottleneck_classification.json."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_hook"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_hook")
         bundle = harness.start_task(task_id="test")
         bundle.verifier_status = "FAIL"
         bundle.patch_produced = False
         harness.finalize(bundle)
-        bottleneck_path = Path("/tmp/test_hook") / "test" / "bottleneck_classification.json"
+        bottleneck_path = tmp_path / "test_hook" / "test" / "bottleneck_classification.json"
         assert bottleneck_path.exists()
         with open(bottleneck_path) as f:
             data = json.load(f)

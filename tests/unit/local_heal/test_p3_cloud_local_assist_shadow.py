@@ -39,7 +39,7 @@ def test_p3_shadow_planner_injects_signal_fields():
         os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
 
 
-def test_p3_shadow_executor_does_not_crash():
+def test_p3_shadow_executor_does_not_crash(tmp_path):
     """P3-I1: Executor handles cloud_with_local_assist topology without crash."""
 
     class FakeProvider:
@@ -61,7 +61,7 @@ def test_p3_shadow_executor_does_not_crash():
     req = LocalModelExecutorRequest(
         task_id="p3-shadow-1",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -135,7 +135,7 @@ def test_p3_shadow_flag_off_preserves_existing_topology():
         os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
 
 
-def test_p3_shadow_no_cloud_endpoint_fail_closed():
+def test_p3_shadow_no_cloud_endpoint_fail_closed(tmp_path):
     """P3-I1: No cloud endpoint → fail-closed state."""
 
     class FakeProvider:
@@ -157,7 +157,7 @@ def test_p3_shadow_no_cloud_endpoint_fail_closed():
     req = LocalModelExecutorRequest(
         task_id="p3-shadow-3",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

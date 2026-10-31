@@ -16,9 +16,9 @@ _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "host_evidence_19
 class TestIdentityCorrelation:
     """Verify repair_attempt_id / identity correlation across artifacts."""
 
-    def test_evidence_harness_uses_instance_id(self):
+    def test_evidence_harness_uses_instance_id(self, tmp_path):
         """EvidenceHarness uses instance_id as task_id."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_identity"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_identity")
         bundle = harness.start_task(task_id="C_12481_instance")
         assert bundle.task_id == "C_12481_instance"
 
@@ -68,9 +68,9 @@ class TestIdentityCorrelation:
         assert payload["selected_lesson_lineage"][0]["source_task_id"] == "task-a"
         assert payload["selected_lesson_lineage"][0]["evidence_ref"] == "receipt://lesson"
 
-    def test_evidence_bundle_and_memory_trace_share_identity(self):
+    def test_evidence_bundle_and_memory_trace_share_identity(self, tmp_path):
         """EvidenceBundle and MemoryTrace can share same repair identity."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_identity"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_identity")
         bundle = harness.start_task(task_id="C_12481")
         trace = MemoryTrace(available=True, selected_ids=["lesson1"])
 
@@ -79,9 +79,9 @@ class TestIdentityCorrelation:
         # Memory trace is independent but can be attached to same context
         assert trace.selected_ids == ["lesson1"]
 
-    def test_unknown_identity_blocks_eval_readiness(self):
+    def test_unknown_identity_blocks_eval_readiness(self, tmp_path):
         """If identity is unavailable, eval readiness must be BLOCKED."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_identity"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_identity")
         bundle = harness.start_task(task_id="unknown")
         assert bundle.task_id == "unknown"
         # This should NOT be used as proof of identity correlation
@@ -104,9 +104,9 @@ class TestIdentityCorrelation:
         assert trace_not_used.available is False
         assert trace_not_used.selected_ids == []
 
-    def test_shadow_ranking_does_not_change_runtime(self):
+    def test_shadow_ranking_does_not_change_runtime(self, tmp_path):
         """Shadow ranking must not change runtime order, prompt, verifier, or claim."""
-        harness = EvidenceHarness(output_dir=Path("/tmp/test_identity"))
+        harness = EvidenceHarness(output_dir=tmp_path / "test_identity")
         bundle = harness.start_task(task_id="test")
         bundle.verifier_status = "PASS"
         harness.finalize(bundle)

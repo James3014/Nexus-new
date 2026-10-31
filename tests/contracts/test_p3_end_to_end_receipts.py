@@ -59,7 +59,7 @@ def setup_env():
     os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
 
 
-def test_p3_e2e_easy_local_only():
+def test_p3_e2e_easy_local_only(tmp_path):
     """A: easy task → local_only topology → skips cloud pipeline entirely."""
     planner = CapabilityPlanner()
     plan = planner.plan(
@@ -81,7 +81,7 @@ def test_p3_e2e_easy_local_only():
     req = LocalModelExecutorRequest(
         task_id="p3-e2e-a",
         problem_statement="Fix typo in foo.py",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -97,7 +97,7 @@ def test_p3_e2e_easy_local_only():
     assert resp.local_model_called is True
 
 
-def test_p3_e2e_medium_cloud_assist_success():
+def test_p3_e2e_medium_cloud_assist_success(tmp_path):
     """B: medium task → cloud assist pipeline → stage4 retry success."""
     planner = CapabilityPlanner()
     plan = planner.plan(
@@ -122,7 +122,7 @@ def test_p3_e2e_medium_cloud_assist_success():
     req = LocalModelExecutorRequest(
         task_id="p3-e2e-b",
         problem_statement="Fix database connection leak in db.py",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="db.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -158,7 +158,7 @@ def test_p3_e2e_medium_cloud_assist_success():
     assert receipt["stage5_escalation_recommended"] is False
 
 
-def test_p3_e2e_hard_escalation():
+def test_p3_e2e_hard_escalation(tmp_path):
     """C: hard task → cloud assist pipeline → retry fails → escalation recommended."""
     planner = CapabilityPlanner()
     plan = planner.plan(
@@ -179,7 +179,7 @@ def test_p3_e2e_hard_escalation():
     req = LocalModelExecutorRequest(
         task_id="p3-e2e-c",
         problem_statement="Complex bug requiring deep analysis",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="complex.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -227,7 +227,7 @@ class FakeCtx:
         return self.meta.get(name, getattr(type(self), name, "" if isinstance(getattr(type(self), name, ""), str) else False))
 
 
-def test_p3_e2e_receipt_from_executor_meta():
+def test_p3_e2e_receipt_from_executor_meta(tmp_path):
     """P3-A1: Executor meta flows into receipt via FakeCtx wrapping."""
     os.environ["NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW"] = "1"
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
@@ -237,7 +237,7 @@ def test_p3_e2e_receipt_from_executor_meta():
         req = LocalModelExecutorRequest(
             task_id="p3-e2e-receipt",
             problem_statement="Fix database connection",
-            repo_root="/tmp",
+            repo_root=str(tmp_path),
             target_file="db.py",
             selected_capabilities=(),
             evidence_refs=(),
@@ -277,14 +277,14 @@ def test_p3_e2e_receipt_from_executor_meta():
         os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
 
 
-def test_p3_boundary_no_real_cloud():
+def test_p3_boundary_no_real_cloud(tmp_path):
     """P3-A1: Real cloud endpoint is NOT connected."""
     from nexus.services.local_heal.local_model_executor import FakeCloudCandidateProvider
     provider = FakeCloudCandidateProvider()
     req = LocalModelExecutorRequest(
         task_id="test",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -296,7 +296,7 @@ def test_p3_boundary_no_real_cloud():
     assert resp.error == ""
 
 
-def test_p3_boundary_no_p4_invoked():
+def test_p3_boundary_no_p4_invoked(tmp_path):
     """P3-A1: P4 committee is NOT invoked from P3 path."""
     os.environ["NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW"] = "1"
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
@@ -306,7 +306,7 @@ def test_p3_boundary_no_p4_invoked():
         req = LocalModelExecutorRequest(
             task_id="p3-boundary",
             problem_statement="Complex cross-module refactoring",
-            repo_root="/tmp",
+            repo_root=str(tmp_path),
             target_file="complex.py",
             selected_capabilities=(),
             evidence_refs=(),

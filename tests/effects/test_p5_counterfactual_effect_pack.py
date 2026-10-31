@@ -10,6 +10,16 @@ from nexus.services.local_heal.committee_routed_tool import (
 )
 
 
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
+
+
 def _load_cases():
     with open("artifacts/effect_fixtures/p5_counterfactual_cases.json") as f:
         return json.load(f)
@@ -29,7 +39,7 @@ def _run_case(case, p5_enabled=True):
     try:
         req = CommitteeRoutedToolRequest(
             task_id=case["case_id"],
-            repo_root="/tmp",
+            repo_root=_REPO_ROOT,
             target_file="foo.py",
             difficulty="hard",
             execution_topology="cloud_with_local_assist",

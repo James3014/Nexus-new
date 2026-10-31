@@ -302,7 +302,7 @@ def test_verification_phase_stateless_run(tmp_path):
 
 # ─── P0 Fix Tests ─────────────────────────────────────────────────────────────
 
-def test_skip_reproduction_uses_problem_statement_as_evidence():
+def test_skip_reproduction_uses_problem_statement_as_evidence(tmp_path):
     """P0-1: When skip_reproduction=True, ReproductionPhase must bypass LLM
     and use problem_statement[:3000] as repro_evidence."""
     from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
@@ -314,7 +314,7 @@ def test_skip_reproduction_uses_problem_statement_as_evidence():
     ctx = HealContext(
         op=OperationalContext(
             instance_id="test-skip",
-            repo_dir=Path("/tmp"),
+            repo_dir=tmp_path,
             problem_statement="Fix the `NdarrayMixin` structured array bug.",
             skip_reproduction=True,
         ),
@@ -464,14 +464,14 @@ def test_slim_prompt_for_7b():
     assert "CHARACTER-FOR-CHARACTER" in full_prompt or "character-for-character" in full_prompt
 
 
-def test_legacy_heal_context_skip_reproduction():
+def test_legacy_heal_context_skip_reproduction(tmp_path):
     """P0-1 End-to-End: Legacy HealContext wrapper must support skip_reproduction
     and pass it properly when converted to V2 operational context."""
     from nexus.services.local_heal.pipeline import HealContext
 
     ctx = HealContext(
         instance_id="test-legacy-skip",
-        repo_dir=Path("/tmp"),
+        repo_dir=tmp_path,
         problem_statement="Fix it."
     )
     ctx.skip_reproduction = True

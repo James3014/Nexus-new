@@ -11,13 +11,13 @@ from nexus.services.local_heal.local_model_executor import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
-def test_fake_cloud_provider_returns_empty():
+def test_fake_cloud_provider_returns_empty(tmp_path):
     """P3-I4: FakeCloudCandidateProvider returns empty candidate."""
     provider = FakeCloudCandidateProvider()
     req = LocalModelExecutorRequest(
         task_id="p3-s2-1",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -30,7 +30,7 @@ def test_fake_cloud_provider_returns_empty():
     assert resp.error == ""
 
 
-def test_executor_shadow_runs_stage2():
+def test_executor_shadow_runs_stage2(tmp_path):
     """P3-I4: Executor runs stage2 cloud candidate seam in shadow topology."""
     class FakeProvider:
         def generate(self, req):
@@ -50,7 +50,7 @@ def test_executor_shadow_runs_stage2():
     req = LocalModelExecutorRequest(
         task_id="p3-s2-2",
         problem_statement="Fix zeta function",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="zeta.py",
         selected_capabilities=(),
         evidence_refs=("patch.diff",),
@@ -116,7 +116,7 @@ def test_stage2_empty_candidate_blocks_claim():
     assert "missing_source_hash" in decision.reasons
 
 
-def test_stage2_fail_closed_no_error():
+def test_stage2_fail_closed_no_error(tmp_path):
     """P3-I4: Stage2 returns empty error (not a crash)."""
     class FakeProvider:
         def generate(self, req):
@@ -136,7 +136,7 @@ def test_stage2_fail_closed_no_error():
     req = LocalModelExecutorRequest(
         task_id="p3-s2-5",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),
@@ -155,7 +155,7 @@ def test_stage2_fail_closed_no_error():
     assert resp.error == ""
 
 
-def test_stage1_and_stage2_both_activated():
+def test_stage1_and_stage2_both_activated(tmp_path):
     """P3-I4: Both stage1 and stage2 are activated."""
     class FakeProvider:
         def generate(self, req):
@@ -175,7 +175,7 @@ def test_stage1_and_stage2_both_activated():
     req = LocalModelExecutorRequest(
         task_id="p3-s2-6",
         problem_statement="test",
-        repo_root="/tmp",
+        repo_root=str(tmp_path),
         target_file="foo.py",
         selected_capabilities=(),
         evidence_refs=(),

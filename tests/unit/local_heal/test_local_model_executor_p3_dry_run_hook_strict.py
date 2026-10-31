@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import importlib.util
 
+import pytest
+
 from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutor,
     LocalModelExecutorRequest,
 )
 from nexus.services.local_heal.local_model_provider import InertLocalModelProvider
+
+# Per-test repo root (#3023): code under test reads and writes repo_root/target_file, so each
+# test gets its own tmp_path instead of a shared temp dir such as /tmp.
+_REPO_ROOT = ""
+
+
+@pytest.fixture(autouse=True)
+def _per_test_repo_root(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "_REPO_ROOT", str(tmp_path))
 
 
 def _make_test_request(
@@ -28,7 +39,7 @@ def _make_test_request(
     return LocalModelExecutorRequest(
         task_id=task_id,
         problem_statement="Fix the bug",
-        repo_root="/tmp",
+        repo_root=_REPO_ROOT,
         target_file="test.py",
         selected_capabilities=(),
         evidence_refs=(),
