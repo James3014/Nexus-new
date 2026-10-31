@@ -425,6 +425,17 @@ def _clauses(line: str) -> list[str]:
     return [clause for clause in _CLAUSE_SPLIT.split(line) if clause.strip()]
 
 
+def _in_parenthetical(text: str, at: int) -> bool:
+    """Whether position ``at`` lies inside a parenthetical that closes later on the line."""
+    depth = 0
+    for char in text[:at]:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+    return depth > 0 and ")" in text[at:]
+
+
 def verdict_clauses(line: str) -> list[str]:
     """Clauses of the line whose accepting token sits in verdict position.
 
@@ -452,6 +463,11 @@ def verdict_clauses(line: str) -> list[str]:
         token_at = start + span[0]
         window_start = prev_token_end
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
+            # A marker inside a parenthetical is part of that aside ("(Round 3, delta only
+            # <a>..<b>): ACCEPT", #3040): starting the window there would cut the aside open
+            # and read its words as the verdict's own.
+            if _in_parenthetical(plain_line, marker.start()):
+                continue
             window_start = marker.start()  # "r1 ... with one should-fix, r2 ACCEPT": new round
         prev_token_end = max(prev_token_end, start + span[1])
         if (

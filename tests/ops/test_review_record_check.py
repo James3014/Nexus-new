@@ -2545,3 +2545,39 @@ def test_a_reject_reason_starting_with_a_noun_withdraws(reason):
     codex = f"Head reviewed: {HEAD}\nCodex r1: ACCEPT\nCodex r2: REJECT {reason}\n"
     report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
     assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+# -- #3040: a round marker inside a label's parenthetical is part of the aside ---------
+
+_DELTA = f"{OLD}..{HEAD}"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # #3029's round-3 record shape.
+        f"(Claude Haiku 5.5, separate agent; Round 3, delta only `{_DELTA}`)",
+        f"(Claude Opus 5.5; r2, only the test file changed since {OLD[:9]})",
+    ],
+)
+def test_a_round_marker_inside_a_label_aside_keeps_an_honest_accept(label):
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Denials outside the aside, or in the verdict's own clause, still deny.
+        f"**Claude review** (Opus; Round 3): not ACCEPT at {HEAD}",
+        f"**Claude review** (Opus; Round 3): ACCEPT at {HEAD} only if CI passes",
+        f"**Claude review** r2 not fixed, (Opus; Round 3): ACCEPT at {HEAD}",
+        f"**Claude review** (Opus; Round 3), awaiting ACCEPT at {HEAD}",
+        # A label the aside disables is still disabled.
+        f"**Claude review** (not run; Round 3): ACCEPT at {HEAD}",
+        # An unclosed parenthesis is no aside.
+        f"**Claude review** (Opus; Round 3, not yet: ACCEPT at {HEAD}",
+    ],
+)
+def test_a_round_marker_inside_an_aside_does_not_hide_a_denial(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(line + "\n")], [])["status"] != "OK"
