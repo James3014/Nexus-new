@@ -6,6 +6,7 @@ import time
 import subprocess
 
 from nexus.core.contained_write import (
+    PathContainmentError,
     contained_relative_path,
     read_text_in_root,
     write_text_in_root,
@@ -47,9 +48,10 @@ if __name__ == "__main__":
     print("✅ [GREEN] Issue resolved.")
     sys.exit(0)
 """
-        repro_path = self.project_root / f"reproduce_v{uid}.py"
-        repro_path.write_text(repro_content, encoding="utf-8")
-        print(f"   🧪 [TDD] Reproduce script generated: {repro_path.name}")
+        repro_name = f"reproduce_v{uid}.py"
+        # 專案根目錄可能已被模型執行過的程式放了連結：不經連結寫入（拒絕時丟 PathContainmentError）
+        write_text_in_root(self.project_root, repro_name, repro_content)
+        print(f"   🧪 [TDD] Reproduce script generated: {repro_name}")
 
     def apply(self, violations):
         """逐一校驗並套用補丁。"""
@@ -77,11 +79,14 @@ if __name__ == "__main__":
 
             # 生成 TDD 復現腳本
             uid = hashlib.md5(f"{time.time()}_{file_path}".encode()).hexdigest()[:8]
-            self._generate_tdd_repro(v, uid)
-
-            # 使用動態路徑
+            # 使用動態路徑；lock_dir 可能在專案根目錄內（也可能是 /tmp），以它為根、不經連結寫入
             tmp_patch = self.lock_dir / f"auto_{uid}.patch"
-            tmp_patch.write_text(patch, encoding="utf-8")
+            try:
+                self._generate_tdd_repro(v, uid)
+                write_text_in_root(self.lock_dir, tmp_patch.name, patch)
+            except PathContainmentError as e:
+                print(f"   ⚠️ [Skipped] {file_path}: Write refused ({e}).")
+                continue
             
             try:
                 # 優先嘗試 git apply
