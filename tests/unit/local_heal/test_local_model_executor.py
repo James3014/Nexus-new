@@ -5328,6 +5328,7 @@ def test_apply_failure_root_cause_target_file_state_drift(tmp_path):
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
 
     snapshots = [
+        (True, "def double(x):\n    return x * 2\n"),  # the original, read before the pipeline
         (True, "def drifted(x):\n    return x\n"),
         (True, "def double(x):\n    return x * 2\n"),
         (True, "def modified_again(x):\n    return x * 5\n"),
