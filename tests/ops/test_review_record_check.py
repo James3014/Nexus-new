@@ -2459,3 +2459,65 @@ def test_a_round_history_item_fixed_later_on_its_line_keeps_the_accept():
 )
 def test_a_later_fix_closes_only_a_weak_reject_and_only_its_own(body):
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    ("files", "body", "status"),
+    [
+        # Only a REJECT main did not read can be answered: one bound to the head by its
+        # own sha stays open under a later ACCEPT that is not bound itself.
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2 @{HEAD[:9]}: REJECT — a regression\n"
+            "Claude r3: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2: REJECT@{HEAD[:9]} — a regression\n"
+            "Claude r3: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        # The answer must be a later round ...
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r2: REJECT — a regression\nClaude r2: ACCEPT\n",
+            "MISSING_RECORD",
+        ),
+        # ... listed after the REJECT ...
+        (
+            DOCS,
+            f"Claude r1: ACCEPT@{HEAD}\nClaude r3: ACCEPT\nClaude r2: REJECT — a regression\n",
+            "MISSING_RECORD",
+        ),
+        # ... of the same family.
+        (
+            RISKY,
+            f"Codex r1 ACCEPT@{HEAD}\nCodex r2: REJECT — race\nClaude r3: ACCEPT\n",
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_an_answer_closes_only_a_weak_reject_by_a_later_round_of_the_same_reviewer(
+    files, body, status
+):
+    comments = [_c(body)] + ([_c(CLAUDE_AT_HEAD)] if files is RISKY else [])
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "rest",
+    [
+        "is returned for an unsigned receipt.",
+        "items were all fixed.",
+        "reviews are not read by the gate.",
+        "finding was a false alarm.",
+        "then r3 ACCEPT.",
+        "/ nit 1, a missing guard.",
+    ],
+)
+def test_a_prose_word_right_after_the_token_decides_alone(rest):
+    # Label and position both pass ("Claude r2: REJECT"), so only the word after the
+    # token keeps the line from reading as a verdict.
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\nClaude r2: REJECT {rest}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
