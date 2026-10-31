@@ -216,8 +216,15 @@ _REJECT_LABEL_WORD = re.compile(
     r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}|[0-9a-f]{7,40}"
     r"|v?\d{1,3}(?:\.\d{1,3}){1,3}[a-z]{0,8}"
 )
-# What may follow the token: end, punctuation, a sha binding or a parenthesis.
-_REJECT_AFTER = re.compile(r"\s*(?:$|[.:;,!)\]\-\u2013\u2014(@]|at\b|on\b)")
+# What may NOT follow the token: a verb or noun that makes it a value in prose ("REJECT is
+# returned", "REJECT items:", "CHANGES_REQUESTED reviews are ignored"). Anything else,
+# a reason word included, leaves it a verdict: an unread REJECT lets an ACCEPT stand, so
+# the list stays short and a new wording fails closed.
+_REJECT_NOT_AFTER = re.compile(
+    r"\s+(?:is|was|are|were|be|been|being|items?|reviews?|values?|states?|status(?:es)?"
+    r"|paths?|branch(?:es)?|cases?|results?|outcomes?|verdicts?|labels?|tokens?)\b",
+    re.IGNORECASE,
+)
 _VERDICT_NEGATIVE = re.compile(r"(?i:verdict)\s*:\s*(?:REJECT|REPAIR_?REQUIRED|REQUEST_?CHANGES)")
 _QUOTE = re.compile("[\"\u201c\u2018]|(?<![A-Za-z])'")  # an apostrophe inside a word is possessive
 # Words before the token in its clause that make it a wish, a condition or a negation.
@@ -526,9 +533,11 @@ def reject_clauses(line: str) -> list[str]:
     verdict: only reviewer labels, round markers and shas stand between it and the
     previous verdict on the line (or the line start), and only punctuation, a sha
     binding or a parenthesis follows it ("**Codex**: r2 REJECT — data loss",
-    "r3 @<sha>: REJECT"). It is not negated, conditional or quoted, and nothing from it
-    to the next verdict on the line says it was resolved (``r1 REJECT (fixed)``,
-    ``REJECT, rebutted``; "not fixed yet" is not resolved). A gate's verdict value in a
+    "r3 @<sha>: REJECT"); so may a reason ("REJECT because ...", "REJECT with two
+    findings"), only a word that makes it a value in prose may not. It is not negated,
+    conditional or quoted, and nothing from it to the next verdict on the line says it
+    was resolved (``r1 REJECT (fixed)``, ``REJECT, rebutted``; "not fixed yet" is not
+    resolved). A gate's verdict value in a
     finding ("a tampered receipt: REJECT", "REJECT is returned") and a history heading
     ("Round 1 (<sha>) REJECT items:") are not verdicts. Lines skipped for accepting
     verdicts are read here (r5 R6): a REJECT in a table row (``| Gemini | r1 | REJECT |``,
@@ -565,7 +574,7 @@ def reject_clauses(line: str) -> list[str]:
         models = list(_NEAREST_MODEL.finditer(window))
         if not _reject_label_only(window[models[-1].end() :] if models else window):
             continue
-        if not _REJECT_AFTER.match(plain_line, end):
+        if _REJECT_NOT_AFTER.match(plain_line, end):
             continue
         following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
         if _resolved_after(plain_line, end, following):
@@ -604,6 +613,23 @@ def _label_binds(labels: list[tuple[list[str], str | None]], index: int, head: s
         if label is not None:
             return head.startswith(label)
     return False
+
+
+def _reject_label_binds(labels: list[tuple[list[str], str | None]], index: int, head: str) -> bool:
+    """Whether a REJECT on line ``index`` whose own label names no commit is about the head.
+
+    Fail closed: it is, unless the comment's Head labels place it on another commit. The
+    nearest Head label proper above it decides; with none above, a loose ``head <sha>``
+    mention that never names the head places it elsewhere. A comment that names the head
+    only outside Head labels (``ACCEPT@<sha>``, prose) leaves its bare REJECT at the head:
+    only comments that name the head reach this parse.
+    """
+    head = head.lower()
+    for _loose, label in reversed(labels[: index + 1]):
+        if label is not None:
+            return head.startswith(label)
+    loose = [found for found_on_line, _label in labels for found in found_on_line]
+    return not loose or any(head.startswith(found) for found in loose)
 
 
 def _bound_after(clause: str, span: tuple[int, int], prose_ok: bool = True) -> str | None:
@@ -902,6 +928,25 @@ def _reject_families(
     return families, (reviewer if len(families) == 1 else None)
 
 
+def _answered(
+    at: tuple[int, int],
+    event: dict[str, Any],
+    answers: list[tuple[tuple[int, int], str, str | None, int | None]],
+) -> bool:
+    """A later ACCEPT of a later round by the same named reviewer answers the REJECT."""
+    reviewer, reject_round = event.get("reviewer"), event["round"]
+    if reviewer is None or reject_round is None:
+        return False
+    return any(
+        where > at
+        and family == event["family"]
+        and who == reviewer
+        and accept_round is not None
+        and accept_round > reject_round
+        for where, family, who, accept_round in answers
+    )
+
+
 def standing_families(events: list[dict[str, Any]]) -> set[str]:
     """Reviewer families whose ACCEPT at the head still stands after later REJECTs (#2992).
 
@@ -978,6 +1023,10 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
     # The families (and reviewer) a REJECT with no model on its line is credited to.
     reject_header: tuple[list[str], str | None] = ([], None)
     header_level = 0  # heading level that opened the section; 99 for a non-heading label
+    # REJECTs placed on the head only by _reject_label_binds, and the ACCEPTs placed the
+    # same way (position, family, reviewer, round) that may answer them.
+    weak_rejects: set[int] = set()
+    answers: list[tuple[tuple[int, int], str, str | None, int | None]] = []
 
     def close_section() -> None:
         # A rebuttal at the cap is a cross-model event at its rebuttal line, so a later
@@ -1023,6 +1072,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             section.append(line)
             accept_clauses = verdict_clauses(line)
         line_events: list[tuple[int, dict[str, Any]]] = []
+        reject_head = _reject_label_binds(reject_labels, index, head)
         if not rejects_only:
             comment_head = _label_binds(labels, index, head)
             plain_line = _plain(line, keep_parens=True)
@@ -1032,9 +1082,20 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 start = plain_line.find(clause, consumed)
                 consumed = start + len(clause) if start >= 0 else consumed
                 family = _clause_family(clause, span, plain_line, start, header_family)
+                before = plain_line[: start + span[0]] if (span and start >= 0) else ""
+                rounds = _ROUND.findall(clause[: span[0]]) if span else []
+                if (
+                    family
+                    and not _binding(clause, span, line, head, comment_head)
+                    and _binding(clause, span, line, head, reject_head)
+                ):
+                    answers.append((
+                        (index, start + (span[0] if span else 0)),
+                        family,
+                        _reviewer_word(before) or header_reviewer,
+                        int(rounds[-1]) if rounds else None,
+                    ))
                 if family and _binding(clause, span, line, head, comment_head):
-                    before = plain_line[: start + span[0]] if (span and start >= 0) else ""
-                    rounds = _ROUND.findall(clause[: span[0]]) if span else []
                     line_events.append((
                         start + (span[0] if span else 0),
                         {
@@ -1046,7 +1107,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                             "line": clause.strip(),
                         },
                     ))
-        reject_head = _label_binds(reject_labels, index, head)
+        strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
         consumed = 0
         for clause in reject_clauses(line):
@@ -1057,20 +1118,24 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 continue
             if not _reject_binding(clause, span, plain_reject, head, reject_head):
                 continue
+            # Placed on the head only because nothing places it elsewhere (#3011 F1): a
+            # later round's ACCEPT by the same reviewer in this comment, placed the same
+            # way, answers it.
+            weak = not _reject_binding(clause, span, plain_reject, head, strict_head)
             families, reviewer = _reject_families(plain_reject[: start + span[0]], reject_header)
             rounds = _ROUND.findall(clause[: span[0]])
             for family in families:
-                line_events.append((
-                    start + span[0],
-                    {
-                        "family": family,
-                        "reviewer": reviewer,
-                        "kind": "reject",
-                        "round": int(rounds[-1]) if rounds else None,
-                        "comment": 0,
-                        "line": clause.strip(),
-                    },
-                ))
+                event = {
+                    "family": family,
+                    "reviewer": reviewer,
+                    "kind": "reject",
+                    "round": int(rounds[-1]) if rounds else None,
+                    "comment": 0,
+                    "line": clause.strip(),
+                }
+                if weak:
+                    weak_rejects.add(id(event))
+                line_events.append((start + span[0], event))
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not accept_clauses:
@@ -1078,6 +1143,11 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         close_section()
         section = []  # the header family persists: a reviewer block lists its rounds
     close_section()
+    events = [
+        (at, event)
+        for at, event in events
+        if id(event) not in weak_rejects or not _answered(at, event, answers)
+    ]
     ordered = [event for _, event in sorted(events + rebuttals, key=lambda item: item[0])]
     standing = standing_families([e for e in ordered if not e.get("rebuttal")])
     return {
