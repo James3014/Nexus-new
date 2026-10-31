@@ -425,6 +425,69 @@ def _clauses(line: str) -> list[str]:
     return [clause for clause in _CLAUSE_SPLIT.split(line) if clause.strip()]
 
 
+def _aside_closes(text: str) -> list[int | None]:
+    """Per position, the index of the ``)`` closing the outermost parenthetical it lies in.
+
+    One pass over the line; None where no parenthetical encloses the position or the
+    outermost one never closes on the line. Nested asides are read as part of the
+    outermost one, so each aside is checked once.
+    """
+    opens: list[int] = []
+    enclosing: list[int | None] = []
+    close_of: dict[int, int] = {}
+    for index, char in enumerate(text):
+        enclosing.append(opens[0] if opens else None)
+        if char == "(":
+            opens.append(index)
+        elif char == ")" and opens:
+            close_of[opens.pop()] = index
+    return [None if at is None else close_of.get(at) for at in enclosing]
+
+
+# The only "only" that names the scope reviewed: a fixed phrase that ends the aside,
+# "docs-only", "test-only", "typing-only" or "delta-only" (optionally followed by
+# "delta"), or "delta only <sha>..<sha>". Any other "only" denies as on main.
+_SCOPE_ONLY_END = re.compile(
+    r"(?<![\w-])(?:(?:docs|test|typing|delta)-(only)(?:\s+delta)?"
+    r"|delta\s+(only)\s+[0-9a-f]{7,40}\.\.[0-9a-f]{7,40})\s*$"
+)
+# A condition anywhere in the aside keeps every "only" in it a denial.
+_ASIDE_COND = re.compile(
+    r"\b(?:if|unless|provided|conditional\w*|once|when|after|with|subject|as\s+long\s+as|till"
+    r"|until|upon|assuming|on\s+condition)\b|\?",
+    re.IGNORECASE,
+)
+
+
+def _scope_only(text: str, start: int) -> bool:
+    """Whether the ``only`` starting at ``text[start]`` names the scope reviewed (#3040)."""
+    if _ASIDE_COND.search(text):
+        return False
+    phrase = _SCOPE_ONLY_END.search(text)
+    return phrase is not None and start in (phrase.start(1), phrase.start(2))
+
+
+def _aside_denies(aside: str) -> bool:
+    """Whether the part of a label aside from its round marker on denies the verdict.
+
+    The same words deny here as in the window, with two exceptions that misread honest
+    records, both only in an aside stating no condition (_ASIDE_COND): an ``only`` in a
+    fixed scope phrase that ends the aside (_SCOPE_ONLY_END; any other ``only`` still
+    denies, "only once CI is green", "for merge only"), and an apostrophe ("round 3's
+    items"), which is no quote. Double quotes, REJECT words, a negative ``Verdict:`` and
+    every other denial still deny (#3040).
+    """
+    text = _plain(aside, keep_parens=True)
+    if _REJECT.search(text) or _VERDICT_NEGATIVE.search(text) or re.search('["\u201c\u2018]', text):
+        return True
+    if _ASIDE_COND.search(text) and _QUOTE.search(text):
+        return True  # the apostrophe is exempt only in an aside stating no condition
+    return any(
+        match.group().lower() != "only" or not _scope_only(text, match.start())
+        for match in _PRE_DENY.finditer(text)
+    )
+
+
 def verdict_clauses(line: str) -> list[str]:
     """Clauses of the line whose accepting token sits in verdict position.
 
@@ -443,6 +506,7 @@ def verdict_clauses(line: str) -> list[str]:
         return []
     consumed = 0
     prev_token_end = 0
+    aside_closes: list[int | None] | None = None
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
@@ -451,8 +515,20 @@ def verdict_clauses(line: str) -> list[str]:
             continue
         token_at = start + span[0]
         window_start = prev_token_end
+        asides: dict[int, int] = {}  # closing index -> start of its last round marker
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
+            if aside_closes is None:
+                aside_closes = _aside_closes(plain_line)
+            # A marker inside a parenthetical is part of that aside ("(Round 3, delta only
+            # <a>..<b>): ACCEPT", #3040): starting the window there would cut the aside open
+            # and read its scope words as the verdict's own. The aside's words from its last
+            # marker on ("(round 1 REJECT, round 2)") are still checked, by _aside_denies.
+            aside_end = aside_closes[marker.start()]
+            if aside_end is not None:
+                asides[aside_end] = marker.start()
+                continue
             window_start = marker.start()  # "r1 ... with one should-fix, r2 ACCEPT": new round
+            asides = {}
         prev_token_end = max(prev_token_end, start + span[1])
         if (
             start > 0
@@ -471,6 +547,8 @@ def verdict_clauses(line: str) -> list[str]:
         after = clause[span[1] :]
         if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
             continue  # a quoted or negated verdict is prose about a verdict, not one
+        if any(_aside_denies(plain_line[at:close]) for close, at in asides.items()):
+            continue  # "(r2 not fixed): ACCEPT": a denial inside the aside still denies
         if _VERDICT_NEGATIVE.search(line_before) or _REJECT.search(_plain(clause[span[1] :])):
             continue  # "Verdict: REJECT — ACCEPT after the fixes" is a rejection
         head_of_after = _STOP.split(after, 1)[0]
