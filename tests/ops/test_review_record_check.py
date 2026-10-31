@@ -2545,3 +2545,62 @@ def test_a_reject_reason_starting_with_a_noun_withdraws(reason):
     codex = f"Head reviewed: {HEAD}\nCodex r1: ACCEPT\nCodex r2: REJECT {reason}\n"
     report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
     assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+# -- #3039 follow-up: a REJECT is judged where it stands, not at an earlier same-text clause
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # The earlier clause of the same text is not read (a prose word follows its token)
+        # and carries a fix note; the later one is a verdict main read.
+        f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n"
+        "Claude: REJECT items from r1 fixed in abc1234; Claude: REJECT — a new data-loss bug\n",
+        # The same, closed through the answer rule instead of a fix note.
+        f"Head reviewed: {HEAD[:7]}\nClaude r1: ACCEPT@{HEAD}\n"
+        "Claude r2: REJECT finding noted; Claude r2: REJECT — data loss\nClaude r3: ACCEPT\n",
+    ],
+)
+def test_a_reject_is_judged_at_its_own_position_on_the_line(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+    codex = body.replace("Claude", "Codex")
+    report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_reject_also_counts_for_the_family_read_where_its_text_first_appears():
+    # Before #3039 the bare REJECT below was placed at the same text inside the Claude
+    # clause and withdrew Claude's ACCEPT; read at its own position it is Codex's. Both
+    # readings count (fail closed), so the record stays missing as it was.
+    body = (
+        f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n"
+        "Claude r3: REJECT — fixed in f638ca3; Codex r3: ACCEPT@8d70e3f; REJECT — data loss\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Read at its first same-text place the REJECT is Opus's; at its own place,
+        # Claude's. No later Claude round may answer it.
+        f"Head reviewed: {HEAD}\nClaude r3: ACCEPT\nOpus, r2: REJECT, fixed, Claude, r2: REJECT\n",
+        # The fix note follows only the earlier same-text clause, not this (weak) REJECT.
+        f"Claude r1: ACCEPT@{HEAD}\n"
+        "Claude: REJECT items fixed in abc1234; Claude: REJECT — the lock leaks\n",
+    ],
+)
+def test_a_reject_read_at_two_places_is_neither_answered_nor_fixed_from_the_other(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_a_reject_still_counts_for_the_family_read_at_its_own_position():
+    # The bare REJECT is Codex's where it stands (after "Codex r3: ACCEPT"), and Claude's
+    # where its text first appears: both ACCEPTs are withdrawn.
+    body = (
+        f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n"
+        "Claude r3: REJECT — fixed in f638ca3; Codex r3: ACCEPT@8d70e3f; REJECT — data loss\n"
+    )
+    report = rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
