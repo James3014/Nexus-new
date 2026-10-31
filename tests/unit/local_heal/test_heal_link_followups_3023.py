@@ -415,13 +415,16 @@ def test_committee_routed_verify_still_checks_a_plain_file(repo_and_host):
 
 def test_committee_routed_verify_fails_a_target_that_is_not_utf8(repo_and_host):
     repo, _host_dir = repo_and_host
-    (repo / TARGET).write_bytes(b"x = 1\n# \xff\xfe\n")
+    # The bad bytes sit mid-file, so a check that only looks at the end would miss them.
+    (repo / TARGET).write_bytes(
+        b"x = 1\n# \xff\xfe\n" + b"".join(b"y%d = %d\n" % (i, i) for i in range(20))
+    )
     result = _verify(repo)
     assert result["status"] == "fail"
     assert result["reason"].startswith("TARGET_NOT_UTF8:")
 
 
-# --- link loops: Python 3.11/3.12 raise RuntimeError from Path.resolve --------------------
+# --- link loops: Python 3.11/3.12 raise RuntimeError from Path.resolve, 3.13+ do not -------
 
 
 @pytest.mark.parametrize("planted", ["target_loop", "parent_loop"])
@@ -441,6 +444,22 @@ def test_existence_helper_refuses_a_link_loop(repo_and_host, planted):
         toy.symlink_to(toy, target_is_directory=True)
     with pytest.raises(PathContainmentError):
         _target_entry_exists(str(repo), TARGET)
+
+
+@pytest.mark.parametrize(
+    ("target_file", "expected"),
+    [
+        (TARGET, True),
+        ("toy/missing.py", False),
+        ("missing_dir/x.py", False),
+        (TARGET + "/x", False),
+    ],
+)
+def test_existence_helper_answers_plain_paths_without_links(repo_and_host, target_file, expected):
+    from nexus.services.local_heal.local_model_executor import _target_entry_exists
+
+    repo, _host_dir = repo_and_host
+    assert _target_entry_exists(str(repo), target_file) is expected
 
 
 def test_committee_restore_stops_at_a_link_loop(repo_and_host):

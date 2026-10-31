@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import os
+from pathlib import PurePath
+import stat
 from typing import Any, Mapping
 
 from nexus.core.contained_write import (
@@ -489,11 +491,12 @@ def _sha256_text(text: str) -> str:
 
 
 def _target_entry_exists(repo_root: str, target_file: str) -> bool:
-    """Whether anything, a link included, is at repo_root/target_file (#3023).
+    """Whether anything is at repo_root/target_file (#3023).
 
     os.path.lexists alone follows a linked directory on the way, so a directory link to a host
-    dir without the file would read as "nothing there". A link on the way to the target, or a
-    target_file that leaves repo_root, raises PathContainmentError instead."""
+    dir without the file would read as "nothing there". A link at the target or on the way to
+    it, a link loop included, or a target_file that leaves repo_root, raises
+    PathContainmentError instead."""
     relative = os.path.normpath(target_file)
     try:
         contained = os.fspath(contained_relative_path(repo_root, relative))
@@ -504,7 +507,20 @@ def _target_entry_exists(repo_root: str, target_file: str) -> bool:
         raise PathContainmentError(f"path_unresolvable:{target_file}") from exc
     if contained != relative:
         raise PathContainmentError(f"path_crosses_link:{target_file}")
-    return os.path.lexists(os.path.join(repo_root, relative))
+    # Path.resolve does not report a link loop on Python 3.13+, so look at each component
+    # with lstat: the answer must not depend on the interpreter version.
+    current = repo_root
+    for name in PurePath(relative).parts:
+        current = os.path.join(current, name)
+        try:
+            mode = os.lstat(current).st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        except OSError as exc:
+            raise PathContainmentError(f"path_unresolvable:{target_file}") from exc
+        if stat.S_ISLNK(mode):
+            raise PathContainmentError(f"path_crosses_link:{target_file}")
+    return True
 
 
 def _read_target_snapshot(repo_root: str, target_file: str) -> tuple[bool, str]:
