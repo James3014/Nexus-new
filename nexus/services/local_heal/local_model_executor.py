@@ -2356,12 +2356,20 @@ class LocalModelExecutor:
             original_target_content = None
             original_target_exists = False
             original_target_path = ""
+            original_target_read_refused = ""
             if request.repo_root and target_file:
                 original_target_path = os.path.join(request.repo_root, target_file)
-                if os.path.exists(original_target_path):
-                    original_target_exists = True
-                    with open(original_target_path, "r", encoding="utf-8") as f:
-                        original_target_content = f.read()
+                # A link at the target or on the way to it would make this "original" a file
+                # outside repo_root, later re-anchored against and written back (#3023).
+                try:
+                    original_target_exists, _original_text = _read_target_snapshot(
+                        request.repo_root, target_file
+                    )
+                except PathContainmentError as exc:
+                    original_target_read_refused = str(exc)
+                else:
+                    if original_target_exists:
+                        original_target_content = _original_text
 
             # Execute repair_loop (localheal pipeline bridge)
             repair_exec = LocalHealPipelineCapabilityExecutor().execute(cap_ctx)
@@ -2454,7 +2462,12 @@ class LocalModelExecutor:
                     candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
                     candidate_isolation_attempted = True
 
-                if candidate_isolation_attempted and original_target_path:
+                if candidate_isolation_attempted and original_target_read_refused:
+                    # No contained original to restore: no apply from this repo_root (#3023).
+                    target_restore_refused = True
+                    isolated_apply_status = "restore_refused"
+                    isolated_apply_error = f"TARGET_READ_REFUSED:{original_target_read_refused}"
+                elif candidate_isolation_attempted and original_target_path:
                     # Model code may have run in repo_root: every read and write of the target
                     # below refuses a link at it or on the way to it (#3023). After a refusal
                     # nothing is read, so no text or hash of a file outside repo_root is recorded.
@@ -2578,6 +2591,7 @@ class LocalModelExecutor:
                 "pipeline_final_patch_len": pipeline_final_patch_len,
                 "pipeline_solve_eligible": pipeline_solve_eligible,
                 "pipeline_failure_reason": pipeline_failure_reason,
+                "original_target_read_refused": original_target_read_refused,
                 "localheal_pipeline_run_called": repair_exec.telemetries.get("localheal_pipeline_run_called", False),
                 "localheal_pipeline_run_success": repair_exec.telemetries.get("localheal_pipeline_run_success", False),
                 "orchestrator_run_reachable": repair_exec.telemetries.get("orchestrator_run_reachable", False),
@@ -2984,14 +2998,20 @@ class LocalModelExecutor:
                     _locked_search_for_dr = str(route_ctx.get("locked_search") or "")
                     _dr_localized_files: list = []
                     if request.target_file:
-                        _target_full_path = _Path(request.repo_root) / request.target_file
-                        if _target_full_path.exists():
-                            try:
-                                from nexus.services.local_heal.interface import LocalizedFile as _LocalizedFile
-                                _current_content = _target_full_path.read_text(encoding="utf-8", errors="replace")
+                        # Never through a link at the target or on the way to it (#3023): its
+                        # text would be a file outside repo_root in the committee prompt.
+                        try:
+                            from nexus.services.local_heal.interface import LocalizedFile as _LocalizedFile
+                            _current_exists, _current_content = _read_target_snapshot(
+                                request.repo_root, request.target_file
+                            )
+                            if _current_exists:
                                 _dr_localized_files = [_LocalizedFile(path=request.target_file, content=_current_content)]
-                            except Exception:
-                                pass
+                        except PathContainmentError as exc:
+                            raw_meta["delegated_retry_target_read_refused"] = True
+                            raw_meta["delegated_retry_target_read_refused_reason"] = str(exc)
+                        except Exception:
+                            pass
 
 
                     _dr_committee_winner = None
@@ -4073,6 +4093,7 @@ class LocalModelExecutor:
         failure_context = ""
         if failure_feedback_present and failure_feedback_text:
             failure_context = f"\n\n{failure_feedback_text}"
+        source_context_read_refused = ""
 
         if protocol_mode == "anchored_edit":
             explicit_prompt = (
@@ -4104,9 +4125,21 @@ class LocalModelExecutor:
             source_context = ""
             try:
                 from pathlib import Path as _Path
-                _fp = _Path(request.repo_root) / request.target_file if request.repo_root else _Path(request.target_file)
-                if _fp.exists():
-                    _lines = _fp.read_text(encoding="utf-8").splitlines()
+                if request.repo_root and request.target_file:
+                    # Never through a link at the target or on the way to it (#3023).
+                    try:
+                        _fp_exists, _fp_text = _read_target_snapshot(request.repo_root, request.target_file)
+                    except PathContainmentError as exc:
+                        source_context_read_refused = str(exc)
+                        _fp_exists, _fp_text = False, ""
+                elif request.repo_root:
+                    _fp_exists, _fp_text = False, ""
+                else:
+                    _fp = _Path(request.target_file)
+                    _fp_exists = _fp.exists()
+                    _fp_text = _fp.read_text(encoding="utf-8") if _fp_exists else ""
+                if _fp_exists:
+                    _lines = _fp_text.splitlines()
                     # Find locked_search start line
                     _search_first = locked_search.strip().splitlines()[0].strip() if locked_search.strip() else ""
                     _anchor_line = 1
@@ -4263,6 +4296,8 @@ class LocalModelExecutor:
             **memory_runtime_meta,
             **_understanding_meta,
         }
+        if source_context_read_refused:
+            raw_meta["source_context_read_refused"] = source_context_read_refused
         _usage = compute_capability_usage(
             selected_capabilities=selected_caps,
             metadata=raw_meta,
