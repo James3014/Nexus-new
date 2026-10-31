@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 from pathlib import Path
 
@@ -2604,3 +2605,120 @@ def test_a_reject_still_counts_for_the_family_read_at_its_own_position():
     )
     report = rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])
     assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+# -- #3040: a round marker inside a label's parenthetical is part of the aside ---------
+
+_DELTA = f"{OLD}..{HEAD}"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # #3029's round-3 record shape.
+        f"(Claude Haiku 5.5, separate agent; Round 3, delta only `{_DELTA}`)",
+        "(Claude Opus 5.5; r2, docs-only delta)",
+    ],
+)
+def test_a_round_marker_inside_a_label_aside_keeps_an_honest_accept(label):
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Denials outside the aside, or in the verdict's own clause, still deny.
+        f"**Claude review** (Opus; Round 3): not ACCEPT at {HEAD}",
+        f"**Claude review** (Opus; Round 3): ACCEPT at {HEAD} only if CI passes",
+        f"**Claude review** r2 not fixed, (Opus; Round 3): ACCEPT at {HEAD}",
+        f"**Claude review** (Opus; Round 3), awaiting ACCEPT at {HEAD}",
+        # A label the aside disables is still disabled.
+        f"**Claude review** (not run; Round 3): ACCEPT at {HEAD}",
+        # An unclosed parenthesis is no aside.
+        f"**Claude review** (Opus; Round 3, not yet: ACCEPT at {HEAD}",
+    ],
+)
+def test_a_round_marker_inside_an_aside_does_not_hide_a_denial(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(line + "\n")], [])["status"] != "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "(r2 not fixed)",
+        "(Round 2 REJECT still open)",
+        "(Opus; round 3, not yet re-run)",
+        "(Opus; round 3, cannot merge yet)",
+        "(Opus; round 3, pending CI)",
+        '(Opus; round 3, "approved" by the author)',
+    ],
+)
+def test_a_denial_inside_a_round_marked_aside_still_denies(label):
+    # Only the scope word "only" and an apostrophe stop denying inside such an aside.
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
+
+
+def test_an_apostrophe_inside_a_round_marked_aside_is_no_quote():
+    # cairnwork#257's round-4 record shape.
+    label = "(separate agent; round 4, a confirmation of round 3's items beyond the usual cap)"
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_a_round_history_inside_an_aside_is_read_from_its_last_round():
+    # cairnwork#268's record shape: the aside's earlier round was a REJECT, its last an
+    # ACCEPT; as on main, only the words from the last round marker on are checked.
+    label = "(Claude Opus 5.5, separate agent; round 1 at 6ed031de REJECT, delta round 2)"
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        # Each is the only denial in its aside, so each check is pinned on its own.
+        "(Opus; round 3, only once CI is green)",
+        "(Opus; round 3, only-if the rebase is clean)",
+        "(Opus; round 3, only after the rebase)",
+        "(Opus; round 3, only-after the rebase)",
+        "(Opus; round 3, only\u2010after the rebase)",
+        "(Opus; round 3, only, once CI is green)",
+        "(Opus; round 3, only)",
+        "(Opus; round 3, once CI is green, test-only)",
+        "(Opus; round 3, when only)",
+        "(Opus; round 3, subject to CI, delta only a1b2c3d..e4f5a6b)",
+        "(Opus; round 3, only subject to CI passing)",
+        "(Opus; round 3, only with CI green)",
+        "(Opus; round 3, only: CI green)",
+        "(Opus; round 3, only (CI green))",
+        "(Opus; round 3 only, once CI is green)",
+        "(Opus; round 3, delta only a1b2c3d..e4f5a6b, once CI is green)",
+        "(Opus; round 3, test-only, once CI is green)",
+        "(Opus; round 3 (not fixed))",
+        "(Opus; round 3, Verdict: REJECTION)",
+        # A REJECT in an earlier segment of the aside: no other check reaches it.
+        "(Opus; round 3, REJECT items open, delta)",
+        '(Opus; round 3, "approved")',
+        "(Opus; round 3, “approved”)",
+    ],
+)
+def test_each_denial_inside_a_round_marked_aside_denies_alone(label):
+    body = f"## Review record — head `{HEAD}`\n**Independent Claude review** {label}: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] != "OK"
+
+
+def test_many_round_markers_in_asides_stay_linear():
+    # Thousands of markers inside asides on one line: one pass per line, not per marker.
+    line = "(" + " r1" * 4000 + ") " * 1 + "(" + " r2" * 4000 + ")"
+    started = time.monotonic()
+    rrc.verdict_clauses(f"**Claude review** {line}: ACCEPT at {HEAD}")
+    assert time.monotonic() - started < 2.0
+
+
+def test_deeply_nested_asides_stay_linear():
+    line = "(r1 " * 3000 + ")" * 3000
+    started = time.monotonic()
+    rrc.verdict_clauses(f"**Claude review** {line}: ACCEPT at {HEAD}")
+    assert time.monotonic() - started < 2.0
