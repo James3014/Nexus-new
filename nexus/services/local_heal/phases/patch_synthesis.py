@@ -12,7 +12,7 @@ from nexus.services.local_heal.prompt_builder import PromptBuilder
 from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
 from nexus.services.local_heal.surgical_context import SurgicalContextBuilder
 from nexus.services.local_heal.patch_applier import PatchApplier
-from nexus.services.local_heal.micro_verifier import MicroVerifier
+from nexus.services.local_heal.micro_verifier import micro_verify_in_scratch_copy
 
 class PatchSynthesisPhase(IPhase):
     """Phase 4: Targeted Edit (Solid SEARCH/REPLACE Protocol Implementation) - Refactored according to Clean Code & Linus principles"""
@@ -496,7 +496,7 @@ class PatchSynthesisPhase(IPhase):
                     if line.startswith("+++ b/"):
                         patched_files.append(line[6:])
             if patched_files:
-                micro_result = MicroVerifier.verify(
+                micro_result = micro_verify_in_scratch_copy(
                     apply_res.applied_diffs[0],
                     input_data.repo_dir,
                     patched_files,

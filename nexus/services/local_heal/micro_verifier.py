@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import ast
 import os
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
@@ -19,6 +21,7 @@ from nexus.engine.model_output_sandbox import (
     interpreter_readable_roots,
     run_model_argv,
 )
+from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
 
 # Imports one module of the patched repo; the repo dir and module name arrive as argv, never
 # interpolated into the code.
@@ -53,9 +56,26 @@ _TEST_IMPORT_PROBE = (
 # with the marker = absent (step skipped); exit 0 without it = present (pytest runs); a non-zero
 # exit or an error = the probe failed (fails closed).
 _PYTEST_ABSENT_MARKER = "NEXUS_MICRO_VERIFY_PYTEST_ABSENT"
+_PYTEST_SHADOWED_MARKER = "NEXUS_MICRO_VERIFY_PYTEST_SHADOWED"
 _PYTEST_PROBE = (
-    "import importlib.util; "
-    f"print('' if importlib.util.find_spec('pytest') else '{_PYTEST_ABSENT_MARKER}')"
+    "import importlib.util, os, sys; "
+    "repo = os.path.realpath(sys.argv[1]); "
+    "sys.path = [p for p in sys.path if p not in ('', '.') and os.path.realpath(p or '.') != repo]; "
+    "spec = importlib.util.find_spec('pytest'); "
+    "origin = getattr(spec, 'origin', None) or ''; "
+    "real_orig = os.path.realpath(origin) if origin else ''; "
+    "parts = real_orig.split(os.sep); "
+    f"print('{_PYTEST_ABSENT_MARKER}' if not spec or not origin else "
+    f"('{_PYTEST_SHADOWED_MARKER}' if (real_orig == repo or real_orig.startswith(repo + os.sep)) and 'site-packages' not in parts and 'dist-packages' not in parts else ''))"
+)
+_PYTEST_BOOTSTRAP = (
+    "import os, sys; "
+    "repo = os.path.realpath(sys.argv[1]); "
+    "sys.path = [p for p in sys.path if p not in ('', '.') and os.path.realpath(p or '.') != repo]; "
+    "import pytest; "
+    "sys.path.insert(0, sys.argv[1]); "
+    "sys.argv = ['pytest'] + sys.argv[2:]; "
+    "sys.exit(pytest.console_main() if hasattr(pytest, 'console_main') else pytest.main(sys.argv[1:]))"
 )
 # pytest's documented exit status for "no tests were collected".
 _PYTEST_NO_TESTS_COLLECTED = 5
@@ -284,11 +304,11 @@ class MicroVerifier:
             if pytest_cmd:
                 run_cmd = [pytest_cmd]
             elif task_interpreter:
-                run_cmd = [task_interpreter, "-m", "pytest"]
+                run_cmd = [task_interpreter, "-c", _PYTEST_BOOTSTRAP, str(repo_dir)]
             elif interpreter:
-                run_cmd = [interpreter, "-m", "pytest"]
+                run_cmd = [interpreter, "-c", _PYTEST_BOOTSTRAP, str(repo_dir)]
             else:
-                run_cmd = ["python3", "-m", "pytest"]
+                run_cmd = ["python3", "-c", _PYTEST_BOOTSTRAP, str(repo_dir)]
 
             # #2975: `<interpreter> -m pytest` on an interpreter without pytest is not a test
             # failure. Ask first; when pytest is absent, record the step as skipped (the full
@@ -296,7 +316,7 @@ class MicroVerifier:
             if not pytest_cmd:
                 try:
                     probe = run_model_argv(
-                        [run_cmd[0], "-c", _PYTEST_PROBE],
+                        [run_cmd[0], "-c", _PYTEST_PROBE, str(repo_dir)],
                         work_dir=repo_dir,
                         timeout=10,
                         readable=interpreter_readable_roots(run_cmd[0]),
@@ -306,6 +326,12 @@ class MicroVerifier:
                         classifications.append("verifier_unavailable")
                         test_errors.append(
                             f"pytest_probe_failed: exit {probe.returncode}: {probe.stderr[-300:]}"
+                        )
+                    elif _PYTEST_SHADOWED_MARKER in probe.stdout:
+                        test_ok = False
+                        classifications.append("verifier_unavailable")
+                        test_errors.append(
+                            f"pytest_shadowed: pytest resolved under repo {repo_dir}: {probe.stdout.strip()}"
                         )
                     elif _PYTEST_ABSENT_MARKER in probe.stdout:
                         test_skip_reason = "pytest_unavailable"
@@ -430,3 +456,79 @@ class MicroVerifier:
             no_tests_collected=no_tests_collected,
             import_skipped=import_skipped,
         )
+
+
+def micro_verify_in_scratch_copy(
+    patch_content: str,
+    repo_dir: str | Path,
+    patched_files: List[str],
+    verifier_env_metadata: Optional[Dict[str, Any]] = None,
+    env_taxonomy: Optional[Dict[str, Any]] = None,
+) -> MicroVerifyResult:
+    """Run MicroVerifier.verify on a disposable copy of repo_dir."""
+    try:
+        scratch_dir = make_isolated_workspace(prefix="micro-verify-")
+    except Exception as e:
+        return MicroVerifyResult(
+            passed=False,
+            syntax_ok=False,
+            error_message="ENV_BLOCKED",
+            details=f"scratch copy failed: {e}",
+            classifications=["env_blocked", "verifier_unavailable"],
+        )
+
+    try:
+        repo_path = Path(repo_dir).resolve()
+        scratch_path = Path(scratch_dir).resolve()
+        try:
+            for entry in repo_path.iterdir():
+                entry_resolved = entry.resolve()
+                if entry_resolved == scratch_path:
+                    continue
+                try:
+                    scratch_path.relative_to(entry_resolved)
+                    continue
+                except ValueError:
+                    pass
+
+                target = scratch_path / entry.name
+                copied = False
+                if sys.platform == "darwin" and not entry.is_symlink():
+                    try:
+                        subprocess.run(
+                            ["cp", "-cR", str(entry), str(target)],
+                            capture_output=True,
+                            check=True,
+                        )
+                        copied = True
+                    except Exception:
+                        if target.is_dir() and not target.is_symlink():
+                            shutil.rmtree(target, ignore_errors=True)
+                        elif target.exists() or target.is_symlink():
+                            target.unlink(missing_ok=True)
+                        copied = False
+                if not copied:
+                    if entry.is_symlink():
+                        shutil.copy2(entry, target, follow_symlinks=False)
+                    elif entry.is_dir():
+                        shutil.copytree(entry, target, symlinks=True)
+                    else:
+                        shutil.copy2(entry, target, follow_symlinks=False)
+        except Exception as e:
+            return MicroVerifyResult(
+                passed=False,
+                syntax_ok=False,
+                error_message="ENV_BLOCKED",
+                details=f"scratch copy failed: {e}",
+                classifications=["env_blocked", "verifier_unavailable"],
+            )
+
+        return MicroVerifier.verify(
+            patch_content=patch_content,
+            repo_dir=scratch_dir,
+            patched_files=patched_files,
+            verifier_env_metadata=verifier_env_metadata,
+            env_taxonomy=env_taxonomy,
+        )
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
