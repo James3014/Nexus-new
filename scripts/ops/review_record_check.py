@@ -1159,6 +1159,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     plain_reject[: found + span[0]], reject_header
                 )
                 families = sorted(set(families) | set(earlier))
+                if _reviewer != reviewer:
+                    reviewer = None  # read as two reviewers: no later round answers it
             rounds = _ROUND.findall(clause[: span[0]])
             for family in families:
                 event = {

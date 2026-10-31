@@ -2578,3 +2578,29 @@ def test_a_reject_also_counts_for_the_family_read_where_its_text_first_appears()
         "Claude r3: REJECT — fixed in f638ca3; Codex r3: ACCEPT@8d70e3f; REJECT — data loss\n"
     )
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Read at its first same-text place the REJECT is Opus's; at its own place,
+        # Claude's. No later Claude round may answer it.
+        f"Head reviewed: {HEAD}\nClaude r3: ACCEPT\nOpus, r2: REJECT, fixed, Claude, r2: REJECT\n",
+        # The fix note follows only the earlier same-text clause, not this (weak) REJECT.
+        f"Claude r1: ACCEPT@{HEAD}\n"
+        "Claude: REJECT items fixed in abc1234; Claude: REJECT — the lock leaks\n",
+    ],
+)
+def test_a_reject_read_at_two_places_is_neither_answered_nor_fixed_from_the_other(body):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_a_reject_still_counts_for_the_family_read_at_its_own_position():
+    # The bare REJECT is Codex's where it stands (after "Codex r3: ACCEPT"), and Claude's
+    # where its text first appears: both ACCEPTs are withdrawn.
+    body = (
+        f"Head reviewed: {HEAD}\nClaude r1: ACCEPT\n"
+        "Claude r3: REJECT — fixed in f638ca3; Codex r3: ACCEPT@8d70e3f; REJECT — data loss\n"
+    )
+    report = rrc.evaluate(HEAD, RISKY, [_c(body), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"
