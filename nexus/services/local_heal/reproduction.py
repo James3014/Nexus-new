@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Tuple
 
+from nexus.core.contained_write import write_text_in_root
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
@@ -338,7 +339,7 @@ class ReproductionRunner:
                 f"sys.path.insert(1, {benchmarks_dir!r})\n"
             )
             executed_script = self._execution_wrapper(path_injection, script_code)
-            repro_path.write_text(executed_script, encoding="utf-8")
+            write_text_in_root(self.repo_dir, repro_path.name, executed_script)
             self.last_script_sha256 = hashlib.sha256(executed_script.encode("utf-8")).hexdigest()
 
             # The failure record is written by the script's own process, so its directory is the

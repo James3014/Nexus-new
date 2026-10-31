@@ -4,6 +4,12 @@ import hashlib
 from pathlib import Path
 from typing import List, Tuple
 from dataclasses import dataclass, field
+from nexus.core.contained_write import (
+    PathContainmentError,
+    contained_relative_path,
+    read_text_in_root,
+    write_text_in_root,
+)
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, SyntaxGate
 from nexus.services.local_heal.validator import validate_effective_change, validate_name_sanity
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind, MatchAuthority
@@ -392,6 +398,17 @@ class PatchApplier:
                         "resolution_attempts": resolution_attempts,
                     })
                     return False, f"FILE_NOT_FOUND:{intent.file_path}", telemetry
+
+            # The path is model output: written on the host, so it must stay in repo_dir.
+            try:
+                contained_relative_path(repo_dir, target_path)
+            except PathContainmentError:
+                telemetry["preflight_checks"].append({
+                    "check": "path_in_repo",
+                    "passed": False,
+                    "file": intent.file_path,
+                })
+                return False, f"PATH_OUTSIDE_REPO:{intent.file_path}", telemetry
             
             # Check 2: Search text is not empty
             if not intent.search.strip():
@@ -423,7 +440,9 @@ class PatchApplier:
                 # T1.3A: Fragment parse failed — try full patched file
                 # This handles indented blocks (inside functions/classes) that aren't valid modules
                 try:
-                    source_text_for_check = target_path.read_text(encoding="utf-8", errors="replace")
+                    source_text_for_check = read_text_in_root(
+                        repo_dir, contained_relative_path(repo_dir, target_path)
+                    )
                     patched_full = source_text_for_check.replace(intent.search, intent.replace)
                     patched_hash = hashlib.sha256(patched_full.encode()).hexdigest()[:16]
                     ast.parse(patched_full)
@@ -539,7 +558,16 @@ class PatchApplier:
                     preflight_telemetry=preflight_telemetry
                 )
 
-            source_text = target_path.read_text(encoding="utf-8", errors="replace")
+            try:
+                target_rel = contained_relative_path(repo_dir, target_path)
+                source_text = read_text_in_root(repo_dir, target_rel)
+            except PathContainmentError:
+                return PatchApplicationResult(
+                    success=False,
+                    applied_diffs=applied_diffs,
+                    error_reason=f"PATH_OUTSIDE_REPO:{intent.file_path}",
+                    preflight_telemetry=preflight_telemetry
+                )
 
             # A. [MatchGate] 逐字匹配與占位符阻斷
             match_res = self.parser.validate(intent, source_text)
@@ -556,7 +584,11 @@ class PatchApplier:
                     alt_path = repo_dir / alt_rel_path
                     if not alt_path.exists() or alt_path == target_path:
                         continue
-                    alt_text = alt_path.read_text(encoding="utf-8", errors="replace")
+                    try:
+                        alt_rel = contained_relative_path(repo_dir, alt_path)
+                        alt_text = read_text_in_root(repo_dir, alt_rel)
+                    except PathContainmentError:
+                        continue
                     alt_res = self.parser.validate(intent, alt_text)
                     if alt_res.is_valid:
                         intent = type(intent)(
@@ -566,6 +598,7 @@ class PatchApplier:
                             operation=intent.operation,
                         )
                         target_path = alt_path
+                        target_rel = alt_rel
                         source_text = alt_text
                         match_res = alt_res
                         corrected = True
@@ -625,7 +658,15 @@ class PatchApplier:
                 )
 
             # D. 寫入檔案與紀錄 unified diff
-            target_path.write_text(patched_content, encoding="utf-8")
+            try:
+                write_text_in_root(repo_dir, target_rel, patched_content)
+            except PathContainmentError:
+                return PatchApplicationResult(
+                    success=False,
+                    applied_diffs=applied_diffs,
+                    error_reason=f"PATH_OUTSIDE_REPO:{intent.file_path}",
+                    preflight_telemetry=preflight_telemetry
+                )
             diff = self._build_file_diff(intent.file_path, source_text, patched_content)
             applied_diffs.append(diff)
 

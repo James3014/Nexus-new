@@ -289,6 +289,60 @@ def localized_files_for_task(task: dict[str, Any]) -> list[tuple[str, str]]:
     ]
 
 
+def stage_local_mode_workspace(task: dict[str, Any], scratch_root: Path) -> dict[str, Any]:
+    """A local-mode task on a scratch copy instead of the host's own checkout.
+
+    Local mode used the Nexus checkout itself as repo_dir: model patches and sandboxed model
+    runs then wrote where the host imports its own code from. The task now gets a fresh git
+    repo under ``scratch_root`` holding the target file (at the same relative path) and
+    ``scripts/benchmarks``, which the repro script puts on ``sys.path``."""
+
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not task.get("local_mode"):
+        return task
+    source_root = Path(task["repo_dir"]).resolve()
+    local_path = Path(task["local_path"])
+    if not local_path.is_absolute():
+        local_path = source_root / local_path
+    local_path = local_path.resolve()
+    try:
+        relative = local_path.relative_to(source_root)
+    except ValueError:
+        relative = Path(local_path.name)
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    workspace = Path(tempfile.mkdtemp(prefix="local-heal-", dir=str(scratch_root))).resolve()
+    benchmarks = source_root / "scripts" / "benchmarks"
+    if benchmarks.is_dir():
+        shutil.copytree(benchmarks, workspace / "scripts" / "benchmarks", symlinks=True)
+    target = workspace / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(local_path, target)
+    git = ["git", "-c", "user.name=nexus-local-heal", "-c", "user.email=local-heal@invalid"]
+    subprocess.run([*git, "init", "-q"], cwd=workspace, check=True)
+    subprocess.run([*git, "add", "-A"], cwd=workspace, check=True)
+    subprocess.run(
+        [*git, "commit", "-q", "--no-verify", "-m", "local-heal task snapshot"],
+        cwd=workspace,
+        check=True,
+    )
+    return {**task, "repo_dir": workspace, "local_path": target, "source_local_path": local_path}
+
+
+def prepare_task_workspace(
+    task: dict[str, Any], scratch_root: Path | None = None
+) -> dict[str, Any]:
+    """Check out the task's workspace; a local-mode task then moves to a scratch copy, never the
+    host's own checkout as the work dir of model output."""
+
+    ensure_workspace_state(task)
+    return stage_local_mode_workspace(
+        task, scratch_root or NEXUS_ROOT / ".nexus" / "local_heal_scratch"
+    )
+
+
 def read_resume_task_ids(path: str | Path | None, *, mode: str) -> set[str]:
     if not path:
         return set()
@@ -611,7 +665,7 @@ def main() -> None:
             )
 
             try:
-                ensure_workspace_state(task)
+                task = prepare_task_workspace(task)
             except Exception as e:
                 print(f"  💥 WORKSPACE ERROR: {e}")
                 _write_runner_abort_receipt(

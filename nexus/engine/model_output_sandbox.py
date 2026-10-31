@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess  # nosec B404 - argv lists only, never a shell
+import sys
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -40,6 +41,7 @@ from nexus.engine.sandboxed_lane import (
     SandboxError,
     confinement,
     developer_toolchain_read_roots,
+    in_tree,
     trusted_executable,
 )
 
@@ -62,11 +64,23 @@ __all__ = [
     "SandboxError",
     "argument_file_roots",
     "denied_subtrees",
+    "host_code_roots",
     "interpreter_readable_roots",
     "model_sandbox",
     "run_model_argv",
     "run_model_command_string",
 ]
+
+
+def host_code_roots() -> tuple[Path, ...]:
+    """Directories this host process imports Python from: the checkout or install holding the
+    ``nexus`` package, and every directory on ``sys.path``. Model output may not be granted
+    write access to one, or to a directory containing one: the host would later import, and
+    run unconfined, what it wrote there."""
+
+    roots = {Path(__file__).resolve().parents[2]}
+    roots.update(Path(entry).resolve() for entry in sys.path if entry and os.path.isdir(entry))
+    return tuple(sorted(roots))
 
 
 def denied_subtrees() -> tuple[Path, ...]:
@@ -179,6 +193,9 @@ def model_sandbox(
     extra = tuple(Path(path).resolve() for path in writable)
     if not all(path.is_dir() for path in extra):
         raise SandboxError("writable_dir_missing")
+    # Checked before the barrier, so it fails the same way on every host.
+    if any(in_tree(root, (work, *extra)) for root in host_code_roots()):
+        raise SandboxError("work_dir_holds_host_code")
     # The host runs git and the task interpreter in work_dir after the model's command (#2945):
     # a planted hook, git config (core.fsmonitor, diff.external) or venv file would run there,
     # unconfined. Both the path and, for a symlink, its target stay unwritable.

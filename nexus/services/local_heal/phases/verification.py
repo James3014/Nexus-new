@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterator
 
+from nexus.core.contained_write import PathContainmentError, write_text_in_root
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.evaluation_gate import EvaluationGate
 from nexus.services.local_heal.interface import (
@@ -602,7 +603,17 @@ class VerificationPhase(IPhase):
         repro_path = input_data.repo_dir / "reproduce_bug.py"
         wrote_repro_script = bool(input_data.repro_script)
         if wrote_repro_script:
-            repro_path.write_text(input_data.repro_script, encoding="utf-8")
+            # Model code may have run in repo_dir: never write through a link it left there.
+            try:
+                write_text_in_root(input_data.repo_dir, "reproduce_bug.py", input_data.repro_script)
+            except PathContainmentError:
+                return VerificationOutput(
+                    success=False,
+                    evaluation_report="",
+                    hidden_verifier_passed=False,
+                    solve_eligible=False,
+                    error_reason="REPRO_SCRIPT_PATH_REFUSED"
+                )
 
         try:
             verification_python = input_data.python_executable or "python3"
@@ -641,7 +652,7 @@ class VerificationPhase(IPhase):
                     error_reason="VERIFICATION_FAILED"
                 )
         finally:
-            if wrote_repro_script and repro_path.exists():
+            if wrote_repro_script and os.path.lexists(repro_path):
                 try:
                     os.remove(repro_path)
                 except OSError:
