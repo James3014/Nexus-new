@@ -7,6 +7,7 @@ without following links, and only a regular single-link file is read or written.
 from __future__ import annotations
 
 import os
+import stat
 import threading
 from pathlib import Path
 
@@ -162,3 +163,93 @@ def test_root_given_through_a_symlink_still_works(layout, tmp_path):
     write_text_in_root(alias, "a.txt", "ok")
     assert (root / "a.txt").read_text(encoding="utf-8") == "ok"
     assert str(contained_relative_path(alias, Path("a.txt"))) == "a.txt"
+
+
+def test_hard_link_unlinked_after_open_is_not_written(layout, monkeypatch):
+    # The name in root is unlinked right after the host opens it, leaving the outside file
+    # as the inode's only link: a check on the opened file would then pass.
+    root, outside = layout
+    os.link(outside / "f.py", root / "h.py")
+    real_open = os.open
+
+    def open_then_unlink(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == "h.py":
+            os.unlink(root / "h.py")
+        return fd
+
+    monkeypatch.setattr(os, "open", open_then_unlink)
+    try:
+        write_text_in_root(root, "h.py", "pwn")
+    except PathContainmentError:
+        pass
+    monkeypatch.undo()
+    assert (outside / "f.py").read_text(encoding="utf-8") == "orig"
+
+
+def _stat_raced(monkeypatch, name: str, result):
+    real_stat = os.stat
+
+    def raced(path, *args, **kwargs):
+        if os.fspath(path) == name and kwargs.get("dir_fd") is not None:
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", raced)
+
+
+def test_hard_link_swapped_in_after_the_check_is_replaced_not_written(layout, monkeypatch):
+    root, outside = layout
+    os.link(outside / "f.py", root / "h.py")
+    _stat_raced(monkeypatch, "h.py", os.stat(__file__))  # the check saw a plain file
+    write_text_in_root(root, "h.py", "new")
+    monkeypatch.undo()
+    assert (outside / "f.py").read_text(encoding="utf-8") == "orig"
+    assert (root / "h.py").read_text(encoding="utf-8") == "new"
+    assert os.stat(root / "h.py").st_ino != os.stat(outside / "f.py").st_ino
+
+
+def test_link_swapped_in_after_the_check_is_replaced_not_followed(layout, monkeypatch):
+    root, outside = layout
+    (root / "link.py").symlink_to(outside / "f.py")
+    _stat_raced(monkeypatch, "link.py", FileNotFoundError("raced"))
+    write_text_in_root(root, "link.py", "new")
+    monkeypatch.undo()
+    assert (outside / "f.py").read_text(encoding="utf-8") == "orig"
+    assert not (root / "link.py").is_symlink()
+    assert (root / "link.py").read_text(encoding="utf-8") == "new"
+
+
+def test_write_keeps_the_mode_and_leaves_no_temp_file(layout):
+    root, _ = layout
+    (root / "run.sh").write_text("old", encoding="utf-8")
+    os.chmod(root / "run.sh", 0o750)
+    write_text_in_root(root, "run.sh", "new")
+    assert (root / "run.sh").read_text(encoding="utf-8") == "new"
+    assert stat.S_IMODE(os.stat(root / "run.sh").st_mode) == 0o750
+    assert sorted(p.name for p in root.iterdir()) == ["run.sh"]
+
+
+def test_write_does_not_carry_over_special_mode_bits(layout):
+    root, _ = layout
+    (root / "tool").write_text("old", encoding="utf-8")
+    os.chmod(root / "tool", 0o4755)
+    write_text_in_root(root, "tool", "new")
+    assert stat.S_IMODE(os.stat(root / "tool").st_mode) == 0o755
+
+
+def test_failed_replace_keeps_the_old_file_and_removes_the_temp_file(layout, monkeypatch):
+    root, _ = layout
+    (root / "a.py").write_text("old", encoding="utf-8")
+
+    def no_rename(*args, **kwargs):
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(os, "rename", no_rename)
+    with pytest.raises(PathContainmentError):
+        write_text_in_root(root, "a.py", "new")
+    monkeypatch.undo()
+    assert (root / "a.py").read_text(encoding="utf-8") == "old"
+    assert sorted(p.name for p in root.iterdir()) == ["a.py"]

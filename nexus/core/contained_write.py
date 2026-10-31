@@ -5,14 +5,19 @@ sandboxed model code may already have run; the drone writes model-chosen files i
 dir. A plain ``path.write_text`` follows whatever is there by then: a symlink or a hard link to a
 host file, a FIFO that blocks forever, or a path the model wrote as absolute or with ``..``.
 
-These helpers open the file relative to ``root`` one component at a time with ``O_NOFOLLOW``,
-so no link swapped in after a check is followed, and accept only a regular file with a single
-link. A refusal raises ``PathContainmentError`` (an ``OSError``) and nothing is written.
+These helpers walk to the file relative to ``root`` one component at a time with ``O_NOFOLLOW``,
+so no link swapped in after a check is followed. A write never opens the existing file: it fills
+a new file created in the same directory and renames it over the name, which replaces the
+directory entry and leaves whatever inode was there untouched (a hard link to a host file, made
+or unlinked at any moment, is never written through). An existing entry that is not a regular
+single-link file is refused up front, and reads accept only such a file. A refusal raises
+``PathContainmentError`` (an ``OSError``) and nothing is written.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 import stat
 from pathlib import Path, PurePath
 
@@ -78,7 +83,10 @@ def _open_parent(root: Path | str, parts: tuple[str, ...], *, create_parents: bo
 
 
 def _check_regular(fd: int, name: str) -> None:
-    info = os.fstat(fd)
+    _check_regular_info(os.fstat(fd), name)
+
+
+def _check_regular_info(info: os.stat_result, name: str) -> None:
     if not stat.S_ISREG(info.st_mode):
         raise PathContainmentError(f"not_a_regular_file:{name}")
     if info.st_nlink != 1:
@@ -92,26 +100,50 @@ def write_text_in_root(
     *,
     create_parents: bool = False,
 ) -> None:
-    """Write ``text`` (UTF-8) to ``root/relative``, created if missing, never through a link."""
+    """Write ``text`` (UTF-8) to ``root/relative``, created if missing, never through a link.
+
+    The text goes to a new file in the same directory, which is then renamed over the name; an
+    existing regular file keeps its permission bits."""
 
     parts = _parts(relative)
+    name = parts[-1]
     parent = _open_parent(root, parts, create_parents=create_parents)
     try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
-            fd = os.open(parts[-1], flags, 0o644, dir_fd=parent)
+            existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
         except OSError as exc:
-            raise PathContainmentError(f"file_open_refused:{parts[-1]}:{exc}") from exc
+            raise PathContainmentError(f"file_stat_refused:{name}:{exc}") from exc
+        if existing is not None:
+            _check_regular_info(existing, name)
+        temp = f".nexus-write-{secrets.token_hex(8)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        try:
+            fd = os.open(temp, flags, 0o644, dir_fd=parent)
+        except OSError as exc:
+            raise PathContainmentError(f"file_open_refused:{name}:{exc}") from exc
+        try:
+            try:
+                data = memoryview(text.encode("utf-8"))
+                while data:
+                    data = data[os.write(fd, data) :]
+                if existing is not None:
+                    os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
+            finally:
+                os.close(fd)
+            try:
+                os.rename(temp, name, src_dir_fd=parent, dst_dir_fd=parent)
+            except OSError as exc:
+                raise PathContainmentError(f"file_replace_refused:{name}:{exc}") from exc
+        except BaseException:
+            try:
+                os.unlink(temp, dir_fd=parent)
+            except OSError:
+                pass
+            raise
     finally:
         os.close(parent)
-    try:
-        _check_regular(fd, parts[-1])
-        os.ftruncate(fd, 0)
-        data = memoryview(text.encode("utf-8"))
-        while data:
-            data = data[os.write(fd, data) :]
-    finally:
-        os.close(fd)
 
 
 def read_text_in_root(root: Path | str, relative: PurePath | str) -> str:

@@ -359,6 +359,8 @@ class PatchApplier:
         Returns (passed, error_reason, telemetry)
         """
         telemetry = {"preflight_checks": []}
+        # Absolute once, so a target found under it is not joined to a relative root again.
+        repo_dir = Path(repo_dir).absolute()
         
         for intent in intents:
             target_path = repo_dir / intent.file_path
@@ -505,6 +507,7 @@ class PatchApplier:
         applied_diffs = []
         syntax_gate_passed = True
         preflight_telemetry = {}
+        repo_dir = Path(repo_dir).absolute()
 
         # Run preflight check first
         passed, error_reason, preflight_telemetry = self.preflight_check(intents, repo_dir)

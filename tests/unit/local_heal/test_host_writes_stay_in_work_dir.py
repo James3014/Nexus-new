@@ -18,7 +18,13 @@ from pathlib import Path
 import pytest
 
 import nexus
-from nexus.engine.model_output_sandbox import SandboxError, host_code_roots, model_sandbox
+from nexus.core.contained_write import PathContainmentError
+from nexus.engine.model_output_sandbox import (
+    SandboxError,
+    holds_host_code,
+    host_code_roots,
+    model_sandbox,
+)
 from nexus.services.local_heal.evaluation_gate import EvaluationGate
 from nexus.services.local_heal.interface import LocalizedFile, VerificationInput
 from nexus.services.local_heal.patch_applier import PatchApplier
@@ -65,6 +71,35 @@ def test_patch_inside_repo_still_applies(dirs):
     result = _apply(repo, "calc.py")
     assert result.success is True
     assert (repo / "calc.py").read_text(encoding="utf-8") == RIGHT
+
+
+def test_patch_applies_with_a_relative_repo_dir(dirs, monkeypatch):
+    repo, _ = dirs
+    (repo / "calc.py").write_text(WRONG, encoding="utf-8")
+    nested = repo / "repo"
+    nested.mkdir()
+    (nested / "calc.py").write_text(WRONG, encoding="utf-8")
+    monkeypatch.chdir(repo.parent)
+    result = _apply(Path("repo"), "calc.py")
+    assert result.success is True, result.error_reason
+    assert (repo / "calc.py").read_text(encoding="utf-8") == RIGHT
+    assert (nested / "calc.py").read_text(encoding="utf-8") == WRONG
+
+
+def test_preflight_reads_the_file_with_a_relative_repo_dir(dirs, monkeypatch):
+    # An indented REPLACE does not parse alone, so preflight parses the whole patched file.
+    repo, _ = dirs
+    wrong = "class C:\n    def add(self, a, b):\n        return a - b\n"
+    (repo / "calc.py").write_text(wrong, encoding="utf-8")
+    monkeypatch.chdir(repo.parent)
+    parser = SolidSearchReplaceProtocol()
+    intents = parser.parse(
+        "FILE: calc.py\n<<<<<<< SEARCH\n        return a - b\n=======\n"
+        "        if a:\n            return a + b\n        return b\n>>>>>>> REPLACE\n"
+    )
+    assert not isinstance(intents, Exception) and intents
+    passed, reason, _ = PatchApplier(parser, Patcher()).preflight_check(intents, Path("repo"))
+    assert passed is True, reason
 
 
 def test_absolute_path_inside_repo_still_applies(dirs):
@@ -212,13 +247,33 @@ def test_model_sandbox_refuses_a_dir_holding_a_sys_path_entry(tmp_path, monkeypa
 
 
 def test_model_sandbox_allows_a_dir_below_a_sys_path_entry(tmp_path, monkeypatch):
+    # Only through a name no import can reach (local_heal keeps work dirs under .nexus/).
     monkeypatch.syspath_prepend(str(tmp_path))
-    (tmp_path / "ws").mkdir()
-    try:
-        with model_sandbox(tmp_path / "ws"):
+    for name in (".nexus/workspaces/armor-apply-x1", "ws-1", "pkg/.hidden/deep"):
+        (tmp_path / name).mkdir(parents=True)
+        assert holds_host_code(tmp_path / name) is False, name
+
+
+def test_importable_dir_below_host_code_is_host_code(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for name in ("pkg", "pkg/sub", "pkg/__pycache__"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+        assert holds_host_code(tmp_path / name) is True, name
+    assert holds_host_code(tmp_path) is True
+    assert holds_host_code(tmp_path.parent) is True
+
+
+def test_model_sandbox_refuses_a_host_package_subdirectory(tmp_path):
+    package_dir = Path(nexus.__file__).resolve().parent / "core"
+    assert package_dir.is_dir()
+    with pytest.raises(SandboxError, match="work_dir_holds_host_code"):
+        with model_sandbox(package_dir):
             pass
-    except SandboxError as exc:  # no OS barrier on this host is fine; the guard is not
-        assert "work_dir_holds_host_code" not in str(exc)
+    work = tmp_path / "work-1"
+    work.mkdir()
+    with pytest.raises(SandboxError, match="work_dir_holds_host_code"):
+        with model_sandbox(work, writable=(package_dir,)):
+            pass
 
 
 def _harness():
@@ -278,3 +333,38 @@ def test_non_local_task_is_left_alone(tmp_path):
     task = {"local_mode": False, "repo_dir": tmp_path}
     assert harness.stage_local_mode_workspace(task, tmp_path / "scratch") is task
     assert not (tmp_path / "scratch").exists()
+
+
+# base_commit set: the SymPy step runs after the (stubbed) checkout to that commit.
+_SYMPY_TASK = {"local_mode": True, "instance_id": "x", "base_commit": "0" * 40}
+
+
+def _sympy_repo(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    repo = tmp_path / "sympy_ws"
+    (repo / ".git").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repo / ".nexus_patched_310").symlink_to(outside / "planted")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0))
+    return repo, outside
+
+
+def test_sympy_patch_marker_is_not_created_through_a_dangling_link(tmp_path, monkeypatch):
+    harness = _harness()
+    repo, outside = _sympy_repo(tmp_path, monkeypatch)
+    harness.ensure_workspace_state(_SYMPY_TASK | {"repo_dir": repo})
+    assert not os.path.lexists(outside / "planted")
+
+
+def test_sympy_patch_marker_write_refuses_a_link_swapped_in(tmp_path, monkeypatch):
+    harness = _harness()
+    repo, outside = _sympy_repo(tmp_path, monkeypatch)
+    real_lexists = os.path.lexists
+    monkeypatch.setattr(
+        os.path,
+        "lexists",
+        lambda path: False if Path(path).name == ".nexus_patched_310" else real_lexists(path),
+    )
+    with pytest.raises(PathContainmentError):
+        harness.ensure_workspace_state(_SYMPY_TASK | {"repo_dir": repo})
+    assert not real_lexists(outside / "planted")

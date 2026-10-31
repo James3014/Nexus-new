@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import datasets
+from nexus.core.contained_write import write_text_in_root
 from nexus.services.local_heal.pipeline import HealPipeline, HealContext
 from nexus.services.local_heal.task_manifest import (
     LocalHealTaskSpec,
@@ -478,7 +479,7 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
         # 3. Apply SymPy compatibility patches for Python 3.10+
         if "sympy" in str(repo_dir):
             patch_marker = repo_dir / ".nexus_patched_310"
-            if not patch_marker.exists():
+            if not os.path.lexists(patch_marker):
                 print("  🩹 Applying SymPy compatibility patches (combined)...")
                 # P0-4: 擴大搜尋範圍至 'collections' 以涵蓋 MutableSet 等直接引用
                 combined_patch = (
@@ -498,7 +499,8 @@ def ensure_workspace_state(task: dict[str, Any]) -> None:
                     f"{{}} 2>/dev/null || true"
                 )
                 subprocess.run(combined_patch, shell=True)
-                patch_marker.touch()
+                # Model code may have run in this repo: the marker never goes through a link.
+                write_text_in_root(repo_dir, patch_marker.name, "")
             else:
                 print("  ✅ SymPy compatibility patches already applied.")
 
