@@ -263,6 +263,16 @@ def test_importable_dir_below_host_code_is_host_code(tmp_path, monkeypatch):
     assert holds_host_code(tmp_path.parent) is True
 
 
+def test_empty_sys_path_entry_is_the_current_directory(tmp_path, monkeypatch):
+    (tmp_path / "pkg").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", ["", *sys.path])
+    assert tmp_path.resolve() in host_code_roots()
+    with pytest.raises(SandboxError, match="work_dir_holds_host_code"):
+        with model_sandbox(tmp_path / "pkg"):
+            pass
+
+
 def test_model_sandbox_refuses_a_host_package_subdirectory(tmp_path):
     package_dir = Path(nexus.__file__).resolve().parent / "core"
     assert package_dir.is_dir()

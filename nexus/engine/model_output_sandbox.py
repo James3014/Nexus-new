@@ -81,7 +81,14 @@ def host_code_roots() -> tuple[Path, ...]:
     there."""
 
     roots = {Path(__file__).resolve().parents[2]}
-    roots.update(Path(entry).resolve() for entry in sys.path if entry and os.path.isdir(entry))
+    for entry in sys.path:
+        if not entry:  # the empty entry imports from the current directory
+            try:
+                entry = os.getcwd()
+            except OSError:
+                continue
+        if os.path.isdir(entry):
+            roots.add(Path(entry).resolve())
     return tuple(sorted(roots))
 
 
