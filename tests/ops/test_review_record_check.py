@@ -2521,3 +2521,27 @@ def test_a_prose_word_right_after_the_token_decides_alone(rest):
     # token keeps the line from reading as a verdict.
     body = f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\nClaude r2: REJECT {rest}\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "path traversal in the writer",
+        "status: the lease is never released",
+        "case-sensitive match lets a renamed file through",
+        "result cache is never invalidated",
+        "token leak in the log",
+        "branch protection bypass",
+    ],
+)
+def test_a_reject_reason_starting_with_a_noun_withdraws(reason):
+    # Only words honest records were seen to use after the token make it prose; a reason
+    # that happens to start with another noun is still a verdict.
+    claude = [
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus)\nVerdict: ACCEPT\n"),
+        _c(f"Head reviewed: {HEAD}\n**Claude review** (Opus) r2\nVerdict: REJECT {reason}\n"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, claude, [])["status"] == "MISSING_RECORD"
+    codex = f"Head reviewed: {HEAD}\nCodex r1: ACCEPT\nCodex r2: REJECT {reason}\n"
+    report = rrc.evaluate(HEAD, RISKY, [_c(codex), _c(CLAUDE_AT_HEAD)], [])
+    assert report["status"] == "MISSING_CROSS_MODEL"

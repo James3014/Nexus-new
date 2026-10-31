@@ -217,13 +217,13 @@ _REJECT_LABEL_WORD = re.compile(
     r"|v?\d{1,3}(?:\.\d{1,3}){1,3}[a-z]{0,8}"
 )
 # What may NOT follow the token: a verb or noun that makes it a value in prose ("REJECT is
-# returned", "REJECT items:", "CHANGES_REQUESTED reviews are ignored"). Anything else,
-# a reason word included, leaves it a verdict: an unread REJECT lets an ACCEPT stand, so
-# the list stays short and a new wording fails closed.
+# returned", "REJECT items:", "CHANGES_REQUESTED reviews are ignored", "the r1 REJECT
+# finding", "r1 REJECT then r2 ACCEPT", "REJECT / nit 1"). Anything else, a reason word
+# included ("REJECT path traversal ..."), leaves it a verdict: an unread REJECT lets an
+# ACCEPT stand, so the list holds only words honest records were seen to use and a new
+# wording fails closed.
 _REJECT_NOT_AFTER = re.compile(
-    r"\s+(?:is|was|are|were|be|been|being|items?|reviews?|values?|states?|status(?:es)?"
-    r"|paths?|branch(?:es)?|cases?|results?|outcomes?|verdicts?|labels?|tokens?|findings?"
-    r"|then)\b|\s*/",  # "the r1 REJECT finding", "r1 REJECT then r2 ACCEPT", "REJECT / nit 1"
+    r"\s+(?:is|was|are|were|be|been|being|items?|reviews?|findings?|then)\b|\s*/",
     re.IGNORECASE,
 )
 # What main read after the token before #3038 (end, punctuation, a sha binding, a
