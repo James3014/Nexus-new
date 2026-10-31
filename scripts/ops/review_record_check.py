@@ -444,7 +444,13 @@ def _resolved_after(text: str, start: int, end: int) -> bool:
     tail = re.sub(  # "REJECT at <sha> (why): fixed"; "(fixed ...)" itself is kept
         rf"^\s*\((?!\s*{_RESOLUTION_WORD}\b)[^()]{{0,300}}\)", "", tail, count=1, flags=re.I
     )
-    match = re.match(rf"\s*(?:[,.:;—–-]\s*)?\(?\s*({_RESOLUTION_WORD})\b", tail, re.I)
+    match = re.match(
+        rf"\s*(?:[,.:;—–-]\s*|(?:→|->|=>)\s*)?\(?\s*({_RESOLUTION_WORD})(?![\w-])"
+        rf"(?=\s*(?:$|[,.;:)(—–→]|-\s|->|=>|(?:in|at|by|as|with|per|via|see|after|before"
+        rf"|because|since|to|on|and|all|both|it|them)\b))",
+        tail,
+        re.I,
+    )
     return bool(match and not _UNRESOLVED.search(tail[: match.start(1)]))
 
 
@@ -577,9 +583,7 @@ def _own_status(line: str) -> bool:
     own = {m.lower() for m in _MODEL_WORDS.findall(_plain(line))}
     plain = _plain(line, keep_parens=True)
     return any(
-        _NOT_A_HEADER.search(part)
-        and not re.search(r"\bin[ -]progress\b|\bfix(?:es|ing)\b", part, re.IGNORECASE)
-        and {m.lower() for m in _MODEL_WORDS.findall(part)} <= own
+        _NOT_A_HEADER.search(part) and {m.lower() for m in _MODEL_WORDS.findall(part)} <= own
         for paren in re.findall(r"\(([^)]*)\)", plain)
         for part in re.split(r"[;,]", paren)
     )
@@ -708,13 +712,16 @@ def _clause_family(
     before = clause[: span[0]] if span else ""
     line_before = plain_line[: start + span[0]] if (span and start >= 0) else before
     label_part, status_part = _split_label(line_before)
-    if _disabled_verdict_label(label_part) or (
-        label_part != line_before
-        and bool(_MODEL_WORDS.search(label_part))
-        and len(status_part.split()) <= 4
-        and bool(_NOT_A_HEADER.search(_plain(status_part)))
+    if not nearest and (
+        _disabled_verdict_label(label_part)
+        or (
+            label_part != line_before
+            and bool(_MODEL_WORDS.search(label_part))
+            and len(status_part.split()) <= 4
+            and bool(_NOT_A_HEADER.search(_plain(status_part)))
+        )
     ):
-        return None
+        return None  # a REJECT is never disabled by a status label (#3002 F5)
     if nearest:
         named = _NEAREST_MODEL.findall(_plain(line_before))  # "(after the Codex fix)" is an aside
         if not named:
@@ -933,7 +940,7 @@ def _short_prefix_rejects(body: str, head: str, number: int) -> list[dict[str, A
             span = _reject_match(clause)
             plain_line = _plain(line, keep_parens=True)
             start = plain_line.find(clause)
-            if span is None or not _reject_label_only(_plain(plain_line[: start + span[0]])):
+            if span is None or not _reject_label_only(_plain(clause[: span[0]])):
                 continue
             family = _clause_family(clause, span, plain_line, start, None, nearest=True)
             if not family:
@@ -1072,7 +1079,11 @@ def evaluate(
                 key=lambda event: event["comment"],
             )
         )
-        independent = approved_reviews > 0 or "claude" in folded
+        independent = (
+            approved_reviews > 0
+            or "claude" in folded
+            or any(approved_reviews_at_head(reviews, old) > 0 for old in delta_heads)
+        )
         cross_model = "cross_model" in folded
     short = head[:12]
     if not independent:

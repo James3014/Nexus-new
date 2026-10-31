@@ -1883,3 +1883,54 @@ def test_3002_f5_other_in_progress_wordings_do_not_drop_a_reject(label):
         _c(CLAUDE_AT_HEAD),
     ]
     assert _status3002(comments) != "OK"
+
+
+def test_3002_in_progress_label_cannot_make_an_accept_count():
+    for body in (
+        f"**Codex r2** (fix in progress): ACCEPT@{HEAD}",
+        f"**Codex review** (fix in progress)\nVerdict: **ACCEPT** at {HEAD}",
+    ):
+        assert _status3002([_c(body), _c(CLAUDE_AT_HEAD)]) == "MISSING_CROSS_MODEL"
+
+
+def test_3002_delta_path_keeps_an_approved_review_at_the_old_head():
+    approved = {"state": "APPROVED", "commit_id": R_OLD, "user": {"login": "x"}}
+    rc, status = _delta_case(comments=[], reviews=[approved])
+    assert rc == 0 and status["state"] == "success"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "resolved path escapes the root",
+        "fixed-size buffer overflow",
+        "(deferred cleanup frees twice)",
+    ],
+)
+def test_3002_finding_text_that_starts_with_a_status_word_stays_open(text):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD}: {text}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) != "OK"
+
+
+@pytest.mark.parametrize("tail", ["-> rebutted: see test", "→ rebutted", ", fixed in 1a2b3c4d5"])
+def test_3002_arrow_and_comma_resolutions_still_resolve(tail):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Codex r2 REJECT@{HEAD} {tail}"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert _status3002(comments) == "OK"
+
+
+def test_3002_later_short_prefix_reject_on_the_same_line_is_kept():
+    line = f"Codex r1 REJECT@1a2b3c4d5 (fixed), r2 REJECT@{HEAD[:7]}: race"
+    assert _status3002([_c(f"Codex ACCEPT@{HEAD}"), _c(line), _c(CLAUDE_AT_HEAD)]) != "OK"
+
+
+def test_3002_line_level_short_sha_of_an_older_commit_does_not_bind_to_the_head():
+    body = f"Head reviewed: {HEAD}\n**Claude review** (Opus): ACCEPT\nCodex: ACCEPT. Last checked 1a2b3c4\n"
+    assert _status3002([_c(body)]) == "MISSING_CROSS_MODEL"
