@@ -144,6 +144,15 @@ _REJECT_POS = re.compile(
     rf"({_REJECT_TOKEN})\b"
     rf"|(?<![\w-])({_REJECT_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
 )
+# Tried when _REJECT_POS finds nothing: after a dash, arrow or full-width colon that
+# follows a closed label aside ("(Opus, separate agent) — REJECT", "(high)—REJECT"; the
+# clause split at ") " leaves it at the clause start), an arrow after a space ("Codex r2
+# → REJECT") or a full-width colon (#3041 r15). A hyphen at the start of a line is a
+# list bullet, not a position (_reject_clause_starts).
+_REJECT_POS_MORE = re.compile(
+    rf"(?:^\s*(?:[\-–—]|→|->|=>|：)\s*|\)\s*(?:[\-–—]|→|->|=>|：)\s*|\s(?:→|->|=>)\s*|：\s*)"
+    rf"({_REJECT_TOKEN})\b"
+)
 _REJECT_PRE_DENY = re.compile(
     r"\b(?:no|not|never|none|nothing|if|unless|whether|would|could|might|may|should|cannot"
     r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
@@ -457,6 +466,20 @@ def _aside_closes(text: str) -> list[int | None]:
     return [None if at is None else close_of.get(at) for at in enclosing]
 
 
+def _reject_aside_closes(text: str) -> list[int | None]:
+    """``_aside_closes`` for reading a REJECT: a ``)`` with no ``(`` before it on the line
+    also closes an aside that a manual line break carried over from the line above
+    ("(Opus, separate agent,\\nnot the author): REJECT", #3041 r15), so the text before it
+    is blanked like any closed aside."""
+    closes = _aside_closes(text)
+    first_open = text.find("(")
+    stray = text.find(")")
+    if stray >= 0 and (first_open < 0 or stray < first_open):
+        for index in range(stray):
+            closes[index] = stray
+    return closes
+
+
 # The only "only" that names the scope reviewed: the aside holds nothing after its round
 # marker but one fixed phrase, "docs-only", "test-only", "typing-only" or "delta-only"
 # (optionally followed by "delta"), or "delta only <sha>..<sha>". Any other "only"
@@ -690,6 +713,14 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
         match = _REJECT_POS.search(clause)
+        if match is None:
+            match = _REJECT_POS_MORE.search(clause)
+            if (
+                match
+                and re.match(r"\s*-(?!>)", clause[match.start() :])
+                and not plain_line[:start].strip()
+            ):
+                continue  # "- REJECT ...": a list bullet at the line start, as before
         if not match or start < 0:
             continue
         token_start = match.start(1) if match.group(1) else match.start(2)
@@ -701,8 +732,8 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         # Denial: the clause may start inside an aside that closes before the token ("(Opus,
         # separate agent, not the author): REJECT"); the aside's words are not the verdict's,
         # as for an accepting verdict, whose window drops parentheticals.
-        if aside_closes is None and "(" in plain_line:
-            aside_closes = _aside_closes(plain_line)
+        if aside_closes is None and ("(" in plain_line or ")" in plain_line):
+            aside_closes = _reject_aside_closes(plain_line)
         before = _outside_closed_asides(plain_line, start, at, aside_closes)
         if _denies_reject(clause[:token_start]) and _denies_reject(before):
             continue
@@ -1016,7 +1047,7 @@ def _rebuttal_point(section: list[str], head: str) -> tuple[int, int] | None:
 
 
 def _reject_match(clause: str) -> tuple[int, int] | None:
-    match = _REJECT_POS.search(clause)
+    match = _REJECT_POS.search(clause) or _REJECT_POS_MORE.search(clause)
     if not match:
         return None
     group = 1 if match.group(1) else 2
