@@ -585,7 +585,8 @@ class HealOrchestrator:
         final_patch = getattr(ctx.op, "final_patch", "")
         target_symbol = self._extract_target_symbol(ctx)
         source_file = self._resolve_target_file(ctx)
-        source_text = read_repo_text(ctx.op.repo_dir, source_file) if source_file else None
+        repo_dir = getattr(ctx.op, "repo_dir", None)
+        source_text = read_repo_text(repo_dir, source_file) if source_file and repo_dir else None
         if source_text is None:
             source_file = None  # never read again by path (#3018)
 
