@@ -96,6 +96,7 @@ def test_output_and_exit_status_are_kept(bound):
     [
         argv_command.ProcessGroupReapingUnavailable("no unreaped wait"),
         PermissionError("a group member survived"),
+        ChildProcessError("the leader was reaped elsewhere"),
     ],
 )
 def test_a_run_whose_group_cannot_be_reaped_is_a_sandbox_error(bound, monkeypatch, error):
