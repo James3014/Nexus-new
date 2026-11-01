@@ -4,8 +4,10 @@
 Reads the Core pin from the base ref's workflow, installs that pin into an
 isolated pin-keyed tool directory, builds a hash-keyed material venv, runs
 ``issue-init`` and ``issue-check`` in a temporary clean detached worktree at the
-exact committed HEAD, and prints a JSON summary. It holds no completion
-authority: the Core receipt is the only verdict. Local or tooling problems fail
+exact committed HEAD, and prints a JSON summary. The material venv is built only
+from the base ref's requirement lock files (never the candidate head's), only
+pinned entries are accepted, and each install runs under a timeout. It holds no
+completion authority: the Core receipt is the only verdict. Local or tooling problems fail
 closed with exit 2; a Core verdict other than VERIFIED exits 1.
 
 The JSON summary carries the receipt ``status`` plus ``reason_codes`` (list from
@@ -23,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -44,6 +47,19 @@ PIN_RE = re.compile(
     r"|^\s*-?\s*uses:\s*James3014/nexus-core/\.github/actions/[A-Za-z0-9_-]+@([0-9a-f]{40})\s*(?:#.*)?$",
     re.MULTILINE,
 )
+# Accepted requirement lines (after joining backslash continuations): an exact
+# git commit of a James3014 repo, or an exact version with sha256 hashes. Option
+# lines (-e, -r, -c, --index-url, ...), paths, URLs and ranges are refused.
+REQ_GIT_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*[ \t]*@[ \t]*"
+    r"git\+https://github\.com/James3014/[A-Za-z0-9][A-Za-z0-9._-]*\.git@[0-9a-f]{40}"
+)
+REQ_HASHED_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*"
+    r"(?:[ \t]+--hash=sha256:[0-9a-f]{64})+"
+)
+MATERIALS_READY = ".nexus-core-materials-ready"
+MATERIALS_TIMEOUT_SECONDS = 1200
 CLAIM_RE = re.compile(r"claim ceiling:\s*(\S+)", re.IGNORECASE)
 CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
 EXIT_OK = 0
@@ -63,22 +79,67 @@ def _run(
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     code: str = "COMMAND_FAILED",
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        result = subprocess.run(
-            list(cmd),
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+    if timeout is None:
+        try:
+            result = subprocess.run(
+                list(cmd),
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+    else:
+        result = _run_with_timeout(cmd, cwd=cwd, env=env, code=code, timeout=timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[-500:]
         raise LocalCheckError(code, f"{' '.join(cmd[:3])} failed: {detail}")
     return result
+
+
+def _run_with_timeout(
+    cmd: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str] | None,
+    code: str,
+    timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    """Run in a new process group; on timeout kill the whole group and fail closed.
+
+    Output goes to temporary files, not pipes, so a descendant that left the
+    group cannot keep the wait open after the group is killed.
+    """
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.Popen(
+                list(cmd),
+                cwd=cwd,
+                env=env,
+                stdout=out,
+                stderr=err,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+            raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+        out.seek(0)
+        err.seek(0)
+        stdout = out.read().decode("utf-8", "replace")
+        stderr = err.read().decode("utf-8", "replace")
+    return subprocess.CompletedProcess(list(cmd), proc.returncode, stdout, stderr)
 
 
 def _git(repo: Path, *args: str, code: str = "GIT_FAILED") -> str:
@@ -122,33 +183,89 @@ def ensure_tool(cache_root: Path, pin: str) -> Path:
     env["UV_TOOL_DIR"] = str(base / "tools")
     env["UV_TOOL_BIN_DIR"] = str(base / "bin")
     base.mkdir(parents=True, exist_ok=True)
-    _run(
-        ["uv", "tool", "install", "--force", CORE_REPO_URL.format(pin=pin)],
-        env=env,
-        code="CORE_INSTALL_FAILED",
-    )
+    # Neutral cwd: uv must not discover uv.toml/pyproject.toml from the checkout.
+    with tempfile.TemporaryDirectory(prefix="nexus-core-tool-") as tmp:
+        _run(
+            ["uv", "tool", "install", "--force", CORE_REPO_URL.format(pin=pin)],
+            cwd=Path(tmp),
+            env=env,
+            code="CORE_INSTALL_FAILED",
+        )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"{certify} missing after install")
     return certify
 
 
-def ensure_materials(cache_root: Path, repo: Path, head: str) -> Path:
+def trusted_requirements(text: str, rel: str) -> str:
+    """Return a normalized copy of ``text`` holding only pinned requirement lines.
+
+    Raises MATERIALS_UNTRUSTED for any option line, path, URL or unpinned entry.
+    The normalized copy (not the raw bytes) is what gets installed, so the
+    installer parses exactly the lines that were checked here.
+    """
+    entries: list[str] = []
+    pending = ""
+    for raw in text.split("\n"):
+        line = raw.rstrip("\r")
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        line = (pending + line).strip(" \t")
+        pending = ""
+        if not line or line.startswith("#"):
+            continue
+        if REQ_GIT_RE.fullmatch(line) or REQ_HASHED_RE.fullmatch(line):
+            entries.append(" ".join(line.split()))
+            continue
+        raise LocalCheckError(
+            "MATERIALS_UNTRUSTED",
+            f"{rel}: only pinned entries (name @ git+https://github.com/James3014/<repo>.git@<sha>"
+            f" or name==version --hash=sha256:...) are allowed; refused: {line[:120]!r}",
+        )
+    if pending:
+        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: dangling line continuation")
+    if not entries:
+        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: no requirement entries")
+    return "".join(entry + "\n" for entry in entries)
+
+
+def ensure_materials(
+    cache_root: Path,
+    repo: Path,
+    base_sha: str,
+    timeout: float = MATERIALS_TIMEOUT_SECONDS,
+) -> Path:
+    """Build the material venv from the trusted base commit's lock files only."""
+    contents: list[tuple[str, str]] = []
     digest = hashlib.sha256()
     for rel in REQUIREMENTS:
-        digest.update(_git(repo, "show", f"{head}:{rel}", code="MATERIALS_FAILED").encode())
+        text = _git(repo, "show", f"{base_sha}:{rel}", code="MATERIALS_FAILED")
+        normalized = trusted_requirements(text, rel)
+        contents.append((rel, normalized))
+        digest.update(f"{rel}\0{normalized}\0".encode())
     env_dir = cache_root / "materials" / digest.hexdigest()
     python = env_dir / "bin" / "python"
-    if python.exists():
+    ready = env_dir / MATERIALS_READY
+    if python.exists() and ready.exists():
         return python
     shutil.rmtree(env_dir, ignore_errors=True)
     env_dir.parent.mkdir(parents=True, exist_ok=True)
-    _run(["uv", "venv", "--python", "3.11", str(env_dir)], code="MATERIALS_FAILED")
-    for rel in REQUIREMENTS:
+    # Every uv call runs in a neutral temporary cwd so no checkout config is read.
+    with tempfile.TemporaryDirectory(prefix="nexus-core-materials-") as tmp:
         _run(
-            ["uv", "pip", "install", "--python", str(python), "--requirement", rel],
-            cwd=repo,
+            ["uv", "venv", "--python", "3.11", str(env_dir)],
+            cwd=Path(tmp),
             code="MATERIALS_FAILED",
+            timeout=timeout,
         )
+        for rel, normalized in contents:
+            req = Path(tmp) / Path(rel).name
+            req.write_text(normalized, encoding="utf-8")
+            cmd = ["uv", "pip", "install", "--python", str(python), "--requirement", str(req)]
+            if all(REQ_HASHED_RE.fullmatch(line) for line in normalized.splitlines()):
+                cmd.append("--require-hashes")
+            _run(cmd, cwd=Path(tmp), code="MATERIALS_FAILED", timeout=timeout)
+    ready.write_text(base_sha + "\n", encoding="utf-8")
     return python
 
 
@@ -228,7 +345,7 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         python = (
             Path(args.material_python)
             if args.material_python
-            else ensure_materials(cache_root, worktree, head)
+            else ensure_materials(cache_root, repo, base_sha, args.materials_timeout)
         )
         if not args.no_fetch:
             _git(worktree, "fetch", "origin", "main", code="FETCH_FAILED")
@@ -334,6 +451,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument("--certify-bin", help="override Core binary (tests)")
     parser.add_argument("--material-python", help="override material python")
+    parser.add_argument(
+        "--materials-timeout",
+        type=float,
+        default=MATERIALS_TIMEOUT_SECONDS,
+        help="seconds allowed for each material venv/install step (default %(default)s)",
+    )
     return parser
 
 
