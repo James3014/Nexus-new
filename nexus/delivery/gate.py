@@ -1,4 +1,5 @@
 from __future__ import annotations
+import subprocess
 from pathlib import Path
 
 from nexus.core.argv_command import run_command_string
@@ -10,10 +11,23 @@ from nexus.delivery.models import DeliveryProfile
 from nexus.delivery.models import TaskLevel
 from nexus.delivery.models import VerificationRecord
 
+# A verification command whose output a child holds open no longer blocks the gate (#3052).
+VERIFICATION_COMMAND_TIMEOUT_SECONDS = 1800
+
 
 def _run_verification_command(command: str, cwd: Path) -> VerificationRecord:
-    # Each segment's process group is killed once it returns (#3052).
-    completed = run_command_string(command, cwd=cwd, reap_process_group=True)
+    # Each segment's process group is killed once it returns or times out (#3052).
+    try:
+        completed = run_command_string(
+            command,
+            cwd=cwd,
+            timeout=VERIFICATION_COMMAND_TIMEOUT_SECONDS,
+            reap_process_group=True,
+        )
+    except subprocess.TimeoutExpired:
+        return VerificationRecord(
+            command=command, exit_code=124, stderr="verification command timed out", passed=False
+        )
     return VerificationRecord(
         command=command,
         exit_code=completed.returncode,
