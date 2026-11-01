@@ -1,10 +1,19 @@
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple
 from pathlib import Path
+
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_is_rooted_at,
+    run_hardened_git,
+)
 from nexus.services.local_heal.interface import LocalizedFile
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchIntent
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class CandidatePatch:
@@ -136,9 +145,18 @@ class CandidatePatchSearcher:
         return None, candidates
 
     def _restore_files(self, repo_dir: Path, intents: List[PatchIntent]):
-        # Helper to restore workspace files
+        # Helper to restore workspace files. repo_dir holds the candidate's edits, so git
+        # runs hardened and only in a repository rooted at repo_dir.
         import subprocess
+        root = Path(repo_dir).resolve()
+        if not repository_is_rooted_at(root) or repository_config_can_start_a_program(root):
+            logger.warning("candidate restore refused: unsafe git repository: %r", str(root))
+            return
         for intent in intents:
             target_path = repo_dir / intent.file_path
             if target_path.exists():
-                subprocess.run(["git", "checkout", "--", str(target_path)], cwd=str(repo_dir), capture_output=True)
+                try:
+                    run_hardened_git(root, "checkout", "--", str(root / intent.file_path))
+                except subprocess.TimeoutExpired:
+                    logger.warning("candidate restore incomplete: git timed out: %r", str(root))
+                    return

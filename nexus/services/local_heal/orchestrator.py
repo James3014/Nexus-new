@@ -1,10 +1,15 @@
 import hashlib
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, List
 
+from nexus.core.hardened_git import (
+    clear_stale_index_lock,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.core.state_root import persistent_state_root
 from nexus.evidence.abort_receipt import write_abort_receipt
 from nexus.services.local_heal.context import HealContext
@@ -20,63 +25,6 @@ from nexus.services.local_heal.repo_read import read_repo_text
 from nexus.services.local_heal.role_contract import build_role_receipt
 
 logger = logging.getLogger(__name__)
-
-# The workspace reset runs git in a repository its candidate may have made, so no git call it
-# makes may start a program that repository names.
-_RESET_GIT_TIMEOUT_S = 120.0
-# Command-line config outranks repository config: hooks and fsmonitor are switched off, and
-# submodules (whose own config is not checked) are not entered.
-_RESET_GIT_OVERRIDES = (
-    "-c",
-    f"core.hooksPath={os.devnull}",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "submodule.recurse=false",
-)
-
-
-def _reset_git_env(repo_dir: Path) -> dict[str, str]:
-    """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
-    GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
-    are never fetched, and discovery stops at ``repo_dir``."""
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
-    env.update(
-        GIT_CONFIG_NOSYSTEM="1",
-        GIT_CONFIG_GLOBAL=os.devnull,
-        GIT_ATTR_NOSYSTEM="1",
-        GIT_NO_LAZY_FETCH="1",
-        GIT_TERMINAL_PROMPT="0",
-        GIT_CEILING_DIRECTORIES=str(repo_dir.parent),
-    )
-    return env
-
-
-def _reset_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *_RESET_GIT_OVERRIDES, *args],
-        cwd=str(repo_dir),
-        env=_reset_git_env(repo_dir),
-        capture_output=True,
-        text=True,
-        timeout=_RESET_GIT_TIMEOUT_S,
-        check=False,
-    )
-
-
-def _config_names_a_repository_program(names: List[str]) -> bool:
-    """Repository config the command line cannot switch off: filter drivers (smudge, clean,
-    process), hooks defined in config (``core.hooksPath`` does not apply to them), includes
-    (read from files outside this check) and promisor remotes (a missing object is fetched,
-    which can start a transport program)."""
-    for name in (raw.lower() for raw in names):
-        if name.startswith(("filter.", "hook.", "include.", "includeif.")):
-            return True
-        if name == "extensions.partialclone" or (
-            name.startswith("remote.") and name.endswith(".promisor")
-        ):
-            return True
-    return False
 
 
 class HealOrchestrator:
@@ -1883,41 +1831,32 @@ class HealOrchestrator:
         # A copied gitdir may name another work tree (core.worktree) or live elsewhere (a
         # gitdir file); checkout and clean would then act outside repo_dir.
         repo_dir = ctx.op.repo_dir.resolve()
-        try:
-            probe = _reset_git(repo_dir, "rev-parse", "--show-toplevel", "--absolute-git-dir")
-            found = probe.stdout.splitlines() if probe.returncode == 0 else []
-        except subprocess.TimeoutExpired:
-            found = []
-        if (
-            len(found) != 2
-            or Path(found[0]).resolve() != repo_dir
-            or not Path(found[1]).resolve().is_relative_to(repo_dir)
-        ):
+        git_dir = repository_git_dir(repo_dir)
+        if git_dir is None:
             logger.warning(
                 "workspace reset refused: git repository is not rooted at repo_dir: %r",
                 str(repo_dir),
             )
             return
-        try:
-            config = _reset_git(repo_dir, "config", "--list", "--name-only", "--includes")
-            refused = config.returncode != 0 or _config_names_a_repository_program(
-                config.stdout.splitlines()
-            )
-        except subprocess.TimeoutExpired:
-            refused = True
-        if refused:
+        if repository_config_can_start_a_program(repo_dir):
             logger.warning(
                 "workspace reset refused: git config can start a program: %r", str(repo_dir)
             )
             return
         try:
             for args in (("checkout", "--", "."), ("clean", "-fd")):
-                if _reset_git(repo_dir, *args).returncode != 0:
+                if run_hardened_git(repo_dir, *args).returncode != 0:
                     logger.warning(
                         "workspace reset incomplete: git %s failed: %r", args[0], str(repo_dir)
                     )
         except subprocess.TimeoutExpired:
             logger.warning("workspace reset incomplete: git timed out: %r", str(repo_dir))
+            # The killed git can leave index.lock behind, and every later reset would fail.
+            if clear_stale_index_lock(repo_dir, git_dir):
+                logger.warning(
+                    "workspace reset removed a stale index.lock after the timeout: %r",
+                    str(repo_dir),
+                )
 
     def _build_patch_failure_structured_packet(
         self,
