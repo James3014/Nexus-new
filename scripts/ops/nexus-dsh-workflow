@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import argparse
 import ast
+import errno
 import fnmatch
 import hashlib
 import json
 import math
 import os
 import re
+import select
+import selectors
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1083,6 +1087,60 @@ def _node_assertion_location(repo: Path, failed: list[dict[str, Any]]) -> dict[s
     return {**location, "path_sha256": digest}
 
 
+_argv_command_module: Any = None
+
+
+def _argv_command() -> Any:
+    """``nexus/core/argv_command.py`` from this script's own tree (the repo root, or the host
+    runtime snapshot, which ships it), loaded by file path so that a ``nexus`` package
+    installed for the running python cannot stand in for it. Not loadable: OSError."""
+    global _argv_command_module
+    if _argv_command_module is None:
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[2] / "nexus" / "core" / "argv_command.py"
+        name = "nexus_dsh_argv_command_" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"no loader for {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
+        except Exception as exc:
+            raise OSError(errno.ENOENT, f"{path} unavailable: {exc}") from exc
+        _argv_command_module = module
+    return _argv_command_module
+
+
+class CandidateProcessSurvived(Exception):
+    """A process left by candidate-run code outlived SIGKILL of its process group (#3052)."""
+
+
+def _run_reaping(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> Any:
+    """``subprocess.run(argv, capture_output=True)`` for candidate-authored code (tests, ruff
+    over candidate files), through ``nexus.core.argv_command.run_reaping_process_group``: the
+    command leads a new session whose whole process group gets SIGKILL on every exit path,
+    so a background child of a candidate test cannot outlive the gate (#3052).
+
+    ``subprocess.TimeoutExpired`` propagates as from ``subprocess.run``; a group member still
+    alive after SIGKILL (EPERM) raises CandidateProcessSurvived; the module missing (see
+    ``_argv_command``), or a refusal before spawning, is an OSError like a failed spawn."""
+    run_reaping_process_group = _argv_command().run_reaping_process_group
+    try:
+        return run_reaping_process_group(
+            argv, cwd=cwd, env=env, timeout=timeout, text=False, stdin=subprocess.DEVNULL
+        )
+    except PermissionError as exc:
+        if exc.errno == errno.EPERM:
+            raise CandidateProcessSurvived(str(exc)) from exc
+        raise
+
+
 def _run_red_tests(
     repo: Path, python: str, nodes: list[str], timeout: float, expected_regex: str
 ) -> dict[str, Any]:
@@ -1099,11 +1157,12 @@ def _run_red_tests(
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
-            proc = subprocess.run(
-                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
-            )
+            proc = _run_reaping(argv, cwd=repo, env=env, timeout=timeout)
         except subprocess.TimeoutExpired:
             codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except CandidateProcessSurvived:
+            codes.add("TEST_PROCESS_SURVIVED")
             return result
         except OSError:
             codes.add("ENVIRONMENT_FAILURE")
@@ -1448,11 +1507,12 @@ def _run_pytest(repo: Path, python: str, targets: list[str], timeout: float) -> 
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         try:
-            proc = subprocess.run(
-                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
-            )
+            proc = _run_reaping(argv, cwd=repo, env=env, timeout=timeout)
         except subprocess.TimeoutExpired:
             codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except CandidateProcessSurvived:
+            codes.add("TEST_PROCESS_SURVIVED")
             return result
         except OSError:
             codes.add("ENVIRONMENT_FAILURE")
@@ -1496,13 +1556,11 @@ def _run_ruff(
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        proc = subprocess.run(
-            argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
-        )
+        proc = _run_reaping(argv, cwd=repo, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
         out["status"] = "timeout"
         return out
-    except OSError:
+    except (OSError, CandidateProcessSurvived):
         out["status"] = "environment"
         return out
     out["exit_code"] = proc.returncode
@@ -1554,12 +1612,10 @@ def _ruff_json(cwd: Path, python: str, paths: list[str], timeout: float) -> tupl
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        proc = subprocess.run(
-            argv, cwd=str(cwd), env=env, capture_output=True, timeout=timeout, check=False
-        )
+        proc = _run_reaping(argv, cwd=cwd, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, "timeout"
-    except OSError:
+    except (OSError, CandidateProcessSurvived):
         return None, "environment"
     if proc.returncode not in (0, 1):
         return None, "environment"
@@ -3710,6 +3766,15 @@ def _lineage_has_goal(root: Path, session: str | None) -> bool:
 NO_PROGRESS_DEFAULT_STEPS = 40
 NO_PROGRESS_DEFAULT_COMPACTIONS = 3
 NO_PROGRESS_TERMINATE_GRACE_SECONDS = 10.0
+# Wall clock of one DSH turn (#3052). The longest phase observed in the host's DSH state is
+# about 42 minutes (phase_wall_ms 2521622); a turn past this is stopped like a stalled one.
+DSH_TURN_WALL_CLOCK_SECONDS = 7200.0
+# The exit code of a turn stopped at the wall clock, whatever DSH itself returned on SIGTERM.
+DSH_TURN_WALL_CLOCK_EXIT = 124
+DSH_OUTPUT_POLL_SECONDS = 0.2
+# Once DSH's group is killed, how long its output may still take to reach EOF (a process that
+# left the group with setsid() can hold the pipe; it is closed after this).
+DSH_OUTPUT_DRAIN_SECONDS = 5.0
 
 
 class NoProgressWatchdog:
@@ -3780,6 +3845,45 @@ class NoProgressWatchdog:
         return reasons
 
 
+def _dsh_exited(pid: int) -> bool:
+    """Whether the DSH child ``pid`` has exited, asked without reaping it (#3052).
+
+    Unreaped, its pid stays reserved, so its process group id still names its own group when
+    signalled. ``waitid(WNOWAIT)`` where it exists; kqueue on macOS before Python 3.13 (this
+    script runs under whatever ``python3`` is first on PATH). Elsewhere it cannot be told
+    (False): the output's EOF or the wall clock then ends the turn.
+    """
+    if hasattr(os, "waitid") and hasattr(os, "WNOWAIT"):
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None
+    if not hasattr(select, "kqueue"):
+        return False
+    kq = select.kqueue()  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        change = select.kevent(  # pyright: ignore[reportAttributeAccessIssue]
+            pid,
+            filter=select.KQ_FILTER_PROC,  # pyright: ignore[reportAttributeAccessIssue]
+            flags=select.KQ_EV_ADD,  # pyright: ignore[reportAttributeAccessIssue]
+            fflags=select.KQ_NOTE_EXIT,  # pyright: ignore[reportAttributeAccessIssue]
+        )
+        try:
+            events = kq.control([change], 1, 0)
+        except ProcessLookupError:
+            return True  # no longer running: exited, waiting unreaped
+        note_exit = select.KQ_NOTE_EXIT  # pyright: ignore[reportAttributeAccessIssue]
+        return any(event.fflags & note_exit for event in events)
+    finally:
+        kq.close()
+
+
+def _signal_dsh_group(proc: subprocess.Popen, sig: int) -> None:
+    """Signal DSH's process group; only called while DSH is unreaped (its id is still its own)."""
+    try:
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        # Nothing left, or (macOS) only the exited, unreaped DSH is left in the group.
+        pass
+
+
 def _run_dsh_supervised(
     argv: Sequence[str],
     *,
@@ -3787,12 +3891,20 @@ def _run_dsh_supervised(
     env: dict[str, str],
     log_path: Path,
     watchdog: NoProgressWatchdog | None,
+    wall_clock_seconds: float | None = None,
 ) -> tuple[int, list[str]]:
-    """Run DSH writing its merged output to ``log_path``; stop it on no progress.
+    """Run DSH writing its merged output to ``log_path``; stop it on no progress or past the
+    wall clock.
 
-    Only the child's own PID is signalled (terminate, then kill after a grace period).
-    Returns (exit code, no-progress reason codes); reasons are empty when not stopped.
+    DSH leads its own process group (#3052). Stopping sends the group SIGTERM, then SIGKILL after
+    a grace period. Past ``wall_clock_seconds`` (default ``DSH_TURN_WALL_CLOCK_SECONDS``) the
+    exit code is ``DSH_TURN_WALL_CLOCK_EXIT`` whatever DSH returned. Once DSH has exited or been
+    stopped, its whole group gets SIGKILL before DSH is reaped, so a background child of DSH
+    neither outlives the turn nor, by holding the output pipe, keeps the read waiting.
+    Returns (exit code, no-progress reason codes); reasons are empty when not stopped for that.
     """
+    limit = DSH_TURN_WALL_CLOCK_SECONDS if wall_clock_seconds is None else wall_clock_seconds
+    deadline = time.monotonic() + limit
     with log_path.open("wb") as sink:
         proc = subprocess.Popen(
             list(argv),
@@ -3800,26 +3912,72 @@ def _run_dsh_supervised(
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
-        reasons: list[str] = []
         assert proc.stdout is not None
-        for raw in iter(proc.stdout.readline, b""):
-            sink.write(raw)
+        fd = proc.stdout.fileno()
+        reasons: list[str] = []
+        feeding = watchdog is not None
+        pending = b""
+        eof = False
+
+        def consume(data: bytes) -> None:
+            nonlocal pending, reasons
+            sink.write(data)
             sink.flush()
-            if watchdog is not None and not reasons:
+            if not feeding or watchdog is None or reasons:
+                return
+            pending += data
+            *lines, pending = pending.split(b"\n")
+            if eof and pending:
+                lines.append(pending)  # a last line without a newline
+                pending = b""
+            for raw in lines:
                 reasons = watchdog.feed_line(raw.decode("utf-8", "replace"))
                 if reasons:
-                    proc.terminate()
-                    break
-        if reasons:
-            try:
-                proc.wait(timeout=NO_PROGRESS_TERMINATE_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            # Drain whatever the child printed while shutting down.
-            sink.write(proc.stdout.read())
-        proc.stdout.close()
-        return proc.wait(), reasons
+                    return
+
+        def pump(until: float, *, stop_on_exit: bool, stop_on_no_progress: bool = False) -> str:
+            """Copy output to the log until ``until`` (or EOF), DSH's exit or no progress."""
+            nonlocal eof
+            while True:
+                if stop_on_no_progress and reasons:
+                    return "no_progress"
+                if stop_on_exit and _dsh_exited(proc.pid):
+                    return "exited"
+                remaining = until - time.monotonic()
+                if remaining <= 0:
+                    return "deadline"
+                if eof:
+                    if not stop_on_exit:
+                        return "eof"
+                    time.sleep(min(remaining, DSH_OUTPUT_POLL_SECONDS))
+                    continue
+                if selector.select(min(remaining, DSH_OUTPUT_POLL_SECONDS)):
+                    data = os.read(fd, 65536)
+                    if not data:
+                        eof = True
+                    consume(data)
+
+        timed_out = False
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(fd, selectors.EVENT_READ)
+                outcome = pump(deadline, stop_on_exit=True, stop_on_no_progress=True)
+                if outcome != "exited":
+                    timed_out = outcome == "deadline"
+                    feeding = False
+                    _signal_dsh_group(proc, signal.SIGTERM)
+                    pump(time.monotonic() + NO_PROGRESS_TERMINATE_GRACE_SECONDS, stop_on_exit=True)
+                # DSH has exited (or outlived the grace): kill its group before reaping it, then
+                # drain what is left; EOF comes once nothing holds the pipe.
+                _signal_dsh_group(proc, signal.SIGKILL)
+                pump(time.monotonic() + DSH_OUTPUT_DRAIN_SECONDS, stop_on_exit=False)
+        finally:
+            _signal_dsh_group(proc, signal.SIGKILL)  # DSH is still unreaped here
+            proc.stdout.close()
+            returncode = proc.wait()
+        return (DSH_TURN_WALL_CLOCK_EXIT if timed_out else returncode), reasons
 
 
 def _run_phase_turn(

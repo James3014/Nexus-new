@@ -17,10 +17,20 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from nexus.core.argv_command import run_command_string  # noqa: E402
 from nexus.core.decorators import nexus_metabolize
 from scripts.engine.output_guard import truncate_output
 
 WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
+# A gate step (a pytest run, an audit script) is bounded; a timeout fails the step (#3052).
+CI_GATE_STEP_TIMEOUT_SECONDS = 1800
+# The nightly step runs the whole suite (scripts/ops/test_full.sh).
+CI_GATE_NIGHTLY_TIMEOUT_SECONDS = 4 * 3600
+CI_GATE_STEP_TIMEOUT_EXIT = 124
+# A supervisor's overall deadline (epoch seconds; the repair loop's verify step sets it): no
+# step runs past it, so a step times out and is reaped here before the supervisor kills this
+# gate's own group, which would not reach a step's separate session (#3052).
+CI_GATE_DEADLINE_ENV = "NEXUS_CI_GATE_DEADLINE_EPOCH"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 CI_TRANSIENT_ARTIFACTS = (
     ".nexus/reports/learn/learning_closure.jsonl",
@@ -165,9 +175,29 @@ def cleanup_ci_transient_artifacts(*, dry_run: bool = False) -> dict:
     }
 
 
-def run_step(name, cmd):
+def run_step(name, cmd, timeout=None):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
-    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    limit = CI_GATE_STEP_TIMEOUT_SECONDS if timeout is None else timeout
+    supervisor_deadline = os.environ.get(CI_GATE_DEADLINE_ENV, "").strip()
+    if supervisor_deadline:
+        try:
+            limit = max(0.0, min(limit, float(supervisor_deadline) - time.time()))
+        except ValueError:
+            pass
+    try:
+        # No shell; the step's process group is killed once it returns or times out (#3052).
+        res = run_command_string(cmd, timeout=limit, reap_process_group=True)
+    except subprocess.TimeoutExpired as exc:
+        partial = [
+            part.decode("utf-8", "replace") if isinstance(part, bytes) else (part or "")
+            for part in (exc.stdout, exc.stderr)
+        ]
+        res = subprocess.CompletedProcess(
+            cmd,
+            CI_GATE_STEP_TIMEOUT_EXIT,
+            partial[0],
+            f"{partial[1]}{name} timed out after {limit}s\n",
+        )
 
     # 🛡️ Apply Context Shield / Hard Truncation
     stdout = truncate_output(str(getattr(res, "stdout", "") or ""), label=f"{name}_stdout")
@@ -606,7 +636,9 @@ def record_test_history(
 
 def run_nightly_full_check() -> bool:
     command = "bash scripts/ops/test_full.sh"
-    success, _ = run_step("Nightly Full Regression", command)
+    success, _ = run_step(
+        "Nightly Full Regression", command, timeout=CI_GATE_NIGHTLY_TIMEOUT_SECONDS
+    )
     record_test_history(mode="nightly-full", command=command, success=success)
     return success
 
