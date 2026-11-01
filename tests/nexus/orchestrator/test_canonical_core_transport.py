@@ -200,15 +200,15 @@ def test_t9_failure_cleanup(test_repo: Path, monkeypatch: pytest.MonkeyPatch):
     ).strip()
     (test_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
 
-    # Monkeypatch subprocess.check_call to fail inside the with block
-    orig_check_output = subprocess.check_output
+    # Make write-tree fail inside the with block
+    orig_run = subprocess.run
 
-    def failing_check_output(cmd, **kwargs):
+    def failing_run(cmd, *args, **kwargs):
         if isinstance(cmd, list) and "write-tree" in cmd:
-            raise subprocess.CalledProcessError(1, cmd)
-        return orig_check_output(cmd, **kwargs)
+            return subprocess.CompletedProcess(cmd, 1, "", "write-tree failed")
+        return orig_run(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "check_output", failing_check_output)
+    monkeypatch.setattr(subprocess, "run", failing_run)
 
     with pytest.raises(subprocess.CalledProcessError):
         extract_git_manifest(test_repo, base_commit, "HEAD")
@@ -863,3 +863,90 @@ def test_core_identity_module_failure_fails_closed(
     identity, status = _identity(monkeypatch, tmp_path / "core")
     assert identity["reason"] == "CORE_IDENTITY_UNREADABLE"
     assert status["status"] == "CORE_IDENTITY_UNAVAILABLE" and status["fail_closed"] is True
+
+
+def _plant_programs(repo: Path, markers: Path) -> None:
+    """Hooks and config programs a Target writer can plant; each only touches a marker."""
+    markers.mkdir()
+    hooks = repo / ".git" / "hooks"
+    for name in ("post-index-change", "reference-transaction", "pre-commit"):
+        hook = hooks / name
+        hook.write_text(f"#!/bin/sh\ntouch '{markers}/hook-{name}'\n", encoding="utf-8")
+        hook.chmod(0o755)
+
+
+def _set_config(repo: Path, key: str, value: str) -> None:
+    subprocess.check_call(["git", "config", "--add", key, value], cwd=repo)
+
+
+@pytest.fixture
+def sentinel_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sentinel = tmp_path / "sentinel"
+    sentinel.mkdir()
+    monkeypatch.chdir(sentinel)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("diff.external", "sh -c \"touch '{markers}/diff-external'\" --"),
+        ("hook.m.command", "touch '{markers}/config-hook'"),
+        ("filter.m.clean", "sh -c \"touch '{markers}/clean-filter'; cat\""),
+    ],
+)
+def test_manifest_of_a_target_naming_a_program_is_refused_before_it_runs(
+    test_repo: Path, tmp_path: Path, sentinel_cwd: None, key: str, value: str
+):
+    markers = tmp_path / "markers"
+    _plant_programs(test_repo, markers)
+    _set_config(test_repo, key, value.format(markers=markers))
+    if key == "hook.m.command":
+        _set_config(test_repo, "hook.m.event", "post-index-change")
+    if key == "filter.m.clean":
+        (test_repo / ".gitattributes").write_text("*.txt filter=m\n", encoding="utf-8")
+    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True)
+    (test_repo / "tracked_a.txt").write_text("worker edit\n", encoding="utf-8")
+    (test_repo / "new.txt").write_text("untracked\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_TARGET_GIT_CONFIG_REFUSED"):
+        extract_git_manifest(test_repo, base_commit.strip(), "HEAD")
+
+    assert sorted(p.name for p in markers.iterdir()) == []
+
+
+def test_manifest_of_a_dirty_target_runs_none_of_its_hooks(
+    test_repo: Path, tmp_path: Path, sentinel_cwd: None
+):
+    markers = tmp_path / "markers"
+    _plant_programs(test_repo, markers)
+    _set_config(test_repo, "core.fsmonitor", f"touch '{markers}/fsmonitor'; true")
+    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True)
+    (test_repo / "tracked_a.txt").write_text("worker edit\n", encoding="utf-8")
+    (test_repo / "new.txt").write_text("untracked\n", encoding="utf-8")
+
+    manifest = extract_git_manifest(test_repo, base_commit.strip(), "HEAD")
+
+    assert sorted(row["path"] for row in manifest["entries"]) == ["new.txt", "tracked_a.txt"]
+    assert sorted(p.name for p in markers.iterdir()) == []
+
+
+def test_manifest_git_calls_are_bounded_in_time(test_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    from nexus.core import hardened_git
+
+    timeouts: list[object] = []
+    orig_run = subprocess.run
+
+    def recording_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and cmd[:1] == ["git"]:
+            timeouts.append(kwargs.get("timeout"))
+        return orig_run(cmd, *args, **kwargs)
+
+    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True)
+    (test_repo / "tracked_a.txt").write_text("worker edit\n", encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", recording_run)
+
+    extract_git_manifest(test_repo, base_commit.strip(), "HEAD")
+
+    assert len(timeouts) >= 6
+    assert set(timeouts) == {hardened_git.GIT_TIMEOUT_S}

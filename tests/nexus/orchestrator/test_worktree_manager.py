@@ -2264,3 +2264,90 @@ def test_valid_orphan_ownership_with_matching_snapshot_allows_genuinely_disjoint
         )
         is True
     )
+
+
+def _controller_git_state(controller: Path) -> dict[str, object]:
+    git_dir = controller / ".git"
+    return {
+        "head": (git_dir / "HEAD").read_text(encoding="utf-8"),
+        "branch": _git(controller, "rev-parse", "HEAD"),
+        "index": (git_dir / "index").read_bytes(),
+        "refs": _git(controller, "for-each-ref", "--format=%(refname) %(objectname)"),
+    }
+
+
+@pytest.fixture
+def sentinel_cwd(tmp_path, monkeypatch):
+    sentinel = tmp_path / "sentinel"
+    sentinel.mkdir()
+    monkeypatch.chdir(sentinel)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+
+
+def test_live_target_git_metadata_is_verified_before_salvage(sh2_repo, sentinel_cwd):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    contract = _contract(sh2_repo, task_id="salvage-verified")
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("worker edit\n", encoding="utf-8")
+    (target / ".git").write_text(f"gitdir: {controller / '.git'}\n", encoding="utf-8")
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager.create_salvage_snapshot(contract, lease, "attempt-1")
+
+    assert _controller_git_state(controller) == before
+
+
+def test_live_target_git_metadata_is_verified_before_slot_reuse(sh2_repo, sentinel_cwd):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    slot = manager.prepare_reusable_slot(
+        _contract(sh2_repo, task_id="slot-verified-1"), campaign_id="verified", slot_index=0
+    )
+    slot_path = Path(slot.slot_path)
+    (slot_path / ".git").write_text(f"gitdir: {controller / '.git'}\n", encoding="utf-8")
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager.prepare_reusable_slot(
+            _contract(sh2_repo, task_id="slot-verified-2"), campaign_id="verified", slot_index=0
+        )
+
+    assert _controller_git_state(controller) == before
+    assert slot_path.is_dir()
+
+
+def _point_git_at_controller(target: Path, controller: Path, how: str) -> None:
+    dotgit = target / ".git"
+    if how == "git file":
+        dotgit.write_text(f"gitdir: {controller / '.git'}\n", encoding="utf-8")
+        return
+    shared = target / "planted" if how == "shared refs via git file" else None
+    if shared is None:
+        dotgit.unlink()
+        shared = dotgit
+    shared.mkdir()
+    (shared / "commondir").write_text(f"{controller / '.git'}\n", encoding="utf-8")
+    (shared / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (shared / "gitdir").write_text(f"{dotgit}\n", encoding="utf-8")
+    if how == "shared refs via git file":
+        dotgit.write_text(f"gitdir: {shared}\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("how", ["git file", "shared refs via git file", "shared refs via git dir"])
+def test_unbound_live_target_status_refuses_a_git_file_naming_the_controller(
+    sh2_repo, sentinel_cwd, how
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(_contract(sh2_repo, task_id="status-verified"))
+    target = Path(lease.target_worktree)
+    _point_git_at_controller(target, controller, how)
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager._status_bytes(target)
+
+    assert _controller_git_state(controller) == before

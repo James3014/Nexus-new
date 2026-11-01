@@ -703,3 +703,44 @@ def test_a_symlink_to_a_linked_worktree_is_not_accepted_as_one(env):
 
     assert hardened_git.linked_worktree_git_dir(worktree) == admin
     assert hardened_git.linked_worktree_git_dir(link) is None
+
+
+def test_a_commit_after_caller_config_still_runs_no_commit_hook(env):
+    repo = _repo_with_local_work(env / "repo")
+    marker = env / "hook-ran"
+    hooks = env / "caller-hooks"
+    hooks.mkdir()
+    script = _marker_script(env, "program.sh", marker)
+    for name in ("pre-commit", "commit-msg"):
+        (hooks / name).symlink_to(script)
+
+    result = hardened_git.run_hardened_git(
+        repo, "-c", "user.name=n", "-c", f"core.hooksPath={hooks}", "commit", "-qam", "edit"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+
+
+def test_hardened_git_returns_bytes_when_asked(env):
+    repo = _repo_with_local_work(env / "repo")
+
+    result = hardened_git.run_hardened_git(repo, "status", "--porcelain=v1", "-z", text=False)
+
+    assert result.returncode == 0
+    assert result.stdout == b" M notes.py\0"
+
+
+def test_hardened_git_runs_on_the_given_index_file(env):
+    repo = _repo_with_local_work(env / "repo")
+    real_index = (repo / ".git" / "index").read_bytes()
+    index_file = env / "scratch-index"
+
+    for args in (("read-tree", "HEAD"), ("add", "-A", "--", ".")):
+        assert hardened_git.run_hardened_git(repo, *args, index_file=index_file).returncode == 0
+    tree = hardened_git.run_hardened_git(repo, "write-tree", index_file=index_file).stdout.strip()
+
+    assert (repo / ".git" / "index").read_bytes() == real_index
+    assert index_file.is_file()
+    shown = hardened_git.run_hardened_git(repo, "cat-file", "-p", f"{tree}:notes.py").stdout
+    assert shown == DIRTY_EDIT

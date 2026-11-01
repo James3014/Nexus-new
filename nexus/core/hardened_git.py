@@ -11,7 +11,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple
 
 GIT_TIMEOUT_S = 120.0
 # Command-line config outranks repository config: hooks and fsmonitor are switched off,
@@ -69,18 +69,35 @@ def hardened_git_env(
     return env
 
 
+def _with_subcommand_flags(args: Tuple[str, ...]) -> Tuple[str, ...]:
+    """``args`` with the subcommand's flags inserted right after it, past any leading
+    ``-c <name>=<value>`` pairs."""
+    at = 0
+    while at + 1 < len(args) and args[at] == "-c":
+        at += 2
+    if at < len(args) and args[at] in _SUBCOMMAND_FLAGS:
+        return (*args[: at + 1], *_SUBCOMMAND_FLAGS[args[at]], *args[at + 1 :])
+    return args
+
+
 def run_hardened_git(
-    repo_dir: Path, *args: str, git_dir: Optional[Path] = None
-) -> subprocess.CompletedProcess[str]:
-    """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given); raises
+    repo_dir: Path,
+    *args: str,
+    git_dir: Optional[Path] = None,
+    text: bool = True,
+    index_file: Optional[Path] = None,
+) -> subprocess.CompletedProcess[Any]:
+    """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given, on the index
+    file ``index_file`` when given; output is bytes when ``text`` is False); raises
     ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped."""
-    if args and args[0] in _SUBCOMMAND_FLAGS:
-        args = (args[0], *_SUBCOMMAND_FLAGS[args[0]], *args[1:])
+    args = _with_subcommand_flags(args)
+    empty = "" if text else b""
     common_dir = None
     if git_dir is not None and (git_dir.is_symlink() or not git_dir.is_dir()):
         # Git follows a gitdir file even at a pinned GIT_DIR, so a replaced git dir fails here.
+        message = f"fatal: pinned git dir is not a directory: {git_dir}\n"
         return subprocess.CompletedProcess(
-            ["git", *args], 128, "", f"fatal: pinned git dir is not a directory: {git_dir}\n"
+            ["git", *args], 128, empty, message if text else message.encode()
         )
     if git_dir is not None and not git_dir.resolve().is_relative_to(Path(repo_dir).resolve()):
         # A linked worktree's admin dir: its registration is checked again and its common
@@ -91,9 +108,13 @@ def run_hardened_git(
             except (OSError, UnicodeDecodeError):
                 common_dir = None
         if common_dir is None:
+            message = f"fatal: pinned git dir is not a worktree: {git_dir}\n"
             return subprocess.CompletedProcess(
-                ["git", *args], 128, "", f"fatal: pinned git dir is not a worktree: {git_dir}\n"
+                ["git", *args], 128, empty, message if text else message.encode()
             )
+    env = hardened_git_env(repo_dir, git_dir, common_dir)
+    if index_file is not None:
+        env["GIT_INDEX_FILE"] = str(index_file)
     key = Path(repo_dir).resolve()
     with _RUNNING_GUARD:
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
@@ -101,9 +122,9 @@ def run_hardened_git(
         return subprocess.run(
             ["git", *_GIT_OVERRIDES, *args],
             cwd=str(repo_dir),
-            env=hardened_git_env(repo_dir, git_dir, common_dir),
+            env=env,
             capture_output=True,
-            text=True,
+            text=text,
             timeout=GIT_TIMEOUT_S,
             check=False,
         )
