@@ -2032,6 +2032,8 @@ def test_baseline_apply_restores_target_after_timeout(tmp_path: Path, monkeypatc
 
     _fake_baseline_model(monkeypatch, lambda *_args, **_kwargs: patched)
     monkeypatch.setattr(research_flow_service.subprocess, "run", timeout_run)
+    # The visible test runs through the process-group reaping runner (#3052).
+    monkeypatch.setattr(research_flow_service, "run_reaping_process_group", timeout_run)
 
     payload, _ = research_flow_service.run_auto_flow(
         repo_root=tmp_path,

@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from nexus.core.argv_command import run_reaping_process_group
+
 from .anti_drift import AntiDrift
 from .replay_runner import (
     ReplayRunner,
@@ -136,8 +138,11 @@ def collect_test_ids(
     """
     argv = [*prefix, "--collect-only", "-q", "-p", "no:cacheprovider", f"--rootdir={cwd}", *targets]
     try:
-        result = subprocess.run(
-            argv, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        # Collection imports candidate test modules: their children die with the run (#3052).
+        result = run_reaping_process_group(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
             timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
@@ -619,9 +624,12 @@ class EvidenceVerifier:
                 })
                 continue
             try:
-                result = subprocess.run(
-                    argv, cwd=self.project_root, stdin=subprocess.DEVNULL,
-                    capture_output=True, text=True, timeout=TEST_COMMAND_TIMEOUT_SECONDS,
+                # Replays an agent-claimed command: its process group is killed after (#3052).
+                result = run_reaping_process_group(
+                    argv,
+                    cwd=self.project_root,
+                    stdin=subprocess.DEVNULL,
+                    timeout=TEST_COMMAND_TIMEOUT_SECONDS,
                 )
                 # Passed only on a real exit 0; a recorded non-zero exit never passes (#2685).
                 executed.append({

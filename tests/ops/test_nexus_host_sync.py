@@ -164,6 +164,9 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "nexus/services/workflow_doctor.py",
         ),
         *[(ROOT / rel, rel) for rel in _EXECUTORS_RUNTIME_PATHS],
+        # #3052: cli_worker kills its process group through nexus.core.argv_command
+        (ROOT / "nexus/core/__init__.py", "nexus/core/__init__.py"),
+        (ROOT / "nexus/core/argv_command.py", "nexus/core/argv_command.py"),
         (ROOT / "nexus/executors/codex_run_boundary.py", "nexus/executors/codex_run_boundary.py"),
         # #2884: the --run-as-user boundary, its wrapper and the manual installer
         (ROOT / "nexus/executors/agy_worker_account.py", "nexus/executors/agy_worker_account.py"),

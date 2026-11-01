@@ -116,7 +116,9 @@ def test_evidence_verifier_high_trust(mock_run):
     with patch("pathlib.Path.exists", return_value=True), \
          patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})), \
          patch.object(EvidenceVerifier, "_compare_test_sets", return_value={"status": "OK"}), \
-         patch.object(EvidenceVerifier, "_deleted_test_files", return_value={"status": "OK"}):
+         patch.object(EvidenceVerifier, "_deleted_test_files", return_value={"status": "OK"}), \
+         patch("nexus.delivery.evidence_verifier.run_reaping_process_group", mock_run), \
+         patch("nexus.delivery.replay_runner.run_reaping_process_group", mock_run):
         res = verifier.verify({"version": "1.1.0", "code_artifacts": ["a.py"], "test_artifacts": [{"command": "pytest", "exit_code": 0}]})
         assert res["overall_trust"] == "HIGH"
 
@@ -284,7 +286,9 @@ def test_replay_runner_success(mock_run):
             {"command": "pytest -q", "exit_code": 0}
         ]
     }
-    report = runner.run_replay(bundle)
+    # Replays run through the process-group reaping runner (#3052).
+    with patch("nexus.delivery.replay_runner.run_reaping_process_group", mock_run):
+        report = runner.run_replay(bundle)
     assert report["passed"] is True
     assert report["replay_count"] == 1
     assert report["replay_results"][0]["match_rc"] is True
@@ -299,7 +303,8 @@ def test_replay_runner_mismatch_fail(mock_run):
             {"command": "pytest -q tests/fail", "exit_code": 0}
         ]
     }
-    report = runner.run_replay(bundle)
+    with patch("nexus.delivery.replay_runner.run_reaping_process_group", mock_run):
+        report = runner.run_replay(bundle)
     assert report["passed"] is False
     assert report["replay_results"][0]["match_rc"] is False
 

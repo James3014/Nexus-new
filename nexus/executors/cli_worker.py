@@ -18,6 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, Tuple
 
+from nexus.core.argv_command import communicate_then_kill_group, require_child_stays_unreaped
 from nexus.executors.exec_policy import (
     assert_git_repo_config_safe,
     git_target_directory,
@@ -1060,6 +1061,9 @@ def run_cli_worker(
     tracker: Optional[_DescendantTracker] = None
     try:
         baseline = _sweep_baseline() if request.sweep_descendants_on_exit else None
+        # Refused (OSError, START_FAILED) before anything is spawned when the worker could not
+        # stay unreaped until its group is killed after a normal exit (#3052).
+        require_child_stays_unreaped()
         process = subprocess.Popen(
             command,
             cwd=request.cwd,
@@ -1077,13 +1081,20 @@ def run_cli_worker(
             _RUN_START_TICKS[run_tag] = worker_ticks
         tracker = _DescendantTracker(process.pid) if request.sweep_descendants_on_exit else None
         try:
-            stdout, stderr = process.communicate(timeout=request.timeout_seconds)
+            # The worker's process group is SIGKILLed once it exits, before it is reaped, so
+            # no child left in its group outlives a normal exit either (#3052).
+            # The tracker's last snapshot still comes before the kill, as it did.
+            stopped: list[set[int]] = []
+            stdout, stderr = communicate_then_kill_group(
+                process,
+                request.timeout_seconds,
+                before_kill=None if tracker is None else lambda: stopped.append(tracker.stop()),
+            )
             timed_out = False
             group_killed = False
             status = CliWorkerStatus.COMPLETED
             if tracker is not None:
-                tracked = tracker.stop() - (baseline.preexisting if baseline else frozenset())
-                _kill_process_group(process)
+                tracked = stopped[0] - (baseline.preexisting if baseline else frozenset())
                 tagged_clean = _sweep_tagged_processes(run_tag)
                 descendants_swept = (
                     _sweep_clean(tracked, _pids_with_cwd_under(request.sweep_roots, baseline))
@@ -1136,8 +1147,9 @@ def run_cli_worker(
     except OSError as exc:
         if tracker is not None:
             tracker.stop()
-        if process is not None:
-            # Failed after launch: never leave the worker or its group running.
+        if process is not None and process.returncode is None:
+            # Failed after launch: never leave the worker or its group running. Once the
+            # worker is reaped its pid may name an unrelated group: never signalled then.
             _kill_process_group(process)
             if request.sweep_descendants_on_exit:
                 descendants_swept = False

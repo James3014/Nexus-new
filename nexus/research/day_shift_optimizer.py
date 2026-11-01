@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
 
+from nexus.core.argv_command import run_reaping_process_group
+
 logger = logging.getLogger(__name__)
 
 class DayShiftOptimizer:
@@ -153,12 +155,11 @@ class DayShiftOptimizer:
     def _run_tests(self) -> Tuple[int, str]:
         """Runs tests in the swarm directory."""
         try:
-            res = subprocess.run(
+            # Runs the candidate's tests: their process group is killed after (#3052).
+            res = run_reaping_process_group(
                 ["uv", "run", "pytest", "-q", "--maxfail=1"],
-                capture_output=True,
-                text=True,
                 cwd=self.swarm_dir,
-                timeout=self.test_timeout_sec
+                timeout=self.test_timeout_sec,
             )
             return res.returncode, res.stdout + "\n" + res.stderr
         except subprocess.TimeoutExpired:

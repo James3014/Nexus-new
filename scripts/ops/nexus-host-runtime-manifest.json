@@ -124,6 +124,14 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/core/__init__.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/core/argv_command.py",
+      "mode": "0644"
+    },
+    {
       "path": "nexus/executors/__init__.py",
       "mode": "0644"
     },
