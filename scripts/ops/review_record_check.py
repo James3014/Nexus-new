@@ -697,6 +697,28 @@ def _label_start(window: str) -> int:
     return found[-1].end() if found else 0
 
 
+_SENTENCE_START = re.compile(r"[.!?](?:\s+|$)|。\s*|(?=\b(?i:verdict)\s*:)")
+_MODEL_LABEL = re.compile(
+    r"\b(?:codex|gemini|gpt|claude|opus|sonnet|cross-model|cross-family)", re.IGNORECASE
+)
+
+
+def _model_labels_reject(window: str) -> bool:
+    """A model is named in the REJECT's own sentence, outside asides or in the aside right
+    before it ("Claude security review: REJECT", "Review of the change (Claude): REJECT").
+    Such a label credits that model before an ACCEPT, so before a REJECT it must take the
+    credit back whatever other words it carries. A negation or condition in the sentence
+    outside asides still denies it ("Claude would not (ever) REJECT"); a model in an aside
+    that prose follows does not label it ("(Claude Opus 5.5) the gate): REJECT")."""
+    starts = list(_SENTENCE_START.finditer(window))
+    own = window[starts[-1].end() :] if starts else window
+    outside = re.sub(r"\([^()]*\)", " ", own)
+    if _denies_reject(outside):
+        return False
+    last = re.search(r"\(([^()]*)\)\W*$", own)
+    return bool(_MODEL_LABEL.search(outside) or (last and _MODEL_LABEL.search(last.group(1))))
+
+
 def _denies_reject(before: str) -> bool:
     """A negation, condition or quote before a REJECT token in its clause."""
     return bool(_REJECT_PRE_DENY.search(_plain(before)) or _QUOTE.search(before))
@@ -811,8 +833,11 @@ def _reject_clause_starts(line: str, more: bool = True) -> list[tuple[str, int]]
         window = _plain(plain_line[window_start:at])
         models = list(_NEAREST_MODEL.finditer(window))
         if not _reject_label_only(window[models[-1].end() :] if models else window):
-            window = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
-            if not _reject_label_only(window[_label_start(window) :]):
+            blanked = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
+            if not _reject_label_only(blanked[_label_start(blanked) :]) and not (
+                extended
+                and _model_labels_reject(_plain(plain_line[window_start:at], keep_parens=True))
+            ):
                 return False
         if _REJECT_NOT_AFTER.match(plain_line, end):
             return False

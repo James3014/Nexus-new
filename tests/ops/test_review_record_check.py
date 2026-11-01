@@ -3888,3 +3888,62 @@ def test_a_cross_model_label_nearest_to_the_accept_credits_no_claude_record():
     # Follow-up to #3063's review: the "cross-model" word is a cross-model name too.
     body = f"**Cross-model review** (after the Claude review): ACCEPT at {HEAD}\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+# A REJECT whose label names a model withdraws even when the label also carries words the
+# label-word list does not hold: the same label before an ACCEPT credits that model, so it
+# must be able to take the credit back.
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude security review: REJECT at {HEAD} — race\n",
+        f"Claude r2 of the change: REJECT at {HEAD} — race\n",
+        f"Claude review for head {HEAD}: REJECT — race\n",
+        f"Claude r2 on the merge: REJECT at {HEAD} — race\n",
+        f"Review of the change (Claude): REJECT at {HEAD} — race\n",
+        f"| Claude | r2 of the change | REJECT at {HEAD} |\n",
+        f"Claude r2 of the change → REJECT at {HEAD} — race\n",
+        f"**Claude second-pass review**: REQUEST_CHANGES at {HEAD} — race\n",
+    ],
+)
+def test_a_descriptive_reject_label_naming_a_model_withdraws(line):
+    comments = [_c(CLAUDE_AT_HEAD), _c(line)]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] != "OK"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["Claude security review", "Claude r2 of the change", f"Claude review for head {HEAD}"],
+)
+def test_the_same_descriptive_label_credits_an_accept(label):
+    # The other half of the symmetry the REJECT reading relies on.
+    assert rrc.evaluate(HEAD, DOCS, [_c(f"{label}: ACCEPT at {HEAD}\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # No model in the REJECT's own sentence: a gate value in a finding stays prose.
+        f"The Claude review is above. A tampered receipt gets: REJECT at {HEAD}\n",
+        f"Finding 2: a tampered receipt: REJECT at {HEAD}\n",
+        # A denial before it still denies.
+        f"Claude security review would not: REJECT at {HEAD}\n",
+        # A resolved one stays resolved.
+        f"Claude security review: REJECT at {HEAD} (fixed)\n",
+    ],
+)
+def test_a_descriptive_reject_label_reading_keeps_the_other_checks(line):
+    comments = [_c(CLAUDE_AT_HEAD), _c(line)]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "OK"
+
+
+def test_a_descriptive_reject_at_the_head_withdraws_a_carried_older_head_accept():
+    # The ACCEPT at the older head is carried over a verified merge-only delta; the later
+    # descriptive REJECT at the head withdraws it (main read no REJECT here and said OK).
+    comments = [
+        _c(f"Head reviewed: {OLD}\nClaude r1: ACCEPT\n"),
+        _c(f"Claude security review: REJECT at {HEAD} — race\n"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))["status"] == (
+        "MISSING_RECORD"
+    )
