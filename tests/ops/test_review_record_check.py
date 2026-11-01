@@ -3947,3 +3947,55 @@ def test_a_descriptive_reject_at_the_head_withdraws_a_carried_older_head_accept(
     assert rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))["status"] == (
         "MISSING_RECORD"
     )
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A new numbering at the head, then a descriptive REJECT, then a later record at the
+        # older head: the delta head is chosen as main chose it.
+        (
+            DOCS,
+            [
+                f"Head reviewed: {HEAD}\nClaude r3: ACCEPT\n",
+                f"Claude r1: REJECT at {HEAD}\n",
+                f"Claude security review: REJECT at {HEAD}\n",
+                f"Head reviewed: {OLD}\nClaude r1: ACCEPT\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        # An extra family REJECT, then a descriptive one.
+        (
+            DOCS,
+            [
+                f"Claude: ACCEPT at {HEAD}\n",
+                f"Claude and Codex: REJECT at {HEAD}\n",
+                f"Claude security review: REJECT at {HEAD}\n",
+                f"Head reviewed: {OLD}\nClaude r1: ACCEPT\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        # The same for the cross-model record on a high-risk path.
+        (
+            RISKY,
+            [
+                f"Claude: ACCEPT at {HEAD}\n",
+                f"Head reviewed: {HEAD}\nCodex r3: ACCEPT\n",
+                f"Codex r1: REJECT at {HEAD}\n",
+                f"Codex security review: REJECT at {HEAD}\n",
+                f"Head reviewed: {OLD}\nCodex r1: ACCEPT\n",
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_descriptive_reject_never_chooses_a_delta_head_main_would_not(files, comments, status):
+    report = rrc.evaluate(HEAD, files, [_c(body) for body in comments], [], delta_verified=(OLD,))
+    assert report["status"] == status
+
+
+def test_a_reject_read_only_by_its_model_label_is_left_out_of_mains_reading():
+    line = f"Claude security review: REJECT at {HEAD} — race"
+    assert rrc._reject_clause_starts(line, more=False) == []
+    assert rrc._reject_clause_starts(line, labels=False) == []
+    assert rrc._reject_clause_starts(line) != []

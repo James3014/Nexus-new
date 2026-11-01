@@ -784,14 +784,18 @@ def reject_clauses(line: str) -> list[str]:
     return [clause for clause, _start in _reject_clause_starts(line)]
 
 
-def _reject_clause_starts(line: str, more: bool = True) -> list[tuple[str, int]]:
+def _reject_clause_starts(
+    line: str, more: bool = True, labels: bool = True
+) -> list[tuple[str, int]]:
     """reject_clauses with each clause's start in ``_plain(_reject_view(line), keep_parens=True)``.
 
     The caller places the token by this start: finding the clause text again would land on
     an earlier, unread clause of the same text and judge the REJECT there (#3039).
     ``more`` False reads only as main did before #3041 r15; with it, a clause main's
     reading skips is read again with the positions in ``_REJECT_POS_MORE`` and a label
-    aside carried over a line break (``_reject_aside_closes``).
+    aside carried over a line break (``_reject_aside_closes``). ``labels`` False leaves out
+    a REJECT read only because its sentence names a model (``_model_labels_reject``, #3069);
+    such a REJECT is an ``extra`` event, not read when choosing merge-only delta heads.
     """
     out: list[tuple[str, int]] = []
     plain_line = _plain(_reject_view(line), keep_parens=True)
@@ -836,6 +840,7 @@ def _reject_clause_starts(line: str, more: bool = True) -> list[tuple[str, int]]
             blanked = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
             if not _reject_label_only(blanked[_label_start(blanked) :]) and not (
                 extended
+                and labels
                 and _model_labels_reject(_plain(plain_line[window_start:at], keep_parens=True))
             ):
                 return False
@@ -1508,6 +1513,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         # Only the clauses main reads move the search on, so a clause read only since
         # #3041 r15 never takes the earlier position's family away from a later one.
         main_starts = {at for _clause, at in _reject_clause_starts(line, more=False)}
+        # A REJECT read only by its model-naming label (#3069) is "extra" too.
+        base_starts = {at for _clause, at in _reject_clause_starts(line, labels=False)}
         for clause, start in _reject_clause_starts(line):
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
@@ -1564,6 +1571,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     "comment": 0,
                     "line": clause.strip(),
                 }
+                if start not in base_starts:
+                    event["extra"] = True
                 if weak:
                     weak_rejects.add(id(event))
                 line_events.append((start + span[0], event))
