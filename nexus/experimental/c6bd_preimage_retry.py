@@ -3,9 +3,25 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+
+
+def _history_repo(source_root: str) -> tuple[Path, Path] | None:
+    """``source_root`` resolved and its git dir, when it is a repository rooted there whose
+    config names no program; model code may have run in it, so anything else is not read."""
+    root = Path(source_root).resolve()
+    git_dir = repository_git_dir(root)
+    if git_dir is None or repository_config_can_start_a_program(root, git_dir):
+        return None
+    return root, git_dir
 
 
 def resolve_anchor_from_preimage(
@@ -20,30 +36,25 @@ def resolve_anchor_from_preimage(
         return current_anchor
 
     try:
-        from pathlib import Path as _Path
-        _repo = _Path(repo_root)
-        _git_dir = _repo / ".git"
-        if not (_git_dir.exists() or _git_dir.is_dir()):
+        _found = _history_repo(repo_root)
+        if _found is None:
             return current_anchor
+        _repo, _git_dir = _found
 
         _search_first_line = str(search_text).strip().splitlines()[0].strip() if str(search_text).strip() else ""
         if not _search_first_line:
             return current_anchor
 
-        _log_res = subprocess.run(
-            ["git", "log", "--all", "--oneline", "--diff-filter=M",
-             "-S", _search_first_line[:80], "--", target_file],
-            cwd=str(_repo), capture_output=True, text=True, timeout=30,
+        _log_res = run_hardened_git(
+            _repo, "log", "--all", "--oneline", "--diff-filter=M",
+            "-S", _search_first_line[:80], "--", target_file, git_dir=_git_dir,
         )
         _fix_commits = [l.split()[0] for l in _log_res.stdout.strip().splitlines() if l.strip()]
         if not _fix_commits:
             return current_anchor
 
         _fix = _fix_commits[0]
-        _show_res = subprocess.run(
-            ["git", "show", f"{_fix}^:{target_file}"],
-            cwd=str(_repo), capture_output=True, text=True, timeout=30,
-        )
+        _show_res = run_hardened_git(_repo, "show", f"{_fix}^:{target_file}", git_dir=_git_dir)
         if _show_res.returncode != 0:
             return current_anchor
 
@@ -73,20 +84,20 @@ def run_c6bd_preimage_retry(
         return None
 
     try:
-        _log_r = subprocess.run(
-            ["git", "log", "--all", "--oneline", "--diff-filter=M",
-             "-S", _search_first[:80], "--", target_file],
-            cwd=source_root, capture_output=True, text=True, timeout=30,
+        _found = _history_repo(source_root)
+        if _found is None:
+            return None
+        _source, _git_dir = _found
+        _log_r = run_hardened_git(
+            _source, "log", "--all", "--oneline", "--diff-filter=M",
+            "-S", _search_first[:80], "--", target_file, git_dir=_git_dir,
         )
         _fix_commits = [l.split()[0] for l in _log_r.stdout.strip().splitlines() if l.strip()]
         if not _fix_commits:
             return None
 
         _fix = _fix_commits[0]
-        _show_r = subprocess.run(
-            ["git", "show", f"{_fix}^:{target_file}"],
-            cwd=source_root, capture_output=True, text=True, timeout=30,
-        )
+        _show_r = run_hardened_git(_source, "show", f"{_fix}^:{target_file}", git_dir=_git_dir)
         if _show_r.returncode != 0:
             return None
 
