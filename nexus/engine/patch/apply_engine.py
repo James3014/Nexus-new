@@ -134,7 +134,13 @@ class PatchApplyEngine:
             self.timer.start(ExecutionPhase.VERIFY_LIGHT)
                     
         # 3. Verify Light (Fail-closed)
-        success, v_msg = self.verifier.verify_change(original_content, current_content)
+        failed_block = next((b for b in block_results if b["status"] == "FAIL"), None)
+        if failed_block is not None:
+            # 任一區塊失敗：不驗證、不寫檔，回報失敗，收據的 new_sha 等於原檔
+            current_content = original_content
+            success, v_msg = False, f"BLOCK_{failed_block['index']}_FAILED: {failed_block['reason']}"
+        else:
+            success, v_msg = self.verifier.verify_change(original_content, current_content)
         self.timer.stop(ExecutionPhase.VERIFY_LIGHT)
         
         # Verify Heavy (AST / Checksum)
