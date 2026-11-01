@@ -365,6 +365,10 @@ class _AssistJobsMixin(_JobsBase):
             pid = int(job.get("pid") or 0)
             process = None
             with self._assist_lock:
+                if not self._assist_job_is_current(task_id, job):
+                    # A retry launched since this cancel's refresh: its record and provider are
+                    # not the job this cancel read, and are left alone (#3076).
+                    return self._assist_response(job, operation="cancel")
                 process = self._assist_processes.get(task_id)
                 if not pid:
                     # The submit writes the pid and registers the provider under this lock: re-read
@@ -409,7 +413,8 @@ class _AssistJobsMixin(_JobsBase):
             })
             self._assist_record_stream_artifacts(job)
             with self._assist_lock:
-                self._assist_processes.pop(task_id, None)
+                if self._assist_job_is_current(task_id, job):
+                    self._assist_processes.pop(task_id, None)
             # No provider was ever started (no registered process, no pid): no group to wait for.
             provider_gone = terminated or (process is None and not pid)
             if provider_gone:
@@ -430,7 +435,7 @@ class _AssistJobsMixin(_JobsBase):
                         "reconciliation_required": True,
                         "process_cleanup": False,
                     })
-            self._assist_write(job)
+            self._assist_write_current(task_id, job)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)
             self._assist_write(job)

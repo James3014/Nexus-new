@@ -955,3 +955,144 @@ def test_probe_whose_provider_did_not_start_leaves_the_in_flight_set(box, monkey
     assert result["blocker"] == "ASSIST_PROVIDER_FAILED", result
     assert TASK not in box.gateway._model_probe_inflight()
     assert TASK not in box.gateway._assist_launch_owners()
+
+
+# ---------------------------------------------------------------------------
+# A query or cancel acts only on the job it read: a retry of the same task id that launched in
+# between keeps its record and its registered provider (#3076)
+# ---------------------------------------------------------------------------
+
+
+def _interleave_retry_at(box, monkeypatch, caller: str, entry: int, before) -> dict:
+    """Run a retry of the task, after ``before()``, just before ``caller`` enters the assist
+    lock for the ``entry``-th time; returns the retry's response under "retry"."""
+    gateway = box.gateway
+    state: dict = {"seen": 0, "retry": None}
+
+    def hook(name: str) -> None:
+        if state["retry"] is not None or name != caller:
+            return
+        state["seen"] += 1
+        if state["seen"] == entry:
+            before()
+            state["retry"] = {}
+            state["retry"] = gateway._assist_retry(TASK)
+
+    monkeypatch.setattr(gateway, "_assist_lock", _LockWithEntryHook(gateway._assist_lock, hook))
+    return state
+
+
+def _launch_old_job(box, monkeypatch):
+    old_provider = _FakeProvider()
+    terminated = _patch_launch(box, monkeypatch, lambda workspace: old_provider)
+    first = box.gateway._assist_submit(_submit_args())
+    assert first["status"] == "RUNNING", first
+    new_provider = _FakeProvider()
+    monkeypatch.setattr(assist_jobs.subprocess, "Popen", lambda *a, **k: new_provider)
+    examined: list = []
+
+    def exited(process) -> bool:
+        examined.append(process)
+        return process.returncode is not None
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", exited)
+    return first["job_id"], old_provider, new_provider, terminated, examined
+
+
+def _assert_retry_untouched(box, state, new_provider) -> None:
+    retry = state["retry"]
+    assert retry, "the retry never ran at the chosen point"
+    assert retry["status"] == "RUNNING", retry
+    assert box.gateway._assist_processes.get(TASK) is new_provider, (
+        "the retry's provider is no longer registered"
+    )
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (retry["job_id"], "RUNNING"), record
+
+
+@pytest.mark.parametrize(
+    ("caller", "entry", "exited_first"),
+    [
+        ("_assist_refresh", 1, True),  # before the provider lookup
+        ("_assist_refresh", 2, True),  # before the finished provider is unregistered
+        ("_assist_write_current", 1, False),  # before a still-running job's record is written
+    ],
+)
+def test_query_of_a_job_leaves_a_retry_launched_meanwhile_tracked(
+    box, monkeypatch, caller, entry, exited_first
+):
+    old_job_id, old_provider, new_provider, _, examined = _launch_old_job(box, monkeypatch)
+
+    def old_provider_exits() -> None:
+        old_provider.returncode = 1
+
+    if exited_first:
+        old_provider_exits()
+    state = _interleave_retry_at(box, monkeypatch, caller, entry, old_provider_exits)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["job_id"] == old_job_id, result
+    _assert_retry_untouched(box, state, new_provider)
+    assert new_provider not in examined, "the query settled the retry's provider as its own"
+
+
+@pytest.mark.parametrize(
+    ("caller", "entry"),
+    [
+        ("_assist_cancel", 1),  # before the provider lookup
+        ("_assist_cancel", 2),  # after the old provider was terminated, before it is unregistered
+        ("_assist_write_current", 1),  # before the cancel's query writes the job as running
+    ],
+)
+def test_cancel_leaves_a_retry_launched_meanwhile_tracked_and_unsignalled(
+    box, monkeypatch, caller, entry
+):
+    old_job_id, old_provider, new_provider, terminated, _ = _launch_old_job(box, monkeypatch)
+
+    def old_provider_exits() -> None:
+        old_provider.returncode = -signal.SIGTERM
+
+    state = _interleave_retry_at(box, monkeypatch, caller, entry, old_provider_exits)
+    result = box.gateway._assist_cancel(TASK)
+    assert result["job_id"] == old_job_id, result
+    assert new_provider not in terminated, "the cancel signalled the retry's provider"
+    _assert_retry_untouched(box, state, new_provider)
+
+
+def test_query_still_finishes_and_unregisters_its_own_job(box, monkeypatch):
+    old_job_id, old_provider, _, _, _ = _launch_old_job(box, monkeypatch)
+    old_provider.returncode = 1
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["status"] == "FAILED", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "FAILED"), record
+
+
+def test_cancel_still_terminates_unregisters_and_records_its_own_job(box, monkeypatch):
+    old_job_id, old_provider, _, terminated, _ = _launch_old_job(box, monkeypatch)
+    result = box.gateway._assist_cancel(TASK)
+    assert terminated == [old_provider]
+    assert result["status"] == "CANCELLED", result
+    assert result["blocker"] == "ASSIST_CANCELLED", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "CANCELLED"), record
+
+
+def test_query_holding_its_own_job_for_reconciliation_unregisters_its_provider(box, monkeypatch):
+    old_job_id, _, _, _, _ = _launch_old_job(box, monkeypatch)
+
+    def group_unlistable(process) -> bool:
+        raise PermissionError("group cannot be listed")
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", group_unlistable)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None, result
+    assert result["blocker"] == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "UNKNOWN_REQUIRES_RECONCILE")
