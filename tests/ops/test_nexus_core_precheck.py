@@ -306,6 +306,61 @@ def test_status_classification(env: Env) -> None:
     assert env.run("status", "--head", head)[1]["status"] == "NOT_FOUND"
 
 
+def test_status_with_issue_reports_only_runs_bound_to_that_issue(env: Env) -> None:
+    head = "b" * 40
+    env.state["runs"] = [
+        _run(5, "completed", "success", f"Core precheck {head} #5", "2026-11-01T01:00:00Z"),
+    ]
+    env.state["artifacts"] = {"5": [f"nexus-core-receipts-{head}-run5-attempt1"]}
+    code, out = env.run("status", "--head", head, "--issue", "7")
+    assert (code, out["status"]) == (0, "NOT_FOUND"), out
+
+    # Same head, same Issue: still VERIFIED.
+    code, out = env.run("status", "--head", head, "--issue", "5")
+    assert (code, out["status"], out["run_id"]) == (0, "VERIFIED", 5), out
+
+    # Without --issue the head alone decides, as before.
+    code, out = env.run("status", "--head", head)
+    assert (code, out["status"], out["run_id"]) == (0, "VERIFIED", 5), out
+
+
+def test_status_with_issue_skips_newer_run_for_other_issue(env: Env) -> None:
+    head = "b" * 40
+    env.state["runs"] = [
+        _run(6, "completed", "success", f"Core precheck {head} #5", "2026-11-01T02:00:00Z"),
+        _run(4, "completed", "failure", f"Core precheck {head} #7", "2026-11-01T01:00:00Z"),
+    ]
+    env.state["artifacts"] = {
+        "6": [f"nexus-core-receipts-{head}-run6-attempt1"],
+        "4": [f"nexus-core-receipts-{head}-run4-attempt1"],
+    }
+    code, out = env.run("status", "--head", head, "--issue", "7")
+    assert (code, out["status"], out["run_id"]) == (1, "FAILED", 4), out
+
+
+def test_status_with_issue_matches_the_whole_issue_number(env: Env) -> None:
+    head = "b" * 40
+    env.state["runs"] = [
+        _run(8, "completed", "success", f"Core precheck {head} #12", "2026-11-01T01:00:00Z"),
+    ]
+    env.state["artifacts"] = {"8": [f"nexus-core-receipts-{head}-run8-attempt1"]}
+    assert env.run("status", "--head", head, "--issue", "1")[1]["status"] == "NOT_FOUND"
+    assert env.run("status", "--head", head, "--issue", "2")[1]["status"] == "NOT_FOUND"
+    code, out = env.run("status", "--head", head, "--issue", "12")
+    assert (code, out["status"], out["run_id"]) == (0, "VERIFIED", 8), out
+
+
+def test_status_with_issue_needs_the_issue_in_the_run_title(env: Env) -> None:
+    head = "b" * 40
+    env.state["runs"] = [
+        _run(9, "completed", "success", f"Core precheck {head}", "2026-11-01T01:00:00Z"),
+    ]
+    env.state["artifacts"] = {"9": [f"nexus-core-receipts-{head}-run9-attempt1"]}
+    assert env.run("status", "--head", head, "--issue", "7")[1]["status"] == "NOT_FOUND"
+    code, out = env.run("status", "--head", head)
+    assert (code, out["status"], out["run_id"]) == (0, "VERIFIED", 9), out
+
+
 def _hook(env: Env, payload: dict, **extra: str) -> subprocess.CompletedProcess[str]:
     work = env.repo
     (work / "scripts" / "ops").mkdir(parents=True, exist_ok=True)

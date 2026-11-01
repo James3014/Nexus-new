@@ -213,8 +213,8 @@ _argv_command_module: ModuleType | None = None
 def _argv_command() -> ModuleType:
     """``nexus/core/argv_command.py`` from this script's own tree, loaded by file path: the
     script runs stdlib-only under ``python3 -I`` and does not import the ``nexus`` package.
-    Loaded on first use, so checks that never run a subprocess do not need it. Not loadable:
-    OSError."""
+    Loaded on first use, so checks that never run a subprocess do not need it. Not loadable,
+    or lacking ``run_reaping_process_group``: OSError."""
     global _argv_command_module
     if _argv_command_module is None:
         path = Path(__file__).resolve().parents[2] / "nexus" / "core" / "argv_command.py"
@@ -230,6 +230,9 @@ def _argv_command() -> ModuleType:
             except BaseException:
                 sys.modules.pop(name, None)
                 raise
+            if not callable(getattr(module, "run_reaping_process_group", None)):
+                sys.modules.pop(name, None)
+                raise ImportError("run_reaping_process_group is missing")
         except Exception as exc:
             raise OSError(f"{path} unavailable: {exc}") from exc
         _argv_command_module = module

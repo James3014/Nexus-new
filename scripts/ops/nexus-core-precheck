@@ -46,6 +46,7 @@ GITHUB_REMOTE_RE = re.compile(
     r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$"
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RUN_TITLE_ISSUE_RE = re.compile(r"#(\d+)\s*$")
 
 
 class PrecheckError(RuntimeError):
@@ -342,15 +343,27 @@ def cmd_status(args: argparse.Namespace, out: dict[str, Any]) -> int:
     runs.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
     hint = f"Core precheck {head[:12]}"
 
+    def title_of(run: dict[str, Any]) -> str:
+        return str(run.get("display_title") or run.get("name") or "")
+
+    def issue_bound(run: dict[str, Any]) -> bool:
+        # The artifact name carries no Issue; the workflow's run-name for a
+        # dispatch is "Core precheck <head> #<issue>", so with --issue a run
+        # counts only when its title names this head and ends in exactly #<issue>.
+        if args.issue is None:
+            return True
+        title = title_of(run)
+        match = RUN_TITLE_ISSUE_RE.search(title)
+        return hint in title and match is not None and int(match.group(1)) == args.issue
+
     def title_hit(run: dict[str, Any]) -> bool:
-        title = str(run.get("display_title") or run.get("name") or "")
-        if hint not in title:
-            return False
-        return args.issue is None or title.rstrip().endswith(f"#{args.issue}")
+        return hint in title_of(run) and issue_bound(run)
 
     # Newest first; the artifact name is authoritative, the run title only a hint.
     chosen: tuple[dict[str, Any], bool] | None = None
     for run in runs:
+        if not issue_bound(run):
+            continue
         run_id = run.get("id")
         arts = _gh_json("api", f"repos/{slug}/actions/runs/{run_id}/artifacts?per_page=100")
         names = [str(a.get("name") or "") for a in (arts or {}).get("artifacts") or []]

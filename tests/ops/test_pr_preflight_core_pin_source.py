@@ -245,3 +245,20 @@ def test_reaping_helper_unavailable_is_a_fail_not_a_plain_run(tmp_path, capsys, 
     assert code == 1
     assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
     assert _calls(log) == []
+
+
+def test_reaping_helper_missing_from_loaded_file_is_a_clean_fail(tmp_path, capsys, monkeypatch):
+    repo = _repo(tmp_path, base_pin=BASE_PIN, head_pin=None)
+    uvx, log = _fake_uvx(tmp_path, _PRINT_MARKER)
+    # A tree whose nexus/core/argv_command.py loads but has no run_reaping_process_group.
+    tree = tmp_path / "tree"
+    _write(tree, "nexus/core/argv_command.py", "VALUE = 1\n")
+    monkeypatch.setattr(pf, "__file__", str(tree / "scripts" / "ops" / "pr_preflight.py"))
+    monkeypatch.setattr(pf, "_argv_command_module", None)
+    monkeypatch.delitem(sys.modules, "_preflight_argv_command", raising=False)
+    code, check = _run_issue_check(repo, tmp_path, capsys, monkeypatch, uvx)
+    assert code == 1
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "run_reaping_process_group" in check["detail"]
+    assert _calls(log) == []
+    assert "_preflight_argv_command" not in sys.modules
