@@ -877,7 +877,7 @@ def test_local_model_executor_committee_raw_fenced_replacement_is_unwrapped(monk
     assert meta.get("candidate_isolated") is True
 
 
-def test_local_model_executor_committee_prose_contamination_delegates_retry(monkeypatch):
+def test_local_model_executor_committee_prose_contamination_delegates_retry(retry_wc, monkeypatch):
     from nexus.services.local_heal.candidate_decision_adapter import (
         CandidateDecisionAdapter,
         CandidateDecisionResponse,
@@ -990,7 +990,7 @@ def test_local_model_executor_committee_prose_contamination_delegates_retry(monk
     assert meta.get("candidate_isolated") is True
 
 
-def test_local_model_executor_committee_delegated_retry_records_second_attempt_metadata(monkeypatch):
+def test_local_model_executor_committee_delegated_retry_records_second_attempt_metadata(retry_wc, monkeypatch):
     from nexus.services.local_heal.candidate_decision_adapter import (
         CandidateDecisionAdapter,
         CandidateDecisionResponse,
@@ -1085,7 +1085,7 @@ def test_local_model_executor_committee_delegated_retry_records_second_attempt_m
     assert meta.get("delegated_retry_output_excerpt").startswith("<<<<<<< REPLACE")
 
 
-def test_local_model_executor_committee_delegated_retry_records_failed_second_attempt_metadata(monkeypatch):
+def test_local_model_executor_committee_delegated_retry_records_failed_second_attempt_metadata(retry_wc, monkeypatch):
     from nexus.services.local_heal.candidate_decision_adapter import (
         CandidateDecisionAdapter,
         CandidateDecisionResponse,
@@ -1339,7 +1339,7 @@ def test_localheal_pipeline_verifier_fail_delegates_existing_retry_with_seeded_e
     assert meta.get("same_span_retry") is True
 
 
-def test_local_model_executor_committee_delegated_retry_uses_reproduction_contract(monkeypatch):
+def test_local_model_executor_committee_delegated_retry_uses_reproduction_contract(retry_wc, monkeypatch):
     from nexus.services.local_heal.candidate_decision_adapter import (
         CandidateDecisionAdapter,
         CandidateDecisionResponse,
@@ -1894,7 +1894,7 @@ def _make_pipeline_verifier_fail_mock(task_id, diff_text, diff_hash, apply_fn, v
     return mock_exec_result
 
 
-def test_committee_trial_flows(monkeypatch, tmp_path: Path) -> None:
+def test_committee_trial_flows(retry_wc, monkeypatch, tmp_path: Path) -> None:
     """C15-5C: 2-candidate committee (Qwen 7B + DeepSeek 6.7B).
     First round verifier fails → delegated retry committee runs →
     DeepSeek wins (verifier pass) → winner metadata written."""
@@ -2054,7 +2054,7 @@ def test_committee_trial_flows(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_candidate_evidence_binds_actual_delivered_winner_not_autoreason_advice(
-    monkeypatch, tmp_path: Path
+    retry_wc, monkeypatch, tmp_path: Path
 ) -> None:
     """Collector must mirror actual runtime delivery when Autoreason disagrees.
 
@@ -2344,7 +2344,7 @@ def test_committee_triple_and_limits(monkeypatch) -> None:
     assert "14b" not in [c["model"].lower() for c in candidates]
 
 
-def test_committee_candidate_records_conversion_status(monkeypatch) -> None:
+def test_committee_candidate_records_conversion_status(retry_wc, monkeypatch) -> None:
     """C15-5F: Verify that candidate metadata records detailed conversion status and telemetry fields."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -2442,7 +2442,7 @@ def test_committee_candidate_records_conversion_status(monkeypatch) -> None:
     assert qwen_cand["preimage_match_status"] == "exact_match"
 
 
-def test_committee_candidate_records_raw_and_applied_hashes(monkeypatch) -> None:
+def test_committee_candidate_records_raw_and_applied_hashes(retry_wc, monkeypatch) -> None:
     """C15-5F: Verify that candidate records distinct hashes for applied vs raw candidates."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -2535,7 +2535,7 @@ def test_committee_candidate_records_raw_and_applied_hashes(monkeypatch) -> None
     assert qwen_cand["conversion_candidate_hash"] == "cand_hash_xyz"
 
 
-def test_committee_unified_diff_conversion_success_allows_isolated_apply(monkeypatch) -> None:
+def test_committee_unified_diff_conversion_success_allows_isolated_apply(retry_wc, monkeypatch) -> None:
     """C15-5F: Verify that successful unified diff conversion allows isolated apply to run."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -2625,7 +2625,7 @@ def test_committee_unified_diff_conversion_success_allows_isolated_apply(monkeyp
     assert "comm-apply-task#committee-qwen2.5-coder:7b-instruct" in apply_called
 
 
-def test_committee_unified_diff_conversion_failure_records_specific_reason(monkeypatch) -> None:
+def test_committee_unified_diff_conversion_failure_records_specific_reason(retry_wc, monkeypatch) -> None:
     """C15-5F: Verify that unified diff conversion failure records specific rejection reason and blocks apply."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -2718,7 +2718,7 @@ def test_committee_unified_diff_conversion_failure_records_specific_reason(monke
     assert qwen_cand["rejection_reason"] == "unified_diff_target_mismatch"
 
 
-def test_committee_no_selected_winner_without_verifier_pass(monkeypatch) -> None:
+def test_committee_no_selected_winner_without_verifier_pass(retry_wc, monkeypatch) -> None:
     """C15-5F: Verify that if no candidate passes the verifier, no winner is selected and solved is False."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
@@ -2800,7 +2800,7 @@ def test_committee_no_selected_winner_without_verifier_pass(monkeypatch) -> None
     assert meta.get("solved") is not True
 
 
-def test_committee_no_winner_marks_provider_called_in_summary(monkeypatch) -> None:
+def test_committee_no_winner_marks_provider_called_in_summary(retry_wc, monkeypatch) -> None:
     """Committee-mode summary must reflect per-candidate execution truth."""
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt

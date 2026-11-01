@@ -1781,7 +1781,7 @@ class LocalModelExecutor:
                             )
                             heal_ctx = LegacyHealContext(
                                 instance_id=request.task_id,
-                                repo_dir=_Path(request.repo_root),
+                                repo_dir=_delegated_retry_world_c(request, route_ctx),
                                 problem_statement=request.problem_statement,
                                 user_prompt=retry_prompt,
                                 attempt=2,
@@ -3189,7 +3189,7 @@ class LocalModelExecutor:
                             _cp_route_ctx["semantic_retry_seed"] = route_ctx.get("semantic_retry_seed", {})
                             _cp_heal_ctx = LegacyHealContext(
                                 instance_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
-                                repo_dir=_Path(request.repo_root),
+                                repo_dir=_delegated_retry_world_c(request, _cp_route_ctx),
                                 problem_statement=request.problem_statement,
                                 user_prompt=retry_prompt, attempt=1,
                                 repro_script=repro_script,

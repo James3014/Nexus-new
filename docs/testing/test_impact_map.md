@@ -217,6 +217,8 @@
 | nexus/services/local_heal/local_qwen_evidence_gate.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/scratch_copy.py | tests/unit/local_heal/test_model_runs_leave_verification_dir_clean.py, tests/unit/local_heal/test_micro_verifier_pytest_shadow_2975_r3.py, tests/unit/local_heal/test_micro_verifier_pytest_absent_2975.py | active | high | local_heal_model_runs_on_disposable_copy_3012 |
 | nexus/services/local_heal/repo_read.py | tests/unit/local_heal/test_heal_repo_reads_3018.py | active | high | local_heal_repo_reads_no_follow_3018 |
+| nexus/services/local_heal/local_model_executor.py | tests/unit/local_heal/test_retries_run_on_a_disposable_copy.py, tests/unit/local_heal/test_local_model_executor.py, tests/unit/local_heal/test_armor_lane_contract.py, tests/unit/local_heal/test_contained_restore_writes_3023.py, tests/unit/local_heal/test_world_c_contained_copy_3037.py | active | high | local_heal_retries_run_on_world_c_copy |
+| nexus/services/local_heal/orchestrator.py | tests/unit/local_heal/test_retries_run_on_a_disposable_copy.py, tests/unit/local_heal/test_heal_repo_reads_3018.py | active | high | local_heal_workspace_reset_absolute_repo_dir |
 | nexus/services/local_heal/memory_belief_signal.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/micromerger.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/parser.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
