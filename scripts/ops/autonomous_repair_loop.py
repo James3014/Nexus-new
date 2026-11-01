@@ -212,7 +212,8 @@ def run_repair_loop():
         # 5. Verify with CI Gate (Dry-run)
         print("🔎 Verifying repair...")
         verify_cmd = [str(VENV_PYTHON), str(CI_GATE_SCRIPT), "--dry-run"]
-        v_res = subprocess.run(verify_cmd)
+        # Runs the tests of the model-repaired tree: its process group is killed after (#3052).
+        v_res = run_reaping_process_group(verify_cmd, capture_output=False)
 
         if v_res.returncode == 0:
             print(f"🎉 [SUCCESS] System repaired in {current_round} round(s)!")

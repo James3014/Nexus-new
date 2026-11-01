@@ -132,3 +132,28 @@ def test_research_flow_candidate_tests_default_to_the_reaping_runner():
         and ast.unparse(node.args[0]) == "cmd"
     }
     assert runners == {"subprocess_runner or run_reaping_process_group"}
+
+
+def test_delivery_gate_verification_command_is_bounded(fake_pytest, monkeypatch):
+    from nexus.delivery import gate
+
+    project, pid_file = fake_pytest
+    script = project.parent / "bin" / "pytest"
+    script.write_text(f"#!/bin/sh\n/bin/sleep 60 &\necho $! > '{pid_file}'\nwait\n")
+    monkeypatch.setattr(gate, "VERIFICATION_COMMAND_TIMEOUT_SECONDS", 1)
+    record = gate._run_verification_command("pytest -q", project)
+    assert (record.passed, record.exit_code) == (False, 124)
+    _assert_reaped(pid_file)
+
+
+def test_repair_loop_verify_step_uses_the_reaping_runner():
+    # The CI gate dry-run runs the tests of the model-repaired tree.
+    source = (REPO / "scripts/ops/autonomous_repair_loop.py").read_text(encoding="utf-8")
+    calls = {
+        ast.unparse(node.value.func)
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and [ast.unparse(target) for target in node.targets] == ["v_res"]
+        and isinstance(node.value, ast.Call)
+    }
+    assert calls == {"run_reaping_process_group"}
