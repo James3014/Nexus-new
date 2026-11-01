@@ -68,3 +68,18 @@ def test_fuzzy_apply_refuses_blank_search():
     content = "a\n\n\nb\n"
     ok, out, _ = BoundedFuzzyApplier().fuzzy_match_and_replace(content, "\n", "z")
     assert ok is False and out == content
+
+
+def test_fuzzy_replace_with_fewer_lines_keeps_the_last_line_ending():
+    content = "a\r\nb\r\nc\nd\n"
+    ok, out, _ = BoundedFuzzyApplier().fuzzy_match_and_replace(content, "a\nb\nc", "X\nY")
+    assert ok
+    assert out == "X\r\nY\nd\n"
+
+
+def test_fuzzy_replace_with_empty_text_leaves_one_empty_line_like_exact_apply():
+    content = "a \nb\nc\nd\n"
+    ok, out, _ = BoundedFuzzyApplier().fuzzy_match_and_replace(content, "a\nb\nc", "")
+    assert ok
+    assert out == "\nd\n"
+    assert "a\nb\nc\nd\n".replace("a\nb\nc", "", 1) == out

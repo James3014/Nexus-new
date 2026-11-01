@@ -30,7 +30,7 @@ class BoundedFuzzyApplier:
         start = starts[0]
         end = start + width
         # 行數相同就逐行沿用原檔該行的換行；行數不同則新行用第一行的換行，最後一行保留原本的尾端。
-        new_lines = replace.split("\n") if replace else []
+        new_lines = replace.split("\n")
         old_cr = ["\r" if line.endswith("\r") else "" for line in lines[start:end]]
         if len(new_lines) == width:
             new_lines = [line + cr for line, cr in zip(new_lines, old_cr)]
