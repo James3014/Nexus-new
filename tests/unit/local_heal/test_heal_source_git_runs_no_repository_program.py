@@ -348,3 +348,86 @@ def test_preimage_reads_skip_a_repository_whose_git_dir_lies_elsewhere(sandbox):
         )
         is None
     )
+
+
+# --- isolated apply: nothing under a git dir is copied into the fresh apply repository -------
+
+
+def _source_with_planted_git_files(root: Path, markers: Path) -> Path:
+    """A source repository whose config names fsmonitor, plus files under its git dirs that
+    would make the fresh apply repository read that config (``commondir``) or run a hook."""
+    source = _repo(root, "source")
+    markers.mkdir()
+    _git(source, "config", "core.fsmonitor", f"touch '{markers}/fsmonitor'; true")
+    (source / ".git" / "commondir").write_text(f"{source / '.git'}\n", encoding="utf-8")
+    hook = source / ".git" / "hooks" / "post-index-change"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\ntouch '{markers}/hook'\n", encoding="utf-8")
+    hook.chmod(0o755)
+    nested = source / "sub" / ".git"
+    nested.mkdir(parents=True)
+    (nested / "commondir").write_text(f"{source / '.git'}\n", encoding="utf-8")
+    return source
+
+
+def _edit_of(source: Path, target: str) -> str:
+    # ``.GIT`` is the git dir on a case-insensitive file system; read the file it names there.
+    last = (source / target.replace(".GIT", ".git")).read_text(encoding="utf-8").splitlines()
+    return f"--- a/{target}\n+++ b/{target}\n@@ -{len(last)} +{len(last)} @@\n-{last[-1]}\n+{last[-1]} x\n"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [".git/commondir", ".GIT/commondir", "sub/.git/commondir", ".git/hooks/post-index-change"],
+)
+def test_isolated_apply_refuses_a_target_inside_a_git_dir(sandbox, target):
+    from nexus.services.local_heal.isolated_workspace_apply import (
+        IsolatedApplyRequest,
+        run_isolated_workspace_apply,
+    )
+
+    markers = sandbox / "markers"
+    source = _source_with_planted_git_files(sandbox, markers)
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="t",
+            source_root=str(source),
+            target_file=target,
+            unified_diff=_edit_of(source, target),
+            selected_candidate_hash="",
+            work_dir=str(sandbox / "work"),
+            mutation_allowed=True,
+        )
+    )
+
+    assert (receipt.patch_apply_status, receipt.workspace_path) == ("blocked", "")
+    assert _fired(markers) == []
+
+
+def test_isolated_apply_copies_no_verifier_file_inside_a_git_dir(sandbox):
+    from nexus.services.local_heal.isolated_workspace_apply import (
+        IsolatedApplyRequest,
+        run_isolated_workspace_apply,
+    )
+
+    markers = sandbox / "markers"
+    source = _source_with_planted_git_files(sandbox, markers)
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="t",
+            source_root=str(source),
+            target_file="src.py",
+            unified_diff=_edit_of(source, "src.py"),
+            selected_candidate_hash="",
+            work_dir=str(sandbox / "work"),
+            mutation_allowed=True,
+            verifier_files=(".git/commondir", ".GIT/commondir", "sub/.git/commondir", "other.py"),
+        )
+    )
+
+    assert receipt.patch_apply_status == "applied"
+    workspace = Path(receipt.workspace_path)
+    assert (workspace / "other.py").is_file()
+    assert not (workspace / ".git" / "commondir").exists()
+    assert not (workspace / "sub").exists()
+    assert _fired(markers) == []

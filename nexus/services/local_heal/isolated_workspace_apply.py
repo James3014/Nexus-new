@@ -45,6 +45,13 @@ class IsolatedApplyReceipt:
     applied_patch_hash_source: str = ""
 
 
+def _names_a_git_dir_entry(relative: str) -> bool:
+    """True when a path segment is ``.git`` in any case: copied into the fresh apply
+    repository, such a file (``commondir``, a hook ...) would make its git calls read the
+    source repository's config or run its programs."""
+    return any(part.lower() == ".git" for part in re.split(r"[\\/]", relative))
+
+
 _HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 _GIT_TRAILING_WS = " \t\r"  # what git itself strips/ignores; not \f, NBSP, U+2028 ...
 _NO_EOL_MARKER = "\\ No newline at end of file"
@@ -397,6 +404,19 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             candidate_output_isolated=False,
             mutation_allowed=True,
         )
+    if _names_a_git_dir_entry(normalized):
+        return IsolatedApplyReceipt(
+            task_id=request.task_id,
+            workspace_path="",
+            target_file=request.target_file,
+            patch_apply_status="blocked",
+            patch_apply_error="git_dir_path_refused",
+            selected_candidate_hash=request.selected_candidate_hash,
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=False,
+            mutation_allowed=True,
+        )
 
     diff_content = request.unified_diff
     if not diff_content.endswith("\n"):
@@ -551,8 +571,10 @@ def _copy_verifier_files(request: IsolatedApplyRequest, workspace: str) -> None:
         return
     allowed = set(verifier_input_files(request.source_root, ("", *request.verifier_files)))
     for relative in request.verifier_files:
-        if relative not in allowed or os.path.normpath(relative) == os.path.normpath(
-            request.target_file
+        if (
+            relative not in allowed
+            or _names_a_git_dir_entry(relative)
+            or os.path.normpath(relative) == os.path.normpath(request.target_file)
         ):
             continue
         # Re-checked while copying: a link or hard link swapped in since the filter raises.
