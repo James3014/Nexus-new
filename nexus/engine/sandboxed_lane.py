@@ -27,6 +27,8 @@ import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from nexus.core.argv_command import ProcessGroupReapingUnavailable, run_reaping_process_group
+
 # Only removes the barrier (fail closed), never grants one; lets the non-macOS contract be
 # exercised anywhere.
 DISABLE_OS_SANDBOX_ENVS = ("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "NEXUS_DISABLE_OS_SANDBOX")
@@ -539,12 +541,16 @@ def run_confined(
     require_barrier: bool = False,
     stdin_text: str | None = None,
     kill_process_group: bool = False,
+    reap_process_group: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run ``argv`` (never a shell) with ``env`` in a ``cwd`` inside ``confine_roots``, wrapped
     in ``sandbox-exec`` when available. ``require_barrier`` refuses to run without one.
     ``stdin_text``, when given, is the child's whole stdin (a pipe, never the caller's).
     ``kill_process_group`` starts the child in its own session and, on timeout, SIGKILLs that
     whole process group by the child's PID, so grandchildren do not outlive the run (#2650).
+    ``reap_process_group`` (no ``stdin_text``) runs through ``run_reaping_process_group``: the
+    group is SIGKILLed on every exit path, a normal exit included (#3017). If that runner refuses
+    or a group member survives, SandboxError is raised and no result is returned.
     Raises subprocess.TimeoutExpired on timeout."""
 
     if not argv:
@@ -559,6 +565,13 @@ def run_confined(
         command = [SANDBOX_EXEC, "-p", profile(), *command]
     elif require_barrier:
         raise SandboxError("no_os_barrier")
+    if reap_process_group:
+        if stdin_text is not None:
+            raise SandboxError("reap_process_group_takes_no_stdin")
+        try:
+            return run_reaping_process_group(command, cwd=resolved_cwd, env=env, timeout=timeout)
+        except (ProcessGroupReapingUnavailable, ChildProcessError, PermissionError) as exc:
+            raise SandboxError(f"process_group_not_reaped:{type(exc).__name__}") from exc
     if kill_process_group:
         return _run_in_own_process_group(
             command, cwd=resolved_cwd, env=env, timeout=timeout, stdin_text=stdin_text
@@ -647,7 +660,8 @@ def python_script_argv(script: Path, args: Iterable[str] = ()) -> list[str]:
 
 class Confinement:
     """A bound sandbox: one profile and one env for every command run in it. Only exists when
-    an OS barrier exists; every run requires it."""
+    an OS barrier exists; every run requires it. Nothing a run starts outlives it in its process
+    group (#3017): the commands run here are model-written code."""
 
     def __init__(self, *, profile: str, env: dict[str, str], roots: tuple[Path, ...]) -> None:
         self.profile = profile
@@ -672,6 +686,7 @@ class Confinement:
             env=self.env,
             timeout=timeout,
             require_barrier=True,
+            reap_process_group=True,
         )
 
 

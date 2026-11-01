@@ -42,7 +42,15 @@ def _spy_runs(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         seen.append(list(argv))
         return real(argv, *args, **kwargs)
 
+    real_reaping = lane.run_reaping_process_group
+
+    def reaping_spy(argv, *args, **kwargs):
+        # Confinement.run runs model code through the process-group reaping runner (#3052).
+        seen.append(list(argv))
+        return real_reaping(argv, *args, **kwargs)
+
     monkeypatch.setattr(subprocess, "run", spy)
+    monkeypatch.setattr(lane, "run_reaping_process_group", reaping_spy)
     return seen
 
 

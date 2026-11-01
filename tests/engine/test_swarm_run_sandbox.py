@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from nexus.engine import sandboxed_lane as lane
 from nexus.engine import swarm_run
 from nexus.engine.sandboxed_lane import os_sandbox_available
 
@@ -105,6 +106,8 @@ def test_no_os_barrier_never_runs_the_verify_script(
         return real(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", spy)
+    # Confinement.run goes through the process-group reaping runner (#3052): watched too.
+    monkeypatch.setattr(lane, "run_reaping_process_group", spy)
     report = swarm_run.run_bounded_swarm(
         workspace_root=ws, task_id="t", task="fix", target_file="calc.py", verify_script="repro.py"
     )

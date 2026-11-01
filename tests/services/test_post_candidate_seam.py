@@ -124,7 +124,19 @@ def barrier(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
             cmd = list(cmd)[3:]
         return original_run(cmd, *args, **kwargs)
 
+    original_reaping = lane.run_reaping_process_group
+
+    def recording_reaping(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+        # Confinement.run goes through the process-group reaping runner (#3052).
+        argv = [str(part) for part in cmd]
+        calls.append(argv)
+        if argv and os.path.basename(argv[0]) == "sandbox-exec" and not REAL_BARRIER:
+            _assert_confining_profile(argv)
+            cmd = list(cmd)[3:]
+        return original_reaping(cmd, *args, **kwargs)
+
     monkeypatch.setattr(subprocess, "run", recording_run)
+    monkeypatch.setattr(lane, "run_reaping_process_group", recording_reaping)
     monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
     monkeypatch.setattr("nexus.engine.ultra_review_service.os_sandbox_available", lambda: True)
     return calls
