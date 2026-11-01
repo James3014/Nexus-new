@@ -19,7 +19,6 @@ import json
 import math
 import os
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -37,6 +36,10 @@ from nexus.executors.claude_measurement_worker import (
     CLAUDE_MEASUREMENT_PROVIDER,
     measurement_claude_enabled,
     measurement_claude_preflight,
+)
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _terminate_provider_group,
+    assist_workspace_parent,
 )
 from nexus.services.agy_account_pool import (
     AgyAccountPoolBusyError,
@@ -220,7 +223,8 @@ class _ModelProbeMixin(_ModelProbeBase):
         raise _gateway().GatewayInputError("AGY_MODEL_FAMILY_UNSUPPORTED")
 
     def _model_probe_inflight(self) -> set[str]:
-        """Task ids whose probe submit is still between job write and launch (#2716)."""
+        """Task ids whose probe submit (#2716), or assist submit or retry (#3076), is still
+        between its job write and the launch."""
         with self._assist_lock:
             inflight = getattr(self, "_model_probe_inflight_ids", None)
             if inflight is None:
@@ -284,6 +288,9 @@ class _ModelProbeMixin(_ModelProbeBase):
                 with self._assist_lock:
                     for registered_task_id in registered:
                         inflight.discard(registered_task_id)
+                        # A cancel request this probe did not honour (it ended before its
+                        # provider started) is dropped with it (#3076).
+                        self._assist_cancel_requests().discard(registered_task_id)
 
     def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[str]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
@@ -353,7 +360,7 @@ class _ModelProbeMixin(_ModelProbeBase):
                 raise _gateway().GatewayInputError("MODEL_PROBE_SUBMIT_IN_PROGRESS")
             inflight.add(task_id)
             registered.append(task_id)
-        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir=assist_workspace_parent()))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
         command = self._assist_command(
             executable=executable,
@@ -543,24 +550,11 @@ class _ModelProbeMixin(_ModelProbeBase):
         except OSError:
             post_launch_identity_matches = False
         if not post_launch_identity_matches:
-            terminated = False
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                process.wait(timeout=2)
-                terminated = True
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except OSError:
-                    pass
-                try:
-                    process.wait(timeout=2)
-                    terminated = True
-                except subprocess.TimeoutExpired:
-                    terminated = False
+            # SIGTERM, then SIGKILL, the provider's group while it is unreaped; True only once its
+            # group was SIGKILLed and listed empty before the reap. A leader that obeyed SIGTERM
+            # is not enough: a descendant that ignored it would keep the account after the lease
+            # release (#3076).
+            terminated = _terminate_provider_group(process)
             if terminated:
                 shutil.rmtree(workspace_root, ignore_errors=True)
                 if account_claim is not None:
@@ -583,7 +577,6 @@ class _ModelProbeMixin(_ModelProbeBase):
             })
             return self._assist_response(self._assist_write(job), operation="submit")
         job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
-        with self._assist_lock:
-            self._assist_processes[task_id] = process
-        return self._assist_response(self._assist_write(job), operation="submit")
+        # Honours a cancel that arrived while the probe was starting (#3076).
+        return self._assist_publish_launch(task_id, job, process, operation="submit")
     # fmt: on

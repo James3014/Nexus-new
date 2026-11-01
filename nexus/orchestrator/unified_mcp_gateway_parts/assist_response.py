@@ -23,9 +23,9 @@ import time
 import weakref
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
-from nexus.core.argv_command import kill_group_if_exited
+from nexus.core.argv_command import kill_group_if_exited, process_group_empty
 
 if TYPE_CHECKING:
     import subprocess
@@ -50,10 +50,121 @@ MODEL_PROBE_PROVIDER_DEADLINE_GRACE_SECONDS = 60.0
 # How long a SIGKILLed provider gets to exit before the cleanup counts as incomplete.
 _PROVIDER_KILL_SETTLE_SECONDS = 2.0
 _PRINT_TIMEOUT_RE = re.compile(r"([0-9]+)s")
+# Where the gateway creates assist, retry and model-probe workspaces (``tempfile.mkdtemp``).
+# A recorded workspace is removed only when it is a directory directly under it (#3076).
+ASSIST_WORKSPACE_PARENT = "/tmp"  # nosec B108
 # Providers whose group this module killed and reaped: a concurrent refresh of the same job
-# then sees a clean exit, not a reap that happened elsewhere. One lock serializes the checks.
+# then sees a clean exit, not a reap that happened elsewhere. A lock per provider serializes
+# its checks; it is held while the group is signalled and listed (worst case about 14 s, 18 s
+# on cancel: two settle steps plus a 10 s ``ps`` listing on macOS), so it is never shared
+# between providers: one stuck group does not hold up the refresh of another job (#3076).
 _GROUP_KILLED: weakref.WeakSet[subprocess.Popen[str]] = weakref.WeakSet()
-_SETTLE_LOCK = threading.Lock()
+_SETTLE_LOCKS: weakref.WeakKeyDictionary[subprocess.Popen[str], threading.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+_SETTLE_LOCKS_GUARD = threading.Lock()
+
+
+def _settle_lock(process: subprocess.Popen[str]) -> threading.Lock:
+    """The lock that serializes the settle and cancel steps of one provider."""
+    with _SETTLE_LOCKS_GUARD:
+        lock = _SETTLE_LOCKS.get(process)
+        if lock is None:
+            lock = _SETTLE_LOCKS[process] = threading.Lock()
+        return lock
+
+
+def _provider_group_gone(job: Mapping[str, Any]) -> bool:
+    """Whether the job's provider process group is known to be gone, so its workspace may be
+    removed (#3076): True for a job that never started a provider, else only when a listing finds
+    no live member of the recorded group. Nothing is signalled; a group that cannot be listed,
+    or whose id now names another group, is not gone."""
+    raw = job.get("pgid") or job.get("pid")
+    if not raw:
+        return True
+    try:
+        pgid = int(raw)
+    except (TypeError, ValueError):
+        return False
+    return process_group_empty(pgid)
+
+
+def assist_workspace_parent() -> str:
+    """The directory new assist, retry and model-probe workspaces are created in."""
+    return ASSIST_WORKSPACE_PARENT
+
+
+def _assist_workspace_state(job: Mapping[str, Any]) -> tuple[str, Optional[Path]]:
+    """What the job's recorded workspace is (#3076 item 18): ``("remove", path)`` for a real
+    directory directly under the assist workspace parent, ``("gone", None)`` for an absolute
+    path that no longer exists, else ``("refused", None)``: an empty, blank or relative value
+    (``Path("")`` is the cwd), a symlink, a path elsewhere or nested deeper, the parent itself,
+    or a directory that is or contains the cwd or the canonical source root."""
+    raw = job.get("workspace_root")
+    if not isinstance(raw, str) or not raw.strip() or not os.path.isabs(raw):
+        return "refused", None
+    if not os.path.lexists(raw):
+        return "gone", None
+    if os.path.islink(raw) or not os.path.isdir(raw):
+        return "refused", None
+    resolved = Path(os.path.realpath(raw))
+    if resolved.parent != Path(os.path.realpath(assist_workspace_parent())):
+        return "refused", None
+    try:
+        cwd = Path(os.path.realpath(os.getcwd()))
+    except OSError:
+        return "refused", None
+    canonical = Path(os.path.realpath(_gateway().CANONICAL_SOURCE_ROOT))
+    for protected in (cwd, canonical):
+        if protected == resolved or resolved in protected.parents:
+            return "refused", None
+    return "remove", resolved
+
+
+def _assist_workspace_removable(job: Mapping[str, Any]) -> bool:
+    """Whether cancel or reconcile may settle the job and remove its workspace (#3076): the
+    workspace is already gone, or the provider's process group is known to be gone. A workspace
+    an operator removed by hand therefore no longer holds the job in reconciliation; an empty or
+    unusable recorded path says nothing about the workspace, so the group check still applies."""
+    if _assist_workspace_state(job)[0] == "gone":
+        return True
+    return _provider_group_gone(job)
+
+
+def _remove_assist_workspace(
+    job: dict[str, Any], snapshot: Callable[[Path], dict[str, str]]
+) -> None:
+    """Remove the job's workspace after recording its filesystem delta: the one removal path of
+    cancel, reconcile and completion. An empty or blank workspace_root would be ``Path(".")``,
+    the gateway's cwd: only a real directory directly under the assist workspace parent is
+    removed, never a symlink, the cwd or the canonical source root (#3076)."""
+    if str(job.get("workspace_root") or "") == str(_gateway().CANONICAL_SOURCE_ROOT):
+        job["process_cleanup"] = True
+        return
+    state, workspace_root = _assist_workspace_state(job)
+    if state == "gone":
+        job["process_cleanup"] = True
+        return
+    if workspace_root is None:
+        job["process_cleanup"] = False
+        job["cleanup_error"] = "ASSIST_WORKSPACE_ROOT_REFUSED"
+        return
+    after = snapshot(workspace_root)
+    before = (
+        job.get("filesystem_before") if isinstance(job.get("filesystem_before"), Mapping) else {}
+    )
+    job["filesystem_after"] = after
+    job["filesystem_delta"] = {
+        "created": sorted(set(after) - set(before)),  # pyright: ignore[reportArgumentType]
+        "removed": sorted(set(before) - set(after)),  # pyright: ignore[reportArgumentType]
+        "changed": sorted(path for path in set(before) & set(after) if before[path] != after[path]),  # pyright: ignore[reportArgumentType, reportOptionalSubscript]
+    }
+    try:
+        shutil.rmtree(workspace_root)
+        job["process_cleanup"] = True
+    except OSError as exc:
+        job["process_cleanup"] = False
+        job["cleanup_error"] = str(exc)
 
 
 def _provider_deadline_passed(job: Mapping[str, Any]) -> bool:
@@ -98,7 +209,7 @@ def _settle_provider_group(
     reaped. ``group_clean`` False: a group member survived SIGKILL, the group could not be
     listed, the provider was reaped elsewhere, or a deadline kill did not end it; its effects
     may still be in progress."""
-    with _SETTLE_LOCK:
+    with _settle_lock(process):
         if process in _GROUP_KILLED:
             return True, True, False
         try:
@@ -118,7 +229,7 @@ def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
     unreaped, each step bounded; True once it exited and its group was SIGKILLed and reaped
     (#3052). False: a group member survived, the group could not be listed, the provider was
     reaped elsewhere (never signalled then) or it did not exit."""
-    with _SETTLE_LOCK:
+    with _settle_lock(process):
         if process in _GROUP_KILLED:
             return True
         if process.returncode is not None:
@@ -147,6 +258,27 @@ class _AssistResponseMixin(_ResponseBase):
         def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool: ...
 
         def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None: ...
+
+    def _assist_hold_for_group(
+        self, task_id: str, job: dict[str, Any], returncode: Any
+    ) -> dict[str, Any]:
+        """A provider group member may still be running on the account and the workspace: keep
+        both (no release, no removal) and require reconciliation."""
+        self._assist_record_stream_artifacts(job)
+        if job.get("account_lease_id_hash"):
+            self._abandon_assist_account_claim(task_id, job)
+        with self._assist_lock:
+            self._assist_processes.pop(task_id, None)
+        job.update({
+            "status": "UNKNOWN_REQUIRES_RECONCILE",
+            "finished_at": self._utc_now(),
+            "exit_code": returncode,
+            "blocker": "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE",
+            "reconciliation_required": True,
+            "model_response_verified": False,
+            "process_cleanup": False,
+        })
+        return self._assist_write(job)
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -214,23 +346,7 @@ class _AssistResponseMixin(_ResponseBase):
                 job["durable_exit_marker"] = True
                 job["durable_exit_code"] = returncode
         if process is not None and not group_clean:
-            # A provider group member may still be running on the account and the workspace:
-            # keep both (no release, no removal) and require reconciliation.
-            self._assist_record_stream_artifacts(job)
-            if job.get("account_lease_id_hash"):
-                self._abandon_assist_account_claim(task_id, job)
-            with self._assist_lock:
-                self._assist_processes.pop(task_id, None)
-            job.update({
-                "status": "UNKNOWN_REQUIRES_RECONCILE",
-                "finished_at": self._utc_now(),
-                "exit_code": returncode,
-                "blocker": "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE",
-                "reconciliation_required": True,
-                "model_response_verified": False,
-                "process_cleanup": False,
-            })
-            return self._assist_write(job)
+            return self._assist_hold_for_group(task_id, job, returncode)
         if process is None and job.get("pid"):
             try:
                 os.kill(int(job["pid"]), 0)
@@ -248,6 +364,11 @@ class _AssistResponseMixin(_ResponseBase):
                     })
                     return self._assist_write(job)
                 returncode = job.get("exit_code")
+                # This gateway never held the provider unreaped: its leader being gone says
+                # nothing about the rest of its group. Finish (and remove the workspace) only
+                # once a listing finds the group empty or the workspace is gone (#3076).
+                if not _assist_workspace_removable(job):
+                    return self._assist_hold_for_group(task_id, job, returncode)
         if returncode is None:
             job["status"] = "RUNNING"
             job["last_polled_at"] = self._utc_now()
@@ -359,22 +480,8 @@ class _AssistResponseMixin(_ResponseBase):
                 "reconciliation_required": True,
                 "model_response_verified": False,
             })
-        workspace_root = Path(str(job.get("workspace_root") or ""))
-        if workspace_root.exists() and workspace_root != _gateway().CANONICAL_SOURCE_ROOT:
-            after = self._snapshot_workspace(workspace_root)
-            before = job.get("filesystem_before") if isinstance(job.get("filesystem_before"), Mapping) else {}
-            job["filesystem_after"] = after
-            job["filesystem_delta"] = {
-                "created": sorted(set(after) - set(before)),  # pyright: ignore[reportArgumentType]
-                "removed": sorted(set(before) - set(after)),  # pyright: ignore[reportArgumentType]
-                "changed": sorted(path for path in set(before) & set(after) if before[path] != after[path]),  # pyright: ignore[reportArgumentType, reportOptionalSubscript]
-            }
-            try:
-                shutil.rmtree(workspace_root)
-                job["process_cleanup"] = True
-            except OSError as exc:
-                job["process_cleanup"] = False
-                job["cleanup_error"] = str(exc)
+        # The one removal path, which refuses an empty or foreign workspace_root (#3076).
+        _remove_assist_workspace(job, lambda root: self._snapshot_workspace(root))
         with self._assist_lock:
             self._assist_processes.pop(task_id, None)
         evidence = self._write_probe_evidence(job)

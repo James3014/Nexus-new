@@ -88,6 +88,8 @@ TRUSTED_UNIVERSE_RE = re.compile(
 )
 CERTIFY_REPO_URL = "git+https://github.com/James3014/nexus-core"
 HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+# Bound on one nexus-certify run (uvx may build the pinned ref first).
+CERTIFY_TIMEOUT_SECONDS = 300
 
 # Source of truth: nexus-core .github/actions/issue-gate/action.yml ("resolve"
 # step). The gate requires exactly one match of this pattern in the PR body.
@@ -203,6 +205,35 @@ def _load_trusted_module(ctx: Context, path: str) -> ModuleType:
     spec.loader.exec_module(module)
     ctx.module_cache[path] = module
     return module
+
+
+_argv_command_module: ModuleType | None = None
+
+
+def _argv_command() -> ModuleType:
+    """``nexus/core/argv_command.py`` from this script's own tree, loaded by file path: the
+    script runs stdlib-only under ``python3 -I`` and does not import the ``nexus`` package.
+    Loaded on first use, so checks that never run a subprocess do not need it. Not loadable:
+    OSError."""
+    global _argv_command_module
+    if _argv_command_module is None:
+        path = Path(__file__).resolve().parents[2] / "nexus" / "core" / "argv_command.py"
+        name = "_preflight_argv_command"
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"no loader for {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
+        except Exception as exc:
+            raise OSError(f"{path} unavailable: {exc}") from exc
+        _argv_command_module = module
+    return _argv_command_module
 
 
 def _core_issue_markers(body: str) -> list[str]:
@@ -387,27 +418,27 @@ def _author_user(author: str | None) -> dict[str, Any]:
 
 
 def _certify_pin(ctx: Context) -> tuple[str | None, str]:
-    """The nexus-core commit Nexus-new pins as ``nexus-certify-ref`` (base ref copy)."""
-    refs: set[str] = set()
-    for rev in (ctx.base_sha, ctx.head_sha):
-        text = _git(ctx.repo, "show", f"{rev}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
-        refs = set(CERTIFY_PIN_RE.findall(text))
-        if refs:
-            break
+    """The nexus-core commit Nexus-new pins as ``nexus-certify-ref``, from the base ref only.
+
+    The pinned ref is built and run on this host, so it is taken from the same base copy CI
+    trusts, never from the head. No pin at the base is unresolved (the issue check FAILs)."""
+    text = _git(ctx.repo, "show", f"{ctx.base_sha}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
+    refs = set(CERTIFY_PIN_RE.findall(text))
     if len(refs) == 1:
         return next(iter(refs)), ""
     if not refs:
-        return None, f"no nexus-certify-ref found in {CERTIFY_PIN_WORKFLOW}"
+        return None, (
+            f"no nexus-certify-ref found in {CERTIFY_PIN_WORKFLOW} at base {ctx.base_sha[:12]} "
+            "(the pin is read from the base ref only)"
+        )
     return None, f"{CERTIFY_PIN_WORKFLOW} pins several nexus-certify-ref values: {sorted(refs)}"
 
 
 def _trusted_config_universe(ctx: Context) -> bool:
-    """True when the issue-gate workflow derives the evidence universe from trusted config."""
-    for rev in (ctx.base_sha, ctx.head_sha):
-        text = _git(ctx.repo, "show", f"{rev}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
-        if text:
-            return TRUSTED_UNIVERSE_RE.search(text) is not None
-    return False
+    """True when the base ref's issue-gate workflow derives the evidence universe from trusted
+    config. Read from the base only, like the pin: a head copy cannot skip the certify run."""
+    text = _git(ctx.repo, "show", f"{ctx.base_sha}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
+    return TRUSTED_UNIVERSE_RE.search(text) is not None
 
 
 def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
@@ -464,7 +495,9 @@ def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, 
     if use_check:
         command.append("--check")
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, check=False, timeout=300)
+        # The whole process group is killed on every exit path, timeout included, so a
+        # build or tool process started under uvx cannot outlive the check.
+        proc = _argv_command().run_reaping_process_group(command, timeout=CERTIFY_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"nexus-certify could not run: {exc}", ref
     try:

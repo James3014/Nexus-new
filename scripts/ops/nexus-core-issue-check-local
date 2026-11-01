@@ -2,13 +2,19 @@
 """Run the Nexus Core Issue-bound check locally with CI parity.
 
 Reads the Core pin from the base ref's workflow, installs that pin into an
-isolated pin-keyed tool directory, builds a hash-keyed material venv, runs
-``issue-init`` and ``issue-check`` in a temporary clean detached worktree at the
-exact committed HEAD, and prints a JSON summary. The material venv is built only
-from the base ref's requirement lock files (never the candidate head's), only
-pinned entries are accepted, and each install runs under a timeout. It holds no
-completion authority: the Core receipt is the only verdict. Local or tooling problems fail
-closed with exit 2; a Core verdict other than VERIFIED exits 1.
+isolated pin-keyed tool directory (under a timeout; a cached install is reused only
+after it completed), runs ``issue-init`` and ``issue-check`` in a temporary clean
+detached worktree at the exact committed HEAD, and prints a JSON summary.
+``issue-check`` runs with ``--require-trusted-config`` (as in CI) and with
+``--expect-config-commit`` set to the base commit resolved here, so the verification
+contract comes only from the trusted base commit. Both subcommands get the
+``--evidence-universe`` that the base ref's workflow declares (CI's default,
+``issue-marker``, when it declares none). As in the CI issue gate (nexus-core#281), a
+head that carries anything under ``.nexus-core/receipts`` is refused before Core runs,
+and the only receipt read is the one ``issue-check`` reports through
+``--receipt-path-out``; it is never picked from the checkout by name or time. It holds
+no completion authority: the Core receipt is the only verdict. Local or tooling
+problems fail closed with exit 2; a Core verdict other than VERIFIED exits 1.
 
 The JSON summary carries the receipt ``status`` plus ``reason_codes`` (list from
 ``outcome.reason_codes``, [] when absent) and ``transport_error`` (bool from
@@ -34,10 +40,6 @@ from typing import Any, Sequence
 
 SCHEMA = "nexus.core_issue_check_local.v1"
 WORKFLOW_PATH = ".github/workflows/nexus-core-issue-completion.yml"
-REQUIREMENTS = (
-    "requirements/canonical-learning.txt",
-    "requirements/canonical-runtime.txt",
-)
 # Legacy single-job gate pinned the tool via NEXUS_CORE_TOOL_PIN; the two-job gate
 # (nexus-core#116/#120) pins it via the composite-action inputs `nexus-certify-ref`
 # and the `uses: James3014/nexus-core/.github/actions/<name>@<sha>` lines. Exactly one
@@ -47,19 +49,19 @@ PIN_RE = re.compile(
     r"|^\s*-?\s*uses:\s*James3014/nexus-core/\.github/actions/[A-Za-z0-9_-]+@([0-9a-f]{40})\s*(?:#.*)?$",
     re.MULTILINE,
 )
-# Accepted requirement lines (after joining backslash continuations): an exact
-# git commit of a James3014 repo, or an exact version with sha256 hashes. Option
-# lines (-e, -r, -c, --index-url, ...), paths, URLs and ranges are refused.
-REQ_GIT_RE = re.compile(
-    r"[A-Za-z0-9][A-Za-z0-9._-]*[ \t]*@[ \t]*"
-    r"git\+https://github\.com/James3014/[A-Za-z0-9][A-Za-z0-9._-]*\.git@[0-9a-f]{40}"
+# Same source of truth as the pin: the base workflow's issue-gate input.
+UNIVERSE_RE = re.compile(
+    r"^\s*evidence-universe:\s*[\"']?([^\s\"'#]+)[\"']?\s*(?:#.*)?$", re.MULTILINE
 )
-REQ_HASHED_RE = re.compile(
-    r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*"
-    r"(?:[ \t]+--hash=sha256:[0-9a-f]{64})+"
-)
-MATERIALS_READY = ".nexus-core-materials-ready"
-MATERIALS_TIMEOUT_SECONDS = 1200
+# Core's evidence-universe modes (product/clients/issue_golden_path.py) and the issue-gate
+# action's default (nexus-core .github/actions/issue-gate/action.yml).
+UNIVERSE_MODES = ("issue-marker", "trusted-config")
+UNIVERSE_DEFAULT = "issue-marker"
+# Core receipt file name, as accepted by the CI issue gate's signing step (#281).
+RECEIPT_NAME_RE = re.compile(r"^\d{8}T\d{6}\.\d{6}\+0000-[0-9a-f]{12}\.json$")
+RECEIPTS_DIR = Path(".nexus-core") / "receipts"
+TOOL_READY = ".nexus-core-tool-ready"
+INSTALL_TIMEOUT_SECONDS = 1200
 CLAIM_RE = re.compile(r"claim ceiling:\s*(\S+)", re.IGNORECASE)
 CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
 EXIT_OK = 0
@@ -174,11 +176,78 @@ def read_pin(repo: Path, base_ref: str) -> str:
     return matches.pop()
 
 
-def ensure_tool(cache_root: Path, pin: str) -> Path:
+def read_evidence_universe(repo: Path, base_ref: str) -> str:
+    """The evidence universe the base ref's workflow passes to the CI issue gate.
+
+    Read from the base ref only, like the pin, so a head edit cannot change it.
+    """
+    try:
+        text = _git(repo, "show", f"{base_ref}:{WORKFLOW_PATH}")
+    except LocalCheckError as exc:
+        raise LocalCheckError("CORE_UNIVERSE_UNRESOLVED", str(exc)) from exc
+    values = set(UNIVERSE_RE.findall(text))
+    if not values:
+        return UNIVERSE_DEFAULT
+    if len(values) != 1 or not values <= set(UNIVERSE_MODES):
+        raise LocalCheckError(
+            "CORE_UNIVERSE_UNRESOLVED",
+            f"expected at most one evidence-universe value from {UNIVERSE_MODES} in "
+            f"{base_ref}:{WORKFLOW_PATH}, found {sorted(values)}",
+        )
+    return values.pop()
+
+
+def refuse_candidate_receipts(repo: Path, head: str, worktree: Path) -> None:
+    """Fail closed when the candidate carries receipts (CI issue-gate parity, #281)."""
+
+    def fail(detail: str) -> None:
+        raise LocalCheckError("CANDIDATE_RECEIPTS_PRESENT", detail)
+
+    core_dir = worktree / RECEIPTS_DIR.parent
+    if core_dir.is_symlink():
+        fail(".nexus-core is a symlink in the candidate head")
+    if _git(repo, "ls-tree", "-r", "--name-only", head, "--", RECEIPTS_DIR.as_posix()).strip():
+        fail("the candidate head commits files under .nexus-core/receipts")
+    receipts = worktree / RECEIPTS_DIR
+    if receipts.exists() or receipts.is_symlink():
+        fail(".nexus-core/receipts exists in the candidate checkout")
+
+
+def reported_receipt(pointer: Path, worktree: Path) -> Path | None:
+    """The receipt issue-check reported through --receipt-path-out, or None if none.
+
+    The path must name one regular file with a Core receipt name directly inside the
+    checkout's receipts directory; anything else fails closed.
+    """
+    if not pointer.is_file():
+        return None
+    text = pointer.read_text(encoding="utf-8").strip()
+    if not text:
+        return None
+
+    def invalid(reason: str) -> LocalCheckError:
+        return LocalCheckError("RECEIPT_POINTER_INVALID", reason)
+
+    path = Path(text)
+    if "\n" in text or not path.is_absolute():
+        raise invalid("pointer must be one absolute path")
+    if path.is_symlink() or not path.is_file():
+        raise invalid("reported receipt is not a regular file")
+    if path.resolve().parent != (worktree / RECEIPTS_DIR).resolve():
+        raise invalid("reported receipt is not directly inside the receipts directory")
+    if not RECEIPT_NAME_RE.match(path.name):
+        raise invalid("reported receipt name does not match the Core receipt pattern")
+    return path.resolve()
+
+
+def ensure_tool(cache_root: Path, pin: str, timeout: float = INSTALL_TIMEOUT_SECONDS) -> Path:
+    """Install the pinned Core tool; reuse a cached install only once it completed."""
     base = cache_root / "tools" / pin
     certify = base / "bin" / "nexus-certify"
-    if certify.exists():
+    ready = base / TOOL_READY
+    if certify.exists() and ready.exists():
         return certify
+    shutil.rmtree(base, ignore_errors=True)
     env = dict(os.environ)
     env["UV_TOOL_DIR"] = str(base / "tools")
     env["UV_TOOL_BIN_DIR"] = str(base / "bin")
@@ -190,83 +259,12 @@ def ensure_tool(cache_root: Path, pin: str) -> Path:
             cwd=Path(tmp),
             env=env,
             code="CORE_INSTALL_FAILED",
+            timeout=timeout,
         )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"{certify} missing after install")
+    ready.write_text(pin + "\n", encoding="utf-8")
     return certify
-
-
-def trusted_requirements(text: str, rel: str) -> str:
-    """Return a normalized copy of ``text`` holding only pinned requirement lines.
-
-    Raises MATERIALS_UNTRUSTED for any option line, path, URL or unpinned entry.
-    The normalized copy (not the raw bytes) is what gets installed, so the
-    installer parses exactly the lines that were checked here.
-    """
-    entries: list[str] = []
-    pending = ""
-    for raw in text.split("\n"):
-        line = raw.rstrip("\r")
-        if line.endswith("\\"):
-            pending += line[:-1] + " "
-            continue
-        line = (pending + line).strip(" \t")
-        pending = ""
-        if not line or line.startswith("#"):
-            continue
-        if REQ_GIT_RE.fullmatch(line) or REQ_HASHED_RE.fullmatch(line):
-            entries.append(" ".join(line.split()))
-            continue
-        raise LocalCheckError(
-            "MATERIALS_UNTRUSTED",
-            f"{rel}: only pinned entries (name @ git+https://github.com/James3014/<repo>.git@<sha>"
-            f" or name==version --hash=sha256:...) are allowed; refused: {line[:120]!r}",
-        )
-    if pending:
-        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: dangling line continuation")
-    if not entries:
-        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: no requirement entries")
-    return "".join(entry + "\n" for entry in entries)
-
-
-def ensure_materials(
-    cache_root: Path,
-    repo: Path,
-    base_sha: str,
-    timeout: float = MATERIALS_TIMEOUT_SECONDS,
-) -> Path:
-    """Build the material venv from the trusted base commit's lock files only."""
-    contents: list[tuple[str, str]] = []
-    digest = hashlib.sha256()
-    for rel in REQUIREMENTS:
-        text = _git(repo, "show", f"{base_sha}:{rel}", code="MATERIALS_FAILED")
-        normalized = trusted_requirements(text, rel)
-        contents.append((rel, normalized))
-        digest.update(f"{rel}\0{normalized}\0".encode())
-    env_dir = cache_root / "materials" / digest.hexdigest()
-    python = env_dir / "bin" / "python"
-    ready = env_dir / MATERIALS_READY
-    if python.exists() and ready.exists():
-        return python
-    shutil.rmtree(env_dir, ignore_errors=True)
-    env_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Every uv call runs in a neutral temporary cwd so no checkout config is read.
-    with tempfile.TemporaryDirectory(prefix="nexus-core-materials-") as tmp:
-        _run(
-            ["uv", "venv", "--python", "3.11", str(env_dir)],
-            cwd=Path(tmp),
-            code="MATERIALS_FAILED",
-            timeout=timeout,
-        )
-        for rel, normalized in contents:
-            req = Path(tmp) / Path(rel).name
-            req.write_text(normalized, encoding="utf-8")
-            cmd = ["uv", "pip", "install", "--python", str(python), "--requirement", str(req)]
-            if all(REQ_HASHED_RE.fullmatch(line) for line in normalized.splitlines()):
-                cmd.append("--require-hashes")
-            _run(cmd, cwd=Path(tmp), code="MATERIALS_FAILED", timeout=timeout)
-    ready.write_text(base_sha + "\n", encoding="utf-8")
-    return python
 
 
 def resolve_token() -> str:
@@ -304,14 +302,6 @@ def _find(obj: Any, keys: Sequence[str]) -> Any:
     return None
 
 
-def newest_receipt(worktree: Path) -> Path | None:
-    receipts = sorted(
-        (worktree / ".nexus-core" / "receipts").glob("*.json"),
-        key=lambda p: (p.stat().st_mtime_ns, p.name),
-    )
-    return receipts[-1] if receipts else None
-
-
 def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     repo = Path(args.repo_root).resolve()
     cache_root = Path(args.cache_root).expanduser().resolve()
@@ -328,8 +318,13 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         repo, "rev-parse", "--verify", f"{args.base_ref}^{{commit}}", code="BASE_REF_MISSING"
     ).strip()
     pin = read_pin(repo, args.base_ref)
+    universe = read_evidence_universe(repo, args.base_ref)
 
-    certify = Path(args.certify_bin) if args.certify_bin else ensure_tool(cache_root, pin)
+    certify = (
+        Path(args.certify_bin)
+        if args.certify_bin
+        else ensure_tool(cache_root, pin, args.install_timeout)
+    )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"certify binary not found: {certify}")
     token = resolve_token()
@@ -342,26 +337,40 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     try:
         _git(repo, "worktree", "add", "--detach", str(worktree), head, code="WORKTREE_FAILED")
         added = True
-        python = (
-            Path(args.material_python)
-            if args.material_python
-            else ensure_materials(cache_root, repo, base_sha, args.materials_timeout)
-        )
-        if not args.no_fetch:
-            _git(worktree, "fetch", "origin", "main", code="FETCH_FAILED")
+        refuse_candidate_receipts(repo, head, worktree)
+        # The worktree shares refs with the source repo, so the base ref still names
+        # base_sha here (no second fetch that could move it).
         env = dict(os.environ)
-        env.update(
-            GITHUB_TOKEN=token,
-            NEXUS_CORE_MATERIAL_PYTHON=str(python),
-            PYTHONDONTWRITEBYTECODE="1",
+        env.update(GITHUB_TOKEN=token, PYTHONDONTWRITEBYTECODE="1")
+        # issue-check accepts only the config committed on the trusted base commit
+        # (--require-trusted-config, as in CI), pinned to the base_sha resolved above,
+        # and reports the receipt it wrote to a pointer file outside the checkout.
+        # issue-init (Core pin b07ae36) takes neither trust flag and runs no verifier or
+        # material command. Both get the base workflow's evidence universe.
+        pointer = tmp_parent / "receipt-pointer"
+        universe_args = ("--evidence-universe", universe)
+        core_calls: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("issue-init", universe_args),
+            (
+                "issue-check",
+                (
+                    "--require-trusted-config",
+                    "--expect-config-commit",
+                    base_sha,
+                    *universe_args,
+                    "--receipt-path-out",
+                    str(pointer),
+                ),
+            ),
         )
         log_path = output_dir / f"issue-{args.issue}-check.log"
         log_parts: list[str] = []
         rc = 0
-        for sub in ("issue-init", "issue-check"):
+        check_ran = False
+        for sub, trust_args in core_calls:
             try:
                 proc = subprocess.run(
-                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue)],
+                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
                     cwd=worktree,
                     env=env,
                     capture_output=True,
@@ -370,6 +379,7 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 )
             except OSError as exc:
                 raise LocalCheckError("CORE_EXEC_FAILED", str(exc)) from exc
+            check_ran = sub == "issue-check"
             log_parts.append(f"$ {sub} (exit {proc.returncode})\n{proc.stdout}{proc.stderr}")
             if proc.returncode != 0:
                 rc = proc.returncode
@@ -377,7 +387,8 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         log_text = "\n".join(log_parts)
         log_path.write_text(log_text, encoding="utf-8")
 
-        receipt = newest_receipt(worktree)
+        # Only the receipt issue-check itself reported; none when it did not run.
+        receipt = reported_receipt(pointer, worktree) if check_ran else None
         receipt_data: dict[str, Any] = {}
         receipt_out: Path | None = None
         if receipt is not None:
@@ -450,12 +461,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument("--certify-bin", help="override Core binary (tests)")
-    parser.add_argument("--material-python", help="override material python")
     parser.add_argument(
+        "--install-timeout",
         "--materials-timeout",
+        dest="install_timeout",
         type=float,
-        default=MATERIALS_TIMEOUT_SECONDS,
-        help="seconds allowed for each material venv/install step (default %(default)s)",
+        default=INSTALL_TIMEOUT_SECONDS,
+        help="seconds allowed for the Core tool install (default %(default)s); "
+        "--materials-timeout is the older name",
     )
     return parser
 
