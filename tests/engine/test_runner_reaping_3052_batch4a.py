@@ -182,6 +182,7 @@ def test_opencode_worker_start_refused_spawns_nothing(tmp_path):
         signal.signal(signal.SIGCHLD, previous)
     assert result.status == "OPENCODE_START_REFUSED"
     assert (result.process_started, result.outcome_unknown) == (False, False)
+    assert result.retry_safe is False
     time.sleep(0.5)
     assert not pid_file.exists()
 
