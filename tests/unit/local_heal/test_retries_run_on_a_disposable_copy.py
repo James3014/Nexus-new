@@ -532,6 +532,30 @@ def test_reset_does_not_run_a_filter_the_candidate_configured(reset_env, via_inc
     assert (reset_env / "cwd" / "SENTINEL").exists()
 
 
+@pytest.mark.parametrize("event", ["post-checkout", "post-index-change"])
+def test_reset_leaves_a_repository_with_a_config_defined_hook_untouched(reset_env, event):
+    copy = _repo_with_local_work(reset_env / "copy")
+    marker = reset_env / "config-hook-ran"
+    script = _marker_script(reset_env, "config-hook.sh", marker)
+    _git(copy, "config", "hook.mark.event", event)
+    _git(copy, "config", "hook.mark.command", str(script))
+
+    _reset_workspace(copy)
+
+    assert not marker.exists()
+    _assert_local_work_kept(copy)
+
+
+def test_reset_logs_a_git_step_that_fails(reset_env, caplog):
+    copy = _repo_with_local_work(reset_env / "copy")
+    (copy / ".git" / "index.lock").write_text("", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexus.services.local_heal.orchestrator"):
+        _reset_workspace(copy)
+
+    assert "workspace reset incomplete: git checkout failed" in caplog.text
+
+
 def test_reset_does_not_invoke_an_fsmonitor_the_candidate_configured(reset_env):
     copy = _repo_with_local_work(reset_env / "copy")
     marker = reset_env / "fsmonitor-ran"

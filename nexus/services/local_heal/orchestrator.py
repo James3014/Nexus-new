@@ -66,10 +66,11 @@ def _reset_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _config_names_a_repository_program(names: List[str]) -> bool:
     """Repository config the command line cannot switch off: filter drivers (smudge, clean,
-    process), includes (read from files outside this check) and promisor remotes (a missing
-    object is fetched, which can start a transport program)."""
+    process), hooks defined in config (``core.hooksPath`` does not apply to them), includes
+    (read from files outside this check) and promisor remotes (a missing object is fetched,
+    which can start a transport program)."""
     for name in (raw.lower() for raw in names):
-        if name.startswith(("filter.", "include.", "includeif.")):
+        if name.startswith(("filter.", "hook.", "include.", "includeif.")):
             return True
         if name == "extensions.partialclone" or (
             name.startswith("remote.") and name.endswith(".promisor")
@@ -1910,8 +1911,11 @@ class HealOrchestrator:
             )
             return
         try:
-            _reset_git(repo_dir, "checkout", "--", ".")
-            _reset_git(repo_dir, "clean", "-fd")
+            for args in (("checkout", "--", "."), ("clean", "-fd")):
+                if _reset_git(repo_dir, *args).returncode != 0:
+                    logger.warning(
+                        "workspace reset incomplete: git %s failed: %r", args[0], str(repo_dir)
+                    )
         except subprocess.TimeoutExpired:
             logger.warning("workspace reset incomplete: git timed out: %r", str(repo_dir))
 
