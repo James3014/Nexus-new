@@ -341,3 +341,37 @@ def test_repair_loop_verify_step_reaps_and_a_timeout_fails(tmp_path, monkeypatch
     assert loop._verify_repair() is (not hang)
     assert time.monotonic() - started < 15
     _assert_gone(pid_file, tmp_path)
+
+
+def test_repair_loop_verify_deadline_reaps_a_gate_step_in_its_own_session(
+    tmp_path, monkeypatch, reap_ours
+):
+    # Killing the gate's group at the outer timeout would not reach a step, which runs in its
+    # own session: the gate is given a deadline so the step times out and is reaped inside it.
+    from scripts.ops import autonomous_repair_loop as loop
+    from scripts.ops import ci_gate
+
+    assert loop.CI_GATE_DEADLINE_ENV == ci_gate.CI_GATE_DEADLINE_ENV
+    step, pid_file = _fake(tmp_path, "cinested3052", linger=60)
+    gate = tmp_path / "gate_probe.py"
+    gate.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {str(REPO)!r})\n"
+        "from scripts.ops import ci_gate\n"
+        f"ci_gate.ROOT = Path({str(tmp_path)!r})\n"
+        f"ok, _ = ci_gate.run_step('probe', {repr(chr(34) + str(step) + chr(34))})\n"
+        "sys.exit(0 if ok else 1)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loop, "VENV_PYTHON", sys.executable)
+    monkeypatch.setattr(loop, "CI_GATE_SCRIPT", gate)
+    monkeypatch.setattr(loop, "REPAIR_VERIFY_TIMEOUT_SECONDS", 30)
+    monkeypatch.setattr(loop, "REPAIR_VERIFY_STEP_MARGIN_SECONDS", 22)
+    started = time.monotonic()
+    assert loop._verify_repair() is False
+    # The step stopped at the gate's deadline, before the outer timeout.
+    assert time.monotonic() - started < 25
+    summary = (tmp_path / ".nexus" / "reports" / "last_failure_summary.txt").read_text()
+    assert f"Exit Code: {ci_gate.CI_GATE_STEP_TIMEOUT_EXIT}" in summary
+    _assert_gone(pid_file, tmp_path)

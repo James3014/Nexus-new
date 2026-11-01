@@ -33,9 +33,13 @@ CI_GATE_SCRIPT = ROOT / "scripts" / "ops" / "ci_gate.py"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 MAX_ROUNDS = 5
 ROLLBACK_TRIGGER_ROUND = 3
-# The verify step's CI gate dry-run (#3052): above its two bounded steps (2 x ci_gate's
-# CI_GATE_STEP_TIMEOUT_SECONDS), so a hung step times out inside the gate first.
+# The verify step's CI gate dry-run (#3052): above its two bounded run_step calls (2 x ci_gate's
+# CI_GATE_STEP_TIMEOUT_SECONDS). The gate also gets a deadline this margin earlier
+# (ci_gate.CI_GATE_DEADLINE_ENV): a step, which runs in its own session that killing the gate's
+# group would not reach, times out and is reaped inside the gate first.
 REPAIR_VERIFY_TIMEOUT_SECONDS = 5400
+REPAIR_VERIFY_STEP_MARGIN_SECONDS = 60
+CI_GATE_DEADLINE_ENV = "NEXUS_CI_GATE_DEADLINE_EPOCH"
 
 
 def _recall_prior_wisdom(failure_context: str, mem: MemoryService) -> str:
@@ -135,10 +139,12 @@ def execute_repair_proposals(lines, cwd):
 def _verify_repair() -> bool:
     """Run the CI gate dry-run over the repaired tree; a timeout is a failed verification."""
     verify_cmd = [str(VENV_PYTHON), str(CI_GATE_SCRIPT), "--dry-run"]
+    gate_deadline = time.time() + REPAIR_VERIFY_TIMEOUT_SECONDS - REPAIR_VERIFY_STEP_MARGIN_SECONDS
+    env = {**os.environ, CI_GATE_DEADLINE_ENV: f"{gate_deadline:.3f}"}
     try:
         # Runs the tests of the model-repaired tree: its process group is killed after (#3052).
         v_res = run_reaping_process_group(
-            verify_cmd, capture_output=False, timeout=REPAIR_VERIFY_TIMEOUT_SECONDS
+            verify_cmd, env=env, capture_output=False, timeout=REPAIR_VERIFY_TIMEOUT_SECONDS
         )
     except subprocess.TimeoutExpired:
         print(f"⏱️ Verification timed out after {REPAIR_VERIFY_TIMEOUT_SECONDS}s")

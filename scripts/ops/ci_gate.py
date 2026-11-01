@@ -27,6 +27,10 @@ CI_GATE_STEP_TIMEOUT_SECONDS = 1800
 # The nightly step runs the whole suite (scripts/ops/test_full.sh).
 CI_GATE_NIGHTLY_TIMEOUT_SECONDS = 4 * 3600
 CI_GATE_STEP_TIMEOUT_EXIT = 124
+# A supervisor's overall deadline (epoch seconds; the repair loop's verify step sets it): no
+# step runs past it, so a step times out and is reaped here before the supervisor kills this
+# gate's own group, which would not reach a step's separate session (#3052).
+CI_GATE_DEADLINE_ENV = "NEXUS_CI_GATE_DEADLINE_EPOCH"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 CI_TRANSIENT_ARTIFACTS = (
     ".nexus/reports/learn/learning_closure.jsonl",
@@ -174,6 +178,12 @@ def cleanup_ci_transient_artifacts(*, dry_run: bool = False) -> dict:
 def run_step(name, cmd, timeout=None):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     limit = CI_GATE_STEP_TIMEOUT_SECONDS if timeout is None else timeout
+    supervisor_deadline = os.environ.get(CI_GATE_DEADLINE_ENV, "").strip()
+    if supervisor_deadline:
+        try:
+            limit = max(0.0, min(limit, float(supervisor_deadline) - time.time()))
+        except ValueError:
+            pass
     try:
         # No shell; the step's process group is killed once it returns or times out (#3052).
         res = run_command_string(cmd, timeout=limit, reap_process_group=True)
