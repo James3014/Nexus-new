@@ -12,6 +12,11 @@ name: Sibling merge checks
 # #3084: the review-record job first marks its status pending on the PR head the
 # check reads, and marks it error if the check does not finish, so a run that
 # times out, is cancelled or fails never leaves an earlier run's success in place.
+# The review-record job serializes per caller repository and PR across event
+# types (the caller's own group is split by event_name), so a newer comment or
+# PR event cancels an older review-record run instead of overlapping it; in a
+# called workflow, github.repository is the caller's repository. The bindings
+# job runs only for pull_request_target, which the caller already groups per PR.
 
 on:
   workflow_call:
@@ -35,6 +40,9 @@ jobs:
     name: Review record present (advisory job)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: review-record-${{ github.repository }}-${{ inputs.pr }}
+      cancel-in-progress: true
     permissions:
       contents: read
       issues: read

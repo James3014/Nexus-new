@@ -2,7 +2,11 @@ name: Review record present
 
 # #2290: advisory. pull_request_target and issue_comment run the default-branch
 # copy of this workflow (pull_request_review is deliberately not used: that event
-# runs the PR's own copy). PR code is never checked out or executed: the script
+# runs the PR's own copy). Consequence: a review submitted after the last push or
+# comment (for example CHANGES_REQUESTED after an APPROVE) does not re-run this
+# check, so its status can lag the newest review; post or edit a PR comment to
+# re-run it before merge.
+# PR code is never checked out or executed: the script
 # only reads the PR, its file list, comments and reviews through the REST API and
 # publishes the commit status "Review record present (advisory)" on the PR head,
 # so a record posted after the last push updates the status without a new push.
