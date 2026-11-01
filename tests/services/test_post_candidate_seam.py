@@ -1437,9 +1437,7 @@ def test_sprint_inplace_evaluation_holds_the_lock_from_write_to_restore(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     # The candidate's tests run through the process-group reaping runner (#3052).
-    monkeypatch.setattr(
-        "nexus.research.sprint_service.run_reaping_process_group", fake_run
-    )
+    monkeypatch.setattr("nexus.research.sprint_service.run_reaping_process_group", fake_run)
     executor = InPlaceSprintExecutor(
         case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30
     )
