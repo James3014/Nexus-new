@@ -1206,6 +1206,26 @@ def _reject_families(
     return families, (reviewer if len(families) == 1 else None)
 
 
+def _label_families(text: str, token_at: int) -> set[str]:
+    """Every family named in a REJECT's label, read fail closed (#3041 class 3).
+
+    The label runs from the previous verdict token on the line (at most 400 characters
+    back) to this one, from the last sentence end outside a closed aside. Every model named
+    there outside parentheses counts ("Claude and Codex: REJECT"); when none is, the models
+    named inside its asides do ("r2 (Gemini via agy): REJECT"). An aside next to a named
+    model ("Codex r1 (after the Claude review): REJECT") stays an aside.
+    """
+    previous = [m.end() for m in _ANY_VERDICT_TOKEN.finditer(text, 0, token_at)]
+    start = max(previous[-1] if previous else 0, token_at - 400)
+    closes = _aside_closes(text) if "(" in text else None
+    blanked = _outside_closed_asides(text, start, token_at, closes)
+    ends = [m.end() for m in re.finditer(r"[.!?](?:\s+|$)|\u3002\s*", blanked)]
+    label = text[start + (ends[-1] if ends else 0) : token_at]
+    words = _NEAREST_MODEL.findall(_plain(label)) or _NEAREST_MODEL.findall(_plain(label, True))
+    named = {"cross_model" if w.lower() == "cross-model" else _family(w) for w in words}
+    return {family for family in named if family}
+
+
 def _fixed_later(text: str, end: int) -> bool:
     """A resolution naming its commit ("fixed in <sha>") after the token, before the next
     verdict on the line, and not negated ("not fixed in <sha>")."""
@@ -1254,7 +1274,8 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
     Numbering uses each event's ``round`` (main's reading); with ``renumber`` the
     comparison uses its ``compare`` round where it has one (``_round_before``), never
     higher for an ACCEPT nor lower for a REJECT than ``round``. Without it (choosing
-    merge-only delta heads) rounds are compared as main read them.
+    merge-only delta heads) rounds are compared as main read them, and a REJECT's
+    ``extra`` families (``_label_families``) are not read.
     """
 
     def compared(event: dict[str, Any]) -> int | None:
@@ -1269,6 +1290,8 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
     # (family, reviewer) -> (epoch, comments of this numbering with a round above 1)
     numbering: dict[tuple[str, str], tuple[int, set[Any]]] = {}
     for event in events:
+        if event.get("extra") and not renumber:
+            continue  # a family main's reading missed (_label_families)
         family = event["family"]
         reviewer = event.get("reviewer")
         epoch = 0
@@ -1470,6 +1493,23 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 if _reviewer != reviewer:
                     reviewer = None  # read as two reviewers: no later round answers it
             rounds = _ROUND.findall(clause[: span[0]])
+            # Families main's reading misses (a second model, or one named only in an
+            # aside) withdraw too, as an unknown reviewer; they never number rounds and are
+            # not read when choosing merge-only delta heads ("extra").
+            for family in sorted(_label_families(plain_reject, start + span[0]) - set(families)):
+                line_events.append((
+                    start + span[0],
+                    {
+                        "family": family,
+                        "reviewer": None,
+                        "kind": "reject",
+                        "extra": True,
+                        "round": int(rounds[-1]) if rounds else None,
+                        "compare": _round_before(clause[: span[0]], lowest=False),
+                        "comment": 0,
+                        "line": clause.strip(),
+                    },
+                ))
             for family in families:
                 event = {
                     "family": family,
