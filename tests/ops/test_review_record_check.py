@@ -3999,3 +3999,179 @@ def test_a_reject_read_only_by_its_model_label_is_left_out_of_mains_reading():
     assert rrc._reject_clause_starts(line, more=False) == []
     assert rrc._reject_clause_starts(line, labels=False) == []
     assert rrc._reject_clause_starts(line) != []
+
+
+# -- REJECT reading, full reading: more shapes and the delta fold order (#3078) ---------
+
+_HL = f"Head reviewed: {HEAD}\n"
+_CODEX_AT = f"**Codex adversarial review** r1: **ACCEPT@{HEAD}**.\n"
+
+
+def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
+    comments = [CLAUDE_AT_HEAD, accept, line] if accept is not CLAUDE_AT_HEAD else [accept, line]
+    return rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # A label word that only the REJECT denial list held (an ACCEPT's label may carry it).
+        _HL + "Claude r2 on whether the lease is safe: REJECT\n",
+        _HL + "Claude r2, nothing else changed since r1: REJECT\n",
+        # A table row without a leading pipe.
+        "Reviewer | Round | Verdict\n--- | --- | ---\nClaude | r2 | REJECT\n" + _HL,
+        # A symbol, tag, bracket, arrow or dash between the position and the token.
+        _HL + "Claude r2: ❌ REJECT — race\n",
+        _HL + "Claude r2: [REJECT] race\n",
+        _HL + "Claude r2: <b>REJECT</b> — race\n",
+        _HL + "Claude r2 ⇒ REJECT: race\n",
+        _HL + "Claude r2 ― REJECT: race\n",
+        _HL + "Claude r2-REJECT: race\n",
+        _HL + "Claude r2->REJECT: race\n",
+        _HL + "Claude r2-> REJECT: race\n",
+        _HL + "**Claude review** REJECT — race\n",
+        _HL + "Claude r2 verdict is REJECT\n",
+        _HL + "Claude r2: ​REJECT — race\n",
+        # A model-naming label longer than 400 characters.
+        _HL + "Claude r2 " + "of the lease retry receipt fold change " * 12 + ": REJECT\n",
+        # The REJECT's line names another model after other words, under a Claude header.
+        _HL + "**Claude review**\nr2 re Codex: REJECT — race\n",
+        _HL + "**Claude review**\nr2 after the Codex finding: REJECT — race\n",
+        # A bold sub-label naming another model inside a Claude section.
+        _HL + "## Claude review\n**N1: the Codex prompt is stale**\nVerdict: REJECT\n",
+        _HL + "**Claude review** (Opus)\n**Gemini comparison**\nVerdict: REJECT\n",
+        # A later withdrawn or struck ACCEPT takes back the reviewer's earlier one.
+        f"Claude: ACCEPT@{HEAD} withdrawn — found a race\n",
+        f"Claude r2: ~~ACCEPT@{HEAD}~~ — found a race\n",
+        f"Claude: r1 ACCEPT@{HEAD} no longer stands\n",
+    ],
+)
+def test_full_reading_rejects_withdraw_the_claude_accept(line):
+    assert _status_after_accept(line) == "MISSING_RECORD"
+
+
+def test_a_codex_label_with_instead_of_withdraws_the_codex_accept():
+    line = _HL + "Codex r2 instead of Gemini: REJECT — race\n"
+    assert _status_after_accept(line, RISKY, _CODEX_AT) == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Claude r2 on whether the lease is safe",
+        "Claude r2, nothing else changed since r1",
+        "Claude r2: ❌",
+        "Claude r2 " + "of the lease retry receipt fold change " * 12,
+    ],
+)
+def test_the_same_labels_credit_an_accept(label):
+    # The symmetry the full reading relies on (passes on main too).
+    assert rrc.evaluate(HEAD, DOCS, [_c(f"{label}: ACCEPT@{HEAD}\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Prose, a negation, a resolution, a value in prose: still not a verdict.
+        _HL + "- The REJECT path now logs the reason.\n",
+        _HL + "Note: the Claude REJECT path now logs the reason.\n",
+        _HL + "- the Claude REJECT path now logs the reason.\n",
+        _HL + "Claude would not: ❌ REJECT — race\n",
+        _HL + "Claude r2: ❌ REJECT — fixed in 1a2b3c4d5\n",
+        _HL + "Claude r2: [REJECT] is returned for a tampered receipt\n",
+        _HL + "Claude found a non-REJECT verdict for the lease\n",
+        _HL + "The gate | REJECT | tampered receipt\n",
+        # A label that starts with its model under a Claude header is that model's only.
+        _HL + "**Claude review**\nCodex r1: REJECT — race\n",
+        _HL + "**Claude review**\nRound 2 Codex: REJECT — race\n",
+        # A bold reviewer label (model and tier only) switches the section as before.
+        _HL + "## Claude review\n**Codex gpt-5.5 xhigh**\nVerdict: REJECT\n",
+        # A withdrawn ACCEPT at another commit is not about the head.
+        f"Claude: ACCEPT@{OLD} withdrawn — found a race\n",
+    ],
+)
+def test_full_reading_keeps_the_claude_accept(line):
+    assert _status_after_accept(line) == "OK"
+
+
+def test_the_full_reading_shapes_are_left_out_of_mains_reading():
+    # Each is an ``extra`` event: merge-only delta heads are chosen as main chose them.
+    for line in (
+        "Claude r2: ❌ REJECT — race",
+        "Claude r2 on whether the lease is safe: REJECT",
+        "Claude | r2 | REJECT",
+        "Claude r2 " + "of the lease retry receipt fold change " * 12 + ": REJECT",
+        "Codex r2 instead of Gemini: REJECT",
+    ):
+        assert rrc._reject_clause_starts(line, more=False) == [], line
+        assert rrc._reject_clause_starts(line, labels=False) == [], line
+        assert rrc._reject_clause_starts(line) != [], line
+
+
+def test_loose_positions_stay_linear_on_a_long_line():
+    import time
+
+    started = time.monotonic()
+    for body in (
+        "Claude" + " " * 60000 + "REJECT",
+        "Claude r2:" + " ❌" * 20000 + " REJECT",
+        ("Claude r2: [REJECT] " * 60)[:-1],
+    ):
+        rrc.classify_record(f"{body}\nHead reviewed: {HEAD}", HEAD)
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        # The head's REJECT is posted first, the older head's ACCEPT after it.
+        [
+            f"Claude: ACCEPT at {OLD}\n",
+            f"Claude: REJECT at {HEAD} — race\n",
+            _HL.replace(HEAD, OLD) + "Claude: ACCEPT\n",
+        ],
+        [f"Claude r5: REJECT at {HEAD}\n", _HL.replace(HEAD, OLD) + "Claude r3: ACCEPT\n"],
+        [f"Claude r5: REJECT at {HEAD}\n", _HL.replace(HEAD, OLD) + "Claude r6: ACCEPT\n"],
+        # An older head's ACCEPT of a later round posted before the head's REJECT.
+        [_HL.replace(HEAD, OLD) + "Claude r6: ACCEPT\n", f"Claude r5: REJECT at {HEAD}\n"],
+    ],
+)
+def test_a_reject_at_the_head_withdraws_a_carried_accept_whatever_the_order(comments):
+    report = rrc.evaluate(HEAD, DOCS, [_c(body) for body in comments], [], delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A later ACCEPT at the head itself still stands after its REJECT.
+        (DOCS, [f"Claude r1: REJECT at {HEAD}\n", f"Claude r2: ACCEPT at {HEAD}\n"], "OK"),
+        # A carried ACCEPT with no REJECT at the head is carried as before.
+        (DOCS, [_HL.replace(HEAD, OLD) + "Claude r1: ACCEPT\n"], "OK"),
+        # A Claude REJECT at the head does not drop the carried Codex ACCEPT.
+        (
+            RISKY,
+            [
+                f"Codex r1: ACCEPT at {OLD}\n",
+                f"Claude r1: REJECT at {HEAD}\n",
+                f"Claude r2: ACCEPT at {HEAD}\n",
+            ],
+            "OK",
+        ),
+        # A Codex REJECT at the head does drop it.
+        (
+            RISKY,
+            [
+                f"Claude r1: ACCEPT at {HEAD}\n",
+                f"Codex r2: REJECT at {HEAD}\n",
+                f"Codex r3: ACCEPT at {OLD}\n",
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_the_delta_fold_drops_only_carried_accepts_of_a_family_rejected_at_the_head(
+    files, comments, status
+):
+    report = rrc.evaluate(HEAD, files, [_c(body) for body in comments], [], delta_verified=(OLD,))
+    assert report["status"] == status
