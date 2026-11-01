@@ -1,6 +1,8 @@
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from nexus.research.swarm_broker import SwarmBroker
 
 
@@ -233,3 +235,128 @@ def test_release_leaves_worktree_reached_through_parent_of_link_untouched(
     assert (sandbox / "SENTINEL").exists()
     assert (other / "wip.txt").exists()
     assert (other / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
+
+
+def _controller_head(controller: Path) -> tuple[str, str]:
+    return (
+        _git(controller, "rev-parse", "HEAD"),
+        _git(controller, "symbolic-ref", "-q", "--short", "HEAD"),
+    )
+
+
+def test_swarm_gitfile_pointing_at_controller_gitdir_is_refused_and_head_kept(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    (swarm / ".git").write_text(f"gitdir: {controller / '.git'}\n", encoding="utf-8")
+    before = _controller_head(controller)
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "wsbase"))
+    monkeypatch.setenv("NEXUS_WORKSPACE_LOCK", str(tmp_path / "merge.lock"))
+    monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
+    from nexus.services.workspace import WorkspaceManager
+
+    WorkspaceManager(controller).lease("t-swarm", "isolated/t-swarm")
+
+    assert _controller_head(controller) == before
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is False
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_admin_entry_with_mismatched_back_pointer_is_refused(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    sibling = controller / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(controller, "worktree", "add", "--detach", str(sibling), base)
+    (sibling / "tracked.txt").write_text("sibling edit\n", encoding="utf-8")
+    sibling_admin = _git(sibling, "rev-parse", "--absolute-git-dir")
+    (swarm / ".git").write_text(f"gitdir: {sibling_admin}\n", encoding="utf-8")
+
+    broker = SwarmBroker(controller)
+    assert broker.is_independently_registered_worktree(swarm) is False
+    broker.release(swarm)
+
+    assert (sibling / "tracked.txt").read_text(encoding="utf-8") == "sibling edit\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_created_by_git_worktree_add_is_accepted_and_reset(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    before = _controller_head(controller)
+
+    broker = SwarmBroker(controller)
+    assert broker.is_independently_registered_worktree(swarm) is True
+    assert broker.acquire(timeout_sec=0.05) == swarm.resolve()
+    (swarm / "tracked.txt").write_text("candidate edit\n", encoding="utf-8")
+    broker.release(swarm)
+
+    assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
+    assert not (swarm / ".swarm_lock").exists()
+    assert _controller_head(controller) == before
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_gitfile_naming_another_repos_worktree_entry_is_refused(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    other = tmp_path / "other"
+    other_base = _init_repo(other)
+    other_wt = tmp_path / "other-wt"
+    _git(other, "worktree", "add", "--detach", str(other_wt), other_base)
+    other_admin = Path(_git(other_wt, "rev-parse", "--absolute-git-dir"))
+    (other_admin / "gitdir").write_text(f"{swarm / '.git'}\n", encoding="utf-8")
+    (swarm / ".git").write_text(f"gitdir: {other_admin}\n", encoding="utf-8")
+
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is False
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_gitfile_symlinked_to_sibling_gitfile_is_refused(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    sibling = controller / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(controller, "worktree", "add", "--detach", str(sibling), base)
+    (swarm / ".git").unlink()
+    (swarm / ".git").symlink_to(sibling / ".git")
+
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is False
+    assert SwarmBroker(controller).is_independently_registered_worktree(sibling) is True
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("back_pointer", [None, ""], ids=["missing", "empty"])
+def test_swarm_admin_entry_without_back_pointer_is_refused(
+    tmp_path: Path, monkeypatch, back_pointer
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    sibling = controller / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(controller, "worktree", "add", "--detach", str(sibling), base)
+    sibling_admin = Path(_git(sibling, "rev-parse", "--absolute-git-dir"))
+    if back_pointer is None:
+        (sibling_admin / "gitdir").unlink()
+    else:
+        (sibling_admin / "gitdir").write_text(back_pointer, encoding="utf-8")
+    (swarm / ".git").write_text(f"gitdir: {sibling_admin}\n", encoding="utf-8")
+
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is False
+    assert (sandbox / "SENTINEL").exists()
