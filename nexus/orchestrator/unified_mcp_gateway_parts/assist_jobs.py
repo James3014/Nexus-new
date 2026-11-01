@@ -13,6 +13,7 @@ lock and lease state stays on the gateway instance (``self._assist_processes``,
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import json
@@ -195,7 +196,7 @@ class _AssistJobsMixin(_JobsBase):
         # Until its pid is written, a cancel finds this submit in flight and leaves a request
         # that the submit honours once the provider started, instead of removing the workspace
         # the provider is being started in (#3076).
-        self._assist_launch_begin(task_id)
+        self._assist_launch_begin(task_id, job)
         try:
             self._assist_write(job)
             started = time.perf_counter()
@@ -216,7 +217,7 @@ class _AssistJobsMixin(_JobsBase):
             job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now(), "provider_start_ms": max(0, int((time.perf_counter() - started) * 1000))})
             return self._assist_publish_launch(task_id, job, process, operation="submit")
         finally:
-            self._assist_launch_end(task_id)
+            self._assist_launch_end(task_id, job_id)
 
     def _assist_cancel_requests(self) -> set[str]:
         """Task ids whose cancel arrived while their submit was still starting the provider."""
@@ -227,15 +228,50 @@ class _AssistJobsMixin(_JobsBase):
                 self._assist_cancel_request_ids = requests
             return requests
 
-    def _assist_launch_begin(self, task_id: str) -> None:
-        """Enter the in-flight set (shared with the model probe, #2716) before the SUBMITTED
-        record is written: until the pid is written, a cancel only leaves a request (#3076)."""
+    def _assist_launch_owners(self) -> dict[str, str]:
+        """Task id -> job id of the submit or retry that holds its in-flight entry."""
         with self._assist_lock:
-            self._model_probe_inflight().add(task_id)
+            owners = getattr(self, "_assist_launch_owner_ids", None)
+            if owners is None:
+                owners = {}
+                self._assist_launch_owner_ids = owners
+            return owners
 
-    def _assist_launch_end(self, task_id: str) -> None:
-        """Leave the in-flight set; a cancel request the launch did not honour is dropped."""
+    def _assist_launch_begin(self, task_id: str, job: Mapping[str, Any], *, retried: Optional[Mapping[str, Any]] = None) -> None:
+        """Enter the in-flight set (shared with the model probe, #2716) before the SUBMITTED
+        record is written: until the pid is written, a cancel only leaves a request (#3076).
+
+        As for the probe, the check and the entry are one step under the lock: a second submit or
+        retry of the same task id is refused, before it writes or starts anything, while another
+        launch is in flight or once another launch has recorded its job since this caller looked
+        (a submit finds any record, a retry a record other than the job it retries). The refused
+        launch's empty workspace is removed."""
         with self._assist_lock:
+            inflight = self._model_probe_inflight()
+            duplicate = task_id in inflight
+            if not duplicate:
+                current = self._assist_read(task_id)
+                if retried is None:
+                    duplicate = current is not None
+                else:
+                    duplicate = current is None or current.get("job_id") != retried.get("job_id")
+            if not duplicate:
+                inflight.add(task_id)
+                self._assist_launch_owners()[task_id] = str(job.get("job_id"))
+                return
+        with contextlib.suppress(OSError):
+            Path(str(job.get("workspace_root"))).rmdir()
+        raise _gateway().GatewayInputError("ASSIST_DUPLICATE_LAUNCH_REFUSED")
+
+    def _assist_launch_end(self, task_id: str, job_id: str) -> None:
+        """Leave the in-flight set unless a later launch of the same task id holds it by now
+        (this launch already left it when it wrote its pid); a cancel request the launch did
+        not honour is dropped."""
+        with self._assist_lock:
+            owners = self._assist_launch_owners()
+            if owners.get(task_id) != job_id:
+                return
+            del owners[task_id]
             self._model_probe_inflight().discard(task_id)
             self._assist_cancel_requests().discard(task_id)
 
@@ -602,7 +638,7 @@ class _AssistJobsMixin(_JobsBase):
             "action": retry_action,
             "bound_action_request": bound_request,
         })
-        self._assist_launch_begin(task_id)
+        self._assist_launch_begin(task_id, new_job, retried=job)
         try:
             self._assist_write(new_job)
             stdout_handle = stdout_path.open("w", encoding="utf-8")
@@ -639,5 +675,5 @@ class _AssistJobsMixin(_JobsBase):
             })
             return self._assist_publish_launch(task_id, new_job, process, operation="retry")
         finally:
-            self._assist_launch_end(task_id)
+            self._assist_launch_end(task_id, new_job_id)
     # fmt: on
