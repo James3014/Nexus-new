@@ -1796,6 +1796,14 @@ class HealOrchestrator:
         # P1-3: Portable root detection — use env var or fall back to detecting via git
         import os
 
+        # An empty or blank repo_dir is Path("."), the process cwd; a relative one also
+        # resolves against the cwd. Neither names a heal workspace, so nothing is reset.
+        if not Path(ctx.op.repo_dir).is_absolute():
+            logger.warning(
+                "workspace reset refused: repo_dir is not absolute: %r", str(ctx.op.repo_dir)
+            )
+            return
+
         nexus_root_env = os.environ.get("NEXUS_ROOT", "")
         if nexus_root_env:
             current_root = Path(nexus_root_env).resolve()

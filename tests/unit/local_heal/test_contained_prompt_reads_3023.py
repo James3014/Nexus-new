@@ -235,9 +235,11 @@ def test_committee_prompt_files_never_hold_text_read_through_a_link(repo_and_hos
         verifier=verifier,
         committee_run=committee_run,
     )
-    assert calls, "the committee must still run"
+    # Each committee candidate runs on a World C copy of repo_root, and the copy refuses
+    # a target behind a link, so no candidate runs (like the single retry below).
     for contents in calls:
         _assert_no_host_text(contents)
+    assert calls == []
     meta = resp.raw_model_metadata
     assert meta["delegated_retry_target_read_refused"] is True
     assert meta["delegated_retry_target_read_refused_reason"]
