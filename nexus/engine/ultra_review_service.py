@@ -15,9 +15,10 @@ import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, TypeVar
 
+from nexus.core.contained_write import PathContainmentError, write_text_in_root
 from nexus.engine.sandboxed_lane import (  # noqa: F401 - re-exported for callers and tests
     _OS_SANDBOX_PROBE,
     GIT_ENV_ALLOWLIST,
@@ -433,6 +434,23 @@ sbpl_path = _as_review_error(_lane_sbpl_path)
 _write_no_follow = _as_review_error(write_no_follow)
 
 
+# Swap bookkeeping that stays out of the report.
+_SWAP_PRIVATE_KEYS = ("original", "restored_result", "checkout_identity")
+
+
+def _dir_identity(path: Path) -> tuple[int, int] | None:
+    """(st_dev, st_ino) of the directory ``path`` names, without following a final link;
+    None when it is not a directory. A link swapped in anywhere on the way yields another
+    inode, so a match means the same directory the reviewer created."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    return (info.st_dev, info.st_ino)
+
+
 class UltraReviewService:
     def __init__(self, project_root: Path | str, *, test_timeout_sec: float | None = None):
         self.project_root = Path(project_root).resolve()
@@ -487,7 +505,7 @@ class UltraReviewService:
                 self._restore_pending_git_swaps()
         except (SandboxError, OSError, subprocess.SubprocessError) as exc:
             # Fail closed with a reason instead of an unhandled traceback.
-            out_path = self._resolve(report_path)
+            out_path = self._report_location(report_path)[2]
             payload = {
                 "schema_version": SCHEMA_VERSION,
                 "run_id": "",
@@ -504,8 +522,7 @@ class UltraReviewService:
                 "report_path": str(out_path),
             }
             try:
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+                self._write_report(report_path, payload)
             except OSError:
                 payload["report_path"] = ""
             return payload
@@ -523,6 +540,7 @@ class UltraReviewService:
     ) -> dict[str, Any]:
         mode = DRY_RUN_MODE if dry_run else REVIEW_MODE
         run_id = self._run_id()
+        self._integrity_violations: list[str] = []
         sandbox_path = self._prepare_sandbox(Path(sandbox_root), run_id)
         progress_path = sandbox_path / "progress.jsonl"
         progress: list[dict[str, Any]] = []
@@ -650,7 +668,7 @@ class UltraReviewService:
             mirror_git_restore = self._restore_checkout_git_file(execution_root, mirror_git)
         if mirror_git:
             ghost_regression["sandbox_git_dir"] = {
-                **{k: v for k, v in mirror_git.items() if k not in ("original", "restored_result")},
+                **{k: v for k, v in mirror_git.items() if k not in _SWAP_PRIVATE_KEYS},
                 "restore": mirror_git_restore,
             }
         ghost_regression["environment_probe_failures"] = list(self._env_probe_failures)
@@ -684,7 +702,7 @@ class UltraReviewService:
         findings = [*security_sentry["findings"], *logic_breaker["findings"], *ghost_regression["findings"]]
         sub_checks_passed = bool(security_sentry["passed"] and logic_breaker["passed"] and ghost_regression["passed"])
         fleet = self._build_dry_run_fleet(test_candidates, security_sentry, logic_breaker, ghost_regression)
-        out_path = self._resolve(report_path)
+        out_path = self._report_location(report_path)[2]
         self._record_progress(progress, progress_path, "report_written", report_path=str(out_path))
         lanes_blocked = [
             lane_name
@@ -727,6 +745,13 @@ class UltraReviewService:
                 gate_passed = sub_checks_passed
                 status = "PASS" if sub_checks_passed else "FAIL"
         worktree_cleanup = self._cleanup_execution_worktree(execution_root, mirror_metadata) if not dry_run else {}
+        integrity_violations = list(self.__dict__.get("_integrity_violations") or [])
+        if integrity_violations:
+            # A directory the review created was replaced while code under review ran: the host
+            # steps on it were skipped, and nothing about this run can pass.
+            gate_passed = False
+            status = "DRY_RUN_FAIL" if dry_run else "BLOCKED"
+            blocked_reason = "sandbox_entry_replaced:" + ",".join(integrity_violations[:5])
         payload = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
@@ -735,6 +760,7 @@ class UltraReviewService:
             "gate_passed": gate_passed,
             "mode": mode,
             "worktree_cleanup": worktree_cleanup,
+            "sandbox_integrity": {"replaced_entries": integrity_violations},
             "isolation": self.sandbox_isolation(),
             "task": task,
             "base_ref": base_ref,
@@ -780,9 +806,55 @@ class UltraReviewService:
             "report_path": str(out_path),
         }
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._write_report(report_path, payload)
         return payload
+
+    def _report_location(self, report_path: Path | str) -> tuple[Path, PurePath, Path]:
+        """``(root, relative, shown)`` for the report: a path in the checkout is written relative
+        to ``project_root`` (no link below it is followed, so a link planted at or on the way to
+        the report path cannot redirect the write); any other absolute path is the caller's own
+        directory plus a file name."""
+        raw = Path(report_path)
+        if not raw.is_absolute():
+            return self.project_root, PurePath(raw), self.project_root / raw
+        raw = Path(os.path.normpath(raw))
+        for depth in range(1, len(raw.parts)):
+            anchor = Path(*raw.parts[:depth])
+            if anchor.resolve() == self.project_root:
+                relative = PurePath(*raw.parts[depth:])
+                return self.project_root, relative, self.project_root / relative
+        return raw.parent, PurePath(raw.name), raw
+
+    def _write_report(self, report_path: Path | str, payload: dict[str, Any]) -> None:
+        """Write the report without following a link at the path or on the way to it (a hard
+        link is never written through either); raises OSError when that is not possible."""
+        root, relative, _shown = self._report_location(report_path)
+        if root != self.project_root:
+            root.mkdir(parents=True, exist_ok=True)
+        write_text_in_root(
+            root, relative, json.dumps(payload, indent=2, ensure_ascii=False), create_parents=True
+        )
+
+    def _remember_dir(self, path: Path) -> None:
+        identity = _dir_identity(path)
+        if identity is not None:
+            self.__dict__.setdefault("_dir_identities", {})[str(path)] = identity
+
+    def _dir_still_ours(
+        self, path: Path, label: str, identity: tuple[int, int] | None = None
+    ) -> bool:
+        """True when ``path`` still names the directory recorded when the review created it.
+        Otherwise the replacement is recorded (the review cannot pass) and False is returned:
+        the caller leaves the path alone."""
+        expected = (
+            identity
+            if identity is not None
+            else (self.__dict__.get("_dir_identities") or {}).get(str(path))
+        )
+        if expected is not None and _dir_identity(path) == expected:
+            return True
+        self.__dict__.setdefault("_integrity_violations", []).append(label)
+        return False
 
     def _record_progress(self, progress: list[dict[str, Any]], progress_path: Path, stage: str, **fields: Any) -> None:
         event = {
@@ -791,15 +863,21 @@ class UltraReviewService:
             **fields,
         }
         progress.append(event)
-        progress_path.parent.mkdir(parents=True, exist_ok=True)
-        with progress_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+        # The whole log is rewritten from memory inside the sandbox dir the review created,
+        # never through a link at (or swapped in for) the log or its directory.
+        if not self._dir_still_ours(progress_path.parent, "sandbox_dir"):
+            raise PathContainmentError(f"sandbox_dir_replaced:{progress_path.parent}")
+        lines = "".join(
+            json.dumps(item, ensure_ascii=False, default=str) + "\n" for item in progress
+        )
+        write_text_in_root(progress_path.parent, progress_path.name, lines)
 
     def _prepare_sandbox(self, sandbox_root: Path, run_id: str) -> Path:
         root = self._resolve(sandbox_root)
         root.mkdir(parents=True, exist_ok=True)
         sandbox_path = root / run_id
         sandbox_path.mkdir(parents=False, exist_ok=False)
+        self._remember_dir(sandbox_path)
         git_home = sandbox_path / "git-home"
         git_home.mkdir()
         self._git_home = git_home.resolve()
@@ -1052,6 +1130,7 @@ class UltraReviewService:
         tmp = sandbox_path / "tmp"
         home.mkdir(parents=True, exist_ok=True)
         tmp.mkdir(parents=True, exist_ok=True)
+        self._remember_dir(execution_root)
         self._sandbox_ctx = {
             "sandbox_path": Path(sbpl_path(sandbox_path.resolve())),
             "execution_root": Path(sbpl_path(execution_root.resolve())),
@@ -1096,10 +1175,26 @@ class UltraReviewService:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         if not ctx.get("execution_root") or not ctx.get("sandbox_path"):
             raise UltraReviewError("sandbox_not_bound")
+        writable = self._sandbox_writable()
+        # Writes only in the mirror, the sandbox home/tmp and (during a witnessed run) its report
+        # dir and cwd; never the sandbox dir itself, which holds the reviewer's own files. None
+        # of those directory entries can be removed or replaced, so every later host step on
+        # them still meets the directory the reviewer created.
         return build_sandbox_profile(
-            writable=[ctx["execution_root"], ctx["sandbox_path"]],
+            writable=writable,
             read_roots=self._sandbox_read_roots(),
+            fixed_entries=[*writable, str(ctx["sandbox_path"])],
         )
+
+    def _sandbox_writable(self) -> list[str]:
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        roots = [
+            ctx.get("execution_root"),
+            ctx.get("home"),
+            ctx.get("tmp"),
+            *(ctx.get("lane_writable") or []),
+        ]
+        return list(dict.fromkeys(str(root) for root in roots if root))
 
     @_as_review_error
     def _sandbox_read_roots(self) -> list[str]:
@@ -1138,12 +1233,7 @@ class UltraReviewService:
         return {
             "barrier": "macos_sandbox_exec" if contained else "none",
             "network": "denied" if contained else "not_enforced",
-            "writes_confined_to": [
-                str((getattr(self, "_sandbox_ctx", None) or {}).get(key) or "")
-                for key in ("execution_root", "sandbox_path")
-            ]
-            if contained
-            else [],
+            "writes_confined_to": self._sandbox_writable() if contained else [],
             "env": "allowlist:" + ",".join(SANDBOX_ENV_ALLOWLIST) + "+HOME/TMPDIR in sandbox",
             "credential_paths_read_denied": list(SANDBOX_DENIED_HOME_PATHS) if contained else [],
         }
@@ -1183,6 +1273,14 @@ class UltraReviewService:
     def _cleanup_execution_worktree(self, execution_root: Path, mirror_metadata: dict[str, Any]) -> dict[str, Any]:
         """Remove the per-run git worktree registration (review artifacts stay in the sandbox)."""
         strategy = str(mirror_metadata.get("strategy") or "")
+        if strategy in ("git_worktree", "copytree") and not self._dir_still_ours(
+            execution_root, "execution_root"
+        ):
+            return {
+                "strategy": strategy,
+                "removed": False,
+                "detail": "execution_root_replaced_left_untouched",
+            }
         if strategy == "git_worktree":
             removed = self._git_run(["worktree", "remove", "--force", str(execution_root)])
             return {
@@ -2343,10 +2441,25 @@ class UltraReviewService:
         self, cmd: list[str], report: dict[str, Any], *, cwd: Path, timeout: float
     ) -> subprocess.CompletedProcess:
         report["started"] = datetime.now(timezone.utc).timestamp()
-        # The ghost re-run is the lane whose stalled descendants outlived a timeout (#2650).
-        return self._sandboxed_run(
-            cmd, cwd=cwd, timeout=timeout, stdin_text=report["key"].hex() + "\n", kill_process_group=True
-        )
+        ctx = getattr(self, "_sandbox_ctx", None)
+        if ctx is not None:
+            # This run alone may write its report dir and its checkout (the base checkout too).
+            ctx["lane_writable"] = [
+                sbpl_path(Path(report["dir"]).resolve()),
+                sbpl_path(Path(cwd).resolve()),
+            ]
+        try:
+            # The ghost re-run is the lane whose stalled descendants outlived a timeout (#2650).
+            return self._sandboxed_run(
+                cmd,
+                cwd=cwd,
+                timeout=timeout,
+                stdin_text=report["key"].hex() + "\n",
+                kill_process_group=True,
+            )
+        finally:
+            if ctx is not None:
+                ctx.pop("lane_writable", None)
 
     @staticmethod
     def _verify_ghost_report(report: dict[str, Any], returncode: int) -> dict[str, Any]:
@@ -2616,6 +2729,7 @@ class UltraReviewService:
             outcome["inconclusive"] = list(failed_ids)
             outcome["reason"] = "base_worktree_unavailable: " + (add.stderr or add.stdout or "")[-300:].strip()
             return outcome
+        self._remember_dir(base_root)
         base_git: dict[str, Any] = {}
         try:
             violations = self._neutralize_base_links(base_root)
@@ -2700,14 +2814,20 @@ class UltraReviewService:
             restore = self._restore_checkout_git_file(base_root, base_git)
             if base_git:
                 outcome["base_git_dir"] = {
-                    **{k: v for k, v in base_git.items() if k not in ("original", "restored_result")},
+                    **{k: v for k, v in base_git.items() if k not in _SWAP_PRIVATE_KEYS},
                     "restore": restore,
                 }
-            removed = self._git_run(["worktree", "remove", "--force", str(base_root)])
-            outcome["base_cleanup"] = {
-                "removed": removed.returncode == 0,
-                "detail": (removed.stderr or removed.stdout or "")[-300:].strip(),
-            }
+            if self._dir_still_ours(base_root, "base_worktree"):
+                removed = self._git_run(["worktree", "remove", "--force", str(base_root)])
+                outcome["base_cleanup"] = {
+                    "removed": removed.returncode == 0,
+                    "detail": (removed.stderr or removed.stdout or "")[-300:].strip(),
+                }
+            else:
+                outcome["base_cleanup"] = {
+                    "removed": False,
+                    "detail": "base_worktree_replaced_left_untouched",
+                }
 
     def _environment_reason(
         self,
@@ -2884,6 +3004,9 @@ class UltraReviewService:
             original = (checkout / ".git").read_text(encoding="utf-8")
         except (UltraReviewError, OSError) as exc:
             return {"ok": False, "detail": f"not_a_review_worktree:{exc}"}
+        checkout_identity = _dir_identity(checkout)
+        if checkout_identity is None:
+            return {"ok": False, "detail": "not_a_review_worktree:not_a_directory"}
         sha_run = self._git_run(["rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}"])
         sha = (sha_run.stdout or "").strip()
         if sha_run.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", sha):
@@ -2929,7 +3052,14 @@ class UltraReviewService:
             return {"ok": False, "detail": f"swap_failed:{exc}"}
         if ctx:
             ctx.setdefault("git_read_roots", []).append(git_dir)
-        swap = {"ok": True, "git_dir": gd, "head": sha, "diff_staged": staged, "original": original}
+        swap = {
+            "ok": True,
+            "git_dir": gd,
+            "head": sha,
+            "diff_staged": staged,
+            "original": original,
+            "checkout_identity": checkout_identity,
+        }
         self.__dict__.setdefault("_pending_git_swaps", []).append((checkout, swap))
         return swap
 
@@ -2940,13 +3070,17 @@ class UltraReviewService:
             return dict(swap.get("restored_result") or {}) if swap else {}
         dot_git = checkout / ".git"
         detail = ""
-        try:
-            if dot_git.is_dir() and not dot_git.is_symlink():
-                shutil.rmtree(dot_git)
-            _write_no_follow(dot_git, str(swap["original"]).encode())
-            restored = True
-        except (OSError, SandboxError) as exc:
-            restored, detail = False, str(exc)[:200]
+        if not self._dir_still_ours(checkout, "checkout", swap.get("checkout_identity")):
+            # The checkout path now names another directory: put nothing there, remove nothing.
+            restored, detail = False, "checkout_replaced_left_untouched"
+        else:
+            try:
+                if dot_git.is_dir() and not dot_git.is_symlink():
+                    shutil.rmtree(dot_git)
+                _write_no_follow(dot_git, str(swap["original"]).encode())
+                restored = True
+            except (OSError, SandboxError) as exc:
+                restored, detail = False, str(exc)[:200]
         git_dir = Path(str(swap["git_dir"]))
         shutil.rmtree(git_dir, ignore_errors=True)
         ctx = getattr(self, "_sandbox_ctx", None) or {}

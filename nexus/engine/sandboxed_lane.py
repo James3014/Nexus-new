@@ -321,6 +321,7 @@ def build_sandbox_profile(
     deny_subtrees: Iterable[Path | str] = (),
     allow_signal_same_sandbox: bool = False,
     read_only_paths: Iterable[str] = (),
+    fixed_entries: Iterable[str] = (),
 ) -> str:
     """SBPL policy for one confined command (last matching rule wins).
 
@@ -334,6 +335,10 @@ def build_sandbox_profile(
 
     ``read_only_paths`` (absolute, already SBPL-safe, not resolved: a symlink there must not be
     replaceable either) stay unwritable even inside ``writable``.
+
+    ``fixed_entries`` (already SBPL-safe) keep their own directory entry: what is inside stays
+    writable, but the entry itself cannot be removed, renamed or replaced (for example by a
+    link to a directory outside the sandbox) while the command runs.
     """
 
     writes = " ".join(f'(subpath "{sbpl_path(path)}")' for path in writable)
@@ -363,6 +368,7 @@ def build_sandbox_profile(
         "(deny network*)",
         f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
         *(f'(deny file-write* (subpath "{path}"))' for path in read_only_paths),
+        *(f'(deny file-write* (literal "{sbpl_path(path)}"))' for path in fixed_entries),
         f"(deny file-read* {denied})",
         # Last rule wins: forbidden subtrees stay unreadable even under an allowed root.
         *(
