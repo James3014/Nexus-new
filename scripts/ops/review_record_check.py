@@ -144,6 +144,15 @@ _REJECT_POS = re.compile(
     rf"({_REJECT_TOKEN})\b"
     rf"|(?<![\w-])({_REJECT_TOKEN})(?=\s*(?:@|\bat\s)\s*[0-9a-f]{{{MIN_PREFIX},}})",
 )
+# Tried when _REJECT_POS finds nothing: after a dash, arrow or full-width colon that
+# follows a closed label aside ("(Opus, separate agent) — REJECT", "(high)—REJECT"; the
+# clause split at ") " leaves it at the clause start), an arrow after a space ("Codex r2
+# → REJECT") or a full-width colon (#3041 r15). A hyphen at the start of a line is a
+# list bullet, not a position (_reject_clause_starts).
+_REJECT_POS_MORE = re.compile(
+    rf"(?:^\s*(?:[\-–—]|→|->|=>|：)\s*|\)\s*(?:[\-–—]|→|->|=>|：)\s*|\s(?:→|->|=>)\s*|：\s*)"
+    rf"({_REJECT_TOKEN})\b"
+)
 _REJECT_PRE_DENY = re.compile(
     r"\b(?:no|not|never|none|nothing|if|unless|whether|would|could|might|may|should|cannot"
     r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
@@ -457,6 +466,20 @@ def _aside_closes(text: str) -> list[int | None]:
     return [None if at is None else close_of.get(at) for at in enclosing]
 
 
+def _reject_aside_closes(text: str) -> list[int | None]:
+    """``_aside_closes`` for reading a REJECT: a ``)`` with no ``(`` before it on the line
+    also closes an aside that a manual line break carried over from the line above
+    ("(Opus, separate agent,\\nnot the author): REJECT", #3041 r15), so the text before it
+    is blanked like any closed aside."""
+    closes = _aside_closes(text)
+    first_open = text.find("(")
+    stray = text.find(")")
+    if stray >= 0 and (first_open < 0 or stray < first_open):
+        for index in range(stray):
+            closes[index] = stray
+    return closes
+
+
 # The only "only" that names the scope reviewed: the aside holds nothing after its round
 # marker but one fixed phrase, "docs-only", "test-only", "typing-only" or "delta-only"
 # (optionally followed by "delta"), or "delta only <sha>..<sha>". Any other "only"
@@ -672,11 +695,14 @@ def reject_clauses(line: str) -> list[str]:
     return [clause for clause, _start in _reject_clause_starts(line)]
 
 
-def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
+def _reject_clause_starts(line: str, more: bool = True) -> list[tuple[str, int]]:
     """reject_clauses with each clause's start in ``_plain(_reject_view(line), keep_parens=True)``.
 
     The caller places the token by this start: finding the clause text again would land on
     an earlier, unread clause of the same text and judge the REJECT there (#3039).
+    ``more`` False reads only as main did before #3041 r15; with it, a clause main's
+    reading skips is read again with the positions in ``_REJECT_POS_MORE`` and a label
+    aside carried over a line break (``_reject_aside_closes``).
     """
     out: list[tuple[str, int]] = []
     plain_line = _plain(_reject_view(line), keep_parens=True)
@@ -685,13 +711,9 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         return []
     starts = [start for start, _end in tokens]
     consumed = 0
-    aside_closes: list[int | None] | None = None
-    for clause in _clauses(plain_line):
-        start = plain_line.find(clause, consumed)
-        consumed = start + len(clause) if start >= 0 else consumed
-        match = _REJECT_POS.search(clause)
-        if not match or start < 0:
-            continue
+    closes: dict[bool, list[int | None] | None] = {}
+
+    def reads(clause: str, start: int, match: re.Match[str], extended: bool) -> bool:
         token_start = match.start(1) if match.group(1) else match.start(2)
         token_end = match.end(1) if match.group(1) else match.end(2)
         at, end = start + token_start, start + token_end
@@ -701,11 +723,16 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         # Denial: the clause may start inside an aside that closes before the token ("(Opus,
         # separate agent, not the author): REJECT"); the aside's words are not the verdict's,
         # as for an accepting verdict, whose window drops parentheticals.
-        if aside_closes is None and "(" in plain_line:
-            aside_closes = _aside_closes(plain_line)
+        if extended not in closes:
+            if extended:
+                found = "(" in plain_line or ")" in plain_line
+                closes[extended] = _reject_aside_closes(plain_line) if found else None
+            else:
+                closes[extended] = _aside_closes(plain_line) if "(" in plain_line else None
+        aside_closes = closes[extended]
         before = _outside_closed_asides(plain_line, start, at, aside_closes)
         if _denies_reject(clause[:token_start]) and _denies_reject(before):
-            continue
+            return False
         index = bisect.bisect_left(starts, at)
         window_start = max(tokens[index - 1][1] if index > 0 else 0, at - 400)
         # (the 400 cap keeps the scan linear on a very long line)
@@ -719,13 +746,33 @@ def _reject_clause_starts(line: str) -> list[tuple[str, int]]:
         if not _reject_label_only(window[models[-1].end() :] if models else window):
             window = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
             if not _reject_label_only(window[_label_start(window) :]):
-                continue
+                return False
         if _REJECT_NOT_AFTER.match(plain_line, end):
-            continue
+            return False
         following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
-        if _resolved_after(plain_line, end, following):
+        return not _resolved_after(plain_line, end, following)
+
+    for clause in _clauses(plain_line):
+        start = plain_line.find(clause, consumed)
+        consumed = start + len(clause) if start >= 0 else consumed
+        if start < 0:
             continue
-        out.append((clause, start))
+        match = _REJECT_POS.search(clause)
+        if match and reads(clause, start, match, extended=False):
+            out.append((clause, start))
+            continue
+        if not more:
+            continue
+        if match is None:
+            match = _REJECT_POS_MORE.search(clause)
+            if (
+                match
+                and re.match(r"\s*-(?!>)", clause[match.start() :])
+                and not plain_line[:start].strip()
+            ):
+                continue  # "- REJECT ...": a list bullet at the line start, as before
+        if match and reads(clause, start, match, extended=True):
+            out.append((clause, start))
     return out
 
 
@@ -1016,7 +1063,7 @@ def _rebuttal_point(section: list[str], head: str) -> tuple[int, int] | None:
 
 
 def _reject_match(clause: str) -> tuple[int, int] | None:
-    match = _REJECT_POS.search(clause)
+    match = _REJECT_POS.search(clause) or _REJECT_POS_MORE.search(clause)
     if not match:
         return None
     group = 1 if match.group(1) else 2
@@ -1293,11 +1340,15 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
         searched = 0
+        # Only the clauses main reads move the search on, so a clause read only since
+        # #3041 r15 never takes the earlier position's family away from a later one.
+        main_starts = {at for _clause, at in _reject_clause_starts(line, more=False)}
         for clause, start in _reject_clause_starts(line):
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
             found = plain_reject.find(clause, searched)
-            searched = found + len(clause) if found >= 0 else searched
+            if start in main_starts:
+                searched = found + len(clause) if found >= 0 else searched
             span = _reject_match(clause)
             if span is None:
                 continue

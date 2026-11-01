@@ -3174,3 +3174,140 @@ def test_a_delta_head_is_not_folded_for_a_reject_only_the_new_numbering_reads():
     ]
     report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))
     assert report["status"] == "MISSING_RECORD"
+
+
+_R15_ACCEPT = (
+    f"**Independent Claude review** (Claude Opus 5.5, separate agent): **ACCEPT at {HEAD}**.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A dash, arrow or full-width colon right after a closed label aside.
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"## Review record — head `{HEAD}`\n**Independent Claude review** (Claude Opus 5.5, "
+                "separate agent) — **REJECT**: data loss in the writer\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"Head reviewed: {HEAD}\n**Claude review** (Opus 5.5)—REJECT: data loss\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"Head reviewed: {HEAD}\n**Claude review** (Opus 5.5) - REJECT: data loss\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"Head reviewed: {HEAD}\n**Claude review** (Opus 5.5) → REJECT: data loss\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"Head reviewed: {HEAD}\n**Claude review** (Opus 5.5)：REJECT — data loss\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        # A full-width colon or an arrow after a label.
+        (
+            DOCS,
+            [_R15_ACCEPT, f"Head reviewed: {HEAD}\nClaude r2：REJECT — data loss\n"],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [_R15_ACCEPT, f"Head reviewed: {HEAD}\nClaude r2 -> REJECT — data loss\n"],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [
+                f"Codex r1 ACCEPT@{HEAD}",
+                f"Head reviewed: {HEAD}\n**Codex gpt-6.1-sol (high) — REJECT**\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            RISKY,
+            [
+                f"Codex r1 ACCEPT@{HEAD}",
+                f"Head reviewed: {HEAD}\nCodex r2 → REJECT: race in X\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        # A label aside broken over two lines: the denial on the second line is the aside's.
+        (
+            DOCS,
+            [
+                _R15_ACCEPT,
+                f"## Review record — head `{HEAD}`\n**Independent Claude review** (Claude Opus 5.5, "
+                f"separate agent,\nnot the author): **REJECT at {HEAD}**\n",
+            ],
+            "MISSING_RECORD",
+        ),
+    ],
+)
+def test_a_reject_after_a_closed_aside_and_a_dash_arrow_or_full_width_colon_withdraws(
+    files, comments, status
+):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        # A list bullet at the line start is no verdict position, as before.
+        f"Head reviewed: {HEAD}\n## Claude review\n- REJECT paths are covered by tests\n",
+        # Finding prose after an aside and a dash still fails the label check.
+        f"Head reviewed: {HEAD}\nClaude review: a forged receipt (tampered) — REJECT is returned\n",
+        # A denial outside any aside still denies; the carried-over aside ends at the first ")".
+        f"Head reviewed: {HEAD}\n(see the thread) Claude would not REJECT at {HEAD}\n",
+        f"Head reviewed: {HEAD}\nnot the author) and Claude would not REJECT at {HEAD}\n",
+        f"Head reviewed: {HEAD}\nClaude would not (ever) REJECT at {HEAD}\n",
+    ],
+)
+def test_a_dash_or_stray_paren_does_not_make_prose_a_reject(comment):
+    assert rrc.evaluate(HEAD, DOCS, [_c(_R15_ACCEPT), _c(comment)], [])["status"] == "OK"
+
+
+def test_a_bullet_reject_bound_to_the_head_is_still_read():
+    # Main reads it by its sha binding; the bullet rule only skips the new positions.
+    comment = f"Head reviewed: {HEAD}\n## Claude review\n-  REJECT@{HEAD}: data loss\n"
+    assert (
+        rrc.evaluate(HEAD, DOCS, [_c(_R15_ACCEPT), _c(comment)], [])["status"] == "MISSING_RECORD"
+    )
+
+
+@pytest.mark.parametrize("files", [DOCS, RISKY])
+def test_a_newly_read_reject_does_not_move_the_search_for_a_later_identical_clause(files):
+    # Main credits the second identical clause to both positions' families (reviewer
+    # unknown); a clause read only through the carried-over aside must not change that.
+    comments = [
+        _c(f"Head reviewed: {HEAD}\nClaude Opus r3: ACCEPT\n"),
+        _c(f"Head reviewed: {HEAD}\nCodex r3: ACCEPT\n"),
+        _c(
+            f"Head reviewed: {HEAD}\n**Claude Opus review** (separate agent,\n"
+            "not the author) r2: REJECT; Codex (not the author) r2: REJECT\n"
+        ),
+    ]
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == "MISSING_RECORD"
