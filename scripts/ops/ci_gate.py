@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nexus.core.argv_command import run_command_string  # noqa: E402
+from nexus.core.argv_command import UNSUPPORTED_SYNTAX_EXIT, run_command_string  # noqa: E402
 from nexus.core.decorators import nexus_metabolize
 from scripts.engine.output_guard import truncate_output
 
@@ -175,8 +175,34 @@ def cleanup_ci_transient_artifacts(*, dry_run: bool = False) -> dict:
     }
 
 
+# Expansion a shell would do but ``run_step`` does not (#3076): refused, not passed on as
+# literal text. Globs are not listed: ``[`` appears in pytest node ids (parametrized tests), and
+# ``select_tests`` expands target globs before building a command.
+_STEP_SHELL_EXPANSION = {"$": "'$' (parameter or command substitution)", "`": "backquote"}
+
+
 def run_step(name, cmd, timeout=None):
+    """Run CI step *name*: *cmd* is a command string run WITHOUT a shell (#3052, #3076).
+
+    Contract for callers: *cmd* is an executable plus arguments, split POSIX-style with quotes
+    honoured (``nexus.core.argv_command.run_command_string``), optionally ``NAME=value``
+    prefixes and ``&&`` chains. Pipes, redirects, ``;``, ``||``, subshells and comments are
+    refused with exit 2 (UNSUPPORTED_SYNTAX_EXIT); ``$``/backquote expansion is refused here
+    with exit 2 too. Globs and ``~`` are passed on literally, never expanded: expand them before
+    building *cmd*. The step leads its own process group, which is SIGKILLed once it returns or
+    times out (``CI_GATE_STEP_TIMEOUT_SECONDS`` unless *timeout*, never past
+    ``CI_GATE_DEADLINE_ENV``); a timeout fails the step with ``CI_GATE_STEP_TIMEOUT_EXIT``.
+    Returns (passed, truncated stdout on success or stderr on failure)."""
     print(f"\n🚀 [CI-Gate] Running: {name}...")
+    refused = [label for char, label in _STEP_SHELL_EXPANSION.items() if char in str(cmd)]
+    if refused:
+        res = subprocess.CompletedProcess(
+            cmd,
+            UNSUPPORTED_SYNTAX_EXIT,
+            "",
+            f"refused (no shell): {', '.join(refused)} in {name} is not expanded\n",
+        )
+        return _step_result(name, res)
     limit = CI_GATE_STEP_TIMEOUT_SECONDS if timeout is None else timeout
     supervisor_deadline = os.environ.get(CI_GATE_DEADLINE_ENV, "").strip()
     if supervisor_deadline:
@@ -198,7 +224,10 @@ def run_step(name, cmd, timeout=None):
             partial[0],
             f"{partial[1]}{name} timed out after {limit}s\n",
         )
+    return _step_result(name, res)
 
+
+def _step_result(name, res):
     # 🛡️ Apply Context Shield / Hard Truncation
     stdout = truncate_output(str(getattr(res, "stdout", "") or ""), label=f"{name}_stdout")
     stderr = truncate_output(str(getattr(res, "stderr", "") or ""), label=f"{name}_stderr")
