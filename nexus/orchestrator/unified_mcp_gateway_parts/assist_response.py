@@ -224,6 +224,24 @@ def _settle_provider_group(
             return True, False, False
 
 
+_ASSIST_SETTLED_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
+
+
+def _assist_settled(job: Mapping[str, Any]) -> bool:
+    """Whether ``job`` is recorded as finished with nothing left to reconcile."""
+    return job.get("status") in _ASSIST_SETTLED_STATUSES and not job.get("reconciliation_required")
+
+
+def _assist_settled_is_replaced(current: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    """Whether writing ``job`` would reopen the settled record ``current`` of the same job, or
+    replace its outcome: no call settles a job and later unsettles it or changes its status, so
+    such a write comes from a read made before another reconcile, cancel or query settled the
+    job. A write with the same settled status (a cancel recording a lease release) still lands."""
+    return _assist_settled(current) and not (
+        _assist_settled(job) and job.get("status") == current.get("status")
+    )
+
+
 def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
     """Cancel: SIGTERM, then SIGKILL, the provider's process group while the provider is
     unreaped, each step bounded; True once it exited and its group was SIGKILLed and reaped
@@ -271,11 +289,15 @@ class _AssistResponseMixin(_ResponseBase):
     ) -> dict[str, Any]:
         """Write ``job`` (with ``drop_process``, also unregister the task's provider) in one step
         under the lock, only while the record still belongs to ``job``; otherwise leave the
-        record and the registered provider alone. Returns ``job`` either way."""
+        record and the registered provider alone and return ``job``. A record of ``job`` that
+        another call settled since ``job`` was read is kept, and returned (#3076)."""
         with self._assist_lock:
             if self._assist_job_is_current(task_id, job):
                 if drop_process:
                     self._assist_processes.pop(task_id, None)
+                current = self._assist_read(task_id)
+                if current is not None and _assist_settled_is_replaced(current, job):
+                    return current
                 return self._assist_write(job)
         return dict(job)
 

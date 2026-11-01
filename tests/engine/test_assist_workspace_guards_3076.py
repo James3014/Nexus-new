@@ -1336,3 +1336,171 @@ def test_reconcile_still_records_its_own_job(
     assert workspace.exists() is not settled
     if settled:
         assert (record["account_lease_released"], record["process_cleanup"]) == (True, True)
+
+
+# ---------------------------------------------------------------------------
+# A settled record stays settled: once another reconcile, cancel or query of the same job has
+# recorded it as COMPLETED, FAILED or CANCELLED without reconciliation, a write based on an
+# earlier read neither reopens it nor replaces its outcome (#3076)
+# ---------------------------------------------------------------------------
+
+
+def _settle_before_write_from(box, monkeypatch, caller: str, settled: dict) -> dict:
+    """Just before ``caller``'s record write takes the assist lock, another call of the same job
+    records it with ``settled`` (same job id); returns that settled record under "settled"."""
+    state: dict = {}
+
+    def hook(name: str) -> None:
+        # hook <- __enter__ <- _assist_write_current <- its caller
+        if name == "_assist_write_current" and sys._getframe(3).f_code.co_name == caller:
+            if "settled" not in state:
+                record = dict(box.gateway._assist_read(TASK))
+                record.update(settled)
+                state["settled"] = box.gateway._assist_write(record)
+
+    monkeypatch.setattr(
+        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
+    )
+    return state
+
+
+def _assert_settled_record_kept(box, state: dict, result: dict) -> None:
+    assert "settled" in state, "the call wrote its record without checking it under the lock"
+    expected = state["settled"]
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"], record["blocker"]) == (
+        expected["job_id"],
+        expected["status"],
+        expected["blocker"],
+    ), record
+    assert not record.get("reconciliation_required"), record
+    assert (result["job_id"], result["status"]) == (expected["job_id"], expected["status"]), result
+
+
+_SETTLED_BY_RECONCILE = {
+    "status": "FAILED",
+    "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+    "reconciliation_required": False,
+}
+_SETTLED_BY_CANCEL = {
+    "status": "CANCELLED",
+    "blocker": "ASSIST_CANCELLED",
+    "reconciliation_required": False,
+}
+
+
+@pytest.mark.parametrize(
+    "settled", [_SETTLED_BY_RECONCILE, _SETTLED_BY_CANCEL], ids=["reconciled", "cancelled"]
+)
+@pytest.mark.parametrize(("member_alive", "lease_result", "expected"), _RECONCILE_WRITES)
+def test_reconcile_keeps_a_job_settled_after_its_read(
+    box, monkeypatch, member_alive, lease_result, expected, settled
+):
+    _reconcile_pending_job(box, monkeypatch, member_alive=member_alive, lease_result=lease_result)
+    state = _settle_before_write_from(box, monkeypatch, "_task_reconcile", settled)
+    result = box.gateway._task_reconcile({"task_id": TASK})
+    _assert_settled_record_kept(box, state, result)
+
+
+@pytest.mark.parametrize("member_alive", [True, False], ids=["group-still-running", "group-gone"])
+def test_cancel_of_a_reconcile_pending_job_keeps_it_settled_after_its_read(
+    box, monkeypatch, member_alive
+):
+    _reconcile_pending_job(box, monkeypatch, member_alive=member_alive, lease_result=None)
+    state = _settle_before_write_from(box, monkeypatch, "_assist_cancel", _SETTLED_BY_RECONCILE)
+    result = box.gateway._assist_cancel(TASK)
+    _assert_settled_record_kept(box, state, result)
+
+
+def test_cancel_of_a_running_job_keeps_the_outcome_a_query_recorded_meanwhile(box, monkeypatch):
+    _launch_old_job(box, monkeypatch)
+    completed = {"status": "COMPLETED", "blocker": None, "reconciliation_required": False}
+    state = _settle_before_write_from(box, monkeypatch, "_assist_cancel", completed)
+    result = box.gateway._assist_cancel(TASK)
+    _assert_settled_record_kept(box, state, result)
+
+
+def test_query_keeps_a_job_settled_after_its_read(box, monkeypatch):
+    """The query finds the provider gone without an exit marker (it would ask for
+    reconciliation); a reconcile settled the job after the query read it."""
+    box.gateway._assist_write(_job(box, str(_workspace(box.root))))
+    group = _FakeGroup(member_alive=False)
+    monkeypatch.setattr(os, "kill", group.kill)
+    state = _settle_before_write_from(box, monkeypatch, "_assist_refresh", _SETTLED_BY_RECONCILE)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None
+    _assert_settled_record_kept(box, state, result)
+
+
+def test_cancel_still_records_the_lease_release_of_a_settled_job(box, monkeypatch):
+    box.gateway._assist_write(
+        _job(
+            box,
+            "",
+            pid=None,
+            pgid=None,
+            account_lease_id_hash="lease-old",
+            account_lease_released=False,
+            **_SETTLED_BY_RECONCILE,
+        )
+    )
+
+    def release(task_id, job) -> bool:
+        job.update({"account_lease_released": True, "account_lease_cleanup_status": "RELEASED"})
+        return True
+
+    monkeypatch.setattr(box.gateway, "_release_assist_account_claim", release)
+    result = box.gateway._assist_cancel(TASK)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["status"], record["account_lease_released"]) == ("FAILED", True), record
+    assert (result["job_id"], result["status"]) == ("assist-3076-ws", "FAILED"), result
+
+
+_UNSETTLED = {"status": "UNKNOWN_REQUIRES_RECONCILE", "reconciliation_required": True}
+
+
+# (record on disk, record written, whether the write lands)
+_SETTLED_WRITES = [
+    pytest.param(_SETTLED_BY_RECONCILE, _UNSETTLED, False, id="settled-not-reopened"),
+    pytest.param(
+        _SETTLED_BY_CANCEL,
+        {**_SETTLED_BY_CANCEL, "reconciliation_required": True},
+        False,
+        id="settled-not-marked-for-reconciliation",
+    ),
+    pytest.param(
+        {"status": "COMPLETED", "blocker": None, "reconciliation_required": False},
+        _SETTLED_BY_CANCEL,
+        False,
+        id="settled-outcome-not-replaced",
+    ),
+    pytest.param(
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": False},
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": True},
+        True,
+        id="same-outcome-updated",
+    ),
+    pytest.param(_UNSETTLED, _SETTLED_BY_RECONCILE, True, id="unsettled-settled"),
+    pytest.param(
+        {**_SETTLED_BY_CANCEL, "reconciliation_required": True},
+        _SETTLED_BY_RECONCILE,
+        True,
+        id="pending-cancel-reconciled",
+    ),
+    pytest.param({"status": "RUNNING"}, _UNSETTLED, True, id="running-held"),
+]
+
+
+@pytest.mark.parametrize(("on_disk", "written", "lands"), _SETTLED_WRITES)
+def test_record_write_of_the_same_job_keeps_a_settled_record(box, on_disk, written, lands):
+    stored = box.gateway._assist_write(_job(box, "", **on_disk))
+    job = _job(box, "", **written)
+    result = box.gateway._assist_write_current(TASK, job)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    expected = {**stored, **written} if lands else stored
+    for key in ("status", "blocker", "reconciliation_required", "account_lease_released"):
+        assert record.get(key) == expected.get(key), (key, record)
+    assert result.get("status") == expected.get("status"), result
