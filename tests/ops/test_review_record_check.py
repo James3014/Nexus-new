@@ -3423,3 +3423,86 @@ def test_a_withdrawn_accept_on_a_bold_line_still_names_the_section_family():
         _c(CLAUDE_AT_HEAD),
     ]
     assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "files, section, others",
+    [
+        (
+            RISKY,
+            f"Head reviewed: {HEAD}\n**Codex review**\n- r3 REJECT@{HEAD[:9]}: one finding\n"
+            f"- r2 @{OLD[:9]}: ACCEPT not current\n- Rebutted: see #1\n",
+            [CLAUDE_AT_HEAD],
+        ),
+        (
+            RISKY,
+            f"Head reviewed: {HEAD}\n**Gemini review**\n- r3 REJECT@{HEAD[:9]}: one finding\n"
+            f"- r2 @{OLD[:9]}: ACCEPT not current\n- Rebutted: see #1\n",
+            [CLAUDE_AT_HEAD],
+        ),
+    ],
+)
+def test_a_negated_accept_still_ends_the_section_line_buffer(files, section, others):
+    # A "not" right after an ACCEPT withdraws it but, as on main, the line still ends the
+    # line buffer: the rebuttal line below never joins the round-3 REJECT above it.
+    comments = [_c(section)] + [_c(body) for body in others]
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
+    "withdrawn",
+    [
+        "r1: ACCEPT@{head} (retracted; prior {old})",
+        "r1: <del>ACCEPT@{head}</del> prior {old}",
+        "r1: ACCEPT at {head} — no longer stands, see {old}",
+        "r1: ~~ACCEPT@{head}~~ vs {old}",
+        "r1: ACCEPT@{head} withdrawn (old run {old})",
+    ],
+)
+@pytest.mark.parametrize(
+    "model, files, others, status",
+    [
+        ("Codex", RISKY, [CLAUDE_AT_HEAD], "MISSING_CROSS_MODEL"),
+        ("Claude", DOCS, [], "MISSING_RECORD"),
+    ],
+)
+def test_a_withdrawn_round_one_accept_still_starts_a_new_numbering(
+    withdrawn, model, files, others, status
+):
+    # Main read the withdrawn r1 ACCEPT as a round 1, which starts a new numbering, so the
+    # older r3 ACCEPT does not outrank the new r2 REJECT; a withdrawn ACCEPT keeps that.
+    line = withdrawn.format(head=HEAD, old=OLD[:9])
+    comments = [
+        _c(f"{model} r3: ACCEPT@{HEAD}\n"),
+        _c(f"{model} {line}\n{model} r2: REJECT@{HEAD} data loss\n"),
+    ] + [_c(body) for body in others]
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "line, status",
+    [
+        # Three tildes strike nothing, and a closing tag right before the token ends there.
+        (f"Claude review: a~~~b ACCEPT at {HEAD}~~", "OK"),
+        (f"Claude r2: ~~~ACCEPT at {HEAD}~~~", "OK"),
+        (f"Claude review: <del>old</del>ACCEPT at {HEAD}", "OK"),
+        # A tag with attributes still strikes.
+        (f'Claude review: <del title="x">r2 ACCEPT at {HEAD}</del>', "MISSING_RECORD"),
+    ],
+)
+def test_strike_marks_with_three_tildes_adjacent_tags_and_attributes(line, status):
+    assert rrc.evaluate(HEAD, DOCS, [_c(line + "\n")], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        " (withdrawn findings: none)",
+        " — denied-path tests added",
+        "; revoked-token handling verified",
+        " — retracted claims in #12 checked",
+    ],
+)
+def test_a_withdrawal_word_used_as_an_adjective_does_not_withdraw(tail):
+    body = f"**Independent Claude review** (Claude Opus 5.5): **ACCEPT at {HEAD}**{tail}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"

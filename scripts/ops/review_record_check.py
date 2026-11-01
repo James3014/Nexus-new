@@ -268,16 +268,19 @@ _PRE_DENY = re.compile(
 # Words right after the token (before a sha, punctuation or a parenthesis) that withdraw it.
 _POST_DENY = re.compile(
     r"^\s*(?:after|pending|withheld|blocked|only|if|unless|once|when|later|is|was|would|will|should"
-    r"|could|may|might|needed|required|expected|requested|awaited|not\b|\?)",
+    r"|could|may|might|needed|required|expected|requested|awaited|\?)",
     re.IGNORECASE,
 )
+_POST_NOT = re.compile(r"^\s*not\b", re.IGNORECASE)  # "ACCEPT not given yet" (#3041)
 # A withdrawal right after the token, past its own sha and any punctuation, dash or
 # opening parenthesis: "ACCEPT withdrawn", "ACCEPT at <sha> (retracted)", "ACCEPT — no
-# longer stands" (#3041). Participles only: "ACCEPT; withdraws the r1 finding" is not one.
+# longer stands" (#3041). Participles only: "ACCEPT; withdraws the r1 finding" is not one,
+# and neither is one used as an adjective ("withdrawn findings: none", "denied-path tests").
 _POST_WITHDRAWN = re.compile(
     r"\s*(?:(?:@|\bat\b|\bon\b)\s*[0-9a-f]{7,40}\b)?[\s.,;:!\-\u2013\u2014(\[]*"
     r"(?:withdrawn|revoked|retracted|rescinded|denied"
-    r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b",
+    r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b"
+    r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending)\b))",
     re.IGNORECASE,
 )
 # Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
@@ -578,16 +581,22 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
     ACCEPT as before #3041, for the parse structure (section breaks and label lines), which
     a withdrawal must not change.
     """
+    return [clause for clause, withdrawn in _verdict_reads(line) if keep_withdrawn or not withdrawn]
+
+
+def _verdict_reads(line: str) -> list[tuple[str, bool]]:
+    """``verdict_clauses`` as before #3041, each with whether it is withdrawn or struck
+    through: a withdrawal never changes how the other clauses on the line are read."""
     if _SKIP_LINE.match(line):
         return []
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []
     plain_line = _plain(line, keep_parens=True)
     if len(_ANY_VERDICT_TOKEN.findall(plain_line)) > MAX_VERDICTS_PER_LINE:
         return []
     consumed = 0
     prev_token_end = 0
     aside_closes: list[int | None] | None = None
-    struck = [] if keep_withdrawn else _struck_spans(plain_line)
+    struck = _struck_spans(plain_line)
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
@@ -595,8 +604,7 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
         if span is None:
             continue
         token_at = start + span[0]
-        if any(begin <= token_at < end for begin, end in struck):
-            continue  # "~~ACCEPT at <sha>~~": struck through, withdrawn
+        withdrawn = any(begin <= token_at < end for begin, end in struck)  # "~~ACCEPT~~"
         window_start = prev_token_end
         asides: dict[int, int] = {}  # closing index -> start of its last round marker
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
@@ -637,8 +645,11 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
         head_of_after = _STOP.split(after, 1)[0]
         if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
             continue
-        if not keep_withdrawn and start >= 0 and _POST_WITHDRAWN.match(plain_line, start + span[1]):
-            continue  # "ACCEPT withdrawn — found a data-loss bug", "ACCEPT (retracted)"
+        # "ACCEPT withdrawn — found a data-loss bug", "ACCEPT (retracted)", "ACCEPT not given"
+        withdrawn = withdrawn or bool(_POST_NOT.match(head_of_after))
+        withdrawn = withdrawn or (
+            start >= 0 and bool(_POST_WITHDRAWN.match(plain_line, start + span[1]))
+        )
         if not _hex_tokens(clause):
             # A verdict not bound by its own clause borrows the sha from later on the
             # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
@@ -649,7 +660,7 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
             rest_of_line = rest_of_line[: next_token.start()] if next_token else rest_of_line
             if _hex_tokens(rest_of_line) and _POST_LINE_DENY.search(rest_of_line):
                 continue
-        out.append(clause)
+        out.append((clause, withdrawn))
     return out
 
 
@@ -1332,7 +1343,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
 
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
-        accept_clauses: list[str] = []
+        reads: list[tuple[str, bool]] = []
         if not in_fence:
             label = _label_family(line)
             disabled = _label_family(line, ignore_status=True) if label is None else None
@@ -1356,14 +1367,14 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             if not section:
                 section_start = index
             section.append(line)
-            accept_clauses = verdict_clauses(line)
+            reads = _verdict_reads(line)
         line_events: list[tuple[int, dict[str, Any]]] = []
         reject_head = _reject_label_binds(reject_labels, index, head)
         if not rejects_only:
             comment_head = _label_binds(labels, index, head)
             plain_line = _plain(line, keep_parens=True)
             consumed = 0
-            for clause in accept_clauses:
+            for clause, withdrawn in reads:
                 span = _verdict_match(clause)
                 start = plain_line.find(clause, consumed)
                 consumed = start + len(clause) if start >= 0 else consumed
@@ -1387,7 +1398,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         {
                             "family": family,
                             "reviewer": _reviewer_word(before) or header_reviewer,
-                            "kind": "accept",
+                            # A withdrawn ACCEPT still numbers its round, as before #3041.
+                            "kind": "round" if withdrawn else "accept",
                             "round": int(rounds[-1]) if rounds else None,
                             "comment": 0,
                             "line": clause.strip(),
@@ -1464,7 +1476,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     ))
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
-        if not accept_clauses and (in_fence or not verdict_clauses(line, keep_withdrawn=True)):
+        if not reads:
             continue  # a withdrawn ACCEPT still ends the section's line buffer, as before
         close_section()
         section = []  # the header family persists: a reviewer block lists its rounds
