@@ -1308,6 +1308,10 @@ class OpenCodeWorkerTransport:
                 error=str(exc),
             )
         except subprocess.TimeoutExpired as exc:
+            # No SIGTERM grace before the group SIGKILL (#3076): a timed-out run is
+            # OUTCOME_UNKNOWN whatever OpenCode does on SIGTERM, ``-f`` names an input file it
+            # does not write, and a reconcile accepts only a reply OpenCode already committed to
+            # its SQLite store with finish "stop", which a SIGKILL cannot tear.
             return OpenCodeRunResult(
                 status="OPENCODE_OUTCOME_UNKNOWN",
                 stdout_sha256=_sha256(exc.output or ""),

@@ -3773,8 +3773,21 @@ DSH_TURN_WALL_CLOCK_SECONDS = 7200.0
 DSH_TURN_WALL_CLOCK_EXIT = 124
 DSH_OUTPUT_POLL_SECONDS = 0.2
 # Once DSH's group is killed, how long its output may still take to reach EOF (a process that
-# left the group with setsid() can hold the pipe; it is closed after this).
+# left the group with setsid() can hold the pipe; it is closed after this, and the turn records
+# DSH_OUTPUT_DRAIN_TIMEOUT).
 DSH_OUTPUT_DRAIN_SECONDS = 5.0
+# How long DSH may take, once it has exited or been sent SIGKILL, to be seen exited (unreaped)
+# so that its group can be killed and it can be reaped (#3076).
+DSH_KILL_SETTLE_SECONDS = 5.0
+# The exit code of a turn whose DSH exited 0 but whose cleanup failed (#3076): a process of the
+# turn may still be running, so the turn is not taken as a success.
+DSH_TURN_CLEANUP_FAILED_EXIT = 125
+# Reason codes of a failed cleanup (#3076), in the turn summary as ``cleanup_reason_codes``.
+DSH_REAPING_UNAVAILABLE = "DSH_PROCESS_GROUP_REAPING_UNAVAILABLE"
+DSH_GROUP_MEMBER_SURVIVED = "DSH_GROUP_MEMBER_SURVIVED"
+DSH_LEADER_NOT_EXITED = "DSH_LEADER_NOT_EXITED"
+DSH_REAPED_ELSEWHERE = "DSH_REAPED_ELSEWHERE"
+DSH_OUTPUT_DRAIN_TIMEOUT = "DSH_OUTPUT_DRAIN_TIMEOUT"
 
 
 class NoProgressWatchdog:
@@ -3876,12 +3889,62 @@ def _dsh_exited(pid: int) -> bool:
 
 
 def _signal_dsh_group(proc: subprocess.Popen, sig: int) -> None:
-    """Signal DSH's process group; only called while DSH is unreaped (its id is still its own)."""
+    """Signal DSH's process group; only called while DSH still runs, so is unreaped (its id is
+    still its own). Whether the group is then empty is confirmed by ``_kill_dsh_group_and_reap``."""
     try:
         os.killpg(proc.pid, sig)
     except (ProcessLookupError, PermissionError):
         # Nothing left, or (macOS) only the exited, unreaped DSH is left in the group.
         pass
+
+
+def _dsh_reaping_refusal() -> str | None:
+    """Why DSH cannot be kept unreaped until its process group is killed, or None (#3076).
+
+    ``nexus.core.argv_command.require_child_stays_unreaped`` (see ``_argv_command``): SIGCHLD not
+    at SIG_DFL (SIG_IGN lets the kernel reap DSH, a handler may reap it, either before its group
+    is signalled), or no way to wait for DSH without reaping it. ``argv_command`` not loadable
+    from this script's tree is a refusal too: it is what kills the group and confirms it empty."""
+    try:
+        _argv_command().require_child_stays_unreaped()
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def _kill_dsh_group_and_reap(proc: subprocess.Popen, failures: list[str]) -> None:
+    """SIGKILL DSH's process group, confirm that no member is left, then reap DSH (#3076).
+
+    Called once DSH has exited or been sent SIGKILL. Goes through
+    ``argv_command.kill_group_if_exited``, which signals the group only once DSH is seen exited
+    and still unreaped (on macOS before Python 3.13, through kqueue, only once DSH is a zombie,
+    not while it is still exiting), raises PermissionError for a member alive after SIGKILL or a
+    group it cannot list, and ChildProcessError, with nothing signalled, for a DSH reaped
+    elsewhere. Retried for ``DSH_KILL_SETTLE_SECONDS`` while DSH is not yet seen exited; DSH
+    still running then is left unreaped. A failure is appended to ``failures``, not raised."""
+    kill_group_if_exited = _argv_command().kill_group_if_exited
+    deadline = time.monotonic() + DSH_KILL_SETTLE_SECONDS
+    while True:
+        try:
+            if kill_group_if_exited(proc):
+                return
+        except PermissionError as exc:
+            failures.append(DSH_GROUP_MEMBER_SURVIVED)
+            print(f"nexus-dsh-workflow: {DSH_GROUP_MEMBER_SURVIVED}: {exc}", file=sys.stderr)
+            return
+        except ChildProcessError as exc:
+            failures.append(DSH_REAPED_ELSEWHERE)
+            print(f"nexus-dsh-workflow: {DSH_REAPED_ELSEWHERE}: {exc}", file=sys.stderr)
+            return
+        if time.monotonic() >= deadline:
+            failures.append(DSH_LEADER_NOT_EXITED)
+            print(
+                f"nexus-dsh-workflow: {DSH_LEADER_NOT_EXITED}: DSH {proc.pid} still runs "
+                "after SIGKILL; left unreaped",
+                file=sys.stderr,
+            )
+            return
+        time.sleep(DSH_OUTPUT_POLL_SECONDS)
 
 
 def _run_dsh_supervised(
@@ -3892,6 +3955,7 @@ def _run_dsh_supervised(
     log_path: Path,
     watchdog: NoProgressWatchdog | None,
     wall_clock_seconds: float | None = None,
+    cleanup_failures: list[str] | None = None,
 ) -> tuple[int, list[str]]:
     """Run DSH writing its merged output to ``log_path``; stop it on no progress or past the
     wall clock.
@@ -3899,10 +3963,22 @@ def _run_dsh_supervised(
     DSH leads its own process group (#3052). Stopping sends the group SIGTERM, then SIGKILL after
     a grace period. Past ``wall_clock_seconds`` (default ``DSH_TURN_WALL_CLOCK_SECONDS``) the
     exit code is ``DSH_TURN_WALL_CLOCK_EXIT`` whatever DSH returned. Once DSH has exited or been
-    stopped, its whole group gets SIGKILL before DSH is reaped, so a background child of DSH
-    neither outlives the turn nor, by holding the output pipe, keeps the read waiting.
+    stopped, its whole group gets SIGKILL and is confirmed empty before DSH is reaped
+    (``_kill_dsh_group_and_reap``), so a background child of DSH neither outlives the turn nor,
+    by holding the output pipe, keeps the read waiting.
+
+    Refused before DSH is spawned, with DshWorkflowError ``DSH_REAPING_UNAVAILABLE``, when DSH
+    could not be kept unreaped until then (``_dsh_reaping_refusal``, #3076). A failed cleanup
+    (a group member alive after SIGKILL, DSH reaped elsewhere or not exiting, or output still
+    held open ``DSH_OUTPUT_DRAIN_SECONDS`` after the kill by a process that left the group) is
+    appended to ``cleanup_failures`` as a reason code, and a DSH exit code of 0 becomes
+    ``DSH_TURN_CLEANUP_FAILED_EXIT``.
     Returns (exit code, no-progress reason codes); reasons are empty when not stopped for that.
     """
+    refusal = _dsh_reaping_refusal()
+    if refusal is not None:
+        raise DshWorkflowError(DSH_REAPING_UNAVAILABLE, f"DSH was not started: {refusal}")
+    failures = cleanup_failures if cleanup_failures is not None else []
     limit = DSH_TURN_WALL_CLOCK_SECONDS if wall_clock_seconds is None else wall_clock_seconds
     deadline = time.monotonic() + limit
     with log_path.open("wb") as sink:
@@ -3960,6 +4036,7 @@ def _run_dsh_supervised(
                     consume(data)
 
         timed_out = False
+        cleaned = False
         try:
             with selectors.DefaultSelector() as selector:
                 selector.register(fd, selectors.EVENT_READ)
@@ -3968,16 +4045,35 @@ def _run_dsh_supervised(
                     timed_out = outcome == "deadline"
                     feeding = False
                     _signal_dsh_group(proc, signal.SIGTERM)
-                    pump(time.monotonic() + NO_PROGRESS_TERMINATE_GRACE_SECONDS, stop_on_exit=True)
-                # DSH has exited (or outlived the grace): kill its group before reaping it, then
-                # drain what is left; EOF comes once nothing holds the pipe.
-                _signal_dsh_group(proc, signal.SIGKILL)
-                pump(time.monotonic() + DSH_OUTPUT_DRAIN_SECONDS, stop_on_exit=False)
+                    grace = time.monotonic() + NO_PROGRESS_TERMINATE_GRACE_SECONDS
+                    if pump(grace, stop_on_exit=True) != "exited":
+                        _signal_dsh_group(proc, signal.SIGKILL)  # DSH still runs: unreaped
+                # DSH has exited (or was sent SIGKILL): kill its group and confirm it empty,
+                # then reap DSH; then drain what is left: EOF comes once nothing holds the pipe.
+                cleaned = True
+                _kill_dsh_group_and_reap(proc, failures)
+                if pump(time.monotonic() + DSH_OUTPUT_DRAIN_SECONDS, stop_on_exit=False) == (
+                    "deadline"
+                ):
+                    failures.append(DSH_OUTPUT_DRAIN_TIMEOUT)
         finally:
-            _signal_dsh_group(proc, signal.SIGKILL)  # DSH is still unreaped here
+            if not cleaned:
+                # Interrupted before the group was killed. DSH still running is unreaped, so
+                # its group id is its own; one reaped elsewhere (ChildProcessError) is never
+                # signalled, and is reported by the cleanup.
+                try:
+                    if not _dsh_exited(proc.pid):
+                        _signal_dsh_group(proc, signal.SIGKILL)
+                except ChildProcessError:
+                    pass
+                _kill_dsh_group_and_reap(proc, failures)
             proc.stdout.close()
-            returncode = proc.wait()
-        return (DSH_TURN_WALL_CLOCK_EXIT if timed_out else returncode), reasons
+        if timed_out:
+            return DSH_TURN_WALL_CLOCK_EXIT, reasons
+        returncode = proc.returncode
+        if returncode is None or (returncode == 0 and failures):
+            return DSH_TURN_CLEANUP_FAILED_EXIT, reasons
+        return returncode, reasons
 
 
 def _run_phase_turn(
@@ -4082,6 +4178,19 @@ def _run_phase_turn(
         blocked["route"] = route
         blocked_path = persist_preflight(root, blocked)
         return EXIT_BLOCKED, {**blocked, "receipt_path": str(blocked_path)}
+    reaping_refusal = _dsh_reaping_refusal()
+    if reaping_refusal is not None:
+        # DSH's process group could not be killed before DSH is reaped (#3076): not started.
+        blocked = _blocked_preflight(
+            subject,
+            reason_code=DSH_REAPING_UNAVAILABLE,
+            detail=f"DSH was not started: {reaping_refusal}",
+        )
+        blocked["invocation"] = "start-phase"
+        blocked["phase"] = phase
+        blocked["route"] = route
+        blocked_path = persist_preflight(root, blocked)
+        return EXIT_BLOCKED, {**blocked, "receipt_path": str(blocked_path)}
     dsh_argv = [args.dsh_bin, "--profile", args.profile]
     for patch in patches:
         dsh_argv.extend(["--patch", patch])
@@ -4104,8 +4213,14 @@ def _run_phase_turn(
         if np_steps > 0 or np_compactions > 0
         else None
     )
+    cleanup_failures: list[str] = []
     dsh_exit, no_progress_reasons = _run_dsh_supervised(
-        dsh_argv, cwd=str(repo_root), env=env, log_path=log_path, watchdog=watchdog
+        dsh_argv,
+        cwd=str(repo_root),
+        env=env,
+        log_path=log_path,
+        watchdog=watchdog,
+        cleanup_failures=cleanup_failures,
     )
     proc = argparse.Namespace(returncode=dsh_exit)
     phase_wall_ms = int((time.monotonic() - phase_started) * 1000)
@@ -4150,13 +4265,14 @@ def _run_phase_turn(
         session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
         turn_subject = {**subject, "session_id": session_id}
         forced = "SESSION_NOT_OBSERVED"
-    if proc.returncode != 0 or forced or no_progress_reasons:
+    if proc.returncode != 0 or forced or no_progress_reasons or cleanup_failures:
         turn = record_failed_turn(
             root,
             turn_subject,
             pre=pre_turn,
             exit_code=EXIT_NO_PROGRESS if no_progress_reasons else proc.returncode,
-            force_dirty_reason=forced,
+            # A process of the turn may still be running and writing (#3076).
+            force_dirty_reason=forced or (cleanup_failures[0] if cleanup_failures else None),
         )
     else:
         turn = _write_turn_state(
@@ -4179,6 +4295,8 @@ def _run_phase_turn(
         summary["canonical_agy_operations"] = canonical_agy_operations
     if binding_error:
         summary["binding_error"] = binding_error
+    if cleanup_failures:
+        summary["cleanup_reason_codes"] = cleanup_failures
     if no_progress_reasons:
         summary["decision"] = "NO_PROGRESS"
         summary["reason_codes"] = no_progress_reasons
