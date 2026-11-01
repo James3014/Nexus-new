@@ -292,3 +292,34 @@ def test_trusted_universe_refuses_candidate_config(pinned_core, tmp_path):
     assert "CONFIG_UNTRUSTED" in log or CONFIG_REASONS & set(summary["reason_codes"]), log
     assert not candidate_marker.exists()
     assert not base_marker.exists()
+
+
+def test_candidate_config_from_another_trusted_ref_is_refused(pinned_core, tmp_path):
+    """The candidate config names another committed ref whose config it matches, so Core would
+    treat it as a trusted base-ref config; the base-commit pin still refuses it before any
+    verifier runs."""
+    repo, base_marker = _repo(tmp_path)
+    other_marker = tmp_path / "other-ref-verifier-ran"
+    other_config = _config("other-trusted", other_marker)
+    _git(repo, "checkout", "-q", "-b", "other-trusted", "main")
+    (repo / ".nexus-core/config.toml").write_text(other_config)
+    _git(repo, "commit", "-q", "-am", "config on another ref")
+    other_sha = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+    (repo / ".nexus-core/config.toml").write_text(other_config)
+    _git(repo, "commit", "-q", "-am", "candidate config")
+    (repo / "a.txt").write_text("b\n")
+    _git(repo, "commit", "-q", "-am", "candidate change")
+
+    proc, summary = _run_tool(tmp_path, repo, pinned_core)
+
+    log = _log(summary)
+    assert summary["base_sha"] != other_sha
+    assert proc.returncode == 1, (summary, log)
+    assert summary["status"] != "VERIFIED", (summary, log)
+    assert "CONFIG_SOURCE_MISMATCH" in log or "CONFIG_SOURCE_MISMATCH" in summary["reason_codes"], (
+        summary,
+        log,
+    )
+    assert not other_marker.exists()
+    assert not base_marker.exists()
