@@ -248,3 +248,220 @@ def test_json_out_write_failure_keeps_exit_code(env):
     assert proc.returncode == 0
     assert out["status"] == "VERIFIED"
     assert "warning: cannot write --json-out" in proc.stderr
+
+
+# --- materials: trusted base lock files only, pinned entries only, timeout ---
+
+GOOD_RUNTIME = (
+    "# comment\n"
+    "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@" + "1" * 40 + "\n"
+)
+GOOD_LEARNING = (
+    "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@" + "2" * 40 + "\n"
+)
+
+FAKE_UV = """#!/usr/bin/env python3
+import json, os, subprocess, sys, time
+from pathlib import Path
+
+args = sys.argv[1:]
+log = Path(os.environ["FAKE_UV_LOG"])
+entry = {"args": args, "cwd": os.getcwd()}
+if args[:1] == ["venv"]:
+    env_dir = Path(args[-1])
+    (env_dir / "bin").mkdir(parents=True, exist_ok=True)
+    (env_dir / "bin" / "python").symlink_to(sys.executable)
+elif args[:2] == ["pip", "install"]:
+    req = args[args.index("--requirement") + 1]
+    entry["requirement"] = Path(req).read_text()
+    if os.environ.get("FAKE_UV_SLEEP"):
+        child = subprocess.Popen(["sleep", "60"])
+        Path(os.environ["FAKE_UV_PIDS"]).write_text(f"{os.getpid()} {child.pid}")
+        time.sleep(60)
+with log.open("a") as fh:
+    fh.write(json.dumps(entry) + "\\n")
+"""
+
+
+def _load_module():
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("nexus_core_issue_check_local", str(SCRIPT))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _with_requirements(env, runtime: str = GOOD_RUNTIME, learning: str = GOOD_LEARNING):
+    repo = env["repo"]
+    (repo / "requirements").mkdir(exist_ok=True)
+    (repo / "requirements/canonical-runtime.txt").write_text(runtime)
+    (repo / "requirements/canonical-learning.txt").write_text(learning)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "requirements")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin", "main")
+    bindir = env["tmp"] / "fakebin"
+    bindir.mkdir(exist_ok=True)
+    uv = bindir / "uv"
+    uv.write_text(FAKE_UV)
+    uv.chmod(uv.stat().st_mode | stat.S_IXUSR)
+    env["uv_log"] = env["tmp"] / "uv.log"
+    env["env"] = dict(
+        env["env"],
+        PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+        FAKE_UV_LOG=str(env["uv_log"]),
+        FAKE_UV_PIDS=str(env["tmp"] / "uv.pids"),
+    )
+    return env
+
+
+def run_materials(env, *extra: str, **envover: str):
+    cmd = [
+        sys.executable,
+        str(SCRIPT),
+        "--issue",
+        "7",
+        "--repo-root",
+        str(env["repo"]),
+        "--certify-bin",
+        str(env["certify"]),
+        "--cache-root",
+        str(env["tmp"] / "cache"),
+        "--output-dir",
+        str(env["tmp"] / "out"),
+        "--no-fetch",
+        *extra,
+    ]
+    penv = dict(env["env"], PYTHONDONTWRITEBYTECODE="1", **envover)
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=penv, timeout=120)
+    return proc, json.loads(proc.stdout)
+
+
+def _uv_calls(env):
+    if not env["uv_log"].exists():
+        return []
+    return [json.loads(line) for line in env["uv_log"].read_text().splitlines()]
+
+
+def test_materials_installed_from_base_not_head(env):
+    """A candidate head that edits the lock files cannot change what gets installed."""
+    env = _with_requirements(env)
+    repo = env["repo"]
+    (repo / "requirements/canonical-runtime.txt").write_text(GOOD_RUNTIME + "-e ./evil\n")
+    (repo / "requirements/canonical-learning.txt").write_text(
+        "--index-url https://example.invalid/simple\nx\n"
+    )
+    git(repo, "commit", "-q", "-am", "head edits requirements")
+    proc, out = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    installs = [c for c in _uv_calls(env) if c["args"][:2] == ["pip", "install"]]
+    assert [c["requirement"] for c in installs] == [
+        GOOD_LEARNING,
+        GOOD_RUNTIME.split("\n", 1)[1],
+    ]
+    for call in installs:
+        assert "evil" not in call["requirement"]
+        assert "index-url" not in call["requirement"]
+        req = Path(call["args"][call["args"].index("--requirement") + 1])
+        assert repo not in req.parents
+        assert Path(call["cwd"]).resolve() != repo.resolve()
+        assert "--require-hashes" not in call["args"]
+
+
+@pytest.mark.parametrize(
+    "bad_line",
+    [
+        "-e ./evil",
+        "-r other.txt",
+        "-c constraints.txt",
+        "--index-url https://example.invalid/simple",
+        "--extra-index-url https://example.invalid/simple",
+        "./local-pkg",
+        "/abs/local-pkg",
+        "file:///tmp/pkg",
+        "pkg @ file:///tmp/pkg",
+        "pkg",
+        "pkg>=1.0",
+        "pkg==1.0",
+        "pkg @ git+https://github.com/James3014/nexus-runtime.git@main",
+        "pkg @ git+https://github.com/other/nexus-runtime.git@" + "1" * 40,
+        "pkg @ git+https://github.com/James3014/x.git@" + "1" * 40 + "#subdirectory=y",
+        "pkg @ https://example.invalid/pkg-1.0.tar.gz",
+    ],
+)
+def test_materials_untrusted_base_line_fails_closed_before_install(env, bad_line):
+    env = _with_requirements(env, runtime=GOOD_RUNTIME + bad_line + "\n")
+    proc, out = run_materials(env)
+    assert proc.returncode == 2
+    assert out["error_code"] == "MATERIALS_UNTRUSTED"
+    assert not [c for c in _uv_calls(env) if c["args"][:1] in (["venv"], ["pip"])]
+    assert not env["calls"].exists()
+
+
+def test_materials_hash_pinned_uses_require_hashes(env):
+    hashed = "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
+    env = _with_requirements(env, runtime=hashed)
+    proc, out = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    installs = [c for c in _uv_calls(env) if c["args"][:2] == ["pip", "install"]]
+    runtime_call = installs[1]
+    assert runtime_call["requirement"] == "pkg==1.0 --hash=sha256:" + "a" * 64 + "\n"
+    assert "--require-hashes" in runtime_call["args"]
+    assert "--require-hashes" not in installs[0]["args"]
+
+
+def test_materials_cache_reused_only_after_complete_install(env):
+    env = _with_requirements(env)
+    proc, _ = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    first = len(_uv_calls(env))
+    proc, _ = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert len(_uv_calls(env)) == first
+
+
+def _pid_alive(pid: int) -> bool:
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+    ).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def test_materials_install_timeout_kills_group_and_fails_closed(env):
+    import time
+
+    env = _with_requirements(env)
+    started = time.monotonic()
+    proc, out = run_materials(env, "--materials-timeout", "3", FAKE_UV_SLEEP="1")
+    assert time.monotonic() - started < 30
+    assert proc.returncode == 2
+    assert out["error_code"] == "MATERIALS_FAILED"
+    assert "timed out" in out["error"]
+    assert not env["calls"].exists()
+    pids = [int(p) for p in (env["tmp"] / "uv.pids").read_text().split()]
+    deadline = time.monotonic() + 10
+    while any(_pid_alive(p) for p in pids) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert not any(_pid_alive(p) for p in pids)
+    # The half-built venv is not reused: the next run rebuilds it.
+    (env["tmp"] / "uv.log").unlink()
+    proc, _ = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert [c["args"][0] for c in _uv_calls(env)][:1] == ["venv"]
+
+
+def test_trusted_requirements_normalizes_and_rejects():
+    mod = _load_module()
+    assert mod.trusted_requirements(GOOD_RUNTIME, "r.txt") == GOOD_RUNTIME.split("\n", 1)[1]
+    with pytest.raises(mod.LocalCheckError) as exc:
+        mod.trusted_requirements("# only a comment\n", "r.txt")
+    assert exc.value.code == "MATERIALS_UNTRUSTED"
+    with pytest.raises(mod.LocalCheckError) as exc:
+        mod.trusted_requirements(GOOD_LEARNING.rstrip("\n") + "\x0c-e ./evil\n", "r.txt")
+    assert exc.value.code == "MATERIALS_UNTRUSTED"
+    with pytest.raises(mod.LocalCheckError) as exc:
+        mod.trusted_requirements("pkg==1.0 \\", "r.txt")
+    assert exc.value.code == "MATERIALS_UNTRUSTED"
