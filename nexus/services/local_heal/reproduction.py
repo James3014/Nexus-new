@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Tuple
 
 from nexus.core.contained_write import write_text_in_root
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
@@ -65,15 +70,16 @@ class ReproductionRunner:
     def workspace_identity(self) -> tuple[str, bool]:
         """Bind source identity to Git HEAD and tamper-sensitive workspace state."""
         try:
+            # The repro script may have written repo_dir, .git included: git runs hardened and
+            # only in a repository rooted at repo_dir whose config names no program.
+            root = Path(self.repo_dir).resolve()
+            git_dir = repository_git_dir(root)
+            if git_dir is None or repository_config_can_start_a_program(root, git_dir):
+                return "", False
 
             def git(*args: str) -> str:
-                result = subprocess.run(
-                    ["git", *args],
-                    cwd=str(self.repo_dir),
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
+                result = run_hardened_git(root, *args, git_dir=git_dir)
+                result.check_returncode()
                 return result.stdout
 
             head = git("rev-parse", "HEAD").strip()
