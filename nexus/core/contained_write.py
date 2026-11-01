@@ -31,6 +31,7 @@ __all__ = [
     "contained_relative_path",
     "copy_file_in_root",
     "copy_tree_in_root",
+    "read_bytes_in_root",
     "read_text_in_root",
     "write_text_in_root",
 ]
@@ -165,10 +166,10 @@ def write_text_in_root(
         os.close(parent)
 
 
-def read_text_in_root(
+def read_bytes_in_root(
     root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
-) -> str:
-    """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
+) -> bytes:
+    """Read the bytes of ``root/relative``, never through a link.
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
     beyond ``max_bytes + 1`` bytes (it may still be growing)."""
@@ -192,9 +193,21 @@ def read_text_in_root(
             data = handle.read() if max_bytes is None else handle.read(max_bytes + 1)
         if max_bytes is not None and len(data) > max_bytes:
             raise PathContainmentError(f"file_too_large:{parts[-1]}:{len(data)}")
-        return data.decode("utf-8", errors="replace")
+        return data
     finally:
         os.close(fd)
+
+
+def read_text_in_root(
+    root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
+) -> str:
+    """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
+
+    With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
+    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
+
+    data = read_bytes_in_root(root, relative, max_bytes=max_bytes)
+    return data.decode("utf-8", errors="replace")
 
 
 def _copy_open_file(src_fd: int, info: os.stat_result, destination: Path) -> None:

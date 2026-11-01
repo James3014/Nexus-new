@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.core.contained_write import read_bytes_in_root
 from nexus.services.local_heal.interface import PhaseResult
 
 WORLD_C_RECEIPT_SCHEMA = "nexus.world_c.pipeline_receipt.v1"
@@ -95,8 +96,11 @@ def build_world_c_canonical_patch_projection(
         raise ValueError("path escapes verified root") from exc
     if not source_file.is_file() or not workspace_file.is_file():
         raise ValueError("verified source/workspace file is missing")
-    source_bytes = source_file.read_bytes()
-    workspace_bytes = workspace_file.read_bytes()
+    try:
+        source_bytes = read_bytes_in_root(source, source_file.relative_to(source))
+        workspace_bytes = read_bytes_in_root(workspace, workspace_file.relative_to(workspace))
+    except OSError as exc:
+        raise ValueError("verified file must be a regular single-link file") from exc
     source_hash = _sha256_bytes(source_bytes)
     workspace_hash = _sha256_bytes(workspace_bytes)
     if expected_source_hash is not None and expected_source_hash != source_hash:

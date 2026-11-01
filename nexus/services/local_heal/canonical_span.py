@@ -105,7 +105,9 @@ def get_canonical_search_span(
 
     # Strategy d: traceback window fallback
     if traceback_lines and failed_search_text:
-        tb_result = _extract_from_traceback_window(traceback_lines, failed_search_text, source_file)
+        tb_result = _extract_from_traceback_window(
+            traceback_lines, failed_search_text, source_file, source_text
+        )
         if tb_result:
             telemetry["strategies_tried"].append({"strategy": "traceback_window", "found": True})
             tb_result.telemetry = telemetry
@@ -238,6 +240,7 @@ def _extract_from_traceback_window(
     traceback_lines: list[str],
     failed_search_text: str,
     source_file: Path | None = None,
+    source_text: str | None = None,
 ) -> Optional[CanonicalSpanResult]:
     """Extract canonical span from traceback window.
 
@@ -247,10 +250,11 @@ def _extract_from_traceback_window(
     if not traceback_lines or not source_file or not source_file.exists():
         return None
 
-    try:
-        source_text = source_file.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+    if source_text is None:
+        try:
+            source_text = source_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
 
     lines = source_text.splitlines()
 
