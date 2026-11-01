@@ -4,6 +4,7 @@ import stat
 import logging
 import time
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -40,6 +41,27 @@ def _names_leaving(src_root: Path, dst_root: Path, swarm_root: Path):
         return {name for name in names if not _resolves_inside(dst_dir / name, swarm_root)}
 
     return ignore
+
+
+def _copy_into_fresh_entry(src, dst):
+    """Copy `src` to `dst` by writing a new file beside it and renaming it into place.
+
+    The rename replaces the directory entry at `dst` instead of opening it, so a destination that
+    shares its file with a path outside the swarm is left as it was.
+    """
+    dst = Path(dst)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", suffix=".swarm-sync", dir=dst.parent)
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp_name)
+        os.replace(tmp_name, dst)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+    return str(dst)
 
 
 class SwarmBroker:
@@ -234,10 +256,14 @@ class SwarmBroker:
                     continue
                 if src.is_dir():
                     shutil.copytree(
-                        src, dst, dirs_exist_ok=True, ignore=_names_leaving(src, dst, swarm_root)
+                        src,
+                        dst,
+                        dirs_exist_ok=True,
+                        ignore=_names_leaving(src, dst, swarm_root),
+                        copy_function=_copy_into_fresh_entry,
                     )
                 else:
-                    shutil.copy2(src, dst)
+                    _copy_into_fresh_entry(src, dst)
 
     def _scope_path_in_workspace(self, rel_path: str) -> Optional[Path]:
         """A scope entry as a path relative to the workspace, or None if it leaves it."""

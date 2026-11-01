@@ -685,3 +685,29 @@ def test_swarm_is_refused_when_its_own_common_dir_lookup_fails(tmp_path: Path, m
 
     assert broker.is_independently_registered_worktree(swarm) is False
     assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_replaces_hard_linked_swarm_files_without_touching_the_shared_file(
+    tmp_path: Path, monkeypatch
+):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    shared_file = outside / "shared-file.txt"
+    shared_deep = outside / "shared-deep.txt"
+    shared_file.write_text("OUTSIDE FILE\n", encoding="utf-8")
+    shared_deep.write_text("OUTSIDE DEEP\n", encoding="utf-8")
+    (swarm / "pkg" / "sub").mkdir(parents=True)
+    os.link(shared_file, swarm / "pkg" / "mod.py")
+    os.link(shared_deep, swarm / "pkg" / "sub" / "deep.py")
+    broker = SwarmBroker(workspace)
+
+    broker.sync_scope(swarm, ["pkg/mod.py"], required_configs=[])
+    broker.sync_scope(swarm, ["pkg"], required_configs=[])
+
+    assert shared_file.read_text(encoding="utf-8") == "OUTSIDE FILE\n"
+    assert shared_deep.read_text(encoding="utf-8") == "OUTSIDE DEEP\n"
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert sorted(p.name for p in (swarm / "pkg").iterdir()) == ["mod.py", "sub"]
+    assert (sandbox / "SENTINEL").exists()
