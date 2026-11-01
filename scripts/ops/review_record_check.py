@@ -158,13 +158,15 @@ _REJECT_PRE_DENY = re.compile(
     r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
     re.IGNORECASE,
 )
-# _REJECT_PRE_DENY without the words an accepting verdict's label may carry (_PRE_DENY has
-# none of them): "Codex r2 instead of Gemini: ACCEPT@<sha>" credits Codex, so the same label
-# before a REJECT takes the credit back. Used only for the full reading (``more`` and
-# ``labels``); _stated_reject keeps the wider list.
+# _REJECT_PRE_DENY, except "instead of" naming a model: that names which reviewer ran
+# ("Codex r2 instead of Gemini: ACCEPT@<sha>" credits Codex, so the same label before a
+# REJECT takes the credit back), not an alternative to the verdict ("APPROVE instead of
+# REJECT"). Used only for the full reading (``more`` and ``labels``); _stated_reject keeps
+# _REJECT_PRE_DENY.
 _REJECT_READ_DENY = re.compile(
-    r"\b(?:no|not|never|if|unless|would|could|might|may|should|cannot"
-    r"|can't|didn't|doesn't|won't|wouldn't|without)\b",
+    r"\b(?:no|not|never|none|nothing|if|unless|whether|would|could|might|may|should|cannot"
+    r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent"
+    r"|instead of(?!\s+(?:the\s+)?(?:codex|gemini|gpt|claude|opus|sonnet)\b))\b",
     re.IGNORECASE,
 )
 # More positions for the full reading, tried when neither _REJECT_POS nor _REJECT_POS_MORE
@@ -749,8 +751,8 @@ def _model_labels_reject(window: str) -> bool:
 
 
 def _denies_reject(before: str, narrow: bool = False) -> bool:
-    """A negation, condition or quote before a REJECT token in its clause. ``narrow`` reads
-    only the denials an accepting verdict's label also may not carry (_REJECT_READ_DENY)."""
+    """A negation, condition or quote before a REJECT token in its clause. ``narrow`` lets
+    "instead of <model>" stand in a reviewer label (_REJECT_READ_DENY)."""
     deny = _REJECT_READ_DENY if narrow else _REJECT_PRE_DENY
     return bool(deny.search(_plain(before)) or _QUOTE.search(before))
 
@@ -864,8 +866,8 @@ def _reject_reads(
     """``_reject_clause_starts`` with the token's span in its clause.
 
     The full reading (``more`` and ``labels``) also reads, like an accepting verdict's label
-    would be: a label holding a denial word that _PRE_DENY does not hold (_REJECT_READ_DENY:
-    "Codex r2 instead of Gemini: REJECT"); a model named more than 400 characters before the
+    would be: a label naming the reviewer that ran "instead of" another model
+    (_REJECT_READ_DENY: "Codex r2 instead of Gemini: REJECT"); a model named more than 400 characters before the
     token in its sentence (up to ``_WIDE_LABEL`` back, not past the previous verdict token,
     tried only when the main reading's 400-character window does not read it, so the wider
     window never drops a REJECT); and, for a clause neither position list reads, the
@@ -1360,17 +1362,6 @@ def _reject_families(
     return families, (reviewer if len(families) == 1 else None)
 
 
-def _own_sentence(text: str, token_at: int) -> str:
-    """The text before a REJECT token from the previous verdict token on the line (at most
-    400 characters back), from the last sentence end outside a closed aside."""
-    previous = [m.end() for m in _ANY_VERDICT_TOKEN.finditer(text, 0, token_at)]
-    start = max(previous[-1] if previous else 0, token_at - 400)
-    closes = _aside_closes(text) if "(" in text else None
-    blanked = _outside_closed_asides(text, start, token_at, closes)
-    ends = [m.end() for m in re.finditer(r"[.!?](?:\s+|$)|\u3002\s*", blanked)]
-    return text[start + (ends[-1] if ends else 0) : token_at]
-
-
 def _label_families(text: str, token_at: int) -> set[str]:
     """Every family named in a REJECT's label, read fail closed (#3041 class 3).
 
@@ -1380,27 +1371,15 @@ def _label_families(text: str, token_at: int) -> set[str]:
     named inside its asides do ("r2 (Gemini via agy): REJECT"). An aside next to a named
     model ("Codex r1 (after the Claude review): REJECT") stays an aside.
     """
-    label = _own_sentence(text, token_at)
+    previous = [m.end() for m in _ANY_VERDICT_TOKEN.finditer(text, 0, token_at)]
+    start = max(previous[-1] if previous else 0, token_at - 400)
+    closes = _aside_closes(text) if "(" in text else None
+    blanked = _outside_closed_asides(text, start, token_at, closes)
+    ends = [m.end() for m in re.finditer(r"[.!?](?:\s+|$)|\u3002\s*", blanked)]
+    label = text[start + (ends[-1] if ends else 0) : token_at]
     words = _NEAREST_MODEL.findall(_plain(label)) or _NEAREST_MODEL.findall(_plain(label, True))
     named = {"cross_model" if w.lower() == "cross-model" else _family(w) for w in words}
     return {family for family in named if family}
-
-
-def _wide_families(text: str, token_at: int, wide: list[str]) -> set[str]:
-    """Section families a REJECT also withdraws, read fail closed (``wide``: the families a
-    REJECT with no model on its line is credited to). When the line names a model before
-    the token (so ``_reject_families`` reads only that model), all of them too if the
-    REJECT's own sentence (``_own_sentence``) names a model after words that are not
-    reviewer labels ("r2 re Codex: REJECT", "r2 after the Codex finding: REJECT" under a
-    Claude header). A sentence that starts with its model ("Codex r1: REJECT", "Round 2
-    Codex: REJECT") or names none adds nothing."""
-    if not wide or _reviewer_word(text[:token_at]) is None:
-        return set()
-    label = _plain(_own_sentence(text, token_at))
-    first = _NEAREST_MODEL.search(label)
-    if first is None or _reject_label_only(label[: first.start()]):
-        return set()
-    return set(wide)
 
 
 def _fixed_later(text: str, end: int) -> bool:
@@ -1711,9 +1690,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             # Families main's reading misses (a second model, or one named only in an
             # aside) withdraw too, as an unknown reviewer; they never number rounds and are
             # not read when choosing merge-only delta heads ("extra").
-            extra_families = _label_families(plain_reject, start + span[0])
-            extra_families |= _wide_families(plain_reject, start + span[0], reject_header[0])
-            for family in sorted(extra_families - set(families)):
+            for family in sorted(_label_families(plain_reject, start + span[0]) - set(families)):
                 line_events.append((
                     start + span[0],
                     {

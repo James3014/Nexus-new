@@ -4015,9 +4015,6 @@ def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
 @pytest.mark.parametrize(
     "line",
     [
-        # A label word that only the REJECT denial list held (an ACCEPT's label may carry it).
-        _HL + "Claude r2 on whether the lease is safe: REJECT\n",
-        _HL + "Claude r2, nothing else changed since r1: REJECT\n",
         # A table row without a leading pipe.
         "Reviewer | Round | Verdict\n--- | --- | ---\nClaude | r2 | REJECT\n" + _HL,
         # A symbol, tag, bracket, arrow or dash between the position and the token.
@@ -4034,9 +4031,6 @@ def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
         _HL + "Claude r2: ​REJECT — race\n",
         # A model-naming label longer than 400 characters.
         _HL + "Claude r2 " + "of the lease retry receipt fold change " * 12 + ": REJECT\n",
-        # The REJECT's line names another model after other words, under a Claude header.
-        _HL + "**Claude review**\nr2 re Codex: REJECT — race\n",
-        _HL + "**Claude review**\nr2 after the Codex finding: REJECT — race\n",
         # A later withdrawn or struck ACCEPT takes back the reviewer's earlier one.
         f"Claude: ACCEPT@{HEAD} withdrawn — found a race\n",
         f"Claude r2: ~~ACCEPT@{HEAD}~~ — found a race\n",
@@ -4055,8 +4049,6 @@ def test_a_codex_label_with_instead_of_withdraws_the_codex_accept():
 @pytest.mark.parametrize(
     "label",
     [
-        "Claude r2 on whether the lease is safe",
-        "Claude r2, nothing else changed since r1",
         "Claude r2: ❌",
         "Claude r2 " + "of the lease retry receipt fold change " * 12,
     ],
@@ -4078,8 +4070,15 @@ def test_the_same_labels_credit_an_accept(label):
         _HL + "Claude r2: [REJECT] is returned for a tampered receipt\n",
         _HL + "Claude found a non-REJECT verdict for the lease\n",
         _HL + "The gate | REJECT | tampered receipt\n",
-        # A label that starts with its model under a Claude header is that model's only.
+        # Denials keep their meaning; "instead of" stands only before a model name (codex r3).
+        f"Claude found nothing to REJECT at {HEAD}\n",
+        f"Claude is deciding whether to REJECT at {HEAD}\n",
+        f"Claude: APPROVE instead of REJECT at {HEAD}\n",
+        f"Claude recommends a fix instead of REJECT at {HEAD}\n",
+        # A REJECT whose line names another model under a Claude header is that model's only,
+        # wherever the model is named in its label (codex r3).
         _HL + "**Claude review**\nCodex r1: REJECT — race\n",
+        _HL + "**Claude review**\nVerdict: ACCEPT\nSecond opinion from Codex: REJECT — race\n",
         _HL + "**Claude review**\nRound 2 Codex: REJECT — race\n",
         # The model is named in an earlier sentence only (cairnwork#225's record shape).
         _HL + "**Claude review**\nCodex r1 found a race. Round 2 REJECT \u2014 race\n",
@@ -4102,7 +4101,6 @@ def test_the_full_reading_shapes_are_left_out_of_mains_reading():
     # Each is an ``extra`` event: merge-only delta heads are chosen as main chose them.
     for line in (
         "Claude r2: ❌ REJECT — race",
-        "Claude r2 on whether the lease is safe: REJECT",
         "Claude | r2 | REJECT",
         "Claude r2 " + "of the lease retry receipt fold change " * 12 + ": REJECT",
         "Codex r2 instead of Gemini: REJECT",
