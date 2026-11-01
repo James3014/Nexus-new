@@ -109,28 +109,36 @@ def _run_with_timeout(
     code: str,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
-    """Run in a new process group; on timeout kill the whole group and fail closed."""
-    try:
-        proc = subprocess.Popen(
-            list(cmd),
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-    except OSError as exc:
-        raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    """Run in a new process group; on timeout kill the whole group and fail closed.
+
+    Output goes to temporary files, not pipes, so a descendant that left the
+    group cannot keep the wait open after the group is killed.
+    """
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.communicate()
-        raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+            proc = subprocess.Popen(
+                list(cmd),
+                cwd=cwd,
+                env=env,
+                stdout=out,
+                stderr=err,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+            raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+        out.seek(0)
+        err.seek(0)
+        stdout = out.read().decode("utf-8", "replace")
+        stderr = err.read().decode("utf-8", "replace")
     return subprocess.CompletedProcess(list(cmd), proc.returncode, stdout, stderr)
 
 
@@ -175,11 +183,14 @@ def ensure_tool(cache_root: Path, pin: str) -> Path:
     env["UV_TOOL_DIR"] = str(base / "tools")
     env["UV_TOOL_BIN_DIR"] = str(base / "bin")
     base.mkdir(parents=True, exist_ok=True)
-    _run(
-        ["uv", "tool", "install", "--force", CORE_REPO_URL.format(pin=pin)],
-        env=env,
-        code="CORE_INSTALL_FAILED",
-    )
+    # Neutral cwd: uv must not discover uv.toml/pyproject.toml from the checkout.
+    with tempfile.TemporaryDirectory(prefix="nexus-core-tool-") as tmp:
+        _run(
+            ["uv", "tool", "install", "--force", CORE_REPO_URL.format(pin=pin)],
+            cwd=Path(tmp),
+            env=env,
+            code="CORE_INSTALL_FAILED",
+        )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"{certify} missing after install")
     return certify
@@ -239,12 +250,14 @@ def ensure_materials(
         return python
     shutil.rmtree(env_dir, ignore_errors=True)
     env_dir.parent.mkdir(parents=True, exist_ok=True)
-    _run(
-        ["uv", "venv", "--python", "3.11", str(env_dir)],
-        code="MATERIALS_FAILED",
-        timeout=timeout,
-    )
+    # Every uv call runs in a neutral temporary cwd so no checkout config is read.
     with tempfile.TemporaryDirectory(prefix="nexus-core-materials-") as tmp:
+        _run(
+            ["uv", "venv", "--python", "3.11", str(env_dir)],
+            cwd=Path(tmp),
+            code="MATERIALS_FAILED",
+            timeout=timeout,
+        )
         for rel, normalized in contents:
             req = Path(tmp) / Path(rel).name
             req.write_text(normalized, encoding="utf-8")

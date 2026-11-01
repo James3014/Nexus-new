@@ -267,7 +267,13 @@ from pathlib import Path
 args = sys.argv[1:]
 log = Path(os.environ["FAKE_UV_LOG"])
 entry = {"args": args, "cwd": os.getcwd()}
-if args[:1] == ["venv"]:
+if args[:2] == ["tool", "install"]:
+    bindir = Path(os.environ["UV_TOOL_BIN_DIR"])
+    bindir.mkdir(parents=True, exist_ok=True)
+    certify = bindir / "nexus-certify"
+    certify.write_text(Path(os.environ["FAKE_CERTIFY_SRC"]).read_text())
+    certify.chmod(0o755)
+elif args[:1] == ["venv"]:
     env_dir = Path(args[-1])
     (env_dir / "bin").mkdir(parents=True, exist_ok=True)
     (env_dir / "bin" / "python").symlink_to(sys.executable)
@@ -275,7 +281,8 @@ elif args[:2] == ["pip", "install"]:
     req = args[args.index("--requirement") + 1]
     entry["requirement"] = Path(req).read_text()
     if os.environ.get("FAKE_UV_SLEEP"):
-        child = subprocess.Popen(["sleep", "60"])
+        detach = bool(os.environ.get("FAKE_UV_DETACH"))
+        child = subprocess.Popen(["sleep", "60"], start_new_session=detach)
         Path(os.environ["FAKE_UV_PIDS"]).write_text(f"{os.getpid()} {child.pid}")
         time.sleep(60)
 with log.open("a") as fh:
@@ -314,11 +321,12 @@ def _with_requirements(env, runtime: str = GOOD_RUNTIME, learning: str = GOOD_LE
         PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
         FAKE_UV_LOG=str(env["uv_log"]),
         FAKE_UV_PIDS=str(env["tmp"] / "uv.pids"),
+        FAKE_CERTIFY_SRC=str(env["certify"]),
     )
     return env
 
 
-def run_materials(env, *extra: str, **envover: str):
+def run_materials(env, *extra: str, certify: bool = True, **envover: str):
     cmd = [
         sys.executable,
         str(SCRIPT),
@@ -326,8 +334,7 @@ def run_materials(env, *extra: str, **envover: str):
         "7",
         "--repo-root",
         str(env["repo"]),
-        "--certify-bin",
-        str(env["certify"]),
+        *(["--certify-bin", str(env["certify"])] if certify else []),
         "--cache-root",
         str(env["tmp"] / "cache"),
         "--output-dir",
@@ -336,8 +343,19 @@ def run_materials(env, *extra: str, **envover: str):
         *extra,
     ]
     penv = dict(env["env"], PYTHONDONTWRITEBYTECODE="1", **envover)
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=penv, timeout=120)
+    # Run from the checkout, as an operator would: uv must not see its config.
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, env=penv, timeout=120, cwd=env["repo"]
+    )
     return proc, json.loads(proc.stdout)
+
+
+def _assert_neutral_cwd(env, calls):
+    repo = env["repo"].resolve()
+    assert calls
+    for call in calls:
+        cwd = Path(call["cwd"]).resolve()
+        assert cwd != repo and repo not in cwd.parents, call
 
 
 def _uv_calls(env):
@@ -362,6 +380,7 @@ def test_materials_installed_from_base_not_head(env):
         GOOD_LEARNING,
         GOOD_RUNTIME.split("\n", 1)[1],
     ]
+    _assert_neutral_cwd(env, _uv_calls(env))
     for call in installs:
         assert "evil" not in call["requirement"]
         assert "index-url" not in call["requirement"]
@@ -465,3 +484,53 @@ def test_trusted_requirements_normalizes_and_rejects():
     with pytest.raises(mod.LocalCheckError) as exc:
         mod.trusted_requirements("pkg==1.0 \\", "r.txt")
     assert exc.value.code == "MATERIALS_UNTRUSTED"
+
+
+def test_core_tool_install_runs_outside_checkout(env):
+    env = _with_requirements(env)
+    proc, out = run_materials(env, certify=False)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    calls = _uv_calls(env)
+    assert [c["args"][:2] for c in calls][0] == ["tool", "install"]
+    _assert_neutral_cwd(env, calls)
+
+
+def test_materials_timeout_returns_despite_detached_descendant(env):
+    import time
+
+    env = _with_requirements(env)
+    started = time.monotonic()
+    try:
+        proc, out = run_materials(
+            env, "--materials-timeout", "3", FAKE_UV_SLEEP="1", FAKE_UV_DETACH="1"
+        )
+        assert time.monotonic() - started < 30
+        assert proc.returncode == 2
+        assert out["error_code"] == "MATERIALS_FAILED"
+        assert "timed out" in out["error"]
+    finally:
+        pids_file = env["tmp"] / "uv.pids"
+        if pids_file.exists():
+            for pid in pids_file.read_text().split():
+                try:
+                    os.kill(int(pid), 9)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+
+def test_materials_rebuilt_when_base_lock_content_changes(env):
+    env = _with_requirements(env)
+    proc, _ = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    env["uv_log"].unlink()
+    repo = env["repo"]
+    bumped = "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@" + "3" * 40 + "\n"
+    (repo / "requirements/canonical-runtime.txt").write_text(bumped)
+    git(repo, "commit", "-q", "-am", "bump runtime pin")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin", "main")
+    proc, _ = run_materials(env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    calls = _uv_calls(env)
+    assert calls[0]["args"][0] == "venv"
+    assert [c["requirement"] for c in calls if c["args"][:2] == ["pip", "install"]][1] == bumped
