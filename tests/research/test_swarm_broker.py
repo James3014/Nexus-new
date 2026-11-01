@@ -396,3 +396,292 @@ def test_swarm_is_refused_when_git_dir_lookup_fails(tmp_path: Path, monkeypatch,
 
     assert broker.is_independently_registered_worktree(swarm) is False
     assert (sandbox / "SENTINEL").exists()
+
+
+# --- the admin entry's commondir must name the controller's common dir ---------------------
+
+
+def test_swarm_admin_entry_with_foreign_commondir_is_refused_and_foreign_refs_kept(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    foreign = tmp_path / "foreign"
+    _git(tmp_path, "clone", "-q", str(controller), str(foreign))
+    _git(foreign, "config", "user.email", "nexus@example.test")
+    _git(foreign, "config", "user.name", "Nexus Test")
+    broker = SwarmBroker(controller)
+    assert broker.is_independently_registered_worktree(swarm) is True  # positive control
+
+    admin = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    (admin / "commondir").write_text(f"{foreign / '.git'}\n", encoding="utf-8")
+    assert (
+        Path(_git(swarm, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        == (foreign / ".git").resolve()
+    )
+    assert broker.is_independently_registered_worktree(swarm) is False
+
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "wsbase"))
+    monkeypatch.setenv("NEXUS_WORKSPACE_LOCK", str(tmp_path / "merge.lock"))
+    monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
+    from nexus.services.workspace import WorkspaceManager
+
+    WorkspaceManager(controller).lease("t-commondir", "isolated/t-commondir")
+
+    assert _git(foreign, "branch", "--list", "isolated/t-commondir") == ""
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_with_default_relative_commondir_is_accepted(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    admin = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    assert not Path((admin / "commondir").read_text(encoding="utf-8").strip()).is_absolute()
+
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is True
+    (admin / "commondir").write_text(f"{(controller / '.git').resolve()}\n", encoding="utf-8")
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is True
+    assert (sandbox / "SENTINEL").exists()
+
+
+# --- release acts only on the directory it validated ----------------------------------------
+
+
+def _victim_repo(tmp_path: Path) -> Path:
+    victim = tmp_path / "victim"
+    _init_repo(victim)
+    (victim / "tracked.txt").write_text("victim uncommitted edit\n", encoding="utf-8")
+    (victim / "victim_wip.txt").write_text("victim untracked work\n", encoding="utf-8")
+    (victim / ".swarm_lock").write_text("", encoding="utf-8")
+    return victim
+
+
+def _victim_repo_intact(victim: Path) -> bool:
+    tracked = (victim / "tracked.txt").read_text(encoding="utf-8")
+    kept = all((victim / name).exists() for name in ("victim_wip.txt", ".swarm_lock"))
+    return tracked == "victim uncommitted edit\n" and kept
+
+
+def _swap_for_link(swarm: Path, target: Path, moved: Path) -> None:
+    swarm.rename(moved)
+    swarm.symlink_to(target, target_is_directory=True)
+
+
+def test_release_leaves_link_swapped_in_after_registration_check_untouched(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    victim = _victim_repo(tmp_path)
+    broker = SwarmBroker(controller)
+    real_check = broker.is_independently_registered_worktree
+
+    def check_then_swap(path):
+        result = real_check(path)
+        _swap_for_link(swarm, victim, tmp_path / "moved-swarm")
+        return result
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_swap)
+    broker.release(swarm)
+
+    assert _victim_repo_intact(victim)
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_leaves_other_real_dir_swapped_in_after_registration_check_untouched(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    broker = SwarmBroker(controller)
+    real_check = broker.is_independently_registered_worktree
+
+    def check_then_replace(path):
+        result = real_check(path)
+        swarm.rename(tmp_path / "moved-swarm")
+        swarm.mkdir()
+        (swarm / "replacement_wip.txt").write_text("not validated\n", encoding="utf-8")
+        (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_replace)
+    broker.release(swarm)
+
+    assert (swarm / "replacement_wip.txt").exists()
+    assert (swarm / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_skips_clean_when_swarm_is_swapped_after_checkout(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    (swarm / "candidate.txt").write_text("candidate scratch\n", encoding="utf-8")
+    victim = _victim_repo(tmp_path)
+    moved = tmp_path / "moved-swarm"
+    real_run = subprocess.run
+
+    def run_then_swap(cmd, *args, **kwargs):
+        result = real_run(cmd, *args, **kwargs)
+        if list(cmd[:2]) == ["git", "checkout"] and not swarm.is_symlink():
+            _swap_for_link(swarm, victim, moved)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", run_then_swap)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert swarm.is_symlink()  # the swap happened after the checkout
+    assert (victim / "victim_wip.txt").exists()
+    assert (moved / "candidate.txt").exists()  # clean did not run anywhere
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_fallback_cleanup_stops_when_swarm_is_swapped(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    victim = tmp_path / "victim"
+    for name in ("a", "b"):
+        (swarm / name).mkdir()
+        (swarm / name / "f.txt").write_text("swarm\n", encoding="utf-8")
+        (victim / name).mkdir(parents=True)
+        (victim / name / "f.txt").write_text("victim\n", encoding="utf-8")
+    (victim / "tracked.txt").write_text("victim\n", encoding="utf-8")  # same names as the swarm
+    broker = SwarmBroker(controller)
+    real_check = broker.is_independently_registered_worktree
+
+    def check_then_drop_gitfile(path):
+        result = real_check(path)
+        (swarm / ".git").unlink()  # forces the non-git fallback cleanup
+        return result
+
+    import shutil
+
+    real_rmtree = shutil.rmtree
+    removed: list[str] = []
+
+    def rmtree_then_swap(path, *args, **kwargs):
+        real_rmtree(path, *args, **kwargs)
+        removed.append(Path(path).name)
+        if not swarm.is_symlink():
+            _swap_for_link(swarm, victim, tmp_path / "moved-swarm")
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_drop_gitfile)
+    monkeypatch.setattr(shutil, "rmtree", rmtree_then_swap)
+    broker.release(swarm)
+    monkeypatch.setattr(shutil, "rmtree", real_rmtree)
+
+    assert len(removed) == 1
+    assert all((victim / name / "f.txt").exists() for name in ("a", "b"))
+    assert (victim / "tracked.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+# --- sync_scope writes only inside the swarm -------------------------------------------------
+
+
+def _scope_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    workspace = tmp_path / "parent" / "workspace"
+    (workspace / "pkg" / "sub").mkdir(parents=True)
+    (workspace / "pkg" / "mod.py").write_text("workspace mod\n", encoding="utf-8")
+    (workspace / "pkg" / "sub" / "deep.py").write_text("workspace deep\n", encoding="utf-8")
+    swarm = workspace / ".nexus-swarm-001"
+    swarm.mkdir()
+    return sandbox, workspace, swarm
+
+
+def test_sync_scope_refuses_parent_and_outside_absolute_paths(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    (workspace.parent / "victim.txt").write_text("FROM-PARENT\n", encoding="utf-8")
+    (workspace / "victim.txt").write_text("USER WORK\n", encoding="utf-8")
+    outside = tmp_path / "outside" / "secret.txt"
+    outside.parent.mkdir()
+    outside.write_text("outside\n", encoding="utf-8")
+    (workspace / "link").symlink_to(outside.parent, target_is_directory=True)
+
+    SwarmBroker(workspace).sync_scope(
+        swarm,
+        ["../victim.txt", "pkg/../pkg/mod.py", str(outside), "link/secret.txt"],
+        required_configs=[],
+    )
+
+    assert (workspace / "victim.txt").read_text(encoding="utf-8") == "USER WORK\n"
+    assert list(swarm.iterdir()) == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_does_not_write_through_links_planted_in_swarm(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    outside_file_dir = tmp_path / "outside-pkg"
+    outside_file_dir.mkdir()
+    outside_sub = tmp_path / "outside-sub"
+    outside_sub.mkdir()
+    broker = SwarmBroker(workspace)
+
+    (swarm / "pkg").symlink_to(outside_file_dir, target_is_directory=True)
+    broker.sync_scope(swarm, ["pkg/mod.py", "pkg"], required_configs=[])
+    assert list(outside_file_dir.iterdir()) == []
+
+    (swarm / "pkg").unlink()
+    (swarm / "pkg").mkdir()
+    (swarm / "pkg" / "sub").symlink_to(outside_sub, target_is_directory=True)
+    broker.sync_scope(swarm, ["pkg"], required_configs=[])
+    assert list(outside_sub.iterdir()) == []
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_copies_relative_files_and_dirs_into_swarm(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    alias = tmp_path / "workspace-link"
+    alias.symlink_to(workspace, target_is_directory=True)
+
+    SwarmBroker(alias).sync_scope(
+        alias / swarm.name,
+        ["pkg/mod.py", "pkg", str(workspace / "pkg" / "mod.py")],
+        required_configs=[],
+    )
+
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert not (swarm / "mod.py").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_is_refused_when_its_own_common_dir_lookup_fails(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    broker = SwarmBroker(controller)
+    assert broker.is_independently_registered_worktree(swarm) is True  # positive control
+    real_git_output = broker._git_output
+
+    def failing_in_swarm(args, cwd):
+        if "--git-common-dir" in args and Path(cwd).resolve() == swarm.resolve():
+            return None
+        return real_git_output(args, cwd)
+
+    monkeypatch.setattr(broker, "_git_output", failing_in_swarm)
+
+    assert broker.is_independently_registered_worktree(swarm) is False
+    assert (sandbox / "SENTINEL").exists()
