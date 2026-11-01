@@ -17,14 +17,18 @@ import importlib
 import os
 import re
 import shutil
+import signal
+import threading
 import time
+import weakref
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
+from nexus.core.argv_command import kill_group_if_exited
+
 if TYPE_CHECKING:
     import subprocess
-    import threading
 
     # Typing only: the probe/decode helpers this mixin calls through ``self``.
     from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
@@ -38,6 +42,68 @@ def _gateway():
     # Late binding: the gateway imports this module at its top level, so its own
     # (and its patched) names are only resolved once a method runs.
     return importlib.import_module("nexus.orchestrator.unified_mcp_gateway")
+
+
+# A running Agy model probe whose provider is still alive this long past its own
+# ``--print-timeout`` (AGY_MODEL_PROBE_PRINT_TIMEOUT) has its process group killed (#3052).
+MODEL_PROBE_PROVIDER_DEADLINE_GRACE_SECONDS = 60.0
+# How long a SIGKILLed provider gets to exit before the cleanup counts as incomplete.
+_PROVIDER_KILL_SETTLE_SECONDS = 2.0
+_PRINT_TIMEOUT_RE = re.compile(r"([0-9]+)s")
+# Providers whose group this module killed and reaped: a concurrent refresh of the same job
+# then sees a clean exit, not a reap that happened elsewhere. One lock serializes the checks.
+_GROUP_KILLED: weakref.WeakSet[subprocess.Popen[str]] = weakref.WeakSet()
+_SETTLE_LOCK = threading.Lock()
+
+
+def _provider_deadline_passed(job: Mapping[str, Any]) -> bool:
+    """Whether a running Agy model probe is past its print timeout plus the grace period."""
+    if job.get("job_kind") != "model_probe" or job.get("provider") != "agy":
+        return False
+    match = _PRINT_TIMEOUT_RE.fullmatch(str(_gateway().AGY_MODEL_PROBE_PRINT_TIMEOUT))
+    if match is None or not job.get("started_at"):
+        return False
+    try:
+        started = datetime.fromisoformat(str(job["started_at"])).timestamp()
+    except (TypeError, ValueError):
+        return False
+    limit = int(match.group(1)) + MODEL_PROBE_PROVIDER_DEADLINE_GRACE_SECONDS
+    return time.time() - started > limit
+
+
+def _settle_provider_group(
+    job: Mapping[str, Any], process: subprocess.Popen[str]
+) -> tuple[bool, bool, bool]:
+    """Detect the provider's exit without reaping it, then SIGKILL its process group and reap it
+    (#3052); past the model-probe deadline, SIGKILL the group first.
+
+    Returns ``(exited, group_clean, deadline_killed)``. ``exited`` False: still running, nothing
+    reaped. ``group_clean`` False: a group member survived SIGKILL, the group could not be
+    listed, the provider was reaped elsewhere, or a deadline kill did not end it; its effects
+    may still be in progress."""
+    with _SETTLE_LOCK:
+        if process in _GROUP_KILLED:
+            return True, True, False
+        try:
+            if kill_group_if_exited(process):
+                _GROUP_KILLED.add(process)
+                return True, True, False
+            if not _provider_deadline_passed(job):
+                return False, True, False
+            # The provider is unreaped, so its pid still names its own group.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            deadline = time.monotonic() + _PROVIDER_KILL_SETTLE_SECONDS
+            while not kill_group_if_exited(process):
+                if time.monotonic() >= deadline:
+                    return True, False, True
+                time.sleep(0.05)
+            _GROUP_KILLED.add(process)
+            return True, True, True
+        except (ChildProcessError, PermissionError):
+            return True, False, False
 
 
 class _AssistResponseMixin(_ResponseBase):
@@ -54,6 +120,8 @@ class _AssistResponseMixin(_ResponseBase):
         def _assist_record_stream_artifacts(job: dict[str, Any]) -> None: ...
 
         def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool: ...
+
+        def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None: ...
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -107,10 +175,34 @@ class _AssistResponseMixin(_ResponseBase):
             return job
         with self._assist_lock:
             process = self._assist_processes.get(task_id)
-        returncode = process.poll() if process is not None else None
-        if process is not None and returncode is not None:
-            job["durable_exit_marker"] = True
-            job["durable_exit_code"] = returncode
+        returncode = None
+        group_clean, deadline_killed = True, False
+        if process is not None:
+            # Not poll(): it reaps, after which the provider's group can no longer be
+            # signalled safely; a descendant left in the group is killed first (#3052).
+            exited, group_clean, deadline_killed = _settle_provider_group(job, process)
+            if exited:
+                returncode = process.returncode
+                job["durable_exit_marker"] = True
+                job["durable_exit_code"] = returncode
+        if process is not None and not group_clean:
+            # A provider group member may still be running on the account and the workspace:
+            # keep both (no release, no removal) and require reconciliation.
+            self._assist_record_stream_artifacts(job)
+            if job.get("account_lease_id_hash"):
+                self._abandon_assist_account_claim(task_id, job)
+            with self._assist_lock:
+                self._assist_processes.pop(task_id, None)
+            job.update({
+                "status": "UNKNOWN_REQUIRES_RECONCILE",
+                "finished_at": self._utc_now(),
+                "exit_code": returncode,
+                "blocker": "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE",
+                "reconciliation_required": True,
+                "model_response_verified": False,
+                "process_cleanup": False,
+            })
+            return self._assist_write(job)
         if process is None and job.get("pid"):
             try:
                 os.kill(int(job["pid"]), 0)
@@ -210,6 +302,10 @@ class _AssistResponseMixin(_ResponseBase):
                 parsed = None
                 schema_error = "degenerate_patch"
             provider_error = "provider process failed" if returncode != 0 else ""
+        if deadline_killed:
+            status = "FAILED"
+            blocker = "ASSIST_PROVIDER_DEADLINE_EXCEEDED"
+            provider_error = "provider still running past the model probe deadline; process group killed"
         job.update({
             "status": status,
             "finished_at": self._utc_now(),

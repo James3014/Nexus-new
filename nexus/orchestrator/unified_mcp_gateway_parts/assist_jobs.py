@@ -33,6 +33,7 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
+from nexus.core.argv_command import require_child_stays_unreaped
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -182,6 +183,8 @@ class _AssistJobsMixin(_JobsBase):
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
+            # The provider's process group is killed on exit before the workspace is removed (#3052).
+            require_child_stays_unreaped()
             process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
         except Exception:
             stdout_handle.close()
@@ -541,6 +544,8 @@ class _AssistJobsMixin(_JobsBase):
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
+            # The provider's process group is killed on exit before the workspace is removed (#3052).
+            require_child_stays_unreaped()
             process = subprocess.Popen(
                 canonical_command,
                 cwd=workspace_root,

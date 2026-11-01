@@ -48,6 +48,9 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _compile_agy_command,
     observe_github_issue,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts import (  # noqa: E402
+    assist_response as assist_response_module,
+)
 from nexus.orchestrator.unified_mcp_gateway_parts.model_probe import (  # noqa: E402
     MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS,
 )
@@ -55,6 +58,24 @@ from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa:
 from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
 )
+
+_REAL_POPEN = subprocess.Popen
+
+
+@pytest.fixture(autouse=True)
+def _fake_provider_exit_check(monkeypatch):
+    """Fake provider processes (no real pid) answer the refresh's exit check through poll();
+    a real subprocess.Popen keeps the reaping group kill (#3052). Tests patch
+    subprocess.Popen itself, so the real class is the one bound at import."""
+    real = assist_response_module.kill_group_if_exited
+
+    def check(process):
+        if isinstance(process, _REAL_POPEN):
+            return real(process)
+        process.returncode = process.poll()
+        return process.returncode is not None
+
+    monkeypatch.setattr(assist_response_module, "kill_group_if_exited", check)
 
 
 def _readiness_observation(plane: str, status: str) -> PlaneObservation:

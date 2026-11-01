@@ -32,6 +32,7 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
+from nexus.core.argv_command import require_child_stays_unreaped
 from nexus.executors.claude_measurement_worker import (
     CLAUDE_MEASUREMENT_PROVIDER,
     measurement_claude_enabled,
@@ -497,6 +498,9 @@ class _ModelProbeMixin(_ModelProbeBase):
                 if account_claim.lock_file_obj is None:
                     raise RuntimeError("AGY_ACCOUNT_LEASE_LOCK_MISSING_BEFORE_LAUNCH")
                 pass_fds = (account_claim.lock_file_obj.fileno(),)
+            # Refused (nothing spawned) unless the provider can stay unreaped until its process
+            # group is killed on exit, before the lease is released (#3052).
+            require_child_stays_unreaped()
             process = subprocess.Popen(
                 command,
                 cwd=workspace_root,
