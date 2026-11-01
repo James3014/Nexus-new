@@ -423,3 +423,16 @@ def test_settings_register_core_precheck_stop_hook() -> None:
     assert any("handoff-check.sh" in c for c in commands)
     assert any("core-precheck-on-stop.sh" in c for c in commands)
     assert os.access(HOOK, os.X_OK) and os.access(SCRIPT, os.X_OK)
+
+
+def test_auto_dispatch_not_skipped_by_dispatch_for_another_issue(env: Env) -> None:
+    head = env.branch("issue-7-work")
+    env.state["issues"] = {"5": "OPEN", "7": "OPEN"}
+    code, out = env.run("dispatch", "--issue", "5")
+    assert out["status"] == "DISPATCHED", out
+    code, out = env.run("dispatch", "--auto")
+    assert out["status"] == "DISPATCHED", out
+    assert out["issue"] == 7 and out["head"] == head
+    # The same Issue is still deduplicated by the local prefilter.
+    code, out = env.run("dispatch", "--auto")
+    assert out["status"] == "SKIPPED_ALREADY_DISPATCHED", out

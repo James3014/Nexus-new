@@ -180,11 +180,28 @@ def _read_record(path: Path) -> dict[str, Any] | None:
     return record if isinstance(record, dict) else None
 
 
-def _auto_local_prefilter(repo_root: Path, head: str, branch: str) -> None:
+def _offline_issue(explicit: int | None, branch: str) -> int | None:
+    """Issue for the local prefilter using only offline sources, else None."""
+    if explicit is not None:
+        return explicit
+    env_issue = os.environ.get("NEXUS_CORE_ISSUE", "").strip().lstrip("#")
+    if env_issue.isdigit():
+        return int(env_issue)
+    candidates = _issues_from_branch(branch)
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _auto_local_prefilter(
+    repo_root: Path, head: str, branch: str, issue: int | None = None
+) -> None:
     """Cheap, offline skips for the Stop hook, which runs at every turn end.
 
     Only narrows when to go online; every condition is re-checked against origin
     afterwards, so a stale local tracking ref can only cause a skip, never a dispatch.
+    The dedupe record is per (head, Issue): when the Issue is known offline (argument,
+    NEXUS_CORE_ISSUE, or exactly one Issue named by the branch) only that Issue's record
+    can skip. When no Issue is known offline, a recent record for any Issue on this head
+    skips (the old behaviour); the full check below then decides per Issue.
     """
     if not branch or branch in {"main", "master"}:
         raise Outcome("SKIPPED_DEFAULT_BRANCH", "detached or default branch (local check)")
@@ -196,7 +213,8 @@ def _auto_local_prefilter(repo_root: Path, head: str, branch: str) -> None:
         raise Outcome("SKIPPED_NOT_PUSHED", "HEAD differs from the local origin tracking ref")
     directory = _dedupe_path(repo_root, head, 0).parent
     now = time.time()
-    for path in directory.glob(f"{head}-*.json") if directory.is_dir() else ():
+    pattern = f"{head}-{issue}.json" if issue is not None else f"{head}-*.json"
+    for path in directory.glob(pattern) if directory.is_dir() else ():
         record = _read_record(path) or {}
         age = now - float(record.get("dispatched_at_epoch", 0))
         if 0 <= age < DEDUPE_SECONDS:
@@ -244,7 +262,7 @@ def cmd_dispatch(args: argparse.Namespace, out: dict[str, Any]) -> int:
     branch = _current_branch(repo_root)
     out["branch"] = branch or None
     if args.auto:
-        _auto_local_prefilter(repo_root, head, branch)
+        _auto_local_prefilter(repo_root, head, branch, _offline_issue(args.issue, branch))
     meta = _gh_json("api", f"repos/{slug}")
     default_branch = str((meta or {}).get("default_branch") or "main")
     if branch == default_branch:
