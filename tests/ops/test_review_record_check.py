@@ -3506,3 +3506,101 @@ def test_strike_marks_with_three_tildes_adjacent_tags_and_attributes(line, statu
 def test_a_withdrawal_word_used_as_an_adjective_does_not_withdraw(tail):
     body = f"**Independent Claude review** (Claude Opus 5.5): **ACCEPT at {HEAD}**{tail}\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A finding id in the ACCEPT's aside does not lift its round.
+        (
+            DOCS,
+            [
+                f"Head reviewed: {HEAD}\nClaude r2 (closes R7): ACCEPT\nClaude r3: REJECT — new bug\n"
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            DOCS,
+            [
+                f"Head reviewed: {HEAD}\nClaude r2 (closes R7): ACCEPT\n",
+                f"Head reviewed: {HEAD}\nClaude r3: REJECT — new bug\n",
+            ],
+            "MISSING_RECORD",
+        ),
+        # A finding id in the REJECT's aside does not lower its round.
+        (
+            DOCS,
+            [f"Head reviewed: {HEAD}\nClaude r2: ACCEPT\nClaude r3 (re R1): REJECT — new bug\n"],
+            "MISSING_RECORD",
+        ),
+        (
+            RISKY,
+            [
+                f"Head reviewed: {HEAD}\nCodex r2 (fixes R5): ACCEPT\nCodex r3 (re R1): REJECT — race\n",
+                CLAUDE_AT_HEAD,
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_a_finding_id_in_an_aside_does_not_move_the_round(files, comments, status):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "comments",
+    [
+        # A later round listed first still survives an earlier one.
+        [
+            f"Head reviewed: {HEAD}\nCodex r3 (closes R7): ACCEPT\nCodex r2 (re R1): REJECT — race\n",
+            CLAUDE_AT_HEAD,
+        ],
+        # Earlier rounds named in the aside do not lower it below main's reading.
+        [
+            f"Head reviewed: {HEAD}\nCodex r4 (r2 and r3 fixed): ACCEPT\nCodex r2 (re R1): REJECT — x\n",
+            CLAUDE_AT_HEAD,
+        ],
+        [f"Head reviewed: {HEAD}\nCodex r3: ACCEPT\nCodex r2: REJECT — race\n", CLAUDE_AT_HEAD],
+        [CODEX_RECORD, CLAUDE_AT_HEAD],
+    ],
+)
+def test_a_later_round_with_finding_ids_still_survives(comments):
+    assert rrc.evaluate(HEAD, RISKY, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body, status",
+    [
+        # The label's round is its first marker outside parentheses ...
+        (
+            f"Head reviewed: {HEAD}\nClaude r2 delta r3: ACCEPT\nClaude r2: REJECT — x\n",
+            "MISSING_RECORD",
+        ),
+        (f"Head reviewed: {HEAD}\nClaude (re R1): r3 ACCEPT\nClaude r2: REJECT — x\n", "OK"),
+        # ... and it never lets an ACCEPT outlast a REJECT that main's round would not.
+        (
+            f"Head reviewed: {HEAD}\nClaude r4 (r2 fixed): ACCEPT\nClaude r3: REJECT — x\n",
+            "MISSING_RECORD",
+        ),
+        (
+            f"Head reviewed: {HEAD}\nClaude r4: ACCEPT\nClaude r2 (re R5): REJECT — x\n",
+            "MISSING_RECORD",
+        ),
+    ],
+)
+def test_the_label_round_only_moves_a_round_the_safe_way(body, status):
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        f"Claude r3 (re R1 at {OLD}): REJECT at {HEAD} — x\n",
+        f"Claude r3 (R1 {OLD}): REJECT at {HEAD}\n",
+    ],
+)
+def test_a_round_one_in_the_rejection_aside_still_starts_a_new_numbering(rejection):
+    # Main read this REJECT as round 1, a new numbering that withdraws the older r4; a line
+    # naming another sha has no round marker, so the REJECT keeps that numbering itself.
+    comments = [_c(f"Claude r4: ACCEPT at {HEAD}\n"), _c(rejection)]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"

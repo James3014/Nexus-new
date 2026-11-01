@@ -1129,6 +1129,24 @@ def _rebuttal_point(section: list[str], head: str) -> tuple[int, int] | None:
     return point
 
 
+def _round_before(prefix: str, lowest: bool) -> int | None:
+    """The round of a verdict from the text before its token in its clause.
+
+    Main read the last round marker, so a finding id in an aside moved it ("r2 (closes
+    R7): ACCEPT" read as round 7, "r3 (re R1): REJECT" as round 1). The label's own round
+    is the first marker outside parentheses; it is used only where it is safer than
+    main's: the lower of the two for an ACCEPT (``lowest``), the higher for a REJECT, so a
+    round never lets an ACCEPT outlast a REJECT that main's round would not (#3041).
+    """
+    found = _ROUND.findall(prefix)
+    if not found:
+        return None
+    last = int(found[-1])
+    outside = _ROUND.findall(_plain(prefix))
+    label = int(outside[0]) if outside else last
+    return min(label, last) if lowest else max(label, last)
+
+
 def _reject_match(clause: str) -> tuple[int, int] | None:
     match = _REJECT_POS.search(clause) or _REJECT_POS_MORE.search(clause)
     if not match:
@@ -1380,7 +1398,9 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 consumed = start + len(clause) if start >= 0 else consumed
                 family = _clause_family(clause, span, plain_line, start, header_family)
                 before = plain_line[: start + span[0]] if (span and start >= 0) else ""
+                accept_round = _round_before(clause[: span[0]], lowest=True) if span else None
                 rounds = _ROUND.findall(clause[: span[0]]) if span else []
+                main_round = int(rounds[-1]) if rounds else None
                 if (
                     family
                     and not _binding(clause, span, line, head, comment_head)
@@ -1390,7 +1410,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         (index, start + (span[0] if span else 0)),
                         family,
                         _reviewer_word(before) or header_reviewer,
-                        int(rounds[-1]) if rounds else None,
+                        accept_round,
                     ))
                 if family and _binding(clause, span, line, head, comment_head):
                     line_events.append((
@@ -1398,9 +1418,9 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         {
                             "family": family,
                             "reviewer": _reviewer_word(before) or header_reviewer,
-                            # A withdrawn ACCEPT still numbers its round, as before #3041.
+                            # A withdrawn ACCEPT still numbers its round as main read it.
                             "kind": "round" if withdrawn else "accept",
-                            "round": int(rounds[-1]) if rounds else None,
+                            "round": main_round if withdrawn else accept_round,
                             "comment": 0,
                             "line": clause.strip(),
                         },
@@ -1439,19 +1459,25 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 families = sorted(set(families) | set(earlier))
                 if _reviewer != reviewer:
                     reviewer = None  # read as two reviewers: no later round answers it
-            rounds = _ROUND.findall(clause[: span[0]])
+            reject_round = _round_before(clause[: span[0]], lowest=False)
+            # Main read the last marker; where that was a round 1 it may start a new
+            # numbering, so a round marker keeps that (a line naming another sha has none).
+            last = _ROUND.findall(clause[: span[0]])
+            renumbers = reject_round != 1 and bool(last) and int(last[-1]) == 1
+            kinds = [("reject", reject_round)] + ([("round", 1)] if renumbers else [])
             for family in families:
-                event = {
-                    "family": family,
-                    "reviewer": reviewer,
-                    "kind": "reject",
-                    "round": int(rounds[-1]) if rounds else None,
-                    "comment": 0,
-                    "line": clause.strip(),
-                }
-                if weak:
-                    weak_rejects.add(id(event))
-                line_events.append((start + span[0], event))
+                for kind, round_ in kinds:
+                    event = {
+                        "family": family,
+                        "reviewer": reviewer,
+                        "kind": kind,
+                        "round": round_,
+                        "comment": 0,
+                        "line": clause.strip(),
+                    }
+                    if weak:
+                        weak_rejects.add(id(event))
+                    line_events.append((start + span[0], event))
         tokens = len(_ANY_VERDICT_TOKEN.findall(line))
         if 0 < tokens <= MAX_VERDICTS_PER_LINE and not names_other_sha(line, head):
             # A round 1 named on a verdict line at the head, read or not (resolved, a
