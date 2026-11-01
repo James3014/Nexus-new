@@ -158,6 +158,37 @@ _REJECT_PRE_DENY = re.compile(
     r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent|instead of)\b",
     re.IGNORECASE,
 )
+# _REJECT_PRE_DENY, except "instead of" naming a model: that names which reviewer ran
+# ("Codex r2 instead of Gemini: ACCEPT@<sha>" credits Codex, so the same label before a
+# REJECT takes the credit back), not an alternative to the verdict ("APPROVE instead of
+# REJECT"). Used only for the full reading (``more`` and ``labels``); _stated_reject keeps
+# _REJECT_PRE_DENY.
+_REJECT_READ_DENY = re.compile(
+    r"\b(?:no|not|never|none|nothing|if|unless|whether|would|could|might|may|should|cannot"
+    r"|can't|didn't|doesn't|won't|wouldn't|without|avoid|prevent"
+    r"|instead of(?!\s+(?:the\s+)?(?:codex|gemini|gpt|claude|opus|sonnet)\b))\b",
+    re.IGNORECASE,
+)
+# More positions for the full reading, tried when neither _REJECT_POS nor _REJECT_POS_MORE
+# reads the clause: a colon, ``@``, ``=``, a spaced dash of any width, an arrow or "verdict
+# is" with up to three symbols or one HTML tag before the token (": ❌ REJECT", ": [REJECT]",
+# ": <b>REJECT</b>", "⇒ REJECT", "verdict is REJECT"); and (weak) a dash glued to a round
+# marker ("r2-REJECT"), a table cell border without a leading ``|`` or a space after a bare
+# label ("**Claude review** REJECT"). An accepting verdict bound by its sha is read in each of
+# these places (_VERDICT_POS, second alternative). Both are matched against at most
+# _LOOSE_REACH characters before a token, so a long run of spaces cannot make them quadratic.
+_LOOSE_REACH = 40
+# How far back the full reading looks for the model that labels a REJECT (the main reading
+# looks 400 characters back); the main reading's window is always tried first.
+_WIDE_LABEL = 4000
+_LOOSE_DECO = r"[ \t]{0,4}(?:<[a-z]{1,10}>[ \t]{0,4}|[^\w\s<>(]{1,3}[ \t]{0,4})?$"
+_REJECT_POS_LOOSE = re.compile(
+    r"(?:[:\uff1a@=]|(?<=\s)[\-\u2010-\u2015\u2212]|->|=>|>>|[\u2192\u21d2\u2794\u279c\u27f6\u27f9]"
+    rf"|\b(?i:verdict)(?:[ \t]{{1,4}}(?i:is|was))?){_LOOSE_DECO}"
+)
+_REJECT_POS_WEAK = re.compile(rf"(?:(?<=[A-Za-z0-9])-|[|\[]|\s){_LOOSE_DECO}")
+# The decoration that may close a loose position after the token ("]", "</b>", "**").
+_LOOSE_CLOSE = re.compile(r"(?:</[a-z]{1,10}>|[\]\u274c\u2716\u26d4~*]{1,3})")
 _RESOLUTION_WORD = (
     r"(?:fixed|rebutted|addressed|resolved|superseded|withdrawn|retracted|overturned"
     r"|dismissed|overridden|cleared|triaged|non-defects?|false[- ]positives?|disputed|declined"
@@ -713,15 +744,17 @@ def _model_labels_reject(window: str) -> bool:
     starts = list(_SENTENCE_START.finditer(window))
     own = window[starts[-1].end() :] if starts else window
     outside = re.sub(r"\([^()]*\)", " ", own)
-    if _denies_reject(outside):
+    if _denies_reject(outside, narrow=True):
         return False
-    last = re.search(r"\(([^()]*)\)\W*$", own)
+    last = re.search(r"\(([^()]*)\)\W*$", own[-400:])  # bounded: a long window stays linear
     return bool(_MODEL_LABEL.search(outside) or (last and _MODEL_LABEL.search(last.group(1))))
 
 
-def _denies_reject(before: str) -> bool:
-    """A negation, condition or quote before a REJECT token in its clause."""
-    return bool(_REJECT_PRE_DENY.search(_plain(before)) or _QUOTE.search(before))
+def _denies_reject(before: str, narrow: bool = False) -> bool:
+    """A negation, condition or quote before a REJECT token in its clause. ``narrow`` lets
+    "instead of <model>" stand in a reviewer label (_REJECT_READ_DENY)."""
+    deny = _REJECT_READ_DENY if narrow else _REJECT_PRE_DENY
+    return bool(deny.search(_plain(before)) or _QUOTE.search(before))
 
 
 def _reject_label_only(prefix: str) -> bool:
@@ -732,6 +765,32 @@ def _reject_label_only(prefix: str) -> bool:
         or word.rstrip(".") in _REJECT_LABEL_EXTRA
         or _REJECT_LABEL_WORD.fullmatch(word.rstrip("."))
         for word in words
+    )
+
+
+def _weak_label(window: str) -> bool:
+    """The label before a REJECT in a weak position (_REJECT_POS_WEAK): it names a model,
+    every other word is a reviewer label, round marker, tier or sha, and a word other than
+    "the", "on", "at" or "pr" follows the last model ("Claude review", "Claude | r2 |",
+    "Claude r2-"). "The REJECT path" and "the Claude REJECT path" are prose."""
+    models = list(_NEAREST_MODEL.finditer(window))
+    if not models:
+        return False
+
+    def words(text: str) -> list[str]:
+        found = re.findall(r"[a-z0-9][a-z0-9.-]*", text.lower())
+        return [word.rstrip(".-") for word in found if word.rstrip(".-")]
+
+    def label_word(word: str) -> bool:
+        return (
+            word in _REJECT_LABEL_WORDS
+            or word in _REJECT_LABEL_EXTRA
+            or bool(_REJECT_LABEL_WORD.fullmatch(word))
+        )
+
+    tail = words(window[models[-1].end() :])
+    return all(label_word(word) for word in words(_NEAREST_MODEL.sub(" ", window))) and any(
+        word not in {"the", "on", "at", "pr"} for word in tail
     )
 
 
@@ -794,10 +853,29 @@ def _reject_clause_starts(
     ``more`` False reads only as main did before #3041 r15; with it, a clause main's
     reading skips is read again with the positions in ``_REJECT_POS_MORE`` and a label
     aside carried over a line break (``_reject_aside_closes``). ``labels`` False leaves out
-    a REJECT read only because its sentence names a model (``_model_labels_reject``, #3069);
-    such a REJECT is an ``extra`` event, not read when choosing merge-only delta heads.
+    a REJECT read only because its sentence names a model (``_model_labels_reject``, #3069)
+    and the full reading's further shapes (``_reject_reads``); such a REJECT is an ``extra``
+    event, not read when choosing merge-only delta heads.
     """
-    out: list[tuple[str, int]] = []
+    return [(clause, start) for clause, start, _span in _reject_reads(line, more, labels)]
+
+
+def _reject_reads(
+    line: str, more: bool = True, labels: bool = True
+) -> list[tuple[str, int, tuple[int, int]]]:
+    """``_reject_clause_starts`` with the token's span in its clause.
+
+    The full reading (``more`` and ``labels``) also reads, like an accepting verdict's label
+    would be: a label naming the reviewer that ran "instead of" another model
+    (_REJECT_READ_DENY: "Codex r2 instead of Gemini: REJECT"); a model named more than 400 characters before the
+    token in its sentence (up to ``_WIDE_LABEL`` back, not past the previous verdict token,
+    tried only when the main reading's 400-character window does not read it, so the wider
+    window never drops a REJECT); and, for a clause neither position list reads, the
+    positions in ``_REJECT_POS_LOOSE`` (a model-naming label as above) and
+    ``_REJECT_POS_WEAK`` (only reviewer labels, round markers and shas before it).
+    """
+    out: list[tuple[str, int, tuple[int, int]]] = []
+    full = more and labels
     plain_line = _plain(_reject_view(line), keep_parens=True)
     tokens = [(m.start(), m.end()) for m in _ANY_VERDICT_TOKEN.finditer(plain_line)]
     if len(tokens) > MAX_VERDICTS_PER_LINE:
@@ -806,9 +884,15 @@ def _reject_clause_starts(
     consumed = 0
     closes: dict[bool, list[int | None] | None] = {}
 
-    def reads(clause: str, start: int, match: re.Match[str], extended: bool) -> bool:
-        token_start = match.start(1) if match.group(1) else match.start(2)
-        token_end = match.end(1) if match.group(1) else match.end(2)
+    def reads(
+        clause: str,
+        start: int,
+        span: tuple[int, int],
+        extended: bool,
+        weak: bool = False,
+        loose: bool = False,
+    ) -> bool:
+        token_start, token_end = span
         at, end = start + token_start, start + token_end
         # Each check below has two readings, main's and one that blanks every label aside
         # closing before the token (nested ones included); the REJECT is read when either
@@ -824,10 +908,12 @@ def _reject_clause_starts(
                 closes[extended] = _aside_closes(plain_line) if "(" in plain_line else None
         aside_closes = closes[extended]
         before = _outside_closed_asides(plain_line, start, at, aside_closes)
-        if _denies_reject(clause[:token_start]) and _denies_reject(before):
+        narrow = extended and full
+        if _denies_reject(clause[:token_start], narrow) and _denies_reject(before, narrow):
             return False
         index = bisect.bisect_left(starts, at)
-        window_start = max(tokens[index - 1][1] if index > 0 else 0, at - 400)
+        previous_end = tokens[index - 1][1] if index > 0 else 0
+        window_start = max(previous_end, at - 400)
         # (the 400 cap keeps the scan linear on a very long line)
         # Label: from the last model named before it ("After the rebase, Codex r3 on head
         # <sha>:"), else from the previous verdict or the line start; in the blanked reading
@@ -835,19 +921,45 @@ def _reject_clause_starts(
         # is not this verdict's label ("(Gemini via agy, dispatched by the desk (review lane),
         # task X): REJECT", "One finding. Verdict: REJECT").
         window = _plain(plain_line[window_start:at])
+        if weak and not _weak_label(window):
+            return False
         models = list(_NEAREST_MODEL.finditer(window))
         if not _reject_label_only(window[models[-1].end() :] if models else window):
             blanked = _plain(_outside_closed_asides(plain_line, window_start, at, aside_closes))
             if not _reject_label_only(blanked[_label_start(blanked) :]) and not (
                 extended
                 and labels
-                and _model_labels_reject(_plain(plain_line[window_start:at], keep_parens=True))
+                and (
+                    _model_labels_reject(_plain(plain_line[window_start:at], keep_parens=True))
+                    or (
+                        full
+                        and window_start > previous_end
+                        and _model_labels_reject(
+                            _plain(plain_line[max(previous_end, at - _WIDE_LABEL) : at], True)
+                        )
+                    )
+                )
             ):
                 return False
         if _REJECT_NOT_AFTER.match(plain_line, end):
             return False
         following = starts[index + 1] if index + 1 < len(starts) else len(plain_line)
-        return not _resolved_after(plain_line, end, following)
+        if _resolved_after(plain_line, end, following):
+            return False
+        if loose:
+            # Past the closing decoration of a loose position ("[REJECT] is returned",
+            # "<b>REJECT</b> (fixed)"): only REJECTs main never read are judged here.
+            closing = _LOOSE_CLOSE.match(plain_line, end)
+            if closing and closing.end() > end:
+                past = closing.end()
+                if _REJECT_NOT_AFTER.match(plain_line, past):
+                    return False
+                return not _resolved_after(plain_line, past, max(following, past))
+        return True
+
+    def span_of(match: re.Match[str]) -> tuple[int, int]:
+        group = 1 if match.group(1) else 2
+        return match.start(group), match.end(group)
 
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
@@ -855,8 +967,8 @@ def _reject_clause_starts(
         if start < 0:
             continue
         match = _REJECT_POS.search(clause)
-        if match and reads(clause, start, match, extended=False):
-            out.append((clause, start))
+        if match and reads(clause, start, span_of(match), extended=False):
+            out.append((clause, start, span_of(match)))
             continue
         if not more:
             continue
@@ -868,8 +980,22 @@ def _reject_clause_starts(
                 and not plain_line[:start].strip()
             ):
                 continue  # "- REJECT ...": a list bullet at the line start, as before
-        if match and reads(clause, start, match, extended=True):
-            out.append((clause, start))
+        if match and reads(clause, start, span_of(match), extended=True):
+            out.append((clause, start, span_of(match)))
+            continue
+        if not full:
+            continue
+        for token in _REJECT.finditer(clause):
+            reach = clause[max(0, token.start() - _LOOSE_REACH) : token.start()]
+            span = token.span()
+            if (
+                _REJECT_POS_LOOSE.search(reach) and reads(clause, start, span, True, loose=True)
+            ) or (
+                _REJECT_POS_WEAK.search(reach)
+                and reads(clause, start, span, True, weak=True, loose=True)
+            ):
+                out.append((clause, start, span))
+                break
     return out
 
 
@@ -1177,14 +1303,6 @@ def _round_before(prefix: str, lowest: bool) -> int | None:
     return min(label, last) if lowest else max(label, last)
 
 
-def _reject_match(clause: str) -> tuple[int, int] | None:
-    match = _REJECT_POS.search(clause) or _REJECT_POS_MORE.search(clause)
-    if not match:
-        return None
-    group = 1 if match.group(1) else 2
-    return match.start(group), match.end(group)
-
-
 def _clause_family(
     clause: str,
     span: tuple[int, int] | None,
@@ -1461,7 +1579,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             reads = _verdict_reads(line)
         line_events: list[tuple[int, dict[str, Any]]] = []
         reject_head = _reject_label_binds(reject_labels, index, head)
-        if not rejects_only:
+        # A withdrawn ACCEPT is read in a rejects-only parse too (it binds like a REJECT).
+        if not rejects_only or any(withdrawn for _clause, withdrawn in reads):
             comment_head = _label_binds(labels, index, head)
             plain_line = _plain(line, keep_parens=True)
             consumed = 0
@@ -1483,6 +1602,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 main_round = int(rounds[-1]) if rounds else None
                 if (
                     family
+                    and not rejects_only
                     and not _binding(clause, span, line, head, comment_head)
                     and _binding(clause, span, line, head, reject_head)
                 ):
@@ -1492,7 +1612,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         _reviewer_word(before) or header_reviewer,
                         main_round,
                     ))
-                if family and _binding(clause, span, line, head, comment_head):
+                if family and not rejects_only and _binding(clause, span, line, head, comment_head):
                     line_events.append((
                         start + (span[0] if span else 0),
                         {
@@ -1507,6 +1627,32 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                             "line": clause.strip(),
                         },
                     ))
+                if (
+                    family
+                    and withdrawn
+                    and (
+                        _binding(clause, span, line, head, comment_head)
+                        or _binding(clause, span, line, head, reject_head)
+                    )
+                ):
+                    # A withdrawn or struck ACCEPT at the head also takes back the
+                    # reviewer's earlier ACCEPTs, as a REJECT of its round would; it binds
+                    # like a REJECT (a 7-character head prefix, fail closed).
+                    line_events.append((
+                        start + (span[0] if span else 0),
+                        {
+                            "family": family,
+                            "reviewer": _reviewer_word(before) or header_reviewer,
+                            "kind": "reject",
+                            "extra": True,
+                            "round": main_round,
+                            "compare": _round_before(clause[: span[0]], lowest=False)
+                            if span
+                            else None,
+                            "comment": 0,
+                            "line": clause.strip(),
+                        },
+                    ))
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
         searched = 0
@@ -1515,15 +1661,12 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         main_starts = {at for _clause, at in _reject_clause_starts(line, more=False)}
         # A REJECT read only by its model-naming label (#3069) is "extra" too.
         base_starts = {at for _clause, at in _reject_clause_starts(line, labels=False)}
-        for clause, start in _reject_clause_starts(line):
+        for clause, start, span in _reject_reads(line):
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
             found = plain_reject.find(clause, searched)
             if start in main_starts:
                 searched = found + len(clause) if found >= 0 else searched
-            span = _reject_match(clause)
-            if span is None:
-                continue
             if not _reject_binding(clause, span, plain_reject, head, reject_head):
                 continue
             # Weak (see _REJECT_AFTER_PUNCT): a later "fixed in <sha>" before the next
@@ -1810,14 +1953,20 @@ def evaluate(
         ):
             delta_heads.append(old)
     if delta_heads:
+        head_events = _fold_events_at(head, comments, allow_rebuttal)
+        # A REJECT at the head is about a newer commit than any merge-only delta head, so no
+        # ACCEPT carried from one answers it, whatever the posting order or its round: a
+        # carried ACCEPT of a family the head has a REJECT of only numbers its round.
+        rejected = {event["family"] for event in head_events if event["kind"] == "reject"}
         carried_events = [
-            event for old in delta_heads for event in _fold_events_at(old, comments, allow_rebuttal)
+            dict(event, kind="round")
+            if event["kind"] == "accept" and event["family"] in rejected
+            else event
+            for old in delta_heads
+            for event in _fold_events_at(old, comments, allow_rebuttal)
         ]
         folded = standing_families(
-            sorted(
-                carried_events + _fold_events_at(head, comments, allow_rebuttal),
-                key=lambda event: event["comment"],
-            )
+            sorted(carried_events + head_events, key=lambda event: event["comment"])
         )
         independent = (
             approved_reviews > 0
