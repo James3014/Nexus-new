@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 UNSUPPORTED_SYNTAX_EXIT = 2
 COMMAND_NOT_FOUND_EXIT = 127
@@ -643,6 +643,51 @@ def run_reaping_process_group(
             if stream is not None:
                 stream.close()
     return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def require_child_stays_unreaped() -> None:
+    """Raise ProcessGroupReapingUnavailable unless a child can be waited for without being
+    reaped here; call it before spawning a child for ``communicate_then_kill_group``."""
+    _refuse_unless_child_stays_unreaped()
+
+
+def communicate_then_kill_group(
+    process: subprocess.Popen,
+    timeout: float | None,
+    before_kill: Callable[[], object] | None = None,
+) -> tuple[bytes, bytes]:
+    """``process.communicate(timeout=timeout)`` that also SIGKILLs the child's process group once
+    the child exits, before it is reaped (#3052). For a child the caller started with
+    ``start_new_session=True`` and binary pipes; returns (stdout, stderr), b"" for no pipe.
+
+    Same precondition as ``run_reaping_process_group``: check ``require_child_stays_unreaped``
+    before spawning, and nothing else reaps the child meanwhile. On timeout it raises
+    ``subprocess.TimeoutExpired`` with the output read so far and leaves the child running,
+    unsignalled and unreaped, its pipes open, as ``communicate`` does, for the caller's own
+    timeout handling. ``before_kill``, if given, runs once the child has exited and its output is
+    read, before the group is signalled (the group is still killed if it raises). A group member
+    alive after SIGKILL raises PermissionError once the child is reaped; a reap that already
+    happened elsewhere raises ChildProcessError."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    streams = (process.stdout, process.stderr)
+    output, timed_out = _read_pipes(process, deadline)
+    timed_out = timed_out or not _wait_leader_unreaped(process.pid, deadline)
+    captured = [b"" if s is None else output.get(s.fileno(), b"") for s in streams]
+    if timed_out:
+        raise subprocess.TimeoutExpired(
+            process.args, timeout or 0, output=captured[0], stderr=captured[1]
+        )
+    try:
+        try:
+            if before_kill is not None:
+                before_kill()
+        finally:
+            _kill_group_then_reap(process)
+    finally:
+        for stream in streams:
+            if stream is not None:
+                stream.close()
+    return captured[0], captured[1]
 
 
 def _decode(data: bytes, stream: object) -> str:

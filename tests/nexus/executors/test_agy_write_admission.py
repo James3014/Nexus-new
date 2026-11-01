@@ -1652,10 +1652,12 @@ def test_error_after_launch_kills_worker_and_is_not_clean(monkeypatch, tmp_path)
             super().__init__(*args, **kwargs)
             launched.append(self)
 
-        def communicate(self, *args, **kwargs):
-            raise OSError("injected pipe failure")
+    def failing_read(*args, **kwargs):
+        # The worker's output is read by communicate_then_kill_group (#3052).
+        raise OSError("injected pipe failure")
 
     monkeypatch.setattr(cli_worker.subprocess, "Popen", FailingPopen)
+    monkeypatch.setattr(cli_worker, "communicate_then_kill_group", failing_read)
     result = run_cli_worker(
         CliWorkerRequest(
             executable=sys.executable,
