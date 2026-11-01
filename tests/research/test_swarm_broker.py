@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import subprocess
 
 import pytest
@@ -359,4 +360,39 @@ def test_swarm_admin_entry_without_back_pointer_is_refused(
     (swarm / ".git").write_text(f"gitdir: {sibling_admin}\n", encoding="utf-8")
 
     assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is False
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_swarm_with_relative_back_pointer_is_accepted(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    admin = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    relative = os.path.relpath(swarm.resolve() / ".git", admin)
+    (admin / "gitdir").write_text(f"{relative}\n", encoding="utf-8")
+
+    assert SwarmBroker(controller).is_independently_registered_worktree(swarm) is True
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("failing_arg", ["--git-common-dir", "--absolute-git-dir"])
+def test_swarm_is_refused_when_git_dir_lookup_fails(tmp_path: Path, monkeypatch, failing_arg):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    broker = SwarmBroker(controller)
+    real_git_output = broker._git_output
+
+    def failing_git_output(args, cwd):
+        if failing_arg in args:
+            return None
+        return real_git_output(args, cwd)
+
+    monkeypatch.setattr(broker, "_git_output", failing_git_output)
+
+    assert broker.is_independently_registered_worktree(swarm) is False
     assert (sandbox / "SENTINEL").exists()
