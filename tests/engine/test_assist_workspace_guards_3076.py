@@ -1206,3 +1206,133 @@ def test_query_held_for_reconciliation_leaves_a_newer_job_tracked(box, monkeypat
     assert result is not None and result["job_id"] == old_job_id, result
     assert result["blocker"] == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE", result
     _assert_newer_job_untouched(box, state["newer"], newer_workspace)
+
+
+# ---------------------------------------------------------------------------
+# A reconcile records only the job it read: a retry recorded after the reconcile read the job
+# keeps its record, provider and workspace, and the reconcile reports the job it read (#3076)
+# ---------------------------------------------------------------------------
+
+# One case per reconcile record write: (group member alive, lease receipt result, expected
+# (status, blocker) of the job the reconcile read)
+_RECONCILE_WRITES = [
+    pytest.param(
+        True,
+        None,
+        ("UNKNOWN_REQUIRES_RECONCILE", "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE"),
+        id="group-still-running",
+    ),
+    pytest.param(
+        False,
+        "LEASE_BUSY_PRESERVED",
+        ("UNKNOWN_REQUIRES_RECONCILE", "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED"),
+        id="lease-preserved",
+    ),
+    pytest.param(
+        False, "LEASE_RECEIPT_REMOVED", ("FAILED", "ASSIST_PROVIDER_PROCESS_LOST"), id="settled"
+    ),
+]
+
+
+def _reconcile_pending_job(box, monkeypatch, *, member_alive: bool, lease_result):
+    """A job a query held for reconciliation (its group could not be listed), optionally with
+    an account lease; the group listing and the lease coordinator are stand-ins."""
+    from nexus.orchestrator import unified_mcp_gateway as gateway_module
+
+    workspace = _workspace(box.root)
+    fields: dict = {
+        "status": "UNKNOWN_REQUIRES_RECONCILE",
+        "blocker": "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE",
+        "reconciliation_required": True,
+    }
+    if lease_result is not None:
+        fields.update({
+            "account_alias_hash": "alias-old",
+            "account_lease_id_hash": "lease-old",
+            "account_lease_owner_pid": FAKE_PID,
+            "account_lease_released": False,
+        })
+    box.gateway._assist_write(_job(box, str(workspace), **fields))
+    group = _FakeGroup(member_alive=member_alive)
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    lease_calls: list = []
+
+    class _Coordinator:
+        def __init__(self, _manager=None) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **claim) -> dict:
+            lease_calls.append(claim)
+            return {"result": lease_result}
+
+    monkeypatch.setattr(gateway_module, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(gateway_module, "get_account_pool_manager", lambda: None)
+    return workspace, group, lease_calls
+
+
+def _assert_lease_calls_name_only_the_read_job(lease_calls: list, lease_result) -> None:
+    expected = (
+        []
+        if lease_result is None
+        else [
+            {"account_alias_hash": "alias-old", "lease_id_hash": "lease-old", "owner_pid": FAKE_PID}
+        ]
+    )
+    assert lease_calls == expected, lease_calls
+
+
+@pytest.mark.parametrize(("member_alive", "lease_result", "expected"), _RECONCILE_WRITES)
+def test_reconcile_leaves_a_retry_recorded_after_its_read_tracked(
+    box, monkeypatch, member_alive, lease_result, expected
+):
+    """Just before the reconcile's record write takes the assist lock, another reconcile has
+    settled the job and a retry recorded a newer job with its own provider and workspace."""
+    workspace, group, lease_calls = _reconcile_pending_job(
+        box, monkeypatch, member_alive=member_alive, lease_result=lease_result
+    )
+    newer_workspace = _workspace(box.root, "nexus-retry-t3076-ws-new")
+    state: dict = {}
+
+    def hook(name: str) -> None:
+        # hook <- __enter__ <- the helper taking the lock <- its caller
+        if name == "_assist_write_current" and sys._getframe(3).f_code.co_name == "_task_reconcile":
+            if "newer" not in state:
+                state["newer"] = _replace_with_newer_job(box, newer_workspace)
+
+    monkeypatch.setattr(
+        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
+    )
+    result = box.gateway._task_reconcile({"task_id": TASK})
+    assert "newer" in state, "the reconcile wrote its record without checking it under the lock"
+    assert (result["job_id"], result["status"], result["blocker"]) == (
+        "assist-3076-ws",
+        *expected,
+    ), result
+    _assert_newer_job_untouched(box, state["newer"], newer_workspace)
+    assert group.sent == [], "the reconcile signalled a process group"
+    _assert_lease_calls_name_only_the_read_job(lease_calls, lease_result)
+    # Only the read job's own workspace is ever removed, and only once it is settled.
+    assert workspace.exists() is (expected[0] != "FAILED")
+
+
+@pytest.mark.parametrize(("member_alive", "lease_result", "expected"), _RECONCILE_WRITES)
+def test_reconcile_still_records_its_own_job(
+    box, monkeypatch, member_alive, lease_result, expected
+):
+    workspace, group, lease_calls = _reconcile_pending_job(
+        box, monkeypatch, member_alive=member_alive, lease_result=lease_result
+    )
+    result = box.gateway._task_reconcile({"task_id": TASK})
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"], record["blocker"]) == ("assist-3076-ws", *expected)
+    assert (result["job_id"], result["status"]) == (record["job_id"], record["status"]), result
+    assert record["reconciliation_required"] is (expected[0] != "FAILED"), record
+    assert group.sent == []
+    _assert_lease_calls_name_only_the_read_job(lease_calls, lease_result)
+    settled = expected[0] == "FAILED"
+    assert workspace.exists() is not settled
+    if settled:
+        assert (record["account_lease_released"], record["process_cleanup"]) == (True, True)
