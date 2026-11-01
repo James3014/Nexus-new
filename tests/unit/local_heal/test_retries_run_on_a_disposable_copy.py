@@ -12,6 +12,7 @@ cwd to a sentinel directory under ``tmp_path``. No model is called.
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -187,6 +188,104 @@ def test_source_repo_keeps_local_work_when_the_reset_runs_on_its_world_c_copy(
 
     assert Path(workspace).resolve() != source.resolve()
     _assert_local_work_kept(source)
+    assert (sentinel_cwd / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize(("name", "as_file"), [(".Git", False), (".GIT", True)])
+def test_world_c_copy_omits_git_metadata_under_any_letter_case(
+    tmp_path, sentinel_cwd, name, as_file
+):
+    # The name is built directly, so this does not depend on a case-insensitive file system.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SENTINEL").write_text("outside\n", encoding="utf-8")
+    source = tmp_path / "source_project"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[project]\nname = 't'\n", encoding="utf-8")
+    (source / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    if as_file:
+        (source / name).write_text(f"gitdir: {outside}\n", encoding="utf-8")
+    else:
+        (source / name).mkdir()
+        (source / name / "config").write_text(
+            f"[core]\n\tbare = false\n\tworktree = {outside}\n", encoding="utf-8"
+        )
+    request = LocalModelExecutorRequest(
+        task_id="t-case",
+        problem_statement="p",
+        repo_root=str(source),
+        target_file="mod.py",
+        selected_capabilities=("repair_loop",),
+        evidence_refs=("ref",),
+        route_context={},
+    )
+
+    workspace = Path(_delegated_retry_world_c(request, {}))
+
+    assert (workspace / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert all(entry.casefold() != ".git" for entry in os.listdir(workspace))
+    _reset_workspace(workspace)
+    assert (outside / "SENTINEL").exists()
+    assert (sentinel_cwd / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("gitdir_file", [False, True])
+def test_reset_leaves_an_outside_worktree_named_by_core_worktree_untouched(
+    tmp_path, sentinel_cwd, monkeypatch, gitdir_file
+):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "SENTINEL").write_text("outside\n", encoding="utf-8")
+    (outside / "sub" / "SENTINEL").write_text("outside\n", encoding="utf-8")
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    (copy / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    if gitdir_file:
+        # A gitdir file pointing at a git directory kept outside the copy.
+        gitdir = tmp_path / "elsewhere"
+        gitdir.mkdir()
+        _git(gitdir, "init", "-q")
+        (copy / ".git").write_text(f"gitdir: {gitdir / '.git'}\n", encoding="utf-8")
+        _git(copy, "--git-dir", str(gitdir / ".git"), "config", "core.worktree", str(outside))
+    else:
+        _git(copy, "init", "-q")
+        _git(copy, "config", "core.worktree", str(outside))
+
+    _reset_workspace(copy)
+
+    assert (outside / "SENTINEL").read_text(encoding="utf-8") == "outside\n"
+    assert (outside / "sub" / "SENTINEL").read_text(encoding="utf-8") == "outside\n"
+    assert (copy / "mod.py").exists()
+    assert (sentinel_cwd / "SENTINEL").exists()
+
+
+def test_reset_leaves_a_copy_whose_git_dir_lives_outside_it_untouched(
+    tmp_path, sentinel_cwd, monkeypatch
+):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    elsewhere = _repo_with_local_work(tmp_path / "elsewhere")
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    (copy / "SENTINEL").write_text("copy\n", encoding="utf-8")
+    (copy / ".git").write_text(f"gitdir: {elsewhere / '.git'}\n", encoding="utf-8")
+
+    _reset_workspace(copy)
+
+    assert (copy / "SENTINEL").read_text(encoding="utf-8") == "copy\n"
+    assert not (copy / "notes.py").exists()
+    _assert_local_work_kept(elsewhere)
+    assert (sentinel_cwd / "SENTINEL").exists()
+
+
+def test_reset_still_cleans_a_normal_workspace_copy(tmp_path, sentinel_cwd, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    copy = _repo_with_local_work(tmp_path / "copy")
+
+    _reset_workspace(copy)
+
+    assert not (copy / "SENTINEL").exists()
+    assert (copy / "notes.py").read_text(encoding="utf-8") == "x = 1\n"
     assert (sentinel_cwd / "SENTINEL").exists()
 
 
