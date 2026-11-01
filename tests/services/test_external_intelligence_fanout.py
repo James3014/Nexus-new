@@ -35,6 +35,18 @@ from nexus.services.external_intelligence_fanout import (
 )
 
 
+def _reaping_from(fake_popen):
+    """The worker runs through the process-group reaping runner (#3052); serve it from a fake
+    Popen."""
+
+    def run(argv, **kwargs):
+        process = fake_popen(argv, **kwargs)
+        stdout, stderr = process.communicate(timeout=kwargs.get("timeout"))
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+    return run
+
+
 def _git(root: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr or result.stdout
@@ -718,6 +730,10 @@ def test_opencode_transport_parses_1_18_domain_event_stream(monkeypatch, tmp_pat
         )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        "nexus.services.external_intelligence_fanout.run_reaping_process_group",
+        _reaping_from(FakePopen),
+    )
     monkeypatch.setattr(subprocess, "run", fake_run)
     transport = OpenCodeDeepSeekTransport(executable="opencode")
     result = transport.run_new(prompt="p", artifact_path="/tmp/envelope", workspace_path=workspace)
@@ -777,6 +793,10 @@ def test_opencode_new_and_continue_bind_exact_model_session_and_directory(monkey
         )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        "nexus.services.external_intelligence_fanout.run_reaping_process_group",
+        _reaping_from(FakePopen),
+    )
     monkeypatch.setattr(subprocess, "run", fake_run)
     transport = OpenCodeDeepSeekTransport(executable="opencode")
     first = transport.run_new(prompt="p", artifact_path="/tmp/envelope", workspace_path=workspace)
@@ -828,6 +848,10 @@ def test_opencode_model_attestation_mismatch_is_outcome_unknown(monkeypatch, tmp
         )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        "nexus.services.external_intelligence_fanout.run_reaping_process_group",
+        _reaping_from(FakePopen),
+    )
     monkeypatch.setattr(subprocess, "run", fake_run)
     result = OpenCodeDeepSeekTransport().run_new(
         prompt="p", artifact_path="x", workspace_path=workspace

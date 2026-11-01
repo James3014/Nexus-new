@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import signal
 import subprocess
 import tempfile
 import uuid
@@ -16,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
+from nexus.core.argv_command import ProcessGroupReapingUnavailable, run_reaping_process_group
 from nexus.services.external_intelligence import (
     ENVELOPE_SCHEMA,
     OBSERVED_MODEL_ATTESTATION_MISMATCH,
@@ -1284,15 +1284,11 @@ class OpenCodeWorkerTransport:
         safe_argv = [self.executable, "run", "<compact-bootstrap>", *argv[3:]]
         argv_sha256 = _sha256(_canonical_json(safe_argv))
         try:
-            process = subprocess.Popen(
-                argv,
-                cwd=workspace_path,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-                shell=False,
+            # The worker leads its own process group, which is SIGKILLed on every exit, normal
+            # or timeout, before it is reaped: nothing it started in that group outlives the
+            # run, and a pipe held open past the timeout no longer blocks (#3052).
+            process = run_reaping_process_group(
+                argv, cwd=workspace_path, stdin=subprocess.DEVNULL, timeout=self.timeout
             )
         except FileNotFoundError as exc:
             return OpenCodeRunResult(
@@ -1302,39 +1298,29 @@ class OpenCodeWorkerTransport:
                 retry_safe=True,
                 error=str(exc),
             )
-        try:
-            try:
-                stdout, stderr = process.communicate(timeout=self.timeout)
-            except subprocess.TimeoutExpired as exc:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass
-                try:
-                    stdout, stderr = process.communicate(timeout=2)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except (OSError, ProcessLookupError):
-                        pass
-                    stdout, stderr = process.communicate()
-                return OpenCodeRunResult(
-                    status="OPENCODE_OUTCOME_UNKNOWN",
-                    stdout_sha256=_sha256(stdout or ""),
-                    stderr_sha256=_sha256(stderr or str(exc)),
-                    argv_sha256=argv_sha256,
-                    process_started=True,
-                    outcome_unknown=True,
-                    retry_safe=False,
-                    error="provider_timeout",
-                )
-        finally:
-            for stream in (process.stdout, process.stderr):
-                if stream is not None:
-                    stream.close()
+        except ProcessGroupReapingUnavailable as exc:
+            # Refused before anything was spawned.
+            return OpenCodeRunResult(
+                status="OPENCODE_START_REFUSED",
+                argv_sha256=argv_sha256,
+                process_started=False,
+                retry_safe=False,
+                error=str(exc),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return OpenCodeRunResult(
+                status="OPENCODE_OUTCOME_UNKNOWN",
+                stdout_sha256=_sha256(exc.output or ""),
+                stderr_sha256=_sha256(exc.stderr or str(exc)),
+                argv_sha256=argv_sha256,
+                process_started=True,
+                outcome_unknown=True,
+                retry_safe=False,
+                error="provider_timeout",
+            )
 
-        stdout = stdout or ""
-        stderr = stderr or ""
+        stdout = process.stdout or ""
+        stderr = process.stderr or ""
         if process.returncode != 0:
             return OpenCodeRunResult(
                 status="OPENCODE_OUTCOME_UNKNOWN",

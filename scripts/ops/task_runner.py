@@ -102,7 +102,8 @@ def run_shell(cmd: str, timeout_sec: int, cwd: Path | str | None = None) -> tupl
     try:
         env = os.environ.copy()
         env["NEXUS_FORCE_RUN"] = "1"
-        r = run_command_string(cmd, timeout=timeout_sec, env=env, cwd=cwd)
+        # Each segment's process group is killed once it returns (#3052).
+        r = run_command_string(cmd, timeout=timeout_sec, env=env, cwd=cwd, reap_process_group=True)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired as e:
         return 124, "", f"timeout:{timeout_sec}s"
