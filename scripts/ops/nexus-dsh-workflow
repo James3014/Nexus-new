@@ -1087,6 +1087,36 @@ def _node_assertion_location(repo: Path, failed: list[dict[str, Any]]) -> dict[s
     return {**location, "path_sha256": digest}
 
 
+_argv_command_module: Any = None
+
+
+def _argv_command() -> Any:
+    """``nexus/core/argv_command.py`` from this script's own tree (the repo root, or the host
+    runtime snapshot, which ships it), loaded by file path so that a ``nexus`` package
+    installed for the running python cannot stand in for it. Not loadable: OSError."""
+    global _argv_command_module
+    if _argv_command_module is None:
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[2] / "nexus" / "core" / "argv_command.py"
+        name = "nexus_dsh_argv_command_" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"no loader for {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
+        except Exception as exc:
+            raise OSError(errno.ENOENT, f"{path} unavailable: {exc}") from exc
+        _argv_command_module = module
+    return _argv_command_module
+
+
 class CandidateProcessSurvived(Exception):
     """A process left by candidate-run code outlived SIGKILL of its process group (#3052)."""
 
@@ -1097,18 +1127,10 @@ def _run_reaping(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: fl
     command leads a new session whose whole process group gets SIGKILL on every exit path,
     so a background child of a candidate test cannot outlive the gate (#3052).
 
-    That module is loaded from this script's own tree (the repo root, or the host runtime
-    snapshot, which ships ``nexus/core/argv_command.py``). ``subprocess.TimeoutExpired``
-    propagates as from ``subprocess.run``; a group member still alive after SIGKILL (EPERM)
-    raises CandidateProcessSurvived; the module missing, or a refusal before spawning, is an
-    OSError like a failed spawn."""
-    root = str(Path(__file__).resolve().parents[2])
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    try:
-        from nexus.core.argv_command import run_reaping_process_group
-    except ImportError as exc:
-        raise OSError(errno.ENOENT, f"nexus.core.argv_command unavailable: {exc}") from exc
+    ``subprocess.TimeoutExpired`` propagates as from ``subprocess.run``; a group member still
+    alive after SIGKILL (EPERM) raises CandidateProcessSurvived; the module missing (see
+    ``_argv_command``), or a refusal before spawning, is an OSError like a failed spawn."""
+    run_reaping_process_group = _argv_command().run_reaping_process_group
     try:
         return run_reaping_process_group(
             argv, cwd=cwd, env=env, timeout=timeout, text=False, stdin=subprocess.DEVNULL

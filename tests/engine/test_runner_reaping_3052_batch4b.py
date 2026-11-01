@@ -36,7 +36,7 @@ dsh = SourceFileLoader(
 
 # A command that prints FIRST_LINE, leaves a grandchild in its own process group (detached
 # from its output, or holding it with HOLD), waits until the grandchild has recorded its pid,
-# then sleeps LINGER seconds (exiting 0 on SIGTERM, like the installed DSH) and exits 0.
+# then sleeps LINGER seconds (exiting 0 on SIGTERM, like the installed DSH) and exits EXIT_CODE.
 FAKE = r"""#!{python}
 import os, signal, sys, time
 PIDFILE = {pidfile!r}
@@ -59,7 +59,7 @@ while not os.path.exists(PIDFILE):
     time.sleep(0.01)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 time.sleep({linger!r})
-sys.exit(0)
+sys.exit({exit_code!r})
 """
 
 
@@ -71,6 +71,7 @@ def _fake(
     linger: float = 0,
     first_line: str = "{}",
     pid_file: Path | None = None,
+    exit_code: int = 0,
 ) -> tuple[Path, Path]:
     pid_file = pid_file or tmp_path / f"{name}.pid"
     script = tmp_path / name
@@ -81,6 +82,7 @@ def _fake(
             hold=hold,
             linger=linger,
             first_line=first_line,
+            exit_code=exit_code,
         ),
         encoding="utf-8",
     )
@@ -147,6 +149,22 @@ def test_dsh_supervised_turn_leaves_no_grandchild(tmp_path, reap_ours):
     _assert_gone(pid_file, tmp_path)
 
 
+@pytest.mark.parametrize("hold", [False, True], ids=["detach", "hold_stdout"])
+def test_dsh_supervised_turn_keeps_a_nonzero_dsh_exit_code(tmp_path, reap_ours, hold):
+    # DSH is reaped by the runner only after its group is killed: its own exit code is kept
+    # (a check that reaped it early would lose the status and report 0).
+    exe, pid_file = _fake(tmp_path, "dshfail3052", hold=hold, exit_code=3)
+    rc, reasons = dsh._run_dsh_supervised(
+        [str(exe)],
+        cwd=str(tmp_path),
+        env=dict(os.environ),
+        log_path=tmp_path / "log",
+        watchdog=None,
+    )
+    assert (rc, reasons) == (3, [])
+    _assert_gone(pid_file, tmp_path)
+
+
 def test_dsh_supervised_turn_is_not_held_by_a_grandchild_holding_its_output(tmp_path, reap_ours):
     exe, pid_file = _fake(tmp_path, "dshhold3052", hold=True, first_line="turn output")
     log = tmp_path / "log"
@@ -172,7 +190,7 @@ def test_dsh_supervised_turn_stops_at_the_wall_clock(tmp_path, reap_ours):
         watchdog=None,
         wall_clock_seconds=1.0,
     )
-    assert (rc, reasons) == (dsh.DSH_TURN_WALL_CLOCK_EXIT, [])
+    assert (rc, reasons) == (124, [])
     assert time.monotonic() - started < 15
     _assert_gone(pid_file, tmp_path)
 
@@ -225,8 +243,8 @@ def test_dsh_phase_turn_past_the_wall_clock_is_a_failed_turn(tmp_path, monkeypat
         parent=None,
         green_gate_command=None,
     )
-    assert code == dsh.DSH_TURN_WALL_CLOCK_EXIT, out
-    assert out["dsh_exit_code"] == dsh.DSH_TURN_WALL_CLOCK_EXIT
+    assert code == 124, out
+    assert out["dsh_exit_code"] == 124
     assert out["turn_state"] != dsh.TURN_OK
     _assert_gone(pid_file, tmp_path)
 
@@ -270,6 +288,29 @@ def test_v3_dsh_gate_pytest_kills_candidate_grandchild(tmp_path, reap_ours, gate
     else:
         assert result["exit_code"] == 1 and not result["codes"], result
     _assert_gone(pid_file, tmp_path)
+
+
+def test_dsh_gates_load_argv_command_from_their_own_tree():
+    # By file path: an installed ``nexus`` package elsewhere on sys.path cannot stand in.
+    module = dsh._argv_command()
+    assert Path(module.__file__).resolve() == REPO / "nexus" / "core" / "argv_command.py"
+    assert dsh._argv_command() is module
+
+
+def test_dsh_gates_without_argv_command_are_an_environment_failure(tmp_path):
+    # A copy of the script in a tree that does not ship nexus/core/argv_command.py.
+    ops = tmp_path / "tree" / "scripts" / "ops"
+    ops.mkdir(parents=True)
+    copy = ops / "nexus-dsh-workflow"
+    copy.write_bytes((REPO / "scripts" / "ops" / "nexus-dsh-workflow").read_bytes())
+    lonely = SourceFileLoader("nexus_dsh_workflow_no_argv_command_3052", str(copy)).load_module()
+    repo = tmp_path / "candidate"
+    repo.mkdir()
+    node = ["tests/test_x.py::test_x"]
+    assert lonely._run_red_tests(repo, sys.executable, node, 4.0, "X")["codes"] == {
+        "ENVIRONMENT_FAILURE"
+    }
+    assert lonely._run_pytest(repo, sys.executable, node, 4.0)["codes"] == {"ENVIRONMENT_FAILURE"}
 
 
 def test_dsh_gate_group_survivor_is_its_own_failure_code(tmp_path, monkeypatch):
