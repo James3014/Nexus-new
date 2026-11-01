@@ -1186,6 +1186,14 @@ def _reviewer_word(text: str) -> str | None:
     return named[-1].lower() if named else None
 
 
+def _named_family(text: str) -> str | None:
+    """Family of the model named last in the text outside parentheses (None: no model)."""
+    word = _reviewer_word(text)
+    if word is None:
+        return None
+    return "cross_model" if word == "cross-model" else _family(word)
+
+
 def _reject_families(
     line_before: str, header: tuple[list[str], str | None]
 ) -> tuple[list[str], str | None]:
@@ -1253,8 +1261,9 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
 
     Numbering uses each event's ``round`` (main's reading); with ``renumber`` the
     comparison uses its ``compare`` round where it has one (``_round_before``), never
-    higher for an ACCEPT nor lower for a REJECT than ``round``. Without it (choosing
-    merge-only delta heads) rounds are compared as main read them.
+    higher for an ACCEPT nor lower for a REJECT than ``round``, and an ``unattributed``
+    ACCEPT (its nearest named model is of the other family) only numbers. Without it
+    (choosing merge-only delta heads) rounds and families are read as main read them.
     """
 
     def compared(event: dict[str, Any]) -> int | None:
@@ -1283,6 +1292,8 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
                 later.add(comment)
             numbering[(family, reviewer)] = (epoch, later)
         if event["kind"] == "accept":
+            if renumber and event.get("unattributed"):
+                continue  # credits no family; it still numbers its round (above)
             accepts.setdefault(family, []).append((event, epoch))
             continue
         if event["kind"] != "reject":
@@ -1407,6 +1418,13 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 consumed = start + len(clause) if start >= 0 else consumed
                 family = _clause_family(clause, span, plain_line, start, header_family)
                 before = plain_line[: start + span[0]] if (span and start >= 0) else ""
+                # Main's family prefers Claude whenever a Claude word is in reach, so a
+                # Codex ACCEPT that mentions the Claude review counted as a Claude record
+                # (and "Claude review (...; fix for Codex r3): ACCEPT" as a cross-model
+                # one). When the model named nearest before the token, outside
+                # parentheses, is of the other family, the ACCEPT credits neither (#3041).
+                named = _named_family(before or (clause[: span[0]] if span else ""))
+                unattributed = family is not None and named is not None and named != family
                 accept_round = _round_before(clause[: span[0]], lowest=True) if span else None
                 rounds = _ROUND.findall(clause[: span[0]]) if span else []
                 main_round = int(rounds[-1]) if rounds else None
@@ -1429,6 +1447,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                             "reviewer": _reviewer_word(before) or header_reviewer,
                             # A withdrawn ACCEPT still numbers its round, as before #3041.
                             "kind": "round" if withdrawn else "accept",
+                            "unattributed": unattributed,
                             "round": main_round,
                             "compare": accept_round,
                             "comment": 0,
@@ -1699,7 +1718,7 @@ def evaluate(
         event["family"]
         for record in records
         for event in record["events"]
-        if event["kind"] == "accept"
+        if event["kind"] == "accept" and not event.get("unattributed")
     } - standing
     independent, cross_model = independent_head, cross_head
     # Delta heads are chosen as before #3041 (rounds compared across numberings), so the
