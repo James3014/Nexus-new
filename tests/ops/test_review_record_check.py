@@ -4037,8 +4037,6 @@ def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
         # The REJECT's line names another model after other words, under a Claude header.
         _HL + "**Claude review**\nr2 re Codex: REJECT — race\n",
         _HL + "**Claude review**\nr2 after the Codex finding: REJECT — race\n",
-        # A bold sub-label naming another model inside a Claude section.
-        _HL + "## Claude review\n**N1: the Codex prompt is stale**\nVerdict: REJECT\n",
         # A later withdrawn or struck ACCEPT takes back the reviewer's earlier one.
         f"Claude: ACCEPT@{HEAD} withdrawn — found a race\n",
         f"Claude r2: ~~ACCEPT@{HEAD}~~ — found a race\n",
@@ -4083,10 +4081,15 @@ def test_the_same_labels_credit_an_accept(label):
         # A label that starts with its model under a Claude header is that model's only.
         _HL + "**Claude review**\nCodex r1: REJECT — race\n",
         _HL + "**Claude review**\nRound 2 Codex: REJECT — race\n",
-        # A bold label that starts with its model may be a reviewer's block: it switches
-        # the section as before (codex r1).
+        # The model is named in an earlier sentence only (cairnwork#225's record shape).
+        _HL + "**Claude review**\nCodex r1 found a race. Round 2 REJECT \u2014 race\n",
+        # A bold reviewer heading switches the section as before, wherever it names the
+        # model (codex r1, r2).
         _HL + "## Claude review\n**Codex gpt-5.5 xhigh**\nVerdict: REJECT\n",
         _HL + "**Claude review**\nVerdict: ACCEPT\n\n**Codex second opinion**\nVerdict: REJECT\n",
+        _HL + "**Claude review**\nVerdict: ACCEPT\n\n**Second opinion: Codex**\nVerdict: REJECT\n",
+        _HL
+        + "**Claude review**\nVerdict: ACCEPT\n\n**External Codex second opinion**\nVerdict: REJECT\n",
         # A withdrawn ACCEPT at another commit is not about the head.
         f"Claude: ACCEPT@{OLD} withdrawn — found a race\n",
     ],

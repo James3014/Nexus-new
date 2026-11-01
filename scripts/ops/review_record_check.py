@@ -1386,33 +1386,16 @@ def _label_families(text: str, token_at: int) -> set[str]:
     return {family for family in named if family}
 
 
-def _bold_sub_label(line: str) -> bool:
-    """A bold label line that ``_label_family`` reads by its bold text alone, and whose bold
-    text names a model only after words that are not reviewer labels: a finding title
-    ("**N1: the Codex prompt is stale**"). Bold text that starts with its model ("**Codex
-    gpt-5.5 xhigh**", "**Codex second opinion**") may be a reviewer's block and opens that
-    model's section as before."""
-    bold = re.match(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*", line)
-    if bold is None or re.match(r"^\s*#", line) or _LABEL_WORDS.search(bold.group(1)):
-        return False
-    if verdict_clauses(line, keep_withdrawn=True):
-        return False
-    first = _NEAREST_MODEL.search(bold.group(1))
-    return first is not None and not _reject_label_only(bold.group(1)[: first.start()])
-
-
 def _wide_families(text: str, token_at: int, wide: list[str]) -> set[str]:
-    """Section families a REJECT also withdraws, read fail closed (``wide``: the section's
-    families, a bold sub-label's added). All of them when no model is named on the line
-    before it (as ``_reject_families`` reads the section's); when one is, all of them only if
-    the REJECT's own sentence names a model after words that are not reviewer labels ("r2 re
-    Codex: REJECT", "r2 after the Codex finding: REJECT" under a Claude header). A sentence
-    that starts with its model ("Codex r1: REJECT", "Round 2 Codex: REJECT") or names none
-    adds nothing. The sentence is ``_own_sentence``."""
-    if not wide:
+    """Section families a REJECT also withdraws, read fail closed (``wide``: the families a
+    REJECT with no model on its line is credited to). When the line names a model before
+    the token (so ``_reject_families`` reads only that model), all of them too if the
+    REJECT's own sentence (``_own_sentence``) names a model after words that are not
+    reviewer labels ("r2 re Codex: REJECT", "r2 after the Codex finding: REJECT" under a
+    Claude header). A sentence that starts with its model ("Codex r1: REJECT", "Round 2
+    Codex: REJECT") or names none adds nothing."""
+    if not wide or _reviewer_word(text[:token_at]) is None:
         return set()
-    if _reviewer_word(text[:token_at]) is None:
-        return set(wide)
     label = _plain(_own_sentence(text, token_at))
     first = _NEAREST_MODEL.search(label)
     if first is None or _reject_label_only(label[: first.start()]):
@@ -1566,9 +1549,6 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
     header_reviewer: str | None = None
     # The families (and reviewer) a REJECT with no model on its line is credited to.
     reject_header: tuple[list[str], str | None] = ([], None)
-    # The same, read fail closed: a bold sub-label that is not a reviewer label (a finding
-    # title, "**Gemini comparison**") adds its family to the section's instead of replacing it.
-    reject_wide: list[str] = []
     header_level = 0  # heading level that opened the section; 99 for a non-heading label
     # REJECTs placed on the head only by _reject_label_binds, and the ACCEPTs placed the
     # same way (position, family, reviewer, round) that may answer them.
@@ -1611,12 +1591,9 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             if label is not None or neutral_heading:
                 header_reviewer = _reviewer_word(line) if label is not None else None
                 reject_header = ([label] if label is not None else [], header_reviewer)
-                kept = reject_wide if label is not None and _bold_sub_label(line) else []
-                reject_wide = sorted(set(kept) | set(reject_header[0]))
             if disabled is not None:
                 families = sorted(set(reject_header[0]) | {disabled})
                 reject_header = (families, _reviewer_word(line) if len(families) == 1 else None)
-                reject_wide = sorted(set(reject_wide) | {disabled})
             if not section:
                 section_start = index
             section.append(line)
@@ -1735,7 +1712,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             # aside) withdraw too, as an unknown reviewer; they never number rounds and are
             # not read when choosing merge-only delta heads ("extra").
             extra_families = _label_families(plain_reject, start + span[0])
-            extra_families |= _wide_families(plain_reject, start + span[0], reject_wide)
+            extra_families |= _wide_families(plain_reject, start + span[0], reject_header[0])
             for family in sorted(extra_families - set(families)):
                 line_events.append((
                     start + span[0],
