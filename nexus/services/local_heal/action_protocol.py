@@ -1,12 +1,21 @@
 """Y2: Controlled Multi-Anchor / Multi-File Action Protocol."""
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.services.local_heal.protocol import ValidationResult
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -181,9 +190,20 @@ class ActionProtocol:
     def rollback(self, project_root: Path):
         """Rollback modifications using git checkout."""
         if self.rollback_policy == "git_checkout_discard":
+            # project_root holds the edits being rolled back, so git runs hardened and only in
+            # a repository rooted at project_root.
+            root = Path(project_root).resolve()
+            git_dir = repository_git_dir(root)
+            if git_dir is None or repository_config_can_start_a_program(root, git_dir):
+                logger.warning("rollback refused: unsafe git repository: %r", str(root))
+                return
             for f in self.files_involved:
                 if f:
-                    subprocess.run(["git", "checkout", "--", f], cwd=str(project_root), capture_output=True)
+                    try:
+                        run_hardened_git(root, "checkout", "--", f, git_dir=git_dir)
+                    except subprocess.TimeoutExpired:
+                        logger.warning("rollback incomplete: git timed out: %r", str(root))
+                        return
 
     def generate_ultra_review_report(self) -> Dict[str, Any]:
         """Runs automated Ultra Review check on this action protocol (Z2-P3)."""

@@ -3,6 +3,12 @@ import logging
 import subprocess
 from pathlib import Path
 
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
+
 logger = logging.getLogger(__name__)
 
 class TransactionManager:
@@ -26,14 +32,21 @@ class TransactionManager:
     def audit_rollback(self, task_id: str):
         """物理回滾：Audit 失敗時強制回溯至任務起點"""
         logger.warning("🚨 [Transaction] Audit FAILED for %s. Triggering PHYSICAL ROLLBACK!", task_id)
+        # The workspace holds the audited agent's edits, so git runs hardened and only in a
+        # repository rooted at project_root.
+        root = self.project_root.resolve()
+        git_dir = repository_git_dir(root)
+        if git_dir is None or repository_config_can_start_a_program(root, git_dir):
+            logger.error("❌ [Transaction] Rollback FAILED: unsafe git repository: %r", str(root))
+            return False
         try:
             # 物理回滾到 HEAD
-            subprocess.run(["git", "-C", str(self.project_root), "reset", "--hard", "HEAD"], check=True)
+            run_hardened_git(root, "reset", "--hard", "HEAD", git_dir=git_dir).check_returncode()
             # 清理未追蹤檔案
-            subprocess.run(["git", "-C", str(self.project_root), "clean", "-fd"], check=True)
+            run_hardened_git(root, "clean", "-fd", git_dir=git_dir).check_returncode()
             logger.info("✅ [Transaction] Rollback SUCCESS. Workspace cleared.")
             return True
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             logger.error("❌ [Transaction] Rollback FAILED: %s", e)
             return False
 
