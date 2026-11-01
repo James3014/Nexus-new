@@ -23,6 +23,8 @@ class SwarmBroker:
 
     def _is_swarm_child_dir(self, swarm_dir: Path) -> bool:
         """A swarm workspace is a real `.nexus-swarm-*` directory directly under the workspace."""
+        if ".." in Path(swarm_dir).parts:
+            return False
         path = Path(os.path.abspath(swarm_dir))
         if path.is_symlink() or not path.is_dir():
             return False

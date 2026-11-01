@@ -213,3 +213,23 @@ def test_release_resets_registered_child_worktree(tmp_path: Path, monkeypatch):
     assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
     assert not (swarm / "scratch.txt").exists()
     assert not (swarm / ".swarm_lock").exists()
+
+
+def test_release_leaves_worktree_reached_through_parent_of_link_untouched(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    _git(controller, "worktree", "add", "--detach", str(controller / ".nexus-swarm-001"), base)
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "sub").mkdir(parents=True)
+    other = elsewhere / ".nexus-swarm-001"
+    _add_foreign_worktree(controller, other, base)
+    (controller / "link").symlink_to(elsewhere / "sub", target_is_directory=True)
+
+    SwarmBroker(controller).release(controller / "link" / ".." / ".nexus-swarm-001")
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (other / "wip.txt").exists()
+    assert (other / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
