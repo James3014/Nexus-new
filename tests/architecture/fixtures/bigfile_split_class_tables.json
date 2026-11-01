@@ -755,6 +755,10 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any], POSITIONAL_OR_KEYWORD:returncode: Any) -> dict[str, Any]"
    },
+   "_assist_job_is_current": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: Mapping[str, Any]) -> bool"
+   },
    "_assist_launch_begin": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: Mapping[str, Any], KEYWORD_ONLY:retried: Optional[Mapping[str, Any]] = None) -> None"
@@ -826,6 +830,10 @@
    "_assist_write": {
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:value: Mapping[str, Any]) -> dict[str, Any]"
+   },
+   "_assist_write_current": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any], KEYWORD_ONLY:drop_process: bool = False) -> dict[str, Any]"
    },
    "_cairnwork_cancel": {
     "kind": "function",

@@ -955,3 +955,254 @@ def test_probe_whose_provider_did_not_start_leaves_the_in_flight_set(box, monkey
     assert result["blocker"] == "ASSIST_PROVIDER_FAILED", result
     assert TASK not in box.gateway._model_probe_inflight()
     assert TASK not in box.gateway._assist_launch_owners()
+
+
+# ---------------------------------------------------------------------------
+# A query or cancel acts only on the job it read: a retry of the same task id that launched in
+# between keeps its record and its registered provider (#3076)
+# ---------------------------------------------------------------------------
+
+
+def _interleave_retry_at(box, monkeypatch, caller: str, entry: int, before) -> dict:
+    """Run a retry of the task, after ``before()``, just before ``caller`` enters the assist
+    lock for the ``entry``-th time; returns the retry's response under "retry"."""
+    gateway = box.gateway
+    state: dict = {"seen": 0, "retry": None}
+
+    def hook(name: str) -> None:
+        if state["retry"] is not None or name != caller:
+            return
+        state["seen"] += 1
+        if state["seen"] == entry:
+            before()
+            state["retry"] = {}
+            state["retry"] = gateway._assist_retry(TASK)
+
+    monkeypatch.setattr(gateway, "_assist_lock", _LockWithEntryHook(gateway._assist_lock, hook))
+    return state
+
+
+def _launch_old_job(box, monkeypatch):
+    old_provider = _FakeProvider()
+    terminated = _patch_launch(box, monkeypatch, lambda workspace: old_provider)
+    first = box.gateway._assist_submit(_submit_args())
+    assert first["status"] == "RUNNING", first
+    new_provider = _FakeProvider()
+    monkeypatch.setattr(assist_jobs.subprocess, "Popen", lambda *a, **k: new_provider)
+    examined: list = []
+
+    def exited(process) -> bool:
+        examined.append(process)
+        return process.returncode is not None
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", exited)
+    return first["job_id"], old_provider, new_provider, terminated, examined
+
+
+def _assert_retry_untouched(box, state, new_provider) -> None:
+    retry = state["retry"]
+    assert retry, "the retry never ran at the chosen point"
+    assert retry["status"] == "RUNNING", retry
+    assert box.gateway._assist_processes.get(TASK) is new_provider, (
+        "the retry's provider is no longer registered"
+    )
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (retry["job_id"], "RUNNING"), record
+
+
+@pytest.mark.parametrize(
+    ("caller", "entry", "exited_first"),
+    [
+        ("_assist_refresh", 1, True),  # before the provider lookup
+        ("_assist_refresh", 2, True),  # before the finished provider is unregistered
+        ("_assist_write_current", 1, False),  # before a still-running job's record is written
+    ],
+)
+def test_query_of_a_job_leaves_a_retry_launched_meanwhile_tracked(
+    box, monkeypatch, caller, entry, exited_first
+):
+    old_job_id, old_provider, new_provider, _, examined = _launch_old_job(box, monkeypatch)
+
+    def old_provider_exits() -> None:
+        old_provider.returncode = 1
+
+    if exited_first:
+        old_provider_exits()
+    state = _interleave_retry_at(box, monkeypatch, caller, entry, old_provider_exits)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["job_id"] == old_job_id, result
+    _assert_retry_untouched(box, state, new_provider)
+    assert new_provider not in examined, "the query settled the retry's provider as its own"
+
+
+@pytest.mark.parametrize(
+    ("caller", "entry"),
+    [
+        ("_assist_cancel", 1),  # before the provider lookup
+        ("_assist_cancel", 2),  # after the old provider was terminated, before it is unregistered
+        ("_assist_write_current", 1),  # before the cancel's query writes the job as running
+    ],
+)
+def test_cancel_leaves_a_retry_launched_meanwhile_tracked_and_unsignalled(
+    box, monkeypatch, caller, entry
+):
+    old_job_id, old_provider, new_provider, terminated, _ = _launch_old_job(box, monkeypatch)
+
+    def old_provider_exits() -> None:
+        old_provider.returncode = -signal.SIGTERM
+
+    state = _interleave_retry_at(box, monkeypatch, caller, entry, old_provider_exits)
+    result = box.gateway._assist_cancel(TASK)
+    assert result["job_id"] == old_job_id, result
+    assert new_provider not in terminated, "the cancel signalled the retry's provider"
+    _assert_retry_untouched(box, state, new_provider)
+
+
+def test_query_still_finishes_and_unregisters_its_own_job(box, monkeypatch):
+    old_job_id, old_provider, _, _, _ = _launch_old_job(box, monkeypatch)
+    old_provider.returncode = 1
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["status"] == "FAILED", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "FAILED"), record
+
+
+def test_cancel_still_terminates_unregisters_and_records_its_own_job(box, monkeypatch):
+    old_job_id, old_provider, _, terminated, _ = _launch_old_job(box, monkeypatch)
+    result = box.gateway._assist_cancel(TASK)
+    assert terminated == [old_provider]
+    assert result["status"] == "CANCELLED", result
+    assert result["blocker"] == "ASSIST_CANCELLED", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "CANCELLED"), record
+
+
+def test_query_holding_its_own_job_for_reconciliation_unregisters_its_provider(box, monkeypatch):
+    old_job_id, _, _, _, _ = _launch_old_job(box, monkeypatch)
+
+    def group_unlistable(process) -> bool:
+        raise PermissionError("group cannot be listed")
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", group_unlistable)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None, result
+    assert result["blocker"] == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE", result
+    assert TASK not in box.gateway._assist_processes
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == (old_job_id, "UNKNOWN_REQUIRES_RECONCILE")
+
+
+def _replace_with_newer_job(box, workspace: Path) -> _FakeProvider:
+    """What a reconciliation followed by a retry leaves behind: a newer job of the task id, with
+    its own workspace and registered provider."""
+    newer = _FakeProvider()
+    newer_job = _job(box, str(workspace), job_id="assist-newer", status="RUNNING")
+    with box.gateway._assist_lock:
+        box.gateway._assist_processes[TASK] = newer
+        box.gateway._assist_write(newer_job)
+    return newer
+
+
+def _assert_newer_job_untouched(box, newer, newer_workspace: Path) -> None:
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["job_id"], record["status"]) == ("assist-newer", "RUNNING"), record
+    assert box.gateway._assist_processes.get(TASK) is newer
+    assert newer_workspace.exists(), "the cancel removed the newer job's workspace"
+
+
+def test_cancel_of_a_reconcile_pending_job_leaves_a_retry_after_reconcile_recorded(
+    box, monkeypatch
+):
+    """The cancel reads a job a restarted gateway lost track of; while it removes that job's
+    workspace, a reconcile settles the job and a retry starts a new provider. The cancel
+    records its own job only while the record is still that job's."""
+    gateway = box.gateway
+    old_job_id, _, new_provider, terminated, _ = _launch_old_job(box, monkeypatch)
+    gateway._assist_processes.pop(TASK)  # a restarted gateway holds no provider
+    group = _FakeGroup(member_alive=False)
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    real_cleanup = gateway._cleanup_assist_workspace
+    state: dict = {}
+
+    def cleanup_then_reconcile_and_retry(job) -> None:
+        real_cleanup(job)
+        if "retry" not in state:
+            state["retry"] = {}
+            state["reconcile"] = gateway._task_reconcile({"task_id": TASK})
+            state["retry"] = gateway._assist_retry(TASK)
+
+    monkeypatch.setattr(gateway, "_cleanup_assist_workspace", cleanup_then_reconcile_and_retry)
+    result = gateway._assist_cancel(TASK)
+    assert (result["job_id"], result["status"]) == (old_job_id, "CANCELLED"), result
+    assert terminated == [] and group.sent == []
+    _assert_retry_untouched(box, state, new_provider)
+
+
+def test_cancel_releasing_a_finished_job_lease_leaves_a_newer_job_recorded(box, monkeypatch):
+    newer_workspace = _workspace(box.root, "nexus-retry-t3076-ws-new")
+    box.gateway._assist_write(
+        _job(
+            box,
+            "",
+            status="FAILED",
+            pid=None,
+            pgid=None,
+            account_lease_id_hash="lease-old",
+            account_lease_released=False,
+        )
+    )
+    real_release = box.gateway._release_assist_account_claim
+    state: dict = {}
+
+    def release_then_newer_job(task_id, job) -> bool:
+        released = real_release(task_id, job)
+        state["newer"] = _replace_with_newer_job(box, newer_workspace)
+        return released
+
+    monkeypatch.setattr(box.gateway, "_release_assist_account_claim", release_then_newer_job)
+    result = box.gateway._assist_cancel(TASK)
+    assert "newer" in state, "the cancel never reached the lease release"
+    assert (result["job_id"], result["status"]) == ("assist-3076-ws", "FAILED"), result
+    _assert_newer_job_untouched(box, state["newer"], newer_workspace)
+
+
+def test_query_whose_record_vanished_neither_recreates_it_nor_unregisters(box, monkeypatch):
+    _, old_provider, _, _, _ = _launch_old_job(box, monkeypatch)
+
+    def record_removed_then_exited(process) -> bool:
+        box.gateway._assist_path(TASK).unlink()
+        process.returncode = 1
+        return True
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", record_removed_then_exited)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["status"] == "FAILED", result
+    assert box.gateway._assist_read(TASK) is None, "the query recreated a removed record"
+    assert box.gateway._assist_processes.get(TASK) is old_provider
+
+
+def test_query_held_for_reconciliation_leaves_a_newer_job_tracked(box, monkeypatch):
+    """The query's own provider group cannot be listed (the job is held for reconciliation);
+    by then a newer job of the task id has its record and provider, which the hold keeps."""
+    old_job_id, _, _, _, _ = _launch_old_job(box, monkeypatch)
+    newer_workspace = _workspace(box.root, "nexus-retry-t3076-ws-new")
+    state: dict = {}
+
+    def newer_job_then_unlistable(process) -> bool:
+        state["newer"] = _replace_with_newer_job(box, newer_workspace)
+        raise PermissionError("group cannot be listed")
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", newer_job_then_unlistable)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None and result["job_id"] == old_job_id, result
+    assert result["blocker"] == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE", result
+    _assert_newer_job_untouched(box, state["newer"], newer_workspace)

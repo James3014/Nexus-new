@@ -259,6 +259,26 @@ class _AssistResponseMixin(_ResponseBase):
 
         def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None: ...
 
+    def _assist_job_is_current(self, task_id: str, job: Mapping[str, Any]) -> bool:
+        """Whether the task's record still belongs to ``job``; call it under ``_assist_lock``.
+        A later launch of the same task id may have replaced the record since ``job`` was read:
+        its record and its registered provider are then not the caller's to touch (#3076)."""
+        current = self._assist_read(task_id)
+        return current is not None and current.get("job_id") == job.get("job_id")
+
+    def _assist_write_current(
+        self, task_id: str, job: dict[str, Any], *, drop_process: bool = False
+    ) -> dict[str, Any]:
+        """Write ``job`` (with ``drop_process``, also unregister the task's provider) in one step
+        under the lock, only while the record still belongs to ``job``; otherwise leave the
+        record and the registered provider alone. Returns ``job`` either way."""
+        with self._assist_lock:
+            if self._assist_job_is_current(task_id, job):
+                if drop_process:
+                    self._assist_processes.pop(task_id, None)
+                return self._assist_write(job)
+        return dict(job)
+
     def _assist_hold_for_group(
         self, task_id: str, job: dict[str, Any], returncode: Any
     ) -> dict[str, Any]:
@@ -267,8 +287,6 @@ class _AssistResponseMixin(_ResponseBase):
         self._assist_record_stream_artifacts(job)
         if job.get("account_lease_id_hash"):
             self._abandon_assist_account_claim(task_id, job)
-        with self._assist_lock:
-            self._assist_processes.pop(task_id, None)
         job.update({
             "status": "UNKNOWN_REQUIRES_RECONCILE",
             "finished_at": self._utc_now(),
@@ -278,7 +296,7 @@ class _AssistResponseMixin(_ResponseBase):
             "model_response_verified": False,
             "process_cleanup": False,
         })
-        return self._assist_write(job)
+        return self._assist_write_current(task_id, job, drop_process=True)
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -334,6 +352,9 @@ class _AssistResponseMixin(_ResponseBase):
             # Settled as needing reconciliation: a later refresh must not finish the job.
             return job
         with self._assist_lock:
+            # A retry may have launched since the read above: its provider is not this job's.
+            if not self._assist_job_is_current(task_id, job):
+                return job
             process = self._assist_processes.get(task_id)
         returncode = None
         group_clean, deadline_killed = True, False
@@ -362,7 +383,7 @@ class _AssistResponseMixin(_ResponseBase):
                         "reconciliation_required": True,
                         "last_polled_at": self._utc_now(),
                     })
-                    return self._assist_write(job)
+                    return self._assist_write_current(task_id, job)
                 returncode = job.get("exit_code")
                 # This gateway never held the provider unreaped: its leader being gone says
                 # nothing about the rest of its group. Finish (and remove the workspace) only
@@ -372,7 +393,7 @@ class _AssistResponseMixin(_ResponseBase):
         if returncode is None:
             job["status"] = "RUNNING"
             job["last_polled_at"] = self._utc_now()
-            return self._assist_write(job)
+            return self._assist_write_current(task_id, job)
         stdout_path = Path(str(job.get("stdout_artifact") or ""))
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
@@ -483,7 +504,8 @@ class _AssistResponseMixin(_ResponseBase):
         # The one removal path, which refuses an empty or foreign workspace_root (#3076).
         _remove_assist_workspace(job, lambda root: self._snapshot_workspace(root))
         with self._assist_lock:
-            self._assist_processes.pop(task_id, None)
+            if self._assist_job_is_current(task_id, job):
+                self._assist_processes.pop(task_id, None)
         evidence = self._write_probe_evidence(job)
         if evidence is not None:
             job["probe_evidence_hash"] = evidence["evidence_hash"]
@@ -491,7 +513,7 @@ class _AssistResponseMixin(_ResponseBase):
             job["authentication_evidence"] = evidence["authentication_evidence"]
             identity = self._probe_evidence_identity(evidence)
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
-        return self._assist_write(job)
+        return self._assist_write_current(task_id, job)
 
     _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d{1,9}(?:,(\d{1,9}))? \+\d{1,9}(?:,(\d{1,9}))? @@")
 
