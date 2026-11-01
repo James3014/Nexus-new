@@ -1137,8 +1137,9 @@ class WorktreeManager:
         Bound to a contract, every directory but its Controller is a Target, which must be a
         linked worktree registered with that Controller. Unbound, a directory under this
         manager's Target root is a Target: a ``.git`` file must be a registration nobody
-        writing the Target alone could have made, and a ``.git`` directory must not share
-        another repository's refs (``commondir``).
+        writing the Target alone could have made, and a ``.git`` directory must be rooted at
+        the Target and must not reach another repository (symlinks, ``commondir``,
+        alternates).
         """
         if cwd is None:
             return None
@@ -1150,10 +1151,16 @@ class WorktreeManager:
             if self.root_dir.resolve() not in start.parents:
                 return None
             dotgit = start / ".git"
-            if dotgit.is_symlink() or (dotgit / "commondir").exists():
+            if dotgit.is_symlink():
                 raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
             if not dotgit.is_file():
-                return _LiveTarget(worktree=start, git_dir=None)
+                # A repository rooted here whose git dir lies inside it (no ``core.worktree``
+                # pointing elsewhere) and holds its own refs, objects and index; its git dir
+                # is pinned.
+                git_dir = target_git.repository_git_dir(start)
+                if git_dir is None or not target_git.git_dir_is_self_contained(git_dir):
+                    raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
+                return _LiveTarget(worktree=start, git_dir=git_dir)
         elif start == controller:
             return None
         git_dir = target_git.linked_worktree_git_dir(start, controller)

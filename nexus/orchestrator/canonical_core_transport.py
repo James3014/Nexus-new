@@ -449,10 +449,11 @@ def _to_serializable(obj: Any) -> Any:
 _RAW_TREE_DIFF = ("diff-tree", "--no-ext-diff", "--no-textconv", "-r", "--no-commit-id", "--raw")
 
 
-def _target_git(repo: Path, *args: str, index_file: Path | None = None) -> str:
-    """``git <args>`` in the candidate Target without any program its repository could
-    name, bounded by the shared timeout; a failure raises ``CalledProcessError``."""
-    result = hardened_git.run_hardened_git(repo, *args, index_file=index_file)
+def _target_git(repo: Path, git_dir: Path, *args: str, index_file: Path | None = None) -> str:
+    """``git <args>`` in the candidate Target, pinned to its probed ``git_dir``, without any
+    program its repository could name, bounded by the shared timeout; a failure raises
+    ``CalledProcessError``."""
+    result = hardened_git.run_hardened_git(repo, *args, git_dir=git_dir, index_file=index_file)
     if result.returncode != 0:
         raise subprocess.CalledProcessError(
             result.returncode, ["git", *args], result.stdout, result.stderr
@@ -465,28 +466,37 @@ def extract_git_manifest(
 ) -> dict[str, Any]:
     """Derive exact Git change manifest directly from repository trees.
 
-    The Target is worker-written, so a repository whose config names a program is refused
-    and every call runs through the shared hardened runner (no hooks, fsmonitor, external
-    diff or textconv, no system or global config, bounded time)."""
+    The Target is worker-written, so a repository not rooted at it, or whose config names a
+    program, is refused, and every call runs through the shared hardened runner pinned to the
+    probed git dir (no hooks, fsmonitor, external diff or textconv, no system or global
+    config, bounded time)."""
     repo = Path(repo_path)
-    if hardened_git.repository_config_can_start_a_program(repo):
+    git_dir = hardened_git.repository_git_dir(repo)
+    if git_dir is None or (
+        git_dir.is_relative_to(repo.resolve())
+        and not hardened_git.git_dir_is_self_contained(git_dir)
+    ):
+        raise RuntimeError("CANONICAL_CORE_TARGET_GITDIR_UNTRUSTED")
+    if hardened_git.repository_config_can_start_a_program(repo, git_dir):
         raise RuntimeError("CANONICAL_CORE_TARGET_GIT_CONFIG_REFUSED")
-    src_tree = _target_git(repo, "rev-parse", f"{base_ref}^{{tree}}").strip()
+    src_tree = _target_git(repo, git_dir, "rev-parse", f"{base_ref}^{{tree}}").strip()
 
     # If target repo is dirty with untracked/working files, materialize them into
     # an isolated temporary index without modifying the caller's working tree or index.
-    status_raw = _target_git(repo, "status", "--porcelain=v1", "--untracked-files=all").strip()
+    status_raw = _target_git(
+        repo, git_dir, "status", "--porcelain=v1", "--untracked-files=all"
+    ).strip()
 
     if status_raw and target_ref == "HEAD":
         with tempfile.TemporaryDirectory() as tmpdir:
             index_file = Path(tmpdir) / "index"
-            _target_git(repo, "read-tree", "HEAD", index_file=index_file)
-            _target_git(repo, "add", "-A", "--", ".", index_file=index_file)
-            tgt_tree = _target_git(repo, "write-tree", index_file=index_file).strip()
-            raw_diff = _target_git(repo, *_RAW_TREE_DIFF, src_tree, tgt_tree).strip()
+            _target_git(repo, git_dir, "read-tree", "HEAD", index_file=index_file)
+            _target_git(repo, git_dir, "add", "-A", "--", ".", index_file=index_file)
+            tgt_tree = _target_git(repo, git_dir, "write-tree", index_file=index_file).strip()
+            raw_diff = _target_git(repo, git_dir, *_RAW_TREE_DIFF, src_tree, tgt_tree).strip()
     else:
-        tgt_tree = _target_git(repo, "rev-parse", f"{target_ref}^{{tree}}").strip()
-        raw_diff = _target_git(repo, *_RAW_TREE_DIFF, base_ref, target_ref).strip()
+        tgt_tree = _target_git(repo, git_dir, "rev-parse", f"{target_ref}^{{tree}}").strip()
+        raw_diff = _target_git(repo, git_dir, *_RAW_TREE_DIFF, base_ref, target_ref).strip()
 
     entries = []
     for line in raw_diff.splitlines():

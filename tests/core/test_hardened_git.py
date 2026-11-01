@@ -744,3 +744,18 @@ def test_hardened_git_runs_on_the_given_index_file(env):
     assert index_file.is_file()
     shown = hardened_git.run_hardened_git(repo, "cat-file", "-p", f"{tree}:notes.py").stdout
     assert shown == DIRTY_EDIT
+
+
+def test_a_git_dir_is_self_contained_only_without_links_to_another_repository(env):
+    repo = _repo_with_local_work(env / "repo")
+    git_dir = repo / ".git"
+    hook = git_dir / "hooks" / "pre-commit"
+    hook.symlink_to(_marker_script(env, "hook.sh", env / "hook-ran"))
+    assert hardened_git.git_dir_is_self_contained(git_dir) is True
+
+    for named in ("commondir", "objects/info/alternates"):
+        (git_dir / named).write_text(f"{env}\n", encoding="utf-8")
+        assert hardened_git.git_dir_is_self_contained(git_dir) is False
+        (git_dir / named).unlink()
+    (git_dir / "refs" / "heads" / "linked").symlink_to(git_dir / "HEAD")
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False

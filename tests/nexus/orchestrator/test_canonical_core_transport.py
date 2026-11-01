@@ -950,3 +950,35 @@ def test_manifest_git_calls_are_bounded_in_time(test_repo: Path, monkeypatch: py
 
     assert len(timeouts) >= 6
     assert set(timeouts) == {hardened_git.GIT_TIMEOUT_S}
+
+
+def test_manifest_of_a_target_whose_work_tree_is_elsewhere_is_refused(
+    test_repo: Path, tmp_path: Path, sentinel_cwd: None
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "tracked_a.txt").write_text("outside a\n", encoding="utf-8")
+    (outside / "other.txt").write_text("outside only\n", encoding="utf-8")
+    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True)
+    subprocess.check_call(["git", "config", "core.worktree", str(outside)], cwd=test_repo)
+
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_TARGET_GITDIR_UNTRUSTED"):
+        extract_git_manifest(test_repo, base_commit.strip(), "HEAD")
+
+    assert (outside / "tracked_a.txt").read_text(encoding="utf-8") == "outside a\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["other.txt", "tracked_a.txt"]
+
+
+def test_manifest_of_a_target_whose_git_dir_links_into_another_repository_is_refused(
+    test_repo: Path, tmp_path: Path, sentinel_cwd: None
+):
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.check_call(["git", "init", "-q"], cwd=other)
+    objects = test_repo / ".git" / "objects"
+    os.rename(objects, other / ".git" / "objects-moved")
+    os.symlink(other / ".git" / "objects-moved", objects)
+    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True)
+
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_TARGET_GITDIR_UNTRUSTED"):
+        extract_git_manifest(test_repo, base_commit.strip(), "HEAD")

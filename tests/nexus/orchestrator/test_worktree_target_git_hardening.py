@@ -311,3 +311,99 @@ def test_a_missing_target_directory_still_fails_as_before(layout):
     with layout.manager.controller_git_scope(layout.contract):
         with pytest.raises(FileNotFoundError):
             layout.manager._run_git(["rev-parse", "HEAD"], cwd=missing)
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(directory)): path.read_bytes()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_unbound_target_refuses_a_git_dir_whose_work_tree_is_elsewhere(layout, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "f.txt").write_text("outside\n", encoding="utf-8")
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+    target = layout.target.parent / "plain"
+    target.mkdir()
+    _git(target, "init", "-q")
+    (target / "f.txt").write_text("target\n", encoding="utf-8")
+    _git(target, "add", "f.txt")
+    _git(target, "-c", "user.name=w", "-c", "user.email=w@example.invalid", "commit", "-qm", "t")
+    _git(target, "config", "core.worktree", str(outside))
+    before = _snapshot(outside)
+    manager = layout.manager
+    manager.get_reusable_slot_path = lambda campaign_id, slot_index: target
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager.get_reusable_slot_status("c", 0, controller_root=layout.controller)
+    for args in (
+        ["status", "--porcelain=v1"],
+        ["checkout", "--", "."],
+        ["clean", "-fdx"],
+        ["add", "--all"],
+    ):
+        with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+            manager._run_git(args, cwd=target)
+
+    assert _snapshot(outside) == before
+
+
+def _controller_state(controller: Path) -> tuple[str, str, bytes, str]:
+    git_dir = controller / ".git"
+    return (
+        _git(controller, "rev-parse", "HEAD"),
+        _git(controller, "for-each-ref"),
+        (git_dir / "index").read_bytes(),
+        (git_dir / "HEAD").read_text(encoding="utf-8"),
+    )
+
+
+@pytest.mark.parametrize("linked", [("refs", "objects"), ("HEAD", "refs", "objects", "index")])
+def test_unbound_target_refuses_a_git_dir_linking_into_the_controller(layout, linked):
+    controller, target = layout.controller, layout.target
+    before = _controller_state(controller)
+    (target / ".git").unlink()
+    git_dir = target / ".git"
+    git_dir.mkdir()
+    if "HEAD" not in linked:
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    for name in linked:
+        os.symlink(controller / ".git" / name, git_dir / name)
+    (git_dir / "config").write_text("[core]\n\tbare = false\n", encoding="utf-8")
+    (target / "f.txt").write_text("worker edit\n", encoding="utf-8")
+
+    for args in (
+        ["add", "--all"],
+        ["-c", "user.name=n", "-c", "user.email=n@example.invalid", "commit", "-m", "x"],
+    ):
+        with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+            layout.manager._run_git(args, cwd=target)
+
+    assert _controller_state(controller) == before
+
+
+@pytest.mark.parametrize("points_at", ["controller git dir", "a git dir inside the target"])
+def test_unbound_target_refuses_a_symlinked_git_entry(layout, points_at):
+    controller, target = layout.controller, layout.target
+    before = _controller_state(controller)
+    (target / ".git").unlink()
+    if points_at == "controller git dir":
+        os.symlink(controller / ".git", target / ".git")
+    else:
+        inner = target / "inner"
+        inner.mkdir()
+        _git(inner, "init", "-q")
+        os.symlink(inner / ".git", target / ".git")
+    (target / "f.txt").write_text("worker edit\n", encoding="utf-8")
+
+    for args in (
+        ["add", "--all"],
+        ["-c", "user.name=n", "-c", "user.email=n@example.invalid", "commit", "-m", "x"],
+    ):
+        with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+            layout.manager._run_git(args, cwd=target)
+
+    assert _controller_state(controller) == before

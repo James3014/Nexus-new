@@ -209,6 +209,25 @@ def repository_git_dir(repo_dir: Path) -> Optional[Path]:
     return None
 
 
+def git_dir_is_self_contained(git_dir: Path) -> bool:
+    """True when git, run on ``git_dir``, reads and writes refs, objects and the index only
+    inside it: nothing in it is a symlink (hooks aside, which are never run here), and it
+    names no other repository through ``commondir`` or object alternates."""
+    git_dir = Path(git_dir)
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        return False
+    for named in ("commondir", "objects/info/alternates", "objects/info/http-alternates"):
+        if os.path.lexists(git_dir / named):
+            return False
+    for root, dirs, files in os.walk(git_dir):
+        if Path(root) == git_dir:
+            dirs[:] = [name for name in dirs if name != "hooks"]
+        for name in (*dirs, *files):
+            if os.path.islink(os.path.join(root, name)):
+                return False
+    return True
+
+
 def linked_worktree_git_dir(
     worktree: Path, controller_root: Optional[Path] = None
 ) -> Optional[Path]:

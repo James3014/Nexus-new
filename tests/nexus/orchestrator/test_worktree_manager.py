@@ -2351,3 +2351,32 @@ def test_unbound_live_target_status_refuses_a_git_file_naming_the_controller(
         manager._status_bytes(target)
 
     assert _controller_git_state(controller) == before
+
+
+def test_salvage_refuses_a_target_registered_with_another_controller(
+    sh2_repo, sentinel_cwd, tmp_path
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    contract = _contract(sh2_repo, task_id="salvage-other")
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    _git(other, "config", "user.name", "Other")
+    _git(other, "config", "user.email", "other@example.invalid")
+    (other / "a.txt").write_text("other\n", encoding="utf-8")
+    _git(other, "add", "a.txt")
+    _git(other, "commit", "-q", "-m", "other")
+    _git(other, "worktree", "add", "-q", "--detach", str(tmp_path / "other-wt"))
+    registration = (other / ".git" / "worktrees" / "other-wt").resolve()
+    (registration / "gitdir").write_text(f"{target / '.git'}\n", encoding="utf-8")
+    (target / ".git").write_text(f"gitdir: {registration}\n", encoding="utf-8")
+    (target / "src" / "allowed.txt").write_text("worker edit\n", encoding="utf-8")
+    before = (_controller_git_state(controller), _controller_git_state(other))
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager.create_salvage_snapshot(contract, lease, "attempt-1")
+
+    assert (_controller_git_state(controller), _controller_git_state(other)) == before
