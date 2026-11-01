@@ -466,3 +466,174 @@ def test_committee_retry_runs_each_candidate_on_a_world_c_copy(
     assert committee_runs[0]["repo_dir"] != committee_runs[1]["repo_dir"]
     _assert_local_work_kept(source)
     assert (sentinel_cwd / "SENTINEL").exists()
+
+
+# --- The reset runs no program the repository names -------------------------------------
+# A retry workspace may hold a repository its candidate made. Each script below only touches
+# a marker file under tmp_path; the test then checks the marker was never created.
+
+
+def _marker_script(tmp_path: Path, name: str, marker: Path, *, passthrough: bool = False) -> Path:
+    """A script that touches ``marker`` (and copies stdin to stdout if ``passthrough``)."""
+    tools = tmp_path / "tools"
+    tools.mkdir(exist_ok=True)
+    script = tools / name
+    body = f'#!/bin/sh\ntouch "{marker}"\n' + ("cat\n" if passthrough else "")
+    script.write_text(body, encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+@pytest.fixture
+def reset_env(tmp_path, sentinel_cwd, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    return tmp_path
+
+
+def _assert_reset_ran(copy: Path) -> None:
+    assert not (copy / "SENTINEL").exists()
+    assert (copy / "notes.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_reset_does_not_run_a_post_checkout_hook_the_candidate_created(reset_env):
+    copy = _repo_with_local_work(reset_env / "copy")
+    marker = reset_env / "hook-ran"
+    hook = copy / ".git" / "hooks" / "post-checkout"
+    hook.write_text(f'#!/bin/sh\ntouch "{marker}"\n', encoding="utf-8")
+    hook.chmod(0o755)
+
+    _reset_workspace(copy)
+
+    assert not marker.exists()
+    _assert_reset_ran(copy)
+    assert (reset_env / "cwd" / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("via_include", [False, True])
+def test_reset_does_not_run_a_filter_the_candidate_configured(reset_env, via_include):
+    copy = _repo_with_local_work(reset_env / "copy")
+    (copy / ".gitattributes").write_text("*.py filter=mark\n", encoding="utf-8")
+    _git(copy, "add", ".gitattributes")
+    _git(copy, "commit", "-qm", "attributes")
+    marker = reset_env / "filter-ran"
+    script = _marker_script(reset_env, "filter.sh", marker, passthrough=True)
+    drivers = f'[filter "mark"]\n\tsmudge = {script}\n\tclean = {script}\n'
+    if via_include:
+        (copy / ".git" / "extra.cfg").write_text(drivers, encoding="utf-8")
+        _git(copy, "config", "include.path", "extra.cfg")
+    else:
+        with open(copy / ".git" / "config", "a", encoding="utf-8") as config:
+            config.write(drivers)
+
+    _reset_workspace(copy)
+
+    assert not marker.exists()
+    _assert_local_work_kept(copy)
+    assert (reset_env / "cwd" / "SENTINEL").exists()
+
+
+def test_reset_does_not_invoke_an_fsmonitor_the_candidate_configured(reset_env):
+    copy = _repo_with_local_work(reset_env / "copy")
+    marker = reset_env / "fsmonitor-ran"
+    _git(copy, "config", "core.fsmonitor", str(_marker_script(reset_env, "fsmonitor.sh", marker)))
+
+    _reset_workspace(copy)
+
+    assert not marker.exists()
+    _assert_reset_ran(copy)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), [("remote.origin.promisor", "true"), ("extensions.partialClone", "origin")]
+)
+def test_reset_leaves_a_repository_with_a_promisor_remote_untouched(reset_env, key, value):
+    copy = _repo_with_local_work(reset_env / "copy")
+    _git(copy, "config", "core.repositoryformatversion", "1")
+    _git(copy, "config", "remote.origin.url", str(reset_env / "nowhere"))
+    _git(copy, "config", key, value)
+
+    _reset_workspace(copy)
+
+    _assert_local_work_kept(copy)
+
+
+def test_reset_leaves_a_repository_whose_config_includes_another_file_untouched(reset_env):
+    copy = _repo_with_local_work(reset_env / "copy")
+    # The included file can be written after the check, so an include alone refuses the reset.
+    _git(copy, "config", "include.path", str(reset_env / "later.cfg"))
+
+    _reset_workspace(copy)
+
+    _assert_local_work_kept(copy)
+
+
+def test_reset_does_not_enter_a_submodule_the_candidate_configured(reset_env):
+    sub = reset_env / "sub"
+    sub.mkdir()
+    (sub / "f.py").write_text("a\n", encoding="utf-8")
+    (sub / ".gitattributes").write_text("*.py filter=mark\n", encoding="utf-8")
+    _git(sub, "init", "-q")
+    _git(sub, "add", ".")
+    _git(sub, "commit", "-qm", "sub")
+    copy = _repo_with_local_work(reset_env / "copy")
+    _git(copy, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "sub")
+    _git(copy, "commit", "-qm", "submodule")
+    marker = reset_env / "submodule-filter-ran"
+    script = _marker_script(reset_env, "filter.sh", marker, passthrough=True)
+    _git(copy / "sub", "config", "filter.mark.smudge", str(script))
+    _git(copy / "sub", "config", "filter.mark.clean", str(script))
+    _git(copy, "config", "submodule.recurse", "true")
+    (copy / "sub" / "f.py").write_text("dirty\n", encoding="utf-8")
+
+    _reset_workspace(copy)
+
+    assert not marker.exists()
+    _assert_reset_ran(copy)
+
+
+def test_reset_restores_tracked_and_removes_untracked_files_under_a_foreign_git_environment(
+    reset_env, monkeypatch
+):
+    copy = _repo_with_local_work(reset_env / "copy")
+    elsewhere = _repo_with_local_work(reset_env / "elsewhere")
+    marker = reset_env / "env-hook-ran"
+    hooks = reset_env / "env-hooks"
+    hooks.mkdir()
+    (hooks / "post-checkout").write_text(f'#!/bin/sh\ntouch "{marker}"\n', encoding="utf-8")
+    (hooks / "post-checkout").chmod(0o755)
+    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(elsewhere))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(hooks))
+
+    _reset_workspace(copy)
+
+    _assert_reset_ran(copy)
+    _assert_local_work_kept(elsewhere)
+    assert not marker.exists()
+
+
+def test_every_reset_git_call_has_a_timeout_and_a_git_free_environment(reset_env, monkeypatch):
+    copy = _repo_with_local_work(reset_env / "copy")
+    monkeypatch.setenv("GIT_DIR", str(copy / ".git"))
+    real_run = subprocess.run
+    calls: list[tuple[list[str], dict]] = []
+
+    def recording_run(args, **kwargs):
+        calls.append((list(args), kwargs))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("nexus.services.local_heal.orchestrator.subprocess.run", recording_run)
+
+    _reset_workspace(copy)
+
+    _assert_reset_ran(copy)
+    assert len(calls) >= 3
+    for args, kwargs in calls:
+        assert args[0] == "git"
+        assert kwargs.get("timeout")
+        env = kwargs.get("env")
+        assert env is not None
+        assert "GIT_DIR" not in env
+        assert env.get("GIT_CONFIG_NOSYSTEM") == "1"
