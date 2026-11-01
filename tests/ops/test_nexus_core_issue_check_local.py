@@ -29,7 +29,8 @@ if sub == "issue-check":
     d = Path(".nexus-core/receipts")
     d.mkdir(parents=True, exist_ok=True)
     status = os.environ.get("FAKE_STATUS", "VERIFIED")
-    (d / "r1.json").write_text(json.dumps({
+    receipt = d / "20261101T000000.000001+0000-0123456789ab.json"
+    receipt.write_text(json.dumps({
         "receipt_hash": "rh123",
         "target": {"target_tree": "tt456"},
         "outcome": {
@@ -38,6 +39,9 @@ if sub == "issue-check":
             **({"transport_error": json.loads(os.environ["FAKE_TRANSPORT"])} if "FAKE_TRANSPORT" in os.environ else {}),
         },
     }))
+    argv = sys.argv[1:]
+    if "--receipt-path-out" in argv:
+        Path(argv[argv.index("--receipt-path-out") + 1]).write_text(str(receipt.resolve()) + "\\n")
     print("claim ceiling: ISSUE_BOUND_VERIFIED")
     sys.exit(0 if status == "VERIFIED" else 3)
 print("init ok")
@@ -566,7 +570,9 @@ def test_issue_check_passes_trusted_config_flags(env):
     base_sha = git(repo, "rev-parse", "origin/main")
     assert out["base_sha"] == base_sha != out["head"]
     calls = {c["argv"][0]: c["argv"][1:] for c in _certify_calls(env)}
-    assert calls["issue-check"] == [
+    check_argv = calls["issue-check"]
+    pointer = check_argv[check_argv.index("--receipt-path-out") + 1]
+    assert check_argv == [
         "--repo",
         ".",
         "--issue",
@@ -574,9 +580,22 @@ def test_issue_check_passes_trusted_config_flags(env):
         "--require-trusted-config",
         "--expect-config-commit",
         base_sha,
+        # The base workflow here declares no evidence-universe: CI's default.
+        "--evidence-universe",
+        "issue-marker",
+        "--receipt-path-out",
+        pointer,
     ]
-    # issue-init at the Core pin accepts neither flag and runs no verifier.
-    assert calls["issue-init"] == ["--repo", ".", "--issue", "7"]
+    assert Path(pointer).is_absolute() and ".nexus-core" not in Path(pointer).parts
+    # issue-init at the Core pin accepts neither trust flag and runs no verifier.
+    assert calls["issue-init"] == [
+        "--repo",
+        ".",
+        "--issue",
+        "7",
+        "--evidence-universe",
+        "issue-marker",
+    ]
 
 
 def test_core_tool_partial_install_not_reused(env):
