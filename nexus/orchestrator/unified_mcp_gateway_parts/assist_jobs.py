@@ -35,6 +35,7 @@ from nexus.contracts.lifecycle_action import (
 )
 from nexus.core.argv_command import require_child_stays_unreaped
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import _terminate_provider_group
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
 if TYPE_CHECKING:
@@ -285,7 +286,12 @@ class _AssistJobsMixin(_JobsBase):
             with self._assist_lock:
                 process = self._assist_processes.get(task_id)
             terminated = False
-            if pid:
+            if process is not None:
+                # Not poll(): it reaps, after which the provider's group can no longer be
+                # signalled safely; the group is SIGKILLed before the reap, so no descendant
+                # outlives a lease release or the workspace removal below (#3052).
+                terminated = _terminate_provider_group(process)
+            elif pid:
                 try:
                     os.killpg(int(job.get("pgid") or pid), signal.SIGTERM)
                 except OSError:

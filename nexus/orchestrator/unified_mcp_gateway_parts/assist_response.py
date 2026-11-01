@@ -71,6 +71,23 @@ def _provider_deadline_passed(job: Mapping[str, Any]) -> bool:
     return time.time() - started > limit
 
 
+def _signal_group_and_settle(process: subprocess.Popen[str], sig: int, seconds: float) -> bool:
+    """Send *sig* to the unreaped provider's process group (its pid still names the group), then
+    wait up to *seconds* for the provider to exit; once it has, its group is SIGKILLed and it is
+    reaped (True). False: still running, unreaped."""
+    try:
+        os.killpg(process.pid, sig)
+    except OSError:
+        pass
+    deadline = time.monotonic() + seconds
+    while not kill_group_if_exited(process):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    _GROUP_KILLED.add(process)
+    return True
+
+
 def _settle_provider_group(
     job: Mapping[str, Any], process: subprocess.Popen[str]
 ) -> tuple[bool, bool, bool]:
@@ -90,20 +107,28 @@ def _settle_provider_group(
                 return True, True, False
             if not _provider_deadline_passed(job):
                 return False, True, False
-            # The provider is unreaped, so its pid still names its own group.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            deadline = time.monotonic() + _PROVIDER_KILL_SETTLE_SECONDS
-            while not kill_group_if_exited(process):
-                if time.monotonic() >= deadline:
-                    return True, False, True
-                time.sleep(0.05)
-            _GROUP_KILLED.add(process)
-            return True, True, True
+            clean = _signal_group_and_settle(process, signal.SIGKILL, _PROVIDER_KILL_SETTLE_SECONDS)
+            return True, clean, True
         except (ChildProcessError, PermissionError):
             return True, False, False
+
+
+def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
+    """Cancel: SIGTERM, then SIGKILL, the provider's process group while the provider is
+    unreaped, each step bounded; True once it exited and its group was SIGKILLed and reaped
+    (#3052). False: a group member survived, the group could not be listed, the provider was
+    reaped elsewhere (never signalled then) or it did not exit."""
+    with _SETTLE_LOCK:
+        if process in _GROUP_KILLED:
+            return True
+        if process.returncode is not None:
+            return False
+        try:
+            return _signal_group_and_settle(
+                process, signal.SIGTERM, _PROVIDER_KILL_SETTLE_SECONDS
+            ) or _signal_group_and_settle(process, signal.SIGKILL, _PROVIDER_KILL_SETTLE_SECONDS)
+        except (ChildProcessError, PermissionError):
+            return False
 
 
 class _AssistResponseMixin(_ResponseBase):
@@ -172,6 +197,9 @@ class _AssistResponseMixin(_ResponseBase):
                     })
                     return self._assist_write(job)
         if job.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
+            return job
+        if job.get("blocker") == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE":
+            # Settled as needing reconciliation: a later refresh must not finish the job.
             return job
         with self._assist_lock:
             process = self._assist_processes.get(task_id)

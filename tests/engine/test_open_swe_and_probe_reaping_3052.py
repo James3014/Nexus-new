@@ -24,6 +24,7 @@ import pytest
 
 from nexus.core.argv_command import ProcessGroupReapingUnavailable
 from nexus.orchestrator.unified_mcp_gateway_parts import assist_response
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_jobs import _AssistJobsMixin
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import _AssistResponseMixin
 from nexus.orchestrator.unified_mcp_gateway_parts.model_probe import _ModelProbeMixin
 from nexus.services import open_swe_external_intelligence as osei
@@ -255,13 +256,20 @@ def _lock_free(lock_path: Path) -> bool:
         return True
 
 
-def _launch_provider(tmp: Path, pidfile: Path, claim, *, linger: float = 0.0):
+def _launch_provider(
+    tmp: Path, pidfile: Path, claim, *, linger: float = 0.0, grandchild_ignores_term: bool = False
+):
     """Launch like model_probe.py does: new session, the lease fd passed to the provider."""
+    # The ignored SIGTERM disposition is inherited by the grandchild through both forks.
+    ignore = "import signal\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
     provider = _write(
         tmp / "agy_provider_stub.py",
         f"#!{sys.executable}\n"
         + DOUBLE_FORK
-        + f"\nspawn_grandchild({str(pidfile)!r}, False)\ntime.sleep({linger!r})\nprint('done')\n",
+        + (ignore if grandchild_ignores_term else "")
+        + f"\nspawn_grandchild({str(pidfile)!r}, False)\n"
+        + ("signal.signal(signal.SIGTERM, signal.SIG_DFL)\n" if grandchild_ignores_term else "")
+        + f"time.sleep({linger!r})\nprint('done')\n",
         executable=True,
     )
     stdout_path, stderr_path = tmp / "out.txt", tmp / "err.txt"
@@ -408,3 +416,59 @@ def test_second_refresh_of_a_settled_provider_sees_a_clean_exit(box):
         _kill_own_group(process)
         claim.release()
     assert not _ours_alive(pid, marker)
+
+
+def test_reconcile_state_is_kept_by_a_later_refresh(box):
+    """An assist job settled as UNKNOWN_REQUIRES_RECONCILE (provider reaped elsewhere) is not
+    finished, nor its workspace removed, by the next refresh."""
+    tmp, pidfile, marker = box
+    claim, _manager, _lock_path, _receipt_path = _lease(tmp)
+    process, job = _launch_provider(tmp, pidfile, claim)
+    claim.release()
+    workspace = tmp / "assist-workspace"
+    workspace.mkdir()
+    job.update({
+        "job_kind": "assist",
+        "provider": "cline",
+        "workspace_root": str(workspace),
+        "account_lease_id_hash": None,
+    })
+    _wait_pidfile(pidfile)
+    process.wait(timeout=10)
+    gateway = _StubGateway(job, process, None)
+    first = gateway._assist_refresh("t1")
+    second = gateway._assist_refresh("t1")
+    for refreshed in (first, second):
+        assert refreshed["status"] == "UNKNOWN_REQUIRES_RECONCILE", refreshed
+        assert refreshed["blocker"] == "ASSIST_PROVIDER_GROUP_CLEANUP_INCOMPLETE"
+    assert workspace.exists()
+
+
+class _CancelGateway(_AssistJobsMixin, _StubGateway):
+    def _assist_response(self, job, *, operation="status"):
+        return dict(job)
+
+    def _cleanup_assist_workspace(self, job):
+        job["process_cleanup"] = True
+
+
+def test_cancel_releases_lease_only_after_group_killed(box):
+    """Cancel SIGTERMs the group; a descendant that ignores SIGTERM must still be gone before the
+    Agy lease is released (poll() reaped the provider and the group was never SIGKILLed)."""
+    tmp, pidfile, marker = box
+    claim, manager, lock_path, _receipt_path = _lease(tmp)
+    process, job = _launch_provider(tmp, pidfile, claim, linger=60.0, grandchild_ignores_term=True)
+    job["started_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    try:
+        pid = _wait_pidfile(pidfile)
+        assert _ours_alive(pid, marker)
+        cancelled = _CancelGateway(job, process, claim)._assist_cancel("t1")
+    finally:
+        _kill_own_group(process)
+    assert cancelled["status"] == "CANCELLED", cancelled
+    assert cancelled["process_killed"] is True
+    assert cancelled["account_lease_cleanup_status"] == "RELEASED"
+    assert manager.released and _lock_free(lock_path)
+    assert not _ours_alive(pid, marker), (
+        f"grandchild {pid} still alive after cancel released the Agy account lease"
+    )

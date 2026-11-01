@@ -2319,6 +2319,7 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     class HangingPopen:
         pid = 54100
         returncode = None
+        signalled = None
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
             self.command = command
@@ -2328,12 +2329,18 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
             stderr.flush()
 
         def poll(self):
-            return None
+            return None if HangingPopen.signalled is None else -HangingPopen.signalled
+
+    def fake_killpg(pgid, sig):
+        # The fake has no real process group: never signal pgid 54100 on this host.
+        assert pgid == HangingPopen.pid
+        HangingPopen.signalled = sig
 
     service = FakeService()
     service.state_dir = tmp_path
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", HangingPopen)
+    monkeypatch.setattr(assist_response_module.os, "killpg", fake_killpg)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
     gateway = UnifiedMCPGateway(service=service)
     gateway.handle({"jsonrpc": "2.0", "id": 7010, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-timeout", "what": "Bounded probe", "why": "Poll timeout distinction", "allowed_files": ["README.md"]}}})
