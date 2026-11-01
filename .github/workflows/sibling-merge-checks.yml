@@ -9,6 +9,9 @@ name: Sibling merge checks
 # The caller's GITHUB_TOKEN is used for its own repo's statuses; the PR head is
 # fetched as git objects only. Known limit (accepted on #2365): commit statuses
 # can be posted by anything with statuses: write.
+# #3084: the review-record job first marks its status pending on the PR head the
+# check reads, and marks it error if the check does not finish, so a run that
+# times out, is cancelled or fails never leaves an earlier run's success in place.
 
 on:
   workflow_call:
@@ -37,7 +40,25 @@ jobs:
       issues: read
       pull-requests: read
       statuses: write
+    env:
+      CONTEXT: Review record present (advisory)
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ inputs.pr }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - name: Mark the status pending before anything can fail
+        id: pending
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          # The check reads the live PR head (pulls/N head.sha); mark that same head.
+          head="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "PR head sha unavailable" >&2; exit 1; }
+          echo "head_sha=${head}" >> "$GITHUB_OUTPUT"
+          gh api -X POST "repos/${REPO}/statuses/${head}" \
+            -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="evaluating the review record" > /dev/null
       - name: Checkout the Nexus-new tools (main, never PR code)
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -49,15 +70,28 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Check the review record at the PR head and publish the status
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ inputs.pr }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        id: check
+        # Below the job timeout, so a slow check fails this step and the next step still runs.
+        timeout-minutes: 7
         run: |
           set -euo pipefail
           python3 -I nexus-tools/scripts/ops/review_record_check.py --repo "$REPO" --pr "$PR" \
             --target-url "$RUN_URL" --output "$RUNNER_TEMP/review-record.json" --no-fail
+      - name: Mark the status error when the check did not finish
+        if: (failure() || cancelled()) && steps.check.outcome != 'success'
+        timeout-minutes: 1
+        env:
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          head="$HEAD_SHA"
+          if ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+            head="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
+          fi
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "PR head sha unavailable" >&2; exit 1; }
+          gh api -X POST "repos/${REPO}/statuses/${head}" \
+            -f state=error -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="review record check did not finish; see the run" > /dev/null
 
   bindings:
     name: Bindings preflight (default branch job)

@@ -532,7 +532,8 @@ def test_workflow_never_checks_out_pr_code_and_runs_the_script_isolated():
         "statuses": "write",
     }
     assert "github.event.issue.pull_request" in job["if"]
-    checkout, check = job["steps"]
+    # #3084 wraps these two steps in a pending step and a did-not-finish step.
+    _pending, checkout, check, _cleanup = job["steps"]
     assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
     assert checkout["with"]["persist-credentials"] is False
     assert "python3 -I scripts/ops/review_record_check.py" in check["run"]

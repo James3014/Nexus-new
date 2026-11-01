@@ -685,9 +685,10 @@
 | docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
 | scripts/ops/deletion_guard.py | tests/ops/test_deletion_guard.py | active | high | deletion_guard_owner_approval_contract |
 | scripts/ops/review_record_check.py | tests/ops/test_review_record_check.py | active | high | review_record_advisory_check_contract |
-| .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py | active | high | review_record_workflow_contract |
+| .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py, tests/ops/test_review_record_pending_3084.py | active | high | review_record_workflow_contract |
+| tests/ops/test_review_record_pending_3084.py | tests/ops/test_review_record_pending_3084.py | active | high | test_contract |
 | .github/workflows/pr-bindings-preflight.yml | tests/ops/test_pr_bindings_preflight_workflow.py, tests/ops/test_pr_workflow_concurrency.py | active | high | bindings_preflight_workflow_contract |
-| .github/workflows/sibling-merge-checks.yml | tests/ops/test_sibling_merge_checks.py | active | high | sibling_merge_checks_contract |
+| .github/workflows/sibling-merge-checks.yml | tests/ops/test_sibling_merge_checks.py, tests/ops/test_review_record_pending_3084.py | active | high | sibling_merge_checks_contract |
 | .github/workflows/benchmark-ci.yml | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | benchmark_ci_dispatch_only_contract |
 | tests/ops/test_benchmark_ci_dispatch_only_2964.py | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | test_contract |
 | scripts/ops/sibling_bindings_check.py | tests/ops/test_sibling_merge_checks.py | active | high | sibling_merge_checks_contract |
