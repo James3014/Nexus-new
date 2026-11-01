@@ -1,12 +1,68 @@
 import os
 import shutil
+import stat
 import logging
 import time
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class _SwarmDirSwapped(Exception):
+    """The swarm path no longer names the directory that release() validated."""
+
+
+def _real_dir_identity(path: Path) -> Optional[tuple[int, int]]:
+    """(st_dev, st_ino) of `path` itself, without following a final symlink; None if not a directory."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def _resolves_inside(path: Path, root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(root)
+    except (OSError, RuntimeError):
+        return False
+
+
+def _names_leaving(src_root: Path, dst_root: Path, swarm_root: Path):
+    """copytree `ignore` hook: skip entries whose destination would resolve outside the swarm."""
+
+    def ignore(src_dir: str, names: List[str]) -> set[str]:
+        dst_dir = dst_root / Path(src_dir).relative_to(src_root)
+        return {name for name in names if not _resolves_inside(dst_dir / name, swarm_root)}
+
+    return ignore
+
+
+def _copy_into_fresh_entry(src, dst):
+    """Copy `src` to `dst` by writing a new file beside it and renaming it into place.
+
+    The rename replaces the directory entry at `dst` instead of opening it, so a destination that
+    shares its file with a path outside the swarm is left as it was.
+    """
+    dst = Path(dst)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", suffix=".swarm-sync", dir=dst.parent)
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp_name)
+        os.replace(tmp_name, dst)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+    return str(dst)
+
 
 class SwarmBroker:
     """
@@ -99,6 +155,12 @@ class SwarmBroker:
         admin_dir = Path(git_dir).resolve()
         if admin_dir.parent != (Path(common_dir) / "worktrees").resolve():
             return False
+        # The admin entry's `commondir` decides whose refs and objects the swarm uses.
+        swarm_common_dir = self._git_output(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], swarm_path
+        )
+        if not swarm_common_dir or Path(swarm_common_dir).resolve() != Path(common_dir).resolve():
+            return False
         try:
             back_pointer = (admin_dir / "gitdir").read_text(encoding="utf-8").strip()
         except (OSError, UnicodeDecodeError):
@@ -172,23 +234,47 @@ class SwarmBroker:
             ]
             
         all_paths = list(scope_files) + required_configs
+        swarm_root = Path(swarm_dir).resolve()
         
         for rel_path in all_paths:
-            raw_path = Path(rel_path)
-            src = raw_path if raw_path.is_absolute() else self.workspace / raw_path
-            try:
-                dst_rel = src.resolve().relative_to(self.workspace)
-            except ValueError:
-                dst_rel = raw_path if not raw_path.is_absolute() else Path(raw_path.name)
+            dst_rel = self._scope_path_in_workspace(rel_path)
+            if dst_rel is None:
+                logger.warning(
+                    "⚠️ [SwarmBroker] Refused scope path outside the workspace: %s", rel_path
+                )
+                continue
+            src = self.workspace / dst_rel
             dst = swarm_dir / dst_rel
             if src.exists():
+                if not _resolves_inside(dst, swarm_root):
+                    logger.warning(
+                        "⚠️ [SwarmBroker] Refused scope target outside the swarm: %s", dst
+                    )
+                    continue
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if src.resolve() == dst.resolve():
                     continue
                 if src.is_dir():
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                    shutil.copytree(
+                        src,
+                        dst,
+                        dirs_exist_ok=True,
+                        ignore=_names_leaving(src, dst, swarm_root),
+                        copy_function=_copy_into_fresh_entry,
+                    )
                 else:
-                    shutil.copy2(src, dst)
+                    _copy_into_fresh_entry(src, dst)
+
+    def _scope_path_in_workspace(self, rel_path: str) -> Optional[Path]:
+        """A scope entry as a path relative to the workspace, or None if it leaves it."""
+        raw_path = Path(rel_path)
+        if ".." in raw_path.parts:
+            return None
+        src = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+        try:
+            return src.resolve().relative_to(self.workspace)
+        except (OSError, RuntimeError, ValueError):
+            return None
 
     def release(self, swarm_dir: Path):
         """
@@ -200,6 +286,14 @@ class SwarmBroker:
             
         if not self._is_swarm_child_dir(swarm_dir):
             logger.warning("⚠️ [SwarmBroker] Refused to release path that is not a swarm directory of this workspace: %s", swarm_dir)
+            return
+
+        identity = _real_dir_identity(swarm_dir)
+        if identity is None:
+            logger.warning(
+                "⚠️ [SwarmBroker] Refused to release swarm path that is not a real directory: %s",
+                swarm_dir,
+            )
             return
 
         lock_file = swarm_dir / ".swarm_lock"
@@ -215,18 +309,24 @@ class SwarmBroker:
 
         try:
             # 實施重用策略 (Reuse)
+            if _real_dir_identity(swarm_dir) != identity:
+                raise _SwarmDirSwapped(swarm_dir)
             is_git = (swarm_dir / ".git").exists()
             if is_git:
                 logger.debug(f"🐝 [SwarmBroker] Reusing git worktree in {swarm_dir.name}")
                 import subprocess
                 # 快速重設 git 狀態
                 subprocess.run(["git", "checkout", "."], cwd=swarm_dir, capture_output=True)
+                if _real_dir_identity(swarm_dir) != identity:
+                    raise _SwarmDirSwapped(swarm_dir)
                 subprocess.run(["git", "clean", "-fd"], cwd=swarm_dir, capture_output=True)
             else:
                 # Fallback: Clean up all contents EXCEPT the lock file
                 for item in swarm_dir.iterdir():
                     if item.name == ".swarm_lock":
                         continue
+                    if _real_dir_identity(swarm_dir) != identity:
+                        raise _SwarmDirSwapped(swarm_dir)
                     if item.is_dir():
                         shutil.rmtree(item)
                     else:
@@ -236,5 +336,10 @@ class SwarmBroker:
             if lock_file.exists():
                 lock_file.unlink()
             logger.debug(f"🐝 [SwarmBroker] Released and reset swarm sandbox: {swarm_dir.name}")
+        except _SwarmDirSwapped:
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarm path was replaced during release; left untouched: %s",
+                swarm_dir,
+            )
         except Exception as e:
             logger.error(f"❌ [SwarmBroker] Error releasing swarm {swarm_dir.name}: {e}")
