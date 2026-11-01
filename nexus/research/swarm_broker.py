@@ -81,7 +81,32 @@ class SwarmBroker:
         top_level = self._git_top_level(swarm_path)
         if top_level != swarm_path or top_level == controller_top_level:
             return False
+        if not self._git_metadata_points_to_own_admin_entry(swarm_path):
+            return False
         return swarm_path in self._registered_worktree_paths()
+
+    def _git_metadata_points_to_own_admin_entry(self, swarm_path: Path) -> bool:
+        """
+        The swarm's `.git` file must name an admin entry under the controller's
+        `<common-dir>/worktrees/`, and that entry's `gitdir` must point back to it.
+        """
+        common_dir = self._git_output(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], self.workspace
+        )
+        git_dir = self._git_output(["rev-parse", "--absolute-git-dir"], swarm_path)
+        if not common_dir or not git_dir:
+            return False
+        admin_dir = Path(git_dir).resolve()
+        if admin_dir.parent != (Path(common_dir) / "worktrees").resolve():
+            return False
+        try:
+            back_pointer = (admin_dir / "gitdir").read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            return False
+        if not back_pointer:
+            return False
+        # Relative entries (worktree.useRelativePaths) are relative to the admin dir.
+        return (admin_dir / back_pointer).resolve() == swarm_path / ".git"
 
     def acquire(self, timeout_sec: float = 60.0) -> Optional[Path]:
         """
