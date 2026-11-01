@@ -360,7 +360,7 @@ class _AssistJobsMixin(_JobsBase):
                 # for reconciliation (#3076). This gateway does not hold the provider unreaped
                 # here, so the group is not signalled.
                 job.update({"reconciliation_required": True, "process_killed": False, "process_cleanup": False})
-            self._assist_write(job)
+            self._assist_write_current(task_id, job)
         elif job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
             pid = int(job.get("pid") or 0)
             process = None
@@ -438,7 +438,7 @@ class _AssistJobsMixin(_JobsBase):
             self._assist_write_current(task_id, job)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)
-            self._assist_write(job)
+            self._assist_write_current(task_id, job)
         return self._assist_response(job, operation="cancel")
 
     def _assist_retry(self, task_id: str) -> dict[str, Any]:
