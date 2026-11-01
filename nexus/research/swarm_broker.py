@@ -17,9 +17,16 @@ class SwarmBroker:
     def __init__(self, workspace: Path):
         self.workspace = workspace.resolve()
         # Find all available swarm directories (e.g., .nexus-swarm-001 to 050)
-        self.swarm_dirs = sorted([d for d in self.workspace.glob(".nexus-swarm-*") if d.is_dir()])
+        self.swarm_dirs = sorted([d for d in self.workspace.glob(".nexus-swarm-*") if self._is_swarm_child_dir(d)])
         if not self.swarm_dirs:
             logger.warning("⚠️ [SwarmBroker] No .nexus-swarm-* directories found. Parallel isolation may be degraded.")
+
+    def _is_swarm_child_dir(self, swarm_dir: Path) -> bool:
+        """A swarm workspace is a real `.nexus-swarm-*` directory directly under the workspace."""
+        path = Path(os.path.abspath(swarm_dir))
+        if path.is_symlink() or not path.is_dir():
+            return False
+        return path.name.startswith(".nexus-swarm-") and path.parent.resolve() == self.workspace
 
     def _git_output(self, args: List[str], cwd: Path) -> Optional[str]:
         try:
@@ -60,12 +67,14 @@ class SwarmBroker:
         Validate that a swarm path is a separate Git worktree registered by the
         controller, not a normal child directory that resolves back to it.
         """
+        if Path(swarm_dir).is_symlink():
+            return False
         swarm_path = Path(swarm_dir).resolve()
         if not swarm_path.is_dir():
             return False
         controller_top_level = self._controller_git_top_level()
         if controller_top_level is None:
-            return True
+            return False
 
         top_level = self._git_top_level(swarm_path)
         if top_level != swarm_path or top_level == controller_top_level:
@@ -162,7 +171,15 @@ class SwarmBroker:
         if not swarm_dir or not swarm_dir.exists():
             return
             
+        if not self._is_swarm_child_dir(swarm_dir):
+            logger.warning("⚠️ [SwarmBroker] Refused to release path that is not a swarm directory of this workspace: %s", swarm_dir)
+            return
+
         lock_file = swarm_dir / ".swarm_lock"
+        for cache_dir in [".venv", "node_modules", ".ruff_cache"]:
+            mounted = swarm_dir / cache_dir
+            if mounted.is_symlink():
+                mounted.unlink()
         if not self.is_independently_registered_worktree(swarm_dir):
             if lock_file.exists():
                 lock_file.unlink()
@@ -170,10 +187,6 @@ class SwarmBroker:
             return
 
         try:
-            for cache_dir in [".venv", "node_modules", ".ruff_cache"]:
-                mounted = swarm_dir / cache_dir
-                if mounted.is_symlink():
-                    mounted.unlink()
             # 實施重用策略 (Reuse)
             is_git = (swarm_dir / ".git").exists()
             if is_git:
