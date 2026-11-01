@@ -66,9 +66,9 @@ jobs:
       head-sha: ${{ steps.gate.outputs.head-sha }}
     steps:
       - id: gate
-        uses: James3014/nexus-core/.github/actions/issue-gate@b07ae36d64501af761e8f2069830b79f89ac733b
+        uses: James3014/nexus-core/.github/actions/issue-gate@67427c5840cd41cd1cf11fff63b710c81a813755
         with:
-          nexus-certify-ref: "b07ae36d64501af761e8f2069830b79f89ac733b"
+          nexus-certify-ref: "67427c5840cd41cd1cf11fff63b710c81a813755"
           evidence-universe: trusted-config
           # Empty on pull requests (the action then uses the PR head and body marker).
           head-sha: ${{ github.event.client_payload.head_sha }}
@@ -93,7 +93,7 @@ jobs:
       # PR_ALREADY_CLOSED_SKIPPED: receipt-verify re-reads the live PR.
       pull-requests: read
     steps:
-      - uses: James3014/nexus-core/.github/actions/receipt-verify@b07ae36d64501af761e8f2069830b79f89ac733b
+      - uses: James3014/nexus-core/.github/actions/receipt-verify@67427c5840cd41cd1cf11fff63b710c81a813755
         with:
           artifact-name: ${{ needs.run.outputs.artifact-name }}
           artifact-id: ${{ needs.run.outputs.artifact-id }}
@@ -103,4 +103,4 @@ jobs:
           base-sha: ${{ github.event.pull_request.base.sha || github.sha }}
           issue-number: ${{ needs.run.outputs.issue-number }}
           gate-outcome: ${{ needs.run.outputs.outcome }}
-          nexus-certify-ref: "b07ae36d64501af761e8f2069830b79f89ac733b"
+          nexus-certify-ref: "67427c5840cd41cd1cf11fff63b710c81a813755"

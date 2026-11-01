@@ -270,7 +270,7 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         env.update(GITHUB_TOKEN=token, PYTHONDONTWRITEBYTECODE="1")
         # issue-check accepts only the config committed on the trusted base commit
         # (--require-trusted-config, as in CI), pinned to the base_sha resolved above.
-        # issue-init (Core pin b07ae36) takes neither flag and runs no verifier or
+        # issue-init (Core pin 67427c5) takes neither flag and runs no verifier or
         # material command.
         core_calls: tuple[tuple[str, tuple[str, ...]], ...] = (
             ("issue-init", ()),
