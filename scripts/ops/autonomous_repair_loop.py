@@ -33,6 +33,9 @@ CI_GATE_SCRIPT = ROOT / "scripts" / "ops" / "ci_gate.py"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 MAX_ROUNDS = 5
 ROLLBACK_TRIGGER_ROUND = 3
+# The verify step's CI gate dry-run (#3052): above its two bounded steps (2 x ci_gate's
+# CI_GATE_STEP_TIMEOUT_SECONDS), so a hung step times out inside the gate first.
+REPAIR_VERIFY_TIMEOUT_SECONDS = 5400
 
 
 def _recall_prior_wisdom(failure_context: str, mem: MemoryService) -> str:
@@ -129,6 +132,20 @@ def execute_repair_proposals(lines, cwd):
     return outcomes
 
 
+def _verify_repair() -> bool:
+    """Run the CI gate dry-run over the repaired tree; a timeout is a failed verification."""
+    verify_cmd = [str(VENV_PYTHON), str(CI_GATE_SCRIPT), "--dry-run"]
+    try:
+        # Runs the tests of the model-repaired tree: its process group is killed after (#3052).
+        v_res = run_reaping_process_group(
+            verify_cmd, capture_output=False, timeout=REPAIR_VERIFY_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        print(f"⏱️ Verification timed out after {REPAIR_VERIFY_TIMEOUT_SECONDS}s")
+        return False
+    return v_res.returncode == 0
+
+
 @nexus_metabolize(task_name="Autonomous Repair Loop")
 def run_repair_loop():
     print("🧠 [Autonomous-Repair] Initializing ReAct Healing Cycle...")
@@ -211,11 +228,7 @@ def run_repair_loop():
 
         # 5. Verify with CI Gate (Dry-run)
         print("🔎 Verifying repair...")
-        verify_cmd = [str(VENV_PYTHON), str(CI_GATE_SCRIPT), "--dry-run"]
-        # Runs the tests of the model-repaired tree: its process group is killed after (#3052).
-        v_res = run_reaping_process_group(verify_cmd, capture_output=False)
-
-        if v_res.returncode == 0:
+        if _verify_repair():
             print(f"🎉 [SUCCESS] System repaired in {current_round} round(s)!")
             # 閉環：記錄成功的教訓
             new_lesson = FaultLesson(

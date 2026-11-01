@@ -161,7 +161,7 @@ def test_extract_junit_target_durations_aggregates_by_file_and_directory(tmp_pat
 
 def test_run_nightly_full_check_records_history(monkeypatch, tmp_path):
     monkeypatch.setattr(ci_gate, "ROOT", tmp_path)
-    monkeypatch.setattr(ci_gate, "run_step", lambda name, cmd: (True, "ok"))
+    monkeypatch.setattr(ci_gate, "run_step", lambda name, cmd, **kwargs: (True, "ok"))
 
     assert ci_gate.run_nightly_full_check() is True
 

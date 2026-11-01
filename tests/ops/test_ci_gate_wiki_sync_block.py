@@ -18,6 +18,11 @@ def test_ci_gate_dry_run_wiki_sync_blocks_rc2(monkeypatch):
         return MockRes(0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
+    # Gate steps run through run_command_string (#3052): answer them with the same mock.
+    monkeypatch.setattr(
+        "scripts.ops.ci_gate.run_command_string",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, mock_run(cmd).returncode, "", ""),
+    )
     monkeypatch.setattr("scripts.ops.ci_gate.Path.exists", lambda x: True)
     monkeypatch.setattr("scripts.ops.ci_gate.ROOT", Path("/tmp"))
     
@@ -31,7 +36,11 @@ def test_ci_gate_main_wiki_sync_blocks_rc2(monkeypatch):
     # Mocking main to capture sys.exit(1)
     
     with patch("sys.exit") as mock_exit:
-        with patch("subprocess.run") as mock_run:
+        # Gate steps run through run_command_string (#3052): they pass.
+        with patch("subprocess.run") as mock_run, patch(
+            "scripts.ops.ci_gate.run_command_string",
+            side_effect=lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, "", ""),
+        ):
             mock_run.side_effect = lambda cmd, *args, **kwargs: MagicMock(returncode=2 if "wiki_sync_check.py" in cmd else 0)
             
             # Setup arguments

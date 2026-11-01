@@ -31,6 +31,13 @@ def test_ci_gate_blocks_on_lesson_fail(monkeypatch):
         return MockRes()
 
     monkeypatch.setattr(subprocess, "run", mock_run)
+    # Gate steps run through run_command_string (#3052): answer them with the same mock.
+    monkeypatch.setattr(
+        "scripts.ops.ci_gate.run_command_string",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, mock_run(cmd).returncode, mock_run(cmd).stdout, ""
+        ),
+    )
     
     # Mock sys.exit to catch it
     exit_codes = []
