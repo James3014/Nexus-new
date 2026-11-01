@@ -2721,7 +2721,9 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                     "process_cleanup": False,
                     "last_polled_at": self._utc_now(),
                 })
-                current = self._assist_write(current)
+                # Each write lands only while the record is still the job read here: a retry
+                # recorded meanwhile keeps its record, and this reports the job it read (#3076).
+                current = self._assist_write_current(task_id, current)
                 return self._assist_response(current, operation="reconcile")
             if needs_reconcile:
                 lease_hash = str(current.get("account_lease_id_hash") or "")
@@ -2742,7 +2744,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                             "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
                             "last_polled_at": self._utc_now(),
                         })
-                        current = self._assist_write(current)
+                        current = self._assist_write_current(task_id, current)
                         return self._assist_response(current, operation="reconcile")
                     current["account_lease_released"] = True
                     current["account_lease_cleanup_status"] = "RELEASED"
@@ -2760,7 +2762,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                     "finished_at": current.get("finished_at") or self._utc_now(),
                 })
                 self._cleanup_assist_workspace(current)
-                current = self._assist_write(current)
+                current = self._assist_write_current(task_id, current)
             return self._assist_response(current, operation="reconcile")
         result = self.service.reconcile_task(task_id)
         if result is None:
