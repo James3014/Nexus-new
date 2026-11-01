@@ -142,6 +142,22 @@ def test_pin_only_at_head_fails_closed_without_running_uvx(tmp_path, capsys, mon
     assert HEAD_PIN not in check["detail"] + check["fix"]
 
 
+def test_trusted_config_mode_only_at_head_still_needs_a_base_pin(tmp_path, capsys, monkeypatch):
+    repo = _repo(tmp_path, base_pin=None, head_pin=None)
+    _write(
+        repo,
+        CERTIFY_PIN_WORKFLOW,
+        _pin_text(HEAD_PIN) + "    evidence-universe: trusted-config\n",
+    )
+    _commit(repo, "workflow at head only")
+    uvx, log = _fake_uvx(tmp_path, _PRINT_MARKER)
+    code, check = _run_issue_check(repo, tmp_path, capsys, monkeypatch, uvx)
+    assert code == 1
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
+    assert "derived from trusted base config" not in check["detail"]
+    assert _calls(log) == []
+
+
 def test_base_pin_is_the_only_ref_run(tmp_path, capsys, monkeypatch):
     repo = _repo(tmp_path, base_pin=BASE_PIN, head_pin=HEAD_PIN)
     uvx, log = _fake_uvx(tmp_path, _PRINT_MARKER)

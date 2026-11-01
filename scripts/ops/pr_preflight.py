@@ -435,12 +435,10 @@ def _certify_pin(ctx: Context) -> tuple[str | None, str]:
 
 
 def _trusted_config_universe(ctx: Context) -> bool:
-    """True when the issue-gate workflow derives the evidence universe from trusted config."""
-    for rev in (ctx.base_sha, ctx.head_sha):
-        text = _git(ctx.repo, "show", f"{rev}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
-        if text:
-            return TRUSTED_UNIVERSE_RE.search(text) is not None
-    return False
+    """True when the base ref's issue-gate workflow derives the evidence universe from trusted
+    config. Read from the base only, like the pin: a head copy cannot skip the certify run."""
+    text = _git(ctx.repo, "show", f"{ctx.base_sha}:{CERTIFY_PIN_WORKFLOW}", check=False).stdout
+    return TRUSTED_UNIVERSE_RE.search(text) is not None
 
 
 def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
