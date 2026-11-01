@@ -70,8 +70,12 @@ def _wait_pidfile(pidfile: Path, timeout: float = 10.0) -> int:
 
 
 def _ps(pid: int, field: str) -> str:
+    # -ww: without a terminal, procps cuts the command line at 80 columns (the tmp path is last).
     out = subprocess.run(
-        ["ps", "-o", f"{field}=", "-p", str(pid)], capture_output=True, text=True, check=False
+        ["ps", "-ww", "-o", f"{field}=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return out.stdout.strip()
 
@@ -312,6 +316,7 @@ def test_model_probe_lease_released_only_after_group_killed(box):
     try:
         pid = _wait_pidfile(pidfile)
         _wait_exit_unreaped(process)
+        assert _ours_alive(pid, marker), "the grandchild must be running before the refresh"
         refreshed = _StubGateway(job, process, claim)._assist_refresh("t1")
     finally:
         _kill_own_group(process)
@@ -396,6 +401,7 @@ def test_second_refresh_of_a_settled_provider_sees_a_clean_exit(box):
     try:
         pid = _wait_pidfile(pidfile)
         _wait_exit_unreaped(process)
+        assert _ours_alive(pid, marker)
         assert assist_response._settle_provider_group(job, process) == (True, True, False)
         assert assist_response._settle_provider_group(job, process) == (True, True, False)
     finally:
