@@ -314,17 +314,19 @@ def copy_tree_in_root(
     read. Regular single-link files are copied; a hard link, FIFO, socket or device raises
     ``PathContainmentError`` and the caller must treat the copy as failed. A symlink is recreated
     as a link only if it resolves inside ``dst_root`` once everything is copied; any other
-    symlink is left out. Entries named in ``ignore_names`` are skipped at every depth. Returns
-    the relative paths of the symlinks left out."""
+    symlink is left out. Entries named in ``ignore_names`` are skipped at every depth, under any
+    letter case (``.Git`` is ``.git`` on a case-insensitive file system). Returns the relative
+    paths of the symlinks left out."""
 
     dst_path = Path(dst_root)
+    ignored = {name.casefold() for name in ignore_names}
     links: list[tuple[PurePath, str]] = []
 
     def walk(src_fd: int, relative: PurePath) -> None:
         with os.scandir(src_fd) as entries:
             names = sorted(entry.name for entry in entries)
         for name in names:
-            if name in ignore_names:
+            if name.casefold() in ignored:
                 continue
             child = relative / name
             info = os.stat(name, dir_fd=src_fd, follow_symlinks=False)

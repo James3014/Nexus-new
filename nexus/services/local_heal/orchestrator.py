@@ -1822,6 +1822,26 @@ class HealOrchestrator:
 
         if not ctx.op.repo_dir or not (ctx.op.repo_dir / ".git").exists():
             return
+        # A copied gitdir may name another work tree (core.worktree) or live elsewhere (a
+        # gitdir file); checkout and clean would then act outside repo_dir.
+        repo_dir = ctx.op.repo_dir.resolve()
+        probe = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel", "--absolute-git-dir"],
+            cwd=str(repo_dir),
+            capture_output=True,
+            text=True,
+        )
+        found = probe.stdout.splitlines() if probe.returncode == 0 else []
+        if (
+            len(found) != 2
+            or Path(found[0]).resolve() != repo_dir
+            or not Path(found[1]).resolve().is_relative_to(repo_dir)
+        ):
+            logger.warning(
+                "workspace reset refused: git repository is not rooted at repo_dir: %r",
+                str(repo_dir),
+            )
+            return
         subprocess.run(
             ["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True
         )
