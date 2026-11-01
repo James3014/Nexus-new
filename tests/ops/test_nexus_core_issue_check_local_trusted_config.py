@@ -132,8 +132,12 @@ applicability = "APPLICABLE"
 '''
 
 
-def _repo(tmp: Path) -> tuple[Path, Path]:
-    """A repository whose base commit carries a config with a harmless verifier."""
+def _repo(tmp: Path, universe: str | None = "trusted-config") -> tuple[Path, Path]:
+    """A repository whose base commit carries a config with a harmless verifier.
+
+    The base workflow declares ``universe`` as its evidence universe (the real gate
+    workflow declares trusted-config); None leaves it undeclared (Core's issue-marker).
+    """
     bare = tmp / "origin.git"
     repo = tmp / "repo"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
@@ -141,7 +145,10 @@ def _repo(tmp: Path) -> tuple[Path, Path]:
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "t")
     (repo / ".github/workflows").mkdir(parents=True)
-    (repo / WORKFLOW).write_text("env:\n  NEXUS_CORE_TOOL_PIN: " + "a" * 40 + "\n")
+    workflow = "env:\n  NEXUS_CORE_TOOL_PIN: " + "a" * 40 + "\n"
+    if universe is not None:
+        workflow += f"jobs:\n  run:\n    with:\n      evidence-universe: {universe}\n"
+    (repo / WORKFLOW).write_text(workflow)
     (repo / ".nexus-core").mkdir()
     base_marker = tmp / "base-verifier-ran"
     (repo / ".nexus-core/config.toml").write_text(_config("origin/main", base_marker))
@@ -215,7 +222,8 @@ def _log(summary: dict[str, Any]) -> str:
 
 def test_issue_check_uses_trusted_base_config_only(pinned_core, tmp_path):
     """A candidate head that edits the config gets a config-trust failure; its verifier never runs."""
-    repo, base_marker = _repo(tmp_path)
+    # issue-marker universe: issue-init accepts the binding, so issue-check's trust flags decide.
+    repo, base_marker = _repo(tmp_path, universe=None)
     candidate_marker = tmp_path / "candidate-verifier-ran"
     (repo / ".nexus-core/config.toml").write_text(_config("HEAD~1", candidate_marker))
     _git(repo, "commit", "-q", "-am", "candidate config")
@@ -246,3 +254,41 @@ def test_issue_check_accepts_base_config_at_base_commit(pinned_core, tmp_path):
     assert not CONFIG_REASONS & set(summary["reason_codes"]), (summary, log)
     assert "CONFIG_SOURCE_MISMATCH" not in log and "CONFIG_UNTRUSTED" not in log, log
     assert base_marker.read_text().strip() == "ran", (proc.stderr, log)
+    assert proc.returncode == 0, (summary, log)
+    assert summary["status"] == "VERIFIED", (summary, log)
+
+
+def test_unchanged_base_config_is_verified_like_ci(pinned_core, tmp_path):
+    """The base workflow declares evidence-universe trusted-config, so the local run, like CI,
+    needs no Issue marker: a clean candidate is VERIFIED from the receipt Core reports."""
+    repo, base_marker = _repo(tmp_path)
+    (repo / "a.txt").write_text("b\n")
+    _git(repo, "commit", "-q", "-am", "candidate change")
+
+    proc, summary = _run_tool(tmp_path, repo, pinned_core)
+
+    log = _log(summary)
+    assert "ISSUE_EVIDENCE_UNIVERSE_UNBOUND" not in log, log
+    assert proc.returncode == 0, (summary, log)
+    assert summary["status"] == "VERIFIED", (summary, log)
+    assert Path(summary["receipt_path"]).parent == tmp_path / "out"
+
+
+def test_trusted_universe_refuses_candidate_config(pinned_core, tmp_path):
+    """With the base's trusted-config universe, a candidate config edit fails closed; no verifier runs."""
+    repo, base_marker = _repo(tmp_path)
+    candidate_marker = tmp_path / "candidate-verifier-ran"
+    (repo / ".nexus-core/config.toml").write_text(_config("HEAD~1", candidate_marker))
+    _git(repo, "commit", "-q", "-am", "candidate config")
+    (repo / "a.txt").write_text("b\n")
+    _git(repo, "commit", "-q", "-am", "candidate change")
+
+    proc, summary = _run_tool(tmp_path, repo, pinned_core)
+
+    log = _log(summary)
+    assert proc.returncode == 1, (summary, log)
+    assert summary["status"] != "VERIFIED"
+    assert summary["receipt_path"] is None, (summary, log)
+    assert "CONFIG_UNTRUSTED" in log or CONFIG_REASONS & set(summary["reason_codes"]), log
+    assert not candidate_marker.exists()
+    assert not base_marker.exists()
