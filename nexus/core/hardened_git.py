@@ -44,12 +44,15 @@ _RUNNING: dict[Path, int] = {}
 _RUNNING_GUARD = threading.Lock()
 
 
-def hardened_git_env(repo_dir: Path, git_dir: Optional[Path] = None) -> dict[str, str]:
+def hardened_git_env(
+    repo_dir: Path, git_dir: Optional[Path] = None, common_dir: Optional[Path] = None
+) -> dict[str, str]:
     """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
     GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
     are never fetched, and discovery stops at ``repo_dir``. With ``git_dir`` (a probed git
     dir) GIT_DIR and GIT_WORK_TREE are pinned to it and ``repo_dir``, so a rewritten ``.git``
-    pointer cannot redirect the call."""
+    pointer cannot redirect the call; ``common_dir`` (a verified linked worktree's) pins
+    GIT_COMMON_DIR too."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
@@ -61,6 +64,8 @@ def hardened_git_env(repo_dir: Path, git_dir: Optional[Path] = None) -> dict[str
     )
     if git_dir is not None:
         env.update(GIT_DIR=str(git_dir), GIT_WORK_TREE=str(repo_dir))
+    if common_dir is not None:
+        env["GIT_COMMON_DIR"] = str(common_dir)
     return env
 
 
@@ -71,11 +76,24 @@ def run_hardened_git(
     ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped."""
     if args and args[0] in _SUBCOMMAND_FLAGS:
         args = (args[0], *_SUBCOMMAND_FLAGS[args[0]], *args[1:])
+    common_dir = None
     if git_dir is not None and (git_dir.is_symlink() or not git_dir.is_dir()):
         # Git follows a gitdir file even at a pinned GIT_DIR, so a replaced git dir fails here.
         return subprocess.CompletedProcess(
             ["git", *args], 128, "", f"fatal: pinned git dir is not a directory: {git_dir}\n"
         )
+    if git_dir is not None and not git_dir.resolve().is_relative_to(Path(repo_dir).resolve()):
+        # A linked worktree's admin dir: its registration is checked again and its common
+        # dir pinned.
+        if linked_worktree_git_dir(repo_dir) == git_dir.resolve():
+            try:
+                common_dir = _common_dir(git_dir.resolve())
+            except (OSError, UnicodeDecodeError):
+                common_dir = None
+        if common_dir is None:
+            return subprocess.CompletedProcess(
+                ["git", *args], 128, "", f"fatal: pinned git dir is not a worktree: {git_dir}\n"
+            )
     key = Path(repo_dir).resolve()
     with _RUNNING_GUARD:
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
@@ -83,7 +101,7 @@ def run_hardened_git(
         return subprocess.run(
             ["git", *_GIT_OVERRIDES, *args],
             cwd=str(repo_dir),
-            env=hardened_git_env(repo_dir, git_dir),
+            env=hardened_git_env(repo_dir, git_dir, common_dir),
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
@@ -148,7 +166,8 @@ def repository_config_can_start_a_program(repo_dir: Path, git_dir: Optional[Path
 
 def repository_git_dir(repo_dir: Path) -> Optional[Path]:
     """The git dir when ``repo_dir`` is the work tree's top level and its git dir lies inside
-    it, else None.
+    it, or when ``repo_dir`` is a linked worktree whose registration holds
+    (``linked_worktree_git_dir``); else None.
 
     A copied gitdir may name another work tree (core.worktree) or live elsewhere (a gitdir
     file); checkout, reset and clean would then act outside ``repo_dir``."""
@@ -158,10 +177,74 @@ def repository_git_dir(repo_dir: Path) -> Optional[Path]:
         found = probe.stdout.splitlines() if probe.returncode == 0 else []
     except subprocess.TimeoutExpired:
         found = []
-    if (
-        len(found) == 2
-        and Path(found[0]).resolve() == repo_dir
-        and Path(found[1]).resolve().is_relative_to(repo_dir)
-    ):
-        return Path(found[1]).resolve()
+    if len(found) != 2 or Path(found[0]).resolve() != repo_dir:
+        return None
+    git_dir = Path(found[1]).resolve()
+    if git_dir.is_relative_to(repo_dir):
+        return git_dir
+    # A linked worktree: its registration is checked in Python and must be what git found.
+    if linked_worktree_git_dir(repo_dir) == git_dir:
+        return git_dir
+    return None
+
+
+def linked_worktree_git_dir(
+    worktree: Path, controller_root: Optional[Path] = None
+) -> Optional[Path]:
+    """The git dir of ``worktree`` when it is a linked worktree whose registration nobody
+    with write access to ``worktree`` alone could have made, else None.
+
+    Checked in Python before any git call: ``worktree/.git`` is a regular file naming
+    ``<common dir>/worktrees/<name>``, that registration's ``commondir`` is the same common
+    dir and its ``gitdir`` points back at this ``.git`` file, and neither the registration
+    nor the common dir lies inside ``worktree``. With ``controller_root`` the common dir must
+    also be that repository's own. Pass the result as ``git_dir`` so a ``.git`` pointer
+    rewritten later is never read."""
+    try:
+        root = Path(worktree)
+        if root.is_symlink() or not root.is_dir():
+            return None
+        root = root.resolve()
+        dotgit = root / ".git"
+        if dotgit.is_symlink() or not dotgit.is_file():
+            return None
+        git_dir = _gitdir_pointer(dotgit)
+        if git_dir is None or not git_dir.is_dir():
+            return None
+        common = _common_dir(git_dir)
+        if (
+            git_dir.parent != common / "worktrees"
+            or common.is_relative_to(root)
+            or _gitdir_pointer(git_dir / "gitdir", prefix="") != dotgit
+        ):
+            return None
+        if controller_root is not None and common != _controller_common_dir(controller_root):
+            return None
+        return git_dir
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _gitdir_pointer(path: Path, prefix: str = "gitdir:") -> Optional[Path]:
+    text = path.read_text(encoding="utf-8").strip()
+    if not text.startswith(prefix) or not text[len(prefix) :].strip():
+        return None
+    return (path.parent / text[len(prefix) :].strip()).resolve()
+
+
+def _common_dir(git_dir: Path) -> Path:
+    try:
+        text = (git_dir / "commondir").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return git_dir
+    return (git_dir / text).resolve()
+
+
+def _controller_common_dir(controller_root: Path) -> Optional[Path]:
+    dotgit = Path(controller_root).resolve() / ".git"
+    if dotgit.is_dir() and not dotgit.is_symlink():
+        return dotgit.resolve()
+    if dotgit.is_file() and not dotgit.is_symlink():
+        git_dir = _gitdir_pointer(dotgit)
+        return _common_dir(git_dir) if git_dir is not None else None
     return None

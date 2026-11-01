@@ -432,12 +432,12 @@ def test_the_config_check_reads_the_probed_git_dir_when_the_gitdir_pointer_is_re
     real_env = hardened_git.hardened_git_env
     calls = 0
 
-    def rewrite_after_the_probe(repo_dir: Path, git_dir: Path | None = None) -> dict[str, str]:
+    def rewrite_after_the_probe(repo_dir: Path, *args: Any) -> dict[str, str]:
         nonlocal calls
         calls += 1
         if calls == 2:  # the probe has run; the config check is next
             (repo / ".git").write_text(f"gitdir: {clean / '.git'}\n", encoding="utf-8")
-        return real_env(repo_dir, git_dir)
+        return real_env(repo_dir, *args)
 
     monkeypatch.setattr(hardened_git, "hardened_git_env", rewrite_after_the_probe)
 
@@ -545,3 +545,161 @@ def test_restore_and_rollback_still_restore_beside_a_planted_submodule(env, site
 
     assert not marker.exists()
     assert (repo / "notes.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+# --- Linked worktrees -------------------------------------------------------------------
+# A directory made by ``git worktree add`` keeps its git dir in the main repository's
+# ``worktrees/<name>`` admin entry; it is accepted only while that registration holds.
+
+RESTORED_ALL = {**RESTORED, "heal_workspace_reset": None}
+
+
+def _linked_worktree(env: Path, *, attributes: str = "") -> tuple[Path, Path, Path]:
+    """A main repo and a linked worktree ``wt`` of it with notes.py dirty; returns
+    (main, worktree, admin dir)."""
+    main = _repo_with_local_work(env / "main")
+    if attributes:
+        (main / ".gitattributes").write_text(attributes, encoding="utf-8")
+        _git(main, "add", ".gitattributes")
+        _git(main, "commit", "-qm", "attributes", "--", ".gitattributes")
+    worktree = env / "wt"
+    _git(main, "worktree", "add", "-q", str(worktree))
+    (worktree / "notes.py").write_text(DIRTY_EDIT, encoding="utf-8")
+    return main, worktree, (main / ".git" / "worktrees" / "wt").resolve()
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+def test_restore_and_rollback_restore_a_registered_linked_worktree(env, site):
+    main, worktree, admin = _linked_worktree(env)
+    (worktree / "untracked.py").write_text("y\n", encoding="utf-8")
+
+    assert hardened_git.repository_git_dir(worktree) == admin
+    assert ALL_SITES[site](worktree) == RESTORED_ALL[site]
+
+    assert (worktree / "notes.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert (main / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+
+
+def _foreign_admin_entry(env: Path, worktree: Path, admin: Path) -> Path:
+    repo = env / "repo"
+    repo.mkdir()
+    (repo / "notes.py").write_text(DIRTY_EDIT, encoding="utf-8")
+    (repo / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+    return repo
+
+
+def _admin_entry_not_pointing_back(env: Path, worktree: Path, admin: Path) -> Path:
+    (admin / "gitdir").write_text(f"{env / 'elsewhere' / '.git'}\n", encoding="utf-8")
+    return worktree
+
+
+def _tampered_commondir(env: Path, worktree: Path, admin: Path) -> Path:
+    other = _repo_with_local_work(env / "other")
+    (admin / "commondir").write_text(f"{(other / '.git').resolve()}\n", encoding="utf-8")
+    return worktree
+
+
+UNREGISTERED = {
+    "gitfile_names_another_worktrees_admin_entry": _foreign_admin_entry,
+    "admin_entry_does_not_point_back": _admin_entry_not_pointing_back,
+    "commondir_names_another_repository": _tampered_commondir,
+}
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+@pytest.mark.parametrize("kind", sorted(UNREGISTERED))
+def test_restore_and_rollback_refuse_a_worktree_its_common_dir_does_not_register(env, site, kind):
+    main, worktree, admin = _linked_worktree(env)
+    index = (admin / "index").read_bytes()
+    target = UNREGISTERED[kind](env, worktree, admin)
+
+    assert hardened_git.repository_git_dir(target) is None
+    assert ALL_SITES[site](target) == REFUSED[site]
+
+    assert (target / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+    assert (worktree / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+    assert (admin / "index").read_bytes() == index
+    if (env / "other").exists():
+        assert (env / "other" / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+@pytest.mark.parametrize("scope", ["common", "worktree"])
+def test_restore_and_rollback_refuse_a_linked_worktree_whose_config_names_a_filter(
+    env, site, scope
+):
+    main, worktree, admin = _linked_worktree(env, attributes="*.py filter=mark\n")
+    marker = env / "filter-ran"
+    script = _marker_script(env, "filter.sh", marker, passthrough=True)
+    if scope == "common":
+        _git(main, "config", "filter.mark.smudge", str(script))
+    else:  # config.worktree, read once extensions.worktreeConfig is set
+        _git(main, "config", "extensions.worktreeConfig", "true")
+        (admin / "config.worktree").write_text(
+            f'[filter "mark"]\n\tsmudge = {script}\n', encoding="utf-8"
+        )
+
+    assert ALL_SITES[site](worktree) == REFUSED[site]
+
+    assert not marker.exists()
+    assert (worktree / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+def test_restore_and_rollback_stop_when_commondir_is_rewritten_after_the_probe(
+    env, site, monkeypatch
+):
+    main, worktree, admin = _linked_worktree(env)
+    other = _repo_with_local_work(env / "other")
+    other_index = (other / ".git" / "index").read_bytes()
+    real_check = hardened_git.config_names_a_repository_program
+
+    def rewrite_commondir_after_the_config_check(names: list[str]) -> bool:
+        (admin / "commondir").write_text(f"{(other / '.git').resolve()}\n", encoding="utf-8")
+        return real_check(names)
+
+    monkeypatch.setattr(
+        hardened_git, "config_names_a_repository_program", rewrite_commondir_after_the_config_check
+    )
+
+    assert ALL_SITES[site](worktree) == REFUSED[site]
+
+    assert (worktree / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+    assert (other / ".git" / "index").read_bytes() == other_index
+    assert (other / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+
+
+def test_a_linked_worktree_runs_with_its_verified_common_dir_pinned(env, monkeypatch):
+    main, worktree, admin = _linked_worktree(env)
+    real_env = hardened_git.hardened_git_env
+    seen: list[dict[str, str]] = []
+
+    def recording_env(*args: Any) -> dict[str, str]:
+        seen.append(real_env(*args))
+        return seen[-1]
+
+    monkeypatch.setattr(hardened_git, "hardened_git_env", recording_env)
+
+    result = hardened_git.run_hardened_git(worktree, "rev-parse", "HEAD", git_dir=admin)
+
+    assert result.returncode == 0
+    assert seen[-1]["GIT_DIR"] == str(admin)
+    assert seen[-1]["GIT_COMMON_DIR"] == str((main / ".git").resolve())
+
+
+def test_a_stale_index_lock_in_a_linked_worktrees_admin_entry_is_kept(env):
+    main, worktree, admin = _linked_worktree(env)
+    lock = admin / "index.lock"
+    lock.write_text("", encoding="utf-8")
+
+    assert hardened_git.clear_stale_index_lock(worktree, admin) is False
+    assert lock.exists()
+
+
+def test_a_symlink_to_a_linked_worktree_is_not_accepted_as_one(env):
+    main, worktree, admin = _linked_worktree(env)
+    link = env / "link"
+    link.symlink_to(worktree)
+
+    assert hardened_git.linked_worktree_git_dir(worktree) == admin
+    assert hardened_git.linked_worktree_git_dir(link) is None
