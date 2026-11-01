@@ -367,9 +367,14 @@ PIN = "3f3dc38de7120b66f25eb246d22ef29d5d5971d9"
 
 
 def _pin_workflow(repo: Path, *refs: str) -> None:
+    """Pin at the base (origin/main), the only ref preflight reads the pin from."""
     lines = "".join(f'          nexus-certify-ref: "{ref}"\n' for ref in refs)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "reset", "-q", "--hard", "origin/main")
     _write(repo, pf.CERTIFY_PIN_WORKFLOW, "steps:\n" + lines)
-    _commit(repo, "pin")
+    _git(repo, "update-ref", "refs/remotes/origin/main", _commit(repo, "pin"))
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "rebase", "-q", "origin/main")
 
 
 def test_certify_resolved_at_pinned_ref_through_uvx(repo, tmp_path, monkeypatch):
