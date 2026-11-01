@@ -4039,7 +4039,6 @@ def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
         _HL + "**Claude review**\nr2 after the Codex finding: REJECT — race\n",
         # A bold sub-label naming another model inside a Claude section.
         _HL + "## Claude review\n**N1: the Codex prompt is stale**\nVerdict: REJECT\n",
-        _HL + "**Claude review** (Opus)\n**Gemini comparison**\nVerdict: REJECT\n",
         # A later withdrawn or struck ACCEPT takes back the reviewer's earlier one.
         f"Claude: ACCEPT@{HEAD} withdrawn — found a race\n",
         f"Claude r2: ~~ACCEPT@{HEAD}~~ — found a race\n",
@@ -4084,8 +4083,10 @@ def test_the_same_labels_credit_an_accept(label):
         # A label that starts with its model under a Claude header is that model's only.
         _HL + "**Claude review**\nCodex r1: REJECT — race\n",
         _HL + "**Claude review**\nRound 2 Codex: REJECT — race\n",
-        # A bold reviewer label (model and tier only) switches the section as before.
+        # A bold label that starts with its model may be a reviewer's block: it switches
+        # the section as before (codex r1).
         _HL + "## Claude review\n**Codex gpt-5.5 xhigh**\nVerdict: REJECT\n",
+        _HL + "**Claude review**\nVerdict: ACCEPT\n\n**Codex second opinion**\nVerdict: REJECT\n",
         # A withdrawn ACCEPT at another commit is not about the head.
         f"Claude: ACCEPT@{OLD} withdrawn — found a race\n",
     ],
@@ -4175,3 +4176,60 @@ def test_the_delta_fold_drops_only_carried_accepts_of_a_family_rejected_at_the_h
 ):
     report = rrc.evaluate(HEAD, files, [_c(body) for body in comments], [], delta_verified=(OLD,))
     assert report["status"] == status
+
+
+@pytest.mark.parametrize("files", [DOCS, RISKY])
+def test_the_wider_label_window_never_drops_a_reject_main_reads(files):
+    # A denial more than 400 characters back, in the same sentence: main's 400-character
+    # window reads the REJECT, so the full reading must too (codex r1).
+    model = "Claude" if files is DOCS else "Codex"
+    comments = [f"Claude: ACCEPT@{HEAD}"] + ([_CODEX_AT] if files is RISKY else [])
+    comments.append("not " + "x" * 401 + f", {model} security review: REJECT at {HEAD}")
+    report = rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])
+    assert report["status"] == ("MISSING_RECORD" if files is DOCS else "MISSING_CROSS_MODEL")
+
+
+def test_the_wider_label_window_stays_linear_on_repeated_asides():
+    import time
+
+    started = time.monotonic()
+    for body in (
+        "Claude security " + "() " * 21800 + f"x: REJECT at {HEAD}",
+        "Claude r2 " + "(!)" * 21000 + f" x: REJECT at {HEAD}",
+        "Claude " + "()" * 32000 + f" x: REJECT at {HEAD}",
+    ):
+        rrc.classify_record(body, HEAD)
+    assert time.monotonic() - started < 3  # 10 s or more each with an unbounded window
+
+
+def test_a_withdrawn_accept_naming_a_short_head_prefix_withdraws_too():
+    comments = [_c(f"Claude: ACCEPT@{HEAD}"), _c(f"Claude: ACCEPT@{HEAD[:7]} withdrawn")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_a_withdrawn_accept_under_a_short_head_label_withdraws_too():
+    # Bound only by a 7-character Head label, as a REJECT is.
+    comments = [
+        _c(f"Claude: ACCEPT@{HEAD}"),
+        _c(f"Head reviewed: {HEAD[:7]}\nClaude: ACCEPT withdrawn — found a race"),
+    ]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_a_full_reading_reject_at_the_head_drops_a_carried_accept_too():
+    # The head's rejected families include the full reading's (extra) REJECTs.
+    comments = [
+        _c(_HL + "Claude r2: \u274c REJECT \u2014 race"),
+        _c(f"Head reviewed: {OLD}\nClaude r1: ACCEPT"),
+    ]
+    report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"
+
+
+def test_a_withdrawn_accept_does_not_choose_a_delta_head_main_would_not():
+    # The withdrawal is an extra event, so the merge-only delta-head choice reads as main
+    # does: an approval at the older head is not carried in by it.
+    reviews = [{"state": "APPROVED", "commit_id": OLD, "user": {"login": "someone"}}]
+    comments = [_c(f"Claude: ACCEPT@{HEAD}"), _c(f"Claude: ACCEPT@{HEAD} withdrawn \u2014 race")]
+    report = rrc.evaluate(HEAD, DOCS, comments, reviews, delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"
