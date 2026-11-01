@@ -229,7 +229,7 @@ class _AssistJobsMixin(_JobsBase):
             return requests
 
     def _assist_launch_owners(self) -> dict[str, str]:
-        """Task id -> job id of the submit or retry that holds its in-flight entry."""
+        """Task id -> job id of the submit, retry or model probe that holds its in-flight entry."""
         with self._assist_lock:
             owners = getattr(self, "_assist_launch_owner_ids", None)
             if owners is None:

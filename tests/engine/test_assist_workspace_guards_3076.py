@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ import pytest
 
 from nexus.core import argv_command
 from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
-from nexus.orchestrator.unified_mcp_gateway_parts import assist_jobs, assist_response
+from nexus.orchestrator.unified_mcp_gateway_parts import assist_jobs, assist_response, model_probe
 from tests.nexus.orchestrator.test_unified_mcp_gateway import FakeService
 
 # Above Linux's largest pid_max (2**22) and macOS's (99999): never a real process.
@@ -793,3 +794,164 @@ def test_a_finished_launch_leaves_a_later_launch_of_the_task_in_flight(box, monk
     assert seen["cancel"]["blocker"] == "ASSIST_CANCEL_PENDING_LAUNCH", seen["cancel"]
     assert seen["retry_workspace_after_cancel"], "a cancel removed the retry's workspace mid-launch"
     assert retry_results["retry"]["status"] == "CANCELLED", retry_results["retry"]
+
+
+# ---------------------------------------------------------------------------
+# Residual of item 20 (burn 11/01): the model probe keeps one launch per task id too
+# ---------------------------------------------------------------------------
+
+
+def _patch_probe(box, monkeypatch, on_popen, on_version=None) -> list:
+    """The probe launches through the same stubbed Popen; its provider is /bin/echo (never run)
+    and each ``--version`` preflight returns a fixed version after calling ``on_version``."""
+    terminated = _patch_launch(box, monkeypatch, on_popen)
+    monkeypatch.setattr(model_probe, "require_child_stays_unreaped", lambda: None)
+    monkeypatch.setattr(model_probe, "_terminate_provider_group", lambda process: True)
+    monkeypatch.setattr(
+        box.gateway,
+        "_provider_executable",
+        lambda provider: ({"default_model": "glm-5.2"}, "/bin/echo"),
+    )
+    versions: list = []
+
+    def run(command, **kwargs):
+        assert command[1:] == ["--version"], command
+        versions.append(command)
+        if on_version is not None:
+            on_version(len(versions))
+        return SimpleNamespace(returncode=0, stdout="cline 1.0.0\n", stderr="")
+
+    monkeypatch.setattr(model_probe.subprocess, "run", run)
+    return terminated
+
+
+def _probe_args() -> dict:
+    return {
+        "task_id": TASK,
+        "provider": "cline",
+        "model": "glm-5.2",
+        "prompt": "probe",
+        "output_schema": {"type": "object"},
+    }
+
+
+def test_probe_leaves_an_assist_launched_during_its_preflight_running(box, monkeypatch):
+    popens: list = []
+    launched: dict = {}
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        popens.append(workspace)
+        return _FakeProvider()
+
+    def on_version(count: int) -> None:
+        # Meanwhile an assist submit of the same task id starts its provider.
+        if count == 1:
+            launched["assist"] = box.gateway._assist_submit(_submit_args())
+
+    _patch_probe(box, monkeypatch, on_popen, on_version)
+    with pytest.raises(Exception, match="MODEL_PROBE_SUBMIT_IN_PROGRESS"):
+        box.gateway._model_probe_submit(_probe_args())
+    assert launched["assist"]["status"] == "RUNNING", launched["assist"]
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["job_kind"] == "assist", record
+    assert record["pid"] == FAKE_PID
+    assert record["workspace_root"] == launched["assist"]["workspace_root"]
+    assert box.gateway._assist_processes[TASK].pid == FAKE_PID
+    # One provider started; the refused probe created no workspace of its own.
+    assert len(popens) == 1, popens
+    assert [path.name for path in box.root.iterdir()] == [popens[0].name]
+    assert TASK not in box.gateway._model_probe_inflight()
+
+
+class _LockWithEntryHook:
+    """The gateway's assist lock, calling ``hook(caller)`` before each entry."""
+
+    def __init__(self, lock, hook) -> None:
+        self._lock = lock
+        self._hook = hook
+
+    def __enter__(self):
+        self._hook(sys._getframe(1).f_code.co_name)
+        return self._lock.__enter__()
+
+    def __exit__(self, *exc):
+        return self._lock.__exit__(*exc)
+
+    def acquire(self, *args, **kwargs):
+        return self._lock.acquire(*args, **kwargs)
+
+    def release(self):
+        return self._lock.release()
+
+
+def test_probe_keeps_an_assist_record_written_before_it_takes_the_lock(box, monkeypatch):
+    """The probe's record check and its in-flight entry are one step under the lock: a record
+    another launch wrote after the probe's first look, just before the probe took the lock,
+    is found and kept."""
+    popens: list = []
+    workspace = _workspace(box.root)
+    assist_job = _job(box, str(workspace), status="FAILED", pid=None, pgid=None)
+
+    def on_popen(path: Path) -> _FakeProvider:
+        popens.append(path)
+        return _FakeProvider()
+
+    _patch_probe(box, monkeypatch, on_popen)
+    written: list = []
+
+    def hook(caller: str) -> None:
+        if caller == "_model_probe_submit_guarded" and not written:
+            written.append(box.gateway._assist_write(dict(assist_job)))
+
+    monkeypatch.setattr(
+        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
+    )
+    with pytest.raises(Exception, match="MODEL_PROBE_SUBMIT_IN_PROGRESS"):
+        box.gateway._model_probe_submit(_probe_args())
+    assert written, "the probe never took the lock for its in-flight entry"
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["job_kind"] == "assist", record
+    assert record["job_id"] == assist_job["job_id"]
+    assert record["workspace_root"] == str(workspace)
+    assert popens == []
+    assert [path.name for path in box.root.iterdir()] == [workspace.name]
+    assert TASK not in box.gateway._model_probe_inflight()
+
+
+def test_finished_probe_leaves_a_later_launch_of_the_task_in_flight(box, monkeypatch):
+    """A later launch of the task id (here a retry entering the in-flight set after the probe
+    wrote its pid, before the probe returned) keeps its entry and ownership when the probe
+    returns, so a cancel during that launch still only leaves a request."""
+    gateway = box.gateway
+    later = {"job_id": "assist-later", "workspace_root": str(box.root / "absent")}
+    _patch_probe(box, monkeypatch, lambda workspace: _FakeProvider())
+    real_publish = gateway._assist_publish_launch
+
+    def publish(task_id, job, process, *, operation):
+        response = real_publish(task_id, job, process, operation=operation)
+        gateway._assist_launch_begin(task_id, later, retried=gateway._assist_read(task_id))
+        return response
+
+    monkeypatch.setattr(gateway, "_assist_publish_launch", publish)
+    result = gateway._model_probe_submit(_probe_args())
+    assert result["status"] == "RUNNING", result
+    assert TASK in gateway._model_probe_inflight(), (
+        "the finished probe cleared the in-flight entry of a later launch of its task id"
+    )
+    assert gateway._assist_launch_owners().get(TASK) == "assist-later"
+    gateway._assist_launch_end(TASK, "assist-later")
+    assert TASK not in gateway._model_probe_inflight()
+
+
+def test_probe_whose_provider_did_not_start_leaves_the_in_flight_set(box, monkeypatch):
+    def on_popen(workspace: Path) -> _FakeProvider:
+        raise OSError("provider could not start")
+
+    _patch_probe(box, monkeypatch, on_popen)
+    result = box.gateway._model_probe_submit(_probe_args())
+    assert result["status"] == "FAILED", result
+    assert result["blocker"] == "ASSIST_PROVIDER_FAILED", result
+    assert TASK not in box.gateway._model_probe_inflight()
+    assert TASK not in box.gateway._assist_launch_owners()

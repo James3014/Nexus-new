@@ -277,22 +277,19 @@ class _ModelProbeMixin(_ModelProbeBase):
         job["reconciliation_required"] = True
 
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        registered: list[str] = []
+        registered: list[tuple[str, str]] = []
         try:
             return self._model_probe_submit_guarded(arguments, registered)
         finally:
             # Leave the in-flight set only after the final job record is written,
-            # so a concurrent refresh never projects a stale pre-launch record.
-            if registered:
-                inflight = self._model_probe_inflight()
-                with self._assist_lock:
-                    for registered_task_id in registered:
-                        inflight.discard(registered_task_id)
-                        # A cancel request this probe did not honour (it ended before its
-                        # provider started) is dropped with it (#3076).
-                        self._assist_cancel_requests().discard(registered_task_id)
+            # so a concurrent refresh never projects a stale pre-launch record, and
+            # only while this probe still owns the entry: a later launch of the same
+            # task id keeps its own. A cancel request this probe did not honour (it
+            # ended before its provider started) is dropped with it (#3076).
+            for registered_task_id, registered_job_id in registered:
+                self._assist_launch_end(registered_task_id, registered_job_id)
 
-    def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[str]) -> dict[str, Any]:
+    def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[tuple[str, str]]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         metadata, executable = self._provider_executable(provider)
         if not metadata:
@@ -356,10 +353,13 @@ class _ModelProbeMixin(_ModelProbeBase):
         stderr_path = root / f"{job_id}.stderr"
         inflight = self._model_probe_inflight()
         with self._assist_lock:
-            if task_id in inflight:
+            # The record is read again under the lock: an assist or probe of the same task id
+            # may have recorded its job during the version preflight, and is never overwritten.
+            if task_id in inflight or self._assist_read(task_id) is not None:
                 raise _gateway().GatewayInputError("MODEL_PROBE_SUBMIT_IN_PROGRESS")
             inflight.add(task_id)
-            registered.append(task_id)
+            self._assist_launch_owners()[task_id] = job_id
+            registered.append((task_id, job_id))
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir=assist_workspace_parent()))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
         command = self._assist_command(

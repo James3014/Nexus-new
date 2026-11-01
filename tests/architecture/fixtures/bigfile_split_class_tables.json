@@ -973,7 +973,7 @@
    },
    "_model_probe_submit_guarded": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:registered: list[str]) -> dict[str, Any]"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:arguments: Mapping[str, Any], POSITIONAL_OR_KEYWORD:registered: list[tuple[str, str]]) -> dict[str, Any]"
    },
    "_mutation_admission_status": {
     "kind": "function",
