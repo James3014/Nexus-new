@@ -289,6 +289,28 @@ def test_reconcile_with_empty_workspace_root_still_waits_for_the_group(box, monk
     assert reconciled["reconciliation_required"] is True
 
 
+def test_cancel_of_reconcile_pending_job_with_empty_workspace_root_keeps_the_cwd(box, monkeypatch):
+    """An empty root used to read as "workspace gone" (skipping the group check), then
+    ``Path("")`` named the cwd and was removed (#3076 item 18)."""
+    job = _job(
+        box,
+        "",
+        status="UNKNOWN_REQUIRES_RECONCILE",
+        blocker="ASSIST_PROVIDER_PROCESS_LOST",
+        reconciliation_required=True,
+    )
+    box.gateway._assist_write(job)
+    group = _FakeGroup(member_alive=False)
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    cancelled = box.gateway._assist_cancel(TASK)
+    assert box.sentinel.exists(), "cancel emptied the gateway's cwd (workspace_root was empty)"
+    assert cancelled["status"] == "CANCELLED", cancelled
+    assert cancelled["process_cleanup"] is False
+    assert group.sent == []
+
+
 # ---------------------------------------------------------------------------
 # Item 19: completion after a gateway restart waits for the provider's group
 # ---------------------------------------------------------------------------
@@ -503,6 +525,27 @@ def test_cancel_while_model_probe_starts_the_provider_keeps_workspace_and_is_hon
     assert result["status"] == "CANCELLED", result
     assert not seen["workspace"].exists()
     assert TASK not in box.gateway._model_probe_inflight()
+
+
+def test_cancel_between_record_and_launch_keeps_workspace_and_cancel_survives(box, monkeypatch):
+    """Same window with a caller-supplied action envelope: the provider is started in a
+    workspace that still exists, and the record ends CANCELLED, not overwritten as RUNNING."""
+    seen: dict = {}
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        seen["cancel"] = box.gateway._assist_cancel(TASK)
+        seen["cwd_exists_at_launch"] = workspace.exists()
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    box.gateway._assist_submit(
+        {"task_id": TASK, "what": "w", "why": "y", "allowed_files": ["a.py"]},
+        action={"action_id": "a1", "attempt_id": "t1"},
+    )
+    assert seen["cwd_exists_at_launch"], "the provider was started in a removed workspace"
+    assert seen["cancel"]["status"] != "CANCELLED", "cancel reported done before the pid existed"
+    final = box.gateway._assist_read(TASK)
+    assert final is not None and final["status"] == "CANCELLED", final
 
 
 def test_failed_start_after_a_pending_cancel_leaves_no_request_behind(box, monkeypatch):
