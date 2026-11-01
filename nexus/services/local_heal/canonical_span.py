@@ -37,6 +37,7 @@ def get_canonical_search_span(
     target_symbol: str = "",
     failed_search_text: str = "",
     traceback_lines: list[str] | None = None,
+    source_text: str | None = None,
 ) -> Optional[CanonicalSpanResult]:
     """Extract canonical SEARCH span using hybrid strategy.
 
@@ -46,13 +47,18 @@ def get_canonical_search_span(
       c. ast_boundary — AST-based symbol extraction from source file
       d. traceback_window — extract from traceback/stack trace lines
 
+    ``source_text``, when given, is the caller's already read text of ``source_file``; it is used
+    instead of reading the file again (for a caller that reads it without following links).
+
     Returns CanonicalSpanResult or None if all strategies fail.
     """
     telemetry = {"strategies_tried": []}
 
     # Read current source text for verification
     current_source_text = ""
-    if source_file and source_file.exists():
+    if source_text is not None:
+        current_source_text = source_text
+    elif source_file and source_file.exists():
         try:
             current_source_text = source_file.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -90,7 +96,7 @@ def get_canonical_search_span(
 
     # Strategy c: AST symbol boundary fallback
     if source_file and source_file.exists() and target_symbol:
-        ast_result = _extract_by_ast_boundary(source_file, target_symbol)
+        ast_result = _extract_by_ast_boundary(source_file, target_symbol, source_text)
         if ast_result:
             telemetry["strategies_tried"].append({"strategy": "ast_boundary", "found": True})
             ast_result.telemetry = telemetry
@@ -139,14 +145,17 @@ def _extract_from_unified_diff(patch_diff: str) -> Optional[CanonicalSpanResult]
     )
 
 
-def _extract_by_ast_boundary(source_file: Path, target_symbol: str) -> Optional[CanonicalSpanResult]:
+def _extract_by_ast_boundary(
+    source_file: Path, target_symbol: str, source_text: str | None = None
+) -> Optional[CanonicalSpanResult]:
     """Extract code block by AST symbol boundary.
 
     Uses Python ast module to parse the source file and find the exact
     AST node for the target symbol, then extracts the full block.
     """
     try:
-        source_text = source_file.read_text(encoding="utf-8", errors="replace")
+        if source_text is None:
+            source_text = source_file.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(source_text)
     except (SyntaxError, OSError):
         return None

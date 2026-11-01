@@ -9,7 +9,9 @@ receives the host's own writes (the applied patch, the repro script).
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess  # nosec B404 - fixed argv, no shell
 import sys
 import tempfile
@@ -17,21 +19,57 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from nexus.core.contained_write import HOST_RUN_SUBTREES, PathContainmentError
+
 __all__ = ["copy_repo_entries", "disposable_repo_copy"]
+
+
+def _refuse_hard_links(entry: Path) -> None:
+    """Raise when ``entry`` is or holds a regular file with another link (#3037 follow-up).
+
+    Both copies below turn a hard link into a plain file with its content, so a hard link to a
+    file outside repo_dir would hand that file to the model code run in the copy, whose output
+    reaches a prompt. Symlinks are copied as links and not followed. ``.git`` and ``.venv`` are
+    not walked: model code cannot write there (HOST_RUN_SUBTREES), and git and uv may hard-link
+    their own files."""
+
+    info = os.lstat(entry)
+    if stat.S_ISREG(info.st_mode):
+        if info.st_nlink != 1:
+            raise PathContainmentError(f"file_has_other_links:{entry.name}")
+        return
+    if not stat.S_ISDIR(info.st_mode) or entry.name in HOST_RUN_SUBTREES:
+        return
+    for dirpath, dirnames, filenames in os.walk(entry):
+        dirnames[:] = [name for name in dirnames if name not in HOST_RUN_SUBTREES]
+        for name in filenames:
+            child = os.path.join(dirpath, name)
+            child_info = os.lstat(child)
+            if stat.S_ISREG(child_info.st_mode) and child_info.st_nlink != 1:
+                raise PathContainmentError(
+                    f"file_has_other_links:{os.path.relpath(child, entry.parent)}"
+                )
 
 
 def copy_repo_entries(repo_dir: Path, scratch_dir: Path) -> None:
     """Copy every top-level entry of ``repo_dir`` into ``scratch_dir``, links kept as links.
 
     On macOS a directory is cloned with ``cp -cR`` (APFS clone); anything else, or a failed
-    clone, uses ``shutil``. An entry that is or contains ``scratch_dir`` is skipped."""
+    clone, uses ``shutil``. An entry that is or contains ``scratch_dir`` is skipped. A hard-linked
+    regular file anywhere outside ``.git``/``.venv`` raises ``PathContainmentError`` before
+    anything is copied."""
 
     repo_path = Path(repo_dir).resolve()
     scratch_path = Path(scratch_dir).resolve()
+    entries = []
     for entry in repo_path.iterdir():
         entry_resolved = entry.resolve()
         if entry_resolved == scratch_path or scratch_path.is_relative_to(entry_resolved):
             continue
+        if not entry.is_symlink():
+            _refuse_hard_links(entry)
+        entries.append(entry)
+    for entry in entries:
         target = scratch_path / entry.name
         copied = False
         if sys.platform == "darwin" and not entry.is_symlink():
