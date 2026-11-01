@@ -19,7 +19,6 @@ import json
 import math
 import os
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -38,6 +37,7 @@ from nexus.executors.claude_measurement_worker import (
     measurement_claude_enabled,
     measurement_claude_preflight,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import _terminate_provider_group
 from nexus.services.agy_account_pool import (
     AgyAccountPoolBusyError,
     AgyAccountPoolExhaustedError,
@@ -543,24 +543,11 @@ class _ModelProbeMixin(_ModelProbeBase):
         except OSError:
             post_launch_identity_matches = False
         if not post_launch_identity_matches:
-            terminated = False
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                process.wait(timeout=2)
-                terminated = True
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except OSError:
-                    pass
-                try:
-                    process.wait(timeout=2)
-                    terminated = True
-                except subprocess.TimeoutExpired:
-                    terminated = False
+            # SIGTERM, then SIGKILL, the provider's group while it is unreaped; True only once its
+            # group was SIGKILLed and listed empty before the reap. A leader that obeyed SIGTERM
+            # is not enough: a descendant that ignored it would keep the account after the lease
+            # release (#3076).
+            terminated = _terminate_provider_group(process)
             if terminated:
                 shutil.rmtree(workspace_root, ignore_errors=True)
                 if account_claim is not None:

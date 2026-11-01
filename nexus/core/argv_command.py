@@ -701,11 +701,27 @@ def kill_group_if_exited(process: subprocess.Popen) -> bool:
     ``require_child_stays_unreaped`` before spawning, and nothing else reaps the child
     meanwhile (``poll()`` or ``wait()`` included). A group member alive after SIGKILL raises
     PermissionError once the child is reaped; a reap that already happened elsewhere raises
-    ChildProcessError with nothing signalled."""
-    if process.returncode is None and not _wait_leader_unreaped(process.pid, time.monotonic()):
+    ChildProcessError with nothing signalled. A child already reaped (``returncode`` set) raises
+    ChildProcessError without asking about its pid, which may name another child by now
+    (#3076)."""
+    if process.returncode is not None:
+        raise ChildProcessError(
+            f"child {process.pid} is already reaped; its process group was not signalled"
+        )
+    if not _wait_leader_unreaped(process.pid, time.monotonic()):
         return False
     _kill_group_then_reap(process)
     return True
+
+
+def process_group_empty(pgid: int) -> bool:
+    """Whether a listing finds no live (non-zombie) member in process group *pgid*; nothing is
+    signalled (#3076). False when a member is live or the group cannot be listed.
+
+    For a group whose leader this process does not hold unreaped, the id may name an unrelated
+    group by now: that reads as not empty, never as empty. A descendant that left the group
+    with ``setsid()`` is not seen."""
+    return pgid > 0 and _live_group_members(pgid) == []
 
 
 def _decode(data: bytes, stream: object) -> str:

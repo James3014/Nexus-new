@@ -35,7 +35,10 @@ from nexus.contracts.lifecycle_action import (
 )
 from nexus.core.argv_command import require_child_stays_unreaped
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
-from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import _terminate_provider_group
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _provider_group_gone,
+    _terminate_provider_group,
+)
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
 if TYPE_CHECKING:
@@ -51,6 +54,11 @@ def _gateway():
     # Late binding: the gateway imports this module at its top level, so its own
     # (and its patched) names are only resolved once a method runs.
     return importlib.import_module("nexus.orchestrator.unified_mcp_gateway")
+
+
+# Cancel after a gateway restart: how long the provider's group gets, after SIGTERM and again
+# after SIGKILL, to show no live member before the cleanup counts as incomplete (#3076).
+_UNOWNED_GROUP_SETTLE_SECONDS = 2.0
 
 
 class _AssistJobsMixin(_JobsBase):
@@ -271,14 +279,20 @@ class _AssistJobsMixin(_JobsBase):
         if job is None:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
-            job.update({
-                "status": "CANCELLED",
-                "finished_at": self._utc_now(),
-                "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
-                "process_killed": False,
-            })
             self._assist_record_stream_artifacts(job)
-            self._cleanup_assist_workspace(job)
+            if _provider_group_gone(job):
+                job.update({
+                    "status": "CANCELLED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+                    "process_killed": False,
+                })
+                self._cleanup_assist_workspace(job)
+            else:
+                # A provider group member may still use the workspace: keep it, and the job,
+                # for reconciliation (#3076). This gateway does not hold the provider unreaped
+                # here, so the group is not signalled.
+                job.update({"reconciliation_required": True, "process_killed": False, "process_cleanup": False})
             self._assist_write(job)
         elif job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
             pid = int(job.get("pid") or 0)
@@ -292,35 +306,20 @@ class _AssistJobsMixin(_JobsBase):
                 # outlives a lease release or the workspace removal below (#3052).
                 terminated = _terminate_provider_group(process)
             elif pid:
-                try:
-                    os.killpg(int(job.get("pgid") or pid), signal.SIGTERM)
-                except OSError:
-                    pass
-                deadline = time.monotonic() + 2.0
-                while time.monotonic() < deadline:
-                    if process is not None and process.poll() is not None:
-                        terminated = True
-                        break
+                # A restarted gateway: the provider is not this process's child, so its exit
+                # cannot be awaited without reaping it, and a leader gone after SIGTERM says
+                # nothing about the rest of its group. The provider counts as terminated only
+                # once a listing finds no live member of its group (#3076).
+                for sig in (signal.SIGTERM, signal.SIGKILL):
                     try:
-                        os.kill(pid, 0)
-                    except OSError:
-                        terminated = True
-                        break
-                    time.sleep(0.05)
-                if not terminated:
-                    try:
-                        os.killpg(int(job.get("pgid") or pid), signal.SIGKILL)
+                        os.killpg(int(job.get("pgid") or pid), sig)
                     except OSError:
                         pass
-                    if process is not None:
-                        try:
-                            process.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            pass
-                    try:
-                        os.kill(pid, 0)
-                    except OSError:
-                        terminated = True
+                    deadline = time.monotonic() + _UNOWNED_GROUP_SETTLE_SECONDS
+                    while not (terminated := _provider_group_gone(job)) and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                    if terminated:
+                        break
             job.update({
                 "status": "CANCELLED",
                 "finished_at": self._utc_now(),
@@ -329,15 +328,22 @@ class _AssistJobsMixin(_JobsBase):
                 "exit_code": process.returncode if process is not None else None,
             })
             self._assist_record_stream_artifacts(job)
-            self._cleanup_assist_workspace(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
             if terminated:
+                self._cleanup_assist_workspace(job)
                 self._release_assist_account_claim(task_id, job)
-            elif job.get("account_lease_id_hash"):
-                self._abandon_assist_account_claim(task_id, job)
-                job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
-                job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
+            else:
+                # The group is not known to be gone: keep the workspace (and the lease) and
+                # require reconciliation (#3076).
+                if job.get("account_lease_id_hash"):
+                    self._abandon_assist_account_claim(task_id, job)
+                job.update({
+                    "status": "UNKNOWN_REQUIRES_RECONCILE",
+                    "blocker": "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
+                    "reconciliation_required": True,
+                    "process_cleanup": False,
+                })
             self._assist_write(job)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)
