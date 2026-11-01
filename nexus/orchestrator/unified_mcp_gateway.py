@@ -174,10 +174,10 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
     _AssistProbeMixin as _AssistProbeMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
-    _AssistResponseMixin as _AssistResponseMixin,
+    _assist_workspace_removable,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
-    _provider_group_gone,
+    _AssistResponseMixin as _AssistResponseMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.cairnwork_route import (
     _CairnworkRouteMixin as _CairnworkRouteMixin,
@@ -2712,10 +2712,10 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
                 or bool(current.get("reconciliation_required"))
             )
-            if needs_reconcile and not _provider_group_gone(current):
-                # A provider group member may still run on the account and in the workspace:
-                # neither the lease nor the workspace is touched until a listing finds the group
-                # empty; reconcile again later (#3076).
+            if needs_reconcile and not _assist_workspace_removable(current):
+                # A provider group member may still run in the workspace and on the account:
+                # neither the workspace nor the lease is touched until a listing finds the group
+                # empty (or the workspace is gone); reconcile again later (#3076).
                 current.update({
                     "reconciliation_required": True,
                     "process_cleanup": False,

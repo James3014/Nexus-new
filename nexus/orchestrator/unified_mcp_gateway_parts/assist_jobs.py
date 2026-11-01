@@ -36,6 +36,7 @@ from nexus.contracts.lifecycle_action import (
 from nexus.core.argv_command import require_child_stays_unreaped
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_workspace_removable,
     _provider_group_gone,
     _terminate_provider_group,
 )
@@ -280,7 +281,7 @@ class _AssistJobsMixin(_JobsBase):
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
             self._assist_record_stream_artifacts(job)
-            if _provider_group_gone(job):
+            if _assist_workspace_removable(job):
                 job.update({
                     "status": "CANCELLED",
                     "finished_at": self._utc_now(),
@@ -330,20 +331,26 @@ class _AssistJobsMixin(_JobsBase):
             self._assist_record_stream_artifacts(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
-            if terminated:
+            # No provider was ever started (no registered process, no pid): no group to wait for.
+            provider_gone = terminated or (process is None and not pid)
+            if provider_gone:
                 self._cleanup_assist_workspace(job)
+            if terminated:
                 self._release_assist_account_claim(task_id, job)
             else:
-                # The group is not known to be gone: keep the workspace (and the lease) and
-                # require reconciliation (#3076).
                 if job.get("account_lease_id_hash"):
                     self._abandon_assist_account_claim(task_id, job)
-                job.update({
-                    "status": "UNKNOWN_REQUIRES_RECONCILE",
-                    "blocker": "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
-                    "reconciliation_required": True,
-                    "process_cleanup": False,
-                })
+                    job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
+                    job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
+                if not provider_gone:
+                    # The group is not known to be gone: keep the workspace and require
+                    # reconciliation (#3076).
+                    job.update({
+                        "status": "UNKNOWN_REQUIRES_RECONCILE",
+                        "blocker": "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
+                        "reconciliation_required": True,
+                        "process_cleanup": False,
+                    })
             self._assist_write(job)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)

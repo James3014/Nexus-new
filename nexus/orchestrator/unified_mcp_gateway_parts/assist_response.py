@@ -86,6 +86,16 @@ def _provider_group_gone(job: Mapping[str, Any]) -> bool:
     return process_group_empty(pgid)
 
 
+def _assist_workspace_removable(job: Mapping[str, Any]) -> bool:
+    """Whether cancel or reconcile may settle the job and remove its workspace (#3076): the
+    workspace is already gone, or the provider's process group is known to be gone. A workspace
+    an operator removed by hand therefore no longer holds the job in reconciliation."""
+    root = str(job.get("workspace_root") or "")
+    if not root or not Path(root).exists():
+        return True
+    return _provider_group_gone(job)
+
+
 def _provider_deadline_passed(job: Mapping[str, Any]) -> bool:
     """Whether a running Agy model probe is past its print timeout plus the grace period."""
     if job.get("job_kind") != "model_probe" or job.get("provider") != "agy":

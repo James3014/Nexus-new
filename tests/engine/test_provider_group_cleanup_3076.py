@@ -631,3 +631,66 @@ def test_open_swe_runtime_cleanup_incomplete_is_reported(monkeypatch, tmp_path, 
     assert osei._runtime_call(
         str(tmp_path / "runtime"), {"operation": "semantic_run"}, provider_id="none", timeout=1.0
     ) == (None, "", True, "runtime_cleanup_incomplete")
+
+
+def test_cancel_of_job_that_never_started_a_provider_removes_workspace(tmp_path):
+    """No registered process and no pid: there is no group to wait for (Ultra Review, #3083)."""
+    gateway = _gateway(tmp_path)
+    job, workspace = _assist_job(tmp_path, status="SUBMITTED")
+    job.pop("pid")
+    job.pop("pgid")
+    gateway._assist_write(job)
+    cancelled = gateway._assist_cancel("t3076")
+    assert cancelled["status"] == "CANCELLED", cancelled
+    assert cancelled["process_cleanup"] is True
+    assert cancelled["reconciliation_required"] is False
+    assert not workspace.exists()
+
+
+def test_reconcile_converges_when_workspace_already_gone(monkeypatch, tmp_path):
+    """A lease-reconcile-pending probe whose group was killed clean and whose workspace was
+    already removed is not held by a group listing that now shows members (a reused id), nor
+    is a job whose workspace an operator removed by hand; the lease receipt keeps its own
+    flock check."""
+    reconciled_leases = []
+
+    class Coordinator:
+        def __init__(self, manager):
+            pass
+
+        def reconcile_claim_receipt(self, **kwargs):
+            reconciled_leases.append(kwargs)
+            return {"result": "LEASE_RECEIPT_REMOVED"}
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: None
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", Coordinator
+    )
+    gateway = _gateway(tmp_path)
+    job, workspace = _assist_job(
+        tmp_path,
+        job_kind="model_probe",
+        provider="agy",
+        status="UNKNOWN_REQUIRES_RECONCILE",
+        blocker="ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
+        reconciliation_required=True,
+        durable_exit_marker=True,
+        account_alias_hash="a" * 12,
+        account_lease_id_hash="b" * 12,
+        account_lease_owner_pid=12345,
+        account_lease_released=False,
+        account_lease_cleanup_status="RECONCILIATION_REQUIRED",
+    )
+    workspace.joinpath("partial.txt").unlink()
+    workspace.rmdir()
+    gateway._assist_write(job)
+    group = _FakeGroup()
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    reconciled = gateway._task_reconcile({"task_id": "t3076"})
+    assert reconciled["status"] == "FAILED", reconciled
+    assert reconciled["account_lease_cleanup_status"] == "RELEASED"
+    assert len(reconciled_leases) == 1
+    assert group.sent == []
