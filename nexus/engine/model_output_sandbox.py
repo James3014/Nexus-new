@@ -110,6 +110,17 @@ def holds_host_code(path: Path | str) -> bool:
             part.isidentifier() for part in target.relative_to(root).parts
         ):
             return True
+        # On a case-insensitive filesystem (macOS default) ``<root>/NEXUS/core`` is the package
+        # ``nexus.core`` too. Compare case-folded on every filesystem: a false hit needs two
+        # directories that differ only by case and it only refuses a grant (#3099).
+        folded_root = Path(str(root).casefold())
+        folded_target = Path(str(target).casefold())
+        if folded_target == folded_root or folded_target in folded_root.parents:
+            return True
+        if folded_target.is_relative_to(folded_root) and all(
+            part.isidentifier() for part in folded_target.relative_to(folded_root).parts
+        ):
+            return True
     return False
 
 

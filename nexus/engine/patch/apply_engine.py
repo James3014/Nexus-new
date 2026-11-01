@@ -61,15 +61,26 @@ class PatchApplyEngine:
             return {"status": "FAIL", "reason": f"FILE_NOT_FOUND: {target_file}"}
 
         try:
-            original_content = read_text_in_root(self.project_root, relative)
+            original_content = read_text_in_root(self.project_root, relative, strict=True)
         except PathContainmentError as exc:
+            # 非 UTF-8 的檔不改寫：寫回就會改掉補丁沒碰到的位元組。
+            if str(exc).startswith("not_utf8:"):
+                return {"status": "FAIL", "reason": f"TARGET_NOT_UTF8: {target_file}"}
             return {"status": "FAIL", "reason": f"TARGET_FILE_REFUSED: {exc}"}
-        # 讀取會把非 UTF-8 位元組換成 U+FFFD；寫回就會改掉補丁沒碰到的位元組，所以不改寫。
-        if "\ufffd" in original_content:
-            return {"status": "FAIL", "reason": f"TARGET_NOT_UTF8: {target_file}"}
         # 寫入是建新檔再改名，不會因唯讀而失敗；唯讀檔照舊不改寫。
-        if not os.access(file_path, os.W_OK):
+        # root 的 os.access(W_OK) 永遠為真，所以 root 另看檔案模式有沒有任何寫入位元。
+        writable = os.access(file_path, os.W_OK)
+        if writable and os.geteuid() == 0:
+            writable = bool(os.stat(file_path).st_mode & 0o222)
+        if not writable:
             return {"status": "FAIL", "reason": f"TARGET_NOT_WRITABLE: {target_file}"}
+        # CRLF 檔（每個換行都是 CRLF）：以 LF 比對，寫回時還原 CRLF，其餘位元組不動。
+        crlf = "\r\n" in original_content and (
+            original_content.count("\n") == original_content.count("\r\n")
+        )
+        original_bytes_text = original_content
+        if crlf:
+            original_content = original_content.replace("\r\n", "\n")
         current_content = original_content
         
         # 1. Parse & Classify Health
@@ -140,7 +151,11 @@ class PatchApplyEngine:
                 self.timer.stop(ExecutionPhase.VERIFY_HEAVY)
 
             try:
-                write_text_in_root(self.project_root, relative, current_content)
+                write_text_in_root(
+                    self.project_root,
+                    relative,
+                    current_content.replace("\n", "\r\n") if crlf else current_content,
+                )
                 logger.info("✅ [PatchEngine] Patch applied successfully.")
             except PathContainmentError as exc:
                 success, v_msg = False, f"TARGET_FILE_REFUSED: {exc}"
@@ -153,8 +168,10 @@ class PatchApplyEngine:
             "success": success,
             "reason": v_msg,
             "block_results": block_results,
-            "original_sha": hashlib.sha256(original_content.encode()).hexdigest(),
-            "new_sha": hashlib.sha256(current_content.encode()).hexdigest()
+            "original_sha": hashlib.sha256(original_bytes_text.encode()).hexdigest(),
+            "new_sha": hashlib.sha256(
+                (current_content.replace("\n", "\r\n") if crlf else current_content).encode()
+            ).hexdigest(),
         }
         
         receipt_data = self.receipt_augmenter.augment(

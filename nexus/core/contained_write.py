@@ -199,15 +199,29 @@ def read_bytes_in_root(
 
 
 def read_text_in_root(
-    root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
+    root: Path | str,
+    relative: PurePath | str,
+    *,
+    max_bytes: int | None = None,
+    strict: bool = False,
 ) -> str:
     """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
+
+    With ``strict=True`` content that is not UTF-8 raises ``PathContainmentError`` with
+    ``not_utf8:<name>`` instead, so a caller that rewrites the file cannot change bytes it never
+    saw. The default stays lenient: callers such as local_model_executor snapshot and hash
+    whatever is there and look for U+FFFD themselves (#3099).
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
     beyond ``max_bytes + 1`` bytes (it may still be growing)."""
 
     data = read_bytes_in_root(root, relative, max_bytes=max_bytes)
-    return data.decode("utf-8", errors="replace")
+    if not strict:
+        return data.decode("utf-8", errors="replace")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PathContainmentError(f"not_utf8:{PurePath(relative).name}") from exc
 
 
 def _copy_open_file(src_fd: int, info: os.stat_result, destination: Path) -> None:
