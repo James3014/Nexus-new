@@ -5,6 +5,7 @@ from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.context_budget import ContextBudgetManager
 from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer, LocalizationBundle
 from nexus.services.local_heal.interface import IPhase, LocalizationInput, LocalizationOutput, PhaseResult
+from nexus.services.local_heal.repo_read import read_repo_text
 
 
 class LocalizationPhase(IPhase):
@@ -156,9 +157,9 @@ class LocalizationPhase(IPhase):
                 error_reason="LOCALIZATION_TARGET_NOT_FOUND",
             )
 
-        try:
-            content = target_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
+        # Not through a link, hard link or special file left in repo_dir, and bounded (#3018).
+        content = read_repo_text(repo_root, canonical_path)
+        if content is None:
             return LocalizationOutput(
                 success=False,
                 localized_files=[],

@@ -21,6 +21,7 @@ from nexus.engine.model_output_sandbox import (
     run_model_argv,
 )
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
+from nexus.services.local_heal.repo_read import read_repo_text
 from nexus.services.local_heal.scratch_copy import copy_repo_entries
 
 # Imports one module of the patched repo; the repo dir and module name arrive as argv, never
@@ -212,8 +213,14 @@ class MicroVerifier:
         for file_path in patched_files:
             full_path = repo_dir / file_path
             if full_path.exists():
+                # Model code has run in repo_dir: a link, hard link, FIFO or huge file at a
+                # patched path is not read by the host and fails the check (#3018).
+                content = read_repo_text(repo_dir, full_path)
+                if content is None:
+                    syntax_ok = False
+                    syntax_errors.append(f"{file_path}: read_refused")
+                    continue
                 try:
-                    content = full_path.read_text(encoding="utf-8", errors="replace")
                     ast.parse(content)
                 except SyntaxError as e:
                     syntax_ok = False

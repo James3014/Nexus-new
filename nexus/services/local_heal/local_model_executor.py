@@ -3219,6 +3219,17 @@ class LocalModelExecutor:
                                     raw_meta["delegated_retry_committee_restore_refused_reason"] = (
                                         f"{_cand_id}:{exc}"
                                     )
+                                    # The link stays at the target in repo_root, so no winner
+                                    # from an earlier candidate is handed on: a caller would
+                                    # apply it from this repo_root (#3037 R6-2).
+                                    _dr_committee_winner = None
+                                    for _dr_prior in _dr_committee_candidates_list:
+                                        if _dr_prior.get("selected"):
+                                            _dr_prior["selected"] = False
+                                            _dr_prior["rejection_reason"] = "committee_restore_refused"
+                                    target_restore_refused = True
+                                    isolated_apply_status = "restore_refused"
+                                    raw_meta["isolated_apply_status"] = "restore_refused"
                                     break
                                 except Exception:
                                     pass
@@ -3386,7 +3397,7 @@ class LocalModelExecutor:
                     _passing_cands = [
                         c for c in _dr_committee_candidates_list
                         if c.get("verifier_result") == "pass"
-                    ]
+                    ] if not raw_meta.get("delegated_retry_committee_restore_refused") else []
                     if len(_passing_cands) > 1:
                         try:
                             from nexus.engine.autoreason_service import AutoreasonService
@@ -3623,7 +3634,11 @@ class LocalModelExecutor:
 
                             class DummyResultCtx:
                                 final_patch = ""
-                                failure_reason = "committee_no_winner"
+                                failure_reason = (
+                                    "delegated_retry_committee_restore_refused"
+                                    if raw_meta.get("delegated_retry_committee_restore_refused")
+                                    else "committee_no_winner"
+                                )
                                 model_decisions = []
                                 # C6E: Carry over verifier evidence from first pass
                                 _orchestrator_verifier_evidence_passed = bool(raw_meta.get("verifier_failure_evidence_available", False))

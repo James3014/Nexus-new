@@ -9,6 +9,7 @@ from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.model_result import classify_model_exception, classify_model_text
 from nexus.engine.local_model_policy import LocalModelPolicy
 from nexus.services.local_heal.prompt_builder import PromptBuilder
+from nexus.services.local_heal.repo_read import read_repo_text
 from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
 from nexus.services.local_heal.surgical_context import SurgicalContextBuilder
 from nexus.services.local_heal.patch_applier import PatchApplier
@@ -64,10 +65,10 @@ class PatchSynthesisPhase(IPhase):
 
             source_text = content
             if target_path.exists():
-                try:
-                    source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
+                # Not through a link, hard link or special file left in repo_dir (#3018).
+                disk_text = read_repo_text(input_data.repo_dir, target_path)
+                if disk_text is not None:
+                    source_text = disk_text
 
             from nexus.services.local_heal.interface import LocalizedFile
             annotated = self.context_builder.build_annotated_context(
@@ -251,10 +252,7 @@ class PatchSynthesisPhase(IPhase):
                 expected_target = loc_file.path
                 target_path = input_data.repo_dir / expected_target
                 if target_path.exists():
-                    try:
-                        source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                    except Exception:
-                        pass
+                    source_text = read_repo_text(input_data.repo_dir, target_path) or ""
                 if not source_text:
                     source_text = loc_file.content
             else:
@@ -267,10 +265,8 @@ class PatchSynthesisPhase(IPhase):
                     expected_target = parsed_target
                     target_path = input_data.repo_dir / expected_target
                     if target_path.exists():
-                        try:
-                            source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                        except Exception:
-                            pass
+                        # The path comes from the model's diff header: never outside repo_dir.
+                        source_text = read_repo_text(input_data.repo_dir, target_path) or ""
                             
             if expected_target and source_text:
                 from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
