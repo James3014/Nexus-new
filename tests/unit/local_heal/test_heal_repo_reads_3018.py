@@ -321,6 +321,162 @@ def test_resolve_target_file_skips_a_link_to_an_outside_file(repo_and_host, kind
     assert HealOrchestrator._resolve_target_file(None, ctx) == repo / "pkg" / "plain.py"  # type: ignore[arg-type]
 
 
+class _StopRetry(Exception):
+    pass
+
+
+def _semantic_retry_orch(monkeypatch, tmp_path, *, response: str, spy_span=None):
+    """A HealOrchestrator whose semantic retry runs for real up to the diff conversion."""
+    import nexus.services.local_heal.canonical_span as canonical_span_mod
+    from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    monkeypatch.delenv("NEXUS_PROTOCOL_MODE", raising=False)  # restored after the test
+    monkeypatch.setattr(
+        canonical_span_mod,
+        "get_canonical_search_span",
+        spy_span or (lambda **_kw: SimpleNamespace(span="x = 1", source="test")),
+    )
+    prompts: list[str] = []
+    converted: list[dict] = []
+
+    def _build_prompt(**kwargs):
+        prompts.append(json.dumps(kwargs, default=str))
+        return "RETRY PROMPT"
+
+    def _convert(**kwargs):
+        converted.append(kwargs)
+        raise _StopRetry
+
+    monkeypatch.setattr(
+        PromptBuilder, "build_verification_guided_retry_prompt", staticmethod(_build_prompt)
+    )
+    monkeypatch.setattr(DiffToSSRPConverter, "convert", staticmethod(_convert))
+
+    class _Client:
+        def generate(self, **kwargs):
+            prompts.append(json.dumps(kwargs, default=str))
+            return response
+
+    orch = object.__new__(HealOrchestrator)
+    orch.patch_phase = SimpleNamespace(llm_client=_Client())
+    orch._extract_target_symbol = lambda ctx: ""  # type: ignore[method-assign]
+    orch._render_memory_lessons = lambda ctx, target: ("", [])  # type: ignore[method-assign]
+    orch._extract_codeintel_context_for_retry = lambda ctx: ""  # type: ignore[method-assign]
+    orch._learning_closure_path = lambda: tmp_path / "no-closure.jsonl"  # type: ignore[method-assign]
+    return orch, prompts, converted
+
+
+def _semantic_retry_ctx(repo: Path, final_patch: str, localized=None):
+    return SimpleNamespace(
+        op=SimpleNamespace(
+            repo_dir=repo,
+            final_patch=final_patch,
+            user_prompt="fix target",
+            problem_statement="fix target",
+            attempt=2,
+            model_decisions=[],
+            localized_files=localized or [],
+            plan=None,
+        )
+    )
+
+
+def _run_semantic_retry(orch, ctx) -> None:
+    try:
+        orch._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+    except _StopRetry:
+        pass
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "parent_symlink", "dotdot"])
+def test_semantic_retry_diff_target_is_not_read_through_a_link(
+    repo_and_host, monkeypatch, tmp_path, kind
+):
+    repo, host_dir, host_file = repo_and_host
+    if kind == "dotdot":
+        relative = "../host/target.py"
+    else:
+        relative = _plant(repo, host_dir, host_file, kind)
+    header = f"--- a/{relative}\n+++ b/{relative}\n"
+    response = header + "@@ -1,2 +1,2 @@\n def helper():\n-    return 1\n+    return 2\n"
+    orch, prompts, converted = _semantic_retry_orch(monkeypatch, tmp_path, response=response)
+    ctx = _semantic_retry_ctx(repo, header + "@@ -1 +1 @@\n-a\n+b\n")
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
+    assert SolidSearchReplaceProtocol().classify_format(response) == "UNIFIED_DIFF"
+    _run_semantic_retry(orch, ctx)
+
+    assert prompts  # the retry reached the model call
+    assert not _host_seen(prompts)
+    assert not _host_seen([c.get("source_text", "") for c in converted])
+    assert host_file.read_text() == HOST_TEXT
+
+
+def test_semantic_retry_diff_target_still_reads_a_plain_file(repo_and_host, monkeypatch, tmp_path):
+    repo, _host_dir, _host_file = repo_and_host
+    header = "--- a/pkg/plain.py\n+++ b/pkg/plain.py\n"
+    response = header + "@@ -1,2 +1,2 @@\n def plain_helper():\n-    return 1\n+    return 2\n"
+    orch, _prompts, converted = _semantic_retry_orch(monkeypatch, tmp_path, response=response)
+    _run_semantic_retry(orch, _semantic_retry_ctx(repo, header + "@@ -1 +1 @@\n-a\n+b\n"))
+    assert converted and converted[0]["source_text"] == PLAIN_TEXT
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "parent_symlink"])
+def test_semantic_retry_canonical_span_source_is_not_read_through_a_link(
+    repo_and_host, monkeypatch, tmp_path, kind
+):
+    """A link swapped in after _resolve_target_file checked the entry is not read either."""
+    repo, host_dir, host_file = repo_and_host
+    relative = _plant(repo, host_dir, host_file, kind)
+    seen: list[dict] = []
+
+    def _spy_span(**kwargs):
+        seen.append(kwargs)
+        source_file = kwargs.get("source_file")
+        text = kwargs.get("source_text")
+        if text is None and source_file is not None:
+            text = Path(source_file).read_text()  # what the real span would read by path
+        return SimpleNamespace(span=text or "x = 1", source="test")
+
+    orch, prompts, _converted = _semantic_retry_orch(
+        monkeypatch, tmp_path, response="no diff", spy_span=_spy_span
+    )
+    orch._resolve_target_file = lambda ctx: repo / relative  # type: ignore[method-assign]
+    _run_semantic_retry(
+        orch,
+        _semantic_retry_ctx(repo, f"--- a/{relative}\n+++ b/{relative}\n@@ -1 +1 @@\n-a\n+b\n"),
+    )
+
+    assert seen
+    assert seen[0]["source_file"] is None
+    assert not _host_seen(seen[0].get("source_text") or "")
+    assert not _host_seen(prompts)
+
+
+def test_semantic_retry_canonical_span_still_gets_a_plain_source(
+    repo_and_host, monkeypatch, tmp_path
+):
+    repo, _host_dir, _host_file = repo_and_host
+    seen: list[dict] = []
+
+    def _spy_span(**kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(span="x = 1", source="test")
+
+    orch, _prompts, _converted = _semantic_retry_orch(
+        monkeypatch, tmp_path, response="no diff", spy_span=_spy_span
+    )
+    ctx = _semantic_retry_ctx(
+        repo,
+        "--- a/pkg/plain.py\n+++ b/pkg/plain.py\n@@ -1 +1 @@\n-a\n+b\n",
+        localized=[LocalizedFile(path="pkg/plain.py", content="")],
+    )
+    _run_semantic_retry(orch, ctx)
+    assert seen[0]["source_file"] == repo / "pkg" / "plain.py"
+    assert seen[0]["source_text"] == PLAIN_TEXT
+
+
 # --- micro verifier ----------------------------------------------------------------------
 
 
@@ -370,7 +526,10 @@ def _world_c_copies_of_tmp_repos(monkeypatch):
     monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
 
 
-def _committee_request(repo: Path) -> LocalModelExecutorRequest:
+TWO_MODELS = ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"]
+
+
+def _committee_request(repo: Path, models: list[str]) -> LocalModelExecutorRequest:
     return LocalModelExecutorRequest(
         task_id="reads-3018-r6-2",
         problem_statement="test",
@@ -390,10 +549,7 @@ def _committee_request(repo: Path) -> LocalModelExecutorRequest:
                 "protocol_mode": "anchored_edit",
                 "mutation_allowed": True,
                 "verifier_allowed": True,
-                "delegated_retry_candidate_models": [
-                    "qwen2.5-coder:7b-instruct",
-                    "deepseek-coder:6.7b-instruct",
-                ],
+                "delegated_retry_candidate_models": list(models),
             },
         },
     )
@@ -478,7 +634,7 @@ def _committee_candidate_result():
     return r
 
 
-def _run_committee(repo: Path, committee_run):
+def _run_committee(repo: Path, committee_run, models: list[str] = TWO_MODELS):
     with (
         patch(
             "nexus.services.local_heal.local_model_capability_executors."
@@ -497,7 +653,7 @@ def _run_committee(repo: Path, committee_run):
         patch("nexus.services.local_heal.pipeline.HealPipeline.run", side_effect=committee_run),
     ):
         return LocalModelExecutor.run(
-            _committee_request(repo), provider=InjectedLocalModelProvider(lambda _: DIFF)
+            _committee_request(repo, models), provider=InjectedLocalModelProvider(lambda _: DIFF)
         )
 
 
@@ -535,6 +691,29 @@ def test_committee_restore_refused_after_a_winner_hands_on_no_patch(tmp_path):
     candidates = json.loads(meta["delegated_retry_committee_candidates_json"])
     assert not any(c.get("selected") for c in candidates)
     assert host_file.read_text() == HOST_TEXT
+
+
+@pytest.mark.usefixtures("_world_c_copies_of_tmp_repos")
+def test_committee_restore_refused_at_a_third_candidate_reports_no_winner(tmp_path):
+    repo, host_file = _committee_repo(tmp_path)
+    calls = []
+
+    def committee_run(heal_ctx):
+        calls.append(heal_ctx)
+        if len(calls) == 3:  # candidate 1 won, candidate 2 was rejected behind it
+            (repo / TARGET).unlink()
+            (repo / TARGET).symlink_to(host_file)
+        return _committee_candidate_result()
+
+    resp = _run_committee(repo, committee_run, [*TWO_MODELS, "llama3.1:8b"])
+    meta = resp.raw_model_metadata
+    assert len(calls) == 3
+    assert resp.candidate_patch == ""
+    assert meta.get("solved") is not True
+    assert meta["delegated_retry_stage"] != "committee_winner_selected"
+    candidates = json.loads(meta["delegated_retry_committee_candidates_json"])
+    assert not any(c.get("selected") for c in candidates)
+    assert all(c["rejection_reason"] != "winner_already_selected" for c in candidates)
 
 
 @pytest.mark.usefixtures("_world_c_copies_of_tmp_repos")

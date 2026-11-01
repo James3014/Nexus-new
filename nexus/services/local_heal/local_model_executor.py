@@ -3224,7 +3224,9 @@ class LocalModelExecutor:
                                     # apply it from this repo_root (#3037 R6-2).
                                     _dr_committee_winner = None
                                     for _dr_prior in _dr_committee_candidates_list:
-                                        if _dr_prior.get("selected"):
+                                        if _dr_prior.get("selected") or (
+                                            _dr_prior.get("rejection_reason") == "winner_already_selected"
+                                        ):
                                             _dr_prior["selected"] = False
                                             _dr_prior["rejection_reason"] = "committee_restore_refused"
                                     target_restore_refused = True
