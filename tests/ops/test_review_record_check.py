@@ -3311,3 +3311,115 @@ def test_a_newly_read_reject_does_not_move_the_search_for_a_later_identical_clau
         ),
     ]
     assert rrc.evaluate(HEAD, files, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A withdrawal word right after the token, past its sha and punctuation.
+        (
+            DOCS,
+            [f"Head reviewed: {HEAD}\nClaude r1: ACCEPT withdrawn — found a data-loss bug\n"],
+            "MISSING_RECORD",
+        ),
+        (DOCS, [f"Claude r1: ACCEPT at {HEAD} (retracted: a data-loss bug)\n"], "MISSING_RECORD"),
+        (
+            DOCS,
+            [f"**Claude review** (Opus): **ACCEPT@{HEAD[:9]}** — revoked, see below\n"],
+            "MISSING_RECORD",
+        ),
+        (DOCS, [f"Head reviewed: {HEAD}\nClaude r1: ACCEPT rescinded\n"], "MISSING_RECORD"),
+        (
+            DOCS,
+            [f"Head reviewed: {HEAD}\nClaude r1: ACCEPT denied by the second pass\n"],
+            "MISSING_RECORD",
+        ),
+        (DOCS, [f"Claude r1: ACCEPT at {HEAD}; no longer stands\n"], "MISSING_RECORD"),
+        (
+            DOCS,
+            [f"Head reviewed: {HEAD}\nClaude verdict: ACCEPT not given yet\n"],
+            "MISSING_RECORD",
+        ),
+        (RISKY, [f"Codex r2: ACCEPT@{HEAD} [withdrawn]\n", CLAUDE_AT_HEAD], "MISSING_CROSS_MODEL"),
+        # Struck through.
+        (
+            DOCS,
+            [
+                "~~**Independent Claude review** (Claude Opus 5.5, separate agent): "
+                f"**ACCEPT at {HEAD}**.~~\n"
+            ],
+            "MISSING_RECORD",
+        ),
+        (DOCS, [f"~Claude r1: ACCEPT at {HEAD}~\n"], "MISSING_RECORD"),
+        (DOCS, [f"<del>Claude review: ACCEPT at {HEAD}</del>\n"], "MISSING_RECORD"),
+        (DOCS, [f"<s>Claude review: ACCEPT at {HEAD}</s>\n"], "MISSING_RECORD"),
+        (DOCS, [f"Claude review: <strike>ACCEPT at {HEAD}</strike>\n"], "MISSING_RECORD"),
+        (
+            DOCS,
+            [f"<del>r1 <del>notes</del> Claude review: ACCEPT at {HEAD}</del>\n"],
+            "MISSING_RECORD",
+        ),
+        (DOCS, [f"~r1 ~notes~ Claude review: ACCEPT at {HEAD} done~\n"], "MISSING_RECORD"),
+        (RISKY, [f"~~Codex r1: ACCEPT@{HEAD}~~\n", CLAUDE_AT_HEAD], "MISSING_CROSS_MODEL"),
+    ],
+)
+def test_a_withdrawn_or_struck_accept_does_not_count(files, comments, status):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "files, comments",
+    [
+        # A withdrawal word later on the line is about something else.
+        (DOCS, [f"Claude r2: ACCEPT at {HEAD} — the r1 finding was withdrawn\n"]),
+        (DOCS, [f"Claude r2: ACCEPT at {HEAD}; withdraws the r1 finding\n"]),
+        (DOCS, [f"Claude review: ACCEPT at {HEAD}, not blocking\n"]),
+        (DOCS, [f"Claude review: ACCEPT at {HEAD} — no longer any open finding\n"]),
+        # Tildes that strike nothing through.
+        (DOCS, [f"Claude review (~3 rounds): ACCEPT at {HEAD}, ~2 min run\n"]),
+        (DOCS, [f"Claude review: ACCEPT at {HEAD} (~500 tests, ~ 2 min)\n"]),
+        (DOCS, [f"Claude review (2~3 rounds): ACCEPT at {HEAD} (est~)\n"]),
+        (DOCS, [f"Claude review (~ 2 min): ACCEPT at {HEAD} (2 rounds~)\n"]),
+        (DOCS, [f"Claude review (~2 rounds): ACCEPT at {HEAD} ~ 3 min\n"]),
+        (DOCS, [f"Claude review (~2 rounds): ACCEPT at {HEAD} (2~3 min)\n"]),
+        (DOCS, [f"Claude review (~2 rounds): ACCEPT at {HEAD} (~3 min~)\n"]),
+        (DOCS, [f"~~r1 ~notes~~; Claude r2: ACCEPT at {HEAD} (x~)\n"]),
+        # Only the struck part is withdrawn (a struck token sharing its clause with a later
+        # one withdraws the clause: fail closed).
+        (DOCS, [f"~~Claude r1: ACCEPT~~; Claude r2: ACCEPT at {HEAD}\n"]),
+        (DOCS, [f"<del>r1 notes</del> Claude r2: ACCEPT at {HEAD}\n"]),
+        (RISKY, [f"Codex r1: ACCEPT@{HEAD}\n~~an earlier note~~\n", CLAUDE_AT_HEAD]),
+    ],
+)
+def test_an_accept_with_a_later_withdrawal_word_or_a_tilde_still_counts(files, comments):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+def test_a_struck_reject_still_withdraws_the_accept():
+    comments = [_c(CLAUDE_AT_HEAD), _c(f"~~Claude r2: REJECT at {HEAD}: data loss~~")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize("withdrawn", ["- r4: ACCEPT withdrawn", "- ~~r4: ACCEPT~~"])
+def test_a_withdrawn_accept_still_ends_the_section_line_buffer(withdrawn):
+    # As before, the withdrawn line ends the buffer, so the round 3 REJECT above it opens
+    # no rebuttal at the cap with the line below it; the withdrawn ACCEPT itself is gone.
+    body = (
+        f"Head: {HEAD}\n**Codex review**\n- r3 REJECT@{HEAD[:9]}: one finding\n"
+        f"{withdrawn}\n- Rebutted: see #1\n"
+    )
+    comments = [_c(body), _c(CLAUDE_AT_HEAD)]
+    assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_a_withdrawn_accept_on_a_bold_line_still_names_the_section_family():
+    # As before, a bold line holding a verdict takes its family from the whole line, so
+    # the bare REJECT under it is Codex's and withdraws the earlier Codex ACCEPT.
+    comments = [
+        _c(f"Codex r1 ACCEPT@{HEAD}"),
+        _c(
+            f"Head reviewed: {HEAD}\n**Finding:** Codex r2: ACCEPT withdrawn\nr3: REJECT — data loss"
+        ),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_CROSS_MODEL"

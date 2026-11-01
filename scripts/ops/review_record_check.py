@@ -268,9 +268,21 @@ _PRE_DENY = re.compile(
 # Words right after the token (before a sha, punctuation or a parenthesis) that withdraw it.
 _POST_DENY = re.compile(
     r"^\s*(?:after|pending|withheld|blocked|only|if|unless|once|when|later|is|was|would|will|should"
-    r"|could|may|might|needed|required|expected|requested|awaited|\?)",
+    r"|could|may|might|needed|required|expected|requested|awaited|not\b|\?)",
     re.IGNORECASE,
 )
+# A withdrawal right after the token, past its own sha and any punctuation, dash or
+# opening parenthesis: "ACCEPT withdrawn", "ACCEPT at <sha> (retracted)", "ACCEPT — no
+# longer stands" (#3041). Participles only: "ACCEPT; withdraws the r1 finding" is not one.
+_POST_WITHDRAWN = re.compile(
+    r"\s*(?:(?:@|\bat\b|\bon\b)\s*[0-9a-f]{7,40}\b)?[\s.,;:!\-\u2013\u2014(\[]*"
+    r"(?:withdrawn|revoked|retracted|rescinded|denied"
+    r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b",
+    re.IGNORECASE,
+)
+# Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
+# is withdrawn: an ACCEPT inside it is not read. A REJECT inside it still is (fail closed).
+_STRIKE_MARK = re.compile(r"(?<!~)~{1,2}(?!~)|<(/?)(del|s|strike)\b[^<>]{0,200}>", re.IGNORECASE)
 _POST_COND = re.compile(
     r"\b(?:only if|if|unless|provided|conditional on|once|when)\b|\?", re.IGNORECASE
 )
@@ -517,15 +529,54 @@ def _aside_denies(aside: str) -> bool:
     )
 
 
-def verdict_clauses(line: str) -> list[str]:
+def _struck_spans(text: str) -> list[tuple[int, int]]:
+    """Spans of struck-through text on one line, in one pass (no backtracking).
+
+    A tilde run opens when the next character is not a space and the previous one is not
+    a word character, and closes the nearest open run of the same length when the
+    previous character is not a space and the next one is not a word character ("~2 min,
+    ~500 tests" and "2~3 rounds" strike nothing). A tag closes the nearest open tag of its
+    name. Openers inside a closed span are dropped.
+    """
+    spans: list[tuple[int, int]] = []
+    opened: dict[str, list[int]] = {"~": [], "~~": [], "del": [], "s": [], "strike": []}
+    for match in _STRIKE_MARK.finditer(text):
+        begin, end = match.span()
+        if match.group(2) is not None:
+            key = match.group(2).lower()
+            if not match.group(1):
+                opened[key].append(begin)
+                continue
+        else:
+            key = match.group()
+            prev = text[begin - 1] if begin else " "
+            nxt = text[end] if end < len(text) else " "
+            closes = bool(opened[key]) and not prev.isspace() and not (nxt.isalnum() or nxt == "_")
+            if not closes:
+                if not nxt.isspace() and not (prev.isalnum() or prev == "_"):
+                    opened[key].append(begin)
+                continue
+        if opened[key]:
+            start = opened[key].pop()
+            spans.append((start, end))
+            for stack in opened.values():  # openers are in position order: drop inner ones
+                while stack and stack[-1] > start:
+                    stack.pop()
+    return spans
+
+
+def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
     """Clauses of the line whose accepting token sits in verdict position.
 
     The token must follow ``Verdict:``, ``@``, a colon or dash, a round marker
     (``r3``, ``Round 2 @ sha:``) or start the line; nothing before it in the
     clause may be a wish, condition or negation (``awaiting``, ``should``, ``not``,
     ``cannot``, ``pending``, ``please``, ``if`` ...), and nothing right after it may
-    withdraw it (``pending``, ``withheld``, ``only if``, ``?``). Table rows, block
-    quotes, unticked checklist items and pasted commands never count.
+    withdraw it (``pending``, ``withheld``, ``only if``, ``?``, ``withdrawn``,
+    ``retracted``). Table rows, block quotes, unticked checklist items, pasted commands
+    and struck-through text never count. ``keep_withdrawn`` reads a withdrawn or struck
+    ACCEPT as before #3041, for the parse structure (section breaks and label lines), which
+    a withdrawal must not change.
     """
     if _SKIP_LINE.match(line):
         return []
@@ -536,6 +587,7 @@ def verdict_clauses(line: str) -> list[str]:
     consumed = 0
     prev_token_end = 0
     aside_closes: list[int | None] | None = None
+    struck = [] if keep_withdrawn else _struck_spans(plain_line)
     for clause in _clauses(plain_line):
         start = plain_line.find(clause, consumed)
         consumed = start + len(clause) if start >= 0 else consumed
@@ -543,6 +595,8 @@ def verdict_clauses(line: str) -> list[str]:
         if span is None:
             continue
         token_at = start + span[0]
+        if any(begin <= token_at < end for begin, end in struck):
+            continue  # "~~ACCEPT at <sha>~~": struck through, withdrawn
         window_start = prev_token_end
         asides: dict[int, int] = {}  # closing index -> start of its last round marker
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
@@ -583,6 +637,8 @@ def verdict_clauses(line: str) -> list[str]:
         head_of_after = _STOP.split(after, 1)[0]
         if _POST_DENY.match(head_of_after) or _POST_COND.search(head_of_after):
             continue
+        if not keep_withdrawn and start >= 0 and _POST_WITHDRAWN.match(plain_line, start + span[1]):
+            continue  # "ACCEPT withdrawn — found a data-loss bug", "ACCEPT (retracted)"
         if not _hex_tokens(clause):
             # A verdict not bound by its own clause borrows the sha from later on the
             # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
@@ -1007,7 +1063,7 @@ def _label_family(line: str, ignore_status: bool = False) -> str | None:
     if (
         bold
         and not re.match(r"^\s*#", line)
-        and not verdict_clauses(line)
+        and not verdict_clauses(line, keep_withdrawn=True)
         and not _LABEL_WORDS.search(bold.group(1))
     ):
         # A finding bullet ("- **N1:** the Codex prompt is stale") labels by its bold
@@ -1408,8 +1464,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     ))
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
-        if not accept_clauses:
-            continue
+        if not accept_clauses and (in_fence or not verdict_clauses(line, keep_withdrawn=True)):
+            continue  # a withdrawn ACCEPT still ends the section's line buffer, as before
         close_section()
         section = []  # the header family persists: a reviewer block lists its rounds
     close_section()
