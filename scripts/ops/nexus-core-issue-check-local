@@ -2,13 +2,14 @@
 """Run the Nexus Core Issue-bound check locally with CI parity.
 
 Reads the Core pin from the base ref's workflow, installs that pin into an
-isolated pin-keyed tool directory, builds a hash-keyed material venv, runs
-``issue-init`` and ``issue-check`` in a temporary clean detached worktree at the
-exact committed HEAD, and prints a JSON summary. The material venv is built only
-from the base ref's requirement lock files (never the candidate head's), only
-pinned entries are accepted, and each install runs under a timeout. It holds no
-completion authority: the Core receipt is the only verdict. Local or tooling problems fail
-closed with exit 2; a Core verdict other than VERIFIED exits 1.
+isolated pin-keyed tool directory (under a timeout; a cached install is reused only
+after it completed), runs ``issue-init`` and ``issue-check`` in a temporary clean
+detached worktree at the exact committed HEAD, and prints a JSON summary.
+``issue-check`` runs with ``--require-trusted-config`` (as in CI) and with
+``--expect-config-commit`` set to the base commit resolved here, so the verification
+contract comes only from the trusted base commit. It holds no completion authority:
+the Core receipt is the only verdict. Local or tooling problems fail closed with
+exit 2; a Core verdict other than VERIFIED exits 1.
 
 The JSON summary carries the receipt ``status`` plus ``reason_codes`` (list from
 ``outcome.reason_codes``, [] when absent) and ``transport_error`` (bool from
@@ -34,10 +35,6 @@ from typing import Any, Sequence
 
 SCHEMA = "nexus.core_issue_check_local.v1"
 WORKFLOW_PATH = ".github/workflows/nexus-core-issue-completion.yml"
-REQUIREMENTS = (
-    "requirements/canonical-learning.txt",
-    "requirements/canonical-runtime.txt",
-)
 # Legacy single-job gate pinned the tool via NEXUS_CORE_TOOL_PIN; the two-job gate
 # (nexus-core#116/#120) pins it via the composite-action inputs `nexus-certify-ref`
 # and the `uses: James3014/nexus-core/.github/actions/<name>@<sha>` lines. Exactly one
@@ -47,19 +44,8 @@ PIN_RE = re.compile(
     r"|^\s*-?\s*uses:\s*James3014/nexus-core/\.github/actions/[A-Za-z0-9_-]+@([0-9a-f]{40})\s*(?:#.*)?$",
     re.MULTILINE,
 )
-# Accepted requirement lines (after joining backslash continuations): an exact
-# git commit of a James3014 repo, or an exact version with sha256 hashes. Option
-# lines (-e, -r, -c, --index-url, ...), paths, URLs and ranges are refused.
-REQ_GIT_RE = re.compile(
-    r"[A-Za-z0-9][A-Za-z0-9._-]*[ \t]*@[ \t]*"
-    r"git\+https://github\.com/James3014/[A-Za-z0-9][A-Za-z0-9._-]*\.git@[0-9a-f]{40}"
-)
-REQ_HASHED_RE = re.compile(
-    r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*"
-    r"(?:[ \t]+--hash=sha256:[0-9a-f]{64})+"
-)
-MATERIALS_READY = ".nexus-core-materials-ready"
-MATERIALS_TIMEOUT_SECONDS = 1200
+TOOL_READY = ".nexus-core-tool-ready"
+INSTALL_TIMEOUT_SECONDS = 1200
 CLAIM_RE = re.compile(r"claim ceiling:\s*(\S+)", re.IGNORECASE)
 CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
 EXIT_OK = 0
@@ -174,11 +160,14 @@ def read_pin(repo: Path, base_ref: str) -> str:
     return matches.pop()
 
 
-def ensure_tool(cache_root: Path, pin: str) -> Path:
+def ensure_tool(cache_root: Path, pin: str, timeout: float = INSTALL_TIMEOUT_SECONDS) -> Path:
+    """Install the pinned Core tool; reuse a cached install only once it completed."""
     base = cache_root / "tools" / pin
     certify = base / "bin" / "nexus-certify"
-    if certify.exists():
+    ready = base / TOOL_READY
+    if certify.exists() and ready.exists():
         return certify
+    shutil.rmtree(base, ignore_errors=True)
     env = dict(os.environ)
     env["UV_TOOL_DIR"] = str(base / "tools")
     env["UV_TOOL_BIN_DIR"] = str(base / "bin")
@@ -190,83 +179,12 @@ def ensure_tool(cache_root: Path, pin: str) -> Path:
             cwd=Path(tmp),
             env=env,
             code="CORE_INSTALL_FAILED",
+            timeout=timeout,
         )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"{certify} missing after install")
+    ready.write_text(pin + "\n", encoding="utf-8")
     return certify
-
-
-def trusted_requirements(text: str, rel: str) -> str:
-    """Return a normalized copy of ``text`` holding only pinned requirement lines.
-
-    Raises MATERIALS_UNTRUSTED for any option line, path, URL or unpinned entry.
-    The normalized copy (not the raw bytes) is what gets installed, so the
-    installer parses exactly the lines that were checked here.
-    """
-    entries: list[str] = []
-    pending = ""
-    for raw in text.split("\n"):
-        line = raw.rstrip("\r")
-        if line.endswith("\\"):
-            pending += line[:-1] + " "
-            continue
-        line = (pending + line).strip(" \t")
-        pending = ""
-        if not line or line.startswith("#"):
-            continue
-        if REQ_GIT_RE.fullmatch(line) or REQ_HASHED_RE.fullmatch(line):
-            entries.append(" ".join(line.split()))
-            continue
-        raise LocalCheckError(
-            "MATERIALS_UNTRUSTED",
-            f"{rel}: only pinned entries (name @ git+https://github.com/James3014/<repo>.git@<sha>"
-            f" or name==version --hash=sha256:...) are allowed; refused: {line[:120]!r}",
-        )
-    if pending:
-        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: dangling line continuation")
-    if not entries:
-        raise LocalCheckError("MATERIALS_UNTRUSTED", f"{rel}: no requirement entries")
-    return "".join(entry + "\n" for entry in entries)
-
-
-def ensure_materials(
-    cache_root: Path,
-    repo: Path,
-    base_sha: str,
-    timeout: float = MATERIALS_TIMEOUT_SECONDS,
-) -> Path:
-    """Build the material venv from the trusted base commit's lock files only."""
-    contents: list[tuple[str, str]] = []
-    digest = hashlib.sha256()
-    for rel in REQUIREMENTS:
-        text = _git(repo, "show", f"{base_sha}:{rel}", code="MATERIALS_FAILED")
-        normalized = trusted_requirements(text, rel)
-        contents.append((rel, normalized))
-        digest.update(f"{rel}\0{normalized}\0".encode())
-    env_dir = cache_root / "materials" / digest.hexdigest()
-    python = env_dir / "bin" / "python"
-    ready = env_dir / MATERIALS_READY
-    if python.exists() and ready.exists():
-        return python
-    shutil.rmtree(env_dir, ignore_errors=True)
-    env_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Every uv call runs in a neutral temporary cwd so no checkout config is read.
-    with tempfile.TemporaryDirectory(prefix="nexus-core-materials-") as tmp:
-        _run(
-            ["uv", "venv", "--python", "3.11", str(env_dir)],
-            cwd=Path(tmp),
-            code="MATERIALS_FAILED",
-            timeout=timeout,
-        )
-        for rel, normalized in contents:
-            req = Path(tmp) / Path(rel).name
-            req.write_text(normalized, encoding="utf-8")
-            cmd = ["uv", "pip", "install", "--python", str(python), "--requirement", str(req)]
-            if all(REQ_HASHED_RE.fullmatch(line) for line in normalized.splitlines()):
-                cmd.append("--require-hashes")
-            _run(cmd, cwd=Path(tmp), code="MATERIALS_FAILED", timeout=timeout)
-    ready.write_text(base_sha + "\n", encoding="utf-8")
-    return python
 
 
 def resolve_token() -> str:
@@ -329,7 +247,11 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     ).strip()
     pin = read_pin(repo, args.base_ref)
 
-    certify = Path(args.certify_bin) if args.certify_bin else ensure_tool(cache_root, pin)
+    certify = (
+        Path(args.certify_bin)
+        if args.certify_bin
+        else ensure_tool(cache_root, pin, args.install_timeout)
+    )
     if not certify.exists():
         raise LocalCheckError("CORE_INSTALL_FAILED", f"certify binary not found: {certify}")
     token = resolve_token()
@@ -342,26 +264,25 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     try:
         _git(repo, "worktree", "add", "--detach", str(worktree), head, code="WORKTREE_FAILED")
         added = True
-        python = (
-            Path(args.material_python)
-            if args.material_python
-            else ensure_materials(cache_root, repo, base_sha, args.materials_timeout)
-        )
-        if not args.no_fetch:
-            _git(worktree, "fetch", "origin", "main", code="FETCH_FAILED")
+        # The worktree shares refs with the source repo, so the base ref still names
+        # base_sha here (no second fetch that could move it).
         env = dict(os.environ)
-        env.update(
-            GITHUB_TOKEN=token,
-            NEXUS_CORE_MATERIAL_PYTHON=str(python),
-            PYTHONDONTWRITEBYTECODE="1",
+        env.update(GITHUB_TOKEN=token, PYTHONDONTWRITEBYTECODE="1")
+        # issue-check accepts only the config committed on the trusted base commit
+        # (--require-trusted-config, as in CI), pinned to the base_sha resolved above.
+        # issue-init (Core pin b07ae36) takes neither flag and runs no verifier or
+        # material command.
+        core_calls: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("issue-init", ()),
+            ("issue-check", ("--require-trusted-config", "--expect-config-commit", base_sha)),
         )
         log_path = output_dir / f"issue-{args.issue}-check.log"
         log_parts: list[str] = []
         rc = 0
-        for sub in ("issue-init", "issue-check"):
+        for sub, trust_args in core_calls:
             try:
                 proc = subprocess.run(
-                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue)],
+                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
                     cwd=worktree,
                     env=env,
                     capture_output=True,
@@ -450,12 +371,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument("--certify-bin", help="override Core binary (tests)")
-    parser.add_argument("--material-python", help="override material python")
     parser.add_argument(
+        "--install-timeout",
         "--materials-timeout",
+        dest="install_timeout",
         type=float,
-        default=MATERIALS_TIMEOUT_SECONDS,
-        help="seconds allowed for each material venv/install step (default %(default)s)",
+        default=INSTALL_TIMEOUT_SECONDS,
+        help="seconds allowed for the Core tool install (default %(default)s); "
+        "--materials-timeout is the older name",
     )
     return parser
 
