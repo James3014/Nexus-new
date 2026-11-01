@@ -1838,14 +1838,14 @@ class HealOrchestrator:
                 str(repo_dir),
             )
             return
-        if repository_config_can_start_a_program(repo_dir):
+        if repository_config_can_start_a_program(repo_dir, git_dir):
             logger.warning(
                 "workspace reset refused: git config can start a program: %r", str(repo_dir)
             )
             return
         try:
             for args in (("checkout", "--", "."), ("clean", "-fd")):
-                if run_hardened_git(repo_dir, *args).returncode != 0:
+                if run_hardened_git(repo_dir, *args, git_dir=git_dir).returncode != 0:
                     logger.warning(
                         "workspace reset incomplete: git %s failed: %r", args[0], str(repo_dir)
                     )

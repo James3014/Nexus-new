@@ -243,7 +243,7 @@ def test_restore_and_rollback_act_on_their_repo_under_a_foreign_git_environment(
 
 @pytest.mark.parametrize("outcome", ["error", "timeout"])
 def test_an_unreadable_repository_config_counts_as_naming_a_program(env, monkeypatch, outcome):
-    def failing_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def failing_git(repo_dir: Path, *args: str, **_: Any) -> subprocess.CompletedProcess[str]:
         if outcome == "timeout":
             raise subprocess.TimeoutExpired(["git", *args], hardened_git.GIT_TIMEOUT_S)
         return subprocess.CompletedProcess(["git", *args], 1, "", "error")
@@ -262,11 +262,13 @@ def test_reset_clears_a_stale_index_lock_a_timed_out_step_left_and_the_next_rese
     lock = repo / ".git" / "index.lock"
     real_git = orchestrator.run_hardened_git
 
-    def checkout_times_out(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def checkout_times_out(
+        repo_dir: Path, *args: str, **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         if args[:1] == ("checkout",):
             lock.write_text("", encoding="utf-8")  # what a killed checkout leaves behind
             raise subprocess.TimeoutExpired(["git", *args], hardened_git.GIT_TIMEOUT_S)
-        return real_git(repo_dir, *args)
+        return real_git(repo_dir, *args, **kwargs)
 
     monkeypatch.setattr(orchestrator, "run_hardened_git", checkout_times_out)
     with caplog.at_level("WARNING", logger="nexus.services.local_heal.orchestrator"):
@@ -318,3 +320,228 @@ def test_an_index_lock_in_a_git_dir_outside_the_repo_is_kept(env):
 
     assert hardened_git.clear_stale_index_lock(repo, outside) is False
     assert lock.exists()
+
+
+def test_hardened_git_runs_no_external_diff_or_textconv_driver_the_repository_names(env):
+    repo = _repo_with_local_work(env / "repo")
+    (repo / ".gitattributes").write_text("*.py diff=mark\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "edit")
+    (repo / "notes.py").write_text(DIRTY_EDIT + "y = 3\n", encoding="utf-8")
+    external_ran, textconv_ran = env / "external-diff-ran", env / "textconv-ran"
+    _git(repo, "config", "diff.external", str(_marker_script(env, "ext.sh", external_ran)))
+    textconv = _marker_script(env, "textconv.sh", textconv_ran, passthrough=True)
+    _git(repo, "config", "diff.mark.textconv", str(textconv))
+
+    for args in (("diff",), ("show", "HEAD"), ("log", "-p", "-1")):
+        assert hardened_git.run_hardened_git(repo, *args).returncode == 0
+
+    assert not external_ran.exists()
+    assert not textconv_ran.exists()
+    # The restore and rollback paths refuse such a repository outright.
+    assert hardened_git.repository_config_can_start_a_program(repo) is True
+
+
+def test_a_hardened_commit_runs_no_commit_hook_and_is_not_signed(env):
+    repo = _repo_with_local_work(env / "repo")
+    marker = env / "program-ran"
+    script = _marker_script(env, "program.sh", marker)
+    _git(repo, "config", "commit.gpgSign", "true")
+    _git(repo, "config", "gpg.program", str(script))
+    _git(repo, "config", "hook.mark.command", str(script))
+    for event in ("pre-commit", "commit-msg"):
+        _git(repo, "config", "--add", "hook.mark.event", event)
+
+    result = hardened_git.run_hardened_git(repo, "commit", "-qam", "edit")
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert "gpgsig" not in hardened_git.run_hardened_git(repo, "cat-file", "commit", "HEAD").stdout
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+def test_restore_and_rollback_stay_on_the_probed_git_dir_when_dot_git_is_rewritten(
+    env, site, monkeypatch
+):
+    repo = _repo_with_local_work(env / "repo")
+    elsewhere = _repo_with_local_work(env / "elsewhere")
+    index = (elsewhere / ".git" / "index").read_bytes()
+    real_check = hardened_git.config_names_a_repository_program
+
+    def rewrite_dot_git_after_the_probe(names: list[str]) -> bool:
+        if (repo / ".git").is_dir():
+            (repo / ".git").rename(env / "moved.git")
+            (repo / ".git").write_text(f"gitdir: {elsewhere / '.git'}\n", encoding="utf-8")
+        return real_check(names)
+
+    monkeypatch.setattr(
+        hardened_git, "config_names_a_repository_program", rewrite_dot_git_after_the_probe
+    )
+
+    assert ALL_SITES[site](repo) == REFUSED[site]
+
+    assert (repo / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+    assert (elsewhere / ".git" / "index").read_bytes() == index
+    assert not (elsewhere / ".git" / "ORIG_HEAD").exists()
+
+
+@pytest.mark.parametrize("site", sorted(SITES))
+def test_restore_and_rollback_use_the_probed_git_dir_when_the_gitdir_pointer_is_rewritten(
+    env, site, monkeypatch
+):
+    repo = _repo_with_local_work(env / "repo")
+    (repo / ".git").rename(repo / ".gitstore")
+    (repo / ".git").write_text("gitdir: .gitstore\n", encoding="utf-8")
+    # git clean -fd would otherwise remove a git dir kept under another name.
+    (repo / ".gitstore" / "info" / "exclude").write_text("/.gitstore/\n", encoding="utf-8")
+    elsewhere = _repo_with_local_work(env / "elsewhere")
+    index = (elsewhere / ".git" / "index").read_bytes()
+    real_check = hardened_git.config_names_a_repository_program
+
+    def point_dot_git_elsewhere_after_the_probe(names: list[str]) -> bool:
+        (repo / ".git").write_text(f"gitdir: {elsewhere / '.git'}\n", encoding="utf-8")
+        return real_check(names)
+
+    monkeypatch.setattr(
+        hardened_git, "config_names_a_repository_program", point_dot_git_elsewhere_after_the_probe
+    )
+
+    assert SITES[site](repo) == RESTORED[site]
+
+    assert (repo / "notes.py").read_text(encoding="utf-8") == "x = 1\n"
+    assert (repo / ".gitstore" / "HEAD").is_file()
+    assert (elsewhere / ".git" / "index").read_bytes() == index
+    assert not (elsewhere / ".git" / "ORIG_HEAD").exists()
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+def test_the_config_check_reads_the_probed_git_dir_when_the_gitdir_pointer_is_rewritten(
+    env, site, monkeypatch
+):
+    repo = _repo_with_local_work(env / "repo")
+    (repo / ".gitattributes").write_text("*.py filter=mark\n", encoding="utf-8")
+    _git(repo, "add", ".gitattributes")
+    _git(repo, "commit", "-qm", "attributes", "--", ".gitattributes")
+    marker = env / "filter-ran"
+    script = _marker_script(env, "filter.sh", marker, passthrough=True)
+    _git(repo, "config", "filter.mark.smudge", str(script))
+    (repo / ".git").rename(repo / ".gitstore")
+    (repo / ".git").write_text("gitdir: .gitstore\n", encoding="utf-8")
+    (repo / ".gitstore" / "info" / "exclude").write_text("/.gitstore/\n", encoding="utf-8")
+    clean = _repo_with_local_work(env / "clean")
+    real_env = hardened_git.hardened_git_env
+    calls = 0
+
+    def rewrite_after_the_probe(repo_dir: Path, git_dir: Path | None = None) -> dict[str, str]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # the probe has run; the config check is next
+            (repo / ".git").write_text(f"gitdir: {clean / '.git'}\n", encoding="utf-8")
+        return real_env(repo_dir, git_dir)
+
+    monkeypatch.setattr(hardened_git, "hardened_git_env", rewrite_after_the_probe)
+
+    assert ALL_SITES[site](repo) == REFUSED[site]
+
+    assert not marker.exists()
+    assert (repo / "notes.py").read_text(encoding="utf-8") == DIRTY_EDIT
+
+
+def test_hardened_log_and_show_verify_no_signature_with_a_repository_signing_program(env):
+    repo = _repo_with_local_work(env / "repo")
+    marker = env / "gpg-ran"
+    _git(repo, "config", "log.showSignature", "true")
+    _git(repo, "config", "gpg.program", str(_marker_script(env, "gpg.sh", marker)))
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    signed = (
+        f"tree {tree}\nauthor t <t@example.invalid> 0 +0000\n"
+        "committer t <t@example.invalid> 0 +0000\n"
+        "gpgsig -----BEGIN PGP SIGNATURE-----\n \n AAAA\n -----END PGP SIGNATURE-----\n\nsigned\n"
+    )
+    commit = subprocess.run(
+        ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+        cwd=repo,
+        input=signed,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    for args in (("log", "-1", commit), ("show", commit)):
+        assert hardened_git.run_hardened_git(repo, *args).returncode == 0
+
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "refused"),
+    [
+        ("diff.external", True),
+        ("diff.mark.textconv", True),
+        ("diff.mark.command", True),
+        ("gpg.program", True),
+        ("gpg.ssh.program", True),
+        ("filter.mark.smudge", True),
+        ("hook.mark.command", True),
+        ("include.path", True),
+        ("includeIf.gitdir:/x/.path", True),
+        ("remote.origin.promisor", True),
+        ("extensions.partialClone", True),
+        ("diff.algorithm", False),
+        ("diff.renames", False),
+        ("core.autocrlf", False),
+        ("remote.origin.url", False),
+    ],
+)
+def test_the_config_check_refuses_keys_that_name_a_program_and_keeps_harmless_ones(name, refused):
+    assert hardened_git.config_names_a_repository_program([name]) is refused
+
+
+def _repo_with_a_planted_submodule(env: Path) -> tuple[Path, Path]:
+    """A repo whose gitlink ``sub`` is populated with a ``.git`` file pointing at a planted
+    repository; that repository's config names a hook that only touches a marker."""
+    planted = env / "planted"
+    planted.mkdir()
+    (planted / "f.txt").write_text("a\n", encoding="utf-8")
+    _git(planted, "init", "-q")
+    _git(planted, "add", ".")
+    _git(planted, "commit", "-qm", "planted")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=planted, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    marker = env / "submodule-hook-ran"
+    _git(planted, "config", "hook.mark.command", str(_marker_script(env, "hook.sh", marker)))
+    for event in ("post-index-change", "post-checkout", "reference-transaction"):
+        _git(planted, "config", "--add", "hook.mark.event", event)
+    (planted / "f.txt").write_text("dirty\n", encoding="utf-8")
+    repo = _repo_with_local_work(env / "repo")
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{head},sub")
+    _git(repo, "commit", "-qm", "gitlink")
+    (repo / "sub").mkdir()
+    (repo / "sub" / ".git").write_text(f"gitdir: {planted / '.git'}\n", encoding="utf-8")
+    return repo, marker
+
+
+@pytest.mark.parametrize(
+    "args", [("status",), ("status", "--porcelain"), ("diff",), ("diff", "HEAD")]
+)
+def test_hardened_status_and_diff_do_not_enter_a_planted_submodule(env, args):
+    repo, marker = _repo_with_a_planted_submodule(env)
+    git_dir = hardened_git.repository_git_dir(repo)
+    assert git_dir is not None
+
+    assert hardened_git.run_hardened_git(repo, *args, git_dir=git_dir).returncode == 0
+
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("site", sorted(ALL_SITES))
+def test_restore_and_rollback_still_restore_beside_a_planted_submodule(env, site):
+    repo, marker = _repo_with_a_planted_submodule(env)
+
+    ALL_SITES[site](repo)
+
+    assert not marker.exists()
+    assert (repo / "notes.py").read_text(encoding="utf-8") == "x = 1\n"

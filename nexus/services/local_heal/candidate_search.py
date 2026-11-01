@@ -6,7 +6,7 @@ from pathlib import Path
 
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
-    repository_is_rooted_at,
+    repository_git_dir,
     run_hardened_git,
 )
 from nexus.services.local_heal.interface import LocalizedFile
@@ -149,14 +149,16 @@ class CandidatePatchSearcher:
         # runs hardened and only in a repository rooted at repo_dir.
         import subprocess
         root = Path(repo_dir).resolve()
-        if not repository_is_rooted_at(root) or repository_config_can_start_a_program(root):
+        git_dir = repository_git_dir(root)
+        if git_dir is None or repository_config_can_start_a_program(root, git_dir):
             logger.warning("candidate restore refused: unsafe git repository: %r", str(root))
             return
         for intent in intents:
             target_path = repo_dir / intent.file_path
             if target_path.exists():
                 try:
-                    run_hardened_git(root, "checkout", "--", str(root / intent.file_path))
+                    target = str(root / intent.file_path)
+                    run_hardened_git(root, "checkout", "--", target, git_dir=git_dir)
                 except subprocess.TimeoutExpired:
                     logger.warning("candidate restore incomplete: git timed out: %r", str(root))
                     return

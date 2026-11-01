@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
-    repository_is_rooted_at,
+    repository_git_dir,
     run_hardened_git,
 )
 from nexus.services.local_heal.protocol import ValidationResult
@@ -193,13 +193,14 @@ class ActionProtocol:
             # project_root holds the edits being rolled back, so git runs hardened and only in
             # a repository rooted at project_root.
             root = Path(project_root).resolve()
-            if not repository_is_rooted_at(root) or repository_config_can_start_a_program(root):
+            git_dir = repository_git_dir(root)
+            if git_dir is None or repository_config_can_start_a_program(root, git_dir):
                 logger.warning("rollback refused: unsafe git repository: %r", str(root))
                 return
             for f in self.files_involved:
                 if f:
                     try:
-                        run_hardened_git(root, "checkout", "--", f)
+                        run_hardened_git(root, "checkout", "--", f, git_dir=git_dir)
                     except subprocess.TimeoutExpired:
                         logger.warning("rollback incomplete: git timed out: %r", str(root))
                         return

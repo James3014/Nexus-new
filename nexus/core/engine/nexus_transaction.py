@@ -5,7 +5,7 @@ from pathlib import Path
 
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
-    repository_is_rooted_at,
+    repository_git_dir,
     run_hardened_git,
 )
 
@@ -35,14 +35,15 @@ class TransactionManager:
         # The workspace holds the audited agent's edits, so git runs hardened and only in a
         # repository rooted at project_root.
         root = self.project_root.resolve()
-        if not repository_is_rooted_at(root) or repository_config_can_start_a_program(root):
+        git_dir = repository_git_dir(root)
+        if git_dir is None or repository_config_can_start_a_program(root, git_dir):
             logger.error("❌ [Transaction] Rollback FAILED: unsafe git repository: %r", str(root))
             return False
         try:
             # 物理回滾到 HEAD
-            run_hardened_git(root, "reset", "--hard", "HEAD").check_returncode()
+            run_hardened_git(root, "reset", "--hard", "HEAD", git_dir=git_dir).check_returncode()
             # 清理未追蹤檔案
-            run_hardened_git(root, "clean", "-fd").check_returncode()
+            run_hardened_git(root, "clean", "-fd", git_dir=git_dir).check_returncode()
             logger.info("✅ [Transaction] Rollback SUCCESS. Workspace cleared.")
             return True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:

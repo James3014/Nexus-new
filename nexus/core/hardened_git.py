@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import List, Optional
 
 GIT_TIMEOUT_S = 120.0
-# Command-line config outranks repository config: hooks and fsmonitor are switched off, and
-# submodules (whose own config is not checked) are not entered.
+# Command-line config outranks repository config: hooks and fsmonitor are switched off,
+# submodules (whose own config is not checked) are not recursed into, and a commit is not
+# signed.
 _GIT_OVERRIDES = (
     "-c",
     f"core.hooksPath={os.devnull}",
@@ -23,16 +24,32 @@ _GIT_OVERRIDES = (
     "core.fsmonitor=false",
     "-c",
     "submodule.recurse=false",
+    "-c",
+    "commit.gpgSign=false",
 )
+# Subcommand options that keep repository-named programs from running even if the config
+# check below missed them: no external diff or textconv driver, no signature verification
+# (log.showSignature runs gpg.program), no commit hooks, and no descent into a populated
+# submodule (its .git, and so its config and hooks, may be planted).
+_NO_DIFF_PROGRAMS = ("--no-ext-diff", "--no-textconv", "--ignore-submodules=all")
+_SUBCOMMAND_FLAGS = {
+    "diff": _NO_DIFF_PROGRAMS,
+    "show": (*_NO_DIFF_PROGRAMS, "--no-show-signature"),
+    "log": (*_NO_DIFF_PROGRAMS, "--no-show-signature"),
+    "status": ("--ignore-submodules=all",),
+    "commit": ("--no-verify",),
+}
 # Git processes started here and not yet reaped, per resolved repo_dir.
 _RUNNING: dict[Path, int] = {}
 _RUNNING_GUARD = threading.Lock()
 
 
-def hardened_git_env(repo_dir: Path) -> dict[str, str]:
+def hardened_git_env(repo_dir: Path, git_dir: Optional[Path] = None) -> dict[str, str]:
     """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
     GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
-    are never fetched, and discovery stops at ``repo_dir``."""
+    are never fetched, and discovery stops at ``repo_dir``. With ``git_dir`` (a probed git
+    dir) GIT_DIR and GIT_WORK_TREE are pinned to it and ``repo_dir``, so a rewritten ``.git``
+    pointer cannot redirect the call."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
@@ -42,12 +59,23 @@ def hardened_git_env(repo_dir: Path) -> dict[str, str]:
         GIT_TERMINAL_PROMPT="0",
         GIT_CEILING_DIRECTORIES=str(repo_dir.parent),
     )
+    if git_dir is not None:
+        env.update(GIT_DIR=str(git_dir), GIT_WORK_TREE=str(repo_dir))
     return env
 
 
-def run_hardened_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run ``git <args>`` in ``repo_dir``; raises ``subprocess.TimeoutExpired`` once the
-    timed-out git has been killed and reaped."""
+def run_hardened_git(
+    repo_dir: Path, *args: str, git_dir: Optional[Path] = None
+) -> subprocess.CompletedProcess[str]:
+    """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given); raises
+    ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped."""
+    if args and args[0] in _SUBCOMMAND_FLAGS:
+        args = (args[0], *_SUBCOMMAND_FLAGS[args[0]], *args[1:])
+    if git_dir is not None and (git_dir.is_symlink() or not git_dir.is_dir()):
+        # Git follows a gitdir file even at a pinned GIT_DIR, so a replaced git dir fails here.
+        return subprocess.CompletedProcess(
+            ["git", *args], 128, "", f"fatal: pinned git dir is not a directory: {git_dir}\n"
+        )
     key = Path(repo_dir).resolve()
     with _RUNNING_GUARD:
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
@@ -55,7 +83,7 @@ def run_hardened_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess[
         return subprocess.run(
             ["git", *_GIT_OVERRIDES, *args],
             cwd=str(repo_dir),
-            env=hardened_git_env(repo_dir),
+            env=hardened_git_env(repo_dir, git_dir),
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
@@ -87,10 +115,17 @@ def clear_stale_index_lock(repo_dir: Path, git_dir: Path) -> bool:
 def config_names_a_repository_program(names: List[str]) -> bool:
     """Repository config the command line cannot switch off: filter drivers (smudge, clean,
     process), config-defined hooks (``hook.<name>.command``, which core.hooksPath does not
-    cover), includes (read from files outside this check) and promisor remotes (a missing
-    object is fetched, which can start a transport program)."""
+    cover), diff drivers (``diff.external``, ``diff.<driver>.textconv`` or ``.command``, which
+    only some subcommands can switch off), signing programs (``gpg.program``,
+    ``gpg.<format>.program``), includes (read from files outside this check) and promisor
+    remotes (a missing object is fetched, which can start a transport program). Harmless keys
+    such as ``diff.algorithm`` are not refused."""
     for name in (raw.lower() for raw in names):
-        if name.startswith(("filter.", "hook.", "include.", "includeif.")):
+        if name.startswith(("filter.", "gpg.", "hook.", "include.", "includeif.")):
+            return True
+        if name == "diff.external" or (
+            name.startswith("diff.") and name.endswith((".command", ".textconv"))
+        ):
             return True
         if name == "extensions.partialclone" or (
             name.startswith("remote.") and name.endswith(".promisor")
@@ -99,11 +134,13 @@ def config_names_a_repository_program(names: List[str]) -> bool:
     return False
 
 
-def repository_config_can_start_a_program(repo_dir: Path) -> bool:
+def repository_config_can_start_a_program(repo_dir: Path, git_dir: Optional[Path] = None) -> bool:
     """True when the config of the repository at ``repo_dir`` names such a program, or cannot
     be read."""
     try:
-        config = run_hardened_git(repo_dir, "config", "--list", "--name-only", "--includes")
+        config = run_hardened_git(
+            repo_dir, "config", "--list", "--name-only", "--includes", git_dir=git_dir
+        )
     except subprocess.TimeoutExpired:
         return True
     return config.returncode != 0 or config_names_a_repository_program(config.stdout.splitlines())
@@ -128,8 +165,3 @@ def repository_git_dir(repo_dir: Path) -> Optional[Path]:
     ):
         return Path(found[1]).resolve()
     return None
-
-
-def repository_is_rooted_at(repo_dir: Path) -> bool:
-    """True when ``repo_dir`` is the work tree's top level and its git dir lies inside it."""
-    return repository_git_dir(repo_dir) is not None

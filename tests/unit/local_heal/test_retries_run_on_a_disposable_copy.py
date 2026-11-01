@@ -640,7 +640,7 @@ def test_reset_restores_tracked_and_removes_untracked_files_under_a_foreign_git_
 
 def test_every_reset_git_call_has_a_timeout_and_a_git_free_environment(reset_env, monkeypatch):
     copy = _repo_with_local_work(reset_env / "copy")
-    monkeypatch.setenv("GIT_DIR", str(copy / ".git"))
+    monkeypatch.setenv("GIT_DIR", str(reset_env / "inherited.git"))
     real_run = subprocess.run
     calls: list[tuple[list[str], dict]] = []
 
@@ -659,5 +659,6 @@ def test_every_reset_git_call_has_a_timeout_and_a_git_free_environment(reset_env
         assert kwargs.get("timeout")
         env = kwargs.get("env")
         assert env is not None
-        assert "GIT_DIR" not in env
+        # The inherited GIT_DIR is dropped; only the probed git dir may be pinned.
+        assert env.get("GIT_DIR") in (None, str((copy / ".git").resolve()))
         assert env.get("GIT_CONFIG_NOSYSTEM") == "1"
