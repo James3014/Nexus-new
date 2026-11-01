@@ -3621,3 +3621,15 @@ def test_a_lowered_accept_round_still_numbers_as_main_read_it(model, files, othe
         _c(f"{model} round 1 notes; {model} r0: REJECT at {HEAD} x\n"),
     ] + [_c(body) for body in others]
     assert rrc.evaluate(HEAD, files, comments, [])["status"] == status
+
+
+def test_a_lowered_accept_round_never_chooses_a_delta_head_main_would_not():
+    # Merge-only delta heads are chosen with rounds compared as main read them: the lower
+    # round here must not make the head's own reading look short of a record.
+    comments = [
+        _c(f"Claude r1 (closes r5): ACCEPT at {HEAD}\n"),
+        _c(f"Claude r1: REJECT at {HEAD} — x\n"),
+        _c(f"Claude r3: ACCEPT at {OLD}\n"),
+    ]
+    report = rrc.evaluate(HEAD, DOCS, comments, [], delta_verified=(OLD,))
+    assert report["status"] == "MISSING_RECORD"

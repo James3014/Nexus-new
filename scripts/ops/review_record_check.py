@@ -1220,7 +1220,7 @@ def _answered(
     answers: list[tuple[tuple[int, int], str, str | None, int | None]],
 ) -> bool:
     """A later ACCEPT of a later round by the same named reviewer answers the REJECT."""
-    reviewer, reject_round = event.get("reviewer"), event.get("compare", event["round"])
+    reviewer, reject_round = event.get("reviewer"), event["round"]
     if reviewer is None or reject_round is None:
         return False
     return any(
@@ -1251,10 +1251,15 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
     ``r3 ACCEPT`` does not outrank its ``r1`` or ``r2 REJECT`` (#3041). A later comment
     without a round 1 (a recap of round 2) keeps the numbering.
 
-    Numbering uses each event's ``round`` (main's reading); the comparison uses its
-    ``compare`` round where it has one (``_round_before``), never higher for an ACCEPT
-    nor lower for a REJECT than ``round``.
+    Numbering uses each event's ``round`` (main's reading); with ``renumber`` the
+    comparison uses its ``compare`` round where it has one (``_round_before``), never
+    higher for an ACCEPT nor lower for a REJECT than ``round``. Without it (choosing
+    merge-only delta heads) rounds are compared as main read them.
     """
+
+    def compared(event: dict[str, Any]) -> int | None:
+        return event.get("compare", event["round"]) if renumber else event["round"]
+
     round_one = {
         (event.get("comment"), event["family"], event.get("reviewer"))
         for event in events
@@ -1282,15 +1287,15 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
             continue
         if event["kind"] != "reject":
             continue  # a round marker only numbers
-        reject_round = event.get("compare", event["round"])
+        reject_round = compared(event)
         accepts[family] = [
             (accept, accept_epoch)
             for accept, accept_epoch in accepts.get(family, [])
             if reviewer is not None and accept.get("reviewer") == reviewer
             if accept_epoch == epoch
             if reject_round is not None
-            and accept.get("compare", accept["round"]) is not None
-            and accept.get("compare", accept["round"]) > reject_round
+            and (accept_round := compared(accept)) is not None
+            and accept_round > reject_round
         ]
     return {family for family, kept in accepts.items() if kept}
 
@@ -1414,7 +1419,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         (index, start + (span[0] if span else 0)),
                         family,
                         _reviewer_word(before) or header_reviewer,
-                        accept_round,
+                        main_round,
                     ))
                 if family and _binding(clause, span, line, head, comment_head):
                     line_events.append((
