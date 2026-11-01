@@ -21,6 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    run_hardened_git,
+)
+
 TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "CANCELLED", "OUTCOME_UNKNOWN"})
 ACTIVE_STATES = frozenset({"QUEUED", "RUNNING", "WAITING_INPUT"})
 _ALLOWED_STATES = TERMINAL_STATES | ACTIVE_STATES
@@ -294,22 +299,50 @@ def process_alive(pid: object) -> bool:
 _process_alive = process_alive
 
 
+def _enclosing_repository(cwd: str) -> Path | None:
+    """The nearest directory at or above ``cwd`` holding a ``.git`` entry, found the way
+    git searches (stopping below any ``GIT_CEILING_DIRECTORIES`` entry), when that
+    repository's config names no program the command line cannot switch off.
+
+    The delegated agent ran and wrote in ``cwd``, so every git call below runs through the
+    shared hardened runner from this directory, never searching above it."""
+    ceilings = {
+        Path(entry).resolve()
+        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
+        if entry
+    }
+    try:
+        start = Path(cwd).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not start.is_dir():
+        return None
+    for candidate in (start, *start.parents):
+        if os.path.lexists(candidate / ".git"):
+            try:
+                refused = repository_config_can_start_a_program(candidate)
+            except OSError:
+                return None
+            return None if refused else candidate
+        if candidate.parent in ceilings:
+            return None
+    return None
+
+
 def _git_identity(cwd: str) -> tuple[str | None, str | None]:
-    root = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if root.returncode != 0:
+    repository = _enclosing_repository(cwd)
+    return (None, None) if repository is None else _git_identity_in(repository)
+
+
+def _git_identity_in(repository: Path) -> tuple[str | None, str | None]:
+    try:
+        root = run_hardened_git(repository, "rev-parse", "--show-toplevel")
+        if root.returncode != 0:
+            return None, None
+        repo_root = root.stdout.strip() or None
+        head = run_hardened_git(repository, "rev-parse", "HEAD")
+    except (OSError, subprocess.TimeoutExpired):
         return None, None
-    repo_root = root.stdout.strip() or None
-    head = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     return repo_root, head.stdout.strip() if head.returncode == 0 else None
 
 
@@ -351,23 +384,17 @@ def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
 
 
 def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
-    root_text, _head = _git_identity(cwd)
-    if not root_text:
+    repository = _enclosing_repository(cwd)
+    root_text = _git_identity_in(repository)[0] if repository is not None else None
+    if not root_text or repository is None:
         return None
     root = Path(root_text)
-    proc = subprocess.run(
-        [
-            "git",
-            "-C",
-            cwd,
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-        ],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        proc = run_hardened_git(
+            repository, "status", "--porcelain=v1", "-z", "--untracked-files=all", text=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if proc.returncode != 0:
         return None
 

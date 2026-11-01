@@ -6,6 +6,8 @@ import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 
+from nexus.core.hardened_git import repository_config_can_start_a_program, run_hardened_git
+
 logger = logging.getLogger(__name__)
 
 class BattleSwarm:
@@ -27,18 +29,28 @@ class BattleSwarm:
         
     def _create_worktree(self, strategy_name: str, branch_name: str) -> Optional[Path]:
         worktree_path = self.run_dir / f"worktree_{strategy_name}"
+        # Git runs only through the shared hardened runner, and not at all in a repository
+        # whose config names a program the command line cannot switch off (filters,
+        # config-defined hooks): checkout and commit would start it.
+        root = self.project_root.resolve()
+        if repository_config_can_start_a_program(root):
+            logger.error(f"Failed to create worktree for {strategy_name}: repository config names a program")
+            return None
         if worktree_path.exists():
-            subprocess.run(["git", "worktree", "remove", "-f", str(worktree_path)], cwd=str(self.project_root), capture_output=True)
+            self._git_quietly("worktree", "remove", "-f", str(worktree_path))
             if worktree_path.exists():
                 shutil.rmtree(worktree_path, ignore_errors=True)
             
         try:
-            subprocess.run(["git", "branch", "-f", branch_name, "HEAD"], cwd=str(self.project_root), check=True, capture_output=True)
-            subprocess.run(["git", "worktree", "add", str(worktree_path), branch_name], cwd=str(self.project_root), check=True, capture_output=True)
+            for args in (("branch", "-f", branch_name, "HEAD"), ("worktree", "add", str(worktree_path), branch_name)):
+                run_hardened_git(root, *args).check_returncode()
             return worktree_path
         except subprocess.CalledProcessError as e:
-            err = e.stderr.decode('utf-8') if e.stderr else str(e)
+            err = e.stderr if e.stderr else str(e)
             logger.error(f"Failed to create worktree for {strategy_name}: {err}")
+            return None
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"Failed to create worktree for {strategy_name}: {e}")
             return None
 
     def _cleanup_worktrees(self, worktree_paths: List[Path], branches: List[str]):
@@ -47,9 +59,16 @@ class BattleSwarm:
         # project_root can be a shared repository whose other worktrees (owned by other sessions)
         # must not be pruned.
         for wp in worktree_paths:
-            subprocess.run(["git", "worktree", "remove", "-f", str(wp)], cwd=str(self.project_root), capture_output=True)
+            self._git_quietly("worktree", "remove", "-f", str(wp))
         for b in branches:
-            subprocess.run(["git", "branch", "-D", b], cwd=str(self.project_root), capture_output=True)
+            self._git_quietly("branch", "-D", b)
+
+    def _git_quietly(self, *args: str) -> None:
+        """Best-effort cleanup git call in project_root, through the shared hardened runner."""
+        try:
+            run_hardened_git(self.project_root.resolve(), *args)
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timed out: git {' '.join(args)}")
 
     def trigger_battle(self, task_id: str, desc: str, context: Dict[str, Any], execute_fn: Callable) -> Dict[str, Any]:
         """

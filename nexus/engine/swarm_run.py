@@ -34,6 +34,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from nexus.core.hardened_git import repository_config_can_start_a_program, run_hardened_git
+
 SCHEMA = "nexus.swarm_run.v1"
 NOT_EXECUTED_NO_BARRIER = "not_executed:no_os_barrier"
 VERIFY_TIMEOUT_SEC = 60
@@ -45,9 +47,10 @@ AUTHORITY = (
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 B607 - fixed git argv
-        ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60, check=False
-    )
+    """``git <args>`` in ``cwd`` (the workspace root or a worker worktree) through the shared
+    hardened runner: no hooks, fsmonitor, signing or external diff program the repository
+    names."""
+    return run_hardened_git(cwd, *args, timeout=60)
 
 
 def _safe(value: str) -> str:
@@ -117,6 +120,9 @@ def run_bounded_swarm(
         report.update(status="BLOCKED", reason="WORKSPACE_NOT_GIT_REPOSITORY")
         return report
     report["base_commit"] = head.stdout.strip()
+    if repository_config_can_start_a_program(root):
+        report.update(status="BLOCKED", reason="WORKSPACE_GIT_CONFIG_NAMES_A_PROGRAM")
+        return report
 
     lock_file = root / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
     registry = FileLockRegistry(lock_file=str(lock_file))
