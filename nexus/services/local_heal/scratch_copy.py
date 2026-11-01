@@ -29,9 +29,9 @@ def _refuse_hard_links(entry: Path) -> None:
 
     Both copies below turn a hard link into a plain file with its content, so a hard link to a
     file outside repo_dir would hand that file to the model code run in the copy, whose output
-    reaches a prompt. Symlinks are copied as links and not followed. ``.git`` and ``.venv`` are
-    not walked: model code cannot write there (HOST_RUN_SUBTREES), and git and uv may hard-link
-    their own files."""
+    reaches a prompt. Symlinks are copied as links and not followed. The top-level ``.git`` and
+    ``.venv`` are not walked: the model sandbox keeps exactly those read-only (HOST_RUN_SUBTREES),
+    and git and uv may hard-link their own files. Nested ones are walked like any directory."""
 
     info = os.lstat(entry)
     if stat.S_ISREG(info.st_mode):
@@ -40,8 +40,7 @@ def _refuse_hard_links(entry: Path) -> None:
         return
     if not stat.S_ISDIR(info.st_mode) or entry.name in HOST_RUN_SUBTREES:
         return
-    for dirpath, dirnames, filenames in os.walk(entry):
-        dirnames[:] = [name for name in dirnames if name not in HOST_RUN_SUBTREES]
+    for dirpath, _dirnames, filenames in os.walk(entry):
         for name in filenames:
             child = os.path.join(dirpath, name)
             child_info = os.lstat(child)
@@ -56,8 +55,8 @@ def copy_repo_entries(repo_dir: Path, scratch_dir: Path) -> None:
 
     On macOS a directory is cloned with ``cp -cR`` (APFS clone); anything else, or a failed
     clone, uses ``shutil``. An entry that is or contains ``scratch_dir`` is skipped. A hard-linked
-    regular file anywhere outside ``.git``/``.venv`` raises ``PathContainmentError`` before
-    anything is copied."""
+    regular file anywhere outside the top-level ``.git``/``.venv`` raises ``PathContainmentError``
+    before anything is copied."""
 
     repo_path = Path(repo_dir).resolve()
     scratch_path = Path(scratch_dir).resolve()

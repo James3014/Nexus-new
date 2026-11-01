@@ -226,6 +226,52 @@ def test_world_c_synthetic_copy_of_regular_files_is_unchanged(world):
     assert not (workspace / "missing.py").exists()
 
 
+@pytest.mark.parametrize("twice", ["repro_and_verifier", "target_and_verifier"])
+def test_world_c_synthetic_copy_names_the_same_file_twice(world, twice):
+    repo, _ = world
+    (repo / "repro.py").write_text("print('x')\n")
+    if twice == "repro_and_verifier":
+        kwargs = {"repro_script": "repro.py", "verifier_files": ("repro.py",)}
+    else:
+        kwargs = {"verifier_files": (TARGET, "./" + TARGET)}
+    workspace = prepare_world_c_workspace(repo, "wc-twice", target_file=TARGET, **kwargs)
+    assert (workspace / TARGET).read_text() == ORIGINAL
+
+
+def test_world_c_synthetic_copy_treats_repro_script_text_as_no_file(world):
+    # route_context["repro_script"] can be the script itself, longer than any file name.
+    repo, _ = world
+    text = "import sys\n" + "x" * 300 + "\nprint('/Users/a/b')\n"
+    workspace = prepare_world_c_workspace(repo, "wc-text", target_file=TARGET, repro_script=text)
+    assert (workspace / TARGET).read_text() == ORIGINAL
+    workspace = prepare_world_c_workspace(
+        repo, "wc-longname", target_file=TARGET, verifier_files=("y" * 300,)
+    )
+    assert (workspace / TARGET).read_text() == ORIGINAL
+
+
+@pytest.mark.parametrize("failure", ["refused", "other"])
+def test_world_c_copy_removes_its_workspace_on_any_failure(world, tmp_path, monkeypatch, failure):
+    import nexus.services.local_heal.pipeline_isolation as isolation
+
+    repo, outside = world
+    made = tmp_path / "made"
+    monkeypatch.setattr(isolation, "make_isolated_workspace", lambda prefix: made.mkdir() or made)
+    if failure == "refused":
+        _hardlink(repo, outside)
+        expected = WorldCCopyRefused
+    else:
+
+        def broken(*_a, **_kw):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(isolation, "copy_file_in_root", broken)
+        expected = OSError
+    with pytest.raises(expected):
+        prepare_world_c_workspace(repo, "wc-cleanup", target_file=TARGET)
+    assert not made.exists()
+
+
 def test_verifier_input_files_skips_a_hard_link(world):
     repo, outside = world
     os.link(outside / "secret.txt", repo / "repro.py")
@@ -505,6 +551,21 @@ def test_scratch_copy_refuses_a_hard_linked_file(world, tmp_path):
 
     repo, outside = world
     os.link(outside / "secret.txt", repo / "toy" / "helper.py")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    with pytest.raises(PathContainmentError, match="file_has_other_links"):
+        copy_repo_entries(repo, scratch)
+    assert MARK not in _tree_text(scratch)
+
+
+@pytest.mark.parametrize("nested", ["pkg/.venv/h.py", "pkg/.git/h"])
+def test_scratch_copy_walks_nested_git_and_venv(world, tmp_path, nested):
+    # The model sandbox keeps only the top-level .git/.venv read-only.
+    from nexus.services.local_heal.scratch_copy import copy_repo_entries
+
+    repo, outside = world
+    (repo / nested).parent.mkdir(parents=True)
+    os.link(outside / "secret.txt", repo / nested)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     with pytest.raises(PathContainmentError, match="file_has_other_links"):

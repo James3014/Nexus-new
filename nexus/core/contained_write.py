@@ -17,6 +17,7 @@ raises ``PathContainmentError`` (an ``OSError``) and nothing is written.
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
 import shutil
@@ -219,19 +220,28 @@ def _open_regular(name: str, dir_fd: int) -> tuple[int, os.stat_result]:
     return fd, info
 
 
+def _names_nothing(error: BaseException | None) -> bool:
+    """The path cannot name an existing entry: missing, or a component too long to exist."""
+
+    return isinstance(error, FileNotFoundError) or (
+        isinstance(error, OSError) and error.errno == errno.ENAMETOOLONG
+    )
+
+
 def copy_file_in_root(src_root: Path | str, relative: PurePath | str, dst_root: Path | str) -> bool:
     """Copy ``src_root/relative`` to ``dst_root/relative``, never reading through a link.
 
     Only a regular single-link file is copied (the same rule as ``read_text_in_root``); a link at
     the file or on the way to it, a hard link and a FIFO or other special file raise
-    ``PathContainmentError`` and nothing is copied. Returns False when the file does not exist.
+    ``PathContainmentError`` and nothing is copied. Returns False when the file does not exist,
+    including a name too long to exist (ENAMETOOLONG).
     ``dst_root`` is a fresh directory only the host writes; missing parents are created there."""
 
     parts = _parts(relative)
     try:
         parent = _open_parent(src_root, parts, create_parents=False)
     except PathContainmentError as exc:
-        if isinstance(exc.__cause__, FileNotFoundError):
+        if _names_nothing(exc.__cause__):
             return False
         raise
     try:
@@ -239,6 +249,10 @@ def copy_file_in_root(src_root: Path | str, relative: PurePath | str, dst_root: 
             fd, info = _open_regular(parts[-1], parent)
         except FileNotFoundError:
             return False
+        except PathContainmentError as exc:
+            if _names_nothing(exc.__cause__):
+                return False
+            raise
     finally:
         os.close(parent)
     try:

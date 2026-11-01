@@ -75,16 +75,26 @@ def prepare_world_c_workspace(
             copy_tree_in_root(source, target, ignore_names=_IGNORED_NAMES)
         else:
             # Synthetic workspaces must not expand an arbitrary parent such as /tmp.
-            for relative in (target_file, repro_script, *verifier_files):
+            # route_context["repro_script"] may hold script text rather than a file name.
+            named = (target_file, "" if "\n" in repro_script else repro_script, *verifier_files)
+            copied: set[str] = set()
+            for relative in named:
                 if not relative:
                     continue
                 relative_path = Path(relative)
                 if relative_path.is_absolute() or ".." in relative_path.parts:
                     continue
-                copy_file_in_root(source, os.path.normpath(relative_path), target)
+                normalized = os.path.normpath(relative_path)
+                if normalized in copied:
+                    continue
+                copied.add(normalized)
+                copy_file_in_root(source, normalized, target)
     except PathContainmentError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise WorldCCopyRefused(f"world_c_copy_refused:{exc}") from exc
+    except BaseException:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
     return target.resolve()
 
 
