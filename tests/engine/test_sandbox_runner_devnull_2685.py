@@ -72,6 +72,10 @@ def test_default_profile_uses_resolved_workspace_path(tmp_path, monkeypatch):
         stderr = ""
 
     monkeypatch.setattr("nexus.engine.sandbox_runner.subprocess.run", lambda *a, **k: _Proc())
+    # The task command runs through the process-group reaping runner (#3052).
+    monkeypatch.setattr(
+        "nexus.engine.sandbox_runner.run_reaping_process_group", lambda *a, **k: _Proc()
+    )
     result = runner.run_task("profile", command=["true"], timeout_sec=5)
     workspace = Path(result["workspace_path"])
     assert str(workspace.resolve()) in captured["write"]

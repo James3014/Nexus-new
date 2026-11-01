@@ -14,6 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.state_root import persistent_state_root
 
 logger = logging.getLogger(__name__)
@@ -556,14 +557,10 @@ socket.socket.connect = _guarded_socket_connect
                 barrier_mode = "os_level_sandbox_exec"
                 loopback_allowed = False
 
-            proc = subprocess.run(
-                active_command,
-                cwd=effective_cwd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
-                check=False,
+            # The task's command and everything it starts in its process group are killed
+            # once it returns or times out (#3052).
+            proc = run_reaping_process_group(
+                active_command, cwd=effective_cwd, env=env, timeout=timeout_sec
             )
             duration_sec = time.time() - start_time
             mismatch = _run_dir_mismatch(run_dir, run_dir_identity)

@@ -152,6 +152,7 @@ def test_network_guard_is_not_writable_by_the_sandboxed_process(tmp_path, monkey
             return _Proc()
 
         monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
         result = runner.run_task("guard", command=_cmd(), timeout_sec=5)
         assert captured["cmd"][:2] == ["sandbox-exec", "-p"]
         profile = captured["cmd"][2]
@@ -184,6 +185,7 @@ def test_scratch_dir_removed_when_subprocess_fails(tmp_path, monkeypatch, failur
         raise failure
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     if isinstance(failure, subprocess.TimeoutExpired):
         result = runner.run_task("probe", command=_cmd(), timeout_sec=1)
         assert result["timed_out"] is True and result["error"] == "timeout"
