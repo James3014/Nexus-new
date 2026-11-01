@@ -510,6 +510,40 @@ def _isolated_executor_resolution_errors():
     _clear_recorded_executor_resolution_errors()
 
 
+_AGY_POOL_STOPPED_OVERRIDE_ENV = "NEXUS_AGY_POOL_STOPPED_OVERRIDE"
+_AGY_POOL_STOPPED_OVERRIDE_BEFORE = pytest.StashKey[str | None]()
+
+
+@pytest.fixture(autouse=True)
+def _agy_pool_stopped_override_for_dispatcher_tests(request):
+    """Agy pool stopped (2026-10-30): nexus-agy-dispatch refuses by default.
+
+    Tests that drive the dispatcher's original logic (in process, or as a
+    subprocess inheriting os.environ) run with the override; the default-deny
+    tests ``delenv`` it themselves, which runs after this fixture.  Set
+    directly, so a test's ``monkeypatch.undo()`` does not drop it; the value
+    from before the test comes back in ``pytest_runtest_teardown`` below, which
+    runs after every fixture (including ``monkeypatch``) has been torn down.
+    """
+    request.node.stash[_AGY_POOL_STOPPED_OVERRIDE_BEFORE] = os.environ.get(
+        _AGY_POOL_STOPPED_OVERRIDE_ENV
+    )
+    os.environ[_AGY_POOL_STOPPED_OVERRIDE_ENV] = "1"
+    yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item):
+    yield
+    if _AGY_POOL_STOPPED_OVERRIDE_BEFORE not in item.stash:
+        return
+    before = item.stash[_AGY_POOL_STOPPED_OVERRIDE_BEFORE]
+    if before is None:
+        os.environ.pop(_AGY_POOL_STOPPED_OVERRIDE_ENV, None)
+    else:
+        os.environ[_AGY_POOL_STOPPED_OVERRIDE_ENV] = before
+
+
 @pytest.fixture(autouse=True)
 def _isolate_gateway_health_hmac_key(tmp_path_factory, monkeypatch):
     """#2226: no test may create or read the real per-host /health HMAC key."""
@@ -527,20 +561,6 @@ def _agy_model_catalog_check_off_unless_requested(monkeypatch):
     after this fixture.
     """
     monkeypatch.setenv("NEXUS_AGY_MODEL_CATALOG_CHECK", "0")
-
-
-@pytest.fixture(autouse=True)
-def _agy_pool_stopped_override_for_dispatcher_tests():
-    """Agy pool stopped (2026-10-30): nexus-agy-dispatch refuses by default.
-
-    Tests that drive the dispatcher's original logic (in process, or as a
-    subprocess inheriting os.environ) run with the override; the default-deny
-    tests ``delenv`` it themselves, which runs after this fixture.  An own
-    MonkeyPatch, so a test's ``monkeypatch.undo()`` does not drop it.
-    """
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("NEXUS_AGY_POOL_STOPPED_OVERRIDE", "1")
-        yield
 
 
 @pytest.fixture(autouse=True)
