@@ -99,3 +99,137 @@ def test_acquire_accepts_independent_registered_worktree(tmp_path: Path):
     assert broker.acquire(timeout_sec=0.05).resolve() == swarm.resolve()
     assert _git(swarm, "rev-parse", "--show-toplevel") == str(swarm.resolve())
     assert (swarm / ".swarm_lock").exists()
+
+
+def _sentinel_cwd(tmp_path: Path, monkeypatch) -> Path:
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "SENTINEL").write_text("keep", encoding="utf-8")
+    monkeypatch.chdir(sandbox)
+    # git must not discover any repository above tmp_path.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    return sandbox
+
+
+def _add_foreign_worktree(controller: Path, path: Path, base: str) -> None:
+    _git(controller, "worktree", "add", "--detach", str(path), base)
+    (path / "tracked.txt").write_text("uncommitted edit\n", encoding="utf-8")
+    (path / "wip.txt").write_text("untracked work\n", encoding="utf-8")
+
+
+def test_non_git_workspace_keeps_real_swarm_dir_contents(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    workspace = tmp_path / "workspace"
+    swarm = workspace / ".nexus-swarm-001"
+    (swarm / "data").mkdir(parents=True)
+    (swarm / "data" / "kept.txt").write_text("x", encoding="utf-8")
+
+    broker = SwarmBroker(workspace)
+
+    assert broker.is_independently_registered_worktree(swarm) is False
+    assert broker.acquire(timeout_sec=0.05) is None
+    broker.release(swarm)
+    assert (swarm / "data" / "kept.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_non_git_workspace_ignores_symlinked_swarm_entry(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = tmp_path / "target"
+    (target / "data").mkdir(parents=True)
+    (target / "data" / "kept.txt").write_text("x", encoding="utf-8")
+    (target / "notes.txt").write_text("y", encoding="utf-8")
+    (workspace / ".nexus-swarm-001").symlink_to(target)
+
+    broker = SwarmBroker(workspace)
+    assert broker.swarm_dirs == []
+    swarm_dir = broker.acquire(timeout_sec=0.05)
+    if swarm_dir is not None:
+        broker.release(swarm_dir)
+    broker.release(workspace / ".nexus-swarm-001")
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (target / "notes.txt").exists()
+    assert (target / "data" / "kept.txt").exists()
+
+
+def test_git_workspace_ignores_symlink_to_registered_worktree(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    other = tmp_path / "other-wt"
+    _add_foreign_worktree(controller, other, base)
+    (other / ".swarm_lock").write_text("", encoding="utf-8")
+    link = controller / ".nexus-swarm-001"
+    link.symlink_to(other)
+
+    broker = SwarmBroker(controller)
+    assert broker.swarm_dirs == []
+    assert broker.is_independently_registered_worktree(link) is False
+    swarm_dir = broker.acquire(timeout_sec=0.05)
+    if swarm_dir is not None:
+        broker.release(swarm_dir)
+    broker.release(link)
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (other / "wip.txt").exists()
+    assert (other / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
+    assert (other / ".swarm_lock").exists()
+
+
+def test_release_leaves_registered_worktree_outside_workspace_untouched(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    other = tmp_path / ".nexus-swarm-001"
+    _add_foreign_worktree(controller, other, base)
+
+    SwarmBroker(controller).release(other)
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (other / "wip.txt").exists()
+    assert (other / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
+
+
+def test_release_resets_registered_child_worktree(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+
+    broker = SwarmBroker(controller)
+    acquired = broker.acquire(timeout_sec=0.05)
+    assert acquired is not None
+    (swarm / "tracked.txt").write_text("candidate edit\n", encoding="utf-8")
+    (swarm / "scratch.txt").write_text("candidate scratch\n", encoding="utf-8")
+    broker.release(acquired)
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
+    assert not (swarm / "scratch.txt").exists()
+    assert not (swarm / ".swarm_lock").exists()
+
+
+def test_release_leaves_worktree_reached_through_parent_of_link_untouched(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    _git(controller, "worktree", "add", "--detach", str(controller / ".nexus-swarm-001"), base)
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "sub").mkdir(parents=True)
+    other = elsewhere / ".nexus-swarm-001"
+    _add_foreign_worktree(controller, other, base)
+    (controller / "link").symlink_to(elsewhere / "sub", target_is_directory=True)
+
+    SwarmBroker(controller).release(controller / "link" / ".." / ".nexus-swarm-001")
+
+    assert (sandbox / "SENTINEL").exists()
+    assert (other / "wip.txt").exists()
+    assert (other / "tracked.txt").read_text(encoding="utf-8") == "uncommitted edit\n"
