@@ -20,9 +20,11 @@ import json, os, sys
 from pathlib import Path
 
 sub = sys.argv[1]
-if os.environ.get("FAKE_MATERIAL_CHECK") and not os.environ.get("NEXUS_CORE_MATERIAL_PYTHON"):
-    sys.exit(9)
 Path(os.environ["FAKE_CALLS"]).open("a").write(sub + " " + os.getcwd() + "\\n")
+Path(os.environ["FAKE_CALLS"] + ".argv").open("a").write(json.dumps({
+    "argv": sys.argv[1:],
+    "material_python": "NEXUS_CORE_MATERIAL_PYTHON" in os.environ,
+}) + "\\n")
 if sub == "issue-check":
     d = Path(".nexus-core/receipts")
     d.mkdir(parents=True, exist_ok=True)
@@ -68,7 +70,8 @@ def env(tmp_path: Path):
     certify.write_text(FAKE_CERTIFY)
     certify.chmod(certify.stat().st_mode | stat.S_IXUSR)
     calls = tmp_path / "calls.log"
-    penv = dict(os.environ, GITHUB_TOKEN="tok", FAKE_CALLS=str(calls), FAKE_MATERIAL_CHECK="1")
+    penv = dict(os.environ, GITHUB_TOKEN="tok", FAKE_CALLS=str(calls))
+    penv.pop("NEXUS_CORE_MATERIAL_PYTHON", None)
     return {"repo": repo, "certify": certify, "calls": calls, "env": penv, "tmp": tmp_path}
 
 
@@ -82,8 +85,6 @@ def run(env, *extra: str, **envover: str):
         str(env["repo"]),
         "--certify-bin",
         str(env["certify"]),
-        "--material-python",
-        sys.executable,
         "--output-dir",
         str(env["tmp"] / "out"),
         *extra,
@@ -250,7 +251,7 @@ def test_json_out_write_failure_keeps_exit_code(env):
     assert "warning: cannot write --json-out" in proc.stderr
 
 
-# --- materials: trusted base lock files only, pinned entries only, timeout ---
+# --- host installs: only the pinned Core tool, time-bounded; no host material venv ---
 
 GOOD_RUNTIME = (
     "# comment\n"
@@ -273,6 +274,12 @@ if args[:2] == ["tool", "install"]:
     certify = bindir / "nexus-certify"
     certify.write_text(Path(os.environ["FAKE_CERTIFY_SRC"]).read_text())
     certify.chmod(0o755)
+    if os.environ.get("FAKE_UV_TOOL_SLEEP"):
+        # The binary is already in place; the install itself never finishes.
+        detach = bool(os.environ.get("FAKE_UV_DETACH"))
+        child = subprocess.Popen(["sleep", "60"], start_new_session=detach)
+        Path(os.environ["FAKE_UV_PIDS"]).write_text(f"{os.getpid()} {child.pid}")
+        time.sleep(60)
 elif args[:1] == ["venv"]:
     env_dir = Path(args[-1])
     (env_dir / "bin").mkdir(parents=True, exist_ok=True)
@@ -364,8 +371,29 @@ def _uv_calls(env):
     return [json.loads(line) for line in env["uv_log"].read_text().splitlines()]
 
 
+def _material_uv_calls(env):
+    return [c for c in _uv_calls(env) if c["args"][:1] in (["venv"], ["pip"])]
+
+
+def _certify_calls(env):
+    log = Path(str(env["calls"]) + ".argv")
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def _kill_recorded_pids(env):
+    pids_file = env["tmp"] / "uv.pids"
+    if pids_file.exists():
+        for pid in pids_file.read_text().split():
+            try:
+                os.kill(int(pid), 9)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
 def test_materials_installed_from_base_not_head(env):
-    """A candidate head that edits the lock files cannot change what gets installed."""
+    """Lock-file edits on the candidate head install nothing on the host."""
     env = _with_requirements(env)
     repo = env["repo"]
     (repo / "requirements/canonical-runtime.txt").write_text(GOOD_RUNTIME + "-e ./evil\n")
@@ -375,19 +403,11 @@ def test_materials_installed_from_base_not_head(env):
     git(repo, "commit", "-q", "-am", "head edits requirements")
     proc, out = run_materials(env)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    installs = [c for c in _uv_calls(env) if c["args"][:2] == ["pip", "install"]]
-    assert [c["requirement"] for c in installs] == [
-        GOOD_LEARNING,
-        GOOD_RUNTIME.split("\n", 1)[1],
-    ]
-    _assert_neutral_cwd(env, _uv_calls(env))
-    for call in installs:
-        assert "evil" not in call["requirement"]
-        assert "index-url" not in call["requirement"]
-        req = Path(call["args"][call["args"].index("--requirement") + 1])
-        assert repo not in req.parents
-        assert Path(call["cwd"]).resolve() != repo.resolve()
-        assert "--require-hashes" not in call["args"]
+    assert out["status"] == "VERIFIED"
+    assert _material_uv_calls(env) == []
+    calls = _certify_calls(env)
+    assert [c["argv"][0] for c in calls] == ["issue-init", "issue-check"]
+    assert not any(c["material_python"] for c in calls)
 
 
 @pytest.mark.parametrize(
@@ -412,34 +432,33 @@ def test_materials_installed_from_base_not_head(env):
     ],
 )
 def test_materials_untrusted_base_line_fails_closed_before_install(env, bad_line):
+    """Base lock-file content is never installed on the host, whatever it holds."""
     env = _with_requirements(env, runtime=GOOD_RUNTIME + bad_line + "\n")
     proc, out = run_materials(env)
-    assert proc.returncode == 2
-    assert out["error_code"] == "MATERIALS_UNTRUSTED"
-    assert not [c for c in _uv_calls(env) if c["args"][:1] in (["venv"], ["pip"])]
-    assert not env["calls"].exists()
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.get("error_code") is None
+    assert _material_uv_calls(env) == []
+    assert [c["argv"][0] for c in _certify_calls(env)] == ["issue-init", "issue-check"]
 
 
 def test_materials_hash_pinned_uses_require_hashes(env):
+    """Hash-pinned lock files are not installed on the host either."""
     hashed = "pkg==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
     env = _with_requirements(env, runtime=hashed)
     proc, out = run_materials(env)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    installs = [c for c in _uv_calls(env) if c["args"][:2] == ["pip", "install"]]
-    runtime_call = installs[1]
-    assert runtime_call["requirement"] == "pkg==1.0 --hash=sha256:" + "a" * 64 + "\n"
-    assert "--require-hashes" in runtime_call["args"]
-    assert "--require-hashes" not in installs[0]["args"]
+    assert [c for c in _uv_calls(env) if c["args"][:2] == ["pip", "install"]] == []
 
 
 def test_materials_cache_reused_only_after_complete_install(env):
+    """A completed Core tool install is reused; nothing else is built on the host."""
     env = _with_requirements(env)
-    proc, _ = run_materials(env)
+    proc, _ = run_materials(env, certify=False)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    first = len(_uv_calls(env))
-    proc, _ = run_materials(env)
+    assert [c["args"][:2] for c in _uv_calls(env)] == [["tool", "install"]]
+    proc, _ = run_materials(env, certify=False)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    assert len(_uv_calls(env)) == first
+    assert [c["args"][:2] for c in _uv_calls(env)] == [["tool", "install"]]
 
 
 def _pid_alive(pid: int) -> bool:
@@ -450,40 +469,42 @@ def _pid_alive(pid: int) -> bool:
 
 
 def test_materials_install_timeout_kills_group_and_fails_closed(env):
+    """The Core tool install is time-bounded; an unfinished install is not reused."""
     import time
 
     env = _with_requirements(env)
     started = time.monotonic()
-    proc, out = run_materials(env, "--materials-timeout", "3", FAKE_UV_SLEEP="1")
-    assert time.monotonic() - started < 30
-    assert proc.returncode == 2
-    assert out["error_code"] == "MATERIALS_FAILED"
-    assert "timed out" in out["error"]
-    assert not env["calls"].exists()
-    pids = [int(p) for p in (env["tmp"] / "uv.pids").read_text().split()]
-    deadline = time.monotonic() + 10
-    while any(_pid_alive(p) for p in pids) and time.monotonic() < deadline:
-        time.sleep(0.2)
-    assert not any(_pid_alive(p) for p in pids)
-    # The half-built venv is not reused: the next run rebuilds it.
-    (env["tmp"] / "uv.log").unlink()
-    proc, _ = run_materials(env)
+    try:
+        proc, out = run_materials(
+            env, "--materials-timeout", "3", certify=False, FAKE_UV_TOOL_SLEEP="1"
+        )
+        assert time.monotonic() - started < 30
+        assert proc.returncode == 2
+        assert out["error_code"] == "CORE_INSTALL_FAILED"
+        assert "timed out" in out["error"]
+        assert not env["calls"].exists()
+        pids = [int(p) for p in (env["tmp"] / "uv.pids").read_text().split()]
+        deadline = time.monotonic() + 10
+        while any(_pid_alive(p) for p in pids) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert not any(_pid_alive(p) for p in pids)
+    finally:
+        _kill_recorded_pids(env)
+    # The binary from the unfinished install is present but not reused.
+    assert (env["tmp"] / "cache" / "tools" / PIN / "bin" / "nexus-certify").exists()
+    env["uv_log"].unlink(missing_ok=True)
+    proc, _ = run_materials(env, certify=False)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    assert [c["args"][0] for c in _uv_calls(env)][:1] == ["venv"]
+    assert [c["args"][:2] for c in _uv_calls(env)] == [["tool", "install"]]
 
 
 def test_trusted_requirements_normalizes_and_rejects():
+    """No host material builder remains: lock files are not parsed or installed here."""
     mod = _load_module()
-    assert mod.trusted_requirements(GOOD_RUNTIME, "r.txt") == GOOD_RUNTIME.split("\n", 1)[1]
-    with pytest.raises(mod.LocalCheckError) as exc:
-        mod.trusted_requirements("# only a comment\n", "r.txt")
-    assert exc.value.code == "MATERIALS_UNTRUSTED"
-    with pytest.raises(mod.LocalCheckError) as exc:
-        mod.trusted_requirements(GOOD_LEARNING.rstrip("\n") + "\x0c-e ./evil\n", "r.txt")
-    assert exc.value.code == "MATERIALS_UNTRUSTED"
-    with pytest.raises(mod.LocalCheckError) as exc:
-        mod.trusted_requirements("pkg==1.0 \\", "r.txt")
-    assert exc.value.code == "MATERIALS_UNTRUSTED"
+    assert not hasattr(mod, "trusted_requirements")
+    assert not hasattr(mod, "ensure_materials")
+    with pytest.raises(SystemExit):
+        mod.build_parser().parse_args(["--issue", "7", "--material-python", sys.executable])
 
 
 def test_core_tool_install_runs_outside_checkout(env):
@@ -496,33 +517,33 @@ def test_core_tool_install_runs_outside_checkout(env):
 
 
 def test_materials_timeout_returns_despite_detached_descendant(env):
+    """The bounded Core tool install returns even if a descendant left the group."""
     import time
 
     env = _with_requirements(env)
     started = time.monotonic()
     try:
         proc, out = run_materials(
-            env, "--materials-timeout", "3", FAKE_UV_SLEEP="1", FAKE_UV_DETACH="1"
+            env,
+            "--materials-timeout",
+            "3",
+            certify=False,
+            FAKE_UV_TOOL_SLEEP="1",
+            FAKE_UV_DETACH="1",
         )
         assert time.monotonic() - started < 30
         assert proc.returncode == 2
-        assert out["error_code"] == "MATERIALS_FAILED"
+        assert out["error_code"] == "CORE_INSTALL_FAILED"
         assert "timed out" in out["error"]
     finally:
-        pids_file = env["tmp"] / "uv.pids"
-        if pids_file.exists():
-            for pid in pids_file.read_text().split():
-                try:
-                    os.kill(int(pid), 9)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        _kill_recorded_pids(env)
 
 
 def test_materials_rebuilt_when_base_lock_content_changes(env):
+    """Changing the base lock files still builds nothing on the host."""
     env = _with_requirements(env)
     proc, _ = run_materials(env)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    env["uv_log"].unlink()
     repo = env["repo"]
     bumped = "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@" + "3" * 40 + "\n"
     (repo / "requirements/canonical-runtime.txt").write_text(bumped)
@@ -531,6 +552,53 @@ def test_materials_rebuilt_when_base_lock_content_changes(env):
     git(repo, "fetch", "-q", "origin", "main")
     proc, _ = run_materials(env)
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    calls = _uv_calls(env)
-    assert calls[0]["args"][0] == "venv"
-    assert [c["requirement"] for c in calls if c["args"][:2] == ["pip", "install"]][1] == bumped
+    assert _material_uv_calls(env) == []
+
+
+def test_issue_check_passes_trusted_config_flags(env):
+    """issue-check gets --require-trusted-config and the base commit as config pin (CI parity)."""
+    repo = env["repo"]
+    (repo / "x.txt").write_text("candidate change\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "candidate change")
+    proc, out = run(env, "--no-fetch")
+    assert proc.returncode == 0, proc.stderr
+    base_sha = git(repo, "rev-parse", "origin/main")
+    assert out["base_sha"] == base_sha != out["head"]
+    calls = {c["argv"][0]: c["argv"][1:] for c in _certify_calls(env)}
+    assert calls["issue-check"] == [
+        "--repo",
+        ".",
+        "--issue",
+        "7",
+        "--require-trusted-config",
+        "--expect-config-commit",
+        base_sha,
+    ]
+    # issue-init at the Core pin accepts neither flag and runs no verifier.
+    assert calls["issue-init"] == ["--repo", ".", "--issue", "7"]
+
+
+def test_core_tool_partial_install_not_reused(env):
+    """A cached Core binary without the completion marker triggers a fresh install."""
+    env = _with_requirements(env)
+    stale = env["tmp"] / "cache" / "tools" / PIN / "bin" / "nexus-certify"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("#!/bin/sh\nexit 7\n")
+    stale.chmod(0o755)
+    proc, out = run_materials(env, certify=False)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out["status"] == "VERIFIED"
+    assert [c["args"][:2] for c in _uv_calls(env)] == [["tool", "install"]]
+    assert (
+        env["tmp"] / "cache" / "tools" / PIN / ".nexus-core-tool-ready"
+    ).read_text() == PIN + "\n"
+
+
+def test_core_tool_install_failure_leaves_no_ready_marker(env):
+    """A failed Core tool install is never marked complete."""
+    env = _with_requirements(env)
+    proc, out = run_materials(env, certify=False, FAKE_CERTIFY_SRC=str(env["tmp"] / "missing"))
+    assert proc.returncode == 2
+    assert out["error_code"] == "CORE_INSTALL_FAILED"
+    assert not (env["tmp"] / "cache" / "tools" / PIN / ".nexus-core-tool-ready").exists()
