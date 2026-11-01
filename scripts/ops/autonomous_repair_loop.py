@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from nexus.core.argv_command import run_reaping_process_group  # noqa: E402
 from nexus.core.decorators import nexus_metabolize
+from nexus.core.argv_command import run_reaping_process_group  # noqa: E402
 from scripts.ops.rollback_guard import RollbackGuard
 from nexus.services.memory import MemoryService, FaultLesson
 
