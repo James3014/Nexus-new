@@ -335,7 +335,9 @@ class HealOrchestrator:
         if failed_text and f_path:
             target_file = ctx.op.repo_dir / f_path
             # f_path comes from the model's patch: read only a regular file inside repo_dir (#3018).
-            file_content = read_repo_text(ctx.op.repo_dir, target_file) if target_file.exists() else None
+            file_content = (
+                read_repo_text(ctx.op.repo_dir, target_file) if target_file.exists() else None
+            )
             if file_content is not None:
                 from nexus.services.local_heal.closest_snippet import find_closest_snippet
 
