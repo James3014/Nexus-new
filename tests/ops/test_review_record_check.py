@@ -3296,3 +3296,18 @@ def test_a_bullet_reject_bound_to_the_head_is_still_read():
     assert (
         rrc.evaluate(HEAD, DOCS, [_c(_R15_ACCEPT), _c(comment)], [])["status"] == "MISSING_RECORD"
     )
+
+
+@pytest.mark.parametrize("files", [DOCS, RISKY])
+def test_a_newly_read_reject_does_not_move_the_search_for_a_later_identical_clause(files):
+    # Main credits the second identical clause to both positions' families (reviewer
+    # unknown); a clause read only through the carried-over aside must not change that.
+    comments = [
+        _c(f"Head reviewed: {HEAD}\nClaude Opus r3: ACCEPT\n"),
+        _c(f"Head reviewed: {HEAD}\nCodex r3: ACCEPT\n"),
+        _c(
+            f"Head reviewed: {HEAD}\n**Claude Opus review** (separate agent,\n"
+            "not the author) r2: REJECT; Codex (not the author) r2: REJECT\n"
+        ),
+    ]
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == "MISSING_RECORD"
