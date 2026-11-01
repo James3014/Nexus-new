@@ -331,7 +331,10 @@ def _semantic_retry_orch(monkeypatch, tmp_path, *, response: str, spy_span=None)
     from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
     from nexus.services.local_heal.prompt_builder import PromptBuilder
 
-    monkeypatch.delenv("NEXUS_PROTOCOL_MODE", raising=False)  # restored after the test
+    # setenv first so monkeypatch records the original state (also "unset") and restores it:
+    # the retry sets NEXUS_PROTOCOL_MODE and the stubbed converter raises before it is reset.
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "standard")
+    monkeypatch.delenv("NEXUS_PROTOCOL_MODE")
     monkeypatch.setattr(
         canonical_span_mod,
         "get_canonical_search_span",
