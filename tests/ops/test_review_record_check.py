@@ -3604,3 +3604,20 @@ def test_a_round_one_in_the_rejection_aside_still_starts_a_new_numbering(rejecti
     # naming another sha has no round marker, so the REJECT keeps that numbering itself.
     comments = [_c(f"Claude r4: ACCEPT at {HEAD}\n"), _c(rejection)]
     assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "model, files, others, status",
+    [
+        ("Claude", DOCS, [], "MISSING_RECORD"),
+        ("Codex", RISKY, [CLAUDE_AT_HEAD], "MISSING_CROSS_MODEL"),
+    ],
+)
+def test_a_lowered_accept_round_still_numbers_as_main_read_it(model, files, others, status):
+    # Main read this ACCEPT as round 5, so the later round 1 starts a new numbering and
+    # withdraws it; the lower round compared here never changes that numbering.
+    comments = [
+        _c(f"{model} r1 (closes r5): ACCEPT at {HEAD}\n"),
+        _c(f"{model} round 1 notes; {model} r0: REJECT at {HEAD} x\n"),
+    ] + [_c(body) for body in others]
+    assert rrc.evaluate(HEAD, files, comments, [])["status"] == status

@@ -1220,7 +1220,7 @@ def _answered(
     answers: list[tuple[tuple[int, int], str, str | None, int | None]],
 ) -> bool:
     """A later ACCEPT of a later round by the same named reviewer answers the REJECT."""
-    reviewer, reject_round = event.get("reviewer"), event["round"]
+    reviewer, reject_round = event.get("reviewer"), event.get("compare", event["round"])
     if reviewer is None or reject_round is None:
         return False
     return any(
@@ -1250,6 +1250,10 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
     that reviewer's events in it: a new session counts from r1 again, so an older
     ``r3 ACCEPT`` does not outrank its ``r1`` or ``r2 REJECT`` (#3041). A later comment
     without a round 1 (a recap of round 2) keeps the numbering.
+
+    Numbering uses each event's ``round`` (main's reading); the comparison uses its
+    ``compare`` round where it has one (``_round_before``), never higher for an ACCEPT
+    nor lower for a REJECT than ``round``.
     """
     round_one = {
         (event.get("comment"), event["family"], event.get("reviewer"))
@@ -1278,15 +1282,15 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
             continue
         if event["kind"] != "reject":
             continue  # a round marker only numbers
-        reject_round = event["round"]
+        reject_round = event.get("compare", event["round"])
         accepts[family] = [
             (accept, accept_epoch)
             for accept, accept_epoch in accepts.get(family, [])
             if reviewer is not None and accept.get("reviewer") == reviewer
             if accept_epoch == epoch
             if reject_round is not None
-            and accept["round"] is not None
-            and accept["round"] > reject_round
+            and accept.get("compare", accept["round"]) is not None
+            and accept.get("compare", accept["round"]) > reject_round
         ]
     return {family for family, kept in accepts.items() if kept}
 
@@ -1418,9 +1422,10 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         {
                             "family": family,
                             "reviewer": _reviewer_word(before) or header_reviewer,
-                            # A withdrawn ACCEPT still numbers its round as main read it.
+                            # A withdrawn ACCEPT still numbers its round, as before #3041.
                             "kind": "round" if withdrawn else "accept",
-                            "round": main_round if withdrawn else accept_round,
+                            "round": main_round,
+                            "compare": accept_round,
                             "comment": 0,
                             "line": clause.strip(),
                         },
@@ -1459,25 +1464,20 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 families = sorted(set(families) | set(earlier))
                 if _reviewer != reviewer:
                     reviewer = None  # read as two reviewers: no later round answers it
-            reject_round = _round_before(clause[: span[0]], lowest=False)
-            # Main read the last marker; where that was a round 1 it may start a new
-            # numbering, so a round marker keeps that (a line naming another sha has none).
-            last = _ROUND.findall(clause[: span[0]])
-            renumbers = reject_round != 1 and bool(last) and int(last[-1]) == 1
-            kinds = [("reject", reject_round)] + ([("round", 1)] if renumbers else [])
+            rounds = _ROUND.findall(clause[: span[0]])
             for family in families:
-                for kind, round_ in kinds:
-                    event = {
-                        "family": family,
-                        "reviewer": reviewer,
-                        "kind": kind,
-                        "round": round_,
-                        "comment": 0,
-                        "line": clause.strip(),
-                    }
-                    if weak:
-                        weak_rejects.add(id(event))
-                    line_events.append((start + span[0], event))
+                event = {
+                    "family": family,
+                    "reviewer": reviewer,
+                    "kind": "reject",
+                    "round": int(rounds[-1]) if rounds else None,
+                    "compare": _round_before(clause[: span[0]], lowest=False),
+                    "comment": 0,
+                    "line": clause.strip(),
+                }
+                if weak:
+                    weak_rejects.add(id(event))
+                line_events.append((start + span[0], event))
         tokens = len(_ANY_VERDICT_TOKEN.findall(line))
         if 0 < tokens <= MAX_VERDICTS_PER_LINE and not names_other_sha(line, head):
             # A round 1 named on a verdict line at the head, read or not (resolved, a
