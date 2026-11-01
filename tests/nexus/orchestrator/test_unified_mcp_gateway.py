@@ -3446,6 +3446,19 @@ def test_model_probe_post_launch_identity_drift_reaps_process(monkeypatch, tmp_p
     monkeypatch.setattr(gateway, "_provider_executable", lambda provider: next(resolutions))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", StartedPopen)
+    # The fake has no real process group: the group kill (#3076) is stubbed, never sent to
+    # pgid 954127 on the host; it reports the group killed and the provider reaped.
+    terminated = []
+
+    def terminate_provider_group(process):
+        terminated.append(process.pid)
+        process.wait()
+        return True
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway_parts.model_probe._terminate_provider_group",
+        terminate_provider_group,
+    )
     _patch_probe_version(monkeypatch)
     result = gateway._model_probe_submit({
         "task_id": "post-launch-identity-drift",
@@ -3456,6 +3469,7 @@ def test_model_probe_post_launch_identity_drift_reaps_process(monkeypatch, tmp_p
     })
     assert result["status"] == "FAILED"
     assert result["blocker"] == "ASSIST_PROVIDER_IDENTITY_DRIFT"
+    assert terminated == [954127]
     job = json.loads((tmp_path / "assisted_provider_jobs" / "post-launch-identity-drift.json").read_text())
     assert job["process_cleanup"] is True
     assert not Path(job["workspace_root"]).exists()

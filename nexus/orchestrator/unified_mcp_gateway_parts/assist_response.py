@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
-from nexus.core.argv_command import kill_group_if_exited
+from nexus.core.argv_command import kill_group_if_exited, process_group_empty
 
 if TYPE_CHECKING:
     import subprocess
@@ -51,9 +51,49 @@ MODEL_PROBE_PROVIDER_DEADLINE_GRACE_SECONDS = 60.0
 _PROVIDER_KILL_SETTLE_SECONDS = 2.0
 _PRINT_TIMEOUT_RE = re.compile(r"([0-9]+)s")
 # Providers whose group this module killed and reaped: a concurrent refresh of the same job
-# then sees a clean exit, not a reap that happened elsewhere. One lock serializes the checks.
+# then sees a clean exit, not a reap that happened elsewhere. A lock per provider serializes
+# its checks; it is held while the group is signalled and listed (worst case about 14 s, 18 s
+# on cancel: two settle steps plus a 10 s ``ps`` listing on macOS), so it is never shared
+# between providers: one stuck group does not hold up the refresh of another job (#3076).
 _GROUP_KILLED: weakref.WeakSet[subprocess.Popen[str]] = weakref.WeakSet()
-_SETTLE_LOCK = threading.Lock()
+_SETTLE_LOCKS: weakref.WeakKeyDictionary[subprocess.Popen[str], threading.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+_SETTLE_LOCKS_GUARD = threading.Lock()
+
+
+def _settle_lock(process: subprocess.Popen[str]) -> threading.Lock:
+    """The lock that serializes the settle and cancel steps of one provider."""
+    with _SETTLE_LOCKS_GUARD:
+        lock = _SETTLE_LOCKS.get(process)
+        if lock is None:
+            lock = _SETTLE_LOCKS[process] = threading.Lock()
+        return lock
+
+
+def _provider_group_gone(job: Mapping[str, Any]) -> bool:
+    """Whether the job's provider process group is known to be gone, so its workspace may be
+    removed (#3076): True for a job that never started a provider, else only when a listing finds
+    no live member of the recorded group. Nothing is signalled; a group that cannot be listed,
+    or whose id now names another group, is not gone."""
+    raw = job.get("pgid") or job.get("pid")
+    if not raw:
+        return True
+    try:
+        pgid = int(raw)
+    except (TypeError, ValueError):
+        return False
+    return process_group_empty(pgid)
+
+
+def _assist_workspace_removable(job: Mapping[str, Any]) -> bool:
+    """Whether cancel or reconcile may settle the job and remove its workspace (#3076): the
+    workspace is already gone, or the provider's process group is known to be gone. A workspace
+    an operator removed by hand therefore no longer holds the job in reconciliation."""
+    root = str(job.get("workspace_root") or "")
+    if not root or not Path(root).exists():
+        return True
+    return _provider_group_gone(job)
 
 
 def _provider_deadline_passed(job: Mapping[str, Any]) -> bool:
@@ -98,7 +138,7 @@ def _settle_provider_group(
     reaped. ``group_clean`` False: a group member survived SIGKILL, the group could not be
     listed, the provider was reaped elsewhere, or a deadline kill did not end it; its effects
     may still be in progress."""
-    with _SETTLE_LOCK:
+    with _settle_lock(process):
         if process in _GROUP_KILLED:
             return True, True, False
         try:
@@ -118,7 +158,7 @@ def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
     unreaped, each step bounded; True once it exited and its group was SIGKILLed and reaped
     (#3052). False: a group member survived, the group could not be listed, the provider was
     reaped elsewhere (never signalled then) or it did not exit."""
-    with _SETTLE_LOCK:
+    with _settle_lock(process):
         if process in _GROUP_KILLED:
             return True
         if process.returncode is not None:

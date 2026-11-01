@@ -174,6 +174,9 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
     _AssistProbeMixin as _AssistProbeMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_workspace_removable,
+)
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
     _AssistResponseMixin as _AssistResponseMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.cairnwork_route import (
@@ -2709,6 +2712,17 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
                 or bool(current.get("reconciliation_required"))
             )
+            if needs_reconcile and not _assist_workspace_removable(current):
+                # A provider group member may still run in the workspace and on the account:
+                # neither the workspace nor the lease is touched until a listing finds the group
+                # empty (or the workspace is gone); reconcile again later (#3076).
+                current.update({
+                    "reconciliation_required": True,
+                    "process_cleanup": False,
+                    "last_polled_at": self._utc_now(),
+                })
+                current = self._assist_write(current)
+                return self._assist_response(current, operation="reconcile")
             if needs_reconcile:
                 lease_hash = str(current.get("account_lease_id_hash") or "")
                 if lease_hash and current.get("account_lease_cleanup_status") != "RELEASED":
