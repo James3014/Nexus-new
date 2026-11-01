@@ -91,6 +91,13 @@ class _FakeGroup:
         )
 
 
+@pytest.fixture(autouse=True)
+def _workspace_parent_is_tmp_path(tmp_path, monkeypatch):
+    """The assist workspaces of these tests live under tmp_path: make it the assist workspace
+    parent, the only directory whose children the gateway removes (#3076 item 18)."""
+    monkeypatch.setattr(assist_response, "ASSIST_WORKSPACE_PARENT", str(tmp_path))
+
+
 def _gateway(tmp_path: Path) -> UnifiedMCPGateway:
     service = FakeService()
     service.state_dir = tmp_path

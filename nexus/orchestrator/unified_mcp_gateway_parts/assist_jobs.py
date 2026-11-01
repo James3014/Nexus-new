@@ -38,7 +38,9 @@ from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
     _assist_workspace_removable,
     _provider_group_gone,
+    _remove_assist_workspace,
     _terminate_provider_group,
+    assist_workspace_parent,
 )
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 
@@ -90,6 +92,8 @@ class _AssistJobsMixin(_JobsBase):
 
         def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None: ...
 
+        def _model_probe_inflight(self) -> set[str]: ...
+
     # fmt: off
     def _assist_submit(self, arguments: Mapping[str, Any], *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
         task_id = self._task_id(arguments, str(arguments.get("what") or "assist"), str(arguments.get("why") or "assist"), [str(path) for path in arguments.get("allowed_files") or []])
@@ -130,7 +134,7 @@ class _AssistJobsMixin(_JobsBase):
         root = self._assist_root()
         stdout_path = root / f"{job_id}.stdout"
         stderr_path = root / f"{job_id}.stderr"
-        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-assist-{task_id}-", dir="/tmp"))
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-assist-{task_id}-", dir=assist_workspace_parent()))
         action_value = dict(action or {})
         if not action_value:
             base = _gateway()._git("rev-parse", "HEAD").strip()
@@ -188,26 +192,69 @@ class _AssistJobsMixin(_JobsBase):
             "connector_disconnected_at": None,
             "reconnected_at": None,
         }
-        self._assist_write(job)
-        started = time.perf_counter()
-        stdout_handle = stdout_path.open("w", encoding="utf-8")
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        # Until its pid is written, a cancel finds this submit in flight and leaves a request
+        # that the submit honours once the provider started, instead of removing the workspace
+        # the provider is being started in (#3076).
+        self._assist_launch_begin(task_id)
         try:
-            # The provider's process group is killed on exit before the workspace is removed (#3052).
-            require_child_stays_unreaped()
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
-        except Exception:
+            self._assist_write(job)
+            started = time.perf_counter()
+            stdout_handle = stdout_path.open("w", encoding="utf-8")
+            stderr_handle = stderr_path.open("w", encoding="utf-8")
+            try:
+                # The provider's process group is killed on exit before the workspace is removed (#3052).
+                require_child_stays_unreaped()
+                process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            except Exception:
+                stdout_handle.close()
+                stderr_handle.close()
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+                return self._assist_response(self._assist_write(job), operation="submit")
             stdout_handle.close()
             stderr_handle.close()
-            shutil.rmtree(workspace_root, ignore_errors=True)
-            job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
-            return self._assist_response(self._assist_write(job), operation="submit")
-        stdout_handle.close()
-        stderr_handle.close()
-        job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now(), "provider_start_ms": max(0, int((time.perf_counter() - started) * 1000))})
+            job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now(), "provider_start_ms": max(0, int((time.perf_counter() - started) * 1000))})
+            return self._assist_publish_launch(task_id, job, process, operation="submit")
+        finally:
+            self._assist_launch_end(task_id)
+
+    def _assist_cancel_requests(self) -> set[str]:
+        """Task ids whose cancel arrived while their submit was still starting the provider."""
+        with self._assist_lock:
+            requests = getattr(self, "_assist_cancel_request_ids", None)
+            if requests is None:
+                requests = set()
+                self._assist_cancel_request_ids = requests
+            return requests
+
+    def _assist_launch_begin(self, task_id: str) -> None:
+        """Enter the in-flight set (shared with the model probe, #2716) before the SUBMITTED
+        record is written: until the pid is written, a cancel only leaves a request (#3076)."""
+        with self._assist_lock:
+            self._model_probe_inflight().add(task_id)
+
+    def _assist_launch_end(self, task_id: str) -> None:
+        """Leave the in-flight set; a cancel request the launch did not honour is dropped."""
+        with self._assist_lock:
+            self._model_probe_inflight().discard(task_id)
+            self._assist_cancel_requests().discard(task_id)
+
+    def _assist_publish_launch(self, task_id: str, job: dict[str, Any], process: subprocess.Popen[str], *, operation: str) -> dict[str, Any]:
+        """Register the started provider and write its pid under the lock a cancel takes, then
+        leave the in-flight set: a cancel sees either a submit still starting the provider, and
+        leaves a request, or a registered provider. A request left meanwhile is honoured here,
+        through the cancel path, once the provider can be terminated as a group (#3076)."""
         with self._assist_lock:
             self._assist_processes[task_id] = process
-        return self._assist_response(self._assist_write(job), operation="submit")
+            written = self._assist_write(job)
+            self._model_probe_inflight().discard(task_id)
+            requests = self._assist_cancel_requests()
+            cancel_requested = task_id in requests
+            requests.discard(task_id)
+        if cancel_requested:
+            self._assist_cancel(task_id)
+            written = self._assist_read(task_id) or written
+        return self._assist_response(written, operation=operation)
 
     def _assist_wait(self, task_id: str, *, timeout_seconds: float = 10.0, poll_interval_seconds: float = 0.25) -> dict[str, Any]:
         deadline = time.monotonic() + max(0.0, min(60.0, timeout_seconds))
@@ -221,24 +268,7 @@ class _AssistJobsMixin(_JobsBase):
             time.sleep(max(0.01, min(5.0, poll_interval_seconds)))
 
     def _cleanup_assist_workspace(self, job: dict[str, Any]) -> None:
-        workspace_root = Path(str(job.get("workspace_root") or ""))
-        if not workspace_root.exists() or workspace_root == _gateway().CANONICAL_SOURCE_ROOT:
-            job["process_cleanup"] = workspace_root == _gateway().CANONICAL_SOURCE_ROOT or not workspace_root.exists()
-            return
-        after = self._snapshot_workspace(workspace_root)
-        before = job.get("filesystem_before") if isinstance(job.get("filesystem_before"), Mapping) else {}
-        job["filesystem_after"] = after
-        job["filesystem_delta"] = {
-            "created": sorted(set(after) - set(before)),  # pyright: ignore[reportArgumentType]
-            "removed": sorted(set(before) - set(after)),  # pyright: ignore[reportArgumentType]
-            "changed": sorted(path for path in set(before) & set(after) if before[path] != after[path]),  # pyright: ignore[reportArgumentType, reportOptionalSubscript]
-        }
-        try:
-            shutil.rmtree(workspace_root)
-            job["process_cleanup"] = True
-        except OSError as exc:
-            job["process_cleanup"] = False
-            job["cleanup_error"] = str(exc)
+        _remove_assist_workspace(job, self._snapshot_workspace)
 
     @staticmethod
     def _assist_record_stream_artifacts(job: dict[str, Any]) -> None:
@@ -300,6 +330,19 @@ class _AssistJobsMixin(_JobsBase):
             process = None
             with self._assist_lock:
                 process = self._assist_processes.get(task_id)
+                if not pid:
+                    # The submit writes the pid and registers the provider under this lock: re-read
+                    # in case it did so after this cancel's refresh (#3076).
+                    job = self._assist_read(task_id) or job
+                    pid = int(job.get("pid") or 0)
+                    starting = process is None and not pid and task_id in self._model_probe_inflight()
+                    if starting:
+                        # A submit in this gateway is still starting the provider in the
+                        # workspace: removing it now would pull the cwd from under the provider,
+                        # and the submit's later writes would drop the cancel. Leave a request
+                        # that the submit honours once the pid is written (#3076).
+                        self._assist_cancel_requests().add(task_id)
+                        return self._assist_response({**job, "blocker": "ASSIST_CANCEL_PENDING_LAUNCH"}, operation="cancel")
             terminated = False
             if process is not None:
                 # Not poll(): it reaps, after which the provider's group can no longer be
@@ -523,7 +566,7 @@ class _AssistJobsMixin(_JobsBase):
         root = self._assist_root()
         stdout_path = root / f"{new_job_id}.stdout"
         stderr_path = root / f"{new_job_id}.stderr"
-        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-retry-{task_id}-", dir="/tmp"))
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-retry-{task_id}-", dir=assist_workspace_parent()))
         new_job = dict(job)
         new_job.update({
             "job_id": new_job_id,
@@ -559,40 +602,42 @@ class _AssistJobsMixin(_JobsBase):
             "action": retry_action,
             "bound_action_request": bound_request,
         })
-        self._assist_write(new_job)
-        stdout_handle = stdout_path.open("w", encoding="utf-8")
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        self._assist_launch_begin(task_id)
         try:
-            # The provider's process group is killed on exit before the workspace is removed (#3052).
-            require_child_stays_unreaped()
-            process = subprocess.Popen(
-                canonical_command,
-                cwd=workspace_root,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                text=True,
-                start_new_session=True,
-            )
-        except Exception:
+            self._assist_write(new_job)
+            stdout_handle = stdout_path.open("w", encoding="utf-8")
+            stderr_handle = stderr_path.open("w", encoding="utf-8")
+            try:
+                # The provider's process group is killed on exit before the workspace is removed (#3052).
+                require_child_stays_unreaped()
+                process = subprocess.Popen(
+                    canonical_command,
+                    cwd=workspace_root,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    text=True,
+                    start_new_session=True,
+                )
+            except Exception:
+                stdout_handle.close()
+                stderr_handle.close()
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                new_job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "ASSIST_PROVIDER_FAILED",
+                    "provider_error": "provider process could not start",
+                })
+                return self._assist_response(self._assist_write(new_job), operation="retry")
             stdout_handle.close()
             stderr_handle.close()
-            shutil.rmtree(workspace_root, ignore_errors=True)
             new_job.update({
-                "status": "FAILED",
-                "finished_at": self._utc_now(),
-                "blocker": "ASSIST_PROVIDER_FAILED",
-                "provider_error": "provider process could not start",
+                "status": "RUNNING",
+                "pid": process.pid,
+                "pgid": process.pid,
+                "started_at": self._utc_now(),
             })
-            return self._assist_response(self._assist_write(new_job), operation="retry")
-        stdout_handle.close()
-        stderr_handle.close()
-        new_job.update({
-            "status": "RUNNING",
-            "pid": process.pid,
-            "pgid": process.pid,
-            "started_at": self._utc_now(),
-        })
-        with self._assist_lock:
-            self._assist_processes[task_id] = process
-        return self._assist_response(self._assist_write(new_job), operation="retry")
+            return self._assist_publish_launch(task_id, new_job, process, operation="retry")
+        finally:
+            self._assist_launch_end(task_id)
     # fmt: on
