@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from typing import Any
 
+from nexus.core.contained_write import copy_file_in_root
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
 
 
@@ -430,11 +431,19 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
         dest_path = os.path.join(tmpdir, request.target_file)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
-        if not os.path.exists(src_path):
+        if request.source_root:
+            # Never through a link: a refusal fails this apply (#3037 follow-up).
+            copied = copy_file_in_root(
+                request.source_root, os.path.normpath(request.target_file), tmpdir
+            )
+        elif os.path.exists(src_path):  # no root to contain to: the path as given
+            shutil.copy2(src_path, dest_path)
+            copied = True
+        else:
+            copied = False
+        if not copied:
             with open(dest_path, "w", encoding="utf-8") as f:
                 pass
-        else:
-            shutil.copy2(src_path, dest_path)
         _copy_verifier_files(request, tmpdir)
 
         subprocess.run(["git", "add", request.target_file], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
@@ -546,6 +555,5 @@ def _copy_verifier_files(request: IsolatedApplyRequest, workspace: str) -> None:
             request.target_file
         ):
             continue
-        destination = os.path.join(workspace, relative)
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        shutil.copy2(os.path.join(request.source_root, relative), destination)
+        # Re-checked while copying: a link or hard link swapped in since the filter raises.
+        copy_file_in_root(request.source_root, os.path.normpath(relative), workspace)

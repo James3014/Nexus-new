@@ -3852,8 +3852,10 @@ class LocalModelExecutor:
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=pipeline_model_called,
-                candidate_patch=candidate_patch,
-                candidate_hash=candidate_hash,
+                # No contained original to restore: the candidate is not handed to a caller that
+                # would apply it from this repo_root again (#3037 follow-up).
+                candidate_patch="" if target_restore_refused else candidate_patch,
+                candidate_hash=empty_hash if target_restore_refused else candidate_hash,
                 reasoning_summary="pipeline_result" if pipeline_result_projected else "pipeline_failed_empty",
                 raw_model_metadata=raw_meta,
                 provider=provider_name,

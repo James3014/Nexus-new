@@ -17,8 +17,10 @@ raises ``PathContainmentError`` (an ``OSError``) and nothing is written.
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
+import shutil
 import stat
 import unicodedata
 from pathlib import Path, PurePath
@@ -27,6 +29,8 @@ __all__ = [
     "HOST_RUN_SUBTREES",
     "PathContainmentError",
     "contained_relative_path",
+    "copy_file_in_root",
+    "copy_tree_in_root",
     "read_text_in_root",
     "write_text_in_root",
 ]
@@ -180,3 +184,150 @@ def read_text_in_root(root: Path | str, relative: PurePath | str) -> str:
             return handle.read().decode("utf-8", errors="replace")
     finally:
         os.close(fd)
+
+
+def _copy_open_file(src_fd: int, info: os.stat_result, destination: Path) -> None:
+    """Copy the already checked open file ``src_fd`` to a new ``destination`` (mode, times)."""
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    dst_fd = os.open(destination, flags, 0o600)
+    try:
+        with (
+            os.fdopen(src_fd, "rb", closefd=False) as source,
+            os.fdopen(dst_fd, "wb", closefd=False) as target,
+        ):
+            shutil.copyfileobj(source, target)
+        os.fchmod(dst_fd, stat.S_IMODE(info.st_mode) & 0o777)
+    finally:
+        os.close(dst_fd)
+    os.utime(destination, ns=(info.st_atime_ns, info.st_mtime_ns), follow_symlinks=False)
+
+
+def _open_regular(name: str, dir_fd: int) -> tuple[int, os.stat_result]:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise PathContainmentError(f"file_open_refused:{name}:{exc}") from exc
+    try:
+        info = os.fstat(fd)
+        _check_regular_info(info, name)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, info
+
+
+def _names_nothing(error: BaseException | None) -> bool:
+    """The path cannot name an existing entry: missing, or a component too long to exist."""
+
+    return isinstance(error, FileNotFoundError) or (
+        isinstance(error, OSError) and error.errno == errno.ENAMETOOLONG
+    )
+
+
+def copy_file_in_root(src_root: Path | str, relative: PurePath | str, dst_root: Path | str) -> bool:
+    """Copy ``src_root/relative`` to ``dst_root/relative``, never reading through a link.
+
+    Only a regular single-link file is copied (the same rule as ``read_text_in_root``); a link at
+    the file or on the way to it, a hard link and a FIFO or other special file raise
+    ``PathContainmentError`` and nothing is copied. Returns False when the file does not exist,
+    including a name too long to exist (ENAMETOOLONG).
+    ``dst_root`` is a fresh directory only the host writes; missing parents are created there."""
+
+    parts = _parts(relative)
+    try:
+        parent = _open_parent(src_root, parts, create_parents=False)
+    except PathContainmentError as exc:
+        if _names_nothing(exc.__cause__):
+            return False
+        raise
+    try:
+        try:
+            fd, info = _open_regular(parts[-1], parent)
+        except FileNotFoundError:
+            return False
+        except PathContainmentError as exc:
+            if _names_nothing(exc.__cause__):
+                return False
+            raise
+    finally:
+        os.close(parent)
+    try:
+        destination = Path(dst_root).joinpath(*parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _copy_open_file(fd, info, destination)
+    finally:
+        os.close(fd)
+    return True
+
+
+def copy_tree_in_root(
+    src_root: Path | str,
+    dst_root: Path | str,
+    *,
+    ignore_names: frozenset[str] | set[str] = frozenset(),
+) -> tuple[str, ...]:
+    """Copy the tree under ``src_root`` into the existing directory ``dst_root``, link-safe.
+
+    Directories are walked by descriptor with ``O_NOFOLLOW``, so no file outside ``src_root`` is
+    read. Regular single-link files are copied; a hard link, FIFO, socket or device raises
+    ``PathContainmentError`` and the caller must treat the copy as failed. A symlink is recreated
+    as a link only if it resolves inside ``dst_root`` once everything is copied; any other
+    symlink is left out. Entries named in ``ignore_names`` are skipped at every depth. Returns
+    the relative paths of the symlinks left out."""
+
+    dst_path = Path(dst_root)
+    links: list[tuple[PurePath, str]] = []
+
+    def walk(src_fd: int, relative: PurePath) -> None:
+        with os.scandir(src_fd) as entries:
+            names = sorted(entry.name for entry in entries)
+        for name in names:
+            if name in ignore_names:
+                continue
+            child = relative / name
+            info = os.stat(name, dir_fd=src_fd, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                links.append((child, os.readlink(name, dir_fd=src_fd)))
+            elif stat.S_ISDIR(info.st_mode):
+                try:
+                    child_fd = os.open(name, _DIR_FLAGS, dir_fd=src_fd)
+                except OSError as exc:
+                    raise PathContainmentError(f"path_component_refused:{child}:{exc}") from exc
+                try:
+                    (dst_path / child).mkdir(exist_ok=True)
+                    walk(child_fd, child)
+                finally:
+                    os.close(child_fd)
+            else:
+                try:
+                    fd, opened = _open_regular(name, src_fd)
+                except FileNotFoundError:
+                    continue
+                except PathContainmentError as exc:
+                    raise PathContainmentError(f"{exc}:{child}") from exc
+                try:
+                    _copy_open_file(fd, opened, dst_path / child)
+                finally:
+                    os.close(fd)
+
+    root_fd = os.open(src_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        walk(root_fd, PurePath())
+    finally:
+        os.close(root_fd)
+
+    for child, target in links:
+        os.symlink(target, dst_path / child)
+    dst_real = dst_path.resolve()
+    dropped: list[str] = []
+    for child, _target in links:
+        link = dst_path / child
+        real = Path(os.path.realpath(link))
+        if real != dst_real and not real.is_relative_to(dst_real):
+            link.unlink()
+            dropped.append(os.fspath(child))
+    return tuple(dropped)
