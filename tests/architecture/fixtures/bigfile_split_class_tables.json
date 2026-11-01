@@ -743,9 +743,25 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> dict[str, Any]"
    },
+   "_assist_cancel_requests": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> set[str]"
+   },
    "_assist_command": {
     "kind": "staticmethod",
     "signature": "(KEYWORD_ONLY:executable: str, KEYWORD_ONLY:provider: str, KEYWORD_ONLY:model: str, KEYWORD_ONLY:prompt: str, KEYWORD_ONLY:explicit_effort: str = '', KEYWORD_ONLY:agy_print_timeout: str = '25s') -> list[str]"
+   },
+   "_assist_hold_for_group": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any], POSITIONAL_OR_KEYWORD:returncode: Any) -> dict[str, Any]"
+   },
+   "_assist_launch_begin": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> None"
+   },
+   "_assist_launch_end": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> None"
    },
    "_assist_patch_is_substantive": {
     "kind": "staticmethod",
@@ -758,6 +774,10 @@
    "_assist_prompt": {
     "kind": "staticmethod",
     "signature": "(POSITIONAL_OR_KEYWORD:what: str, POSITIONAL_OR_KEYWORD:why: str, POSITIONAL_OR_KEYWORD:allowed: list[str], POSITIONAL_OR_KEYWORD:verifiers: list[str]) -> str"
+   },
+   "_assist_publish_launch": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: dict[str, Any], POSITIONAL_OR_KEYWORD:process: subprocess.Popen[str], KEYWORD_ONLY:operation: str) -> dict[str, Any]"
    },
    "_assist_read": {
     "kind": "function",

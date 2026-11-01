@@ -3505,7 +3505,12 @@ def test_cline_real_stdout_fixture_preserves_error_event_and_fails_closed():
     assert UnifiedMCPGateway._decode_assist_payload(raw, "cline", require_patch=True) is None
 
 
-def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):
+def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path, monkeypatch):
+    # The workspace below lives under tmp_path: that is the assist workspace parent here (#3076).
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway_parts.assist_response.ASSIST_WORKSPACE_PARENT",
+        str(tmp_path),
+    )
     service = FakeService()
     service.state_dir = tmp_path
     gateway = UnifiedMCPGateway(service=service)
@@ -3593,6 +3598,11 @@ def test_agy_model_probe_reconcile_preserves_receipt_until_safe_cleanup(monkeypa
         FakeCoordinator,
     )
     gateway = UnifiedMCPGateway(service=service)
+    # The workspace below lives under tmp_path: that is the assist workspace parent here (#3076).
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway_parts.assist_response.ASSIST_WORKSPACE_PARENT",
+        str(tmp_path),
+    )
     workspace = tmp_path / "lost-workspace"
     workspace.mkdir()
     (workspace / "partial.txt").write_text("partial", encoding="utf-8")
