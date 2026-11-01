@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import signal
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -572,3 +573,223 @@ def test_cancel_of_a_stale_never_started_job_still_removes_its_workspace(box):
     assert cancelled["status"] == "CANCELLED", cancelled
     assert cancelled["process_cleanup"] is True
     assert not workspace.exists()
+
+
+# ---------------------------------------------------------------------------
+# Residual of item 20 (burn 11/01): one launch per task id
+# ---------------------------------------------------------------------------
+
+
+def _pause_in_flight_checks(box, monkeypatch, names: tuple[str, str]) -> None:
+    """After both launches passed their own existence check (both are at the command
+    builder), each launch's next record read, the one its in-flight check makes, waits briefly
+    for the other's: if the check is not taken under the lock both see an empty slot."""
+    gateway = box.gateway
+    at_command = threading.Barrier(2, timeout=10)
+    reached = {name: threading.Event() for name in names}
+    armed: set[str] = set()
+    real_command = gateway._assist_command
+    real_read = gateway._assist_read
+
+    def command(*args, **kwargs):
+        at_command.wait()
+        armed.add(threading.current_thread().name)
+        return real_command(*args, **kwargs)
+
+    def read(task_id):
+        name = threading.current_thread().name
+        if name in armed:
+            armed.discard(name)
+            reached[name].set()
+            other = next(other for other in names if other != name)
+            reached[other].wait(0.5)
+        return real_read(task_id)
+
+    monkeypatch.setattr(gateway, "_assist_command", command)
+    monkeypatch.setattr(gateway, "_assist_read", read)
+
+
+def _run_concurrently(calls: dict) -> dict:
+    results: dict = {}
+
+    def run(name, call):
+        try:
+            results[name] = call()
+        except Exception as exc:  # noqa: BLE001 - asserted by the caller
+            results[name] = exc
+
+    threads = [
+        threading.Thread(target=run, args=(name, call), name=name) for name, call in calls.items()
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(20)
+    assert not any(thread.is_alive() for thread in threads)
+    return results
+
+
+def _assert_one_launch_one_refusal(box, popens: list, results: dict) -> None:
+    assert len(popens) == 1, f"two providers started for one task_id: {popens}"
+    refused = [value for value in results.values() if isinstance(value, Exception)]
+    assert len(refused) == 1, results
+    assert "ASSIST_DUPLICATE_LAUNCH_REFUSED" in str(refused[0])
+    started = next(value for value in results.values() if isinstance(value, dict))
+    assert started["status"] == "RUNNING", started
+    assert TASK not in box.gateway._model_probe_inflight()
+    # Only the started provider's workspace remains; the refused launch removed its empty one.
+    assert [path.name for path in box.root.iterdir()] == [Path(popens[0]).name]
+
+
+def test_concurrent_submits_of_one_task_start_one_provider(box, monkeypatch):
+    popens: list = []
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        popens.append(str(workspace))
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    _pause_in_flight_checks(box, monkeypatch, ("A", "B"))
+    results = _run_concurrently({
+        "A": lambda: box.gateway._assist_submit(_submit_args()),
+        "B": lambda: box.gateway._assist_submit(_submit_args()),
+    })
+    _assert_one_launch_one_refusal(box, popens, results)
+
+
+def _failed_submit(box, monkeypatch) -> dict:
+    def fail_start(workspace: Path):
+        raise OSError("provider could not start")
+
+    _patch_launch(box, monkeypatch, fail_start)
+    failed = box.gateway._assist_submit(_submit_args())
+    assert failed["status"] == "FAILED", failed
+    return failed
+
+
+def test_concurrent_retries_of_one_task_start_one_provider(box, monkeypatch):
+    _failed_submit(box, monkeypatch)
+    popens: list = []
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        popens.append(str(workspace))
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    _pause_in_flight_checks(box, monkeypatch, ("A", "B"))
+    results = _run_concurrently({
+        "A": lambda: box.gateway._assist_retry(TASK),
+        "B": lambda: box.gateway._assist_retry(TASK),
+    })
+    _assert_one_launch_one_refusal(box, popens, results)
+
+
+def _hold_second_until_first_done(box, monkeypatch) -> threading.Event:
+    """Both launches pass their own existence check; B then waits until A has finished."""
+    gateway = box.gateway
+    at_command = threading.Barrier(2, timeout=10)
+    a_done = threading.Event()
+    real_command = gateway._assist_command
+
+    def command(*args, **kwargs):
+        at_command.wait()
+        if threading.current_thread().name == "B":
+            assert a_done.wait(10)
+        return real_command(*args, **kwargs)
+
+    monkeypatch.setattr(gateway, "_assist_command", command)
+    return a_done
+
+
+def _run_a_then_b(call, a_done: threading.Event) -> dict:
+    """A, then B once A has finished (B waits in the command builder, see above)."""
+
+    def first():
+        try:
+            return call()
+        finally:
+            a_done.set()
+
+    return _run_concurrently({"A": first, "B": call})
+
+
+def test_submit_that_lost_the_race_to_a_finished_submit_starts_nothing(box, monkeypatch):
+    popens: list = []
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        popens.append(str(workspace))
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    a_done = _hold_second_until_first_done(box, monkeypatch)
+    results = _run_a_then_b(lambda: box.gateway._assist_submit(_submit_args()), a_done)
+    _assert_one_launch_one_refusal(box, popens, results)
+    assert isinstance(results["B"], Exception), results
+
+
+def test_retry_that_lost_the_race_to_a_finished_retry_starts_nothing(box, monkeypatch):
+    _failed_submit(box, monkeypatch)
+    popens: list = []
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        popens.append(str(workspace))
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    a_done = _hold_second_until_first_done(box, monkeypatch)
+    results = _run_a_then_b(lambda: box.gateway._assist_retry(TASK), a_done)
+    _assert_one_launch_one_refusal(box, popens, results)
+    assert isinstance(results["B"], Exception), results
+
+
+def test_a_finished_launch_leaves_a_later_launch_of_the_task_in_flight(box, monkeypatch):
+    """The submit is cancelled and retried right after it wrote its pid, before it returned:
+    when the submit then returns it must not take the retry's in-flight entry, or a cancel
+    during the retry's launch removes the retry's workspace."""
+    gateway = box.gateway
+    retry_at_popen = threading.Event()
+    submit_returned = threading.Event()
+    seen: dict = {}
+    retry_results: dict = {}
+    armed = [True]
+
+    def on_popen(workspace: Path) -> _FakeProvider:
+        if threading.current_thread().name == "retry":
+            retry_at_popen.set()
+            assert submit_returned.wait(10)
+            seen["inflight_during_retry_launch"] = TASK in gateway._model_probe_inflight()
+            seen["cancel"] = gateway._assist_cancel(TASK)
+            seen["retry_workspace_after_cancel"] = workspace.exists()
+        return _FakeProvider()
+
+    _patch_launch(box, monkeypatch, on_popen)
+    real_response = gateway._assist_response
+
+    def response(job, *, operation):
+        if operation == "submit" and armed:
+            armed.clear()
+            cancelled = gateway._assist_cancel(TASK)
+            assert cancelled["status"] == "CANCELLED", cancelled
+
+            def run_retry():
+                try:
+                    retry_results["retry"] = gateway._assist_retry(TASK)
+                except Exception as exc:  # noqa: BLE001 - asserted below
+                    retry_results["retry"] = exc
+
+            retry_results["thread"] = threading.Thread(target=run_retry, name="retry")
+            retry_results["thread"].start()
+            assert retry_at_popen.wait(10)
+        return real_response(job, operation=operation)
+
+    monkeypatch.setattr(gateway, "_assist_response", response)
+    gateway._assist_submit(_submit_args())
+    submit_returned.set()
+    retry_results["thread"].join(20)
+    assert not retry_results["thread"].is_alive()
+    assert seen["inflight_during_retry_launch"], (
+        "the submit cleared the in-flight entry of the retry still starting its provider"
+    )
+    assert seen["cancel"]["blocker"] == "ASSIST_CANCEL_PENDING_LAUNCH", seen["cancel"]
+    assert seen["retry_workspace_after_cancel"], "a cancel removed the retry's workspace mid-launch"
+    assert retry_results["retry"]["status"] == "CANCELLED", retry_results["retry"]

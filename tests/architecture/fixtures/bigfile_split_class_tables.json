@@ -757,11 +757,15 @@
    },
    "_assist_launch_begin": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> None"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job: Mapping[str, Any], KEYWORD_ONLY:retried: Optional[Mapping[str, Any]] = None) -> None"
    },
    "_assist_launch_end": {
     "kind": "function",
-    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str) -> None"
+    "signature": "(POSITIONAL_OR_KEYWORD:self, POSITIONAL_OR_KEYWORD:task_id: str, POSITIONAL_OR_KEYWORD:job_id: str) -> None"
+   },
+   "_assist_launch_owners": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> dict[str, str]"
    },
    "_assist_patch_is_substantive": {
     "kind": "staticmethod",
