@@ -4,6 +4,9 @@ import difflib
 import hashlib
 from dataclasses import dataclass
 
+from nexus.services.local_heal.repo_read import read_repo_text
+
+
 @dataclass(frozen=True)
 class RepairReceipt:
     repair_attempted: bool
@@ -72,17 +75,14 @@ def repair_malformed_diff(
         )
         
     locked_lines = []
-    from pathlib import Path
     if source_root and target_file:
-        file_path = Path(source_root) / target_file
-        if file_path.exists():
-            try:
-                all_lines = file_path.read_text(encoding="utf-8").splitlines()
-                if 1 <= span_start <= len(all_lines):
-                    search_len = len(locked_search.splitlines())
-                    locked_lines = all_lines[span_start - 1 : span_start - 1 + search_len]
-            except Exception:
-                pass
+        # Model code may have run in source_root: read without following a link (#3018).
+        source_text = read_repo_text(source_root, target_file)
+        if source_text is not None:
+            all_lines = source_text.splitlines()
+            if 1 <= span_start <= len(all_lines):
+                search_len = len(locked_search.splitlines())
+                locked_lines = all_lines[span_start - 1 : span_start - 1 + search_len]
                 
     if not locked_lines:
         locked_lines = locked_search.splitlines()
