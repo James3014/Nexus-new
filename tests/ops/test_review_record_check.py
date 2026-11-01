@@ -3635,6 +3635,128 @@ def test_a_lowered_accept_round_never_chooses_a_delta_head_main_would_not():
     assert report["status"] == "MISSING_RECORD"
 
 
+# -- class 4: an ACCEPT whose nearest named model is of the other family (#3041) -------
+
+
+@pytest.mark.parametrize(
+    "files, comments, status",
+    [
+        # A Codex or Gemini ACCEPT that mentions the Claude review is not a Claude record.
+        (DOCS, [f"**Codex review** (Claude asked): ACCEPT at {HEAD}\n"], "MISSING_RECORD"),
+        (DOCS, [f"Gemini review (after the Claude review): ACCEPT at {HEAD}\n"], "MISSING_RECORD"),
+        (
+            DOCS,
+            [
+                f"Head reviewed: {HEAD}\n"
+                "Full history (r1-r3 Claude ACCEPT, Gemini r1 REJECT, r2 ACCEPT) is above.\n"
+            ],
+            "MISSING_RECORD",
+        ),
+        # A Claude ACCEPT whose aside mentions Codex is not a cross-model record.
+        (
+            RISKY,
+            [
+                CLAUDE_AT_HEAD,
+                "**Independent Claude review** (Claude Opus 5.5, separate agent; delta = fix "
+                f"for Codex round 3): **ACCEPT at {HEAD}**\n",
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            RISKY,
+            [
+                CLAUDE_AT_HEAD,
+                "**Independent Claude review** (separate Opus agent, not the author; live "
+                f"repros with a fake codex): **ACCEPT at {HEAD}**\n",
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+    ],
+)
+def test_an_accept_naming_the_other_family_nearest_credits_neither(files, comments, status):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == status
+
+
+@pytest.mark.parametrize(
+    "files, comments",
+    [
+        (
+            RISKY,
+            [
+                CLAUDE_AT_HEAD,
+                "Cross-model review (Gemini via agy; Codex substitute): Verdict: "
+                f"**ACCEPT** at {HEAD[:9]}\n",
+            ],
+        ),
+        (
+            DOCS,
+            [
+                "**Independent Claude review** (Claude Opus 5.5, separate agent; delta = fixes "
+                f"for Codex round 1 and the first Claude review): **ACCEPT at {HEAD}**\n"
+            ],
+        ),
+        (DOCS, [f"Head reviewed: {HEAD}\nCodex r1: REJECT — x; Claude r2: ACCEPT at {HEAD}\n"]),
+        (RISKY, [CLAUDE_AT_HEAD, CODEX_RECORD]),
+        (RISKY, [COMBINED_RECORD]),
+    ],
+)
+def test_an_accept_whose_nearest_model_is_its_own_family_still_counts(files, comments):
+    assert rrc.evaluate(HEAD, files, [_c(body) for body in comments], [])["status"] == "OK"
+
+
+def _event(kind, rnd, comment, **extra):
+    return {
+        "family": "claude",
+        "reviewer": "claude",
+        "kind": kind,
+        "round": rnd,
+        "comment": comment,
+        "line": "x",
+        **extra,
+    }
+
+
+def test_an_unattributed_accept_credits_nothing_but_still_numbers_its_round():
+    lone = [_event("accept", 2, 0, unattributed=True)]
+    assert rrc.standing_families(lone) == set()
+    # Choosing merge-only delta heads reads families as main did.
+    assert rrc.standing_families(lone, renumber=False) == {"claude"}
+    # Its round 3 in comment 0 makes the later round 1 start a new numbering, so the r0
+    # REJECT withdraws the earlier r1 ACCEPT, as on main.
+    events = [
+        _event("accept", 1, 0),
+        _event("accept", 3, 0, unattributed=True),
+        _event("round", 1, 1),
+        _event("reject", 0, 1),
+    ]
+    assert rrc.standing_families(events) == set()
+
+
+def test_unattributed_accepts_never_choose_a_delta_head_main_would_not():
+    # Found by the differential: reading the head's families strictly when choosing
+    # merge-only delta heads folds the older heads in and makes this OK; main says
+    # MISSING_CROSS_MODEL.
+    older = "2a9f3d4ec0000000000000000000000000000000"
+    comments = [
+        _c(f"cross-model r2 REQUEST_CHANGES, Codex r4 ACCEPT at {HEAD}\n"),
+        _c(
+            f"Head reviewed: {OLD}\n**Cross-model Opus round 1**: APPROVE at {older}.\n"
+            "Rounds: cross-model r1 ACCEPT (not the author) → r1 REJECT. "
+            "Opus r1 ACCEPT then r2–r4 REJECT.\n"
+        ),
+    ]
+    report = rrc.evaluate(HEAD, RISKY, comments, [], delta_verified=(OLD, older))
+    assert report["status"] == "MISSING_CROSS_MODEL"
+
+
+def test_an_unattributed_accept_is_not_reported_as_withdrawn_by_a_reject():
+    report = rrc.evaluate(
+        HEAD, DOCS, [_c(f"**Codex review** (Claude asked): ACCEPT at {HEAD}\n")], []
+    )
+    assert report["status"] == "MISSING_RECORD"
+    assert "REJECT" not in report["reason"]
+
+
 # -- class 3: every family named in a REJECT's label withdraws (#3041) ------------------
 
 _CODEX_AT_HEAD = f"**Codex review** (gpt-6.1-sol, read-only): **ACCEPT at {HEAD}**\n"
@@ -3760,3 +3882,9 @@ def test_an_extra_reject_family_withdraws_a_later_round_of_any_reviewer():
         _c(f"Claude and Gemini r2: REJECT at {HEAD} — race\n"),
     ]
     assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_a_cross_model_label_nearest_to_the_accept_credits_no_claude_record():
+    # Follow-up to #3063's review: the "cross-model" word is a cross-model name too.
+    body = f"**Cross-model review** (after the Claude review): ACCEPT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"

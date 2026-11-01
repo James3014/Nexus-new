@@ -17,6 +17,8 @@ def test_evaluate_direct_mode_completion_detects_unchanged_targets_and_failed_ve
         return _Res(returncode=1, stdout="", stderr="boom")
 
     monkeypatch.setattr("nexus.engine.direct_mode.subprocess.run", _fake_run)
+    # Verify commands run through the process-group reaping runner (#3052).
+    monkeypatch.setattr("nexus.core.argv_command.run_reaping_process_group", _fake_run)
 
     result = evaluate_direct_mode_completion(
         project_root=tmp_path,
@@ -50,6 +52,8 @@ def test_evaluate_direct_mode_completion_passes_when_targets_changed_and_verify_
         return _Res(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr("nexus.engine.direct_mode.subprocess.run", _fake_run)
+    # Verify commands run through the process-group reaping runner (#3052).
+    monkeypatch.setattr("nexus.core.argv_command.run_reaping_process_group", _fake_run)
 
     result = evaluate_direct_mode_completion(
         project_root=tmp_path,

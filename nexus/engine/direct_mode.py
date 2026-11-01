@@ -8,6 +8,10 @@ from typing import Iterable
 
 from nexus.core.argv_command import run_command_string
 
+# A verify command (from the task text) no longer waits forever on a child holding its output;
+# its process group is killed on every exit (#3052).
+DIRECT_MODE_VERIFY_TIMEOUT_SECONDS = 1800
+
 _FILE_PATTERN = re.compile(
     r"(?P<path>(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.(?:py|json|yml|yaml|toml|md|txt|sh|ts|tsx|js|jsx))(?::(?P<line>\d+))?"
 )
@@ -135,7 +139,12 @@ def evaluate_direct_mode_completion(
     for cmd in spec.verify_commands:
         try:
             # The command comes from the task text, so it never reaches a shell (#2635).
-            res = run_command_string(cmd, cwd=project_root)
+            res = run_command_string(
+                cmd,
+                cwd=project_root,
+                timeout=DIRECT_MODE_VERIFY_TIMEOUT_SECONDS,
+                reap_process_group=True,
+            )
             verify_results.append(
                 {
                     "command": cmd,

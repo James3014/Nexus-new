@@ -12,7 +12,8 @@ from nexus.delivery.models import VerificationRecord
 
 
 def _run_verification_command(command: str, cwd: Path) -> VerificationRecord:
-    completed = run_command_string(command, cwd=cwd)
+    # Each segment's process group is killed once it returns (#3052).
+    completed = run_command_string(command, cwd=cwd, reap_process_group=True)
     return VerificationRecord(
         command=command,
         exit_code=completed.returncode,

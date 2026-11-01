@@ -453,6 +453,7 @@ def run_research_run(
     import subprocess
     import sys
 
+    from nexus.core.argv_command import run_reaping_process_group
     from nexus.engine.completion_contract import build_completion_envelope
     from nexus.engine.completion_enforcer import CompletionEnforcementError
 
@@ -627,7 +628,8 @@ def run_research_run(
                         broker = None
                     try:
                         cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", *_scope_test_targets(run_cwd, scope_list)]
-                        res = (subprocess_runner or subprocess.run)(
+                        # Runs the candidate's tests: their process group is killed after (#3052).
+                        res = (subprocess_runner or run_reaping_process_group)(
                             cmd, capture_output=True, text=True, timeout=timeout_sec, cwd=run_cwd
                         )
                     finally:

@@ -101,6 +101,7 @@ def test_run_dir_swapped_for_symlink_between_pre_and_post_marks_run_failed(tmp_p
         return _Proc()
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     result = runner.run_task("swap", command=_cmd(), timeout_sec=5)
 
     assert result["success"] is False
@@ -129,6 +130,7 @@ def test_renamed_parent_with_symlink_is_detected_even_with_same_inode(tmp_path, 
         return _Proc()
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     result = runner.run_task("swap-parent", command=_cmd(), timeout_sec=5)
 
     # Control: the end of the path is still the same directory.
@@ -151,6 +153,7 @@ def test_swap_during_timed_out_run_is_also_refused(tmp_path, monkeypatch):
         raise subprocess.TimeoutExpired(cmd="probe", timeout=1)
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     result = runner.run_task("swap-timeout", command=_cmd(), timeout_sec=1)
 
     assert result["success"] is False
@@ -164,6 +167,9 @@ def test_untouched_run_dir_still_gets_its_report(tmp_path, monkeypatch):
     root = _project(tmp_path)
     runner = SandboxRunner(root)
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", lambda cmd, **kw: _Proc())
+    monkeypatch.setattr(
+        sandbox_runner_mod, "run_reaping_process_group", lambda cmd, **kw: _Proc()
+    )  # #3052
     result = runner.run_task("ok", command=_cmd(), timeout_sec=5)
     assert result["success"] is True
     report = Path(result["report_path"])
@@ -269,6 +275,7 @@ def _captured_profile(tmp_root: Path, monkeypatch, elastic_profile: str | None =
         return _Proc()
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     result = runner.run_task(
         "profile", command=_cmd(), timeout_sec=5, elastic_profile=elastic_profile
     )
@@ -358,6 +365,7 @@ def test_symlinked_project_root_uses_the_real_run_dir_everywhere(tmp_path, monke
         return _Proc()
 
     monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
     result = runner.run_task("linked", command=_cmd(), timeout_sec=5)
 
     real_run_dir = Path(os.path.realpath(real_root)) / ".nexus" / "sandbox" / "runs"
