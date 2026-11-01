@@ -18,6 +18,7 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerStatus,
@@ -34,6 +35,9 @@ from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
+# A post-apply command whose output is held open (by a background child) no longer waits
+# forever; its whole process group is killed on every exit (#3052).
+POST_APPLY_COMMAND_TIMEOUT_SECONDS = 1800
 
 
 @dataclass(frozen=True)
@@ -1024,9 +1028,16 @@ class ControlledIntegrationManager:
                     if self._git(["rev-parse", "HEAD"], post_apply_path) != exact_head:
                         raise RuntimeError("post-apply worktree is not the integrated commit")
                     for command in post_apply_commands:
-                        result = subprocess.run(
-                            tuple(command), cwd=post_apply_path, capture_output=True, text=True
-                        )
+                        try:
+                            result = run_reaping_process_group(
+                                tuple(command),
+                                cwd=post_apply_path,
+                                timeout=POST_APPLY_COMMAND_TIMEOUT_SECONDS,
+                            )
+                        except subprocess.TimeoutExpired as exc:
+                            raise RuntimeError(
+                                f"post-apply verification timed out: {' '.join(command)}"
+                            ) from exc
                         if result.returncode != 0:
                             raise RuntimeError(
                                 f"post-apply verification failed: {' '.join(command)}"

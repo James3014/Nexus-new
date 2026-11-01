@@ -3,7 +3,9 @@
 import hashlib
 import json
 import os
+import signal
 import subprocess
+import time
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1107,6 +1109,69 @@ def test_post_apply_failure_removes_its_worktree_and_stays_typed(tmp_path: Path)
     assert not (tmp_path / "stage" / ".post-apply" / "task-1").exists()
     assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
     assert _git(controller, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def _wait_gone(pid: int) -> bool:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        stat = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        if not stat or stat.startswith("Z"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_post_apply_command_leaves_no_background_child(tmp_path: Path):
+    """#3052: a post-apply command's process group is killed once it returns."""
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    pid_file = tmp_path / "bg.pid"
+    result = _separate_controller_integrate(
+        tmp_path,
+        controller,
+        base,
+        candidate,
+        post_apply_commands=(
+            ("/bin/sh", "-c", f"/bin/sleep 60 >/dev/null 2>&1 & echo $! > '{pid_file}'"),
+        ),
+    )
+    assert result.post_apply_verified is True
+    pid = int(pid_file.read_text().strip())
+    try:
+        assert _wait_gone(pid), f"post-apply background child {pid} outlived the command"
+    finally:
+        if not _wait_gone(pid):
+            os.kill(pid, signal.SIGKILL)
+
+
+def test_post_apply_command_that_holds_its_output_times_out(tmp_path: Path, monkeypatch):
+    """#3052: a post-apply command no longer waits forever on a child holding its output."""
+    from nexus.orchestrator import governed_integration
+
+    monkeypatch.setattr(governed_integration, "POST_APPLY_COMMAND_TIMEOUT_SECONDS", 1)
+    _root, controller, base, candidate = _separate_controller(tmp_path)
+    pid_file = tmp_path / "bg.pid"
+    with pytest.raises(IntegrationExecutionError) as raised:
+        _separate_controller_integrate(
+            tmp_path,
+            controller,
+            base,
+            candidate,
+            post_apply_commands=(("/bin/sh", "-c", f"/bin/sleep 60 & echo $! > '{pid_file}'"),),
+        )
+    assert "timed out" in str(raised.value)
+    pid = int(pid_file.read_text().strip())
+    try:
+        assert _wait_gone(pid), f"post-apply child {pid} outlived the timeout"
+    finally:
+        if not _wait_gone(pid):
+            os.kill(pid, signal.SIGKILL)
+    assert ".post-apply" not in _git(controller, "worktree", "list", "--porcelain")
 
 
 def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:

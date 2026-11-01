@@ -572,6 +572,7 @@ def run_reaping_process_group(
     capture_output: bool = True,
     text: bool = True,
     timeout: float | None = None,
+    stdin: int | None = None,
 ) -> subprocess.CompletedProcess:
     """``subprocess.run(argv, check=False)`` in a new session, whose process group is killed after.
 
@@ -596,8 +597,12 @@ def run_reaping_process_group(
     ``subprocess.TimeoutExpired`` propagates, as it does from ``subprocess.run``. A group member
     that is still alive after SIGKILL (other credentials, or not dead within
     ``_KILL_SETTLE_SECONDS``), or a group that cannot be listed, raises PermissionError once
-    the child is reaped; a leader itself still alive then is left unreaped, not waited for."""
+    the child is reaped; a leader itself still alive then is left unreaped, not waited for.
+    ``stdin`` is passed to ``Popen`` as is (e.g. ``subprocess.DEVNULL``); None inherits it.
+    ``subprocess.PIPE`` is refused: nothing here would ever write to or close it."""
 
+    if stdin == subprocess.PIPE:
+        raise ValueError("stdin=PIPE is not supported: nothing would write to it")
     _refuse_unless_child_stays_unreaped()
     pipe = subprocess.PIPE if capture_output else None
     deadline = None if timeout is None else time.monotonic() + timeout
@@ -606,6 +611,7 @@ def run_reaping_process_group(
         list(argv),
         cwd=None if cwd is None else str(cwd),
         env=None if env is None else dict(env),
+        stdin=stdin,
         stdout=pipe,
         stderr=pipe,
         text=text,

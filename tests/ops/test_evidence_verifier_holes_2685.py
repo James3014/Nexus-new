@@ -422,6 +422,14 @@ def test_collection_runs_argv_only_with_timeout(tmp_path, monkeypatch):
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(ev.subprocess, "run", spy)
+    real_reap = ev.run_reaping_process_group
+
+    def spy_reap(argv, *args, **kwargs):
+        # Collection runs through the process-group reaping runner (#3052).
+        seen.append((argv, kwargs))
+        return real_reap(argv, *args, **kwargs)
+
+    monkeypatch.setattr(ev, "run_reaping_process_group", spy_reap)
     ev.collect_test_ids(("python", "-m", "pytest"), ["tests"], root)
     argv, kwargs = seen[-1]
     assert isinstance(argv, list) and "--collect-only" in argv

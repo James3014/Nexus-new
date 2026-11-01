@@ -1,11 +1,36 @@
 import shlex
-import subprocess
 import hashlib
 import time
 import sys
 import os
 from pathlib import Path
 from typing import Dict, List, Any
+
+
+def _load_run_reaping_process_group():
+    """``nexus.core.argv_command.run_reaping_process_group`` (#3052).
+
+    ``scripts/ops/replay_runner.py`` loads this file by path under a bare python3 in the
+    delivery gate, where the ``nexus`` package is not importable; ``argv_command`` is
+    stdlib-only, so it is then loaded by path the same way."""
+    try:
+        from nexus.core.argv_command import run_reaping_process_group
+    except ModuleNotFoundError as exc:
+        if exc.name not in ("nexus", "nexus.core"):
+            raise
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[1] / "core" / "argv_command.py"
+        spec = importlib.util.spec_from_file_location("nexus_core_argv_command", path)
+        if spec is None or spec.loader is None:
+            raise
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        run_reaping_process_group = module.run_reaping_process_group
+    return run_reaping_process_group
+
+
+run_reaping_process_group = _load_run_reaping_process_group()
 
 _SHELL_METACHARS = set(";|&$`<>") | {"\n", "\r", "\x00"}
 
@@ -325,9 +350,9 @@ class ReplayRunner:
                 })
                 continue
             try:
-                result = subprocess.run(
-                    argv, cwd=self.project_root,
-                    capture_output=True, text=True, timeout=REPLAY_TIMEOUT_SECONDS
+                # Replays an agent-claimed command: its process group is killed after (#3052).
+                result = run_reaping_process_group(
+                    argv, cwd=self.project_root, timeout=REPLAY_TIMEOUT_SECONDS
                 )
                 executed += 1
                 duration = int((time.time() - start_time) * 1000)

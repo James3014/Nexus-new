@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Collection, Mapping, Sequence
 
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     validate_selected_worker,
@@ -2803,15 +2804,9 @@ def _run_one_verifier(
         else:
             sandbox_info["reason"] = "not_a_pytest_verifier"
             try:
-                proc = subprocess.run(
-                    executed_argv,
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    timeout=spec.timeout,
-                    check=False,
-                    env=env,
-                    shell=False,
+                # Runs against the candidate commit: its process group is killed after (#3052).
+                proc = run_reaping_process_group(
+                    executed_argv, cwd=root, env=env, timeout=spec.timeout
                 )
                 returncode = int(proc.returncode)
                 stdout = proc.stdout or ""

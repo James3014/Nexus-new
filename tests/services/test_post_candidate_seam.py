@@ -1398,6 +1398,12 @@ def test_sprint_inplace_executor_refuses_when_a_companion_is_held(
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", "")
     )
+    # The candidate's tests run through the process-group reaping runner (#3052).
+    monkeypatch.setattr(
+        sprint_service,
+        "run_reaping_process_group",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "", ""),
+    )
     seam.acquire_target_lock(task_id="other-task", workspace_root=case, target_file="helper.py")
     try:
         executor = InPlaceSprintExecutor(
@@ -1430,6 +1436,10 @@ def test_sprint_inplace_evaluation_holds_the_lock_from_write_to_restore(
         return subprocess.CompletedProcess(a[0], 0, "1 passed", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    # The candidate's tests run through the process-group reaping runner (#3052).
+    monkeypatch.setattr(
+        "nexus.research.sprint_service.run_reaping_process_group", fake_run
+    )
     executor = InPlaceSprintExecutor(
         case, "target.py", [sys.executable, "-m", "pytest", "-q", "test_visible.py"], 30
     )

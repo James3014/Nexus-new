@@ -18,6 +18,7 @@ from typing import Any
 from dataclasses import asdict
 import click
 
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.repo_root import REPO_ROOT
 from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries, planner_route_signals, NO_LOCAL_CANDIDATE_GENERATOR
@@ -239,7 +240,8 @@ def _run_visible_pytest(
             workspace_root=repo_root,
         )
         return completed
-    return subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
+    # Runs the candidate's tests: their process group is killed after (#3052).
+    return run_reaping_process_group(pytest_cmd, cwd=repo_root, timeout=timeout_sec)
 
 
 def _visible_error(res: subprocess.CompletedProcess, default: str) -> str:

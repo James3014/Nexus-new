@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from nexus.core.argv_command import run_reaping_process_group  # noqa: E402
 from nexus.core.decorators import nexus_metabolize
 from scripts.ops.rollback_guard import RollbackGuard
 from nexus.services.memory import MemoryService, FaultLesson
@@ -117,7 +118,10 @@ def execute_repair_proposals(lines, cwd):
             continue
         print(f"  > {cmd}")
         try:
-            res = subprocess.run(argv, cwd=str(cwd), stdin=subprocess.DEVNULL, timeout=600)
+            # A model-proposed command: its process group is killed after (#3052).
+            res = run_reaping_process_group(
+                argv, cwd=str(cwd), stdin=subprocess.DEVNULL, capture_output=False, timeout=600
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             outcomes.append({"command": cmd, "status": "FAILED_TO_RUN", "reason": str(exc)})
             continue

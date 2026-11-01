@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, cast
 
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.ddtree_adapter import DDTreeAdapter
@@ -1625,12 +1626,9 @@ class InPlaceSprintExecutor:
                 restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                 extra_path.parent.mkdir(parents=True, exist_ok=True)
                 extra_path.write_text(extra_code, encoding="utf-8")
-            res = subprocess.run(
-                self.pytest_cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_sec,
-                cwd=self.repo_root,
+            # Runs the candidate's tests: their process group is killed after (#3052).
+            res = run_reaping_process_group(
+                self.pytest_cmd, cwd=self.repo_root, timeout=self.timeout_sec
             )
             return CandidateEval(
                 seed=seed,

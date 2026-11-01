@@ -155,6 +155,8 @@ def test_replay_runner_runs_argv_without_shell(tmp_path, monkeypatch):
         return MagicMock(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    # Replays run through the process-group reaping runner (#3052).
+    monkeypatch.setattr("nexus.delivery.replay_runner.run_reaping_process_group", fake_run)
     report = ReplayRunner(tmp_path).run_replay({
         "test_artifacts": [{"command": "pytest -k 'a b' c"}]
     })

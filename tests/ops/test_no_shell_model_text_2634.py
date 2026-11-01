@@ -137,6 +137,8 @@ def test_allowlisted_runner_is_run_argv_only_without_shell(tmp_path, monkeypatch
         return subprocess.CompletedProcess(args[0], 0, "", "")
 
     monkeypatch.setattr(ev.subprocess, "run", fake_run)
+    # Replays run through the process-group reaping runner (#3052).
+    monkeypatch.setattr(ev, "run_reaping_process_group", fake_run)
     report = EvidenceVerifier(tmp_path)._verify_test_commands([{"command": cmd}])
     assert report["all_executed"] is True
     assert len(calls) == 1

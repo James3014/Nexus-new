@@ -24,6 +24,7 @@ from nexus.research.runtime.runtime_resilience import (
 )
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
+from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.context_hub import ContextHub
 from nexus.services.workspace import WorkspaceManager
 from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
@@ -823,13 +824,8 @@ class AutoResearchNightShift:
 
     def _run_cmd(self, cmd: list[str], cwd: Path, timeout_sec: int) -> tuple[bool, str]:
         try:
-            res = subprocess.run(
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
-            )
+            # Runs checks on the candidate: their process group is killed after (#3052).
+            res = run_reaping_process_group(cmd, cwd=cwd, timeout=timeout_sec)
         except subprocess.TimeoutExpired:
             return False, f"timeout: {' '.join(cmd)}"
         except Exception as exc:
