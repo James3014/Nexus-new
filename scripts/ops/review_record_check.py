@@ -1129,6 +1129,24 @@ def _rebuttal_point(section: list[str], head: str) -> tuple[int, int] | None:
     return point
 
 
+def _round_before(prefix: str, lowest: bool) -> int | None:
+    """The round of a verdict from the text before its token in its clause.
+
+    Main read the last round marker, so a finding id in an aside moved it ("r2 (closes
+    R7): ACCEPT" read as round 7, "r3 (re R1): REJECT" as round 1). The label's own round
+    is the first marker outside parentheses; it is used only where it is safer than
+    main's: the lower of the two for an ACCEPT (``lowest``), the higher for a REJECT, so a
+    round never lets an ACCEPT outlast a REJECT that main's round would not (#3041).
+    """
+    found = _ROUND.findall(prefix)
+    if not found:
+        return None
+    last = int(found[-1])
+    outside = _ROUND.findall(_plain(prefix))
+    label = int(outside[0]) if outside else last
+    return min(label, last) if lowest else max(label, last)
+
+
 def _reject_match(clause: str) -> tuple[int, int] | None:
     match = _REJECT_POS.search(clause) or _REJECT_POS_MORE.search(clause)
     if not match:
@@ -1232,7 +1250,16 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
     that reviewer's events in it: a new session counts from r1 again, so an older
     ``r3 ACCEPT`` does not outrank its ``r1`` or ``r2 REJECT`` (#3041). A later comment
     without a round 1 (a recap of round 2) keeps the numbering.
+
+    Numbering uses each event's ``round`` (main's reading); with ``renumber`` the
+    comparison uses its ``compare`` round where it has one (``_round_before``), never
+    higher for an ACCEPT nor lower for a REJECT than ``round``. Without it (choosing
+    merge-only delta heads) rounds are compared as main read them.
     """
+
+    def compared(event: dict[str, Any]) -> int | None:
+        return event.get("compare", event["round"]) if renumber else event["round"]
+
     round_one = {
         (event.get("comment"), event["family"], event.get("reviewer"))
         for event in events
@@ -1260,15 +1287,15 @@ def standing_families(events: list[dict[str, Any]], renumber: bool = True) -> se
             continue
         if event["kind"] != "reject":
             continue  # a round marker only numbers
-        reject_round = event["round"]
+        reject_round = compared(event)
         accepts[family] = [
             (accept, accept_epoch)
             for accept, accept_epoch in accepts.get(family, [])
             if reviewer is not None and accept.get("reviewer") == reviewer
             if accept_epoch == epoch
             if reject_round is not None
-            and accept["round"] is not None
-            and accept["round"] > reject_round
+            and (accept_round := compared(accept)) is not None
+            and accept_round > reject_round
         ]
     return {family for family, kept in accepts.items() if kept}
 
@@ -1380,7 +1407,9 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 consumed = start + len(clause) if start >= 0 else consumed
                 family = _clause_family(clause, span, plain_line, start, header_family)
                 before = plain_line[: start + span[0]] if (span and start >= 0) else ""
+                accept_round = _round_before(clause[: span[0]], lowest=True) if span else None
                 rounds = _ROUND.findall(clause[: span[0]]) if span else []
+                main_round = int(rounds[-1]) if rounds else None
                 if (
                     family
                     and not _binding(clause, span, line, head, comment_head)
@@ -1390,7 +1419,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                         (index, start + (span[0] if span else 0)),
                         family,
                         _reviewer_word(before) or header_reviewer,
-                        int(rounds[-1]) if rounds else None,
+                        main_round,
                     ))
                 if family and _binding(clause, span, line, head, comment_head):
                     line_events.append((
@@ -1400,7 +1429,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                             "reviewer": _reviewer_word(before) or header_reviewer,
                             # A withdrawn ACCEPT still numbers its round, as before #3041.
                             "kind": "round" if withdrawn else "accept",
-                            "round": int(rounds[-1]) if rounds else None,
+                            "round": main_round,
+                            "compare": accept_round,
                             "comment": 0,
                             "line": clause.strip(),
                         },
@@ -1446,6 +1476,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     "reviewer": reviewer,
                     "kind": "reject",
                     "round": int(rounds[-1]) if rounds else None,
+                    "compare": _round_before(clause[: span[0]], lowest=False),
                     "comment": 0,
                     "line": clause.strip(),
                 }
