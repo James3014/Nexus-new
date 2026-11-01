@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from rank_bm25 import BM25Okapi
 
+from nexus.services.local_heal.repo_read import read_repo_text
+
 
 @dataclass
 class FileCandidate:
@@ -57,7 +59,9 @@ class RepoMap:
         for py_file in self.repo_dir.rglob("*.py"):
             try:
                 rel = str(py_file.relative_to(self.repo_dir))
-                content = py_file.read_text(encoding="utf-8", errors="replace")
+                content = read_repo_text(self.repo_dir, py_file)
+                if content is None:
+                    continue  # a link, hard link or special file left in repo_dir (#3018)
                 self._file_index[rel] = content
                 
                 # Extract top-level symbols

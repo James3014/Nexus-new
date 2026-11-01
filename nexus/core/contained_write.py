@@ -165,8 +165,13 @@ def write_text_in_root(
         os.close(parent)
 
 
-def read_text_in_root(root: Path | str, relative: PurePath | str) -> str:
-    """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link."""
+def read_text_in_root(
+    root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
+) -> str:
+    """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
+
+    With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
+    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
 
     parts = _parts(relative)
     parent = _open_parent(root, parts, create_parents=False)
@@ -179,9 +184,15 @@ def read_text_in_root(root: Path | str, relative: PurePath | str) -> str:
     finally:
         os.close(parent)
     try:
-        _check_regular(fd, parts[-1])
+        info = os.fstat(fd)
+        _check_regular_info(info, parts[-1])
+        if max_bytes is not None and info.st_size > max_bytes:
+            raise PathContainmentError(f"file_too_large:{parts[-1]}:{info.st_size}")
         with os.fdopen(fd, "rb", closefd=False) as handle:
-            return handle.read().decode("utf-8", errors="replace")
+            data = handle.read() if max_bytes is None else handle.read(max_bytes + 1)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise PathContainmentError(f"file_too_large:{parts[-1]}:{len(data)}")
+        return data.decode("utf-8", errors="replace")
     finally:
         os.close(fd)
 

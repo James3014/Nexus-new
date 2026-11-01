@@ -4,6 +4,8 @@ import ast
 import re
 from pathlib import Path
 
+from nexus.services.local_heal.repo_read import read_repo_text
+
 try:
     from rank_bm25 import BM25Okapi
     _RANK_BM25_AVAILABLE = True
@@ -112,8 +114,11 @@ class GranularMethodLocalizer:
         found_explicit = []
         for path in explicit_paths:
             p = repo_dir / path if not Path(path).is_absolute() else Path(path)
-            if p.exists():
-                found_explicit.append((10000.0, {"path": str(path), "content": p.read_text(errors="replace"), "file_path": p}))
+            # A path named in the issue text, or an entry left in repo_dir, is read only when it
+            # is a regular file inside repo_dir (#3018).
+            explicit_content = read_repo_text(repo_dir, p) if p.exists() else None
+            if explicit_content is not None:
+                found_explicit.append((10000.0, {"path": str(path), "content": explicit_content, "file_path": p}))
 
         if found_explicit:
             return found_explicit[:max_files]
@@ -129,8 +134,8 @@ class GranularMethodLocalizer:
             )): 
                 continue
             try:
-                content = pyfile.read_text(encoding="utf-8", errors="replace")
-                if content.strip():
+                content = read_repo_text(repo_dir, pyfile)
+                if content is not None and content.strip():
                     documents.append({"path": rel_path, "content": content, "file_path": pyfile})
             except: pass
 

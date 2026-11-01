@@ -104,7 +104,7 @@
 | nexus/core/memory_manager.py | tests/core/test_state_read_only_p1_writers_2721.py, tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
 | nexus/core/argv_command.py | tests/security/test_low_severity_hardening_2635.py, tests/core, tests/delivery, tests/health | active | high | no_shell_legacy_command_runner_2635 |
 | nexus/core/notifier.py | tests/security/test_low_severity_hardening_2635.py, tests/core | active | medium | notifier_osascript_argv_2635 |
-| nexus/core/contained_write.py | tests/core/test_contained_write.py, tests/core/test_drone_file_edit_containment_2949.py, tests/unit/local_heal/test_host_writes_stay_in_work_dir.py, tests/unit/local_heal/test_patch_applier.py | active | high | host_writes_contained_to_work_dir_3013 |
+| nexus/core/contained_write.py | tests/core/test_contained_write.py, tests/core/test_drone_file_edit_containment_2949.py, tests/unit/local_heal/test_host_writes_stay_in_work_dir.py, tests/unit/local_heal/test_patch_applier.py, tests/unit/local_heal/test_heal_repo_reads_3018.py | active | high | host_writes_contained_to_work_dir_3013 |
 | benchmarking/swebench_lite/swe_local_heal.py | tests/unit/test_swe_local_heal_manifest_runner.py, tests/unit/local_heal/test_host_writes_stay_in_work_dir.py | active | medium | research_harness_local_mode_scratch_copy_3013 |
 | scripts/core/guard_executor.py | tests/security/test_low_severity_hardening_2635.py, tests/test_guard_allowlist.py | active | medium | guard_executor_no_shell_2635 |
 | scripts/guard_executor.py | tests/security/test_low_severity_hardening_2635.py | active | medium | legacy_guard_executor_no_shell_2635 |
@@ -216,6 +216,7 @@
 | nexus/services/local_heal/local_model_capability_executor_registry.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/local_qwen_evidence_gate.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/scratch_copy.py | tests/unit/local_heal/test_model_runs_leave_verification_dir_clean.py, tests/unit/local_heal/test_micro_verifier_pytest_shadow_2975_r3.py, tests/unit/local_heal/test_micro_verifier_pytest_absent_2975.py | active | high | local_heal_model_runs_on_disposable_copy_3012 |
+| nexus/services/local_heal/repo_read.py | tests/unit/local_heal/test_heal_repo_reads_3018.py | active | high | local_heal_repo_reads_no_follow_3018 |
 | nexus/services/local_heal/memory_belief_signal.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/micromerger.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |
 | nexus/services/local_heal/parser.py | tests/services/test_archived_deadcode_b3_2026_10_17.py | active | low | retired_deadcode_b3_guard_2491 |

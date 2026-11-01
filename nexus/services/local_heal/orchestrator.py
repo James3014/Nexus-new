@@ -15,6 +15,7 @@ from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
 from nexus.services.local_heal.latency_ledger import LatencyLedger
 from nexus.services.local_heal.phase_runner import PhaseRunner
+from nexus.services.local_heal.repo_read import read_repo_text
 from nexus.services.local_heal.role_contract import build_role_receipt
 
 logger = logging.getLogger(__name__)
@@ -333,10 +334,13 @@ class HealOrchestrator:
         f_path = metadata.get("file_path")
         if failed_text and f_path:
             target_file = ctx.op.repo_dir / f_path
-            if target_file.exists():
+            # f_path comes from the model's patch: read only a regular file inside repo_dir (#3018).
+            file_content = (
+                read_repo_text(ctx.op.repo_dir, target_file) if target_file.exists() else None
+            )
+            if file_content is not None:
                 from nexus.services.local_heal.closest_snippet import find_closest_snippet
 
-                file_content = target_file.read_text(encoding="utf-8", errors="replace")
                 search_symbols = ctx.op.plan.search_symbols if ctx.op.plan else []
                 err.closest_match = find_closest_snippet(
                     file_content, failed_text, context_hints=search_symbols
@@ -583,11 +587,16 @@ class HealOrchestrator:
         final_patch = getattr(ctx.op, "final_patch", "")
         target_symbol = self._extract_target_symbol(ctx)
         source_file = self._resolve_target_file(ctx)
+        repo_dir = getattr(ctx.op, "repo_dir", None)
+        source_text = read_repo_text(repo_dir, source_file) if source_file and repo_dir else None
+        if source_text is None:
+            source_file = None  # never read again by path (#3018)
 
         canonical_result = get_canonical_search_span(
             locked_search="",
             patch_diff=final_patch,
             source_file=source_file,
+            source_text=source_text,
             target_symbol=target_symbol,
             failed_search_text="",
         )
@@ -871,13 +880,12 @@ class HealOrchestrator:
             source_text = ""
             target_path = ctx.op.repo_dir / expected_target
             if target_path.exists():
-                try:
-                    source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                except Exception as exc:
+                # Not through a link, hard link or special file left in repo_dir (#3018).
+                source_text = read_repo_text(ctx.op.repo_dir, target_path) or ""
+                if not source_text:
                     logger.warning(
-                        "could not read diff target %s; falling back to localized content: %r",
+                        "could not read diff target %s; falling back to localized content",
                         target_path,
-                        exc,
                     )
             if not source_text and ctx.op.localized_files:
                 source_text = ctx.op.localized_files[0].content
@@ -1250,7 +1258,9 @@ class HealOrchestrator:
         for loc in localized:
             if hasattr(loc, "path") and loc.path:
                 target = ctx.op.repo_dir / loc.path
-                if target.exists():
+                # Its callers read it by path (canonical span, AST evidence): only a regular
+                # file inside repo_dir, not a link, hard link or special file (#3018).
+                if target.exists() and read_repo_text(ctx.op.repo_dir, target) is not None:
                     return target
         return None
 
