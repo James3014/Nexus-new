@@ -345,7 +345,7 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         # issue-check accepts only the config committed on the trusted base commit
         # (--require-trusted-config, as in CI), pinned to the base_sha resolved above,
         # and reports the receipt it wrote to a pointer file outside the checkout.
-        # issue-init (Core pin b07ae36) takes neither trust flag and runs no verifier or
+        # issue-init (Core pin 67427c5) takes neither trust flag and runs no verifier or
         # material command. Both get the base workflow's evidence universe.
         pointer = tmp_parent / "receipt-pointer"
         universe_args = ("--evidence-universe", universe)
