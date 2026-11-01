@@ -7,16 +7,23 @@ Deep Agents/provider runtime lives in a separate executable and dependency domai
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import signal
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.core.argv_command import (
+    ProcessGroupReapingUnavailable,
+    communicate_then_kill_group,
+    require_child_stays_unreaped,
+)
 from nexus.services.external_intelligence import (
     OBSERVED_MODEL_ATTESTATION_MISMATCH,
     ExternalIntelligenceError,
@@ -339,6 +346,50 @@ def _validate_execution_exposure_receipt(
     return dict(receipt)
 
 
+# After a runtime timeout: how long its process group gets to close the output after SIGTERM,
+# then after SIGKILL (#3052). Only a descendant that left the group with setsid() can hold the
+# output past the second bound; the result is then still runtime_timeout (outcome unknown).
+_RUNTIME_TERM_GRACE_SECONDS = 2.0
+_RUNTIME_KILL_DRAIN_SECONDS = 5.0
+
+
+def _terminate_timed_out_runtime(
+    process: subprocess.Popen, timed_out: subprocess.TimeoutExpired
+) -> str:
+    """SIGTERM, then SIGKILL, a timed-out runtime's process group while the runtime is still
+    unreaped (its pid, the group id, stays reserved), each step bounded; returns the stderr read.
+
+    ``communicate_then_kill_group`` left the runtime unsignalled and unreaped on timeout. Each
+    step that sees the runtime exit and its output close SIGKILLs the group and reaps it. If
+    the output is still held after the SIGKILL step, the dead runtime is reaped without waiting
+    on the holder."""
+    stderr_parts = [timed_out.stderr or b""]
+    try:
+        for sig, grace in (
+            (signal.SIGTERM, _RUNTIME_TERM_GRACE_SECONDS),
+            (signal.SIGKILL, _RUNTIME_KILL_DRAIN_SECONDS),
+        ):
+            with contextlib.suppress(OSError):
+                os.killpg(process.pid, sig)
+            try:
+                _stdout, stderr = communicate_then_kill_group(process, grace)
+            except subprocess.TimeoutExpired as again:
+                stderr_parts.append(again.stderr or b"")
+                continue
+            except (ChildProcessError, PermissionError):
+                break
+            stderr_parts.append(stderr)
+            break
+        if process.returncode is None:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=_RUNTIME_TERM_GRACE_SECONDS)
+    finally:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+    return b"".join(stderr_parts).decode("utf-8", errors="replace")
+
+
 def _runtime_call(
     executable: str,
     payload: Mapping[str, Any],
@@ -355,46 +406,49 @@ def _runtime_call(
     """
 
     try:
-        process = subprocess.Popen(
-            [executable],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-            shell=False,
-            env=_runtime_env(provider_id),
-        )
-    except FileNotFoundError:
-        return None, "", False, "runtime_not_found"
-    try:
+        # Refused before anything is spawned when the runtime could not stay unreaped until its
+        # process group is killed (#3052).
+        require_child_stays_unreaped()
+    except ProcessGroupReapingUnavailable:
+        return None, "", False, "runtime_reaping_unavailable"
+    # The payload is fed from an unlinked temporary file, so no writer thread is needed while
+    # communicate_then_kill_group reads the binary pipes.
+    with tempfile.TemporaryFile() as request_file:
+        request_file.write((_canonical_json(dict(payload)) + "\n").encode("utf-8"))
+        request_file.flush()
+        request_file.seek(0)
         try:
-            stdout, stderr = process.communicate(
-                _canonical_json(dict(payload)) + "\n", timeout=timeout
+            process = subprocess.Popen(
+                [executable],
+                stdin=request_file,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+                shell=False,
+                env=_runtime_env(provider_id),
             )
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                pass
-            try:
-                stdout, stderr = process.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    pass
-                stdout, stderr = process.communicate()
-            return None, stderr or "", True, "runtime_timeout"
+        except FileNotFoundError:
+            return None, "", False, "runtime_not_found"
+    try:
+        # The runtime's process group is SIGKILLed once the runtime exits, before it is
+        # reaped, so a descendant left in its group does not outlive an accepted result (#3052).
+        stdout_bytes, stderr_bytes = communicate_then_kill_group(process, timeout)
+    except subprocess.TimeoutExpired as exc:
+        return None, _terminate_timed_out_runtime(process, exc), True, "runtime_timeout"
+    except (ChildProcessError, PermissionError):
+        # A group member survived SIGKILL, or the group could not be listed: the runtime's
+        # effects may still be in progress.
+        return None, "", True, "runtime_cleanup_incomplete"
     finally:
-        for stream in (process.stdin, process.stdout, process.stderr):
+        for stream in (process.stdout, process.stderr):
             if stream is not None:
                 stream.close()
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
     if process.returncode != 0:
         return None, stderr or "", True, f"runtime_nonzero:{process.returncode}"
     try:
-        value = json.loads(stdout or "")
-    except json.JSONDecodeError:
+        value = json.loads(stdout_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None, stderr or "", True, "runtime_result_invalid"
     if not isinstance(value, dict) or value.get("schema") != PROTOCOL_RESULT_SCHEMA:
         return None, stderr or "", True, "runtime_result_invalid"

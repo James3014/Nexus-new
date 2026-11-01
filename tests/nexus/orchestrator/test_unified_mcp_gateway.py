@@ -48,6 +48,9 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _compile_agy_command,
     observe_github_issue,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts import (  # noqa: E402
+    assist_response as assist_response_module,
+)
 from nexus.orchestrator.unified_mcp_gateway_parts.model_probe import (  # noqa: E402
     MODEL_PROBE_POOL_WAIT_DEFAULT_SECONDS,
 )
@@ -55,6 +58,24 @@ from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa:
 from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
 )
+
+_REAL_POPEN = subprocess.Popen
+
+
+@pytest.fixture(autouse=True)
+def _fake_provider_exit_check(monkeypatch):
+    """Fake provider processes (no real pid) answer the refresh's exit check through poll();
+    a real subprocess.Popen keeps the reaping group kill (#3052). Tests patch
+    subprocess.Popen itself, so the real class is the one bound at import."""
+    real = assist_response_module.kill_group_if_exited
+
+    def check(process):
+        if isinstance(process, _REAL_POPEN):
+            return real(process)
+        process.returncode = process.poll()
+        return process.returncode is not None
+
+    monkeypatch.setattr(assist_response_module, "kill_group_if_exited", check)
 
 
 def _readiness_observation(plane: str, status: str) -> PlaneObservation:
@@ -2298,6 +2319,7 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     class HangingPopen:
         pid = 54100
         returncode = None
+        signalled = None
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
             self.command = command
@@ -2307,12 +2329,18 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
             stderr.flush()
 
         def poll(self):
-            return None
+            return None if HangingPopen.signalled is None else -HangingPopen.signalled
+
+    def fake_killpg(pgid, sig):
+        # The fake has no real process group: never signal pgid 54100 on this host.
+        assert pgid == HangingPopen.pid
+        HangingPopen.signalled = sig
 
     service = FakeService()
     service.state_dir = tmp_path
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", HangingPopen)
+    monkeypatch.setattr(assist_response_module.os, "killpg", fake_killpg)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
     gateway = UnifiedMCPGateway(service=service)
     gateway.handle({"jsonrpc": "2.0", "id": 7010, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-timeout", "what": "Bounded probe", "why": "Poll timeout distinction", "allowed_files": ["README.md"]}}})

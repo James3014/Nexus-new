@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -19,7 +20,7 @@ import pytest
 from nexus.orchestrator import unified_mcp_gateway as gateway_module
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
-from nexus.orchestrator.unified_mcp_gateway_parts import model_probe
+from nexus.orchestrator.unified_mcp_gateway_parts import assist_response, model_probe
 from nexus.services.agy_account_pool import (
     AgyAccount,
     AgyAccountPoolManager,
@@ -49,6 +50,25 @@ class _FakePopen:
 
     def poll(self):
         return 0
+
+
+_REAL_POPEN = subprocess.Popen
+
+
+@pytest.fixture(autouse=True)
+def _fake_provider_exit_check(monkeypatch):
+    """Fake provider processes (no real pid) answer the refresh's exit check through poll();
+    a real subprocess.Popen keeps the reaping group kill (#3052). Tests patch
+    subprocess.Popen itself, so the real class is the one bound at import."""
+    real = assist_response.kill_group_if_exited
+
+    def check(process):
+        if isinstance(process, _REAL_POPEN):
+            return real(process)
+        process.returncode = process.poll()
+        return process.returncode is not None
+
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", check)
 
 
 @pytest.fixture

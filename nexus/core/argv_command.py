@@ -690,6 +690,24 @@ def communicate_then_kill_group(
     return captured[0], captured[1]
 
 
+def kill_group_if_exited(process: subprocess.Popen) -> bool:
+    """Non-blocking ``process.poll()`` that also SIGKILLs the child's process group once the child
+    has exited, before it is reaped (#3052). For a child the caller started with
+    ``start_new_session=True`` whose output does not go to pipes this process reads.
+
+    False, with nothing signalled or reaped, while the child still runs. Once it has exited: the
+    group gets SIGKILL, the child is reaped (``process.returncode`` is set) and True is
+    returned. Same precondition as ``communicate_then_kill_group``: check
+    ``require_child_stays_unreaped`` before spawning, and nothing else reaps the child
+    meanwhile (``poll()`` or ``wait()`` included). A group member alive after SIGKILL raises
+    PermissionError once the child is reaped; a reap that already happened elsewhere raises
+    ChildProcessError with nothing signalled."""
+    if process.returncode is None and not _wait_leader_unreaped(process.pid, time.monotonic()):
+        return False
+    _kill_group_then_reap(process)
+    return True
+
+
 def _decode(data: bytes, stream: object) -> str:
     """Decode as ``communicate`` does in text mode: the stream's encoding, universal newlines."""
     encoding = getattr(stream, "encoding", None) or "utf-8"
