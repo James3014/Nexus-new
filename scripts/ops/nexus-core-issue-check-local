@@ -26,6 +26,7 @@ the original exit code is kept.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -241,8 +242,18 @@ def reported_receipt(pointer: Path, worktree: Path) -> Path | None:
 
 
 def ensure_tool(cache_root: Path, pin: str, timeout: float = INSTALL_TIMEOUT_SECONDS) -> Path:
-    """Install the pinned Core tool; reuse a cached install only once it completed."""
-    base = cache_root / "tools" / pin
+    """Install the pinned Core tool; reuse a cached install only once it completed.
+
+    Concurrent runs on one host serialise on a per-pin lock file beside the install
+    directory, so one run never removes or marks another run's unfinished install (#3080)."""
+    tools = cache_root / "tools"
+    tools.mkdir(parents=True, exist_ok=True)
+    with open(tools / f"{pin}.lock", "a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _ensure_tool_locked(tools / pin, pin, timeout)
+
+
+def _ensure_tool_locked(base: Path, pin: str, timeout: float) -> Path:
     certify = base / "bin" / "nexus-certify"
     ready = base / TOOL_READY
     if certify.exists() and ready.exists():
