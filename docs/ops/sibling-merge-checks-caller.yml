@@ -1,5 +1,18 @@
 # Caller for the Nexus-new reusable "Sibling merge checks" (#2385).
 # Copy to .github/workflows/sibling-merge-checks.yml in each sibling repo.
+#
+# Pinned-version consumers (#3225). Most sibling repos call the reusable
+# workflow `@main` and pick up every change on merge. These two pin a
+# Nexus-new commit SHA instead, so a change to
+# .github/workflows/sibling-merge-checks.yml only reaches them after a
+# pin bump PR in their repo (nexus-core requires 40-hex pins, see its
+# tests/architecture/test_workflow_dependency_pinning.py):
+#   - James3014/nexus-core  .github/workflows/sibling-merge-checks.yml
+#     (last bump: nexus-core#314 -> 89824d487de94c5d4a6b5ee9e5ee4300be9a1ec0)
+#   - cairnwork/cairnwork   .github/workflows/sibling-merge-checks.yml
+#     (last bump: cairnwork#711 -> 89824d487de94c5d4a6b5ee9e5ee4300be9a1ec0)
+# When you change the reusable workflow, open the two bump PRs (or an
+# Issue naming them) in the same change set.
 name: Sibling merge checks
 
 on:
