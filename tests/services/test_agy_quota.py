@@ -466,3 +466,51 @@ def test_query_keeps_an_ignored_hangup_ignored(tmp_path: Path, monkeypatch) -> N
         assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, previous)
+
+
+def test_query_leaves_a_non_python_hangup_handler_in_place(tmp_path: Path, monkeypatch) -> None:
+    """#3203 review: a handler getsignal reports as None is neither replaced nor "restored"."""
+    import signal
+
+    real_getsignal = signal.getsignal
+    real_signal = signal.signal
+    replaced: list[object] = []
+
+    def getsignal(signum):
+        return None if signum == signal.SIGHUP else real_getsignal(signum)
+
+    def fake_signal(signum, handler):
+        if signum != signal.SIGHUP:
+            return real_signal(signum, handler)
+        if handler is None:
+            return real_signal(signum, handler)  # what restoring None really does: TypeError
+        replaced.append(handler)
+        return None  # a handler installed outside Python reads back as None
+
+    class FakeUsage:
+        pid = 2**22 + 13
+        returncode = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    monkeypatch.setattr(signal, "getsignal", getsignal)
+    monkeypatch.setattr(signal, "signal", fake_signal)
+    monkeypatch.setattr(quota.subprocess, "Popen", FakeUsage)
+    account_home = tmp_path / "account"
+    account_home.mkdir()
+
+    row = quota.query_account(
+        account_home=account_home,
+        account_name="one",
+        email=None,
+        agy_binary="unused-agy",
+        timeout=5.0,
+        checked_at="2026-11-02T00:00:00+00:00",
+    )
+
+    assert row["ok"] is False
+    assert replaced == []

@@ -1043,8 +1043,9 @@ CHECK_ORDER = (
 def _termination_signals_raise() -> Iterator[None]:
     """Turn SIGTERM and SIGHUP into SystemExit so ``finally`` cleanup runs (#3203).
 
-    Only on the main thread, and an ignored signal (``nohup``) stays ignored.
-    The previous handlers are restored on the way out.
+    Only on the main thread. An ignored signal (``nohup``) stays ignored, and a handler
+    not installed from Python (``getsignal`` returns None, so it could not be restored)
+    is left in place. The previous handlers are restored on the way out.
     """
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -1056,7 +1057,8 @@ def _termination_signals_raise() -> Iterator[None]:
     previous: dict[int, Any] = {}
     try:
         for signum in (signal.SIGTERM, signal.SIGHUP):
-            if signal.getsignal(signum) is not signal.SIG_IGN:
+            current = signal.getsignal(signum)
+            if current is not None and current is not signal.SIG_IGN:
                 previous[signum] = signal.signal(signum, _raise)
         yield
     finally:

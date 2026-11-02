@@ -15,6 +15,7 @@ import argparse
 import fcntl
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -56,10 +57,15 @@ def _acquire_lock(lock_path: Path) -> bool:
 
     A lock file left behind by a killed run no longer blocks later runs. The
     descriptor stays open until ``_release_lock``; the file still names the holder pid.
+    The path is shared (``/tmp`` by default), so a symlink, a hard link or another
+    user's file there raises ``OSError`` instead of being opened and truncated.
     """
     while True:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
         try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
+                raise OSError(f"unsafe lock file (not a private regular file): {lock_path}")
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             os.close(fd)
@@ -234,11 +240,23 @@ def main() -> int:
         return 2
 
     cwd = Path(args.cwd).resolve()
-    lock_path = Path(args.lock_file).resolve()
+    # Not resolve(): a symlink planted at the lock path must reach O_NOFOLLOW, not be followed.
+    lock_path = Path(os.path.abspath(args.lock_file))
     prompt = _read_prompt(args.prompt, args.prompt_file)
     inact_timeout = args.inactivity_timeout_sec if args.inactivity_timeout_sec > 0 else None
 
-    if not _acquire_lock(lock_path):
+    try:
+        acquired = _acquire_lock(lock_path)
+    except OSError as exc:
+        report = {
+            "status": "blocked",
+            "reason": "single_flight_lock_unusable",
+            "lock_file": str(lock_path),
+            "detail": str(exc),
+        }
+        print(json.dumps(report, ensure_ascii=False))
+        return 3
+    if not acquired:
         report = {
             "status": "blocked",
             "reason": "single_flight_lock_active",

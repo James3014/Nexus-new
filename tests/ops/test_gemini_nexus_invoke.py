@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from scripts.ops import gemini_nexus_invoke
 
 
@@ -70,3 +72,63 @@ def test_lock_released_by_holder_is_reacquired_on_the_new_file(tmp_path, monkeyp
         gemini_nexus_invoke._release_lock(lock)
     gemini_nexus_invoke._release_lock(lock)
     assert not lock.exists()
+
+
+@pytest.mark.parametrize("target_exists", [True, False])
+def test_lock_path_planted_as_symlink_is_refused_without_touching_the_target(
+    tmp_path, target_exists
+):
+    """#3203 review: the shared lock path is opened with O_NOFOLLOW, never through a symlink."""
+    target = tmp_path / "victim.txt"
+    if target_exists:
+        target.write_text("keep me", encoding="utf-8")
+    lock = tmp_path / "gemini.lock"
+    lock.symlink_to(target)
+
+    with pytest.raises(OSError):
+        gemini_nexus_invoke._acquire_lock(lock)
+
+    assert lock.is_symlink()
+    if target_exists:
+        assert target.read_text(encoding="utf-8") == "keep me"
+    else:
+        assert not target.exists()
+    assert lock not in gemini_nexus_invoke._LOCK_FDS
+
+
+def test_lock_path_planted_as_hard_link_is_refused_without_truncating(tmp_path):
+    """#3203 review: a hard link at the lock path is not locked or truncated."""
+    target = tmp_path / "victim.txt"
+    target.write_text("keep me", encoding="utf-8")
+    lock = tmp_path / "gemini.lock"
+    os.link(target, lock)
+
+    with pytest.raises(OSError):
+        gemini_nexus_invoke._acquire_lock(lock)
+
+    assert target.read_text(encoding="utf-8") == "keep me"
+    assert lock not in gemini_nexus_invoke._LOCK_FDS
+
+
+def test_main_reports_a_planted_symlink_lock_as_unusable(tmp_path, monkeypatch, capsys):
+    """#3203 review: main does not resolve the lock path past a planted symlink."""
+    import json
+    import sys
+
+    fake_gemini = tmp_path / "gemini"
+    fake_gemini.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    target = tmp_path / "victim.txt"
+    target.write_text("keep me", encoding="utf-8")
+    lock = tmp_path / "gemini.lock"
+    lock.symlink_to(target)
+    monkeypatch.setattr(gemini_nexus_invoke, "GEMINI_BIN", fake_gemini)
+    monkeypatch.setattr(
+        sys, "argv", ["gemini_nexus_invoke.py", "--prompt", "hi", "--lock-file", str(lock)]
+    )
+
+    code = gemini_nexus_invoke.main.__wrapped__()
+
+    report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 3
+    assert report["reason"] == "single_flight_lock_unusable"
+    assert target.read_text(encoding="utf-8") == "keep me"

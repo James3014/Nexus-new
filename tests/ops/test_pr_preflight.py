@@ -970,3 +970,40 @@ def test_static_worktrees_keep_an_ignored_hangup_ignored(tmp_path, monkeypatch):
         assert signal_module.getsignal(signal_module.SIGHUP) is signal_module.SIG_IGN
     finally:
         signal_module.signal(signal_module.SIGHUP, previous)
+
+
+def test_static_worktrees_leave_a_non_python_hangup_handler_in_place(tmp_path, monkeypatch):
+    """#3203 review: a handler getsignal reports as None is neither replaced nor "restored"."""
+    import signal as signal_module
+    import types
+
+    real_getsignal = signal_module.getsignal
+    real_signal = signal_module.signal
+    replaced: list[object] = []
+
+    def getsignal(signum):
+        return None if signum == signal_module.SIGHUP else real_getsignal(signum)
+
+    def fake_signal(signum, handler):
+        if signum != signal_module.SIGHUP:
+            return real_signal(signum, handler)
+        if handler is None:
+            return real_signal(signum, handler)  # what restoring None really does: TypeError
+        replaced.append(handler)
+        return None  # a handler installed outside Python reads back as None
+
+    monkeypatch.setattr(signal_module, "getsignal", getsignal)
+    monkeypatch.setattr(signal_module, "signal", fake_signal)
+    monkeypatch.setattr(pf, "_add_worktree", lambda repo, rev, parent, label: parent / label)
+    monkeypatch.setattr(
+        pf, "_git", lambda repo, *a, check=True: subprocess.CompletedProcess(a, 0, "", "")
+    )
+    monkeypatch.setattr(
+        pf, "check_static", lambda ctx, tool, wt: pf.CheckResult("static_ruff", pf.PASS)
+    )
+    ctx = types.SimpleNamespace(repo=tmp_path, base_sha="b" * 40, head_sha="h" * 40)
+
+    results = pf.run_checks(ctx, ["static_ruff"])
+
+    assert [r.status for r in results] == [pf.PASS]
+    assert replaced == []
