@@ -217,3 +217,77 @@ def test_hint_names_the_switch_and_no_host_detail() -> None:
     assert assist_jobs.ASSIST_DEFAULT_LANE_ENABLED_ENV == SWITCH
     assert f"{SWITCH}=1" in hint
     assert "/" not in hint.replace("cline, glm-5.2", "")
+
+
+@pytest.mark.parametrize(
+    "blank",
+    [{"model": "  "}, {"model": "\t"}, {"provider": "", "model": " \n "}],
+)
+def test_a_blank_probe_model_is_the_default_lane(box, blank) -> None:
+    gateway, state, launches = box
+    assert _error(gateway, "nexus_model_probe", _probe("lane-probe-7", **blank)).startswith(
+        PROBE_BLOCKER
+    )
+    assert launches == []
+    assert _no_job_written(state)
+
+
+@pytest.mark.parametrize(
+    "blank",
+    [
+        {"model": "  "},
+        {"preferred_model": "\t"},
+        {"provider": "  "},
+        {"preferred_worker": " ", "preferred_model": " "},
+        {"provider": "", "model": " \n "},
+    ],
+)
+def test_a_blank_assist_provider_and_model_is_the_default_lane(box, blank) -> None:
+    gateway, state, launches = box
+    assert _error(gateway, "nexus_assist_submit", _assist("lane-assist-7", **blank)).startswith(
+        ASSIST_BLOCKER
+    )
+    assert launches == []
+    assert _no_job_written(state)
+
+
+def test_switch_off_still_replays_a_stored_assist_job(box, monkeypatch) -> None:
+    gateway, _state, launches = box
+    monkeypatch.setenv(SWITCH, "1")
+    first = _call(gateway, "nexus_assist_submit", _assist("lane-assist-8"))
+    assert not first.get("isError"), first
+    stored = gateway._assist_read("lane-assist-8")
+    assert stored is not None and stored["status"] == "FAILED"
+    assert [kind for kind, _ in launches] == ["Popen"]
+    monkeypatch.delenv(SWITCH)
+    replay = _call(gateway, "nexus_assist_submit", _assist("lane-assist-8"))
+    assert not replay.get("isError"), replay
+    assert replay["structuredContent"]["task_id"] == "lane-assist-8"
+    assert replay["structuredContent"]["status"] == "FAILED"
+    assert gateway._assist_read("lane-assist-8")["job_id"] == stored["job_id"]
+    assert [kind for kind, _ in launches] == ["Popen"]
+
+
+def test_switch_off_still_replays_a_stored_model_probe(box, monkeypatch) -> None:
+    gateway, _state, launches = box
+    versions: list[str] = []
+
+    def version_run(argv: Any, *args: Any, **kwargs: Any):
+        versions.append(f"cline {len(versions) + 1}")
+        return subprocess.CompletedProcess(argv, 0, stdout=versions[-1], stderr="")
+
+    monkeypatch.setattr(subprocess, "run", version_run)
+    monkeypatch.setenv(SWITCH, "1")
+    first = _call(gateway, "nexus_model_probe", _probe("lane-probe-8"))
+    assert not first.get("isError"), first
+    stored = gateway._assist_read("lane-probe-8")
+    assert stored is not None
+    assert (stored["status"], stored["blocker"]) == ("FAILED", "ASSIST_PROVIDER_IDENTITY_DRIFT")
+    assert len(versions) == 2
+    monkeypatch.delenv(SWITCH)
+    replay = _call(gateway, "nexus_model_probe", _probe("lane-probe-8"))
+    assert not replay.get("isError"), replay
+    assert replay["structuredContent"]["task_id"] == "lane-probe-8"
+    assert replay["structuredContent"]["status"] == "FAILED"
+    assert gateway._assist_read("lane-probe-8")["job_id"] == stored["job_id"]
+    assert len(versions) == 2 and launches == []
