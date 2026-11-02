@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+
+import pytest
 
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 
@@ -50,3 +53,83 @@ def test_dayshift_generation_uses_unified_runtime_on_revisioned_workspace(monkey
     assert optimizer.unified_runtime_receipts[0]["task_id"] == receipt["task_id"]
     assert optimizer.unified_runtime_receipts[0]["receipt_complete"] is True
     assert optimizer.unified_runtime_receipts[0]["learning"]["task_id"] == receipt["task_id"]
+
+
+def _dayshift_layout(tmp_path: Path, monkeypatch, use_llm_scoring: bool):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "SENTINEL").write_text("keep", encoding="utf-8")
+    monkeypatch.chdir(sandbox)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    swarm = tmp_path / "swarm"
+    swarm.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("OUTSIDE\n", encoding="utf-8")
+    optimizer = DayShiftOptimizer(
+        project_root=tmp_path,
+        swarm_dir=swarm,
+        target_file="demo.py",
+        task_desc="improve demo",
+        max_rounds=1,
+        min_round_delay_sec=0,
+        use_llm_scoring=use_llm_scoring,
+    )
+    return sandbox, swarm, outside, optimizer
+
+
+def _relink(target: Path, outside: Path) -> None:
+    target.unlink()
+    os.link(outside, target)
+
+
+@pytest.mark.parametrize("rollback", ["failed_tests", "low_score"])
+def test_dayshift_writes_never_reach_a_file_hard_linked_into_the_swarm(
+    tmp_path: Path, monkeypatch, rollback
+):
+    sandbox, swarm, outside, optimizer = _dayshift_layout(
+        tmp_path, monkeypatch, use_llm_scoring=rollback == "low_score"
+    )
+    target = swarm / "demo.py"
+    os.link(outside, target)  # shared before the candidate is written
+
+    def ask(**kwargs):
+        if kwargs["task_kind"] == "scoring":
+            return {"score": 0.1}, "raw", {}
+        return {"status": "APPROVED", "patch": "CANDIDATE\n"}, "raw", {}
+
+    def run_tests():
+        assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
+        _relink(target, outside)  # shared again before the rollback
+        return (1, "failed") if rollback == "failed_tests" else (0, "passed")
+
+    monkeypatch.setattr(optimizer, "_ask_unified", ask)
+    monkeypatch.setattr(optimizer, "_run_tests", run_tests)
+    monkeypatch.setattr(optimizer, "_finalize_unified_runtime_receipts", lambda **_kwargs: None)
+
+    result = optimizer.optimize()
+
+    assert result["status"] == "FAILED"
+    assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
+    assert target.read_text(encoding="utf-8") == "OUTSIDE\n"
+    assert os.stat(target).st_ino != os.stat(outside).st_ino
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("target_file", ["../outside.py", "link/outside.py"])
+def test_dayshift_candidate_write_stays_inside_the_swarm(tmp_path: Path, monkeypatch, target_file):
+    sandbox, swarm, outside, optimizer = _dayshift_layout(tmp_path, monkeypatch, False)
+    (swarm / "link").symlink_to(tmp_path, target_is_directory=True)
+    optimizer.target_file = target_file
+    monkeypatch.setattr(
+        optimizer,
+        "_ask_unified",
+        lambda **_kwargs: ({"status": "APPROVED", "patch": "CANDIDATE\n"}, "raw", {}),
+    )
+    monkeypatch.setattr(optimizer, "_run_tests", lambda: (1, "failed"))
+    monkeypatch.setattr(optimizer, "_finalize_unified_runtime_receipts", lambda **_kwargs: None)
+
+    with pytest.raises((OSError, ValueError)):
+        optimizer.optimize()
+
+    assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
+    assert (sandbox / "SENTINEL").exists()
