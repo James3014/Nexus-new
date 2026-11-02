@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import shlex
 import subprocess
@@ -19,6 +20,7 @@ from nexus.orchestrator.governed_integration import (
 from nexus.orchestrator.target_integration_lifecycle import (
     TargetIntegrationLifecycle,
     _render_command,
+    post_apply_commands_hash,
 )
 
 
@@ -83,15 +85,25 @@ def authorization(root: Path, base: str, candidate: str, receipt: ExternalAccept
 def integrate(
     *, acceptance_receipt: ExternalAcceptanceReceipt, auth: IntegrationAuthorizationEnvelope,
     staging_root: str, apply: bool = False, verifier_commands=(), lifecycle_state=None,
-    post_apply_commands=(),
+    post_apply_commands=(), authorized_post_apply_hash=None,
 ):
     """Drive the live Git sink with an authorized task state (#2584 Phase-2 batch A).
 
     The compatibility adapter ``TargetIntegrationLifecycle.transactional_integration``
     that these canaries used to call had no production caller and was removed; the
     state below is the one it built, handed to the same sink the live
-    ``SelfHostedTaskService.integrate_approved`` uses.
+    ``SelfHostedTaskService.integrate_approved`` uses.  The authorization is bound
+    to ``post_apply_commands`` unless ``authorized_post_apply_hash`` names another
+    value (#3185).
     """
+    auth = dataclasses.replace(
+        auth,
+        post_apply_commands_hash=(
+            post_apply_commands_hash(post_apply_commands)
+            if authorized_post_apply_hash is None
+            else authorized_post_apply_hash
+        ),
+    )
     authorization_state = auth.to_dict()
     authorization_state["authorization_hash"] = auth.authorization_hash
     state = dict(lifecycle_state or {})

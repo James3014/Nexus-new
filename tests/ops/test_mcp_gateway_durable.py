@@ -9195,3 +9195,39 @@ def test_r1_recovery_wrapper_passes_cairnwork_env(tmp_path, monkeypatch):
     assert "NEXUS_CAIRNWORK_ROUTE=route" in out
     assert "NEXUS_CAIRNWORK_STATE=/cw/state" in out
     assert not [line for line in out if line.startswith("NEXUS_CAIRNWORK_ROUTE_BIN=")]
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+def test_r1_interrupt_between_worktree_add_and_move_removes_hidden_worktree(
+    tmp_path, monkeypatch, interrupt
+):
+    """#3203: an interrupt or signal-raised exit after add still removes the temporary worktree.
+
+    git is a stub here: no repository, Gateway state or process is touched.
+    """
+    deployments = tmp_path / "deployments"
+    deployments.mkdir(mode=0o700)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(*command, **_kwargs):
+        calls.append(command)
+        verb = command[4] if len(command) > 4 else ""
+        if verb == "add":
+            Path(command[-2]).mkdir(mode=0o700)
+        elif verb == "move":
+            raise interrupt()
+        return ""
+
+    monkeypatch.setattr(g, "_r1_safe_directory", lambda path: deployments)
+    monkeypatch.setattr(g, "_r1_run", fake_run)
+    manifest = SimpleNamespace(deployment_id="a1-" + "c" * 40, commit="c" * 40)
+
+    with pytest.raises(interrupt):
+        g._r1_materialize_worktree(manifest)
+
+    verbs = [command[4] for command in calls]
+    assert verbs == ["add", "move", "remove"]
+    temporary = calls[0][-2]
+    assert calls[2][-1] == temporary
+    assert Path(temporary).parent == deployments
+    assert Path(temporary).name.startswith(f".{manifest.deployment_id}.")

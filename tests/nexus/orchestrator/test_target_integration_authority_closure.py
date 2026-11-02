@@ -29,7 +29,10 @@ from nexus.orchestrator.governed_integration import (
 )
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
-from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
+from nexus.orchestrator.target_integration_lifecycle import (
+    TargetIntegrationLifecycle,
+    post_apply_commands_hash,
+)
 from nexus.orchestrator.worktree_manager import WorktreeManager
 from nexus.services.runtime_workforce_admission import _binding_payload, _sha256_json
 
@@ -373,7 +376,10 @@ def _acceptance(candidate: str) -> ExternalAcceptanceReceipt:
     )
 
 
-def _authorization(root: Path, base: str, candidate: str, acceptance: ExternalAcceptanceReceipt) -> IntegrationAuthorizationEnvelope:
+def _authorization(
+    root: Path, base: str, candidate: str, acceptance: ExternalAcceptanceReceipt,
+    post_apply_commands=(),
+) -> IntegrationAuthorizationEnvelope:
     return IntegrationAuthorizationEnvelope(
         schema="nexus.integration_authorization.v1", task_id="task-1",
         campaign_id="campaign", task_card_hash="c" * 64, attempt_id="attempt-1",
@@ -384,7 +390,8 @@ def _authorization(root: Path, base: str, candidate: str, acceptance: ExternalAc
         canonical_branch="nexus/integration/canary", expected_canonical_head=base,
         canonical_dirty_baseline=_status_hash(root), integration_plan_hash="1" * 64,
         strategy="EPHEMERAL_WORKTREE_MERGE_THEN_APPLY", verification_commands_hash="2" * 64,
-        post_apply_commands_hash="3" * 64, cleanup_target_id="target-1",
+        post_apply_commands_hash=post_apply_commands_hash(post_apply_commands),
+        cleanup_target_id="target-1",
         cleanup_target_path=str(root / "target"), durable_ref="refs/nexus-candidate/task-1",
         cleanup_requested=True, rollback="retain target", issued_at="2026-08-02T00:00:00+00:00",
         action_set=("ACCEPT_DISPOSITION", "INTEGRATION_STAGING", "APPLY_VERIFIED_INTEGRATION", "POST_INTEGRATION_VERIFY", "CLEANUP_OWNED_TARGET"),
@@ -405,6 +412,8 @@ def _integrate_via_sink(
     """
     authorization_state: dict[str, object] = {}
     if auth is not None:
+        # Bind the authorization to the post-apply commands that run (#3185).
+        auth = replace(auth, post_apply_commands_hash=post_apply_commands_hash(post_apply_commands))
         authorization_state = auth.to_dict()
         authorization_state["authorization_hash"] = auth.authorization_hash
     state = {
@@ -830,7 +839,9 @@ def test_owner_finish_does_not_archive_cleanup_pending_or_retained_state(tmp_pat
 def test_post_apply_physical_truth_is_typed_and_persistable(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)
-    auth = _authorization(root, base, candidate, receipt)
+    auth = _authorization(
+        root, base, candidate, receipt, post_apply_commands=(("/bin/sh", "-c", "exit 1"),)
+    )
     state = {
         "task_id": "task-1", "contract": {"controller_repo_root": str(root)},
         "promotion_packet": {"candidate_commit_sha": candidate},
@@ -867,7 +878,10 @@ def _separate_controller_integrate(
     tmp_path: Path, controller: Path, base: str, candidate: str, **kwargs
 ):
     receipt = _acceptance(candidate)
-    auth = _authorization(controller, base, candidate, receipt)
+    auth = _authorization(
+        controller, base, candidate, receipt,
+        post_apply_commands=kwargs.get("post_apply_commands", ()),
+    )
     state = {
         "task_id": "task-1",
         "contract": {"controller_repo_root": str(controller)},
@@ -1194,7 +1208,9 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
     root, base, candidate = _repo(tmp_path)
     receipt = replace(_acceptance(candidate), task_id="post-apply-task")
     auth = replace(
-        _authorization(root, base, candidate, receipt),
+        _authorization(
+            root, base, candidate, receipt, post_apply_commands=(("/bin/sh", "-c", "exit 1"),)
+        ),
         task_id="post-apply-task",
         acceptance_receipt_hash=receipt.receipt_hash,
         cleanup_target_id="post-apply-task",

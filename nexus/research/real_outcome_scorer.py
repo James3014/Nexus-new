@@ -1398,6 +1398,8 @@ def _scorer_profile(
     read_roots = lane.checked_read_roots([*writable, *reads])
     if all_system_subpaths:
         read_roots = sorted(set(read_roots) | set(lane.SANDBOX_SYSTEM_READ_SUBPATHS))
+        covered = _hash_covered_system_subpaths(reads)
+        read_roots = [root for root in read_roots if root not in covered]
     # Tests may signal the processes they start (e.g. a process-group kill); never one
     # outside the sandbox.
     return lane.build_sandbox_profile(
@@ -1406,6 +1408,24 @@ def _scorer_profile(
         deny_subtrees=list(denied),
         allow_signal_same_sandbox=True,
     )
+
+
+# Shared system subpaths added after scorer 1.3.2 that the scorer's own fixed read roots already
+# cover (``/usr/share`` in TOOLCHAIN_READ_ROOTS): a scorer run reads exactly what it read before
+# they were added (#3194), so the profile hash leaves them out and earlier "os" receipts and
+# cached results keep their hash. Each is left out only while another read root of the hash
+# covers it; otherwise it is hashed like every other root.
+_PROFILE_HASH_COVERED_SYSTEM_SUBPATHS: tuple[str, ...] = ("/usr/share/locale",)
+
+
+def _hash_covered_system_subpaths(reads: Sequence[str]) -> set[str]:
+    """The ``_PROFILE_HASH_COVERED_SYSTEM_SUBPATHS`` some other root in ``reads`` contains."""
+    covered: set[str] = set()
+    for path in _PROFILE_HASH_COVERED_SYSTEM_SUBPATHS:
+        target = PurePosixPath(path)
+        if any(PurePosixPath(root) in target.parents for root in reads):
+            covered.add(path)
+    return covered
 
 
 # A9: every root of the scorer's profile as (rule, kind): the single source for both the
@@ -1723,7 +1743,10 @@ class PytestRunner:
         ``$HOME``) and every system/toolchain root listed, unresolved, whether or not it
         exists here.
         So the same scorer gives the same hash on any machine, and any change to the
-        shared profile or to the scorer's roots changes it. Part of the "os" result key.
+        shared profile or to the scorer's roots changes it, except a shared system subpath
+        that the scorer's own roots already cover (``_PROFILE_HASH_COVERED_SYSTEM_SUBPATHS``,
+        #3194): it changes no read the scorer allows, so the hash stays comparable.
+        Part of the "os" result key.
         """
         if self.sandbox == SANDBOX_NONE:
             return None

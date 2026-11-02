@@ -390,6 +390,13 @@ def _kill_recorded_pids(env):
     pids_file = env["tmp"] / "uv.pids"
     if pids_file.exists():
         for pid in pids_file.read_text().split():
+            # The pid may be long dead and reused: kill only a process that still runs one
+            # of this test's fakes (the fake uv under tmp, or its `sleep`), never by number.
+            command = subprocess.run(
+                ["ps", "-o", "command=", "-p", pid], capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+            if not command or not (str(env["tmp"]) in command or command.startswith("sleep ")):
+                continue
             try:
                 os.kill(int(pid), 9)
             except (ProcessLookupError, PermissionError):
