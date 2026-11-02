@@ -1438,11 +1438,15 @@ def seal_shadow_candidate(
     refused_untracked: list[str] = []
     for rel in untracked_paths:
         file_path = source / rel
+        if file_path.is_symlink() and file_path.is_dir():
+            # A link to a directory carries no bytes and is never read: skipped, as before.
+            continue
         if not (file_path.is_symlink() or file_path.is_file()):
             continue
         try:
             # Never through a link, at the file or on the way to it, and never a hard link:
-            # bytes from outside the copy must not be sealed into the receipt (#3130).
+            # bytes from outside the copy must not be sealed into the receipt (#3130). A file
+            # link, a dangling link and a hard link are refused.
             data = read_bytes_in_root(source, rel)
         except PathContainmentError:
             refused_untracked.append(rel)

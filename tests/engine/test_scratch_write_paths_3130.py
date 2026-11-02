@@ -363,7 +363,8 @@ def test_artifact_write_refusal_keeps_the_child_result(tmp_path, monkeypatch):
     )
 
     assert result["success"] is False
-    assert result["error"] == RUN_DIR_ENTRY_REFUSED != RUN_DIR_REPLACED
+    assert result["error"] == RUN_DIR_ENTRY_REFUSED
+    assert RUN_DIR_ENTRY_REFUSED != RUN_DIR_REPLACED
     assert (result["exit_code"], result["stdout"], result["stderr"]) == (
         7,
         "child-stdout",
