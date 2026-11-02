@@ -56,6 +56,11 @@ SCHEMA_VERSION = "ultra-review.v1"
 # override per service (``test_timeout_sec``) or with ULTRA_TEST_TIMEOUT_ENV.
 GHOST_REGRESSION_TIMEOUT_SEC = 300
 ULTRA_TEST_TIMEOUT_ENV = "NEXUS_ULTRA_REVIEW_TEST_TIMEOUT_SEC"
+# System locale data, read-only, so a sandboxed tool can set up the caller's ``LANG``/``LC_*``
+# locale: on current macOS, Perl (``/usr/bin/shasum``) panics when ``setlocale`` cannot read
+# ``/usr/share/locale/<name>/LC_CTYPE`` (``C.UTF-8`` included) (#3157). Public system files only;
+# added only where the directory exists.
+ULTRA_REVIEW_LOCALE_READ_ROOTS = ("/usr/share/locale",)
 # Per-test outcomes come from pytest's junit XML (xunit1 keeps the ``file`` attribute), never
 # from parsing terminal text; reports larger than this are treated as unparseable.
 JUNIT_MAX_BYTES = 20_000_000
@@ -1231,8 +1236,16 @@ class UltraReviewService:
         # and Perl tools work inside the sandbox (#2650); validated like every other root.
         # Read-only, reviewer-built git dirs for the mirror and base checkout (#2650).
         git_roots = [str(path) for path in ctx.get("git_read_roots") or []]
+        locale_roots = [path for path in ULTRA_REVIEW_LOCALE_READ_ROOTS if os.path.isdir(path)]
         return checked_read_roots(
-            [ctx["execution_root"], ctx["sandbox_path"], *interpreter_read_roots(), *tool_read_roots(), *git_roots],
+            [
+                ctx["execution_root"],
+                ctx["sandbox_path"],
+                *interpreter_read_roots(),
+                *tool_read_roots(),
+                *locale_roots,
+                *git_roots,
+            ],
             extra_forbidden=[self.project_root],
         )
 
