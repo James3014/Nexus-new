@@ -1536,7 +1536,11 @@ def test_record_write_of_the_same_job_keeps_a_settled_record(box, on_disk, writt
 
 
 class _Claim:
-    """An Agy account claim stand-in that counts its releases; no real lease behind it."""
+    """An Agy account claim stand-in that counts its releases; no real lease behind it.
+    It names the lease the record holds, as a real claim does, so a release is noted by it
+    (#3180) and a later call of the same job finds the release, not a lost claim (#3233)."""
+
+    lease_id_hash = "lease-3144"
 
     def __init__(self) -> None:
         self.releases = 0
@@ -1698,3 +1702,49 @@ def test_refused_write_of_a_released_lease_is_recorded_when_the_kept_record_has_
         True,
         "RELEASED",
     ), record
+
+
+# ---------------------------------------------------------------------------
+# #3233: a cancel on a restarted gateway that holds no claim for the job's lease leaves a
+# record that reconcile acts on, instead of a CANCELLED record no call can move on
+# ---------------------------------------------------------------------------
+
+
+class _LiveLeaderGroup(_FakeGroup):
+    """The provider leader is alive when the restarted gateway looks (so cancel takes the
+    unowned-group path), and the group is empty once it has been signalled."""
+
+    def kill(self, pid: int, sig: int) -> None:
+        assert pid == FAKE_PID, f"os.kill on a pid this test does not own: {pid}"
+        if sig == 0:
+            return
+        self.sent.append(sig)
+
+    def live_members(self, pgid: int) -> list[int]:
+        assert pgid == FAKE_PID
+        return [] if self.sent else [FAKE_PID]
+
+
+def test_cancel_on_a_restarted_gateway_without_the_claim_holds_the_job_for_reconcile(
+    box, monkeypatch
+):
+    workspace = _workspace(box.root)
+    box.gateway._assist_write(_job(
+        box, str(workspace), job_kind="model_probe",
+        account_lease_id_hash="lease-3233", account_lease_released=False,
+        account_lease_cleanup_status="HELD",
+    ))
+    assert TASK not in box.gateway._assist_account_claims
+    group = _LiveLeaderGroup(member_alive=False)
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    monkeypatch.setattr(assist_jobs, "_UNOWNED_GROUP_SETTLE_SECONDS", 0.2, raising=False)
+    cancelled = box.gateway._assist_cancel(TASK)
+    assert cancelled["status"] == "CANCELLED", cancelled
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED", record
+    assert record["reconciliation_required"] is True, record
+    with pytest.raises(Exception, match="ASSIST_RETRY_REQUIRES_RECONCILIATION"):
+        box.gateway._assist_retry(TASK)

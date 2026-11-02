@@ -272,8 +272,12 @@ class _ModelProbeMixin(_ModelProbeBase):
                     job["account_lease_cleanup_status"] = "RELEASED"
                     return True
                 if lease_hash:
+                    # No claim and no note of its release (another Gateway instance took the
+                    # lease): hold the job for reconciliation, as a failed release does, so
+                    # the task is neither retried on the lease nor left stuck (#3233).
                     job["account_lease_released"] = False
                     job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                    job["reconciliation_required"] = True
                     return False
                 return True
             try:
