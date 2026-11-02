@@ -133,3 +133,44 @@ def test_dayshift_candidate_write_stays_inside_the_swarm(tmp_path: Path, monkeyp
 
     assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
     assert (sandbox / "SENTINEL").exists()
+
+
+def test_dayshift_refuses_a_target_that_is_not_a_regular_file(tmp_path: Path, monkeypatch):
+    import threading
+
+    sandbox, swarm, _outside, optimizer = _dayshift_layout(tmp_path, monkeypatch, False)
+    target = swarm / "demo.py"
+    os.mkfifo(target)
+    asked: list[bool] = []
+    monkeypatch.setattr(
+        optimizer, "_ask_unified", lambda **_kwargs: asked.append(True) or ({}, "raw", {})
+    )
+    monkeypatch.setattr(optimizer, "_run_tests", lambda: (1, "failed"))
+    monkeypatch.setattr(optimizer, "_finalize_unified_runtime_receipts", lambda **_kwargs: None)
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def run():
+        try:
+            results.append(optimizer.optimize())
+        except BaseException as exc:  # reported to the test thread
+            errors.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    finished = not worker.is_alive()
+    if not finished:
+        # Release the read blocked on the FIFO (a writer that opens and closes), then wait.
+        writer = threading.Thread(
+            target=lambda: os.close(os.open(target, os.O_WRONLY)), daemon=True
+        )
+        writer.start()
+        writer.join(timeout=5)
+        worker.join(timeout=5)
+
+    assert finished
+    assert errors == []
+    assert results == [{"status": "FAILED", "reason": "target_file_not_regular"}]
+    assert asked == []
+    assert (sandbox / "SENTINEL").exists()

@@ -1,4 +1,5 @@
 import errno
+import fcntl
 import logging
 import os
 import secrets
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from nexus.core.hardened_git import (
+    GIT_TIMEOUT_S,
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
     run_hardened_git,
@@ -22,6 +24,13 @@ _SHARED_CACHE_DIRS = (".venv", "node_modules", ".ruff_cache")
 _DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 _SOURCE_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
 _NEW_FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+_LOCK_FILE_FLAGS = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+# Written into the lock by a release that left the swarm locked; only such a lock is recovered.
+_RELEASE_FAILED_MARK = b"release_failed\n"
+_STATE_RELEASE_FAILED = "release_failed"
+# An index.lock this old cannot belong to a git started by the hardened runner (killed after
+# GIT_TIMEOUT_S).
+_STALE_INDEX_LOCK_SEC = 2 * GIT_TIMEOUT_S
 
 
 class _SwarmDirSwapped(Exception):
@@ -111,16 +120,80 @@ def _write_fresh_entry(
         raise
 
 
+# What opening a socket, or a link with O_NOFOLLOW, fails with (Linux, macOS).
+_NOT_A_FILE_ERRNOS = {errno.ELOOP, errno.ENXIO, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", -1)}
+
+
+def _open_regular_file(path, dir_fd: Optional[int] = None) -> Optional[int]:
+    """A read descriptor for `path` when it is a regular file, else None (nothing left open).
+
+    A link, FIFO, socket, device or directory seen by an lstat is never opened. O_NONBLOCK
+    keeps a FIFO swapped in after that lstat from blocking the open, and the type is checked
+    again on the descriptor itself, so any entry swapped in after the lstat is refused too.
+    """
+    if not stat.S_ISREG(os.stat(path, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+        return None
+    try:
+        fd = os.open(path, _SOURCE_FILE_FLAGS, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno in _NOT_A_FILE_ERRNOS:
+            return None
+        raise
+    try:
+        is_regular = stat.S_ISREG(os.fstat(fd).st_mode)
+    except BaseException:
+        os.close(fd)
+        raise
+    if not is_regular:
+        os.close(fd)
+        return None
+    return fd
+
+
+def read_text_in_dir(root: Path, rel_path: str, encoding: str = "utf-8") -> Optional[str]:
+    """The text of `root/rel_path`, or None when that entry is not a regular file.
+
+    Every directory between `root` and the file is opened without following links (a link on
+    the way raises OSError), and the file itself is opened through `_open_regular_file`, so a
+    FIFO cannot block the read.
+    """
+    parts = Path(rel_path).parts
+    if not parts or Path(rel_path).is_absolute() or ".." in parts:
+        raise ValueError(f"path must stay inside {root}: {rel_path}")
+    opened = [_open_real_dir(root)]
+    try:
+        for part in parts[:-1]:
+            opened.append(_open_child_dir(opened[-1], part, create=False))
+        fd = _open_regular_file(parts[-1], dir_fd=opened[-1])
+        if fd is None:
+            return None
+        with open(fd, "rb") as handle:
+            return handle.read().decode(encoding)
+    finally:
+        for dir_fd in opened:
+            os.close(dir_fd)
+
+
+def _drop_stale_copy(parent_fd: int, name: str) -> None:
+    """Remove what an earlier sync left at `name`, so a refused source is not run as synced.
+
+    Only a non-directory entry is removed, relative to the open directory."""
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode):
+        _unlink_at(parent_fd, name)
+
+
 def _copy_file_into(src: Path, parent_fd: int, name: str) -> None:
-    # O_NONBLOCK: opening a FIFO with no writer would otherwise block; the type is checked on
-    # the opened file, so an entry swapped after the directory scan is caught too.
-    with open(os.open(src, _SOURCE_FILE_FLAGS), "rb") as fsrc:
+    source_fd = _open_regular_file(src)
+    if source_fd is None:
+        logger.warning("⚠️ [SwarmBroker] Refused scope source that is not a regular file: %s", src)
+        _drop_stale_copy(parent_fd, name)
+        return
+    with open(source_fd, "rb") as fsrc:
         info = os.fstat(fsrc.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            logger.warning(
-                "⚠️ [SwarmBroker] Refused scope source that is not a regular file: %s", src
-            )
-            return
         _write_fresh_entry(
             parent_fd,
             name,
@@ -153,12 +226,11 @@ def _copy_dir_into(src_dir: Path, dst_fd: int) -> None:
                 _copy_dir_into(Path(entry.path), child_fd)
             finally:
                 os.close(child_fd)
-        elif entry.is_file(follow_symlinks=False):
-            _copy_file_into(Path(entry.path), dst_fd, entry.name)
+        elif entry.is_symlink():
+            logger.info("[SwarmBroker] Skipped scope entry that is a link: %s", entry.path)
         else:
-            logger.info(
-                "[SwarmBroker] Skipped scope entry that is not a file or directory: %s", entry.path
-            )
+            # Files, and FIFOs, sockets or devices, which are refused without being opened.
+            _copy_file_into(Path(entry.path), dst_fd, entry.name)
 
 
 def _unlink_link_at(dir_fd: int, name: str) -> None:
@@ -175,6 +247,42 @@ def _unlink_at(dir_fd: int, name: str) -> None:
         os.unlink(name, dir_fd=dir_fd)
     except FileNotFoundError:
         pass
+
+
+def _entry_identity_at(dir_fd: int, name: str) -> Optional[tuple[int, int]]:
+    try:
+        info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def _open_lock(swarm_fd: int) -> Optional[int]:
+    """A read-write descriptor for the swarm's lock when it is a regular file, else None."""
+    try:
+        if not stat.S_ISREG(os.stat(_LOCK_NAME, dir_fd=swarm_fd, follow_symlinks=False).st_mode):
+            return None
+        fd = os.open(_LOCK_NAME, _LOCK_FILE_FLAGS, dir_fd=swarm_fd)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        return None
+    return fd
+
+
+def _lock_state(swarm_fd: int) -> Optional[str]:
+    """None when the swarm open at `swarm_fd` has no lock, else `held` or `release_failed`."""
+    if _entry_identity_at(swarm_fd, _LOCK_NAME) is None:
+        return None
+    fd = _open_lock(swarm_fd)
+    if fd is None:
+        return "held"
+    try:
+        mark = os.pread(fd, len(_RELEASE_FAILED_MARK) + 1, 0)
+    finally:
+        os.close(fd)
+    return _STATE_RELEASE_FAILED if mark == _RELEASE_FAILED_MARK else "held"
 
 
 def _entry_exists_at(dir_fd: int, name: str) -> bool:
@@ -322,6 +430,7 @@ class SwarmBroker:
         """
         if not self.swarm_dirs:
             return None
+        self.recover_failed_releases()
 
         eligible_dirs = []
         for swarm_dir in self.swarm_dirs:
@@ -510,19 +619,154 @@ class SwarmBroker:
             )
             return
         try:
-            self._release_pinned(swarm_dir, pinned)
+            self._release_holding_lock(swarm_dir, pinned, recovering=False)
+        finally:
+            os.close(pinned)
+
+    def locked_swarms(self) -> List[tuple[Path, str]]:
+        """Each swarm directory whose lock is present, with `release_failed` when its last
+        release could not reset it (see `recover_failed_releases`), else `held`."""
+        report = []
+        for swarm_dir in self.swarm_dirs:
+            try:
+                pinned = _open_real_dir(swarm_dir)
+            except OSError:
+                continue
+            try:
+                state = _lock_state(pinned)
+            finally:
+                os.close(pinned)
+            if state is not None:
+                report.append((swarm_dir, state))
+        return report
+
+    def recover_failed_releases(
+        self, stale_index_lock_after_sec: float = _STALE_INDEX_LOCK_SEC
+    ) -> List[Path]:
+        """Run the guarded release again on swarms whose last release failed; the swarms
+        unlocked by it are returned and those still locked are logged.
+
+        Only a lock marked by a failed release is taken up, so a swarm still leased is never
+        touched. Before the release, an `index.lock` older than `stale_index_lock_after_sec`
+        is removed from the swarm's own registration (a git killed mid-reset leaves one, and
+        it fails every later reset). The swarm goes back to the pool only once its reset has
+        succeeded, exactly as with `release`.
+        """
+        recovered = []
+        for swarm_dir, state in self.locked_swarms():
+            if state != _STATE_RELEASE_FAILED or not self._is_swarm_child_dir(swarm_dir):
+                continue
+            try:
+                pinned = _open_real_dir(swarm_dir)
+            except OSError:
+                continue
+            try:
+                if self._release_holding_lock(
+                    swarm_dir, pinned, recovering=True, stale_after=stale_index_lock_after_sec
+                ):
+                    recovered.append(swarm_dir)
+            finally:
+                os.close(pinned)
+        stuck = [
+            path.name for path, state in self.locked_swarms() if state == _STATE_RELEASE_FAILED
+        ]
+        if stuck:
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarms left locked by a failed release: %s", ", ".join(stuck)
+            )
+        return recovered
+
+    def _release_holding_lock(
+        self,
+        swarm_dir: Path,
+        pinned: int,
+        recovering: bool,
+        stale_after: float = _STALE_INDEX_LOCK_SEC,
+    ) -> bool:
+        """The guarded release, holding an exclusive flock on the swarm's lock file so two
+        releases or recoveries of one swarm never run at once; True once it is unlocked.
+
+        A release that fails leaves the lock marked `release_failed` (written through the
+        descriptor opened here, so a lock taken by a new holder in the meantime is never
+        marked). With `recovering`, only a lock carrying that mark is taken up.
+        """
+        lock_fd = _open_lock(pinned)
+        if lock_fd is None:
+            # No lock (or not a regular file): released as before, nothing to mark.
+            return False if recovering else self._release_guarded(swarm_dir, pinned) is True
+        try:
+            try:
+                # A release waits for a recovery's check; a recovery never waits for a release.
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | (fcntl.LOCK_NB if recovering else 0))
+            except BlockingIOError:
+                logger.warning(
+                    "⚠️ [SwarmBroker] A release of this swarm is running; recovery skipped: %s",
+                    swarm_dir,
+                )
+                return False
+            # The flock is on the file opened here: it must still be the swarm's lock.
+            if _entry_identity_at(pinned, _LOCK_NAME) != _fd_identity(lock_fd):
+                return False
+            if recovering:
+                if os.pread(lock_fd, len(_RELEASE_FAILED_MARK) + 1, 0) != _RELEASE_FAILED_MARK:
+                    return False
+                self._clear_stale_registration_lock(swarm_dir, stale_after)
+            released = self._release_guarded(swarm_dir, pinned)
+            if released is False:
+                os.ftruncate(lock_fd, 0)
+                os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
+            return released is True
+        finally:
+            os.close(lock_fd)
+
+    def _release_guarded(self, swarm_dir: Path, pinned: int) -> Optional[bool]:
+        """True when released, False when the swarm was left locked, None when its path was
+        swapped (left untouched and not marked, for someone to look at)."""
+        try:
+            return self._release_pinned(swarm_dir, pinned)
         except _SwarmDirSwapped:
             logger.warning(
                 "⚠️ [SwarmBroker] Swarm path was replaced during release; left untouched: %s",
                 swarm_dir,
             )
+            return None
         except Exception as e:
             logger.error(f"❌ [SwarmBroker] Error releasing swarm {swarm_dir.name}: {e}")
-        finally:
-            os.close(pinned)
+            return False
 
-    def _release_pinned(self, swarm_dir: Path, pinned: int) -> None:
-        """Reset and unlock the swarm directory open at `pinned`.
+    def _clear_stale_registration_lock(self, swarm_dir: Path, stale_after: float) -> bool:
+        """Remove an `index.lock` older than `stale_after` seconds from the swarm's own
+        registration under the controller, relative to that opened directory.
+
+        `hardened_git.clear_stale_index_lock` only clears a git dir inside the work tree, and a
+        swarm's registration lies outside it. The age bound stands in for its running-git
+        check: the hardened runner kills any git it started after GIT_TIMEOUT_S.
+        """
+        controller = self._controller_git_top_level()
+        git_dir = linked_worktree_git_dir(swarm_dir, controller) if controller else None
+        if git_dir is None:
+            return False
+        try:
+            git_dir_fd = _open_real_dir(git_dir)
+        except OSError:
+            return False
+        try:
+            try:
+                info = os.stat("index.lock", dir_fd=git_dir_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            if not stat.S_ISREG(info.st_mode) or time.time() - info.st_mtime < stale_after:
+                return False
+            _unlink_at(git_dir_fd, "index.lock")
+        finally:
+            os.close(git_dir_fd)
+        logger.warning(
+            "⚠️ [SwarmBroker] Removed a stale index.lock from the registration of %s", swarm_dir
+        )
+        return True
+
+    def _release_pinned(self, swarm_dir: Path, pinned: int) -> bool:
+        """Reset and unlock the swarm directory open at `pinned`; True once the lock is removed.
 
         Links and the lock are removed relative to `pinned`, so they come out of the directory
         that was opened whatever the path names by then. Git can only be given a path: the
@@ -534,30 +778,33 @@ class SwarmBroker:
         if not self.is_independently_registered_worktree(swarm_dir):
             _unlink_at(pinned, _LOCK_NAME)
             logger.warning("⚠️ [SwarmBroker] Refused to clean unregistered swarm placeholder: %s", swarm_dir)
-            return
+            return True
 
         # 實施重用策略 (Reuse)
         if _entry_exists_at(pinned, ".git"):
             logger.debug(f"🐝 [SwarmBroker] Reusing git worktree in {swarm_dir.name}")
             if not self._reset_worktree(swarm_dir, pinned):
-                return
+                return False
         else:
-            # Fallback: Clean up all contents EXCEPT the lock file
-            for item in swarm_dir.iterdir():
-                if item.name == _LOCK_NAME:
+            # Fallback: clean up all contents except the lock file, relative to the opened
+            # directory, so nothing is removed through a path swapped in meanwhile.
+            for name in os.listdir(pinned):
+                if name == _LOCK_NAME:
                     continue
                 if not _names_dir(swarm_dir, pinned):
                     raise _SwarmDirSwapped(swarm_dir)
-                if item.is_dir():
-                    shutil.rmtree(item)
+                info = os.stat(name, dir_fd=pinned, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    shutil.rmtree(name, dir_fd=pinned)
                 else:
-                    item.unlink()
+                    _unlink_at(pinned, name)
 
         # Finally remove the lock file to release it back to the pool
         if not _names_dir(swarm_dir, pinned):
             raise _SwarmDirSwapped(swarm_dir)
         _unlink_at(pinned, _LOCK_NAME)
         logger.debug(f"🐝 [SwarmBroker] Released and reset swarm sandbox: {swarm_dir.name}")
+        return True
 
     def _reset_worktree(self, swarm_dir: Path, pinned: int) -> bool:
         """`git checkout` and `git clean` through the hardened runner, with the git dir pinned
