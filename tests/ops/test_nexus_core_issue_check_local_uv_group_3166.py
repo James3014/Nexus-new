@@ -71,6 +71,7 @@ def _stub(module, monkeypatch, proc):
     monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **k: proc)
     monkeypatch.setattr(module.os, "killpg", killpg)
     monkeypatch.setattr(module, "_group_stopped_if_exited", lambda p: p.exited())
+    monkeypatch.setattr(module, "_leader_unreaped", lambda p: p.returncode is None)
     return kills
 
 

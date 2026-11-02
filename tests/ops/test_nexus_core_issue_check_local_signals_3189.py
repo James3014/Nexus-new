@@ -67,6 +67,7 @@ def _stub(module, monkeypatch, popen):
     # Stands in for argv_command.kill_group_if_exited: the child's exit, then its group's kill
     # and reap (the kill there is not recorded here).
     monkeypatch.setattr(module, "_group_stopped_if_exited", lambda proc: proc.wait() == 0)
+    monkeypatch.setattr(module, "_leader_unreaped", lambda proc: proc.returncode is None)
     monkeypatch.setattr(module.os, "killpg", lambda pid, sig: kills.append((pid, sig)))
     return kills
 
@@ -524,6 +525,80 @@ def test_a_signal_while_the_group_is_stopped_is_held_until_the_child_is_reaped(
     assert kills == [(proc.pid, signal.SIGKILL)]
     assert proc.returncode == 0  # the stop ran to the reap before the signal was raised
     assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
+class _ReapingGroups:
+    """Stands in for argv_command: ``kill_group_if_exited`` kills the group and reaps the
+    child, then runs *interrupt* before ``returncode`` is set, as a signal landing inside
+    ``Popen.wait`` after its ``waitpid`` would."""
+
+    def __init__(self, interrupt):
+        self.interrupt = interrupt
+        self.reaped: set[int] = set()
+
+    def require_child_stays_unreaped(self):
+        pass
+
+    def kill_group_if_exited(self, proc):
+        self.reaped.add(proc.pid)
+        self.interrupt()
+        proc.returncode = 0
+        return True
+
+    def _leader_unreaped(self, pid):
+        return pid not in self.reaped
+
+
+def _run_with_reap_interrupt(module, monkeypatch, tmp_path, interrupt):
+    proc = FakeProc()
+    kills: list[tuple[int, int]] = []
+    groups = _ReapingGroups(interrupt)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **k: proc)
+    monkeypatch.setattr(module.os, "killpg", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(module, "_argv_command", lambda: groups)
+    return proc, kills, lambda: _run(module, tmp_path)
+
+
+def test_a_signal_during_the_reap_is_held_until_returncode_is_set(
+    tmp_path, monkeypatch, sentinel_handlers
+):
+    module = _load_module()
+    proc, kills, run = _run_with_reap_interrupt(
+        module, monkeypatch, tmp_path, lambda: os.kill(os.getpid(), signal.SIGTERM)
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        run()
+    assert exit_info.value.code == 128 + signal.SIGTERM
+    assert proc.returncode == 0  # the reap finished before the signal was raised
+    assert kills == []  # a reaped child's pid is never signalled
+    assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
+def test_an_interrupt_after_the_reap_signals_nothing(tmp_path, monkeypatch, sentinel_handlers):
+    """SIGINT is not held: KeyboardInterrupt between the reap and returncode being set."""
+    module = _load_module()
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    proc, kills, run = _run_with_reap_interrupt(module, monkeypatch, tmp_path, interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run()
+    assert proc.returncode is None
+    assert kills == []  # the pid may name another group by now
+    assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
+def test_a_hung_git_in_the_cleanup_is_bounded(tmp_path, monkeypatch):
+    module = _load_module()
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    _executable(fakebin / "git", f"#!/bin/sh\nexec sleep {BOUND}\n")
+    monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setattr(module, "GIT_CLEANUP_TIMEOUT_SECONDS", 0.5)
+    started = time.monotonic()
+    module._git_cleanup(tmp_path, "worktree", "prune")
+    assert time.monotonic() - started < 10
 
 
 def test_a_handler_not_installed_from_python_is_left_in_place(monkeypatch, sentinel_handlers):

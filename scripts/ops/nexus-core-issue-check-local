@@ -75,6 +75,8 @@ EXIT_ERROR = 2
 # How often a child is polled for exit, and how long a SIGKILLed group gets to die.
 GROUP_POLL_SECONDS = 0.05
 GROUP_STOP_SETTLE_SECONDS = 5.0
+# Bound on each git call of the cleanup, which runs with the terminating signals held.
+GIT_CLEANUP_TIMEOUT_SECONDS = 300.0
 
 
 class LocalCheckError(RuntimeError):
@@ -151,16 +153,27 @@ def _group_stopped_if_exited(proc: subprocess.Popen[Any]) -> bool:
     its process group, reap it and return True (``argv_command.kill_group_if_exited``), so a
     member that outlives the child is stopped too instead of running on after this run (#3189).
     A member alive after SIGKILL raises PermissionError; a child reaped elsewhere,
-    ChildProcessError."""
-    return bool(_argv_command().kill_group_if_exited(proc))
+    ChildProcessError. A terminating signal is held meanwhile, so it cannot land between the
+    reap and ``returncode`` being set."""
+    with _signals_held():
+        return bool(_argv_command().kill_group_if_exited(proc))
+
+
+def _leader_unreaped(proc: subprocess.Popen[Any]) -> bool:
+    """Whether the child is still unreaped, so its pid still names its group: not if
+    ``returncode`` is set, nor if an interrupt (SIGINT, which is not held) landed between the
+    reap and ``returncode`` being set. Asked through ``argv_command`` (``waitid`` with
+    ``WNOWAIT``, or libproc on macOS), from the same tree as ``kill_group_if_exited``."""
+    return proc.returncode is None and bool(_argv_command()._leader_unreaped(proc.pid))
 
 
 def _stop_group(proc: subprocess.Popen[Any]) -> None:
     """Kill the child's process group and reap the child, unless that is already done.
 
     The child is reaped only by ``_group_stopped_if_exited``, after its group is killed, so
-    until then its pid still names its group and ``killpg`` cannot reach another group."""
-    if proc.returncode is not None:
+    while it is unreaped its pid still names its group and ``killpg`` cannot reach another
+    group; once reaped, nothing is signalled."""
+    if not _leader_unreaped(proc):
         return  # reaped by _group_stopped_if_exited, after its group was killed
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -635,16 +648,24 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         # a hangup sent to the whole terminal group) is then still pruned.
         with _signals_held():
             if added:
-                subprocess.run(
-                    ["git", "-C", str(repo), "worktree", "remove", "--force", str(worktree)],
-                    capture_output=True,
-                    check=False,
-                )
+                _git_cleanup(repo, "worktree", "remove", "--force", str(worktree))
             shutil.rmtree(tmp_parent, ignore_errors=True)
             if added:
-                subprocess.run(
-                    ["git", "-C", str(repo), "worktree", "prune"], capture_output=True, check=False
-                )
+                _git_cleanup(repo, "worktree", "prune")
+
+
+def _git_cleanup(repo: Path, *args: str) -> None:
+    """One git call of the cleanup, bounded: the cleanup runs with the terminating signals
+    held, so nothing else would stop a git that hangs. Its result is not checked."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+            timeout=GIT_CLEANUP_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def build_parser() -> argparse.ArgumentParser:
