@@ -140,6 +140,9 @@ NON_CANDIDATE_GIT_WRITERS = frozenset({
     "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
     # Fast-forwards the EIA daemon's own checkout to origin/main by day; no candidate (#2979).
     "scripts/ops/eia_nightly.py:Nightly._fast_forward_daemon_checkout",
+    # Records the lease base in the swarm's own worktree admin ref so release can reset to it;
+    # no candidate is applied (#3169, #3179).
+    "nexus/research/swarm_broker.py:SwarmBroker._start_lease",
 })
 
 # These exact symbols own launchd effects for services other than the durable
