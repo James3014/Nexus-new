@@ -32,7 +32,8 @@ _STATE_RELEASE_FAILED = "release_failed"
 # GIT_TIMEOUT_S).
 _STALE_INDEX_LOCK_SEC = 2 * GIT_TIMEOUT_S
 # Per-worktree ref (kept in the swarm's registration, outside its work tree) naming the commit a
-# lease started from; release puts the swarm back there.
+# lease started from; release puts the swarm back there. It undoes HEAD moved during a lease, not
+# a deliberate rewrite: any process running git as the same user during the lease can change it.
 _LEASE_BASE_REF = "refs/worktree/nexus-swarm-base"
 # A swarm whose recovery failed is not tried again for this long (in this process), so an
 # acquire does not wait on the same failing git calls each time.
@@ -467,6 +468,7 @@ class SwarmBroker:
                 swarm_dir, identity = entry
                 outcome = self._try_lock(swarm_dir, identity)
                 if outcome and not self._start_lease(swarm_dir, identity):
+                    self._mark_unstarted_lease(swarm_dir, identity)
                     outcome = None
                 if outcome is None:
                     eligible_dirs.remove(entry)
@@ -515,7 +517,7 @@ class SwarmBroker:
 
     def _start_lease(self, swarm_dir: Path, identity: tuple[int, int]) -> bool:
         """Check the swarm again now that it is locked and record the commit its lease starts
-        from; False keeps it locked, for someone to look at.
+        from; False keeps it locked (`acquire` then marks it for recovery).
 
         A swarm validated before this acquire waited may have been released meanwhile by a
         holder that left it unregistered, and such a release unlocks without resetting.
@@ -526,6 +528,13 @@ class SwarmBroker:
             logger.warning(
                 "⚠️ [SwarmBroker] Swarm is no longer the registered worktree that was validated; "
                 "left locked: %s",
+                swarm_dir,
+            )
+            return False
+        # The runner's overrides do not switch off a hook defined in the repository config.
+        if repository_config_can_start_a_program(swarm_dir, git_dir=git_dir):
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarm repository config names a program; left locked: %s",
                 swarm_dir,
             )
             return False
@@ -541,6 +550,29 @@ class SwarmBroker:
             )
             return False
         return True
+
+    def _mark_unstarted_lease(self, swarm_dir: Path, identity: tuple[int, int]) -> None:
+        """Mark the lock this acquire took in the validated directory `release_failed`, so
+        `recover_failed_releases` takes the swarm up; a path that names another directory by
+        now is left alone."""
+        try:
+            pinned = _open_real_dir(swarm_dir)
+        except OSError:
+            return
+        try:
+            if _fd_identity(pinned) != identity:
+                return
+            lock_fd = _open_lock(pinned)
+            if lock_fd is None:
+                return
+            try:
+                _write_release_failed_mark(lock_fd)
+            finally:
+                os.close(lock_fd)
+        except OSError as e:
+            logger.error(f"❌ [SwarmBroker] Could not mark swarm {swarm_dir.name}: {e}")
+        finally:
+            os.close(pinned)
 
     def _mount_shared_cache(self, swarm_dir: Path, pinned: Optional[int] = None):
         """

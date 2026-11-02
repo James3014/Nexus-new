@@ -1747,7 +1747,7 @@ def test_waiting_acquire_leaves_locked_a_swarm_released_without_its_registration
 
     assert waiter.acquire(timeout_sec=5) is None
     assert left
-    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / ".swarm_lock").read_bytes() == b"release_failed\n"
     assert (sandbox / "SENTINEL").exists()
 
 
@@ -1773,6 +1773,7 @@ def test_acquire_leaves_locked_a_swarm_replaced_while_it_is_checked_again(
             swarm.rename(moved)
             swarm.mkdir()
             (swarm / ".git").write_bytes((moved / ".git").read_bytes())
+            (swarm / ".swarm_lock").write_text("", encoding="utf-8")
         return result
 
     monkeypatch.setattr(swarm_broker, "linked_worktree_git_dir", lookup_then_replace)
@@ -1780,6 +1781,7 @@ def test_acquire_leaves_locked_a_swarm_replaced_while_it_is_checked_again(
     assert SwarmBroker(controller).acquire(timeout_sec=0.05) is None
     assert calls
     assert (moved / ".swarm_lock").exists()
+    assert (swarm / ".swarm_lock").read_bytes() == b""
     assert (sandbox / "SENTINEL").exists()
 
 
@@ -1803,7 +1805,24 @@ def test_acquire_leaves_swarm_locked_when_its_lease_base_cannot_be_recorded(
     monkeypatch.setattr(subprocess, "run", real_run)
 
     assert acquired is None
-    assert (swarm / ".swarm_lock").exists()
+    assert SwarmBroker(controller).locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_acquire_never_runs_a_hook_named_in_repository_config(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    marker = tmp_path / "hook-ran"
+    _git(controller, "config", "hook.probe.command", f"touch '{marker}'")
+    _git(controller, "config", "hook.probe.event", "reference-transaction")
+
+    assert SwarmBroker(controller).acquire(timeout_sec=0.05) is None
+
+    assert not marker.exists()
+    assert SwarmBroker(controller).locked_swarms() == [(swarm, "release_failed")]
     assert (sandbox / "SENTINEL").exists()
 
 
