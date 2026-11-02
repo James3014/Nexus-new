@@ -78,10 +78,14 @@ SBPL_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/@+ -]*$")
 # Nothing under a user's home directory, no temp tree, no repository root.
 # ``/usr/share/i18n`` holds only the system charset tables (``csmapper``/``esdb``) that libiconv
 # loads: without it ``git status`` fails with ``iconv_open(UTF-8,UTF-8-MAC)`` (#2665, P6).
+# ``/usr/share/locale`` holds the public system locale data ``setlocale`` reads for ``LANG``/
+# ``LC_*``: without it a confined Perl tool (``/usr/bin/shasum``) panics under ``C.UTF-8`` and
+# warns under ``en_US.UTF-8`` (#3194, as #3157 for ultra review). Read-only like every entry here.
 SANDBOX_SYSTEM_READ_SUBPATHS = (
     "/usr/lib",
     "/usr/share/zoneinfo",
     "/usr/share/i18n",
+    "/usr/share/locale",
     "/System/Library",
 )
 SANDBOX_SYSTEM_READ_LITERALS = (
