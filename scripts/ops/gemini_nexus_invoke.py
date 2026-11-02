@@ -12,15 +12,19 @@ Features:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
-
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEMINI_BIN = Path(os.environ.get("GEMINI_BIN", "/Users/jameschen/.npm-global/bin/gemini"))
@@ -99,6 +103,48 @@ def _release_lock(lock_path: Path) -> None:
         os.close(fd)
 
 
+@contextlib.contextmanager
+def _termination_signals_raise() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into SystemExit so ``finally`` stops the Gemini group (#3203).
+
+    Only on the main thread. An ignored signal (``nohup``) stays ignored, and a handler
+    not installed from Python (``getsignal`` returns None) is left in place.
+    The previous handlers are restored on the way out.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _raise(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    previous: dict[int, Any] = {}
+    try:
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            current = signal.getsignal(signum)
+            if current is not None and current is not signal.SIG_IGN:
+                previous[signum] = signal.signal(signum, _raise)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _stop_child_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the Gemini child's own group and reap it, while its leader is unreaped.
+
+    An unreaped leader keeps the group id from being reused, so the kill cannot hit
+    an unrelated group.
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    proc.wait()
+
+
 def _run_once(
     *,
     model: str,
@@ -122,7 +168,11 @@ def _run_once(
     return_code = 0
     classification = "OK"
 
+    proc = None
     try:
+        # Own session, so the whole Gemini group can be stopped. The child also inherits
+        # the single-flight lock descriptor: if the invoker is SIGKILLed, the lock stays
+        # held until the orphaned Gemini group is gone too (#3203).
         proc = subprocess.Popen(
             cmd,
             cwd=str(cwd),
@@ -131,6 +181,8 @@ def _run_once(
             text=True,
             env=_gemini_subprocess_env(),
             bufsize=1,
+            start_new_session=True,
+            pass_fds=tuple(_LOCK_FDS.values()),
         )
 
         last_activity_time = time.time()
@@ -145,14 +197,14 @@ def _run_once(
             
             # Wall clock timeout check
             if elapsed > timeout_sec:
-                proc.kill()
+                _stop_child_group(proc)
                 classification = "TIMEOUT_WALLCLOCK"
                 return_code = 124
                 break
             
             # Inactivity timeout check
             if inactivity_timeout_sec and (current_time - last_activity_time) > inactivity_timeout_sec:
-                proc.kill()
+                _stop_child_group(proc)
                 classification = "TIMEOUT_INACTIVITY"
                 return_code = 124
                 break
@@ -178,15 +230,20 @@ def _run_once(
                 break
 
         if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-        else:
+            _stop_child_group(proc)
+        elif classification == "OK":
+            # A timeout already reaped the group above; keep its 124.
             return_code = proc.returncode
 
     except Exception as exc:
         output_chunks.append(str(exc))
         return_code = 1
         classification = "ERROR"
+    finally:
+        # A signal-raised exit or any other interrupt still stops the group before
+        # main releases the lock.
+        if proc is not None:
+            _stop_child_group(proc)
 
     final_output = "".join(output_chunks)
     elapsed_sec = round(time.time() - start_time, 4)
@@ -266,6 +323,11 @@ def main() -> int:
         return 3
 
     attempts: list[dict] = []
+    with _termination_signals_raise():
+        return _run_attempts(args, cwd, lock_path, prompt, inact_timeout, attempts)
+
+
+def _run_attempts(args, cwd, lock_path, prompt, inact_timeout, attempts) -> int:
     try:
         if args.preflight:
             p_code, p_out, p_elap, p_cls = _run_once(
