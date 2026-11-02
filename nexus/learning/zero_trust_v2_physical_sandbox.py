@@ -120,6 +120,13 @@ def run_macos_sandbox_probe(
 
     sandbox_apply_failed = sandbox_available and returncode == 71 and "sandbox_apply" in stderr
     command_passed = returncode == 0 and not timed_out and not sandbox_apply_failed
+    sandbox_ran = sandbox_available and not sandbox_apply_failed
+    if not sandbox_available:
+        isolation_reason = "sandbox_exec_unavailable"
+    elif sandbox_apply_failed:
+        isolation_reason = "sandbox_apply_failed"
+    else:
+        isolation_reason = None
     raw_observation = {
         "returncode": returncode,
         "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
@@ -134,8 +141,9 @@ def run_macos_sandbox_probe(
         "issuer": "nexus.runner",
         "sandbox_mode": "macos_sandbox",
         "status": "PASS" if command_passed and teardown_status == "PASS" else "BLOCKED",
-        "network_disabled": sandbox_available and not sandbox_apply_failed,
-        "workspace_isolated": True,
+        "network_disabled": sandbox_ran,
+        "workspace_isolated": sandbox_ran,
+        "workspace_isolation_reason": isolation_reason,
         "tmp_isolated": True,
         "env_allowlist_hash": _env_allowlist_hash(child_env),
         "resource_limits": {"cpu": "process_timeout", "memory_mb": memory_mb, "timeout_sec": timeout_sec},
@@ -148,7 +156,7 @@ def run_macos_sandbox_probe(
         **attestation_body,
         "signature": _sandbox_signature(attestation_body=attestation_body, signing_secret=signing_secret),
     }
-    promotion_eligible = command_passed and teardown_status == "PASS"
+    promotion_eligible = command_passed and sandbox_ran and teardown_status == "PASS"
     return {
         "schema": "nexus.zero_trust_v2.physical_sandbox_probe.v1",
         "status": "PASS" if promotion_eligible else "BLOCKED",
