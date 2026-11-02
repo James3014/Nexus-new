@@ -13,7 +13,9 @@ are replaced, so nothing is signalled on the host. No live gateway, no Agy, no r
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -559,3 +561,311 @@ def test_query_whose_final_write_is_refused_released_the_lease_once_and_records_
     assert not workspace.exists()
     box.gateway._assist_cancel(TASK)
     assert claim.releases == 1, claim.releases
+
+
+# ---------------------------------------------------------------------------
+# #3160: a model probe holding an Agy account lease. A second call of the same job between the
+# finishing query's lease release and its final write finds the release done by this job, not
+# a lost claim: it answers the job's real state and records nothing the final write overwrites.
+# ---------------------------------------------------------------------------
+
+LEASE = "lease-3160"
+_PROBE_RESULT = {"answer": "ok"}
+
+
+def _lease_probe_finishing(box, monkeypatch) -> tuple[Path, _Claim]:
+    """A running Agy model probe that holds an account claim; its provider exited with 0 and
+    its output decodes as a verified probe answer. Nothing real: no Popen, no lease, and
+    ``os.kill``/``os.killpg`` raise on any real signal."""
+    workspace = _running_job(box)
+    _provider_exited(box, monkeypatch)
+
+    def kill(pid: int, sig: int) -> None:
+        assert pid == FAKE_PID, f"os.kill on a pid this test does not own: {pid}"
+        if sig != 0:
+            raise AssertionError(f"os.kill with a real signal: {sig}")
+        raise ProcessLookupError(pid)
+
+    def killpg(pgid: int, sig: int) -> None:
+        raise AssertionError(f"os.killpg({pgid}, {sig}) in a test that signals nothing")
+
+    def popen(*args, **kwargs):
+        raise AssertionError("a provider was launched")
+
+    monkeypatch.setattr(os, "kill", kill)
+    monkeypatch.setattr(os, "killpg", killpg)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        box.gateway,
+        "_decode_model_probe_payload",
+        lambda stdout, provider, model: (dict(_PROBE_RESULT), "provider_stdout"),
+    )
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    record.update({
+        "job_kind": "model_probe",
+        "provider": "agy",
+        "resolved_model": "gemini-test",
+        "account_alias_hash": "alias-3160",
+        "account_lease_id_hash": LEASE,
+        "account_lease_released": False,
+        "account_lease_cleanup_status": "HELD",
+    })
+    box.gateway._assist_write(record)
+    claim = _Claim()
+    box.gateway._assist_account_claims[TASK] = claim
+    return workspace, claim
+
+
+def _assert_probe_completed(record: dict) -> None:
+    assert (record["job_id"], record["status"], record["blocker"]) == (
+        JOB_ID,
+        "COMPLETED",
+        None,
+    ), record
+    assert record["result"] == _PROBE_RESULT, record
+    assert record["model_response_verified"] is True, record
+    assert not record.get("reconciliation_required"), record
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record
+
+
+def _in_window(box, call) -> dict:
+    """Run ``call()`` and keep its answer and the record it left on disk."""
+    answer = call()
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    return {"answer": answer, "record": record}
+
+
+def test_wait_while_a_query_finishes_a_lease_probe_sees_the_release_done(box, monkeypatch):
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+    state = _before_final_write(
+        box,
+        monkeypatch,
+        lambda: _in_window(box, lambda: box.gateway._assist_wait(TASK, timeout_seconds=0.0)),
+    )
+    result = box.gateway._assist_refresh(TASK)
+    assert state.get("other") is not None, "the wait never ran before the final write"
+    answer, seen = state["other"]["answer"], state["other"]["record"]
+    assert (answer["status"], answer["blocker"], answer["reconciliation_required"]) == (
+        "COMPLETED",
+        None,
+        False,
+    ), answer
+    assert answer["next_action"] == "none", answer
+    _assert_probe_completed(seen)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    _assert_probe_completed(record)
+    assert result is not None
+    _assert_probe_completed(result)
+    assert claim.releases == 1, claim.releases
+    assert TASK not in box.gateway._assist_processes
+    assert not workspace.exists()
+
+
+def test_cancel_while_a_query_finishes_a_lease_probe_records_no_lease_failure(box, monkeypatch):
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+    state = _before_final_write(
+        box, monkeypatch, lambda: _in_window(box, lambda: box.gateway._assist_cancel(TASK))
+    )
+    result = box.gateway._assist_refresh(TASK)
+    assert state.get("other") is not None, "the cancel never ran before the final write"
+    answer, seen = state["other"]["answer"], state["other"]["record"]
+    assert (answer["status"], answer["blocker"], answer["reconciliation_required"]) == (
+        "COMPLETED",
+        None,
+        False,
+    ), answer
+    # Nothing the final write has to overwrite: no CANCELLED, no PROCESS_LOST, no hold.
+    _assert_probe_completed(seen)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    _assert_probe_completed(record)
+    assert result is not None
+    _assert_probe_completed(result)
+    assert claim.releases == 1, claim.releases
+    assert box.terminated == []
+    assert TASK not in box.gateway._assist_processes
+    assert not workspace.exists()
+
+
+def test_reconcile_while_a_query_finishes_a_lease_probe_keeps_the_provider_outcome(
+    box, monkeypatch
+):
+    """Without the fix the window's hold reaches reconcile, which settles the job as a
+    retryable PROCESS_LOST failure and refuses the query's completed write (#3160 comment)."""
+    from nexus.orchestrator import unified_mcp_gateway
+
+    receipts: list = []
+
+    class _Coordinator:
+        def __init__(self, manager) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **kwargs):
+            receipts.append(kwargs)
+            return {"result": "ALREADY_ABSENT"}
+
+    monkeypatch.setattr(unified_mcp_gateway, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(unified_mcp_gateway, "get_account_pool_manager", lambda: object())
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+    state = _before_final_write(
+        box,
+        monkeypatch,
+        lambda: _in_window(box, lambda: box.gateway._task_reconcile({"task_id": TASK})),
+    )
+    box.gateway._assist_refresh(TASK)
+    assert state.get("other") is not None, "the reconcile never ran before the final write"
+    _assert_probe_completed(state["other"]["record"])
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    _assert_probe_completed(record)
+    assert receipts == []
+    assert claim.releases == 1, claim.releases
+    assert not workspace.exists()
+
+
+def test_lease_probe_whose_final_write_fails_releases_the_lease_once(box, monkeypatch):
+    """The query released the claim, then its final write failed (the provider was already
+    unregistered, #3144): the next query holds the job for reconciliation, which finds the
+    lease receipt gone and settles it with the release recorded. The claim is released exactly
+    once, and a later cancel releases nothing."""
+    from nexus.orchestrator import unified_mcp_gateway
+
+    receipts: list = []
+
+    class _Coordinator:
+        def __init__(self, manager) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **kwargs):
+            receipts.append(kwargs)
+            return {"result": "ALREADY_ABSENT"}
+
+    monkeypatch.setattr(unified_mcp_gateway, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(unified_mcp_gateway, "get_account_pool_manager", lambda: object())
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+    write = box.gateway._assist_write
+    failed: list = []
+
+    def failing_write(job):
+        if job.get("status") == "COMPLETED" and not failed:
+            failed.append(dict(job))
+            raise OSError("disk full")
+        return write(job)
+
+    monkeypatch.setattr(box.gateway, "_assist_write", failing_write)
+    with pytest.raises(OSError, match="disk full"):
+        box.gateway._assist_refresh(TASK)
+    assert failed, "the final write was never attempted"
+    assert claim.releases == 1, claim.releases
+    held = box.gateway._assist_refresh(TASK)
+    assert held is not None
+    _assert_held(held, "ASSIST_PROVIDER_PROCESS_LOST")
+    settled = box.gateway._task_reconcile({"task_id": TASK})
+    assert (settled["status"], settled["blocker"]) == ("FAILED", "ASSIST_PROVIDER_PROCESS_LOST")
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record
+    assert [r["lease_id_hash"] for r in receipts] == [LEASE]
+    assert claim.releases == 1, claim.releases
+    box.gateway._assist_cancel(TASK)
+    assert claim.releases == 1, claim.releases
+    assert not workspace.exists()
+
+
+class _FailingClaim(_Claim):
+    def release(self) -> None:
+        self.releases += 1
+        raise RuntimeError("release failed")
+
+
+def test_release_noted_only_for_the_lease_that_was_released(box):
+    gateway = box.gateway
+    claim = _Claim()
+    gateway._assist_account_claims[TASK] = claim
+    first: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, first) is True
+    # A second call for the same lease: the release is done, by this job.
+    again: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, again) is True
+    assert (again["account_lease_released"], again["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    )
+    assert claim.releases == 1
+    # Another lease of the task (a retry's) whose claim is gone: a lost claim.
+    other: dict = {"account_lease_id_hash": "lease-3160-retry"}
+    assert gateway._release_assist_account_claim(TASK, other) is False
+    assert (other["account_lease_released"], other["account_lease_cleanup_status"]) == (
+        False,
+        "RECONCILIATION_REQUIRED",
+    )
+    # The same lease hash on another task: not that task's release.
+    elsewhere: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim("t3160-other", elsewhere) is False
+
+
+def test_failed_release_is_not_noted_as_released(box):
+    gateway = box.gateway
+    claim = _FailingClaim()
+    gateway._assist_account_claims[TASK] = claim
+    first: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, first) is False
+    assert first["account_lease_cleanup_status"] == "RELEASE_FAILED"
+    again: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, again) is False
+    assert (again["account_lease_released"], again["account_lease_cleanup_status"]) == (
+        False,
+        "RECONCILIATION_REQUIRED",
+    )
+    assert claim.releases == 1
+
+
+def test_second_release_waits_for_a_release_in_progress(box):
+    """A second call of the same job while the first is still releasing the claim waits for
+    it and then finds the release done; it never sees the claim gone and unreleased."""
+    gateway = box.gateway
+    entered = threading.Event()
+    proceed = threading.Event()
+
+    class _SlowClaim(_Claim):
+        def release(self) -> None:
+            entered.set()
+            assert proceed.wait(5), "the test never let the release finish"
+            super().release()
+
+    claim = _SlowClaim()
+    gateway._assist_account_claims[TASK] = claim
+    first: dict = {"account_lease_id_hash": LEASE}
+    second: dict = {"account_lease_id_hash": LEASE}
+    outcome: dict = {}
+    releasing = threading.Thread(
+        target=lambda: outcome.setdefault(
+            "first", gateway._release_assist_account_claim(TASK, first)
+        )
+    )
+    releasing.start()
+    assert entered.wait(5), "the first release never started"
+    racing = threading.Thread(
+        target=lambda: outcome.setdefault(
+            "second", gateway._release_assist_account_claim(TASK, second)
+        )
+    )
+    racing.start()
+    racing.join(0.3)
+    raced_early = "second" in outcome
+    proceed.set()
+    releasing.join(5)
+    racing.join(5)
+    assert not raced_early, f"the second call did not wait for the release: {second}"
+    assert outcome == {"first": True, "second": True}, (outcome, second)
+    assert second["account_lease_cleanup_status"] == "RELEASED", second
+    assert claim.releases == 1
