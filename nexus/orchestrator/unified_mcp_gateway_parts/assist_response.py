@@ -224,6 +224,50 @@ def _settle_provider_group(
             return True, False, False
 
 
+_ASSIST_SETTLED_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
+
+
+def _assist_settled(job: Mapping[str, Any]) -> bool:
+    """Whether ``job`` is recorded as finished with nothing left to reconcile."""
+    return job.get("status") in _ASSIST_SETTLED_STATUSES and not job.get("reconciliation_required")
+
+
+def _assist_settled_is_replaced(current: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    """Whether writing ``job`` would reopen the settled record ``current`` of the same job, or
+    replace its outcome: no call settles a job and later unsettles it or changes its status, so
+    such a write comes from a read made before another reconcile, cancel or query settled the
+    job. A write with the same settled status (a cancel recording a lease release) still lands,
+    unless it records a lease the record shows as released as not released: the claim is
+    released once, so that write comes from a call that found the claim already gone (#3144)."""
+    return _assist_settled(current) and not (
+        _assist_settled(job)
+        and job.get("status") == current.get("status")
+        and not (
+            current.get("account_lease_released") is True
+            and job.get("account_lease_released") is not True
+        )
+    )
+
+
+_ASSIST_LIVE_STATUSES = frozenset({"SUBMITTED", "RUNNING"})
+
+
+def _assist_held(job: Mapping[str, Any]) -> bool:
+    """Whether ``job`` is recorded as needing reconciliation."""
+    return job.get("status") == "UNKNOWN_REQUIRES_RECONCILE" or bool(
+        job.get("reconciliation_required")
+    )
+
+
+def _assist_held_is_reopened(current: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    """Whether writing ``job`` would put the record ``current`` of the same job, held for
+    reconciliation, back to SUBMITTED or RUNNING: once a cancel, query or reconcile held the
+    job, it leaves that state only by settling (reconcile, cancel, or a query that finishes
+    it), so such a write is a query's heartbeat from a read made before the job was held. A
+    held or settling write still lands (#3144)."""
+    return _assist_held(current) and job.get("status") in _ASSIST_LIVE_STATUSES
+
+
 def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
     """Cancel: SIGTERM, then SIGKILL, the provider's process group while the provider is
     unreaped, each step bounded; True once it exited and its group was SIGKILLed and reaped
@@ -259,6 +303,44 @@ class _AssistResponseMixin(_ResponseBase):
 
         def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None: ...
 
+    def _assist_job_is_current(self, task_id: str, job: Mapping[str, Any]) -> bool:
+        """Whether the task's record still belongs to ``job``; call it under ``_assist_lock``.
+        A later launch of the same task id may have replaced the record since ``job`` was read:
+        its record and its registered provider are then not the caller's to touch (#3076)."""
+        current = self._assist_read(task_id)
+        return current is not None and current.get("job_id") == job.get("job_id")
+
+    def _assist_write_current(
+        self, task_id: str, job: dict[str, Any], *, drop_process: bool = False
+    ) -> dict[str, Any]:
+        """Write ``job`` (with ``drop_process``, also unregister the task's provider) in one step
+        under the lock, only while the record still belongs to ``job``; otherwise leave the
+        record and the registered provider alone and return ``job``. A record of ``job`` that
+        another call settled since ``job`` was read is kept, and returned (#3076); so is one
+        another call held for reconciliation, against a SUBMITTED or RUNNING write (#3144)."""
+        with self._assist_lock:
+            if self._assist_job_is_current(task_id, job):
+                if drop_process:
+                    self._assist_processes.pop(task_id, None)
+                current = self._assist_read(task_id)
+                if current is not None and _assist_settled_is_replaced(current, job):
+                    if (
+                        job.get("account_lease_released") is True
+                        and current.get("account_lease_released") is not True
+                    ):
+                        # The caller released the job's lease after another call settled the
+                        # record without it: keep the outcome, record the release (#3144).
+                        current.update({
+                            "account_lease_released": True,
+                            "account_lease_cleanup_status": "RELEASED",
+                        })
+                        return self._assist_write(current)
+                    return current
+                if current is not None and _assist_held_is_reopened(current, job):
+                    return current
+                return self._assist_write(job)
+        return dict(job)
+
     def _assist_hold_for_group(
         self, task_id: str, job: dict[str, Any], returncode: Any
     ) -> dict[str, Any]:
@@ -267,8 +349,6 @@ class _AssistResponseMixin(_ResponseBase):
         self._assist_record_stream_artifacts(job)
         if job.get("account_lease_id_hash"):
             self._abandon_assist_account_claim(task_id, job)
-        with self._assist_lock:
-            self._assist_processes.pop(task_id, None)
         job.update({
             "status": "UNKNOWN_REQUIRES_RECONCILE",
             "finished_at": self._utc_now(),
@@ -278,7 +358,7 @@ class _AssistResponseMixin(_ResponseBase):
             "model_response_verified": False,
             "process_cleanup": False,
         })
-        return self._assist_write(job)
+        return self._assist_write_current(task_id, job, drop_process=True)
 
     # fmt: off
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -334,6 +414,9 @@ class _AssistResponseMixin(_ResponseBase):
             # Settled as needing reconciliation: a later refresh must not finish the job.
             return job
         with self._assist_lock:
+            # A retry may have launched since the read above: its provider is not this job's.
+            if not self._assist_job_is_current(task_id, job):
+                return job
             process = self._assist_processes.get(task_id)
         returncode = None
         group_clean, deadline_killed = True, False
@@ -362,7 +445,7 @@ class _AssistResponseMixin(_ResponseBase):
                         "reconciliation_required": True,
                         "last_polled_at": self._utc_now(),
                     })
-                    return self._assist_write(job)
+                    return self._assist_write_current(task_id, job)
                 returncode = job.get("exit_code")
                 # This gateway never held the provider unreaped: its leader being gone says
                 # nothing about the rest of its group. Finish (and remove the workspace) only
@@ -372,7 +455,7 @@ class _AssistResponseMixin(_ResponseBase):
         if returncode is None:
             job["status"] = "RUNNING"
             job["last_polled_at"] = self._utc_now()
-            return self._assist_write(job)
+            return self._assist_write_current(task_id, job)
         stdout_path = Path(str(job.get("stdout_artifact") or ""))
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
@@ -472,6 +555,13 @@ class _AssistResponseMixin(_ResponseBase):
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
+        # The lease release, the workspace removal and the probe evidence below happen before
+        # the final write, which is refused when another call settled the job meanwhile (#3144).
+        # They stay first: the release decides what is written (a probe whose release failed is
+        # held for reconciliation, and a settled record cannot be reopened later), and the claim
+        # is taken once, by whichever call reaches it first; a refused write that released it
+        # still records the release on the kept record (_assist_write_current). The removal and
+        # the evidence describe this provider, which has exited with its group gone.
         lease_cleanup_ok = self._release_assist_account_claim(task_id, job)
         if is_model_probe and job.get("account_lease_id_hash") and not lease_cleanup_ok:
             job.update({
@@ -482,8 +572,6 @@ class _AssistResponseMixin(_ResponseBase):
             })
         # The one removal path, which refuses an empty or foreign workspace_root (#3076).
         _remove_assist_workspace(job, lambda root: self._snapshot_workspace(root))
-        with self._assist_lock:
-            self._assist_processes.pop(task_id, None)
         evidence = self._write_probe_evidence(job)
         if evidence is not None:
             job["probe_evidence_hash"] = evidence["evidence_hash"]
@@ -491,7 +579,14 @@ class _AssistResponseMixin(_ResponseBase):
             job["authentication_evidence"] = evidence["authentication_evidence"]
             identity = self._probe_evidence_identity(evidence)
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
-        return self._assist_write(job)
+        # The provider stays registered until its outcome is on disk, in the same locked step:
+        # unregistered earlier, a concurrent query or cancel would find no provider and a gone
+        # pid, record the job as PROCESS_LOST, and a cancel would settle it CANCELLED over the
+        # provider's own outcome (#3144). It is unregistered even when the write is refused:
+        # the provider has exited and its group is gone. A retry launched before this step owns
+        # the record and the registered provider, and both are left alone (#3076).
+        with self._assist_lock:
+            return self._assist_write_current(task_id, job, drop_process=True)
 
     _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d{1,9}(?:,(\d{1,9}))? \+\d{1,9}(?:,(\d{1,9}))? @@")
 

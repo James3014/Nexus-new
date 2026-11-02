@@ -8,7 +8,11 @@ execution verifier (``nexus.committee.execution_verifier``). Everything here fai
 * ``build_sandbox_profile`` emits a default-deny SBPL policy (``$HOME`` read-denied first, then
   only the sandbox, the trusted interpreter prefixes and fixed system locations readable,
   credential stores denied again last, no network, writes only inside the sandbox). Every
-  interpolated path goes through ``sbpl_path``.
+  interpolated path goes through ``sbpl_path``. ``confinement`` keeps each writable root's own
+  directory entry in place (``pinned_entries``: it cannot be removed, renamed or replaced while
+  a command runs) and leaves the root's own metadata (times, mode, attributes) writable.
+  ``fixed_entries`` is stricter: the entry's metadata cannot change either, so archiving or
+  ``cp -p`` onto such a directory itself exits non-zero.
 * ``scrubbed_env`` / ``git_safe_env`` drop every caller variable outside a small allowlist.
 * ``diff_policy_violations`` / ``unsafe_summary_lines`` / ``lstat_walk_violations`` refuse
   symlink, gitlink, rename/copy and ``.git`` patches before and after ``git apply``.
@@ -321,6 +325,8 @@ def build_sandbox_profile(
     deny_subtrees: Iterable[Path | str] = (),
     allow_signal_same_sandbox: bool = False,
     read_only_paths: Iterable[str] = (),
+    fixed_entries: Iterable[str] = (),
+    pinned_entries: Iterable[str] = (),
 ) -> str:
     """SBPL policy for one confined command (last matching rule wins).
 
@@ -334,6 +340,17 @@ def build_sandbox_profile(
 
     ``read_only_paths`` (absolute, already SBPL-safe, not resolved: a symlink there must not be
     replaceable either) stay unwritable even inside ``writable``.
+
+    ``fixed_entries`` (already SBPL-safe) keep their own directory entry: what is inside stays
+    writable, but the entry itself cannot be removed, renamed or replaced (for example by a
+    link to a directory outside the sandbox) while the command runs. Nothing else about the
+    entry can change either: its own times, mode and attributes stay as they are, so a command
+    that sets them on that directory (``touch``, ``chmod``, ``cp -p`` or an archive extracting
+    ``./`` into it) fails there.
+
+    ``pinned_entries`` (already SBPL-safe) keep their directory entry in the same way (no
+    removal, rename, rename over it, swap or re-creation at that path) but leave the entry's own
+    metadata writable, so those commands still work on it (#3177).
     """
 
     writes = " ".join(f'(subpath "{sbpl_path(path)}")' for path in writable)
@@ -363,6 +380,13 @@ def build_sandbox_profile(
         "(deny network*)",
         f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
         *(f'(deny file-write* (subpath "{path}"))' for path in read_only_paths),
+        *(f'(deny file-write* (literal "{sbpl_path(path)}"))' for path in fixed_entries),
+        # Removal and every rename from or onto the entry are checked as unlink; re-creating it
+        # at that path as create. Times, mode, flags and attributes are separate operations.
+        *(
+            f'(deny file-write-unlink file-write-create (literal "{sbpl_path(path)}"))'
+            for path in pinned_entries
+        ),
         f"(deny file-read* {denied})",
         # Last rule wins: forbidden subtrees stay unreadable even under an allowed root.
         *(
@@ -705,6 +729,8 @@ def confinement(
     in ``sandbox`` + ``extra_writable`` (+ interpreter prefixes and system paths for reads).
     ``host_interpreter_readable=False`` leaves out this process's own interpreter prefixes, for
     commands that start their own interpreter (granted via ``extra_readable``) (#2956).
+    Each root's own entry stays where it is while a command runs (``pinned_entries``); the
+    root's own times, mode and attributes stay writable (#3177).
     Raises SandboxError("no_os_barrier") when there is no OS barrier: nothing may run."""
 
     if not os_sandbox_available():
@@ -727,11 +753,15 @@ def confinement(
         extra_forbidden=extra_forbidden,
         forbidden_subtrees=subtrees,
     )
+    # The writable roots keep their own entries: a command cannot remove, rename or replace one,
+    # so every later run and host step on that path still meets the directory bound here. Their
+    # own times, mode and attributes stay writable (``cp -p``, archives with ``./``, #3177).
     profile = build_sandbox_profile(
         writable=[str(p) for p in writable],
         read_roots=read_roots,
         deny_subtrees=subtrees,
         read_only_paths=read_only_paths,
+        pinned_entries=[str(p) for p in writable],
     )
     env = scrubbed_env(
         home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)

@@ -1,5 +1,6 @@
 import unittest
 import os
+from unittest import mock
 from nexus.governance.domain.blocker_taxonomy import BlockerCode
 from nexus.observability.domain.heatmap_builder import HeatmapSeriesBuilder
 from nexus.observability.application.dashboard_view_model import DashboardAssembler, ReplayAuditRow
@@ -12,6 +13,12 @@ class TestSprint5Dashboard(unittest.TestCase):
     🖥️ [v27.1 Sprint 5] Observability Dashboard TDD
     驗證熱圖聚合、View Model 轉換與 Canary 面板一致性。
     """
+
+    def _isolate_env(self):
+        """Put os.environ back to its pre-test contents when the test ends."""
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_heatmap_aggregates_blocker_density(self):
         events = [
@@ -37,6 +44,7 @@ class TestSprint5Dashboard(unittest.TestCase):
 
     def test_canary_panel_shows_mode_and_rollout(self):
         """[Canary P1] 驗證：狀態能正確映射為 OBSERVATION"""
+        self._isolate_env()
         os.environ["NEXUS_GOVERNANCE_MODE"] = "OBSERVATION"
         guard = CanaryGuard()
         vm = CanaryPanelAssembler.assemble(guard, rollout_fraction=0.0)
@@ -45,8 +53,8 @@ class TestSprint5Dashboard(unittest.TestCase):
         
     def test_canary_panel_shows_latest_blocker(self):
         """[Canary P1] 驗證：重大 Blocker 會讓 Canary 面板亮紅燈"""
-        if "NEXUS_GOVERNANCE_MODE" in os.environ:
-            del os.environ["NEXUS_GOVERNANCE_MODE"]
+        self._isolate_env()
+        os.environ.pop("NEXUS_GOVERNANCE_MODE", None)
             
         guard = CanaryGuard()
         vm = CanaryPanelAssembler.assemble(guard, rollout_fraction=0.1, recent_blocker_code=BlockerCode.BASELINE_REGRESSION)

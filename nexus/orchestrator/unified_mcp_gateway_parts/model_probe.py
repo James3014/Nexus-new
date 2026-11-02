@@ -9,6 +9,8 @@ source lines are verbatim, except that ``_git``, ``get_account_pool_manager``,
 the gateway module by tests) and ``GatewayInputError``, ``TOOL_MANIFEST_REVISION``, ``_text``
 and ``AGY_MODEL_PROBE_PRINT_TIMEOUT`` (defined by the gateway) are resolved at call time
 through ``_gateway()``. Lease, lock and process state stays on the gateway instance.
+``_assist_write`` wraps the assist record write to drop a settled job's released-lease note
+(#3180).
 """
 
 from __future__ import annotations
@@ -37,7 +39,12 @@ from nexus.executors.claude_measurement_worker import (
     measurement_claude_enabled,
     measurement_claude_preflight,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_jobs import (
+    ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT,
+    assist_default_lane_refused,
+)
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_settled,
     _terminate_provider_group,
     assist_workspace_parent,
 )
@@ -249,23 +256,58 @@ class _ModelProbeMixin(_ModelProbeBase):
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED") from exc
 
     def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool:
+        lease_hash = job.get("account_lease_id_hash")
+        # The claim is taken, released and noted as released by its lease in one locked step
+        # (the release is local: receipt, flock, pool lease). A second call of the same job,
+        # such as a query or cancel while another query finishes the job, then finds the
+        # release done, not a lost claim that would hold the job for reconciliation (#3160).
         with self._assist_lock:
+            released = getattr(self, "_assist_released_leases", None)
+            if released is None:
+                released = self._assist_released_leases = {}
             claim = self._assist_account_claims.pop(task_id, None)
-        if claim is None:
-            if job.get("account_lease_id_hash"):
+            if claim is None:
+                if lease_hash and released.get(task_id) == lease_hash:
+                    job["account_lease_released"] = True
+                    job["account_lease_cleanup_status"] = "RELEASED"
+                    return True
+                if lease_hash:
+                    job["account_lease_released"] = False
+                    job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                    return False
+                return True
+            try:
+                claim.release()
+                # AccountLeaseClaim.release() never raises; the steps that failed are kept on
+                # the claim (#3180). A failed release holds the job for reconciliation, which
+                # removes the receipt only once its flock is free; it is never noted here.
+                release_ok = not getattr(claim, "release_errors", ())
+            except Exception:
+                release_ok = False
+            if not release_ok:
                 job["account_lease_released"] = False
-                job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                job["account_lease_cleanup_status"] = "RELEASE_FAILED"
+                job["reconciliation_required"] = True
                 return False
-            return True
-        try:
-            claim.release()
-        except Exception:
-            job["account_lease_released"] = False
-            job["account_lease_cleanup_status"] = "RELEASE_FAILED"
-            return False
+            # Noted by the claim's own lease, not the caller's record (#3180).
+            claim_hash = getattr(claim, "lease_id_hash", None)
+            if claim_hash:
+                released[task_id] = claim_hash
         job["account_lease_released"] = True
         job["account_lease_cleanup_status"] = "RELEASED"
         return True
+
+    def _assist_write(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Every assist record write; a record written settled drops its task's released-lease
+        note, which a call of the job needs only until then: a later write of an unsettled
+        record of the job is refused (``_assist_write_current``) (#3180)."""
+        written = super()._assist_write(value)
+        if _assist_settled(written):
+            with self._assist_lock:
+                released = getattr(self, "_assist_released_leases", None)
+                if released:
+                    released.pop(str(written.get("task_id")), None)
+        return written
 
     def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None:
         with self._assist_lock:
@@ -291,10 +333,13 @@ class _ModelProbeMixin(_ModelProbeBase):
 
     def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[tuple[str, str]]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
+        # #3164: decided before the provider lookup, so the default lane reports its own
+        # reason; the refusal itself is raised after the replay of an existing job below.
+        default_lane_refused = assist_default_lane_refused(arguments.get("provider"), arguments.get("model"))
         metadata, executable = self._provider_executable(provider)
-        if not metadata:
+        if not metadata and not default_lane_refused:
             raise _gateway().GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
-        if not executable:
+        if not executable and not default_lane_refused:
             raise _gateway().GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
         model = str(arguments.get("model") or metadata.get("default_model") or "").strip()
         requested_model = model
@@ -313,6 +358,10 @@ class _ModelProbeMixin(_ModelProbeBase):
             if existing.get("probe_semantics_hash") != semantics:
                 raise _gateway().GatewayInputError("MODEL_PROBE_TASK_ID_CONFLICT")
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        if default_lane_refused or not executable:
+            # #3164: refuse the implicit default lane before the version preflight and the job
+            # record (a missing executable was refused above unless the default lane was).
+            raise _gateway().GatewayInputError(f"MODEL_PROBE_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider == "agy" and agy_pool_stopped():
             # #2998: refuse before the version preflight, the job record and the lease.
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED")

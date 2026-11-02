@@ -64,6 +64,38 @@ def _gateway():
 # after SIGKILL, to show no live member before the cleanup counts as incomplete (#3076).
 _UNOWNED_GROUP_SETTLE_SECONDS = 2.0
 
+# #3164: the implicit default lane (cline, glm-5.2) of an assist submit or model probe
+# failed every launch once its authorisation expired, and it is not being renewed.  A
+# submit whose provider and model both resolve to empty (absent, or blank after the strip
+# the launch path applies) is refused before any job record, workspace or process unless
+# this switch is exactly "1"; a caller that names a provider or a model keeps its
+# current behaviour.  #3171: while the switch is off, a request that names exactly the
+# default lane (provider cline and model glm-5.2, after the launch path's normalisation)
+# is refused the same way, and so is a retry of a stored job on that lane.
+ASSIST_DEFAULT_LANE_ENABLED_ENV = "NEXUS_ASSIST_DEFAULT_LANE_ENABLED"
+ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT = (
+    "the default lane (cline, glm-5.2) is off because its authorisation has expired; "
+    "name a provider and model explicitly, or restore the lane and set "
+    f"{ASSIST_DEFAULT_LANE_ENABLED_ENV}=1 on the Gateway"
+)
+
+
+# The model names that launch the default lane: the cline command prefixes a bare name.
+_ASSIST_DEFAULT_LANE_MODELS = frozenset({"glm-5.2", "cline-pass/glm-5.2"})
+
+
+def assist_default_lane_refused(provider: Any, model: Any) -> bool:
+    """True when the default lane is off and the requested provider and model (each the
+    value the launch path reads before its default, so ``a or b`` chains included) are
+    either both empty after its strip, or exactly the default lane (#3171)."""
+    if os.environ.get(ASSIST_DEFAULT_LANE_ENABLED_ENV) == "1":
+        return False
+    provider_name = str(provider or "").strip().lower()
+    model_name = str(model or "").strip()
+    if not provider_name and not model_name:
+        return True
+    return provider_name == "cline" and model_name in _ASSIST_DEFAULT_LANE_MODELS
+
 
 class _AssistJobsMixin(_JobsBase):
     """Mixin base of ``UnifiedMCPGateway``; never instantiated on its own."""
@@ -101,6 +133,8 @@ class _AssistJobsMixin(_JobsBase):
         existing = self._assist_read(task_id)
         if existing is not None:
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        if assist_default_lane_refused(arguments.get("provider") or arguments.get("preferred_worker"), arguments.get("model") or arguments.get("preferred_model")):
+            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         provider = str(arguments.get("provider") or arguments.get("preferred_worker") or "cline").strip().lower()
         model = str(arguments.get("model") or arguments.get("preferred_model") or "glm-5.2").strip()
         if provider != "cline":
@@ -360,11 +394,15 @@ class _AssistJobsMixin(_JobsBase):
                 # for reconciliation (#3076). This gateway does not hold the provider unreaped
                 # here, so the group is not signalled.
                 job.update({"reconciliation_required": True, "process_killed": False, "process_cleanup": False})
-            self._assist_write(job)
+            job = self._assist_write_current(task_id, job)
         elif job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
             pid = int(job.get("pid") or 0)
             process = None
             with self._assist_lock:
+                if not self._assist_job_is_current(task_id, job):
+                    # A retry launched since this cancel's refresh: its record and provider are
+                    # not the job this cancel read, and are left alone (#3076).
+                    return self._assist_response(job, operation="cancel")
                 process = self._assist_processes.get(task_id)
                 if not pid:
                     # The submit writes the pid and registers the provider under this lock: re-read
@@ -409,7 +447,8 @@ class _AssistJobsMixin(_JobsBase):
             })
             self._assist_record_stream_artifacts(job)
             with self._assist_lock:
-                self._assist_processes.pop(task_id, None)
+                if self._assist_job_is_current(task_id, job):
+                    self._assist_processes.pop(task_id, None)
             # No provider was ever started (no registered process, no pid): no group to wait for.
             provider_gone = terminated or (process is None and not pid)
             if provider_gone:
@@ -430,10 +469,10 @@ class _AssistJobsMixin(_JobsBase):
                         "reconciliation_required": True,
                         "process_cleanup": False,
                     })
-            self._assist_write(job)
+            job = self._assist_write_current(task_id, job)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)
-            self._assist_write(job)
+            job = self._assist_write_current(task_id, job)
         return self._assist_response(job, operation="cancel")
 
     def _assist_retry(self, task_id: str) -> dict[str, Any]:
@@ -525,6 +564,9 @@ class _AssistJobsMixin(_JobsBase):
 
         provider = str(job.get("provider") or "cline").strip().lower()
         model = str(job.get("model") or "glm-5.2").strip()
+        if assist_default_lane_refused(provider, model):
+            # #3171: a stored job on the disabled default lane is not relaunched on it.
+            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider != "cline":
             raise _gateway().GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
         metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)

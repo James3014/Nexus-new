@@ -13,11 +13,7 @@ from typing import Any, Optional
 
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import (
-    TargetWorktreeLease,
-    WorktreeManager,
-    get_canonical_git_hooks_dir,
-)
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 
 
 @dataclass(frozen=True)
@@ -247,26 +243,22 @@ class CandidateCommitter:
             ).splitlines()
             if staged_after != paths:
                 raise RuntimeError("staged candidate paths differ from verified paths")
-            commit_env = os.environ.copy()
-            commit_env["GIT_CONFIG_NOSYSTEM"] = "1"
-            commit_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-            commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
-            commit_env["HOME"] = self._resolve_git_home()
-            hooks_dir = get_canonical_git_hooks_dir(target)
+            # The hardened Target runner reads no global config, so no Git HOME is passed;
+            # an unresolvable one still fails the commit closed.
+            self._resolve_git_home()
+            # No hooks path is passed: the hardened Target runner runs no hook, and the
+            # unbound path supplies its own.
             self.worktree_manager._run_git(
                 [
                     "-c",
                     f"user.name={self.AUTHOR_NAME}",
                     "-c",
                     f"user.email={self.AUTHOR_EMAIL}",
-                    "-c",
-                    f"core.hooksPath={hooks_dir}",
                     "commit",
                     "-m",
                     f"candidate({contract.task_id}): governed worker result",
                 ],
                 cwd=target,
-                env=commit_env,
             )
             commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
         final_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)

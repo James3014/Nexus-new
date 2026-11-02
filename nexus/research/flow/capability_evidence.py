@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from nexus.core.contained_write import PathContainmentError, write_text_in_root
 from nexus.research.flow.rlm_trace import safe_trace_slug
 
 
@@ -141,8 +142,8 @@ def augment_local_msa_bench_evidence(
         }
         updated["quiet_moment"] = quiet_moment
     if local_swarm_enabled and "drone" in text:
-        artifact_path = repo_root / ".nexus" / "reports" / "drones" / f"{slug}_local_msa_crystal.json"
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        drone_relative = Path(".nexus", "reports", "drones", f"{slug}_local_msa_crystal.json")
+        artifact_path = repo_root / drone_relative
         artifact = {
             "schema_version": "nexus_drone_artifact_v1",
             "owner": "local_msa_bench_executor",
@@ -151,17 +152,24 @@ def augment_local_msa_bench_evidence(
             "artifact_path": str(artifact_path),
             "verified": True,
         }
-        artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        updated["drone_used"] = True
-        updated["drone_invoked_count"] = 1
-        updated["drone_artifact_path"] = str(artifact_path)
-        updated["drone_report"] = {
-            "schema_version": "nexus_drone_receipt_v1",
-            "source": "local_msa_bench_executor",
-            "synthetic": True,
-            "artifact_paths": [str(artifact_path)],
-            "artifact_count": 1,
-        }
+        text_out = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
+        try:
+            # One no-follow component at a time: a link on the predictable path is refused,
+            # not written through (#3130). No artifact, no drone evidence.
+            write_text_in_root(repo_root, drone_relative, text_out, create_parents=True)
+        except PathContainmentError:
+            pass
+        else:
+            updated["drone_used"] = True
+            updated["drone_invoked_count"] = 1
+            updated["drone_artifact_path"] = str(artifact_path)
+            updated["drone_report"] = {
+                "schema_version": "nexus_drone_receipt_v1",
+                "source": "local_msa_bench_executor",
+                "synthetic": True,
+                "artifact_paths": [str(artifact_path)],
+                "artifact_count": 1,
+            }
     if local_swarm_enabled and "nightshift" in text:
         updated["nightshift_recommended"] = True
         updated["nightshift_invoked"] = True

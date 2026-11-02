@@ -12,6 +12,9 @@ from nexus.health.sandbox import SpeculativeSandbox
 
 
 def test_tmpdir_fork_preserves_external_symlink_without_copying_target(tmp_path: Path) -> None:
+    # The name is historical: an outward link is no longer kept in the copy (#3162). What the
+    # test holds is that the target's bytes never enter the copy, and that nothing written by
+    # path in the copy reaches the target.
     source = tmp_path / "source"
     source.mkdir()
     (source / "repo.txt").write_text("repo", encoding="utf-8")
@@ -23,16 +26,21 @@ def test_tmpdir_fork_preserves_external_symlink_without_copying_target(tmp_path:
     sandbox = SpeculativeSandbox(source, mode="tmpdir")
     sandbox_root = sandbox.fork()
     try:
-        copied_link = sandbox_root / "escape"
-        assert copied_link.is_symlink()
-        assert Path(os.readlink(copied_link)) == external
+        assert (sandbox_root / "repo.txt").read_text(encoding="utf-8") == "repo"
+        assert not os.path.lexists(sandbox_root / "escape")
 
         visited_files = []
         for _root, _dirs, files in os.walk(sandbox_root, followlinks=False):
             visited_files.extend(files)
         assert "large.bin" not in visited_files
+
+        # A repair command writing by path in the copy stays in the copy.
+        (sandbox_root / "escape").mkdir()
+        (sandbox_root / "escape" / "planted.txt").write_text("x", encoding="utf-8")
+        assert sorted(p.name for p in external.iterdir()) == ["large.bin"]
     finally:
         sandbox.cleanup()
+    assert (source / "escape").is_symlink()
 
 
 def test_fork_failure_removes_partial_sandbox(monkeypatch, tmp_path: Path) -> None:
@@ -74,12 +82,17 @@ def test_cleanup_does_not_follow_symlink_outside_sandbox(tmp_path: Path) -> None
 
     sandbox = SpeculativeSandbox(source, mode="tmpdir")
     sandbox_root = sandbox.fork()
-    assert (sandbox_root / "escape").is_symlink()
+    temp_root = sandbox_root.parent
+    # The copy leaves the outward link out (#3162); a command run in the copy can still make
+    # one, and cleanup must remove the link without following it.
+    assert not os.path.lexists(sandbox_root / "escape")
+    (sandbox_root / "made-by-run").symlink_to(external, target_is_directory=True)
 
     sandbox.cleanup()
 
     assert sentinel.read_text(encoding="utf-8") == "keep"
     assert external.exists()
+    assert not temp_root.exists()
 
 
 def test_cleanup_is_idempotent(tmp_path: Path) -> None:

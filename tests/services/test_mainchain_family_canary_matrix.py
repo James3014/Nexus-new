@@ -42,6 +42,7 @@ from nexus.services.capability_registry import (
 )
 from nexus.services.mainchain_entry import run_mainchain
 from nexus.services.mainchain_route_freeze import build_capability_catalog
+from nexus.services.product_capability_canary_helper import armor_ephemeral_allowed
 from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     build_registered_online_invoker,
@@ -409,7 +410,6 @@ def _run_family_canary_impl(
     task_id_override: str = "",
 ) -> dict[str, Any]:
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
-    os.environ["NEXUS_ARMOR_ALLOW_EPHEMERAL"] = "1"
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     family_ctx = _family_positive_context(name) if positive else {}
     if positive and not family_ctx.get("source_hash"):
@@ -828,14 +828,15 @@ def _run_family_canary_impl(
             ),
         }
 
-    receipt = run_mainchain(
-        req,
-        online_invoker=build_registered_online_invoker(online_provider),
-        local_service=LocalAssistService() if local_enabled else None,
-        capability_invokers=invoker_map,
-        verifier=_verifier,
-        learning=None,
-    )
+    with armor_ephemeral_allowed():
+        receipt = run_mainchain(
+            req,
+            online_invoker=build_registered_online_invoker(online_provider),
+            local_service=LocalAssistService() if local_enabled else None,
+            capability_invokers=invoker_map,
+            verifier=_verifier,
+            learning=None,
+        )
 
     # ── Truth only from MainchainEntry receipt (no second invoker probe) ──
     ctx_trace = (

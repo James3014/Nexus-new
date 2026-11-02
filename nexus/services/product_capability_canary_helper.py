@@ -5,6 +5,7 @@ Extracted from family canary for production closure runner consumption without t
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -12,7 +13,7 @@ import shutil
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from nexus.services.capability_registry import (
     LOCAL_STAGE_CAPABILITIES,
@@ -25,6 +26,21 @@ from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     build_registered_online_invoker,
 )
+
+
+@contextlib.contextmanager
+def armor_ephemeral_allowed() -> Iterator[None]:
+    """Allow World C ephemeral paths for one canary run, then restore the previous value."""
+    key = "NEXUS_ARMOR_ALLOW_EPHEMERAL"
+    previous = os.environ.get(key)
+    os.environ[key] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
 
 
 def run_canary_mainchain(
@@ -63,7 +79,6 @@ def _run_canary_mainchain_cached(
     task_id_override: str = "",
 ) -> dict[str, Any]:
     """Production canary invocation via MainchainEntry -> Planner -> UnifiedRuntime."""
-    os.environ["NEXUS_ARMOR_ALLOW_EPHEMERAL"] = "1"
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
     canary_root = Path("/tmp/nexus_family_canary") / task_id
@@ -310,10 +325,11 @@ def _run_canary_mainchain_cached(
             ),
         }
 
-    return run_mainchain(
-        req,
-        online_invoker=build_registered_online_invoker(online_provider),
-        local_service=LocalAssistService() if local_enabled else None,
-        capability_invokers=invoker_map,
-        verifier=_verifier,
-    )
+    with armor_ephemeral_allowed():
+        return run_mainchain(
+            req,
+            online_invoker=build_registered_online_invoker(online_provider),
+            local_service=LocalAssistService() if local_enabled else None,
+            capability_invokers=invoker_map,
+            verifier=_verifier,
+        )

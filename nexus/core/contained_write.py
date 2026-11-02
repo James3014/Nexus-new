@@ -11,8 +11,10 @@ a new file created in the same directory and renames it over the name, which rep
 directory entry and leaves whatever inode was there untouched (a hard link to a host file, made
 or unlinked at any moment, is never written through). An existing entry that is not a regular
 single-link file is refused up front, and reads accept only such a file. A write into a
-directory the host itself runs from later (``HOST_RUN_SUBTREES``) is refused too. A refusal
-raises ``PathContainmentError`` (an ``OSError``) and nothing is written.
+directory the host itself runs from later (``HOST_RUN_SUBTREES``) is refused too. A caller that
+recorded ``root_identity(root)`` before model code ran there can pass it to a write or a read
+(``pinned_root``), which then refuses a root that is no longer that directory. A refusal raises ``PathContainmentError`` (an
+``OSError``) and nothing is written.
 """
 
 from __future__ import annotations
@@ -31,8 +33,10 @@ __all__ = [
     "contained_relative_path",
     "copy_file_in_root",
     "copy_tree_in_root",
+    "drop_escaping_links",
     "read_bytes_in_root",
     "read_text_in_root",
+    "root_identity",
     "write_text_in_root",
 ]
 
@@ -79,8 +83,42 @@ def _is_host_run_name(name: str) -> bool:
     return folded in HOST_RUN_SUBTREES
 
 
-def _open_parent(root: Path | str, parts: tuple[str, ...], *, create_parents: bool) -> int:
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+def root_identity(root: Path | str) -> tuple[int, int]:
+    """``(st_dev, st_ino)`` of the directory ``root`` names itself (a link there is refused).
+
+    Record it before model code runs in ``root`` and pass it to later host writes there."""
+
+    try:
+        info = os.stat(root, follow_symlinks=False)
+    except OSError as exc:
+        raise PathContainmentError(f"root_refused:{root}:{exc}") from exc
+    if not stat.S_ISDIR(info.st_mode):
+        raise PathContainmentError(f"root_not_a_directory:{root}")
+    return info.st_dev, info.st_ino
+
+
+def _open_root(root: Path | str, identity: tuple[int, int] | None) -> int:
+    if identity is None:
+        return os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        fd = os.open(root, _DIR_FLAGS)
+    except OSError as exc:
+        raise PathContainmentError(f"root_replaced:{root}:{exc}") from exc
+    info = os.fstat(fd)
+    if (info.st_dev, info.st_ino) != identity:
+        os.close(fd)
+        raise PathContainmentError(f"root_replaced:{root}")
+    return fd
+
+
+def _open_parent(
+    root: Path | str,
+    parts: tuple[str, ...],
+    *,
+    create_parents: bool,
+    identity: tuple[int, int] | None = None,
+) -> int:
+    fd = _open_root(root, identity)
     try:
         for name in parts[:-1]:
             if create_parents:
@@ -117,17 +155,19 @@ def write_text_in_root(
     text: str,
     *,
     create_parents: bool = False,
+    pinned_root: tuple[int, int] | None = None,
 ) -> None:
     """Write ``text`` (UTF-8) to ``root/relative``, created if missing, never through a link.
 
     The text goes to a new file in the same directory, which is then renamed over the name; an
-    existing regular file keeps its permission bits, a new one gets 0o666 less the umask."""
+    existing regular file keeps its permission bits, a new one gets 0o666 less the umask. With
+    ``pinned_root`` (from ``root_identity``), ``root`` must still be that directory."""
 
     parts = _parts(relative)
     if any(_is_host_run_name(part) for part in parts):
         raise PathContainmentError(f"path_in_host_run_subtree:{os.fspath(relative)}")
     name = parts[-1]
-    parent = _open_parent(root, parts, create_parents=create_parents)
+    parent = _open_parent(root, parts, create_parents=create_parents, identity=pinned_root)
     try:
         try:
             existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -167,15 +207,20 @@ def write_text_in_root(
 
 
 def read_bytes_in_root(
-    root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
+    root: Path | str,
+    relative: PurePath | str,
+    *,
+    max_bytes: int | None = None,
+    pinned_root: tuple[int, int] | None = None,
 ) -> bytes:
     """Read the bytes of ``root/relative``, never through a link.
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
-    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
+    beyond ``max_bytes + 1`` bytes (it may still be growing). With ``pinned_root`` (from
+    ``root_identity``), ``root`` must still be that directory, as for ``write_text_in_root``."""
 
     parts = _parts(relative)
-    parent = _open_parent(root, parts, create_parents=False)
+    parent = _open_parent(root, parts, create_parents=False, identity=pinned_root)
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
@@ -204,6 +249,7 @@ def read_text_in_root(
     *,
     max_bytes: int | None = None,
     strict: bool = False,
+    pinned_root: tuple[int, int] | None = None,
 ) -> str:
     """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
 
@@ -213,9 +259,10 @@ def read_text_in_root(
     whatever is there and look for U+FFFD themselves (#3099).
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
-    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
+    beyond ``max_bytes + 1`` bytes (it may still be growing). ``pinned_root`` is passed on to
+    ``read_bytes_in_root``."""
 
-    data = read_bytes_in_root(root, relative, max_bytes=max_bytes)
+    data = read_bytes_in_root(root, relative, max_bytes=max_bytes, pinned_root=pinned_root)
     if not strict:
         return data.decode("utf-8", errors="replace")
     try:
@@ -314,17 +361,19 @@ def copy_tree_in_root(
     read. Regular single-link files are copied; a hard link, FIFO, socket or device raises
     ``PathContainmentError`` and the caller must treat the copy as failed. A symlink is recreated
     as a link only if it resolves inside ``dst_root`` once everything is copied; any other
-    symlink is left out. Entries named in ``ignore_names`` are skipped at every depth. Returns
-    the relative paths of the symlinks left out."""
+    symlink is left out. Entries named in ``ignore_names`` are skipped at every depth, under any
+    letter case (``.Git`` is ``.git`` on a case-insensitive file system). Returns the relative
+    paths of the symlinks left out."""
 
     dst_path = Path(dst_root)
+    ignored = {name.casefold() for name in ignore_names}
     links: list[tuple[PurePath, str]] = []
 
     def walk(src_fd: int, relative: PurePath) -> None:
         with os.scandir(src_fd) as entries:
             names = sorted(entry.name for entry in entries)
         for name in names:
-            if name in ignore_names:
+            if name.casefold() in ignored:
                 continue
             child = relative / name
             info = os.stat(name, dir_fd=src_fd, follow_symlinks=False)
@@ -369,3 +418,33 @@ def copy_tree_in_root(
             link.unlink()
             dropped.append(os.fspath(child))
     return tuple(dropped)
+
+
+def drop_escaping_links(root: Path | str, *, dangling_only: bool = False) -> tuple[str, ...]:
+    """Remove every symlink under ``root`` that does not resolve inside ``root`` (#3130).
+
+    For a fresh copy made with links kept as links (``shutil.copytree(symlinks=True)``): a link
+    that points outside the copy, or dangles towards a path outside it, would let a later write
+    by path in the copy change or create a file outside it. Links that resolve inside ``root``
+    are kept, the same rule ``copy_tree_in_root`` applies. With ``dangling_only`` an escaping
+    link whose target exists is kept too, and only one that would create a new file outside
+    goes. Directories are walked without following links. Returns the relative paths of the
+    links removed."""
+
+    root_path = Path(root)
+    root_real = root_path.resolve()
+    dropped: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
+        for name in (*dirnames, *filenames):
+            entry = os.path.join(dirpath, name)
+            if not os.path.islink(entry):
+                continue
+            real = Path(os.path.realpath(entry))
+            if real == root_real or real.is_relative_to(root_real):
+                continue
+            if dangling_only and os.path.exists(entry):
+                continue
+            os.unlink(entry)
+            dropped.append(os.path.relpath(entry, root_path))
+        dirnames[:] = [name for name in dirnames if not os.path.islink(os.path.join(dirpath, name))]
+    return tuple(sorted(dropped))

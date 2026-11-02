@@ -12,6 +12,7 @@ import tempfile
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from nexus.core.contained_write import drop_escaping_links
 from nexus.engine.target_env_context import TargetEnvContext
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,9 @@ def run_cli_pregate(
                     copy_function=_bounded_copy([_PREGATE_COPY_MAX_BYTES]),
                     dirs_exist_ok=True,
                 )
+                # Links stay links in the copy; one that leaves it would let a relative
+                # write in copy_only mode land outside the copy (#3130).
+                drop_escaping_links(work_dir)
                 env["PYTHONPATH"] = str(work_dir)
                 return _run_pregate_commands(
                     commands, work_dir, env, timeout_per_cmd, confined=True, source_root=target_repo_root

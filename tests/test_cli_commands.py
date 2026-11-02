@@ -35,6 +35,19 @@ def _scoped_pytest_verification_passes(monkeypatch):
 
     monkeypatch.setattr(_subprocess, "run", fake_run)
 
+    # research:run starts the scoped pytest through the process-group reaping runner (#3062),
+    # not subprocess.run, so stub that runner the same way.
+    from nexus.core import argv_command
+
+    real_reaping_run = argv_command.run_reaping_process_group
+
+    def fake_reaping_run(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and "pytest" in cmd:
+            return _subprocess.CompletedProcess(cmd, 0, stdout="stubbed pytest pass", stderr="")
+        return real_reaping_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(argv_command, "run_reaping_process_group", fake_reaping_run)
+
 
 def test_research_run_success(tmp_path, monkeypatch):
     runner = CliRunner()

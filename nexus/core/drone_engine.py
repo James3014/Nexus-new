@@ -10,7 +10,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from nexus.core.contained_write import write_text_in_root
+from nexus.core.contained_write import PathContainmentError, root_identity, write_text_in_root
 from nexus.core.layer_ports import resolve_port
 from nexus.core.drone_protocol import DroneProtocol
 
@@ -89,31 +89,55 @@ class LocalBonsaiBrain:
 class DroneToolBox:
     def __init__(self, sandbox_dir: Path):
         self.sandbox_dir = sandbox_dir
+        # Pinned before any model command runs: later rounds use the directory recorded here,
+        # never whatever the path names by then. A link at sandbox_dir is refused.
+        self._root_identity = root_identity(sandbox_dir)
+        # The one path every round checks and hands to the sandbox (#3177): already resolved,
+        # so the sandbox resolving it again names the same entry the check saw.
+        self._root_path = Path(os.path.realpath(sandbox_dir))
+        if not self._root_unchanged():
+            raise PathContainmentError(f"root_replaced:{sandbox_dir}")
+
+    def _root_unchanged(self) -> bool:
+        """The recorded path still resolves to itself and is still the recorded directory."""
+        root = str(self._root_path)
+        try:
+            return os.path.realpath(root) == root and root_identity(root) == self._root_identity
+        except OSError:
+            return False
 
     def bash_exec(self, command: str) -> Dict[str, Any]:
         # The command is local-model output: run it under the OS sandbox (no network, writes
         # only in sandbox_dir, allowlisted env). Without a barrier, or with the port unbound,
         # nothing runs (#2936).
         try:
+            if not self._root_unchanged():
+                return {"exit_code": -1, "stderr": "sandbox_root_replaced"}
             run_model_command_string = resolve_port("model_output.run_model_command_string")
-            res = run_model_command_string(command, work_dir=self.sandbox_dir, timeout=30)
+            res = run_model_command_string(command, work_dir=self._root_path, timeout=30)
+            # Checked again on the same path: a root changed while the round ran (only possible
+            # from outside the sandbox) voids the round's result.
+            if not self._root_unchanged():
+                return {"exit_code": -1, "stderr": "sandbox_root_replaced"}
             return {"exit_code": res.returncode, "stdout": res.stdout, "stderr": res.stderr}
         except Exception as e:
             return {"exit_code": -1, "stderr": str(e)}
 
     def file_edit(self, target: str, content: str) -> Dict[str, Any]:
         try:
-            path = (self.sandbox_dir / target).resolve()
+            path = (self._root_path / target).resolve()
             # Path containment, not a string prefix: "<dir>EXTRA" must not pass for "<dir>" (#2949).
-            if not path.is_relative_to(self.sandbox_dir.resolve()):
+            if not path.is_relative_to(self._root_path):
                 return {"status": "FAIL", "error": "Path traversal blocked"}
             # Sandboxed BASH runs may still be changing sandbox_dir: the write walks the checked
-            # path again without following any link, and only into a regular single-link file.
+            # path again without following any link, and only into a regular single-link file,
+            # from the root pinned at setup.
             write_text_in_root(
-                self.sandbox_dir,
-                path.relative_to(self.sandbox_dir.resolve()),
+                self._root_path,
+                path.relative_to(self._root_path),
                 content,
                 create_parents=True,
+                pinned_root=self._root_identity,
             )
             return {"status": "SUCCESS"}
         except Exception as e:
@@ -183,8 +207,13 @@ class TacticalDrone(DroneProtocol):
         self.task_intent = task_intent
         
         sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
-        sandbox_dir.mkdir(parents=True, exist_ok=True)
-        toolbox = DroneToolBox(sandbox_dir)
+        try:
+            sandbox_dir.mkdir(parents=True, exist_ok=True)
+            toolbox = DroneToolBox(sandbox_dir)
+        except OSError as exc:
+            # A drone dir that is not a plain directory (e.g. a link left behind) is refused
+            # before any model call, as a FAIL outcome rather than an exception (#3177).
+            return self.abort_unavailable(f"drone_sandbox_root_refused: {exc}")
         
         system_prompt = (
             "You are a Nexus Drone. Follow MUSE_PROTO. Must return strict JSON.\n"

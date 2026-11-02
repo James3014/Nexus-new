@@ -4,6 +4,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, List
 
+from nexus.core.hardened_git import (
+    clear_stale_index_lock,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.core.state_root import persistent_state_root
 from nexus.evidence.abort_receipt import write_abort_receipt
 from nexus.services.local_heal.context import HealContext
@@ -864,11 +870,6 @@ class HealOrchestrator:
 
         # 7. Parse SEARCH/REPLACE from response
         # C6U: Force anchored_edit mode for retry to enable replace-only contract
-        import os
-
-        original_protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE")
-        os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
-
         parser = SolidSearchReplaceProtocol()
 
         # C15-5E Path B: Unified-Diff-to-SSRP Converter for Semantic Retry
@@ -897,13 +898,10 @@ class HealOrchestrator:
                 if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
                     response = converted_ssrp
 
-        intents_or_error = parser.parse(response, anchor_text=canonical_search)
-
-        # Restore original protocol mode
-        if original_protocol_mode is None:
-            os.environ.pop("NEXUS_PROTOCOL_MODE", None)
-        else:
-            os.environ["NEXUS_PROTOCOL_MODE"] = original_protocol_mode
+        # The mode is passed as an argument; the process environment is not touched.
+        intents_or_error = parser.parse(
+            response, anchor_text=canonical_search, protocol_mode="anchored_edit"
+        )
         if hasattr(intents_or_error, "kind"):
             parse_kind_name = intents_or_error.kind.name
             ctx.op.model_decisions[-1]["status"] = parse_kind_name
@@ -1822,10 +1820,35 @@ class HealOrchestrator:
 
         if not ctx.op.repo_dir or not (ctx.op.repo_dir / ".git").exists():
             return
-        subprocess.run(
-            ["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True
-        )
-        subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
+        # A copied gitdir may name another work tree (core.worktree) or live elsewhere (a
+        # gitdir file); checkout and clean would then act outside repo_dir.
+        repo_dir = ctx.op.repo_dir.resolve()
+        git_dir = repository_git_dir(repo_dir)
+        if git_dir is None:
+            logger.warning(
+                "workspace reset refused: git repository is not rooted at repo_dir: %r",
+                str(repo_dir),
+            )
+            return
+        if repository_config_can_start_a_program(repo_dir, git_dir):
+            logger.warning(
+                "workspace reset refused: git config can start a program: %r", str(repo_dir)
+            )
+            return
+        try:
+            for args in (("checkout", "--", "."), ("clean", "-fd")):
+                if run_hardened_git(repo_dir, *args, git_dir=git_dir).returncode != 0:
+                    logger.warning(
+                        "workspace reset incomplete: git %s failed: %r", args[0], str(repo_dir)
+                    )
+        except subprocess.TimeoutExpired:
+            logger.warning("workspace reset incomplete: git timed out: %r", str(repo_dir))
+            # The killed git can leave index.lock behind, and every later reset would fail.
+            if clear_stale_index_lock(repo_dir, git_dir):
+                logger.warning(
+                    "workspace reset removed a stale index.lock after the timeout: %r",
+                    str(repo_dir),
+                )
 
     def _build_patch_failure_structured_packet(
         self,

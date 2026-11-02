@@ -19,6 +19,14 @@ from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unco
 pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
 
+@pytest.fixture(autouse=True)
+def _world_c_copies_of_tmp_repos(monkeypatch):
+    # The STANDARD retry copies the task repo into World C, which refuses an OS-temp source
+    # unless this is set. Run alone, the test failed on every host; in the full nightly it only
+    # passed because an earlier canary test left this variable set (#3093).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+
+
 ORIG_SRC = 'def greet(name):\n    return "unfixed"\n'
 
 DIFF_BAD = (

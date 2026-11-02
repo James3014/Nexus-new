@@ -330,3 +330,24 @@ def test_model_sandbox_keeps_the_same_subtrees_read_only(tmp_path, monkeypatch):
     for name in HOST_RUN_SUBTREES:
         with pytest.raises(PathContainmentError):
             write_text_in_root(work, f"{name}/x", "x", create_parents=True)
+
+
+def test_tree_copy_skips_ignored_names_under_any_letter_case(tmp_path):
+    # The case variants are separate entries, so this holds on case-sensitive Linux as well as
+    # on a case-insensitive macOS volume, where ".Git" is the ".git" directory.
+    from nexus.core.contained_write import copy_tree_in_root
+
+    src = tmp_path / "src"
+    (src / "a" / ".Git").mkdir(parents=True)
+    (src / "a" / ".Git" / "config").write_text("[core]\n", encoding="utf-8")
+    (src / "b").mkdir()
+    (src / "b" / ".GIT").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+    (src / "keep.py").write_text("x = 1\n", encoding="utf-8")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+
+    copy_tree_in_root(src, dst, ignore_names={".git"})
+
+    assert (dst / "keep.py").read_text(encoding="utf-8") == "x = 1\n"
+    copied = {name.casefold() for _, dirs, files in os.walk(dst) for name in (*dirs, *files)}
+    assert ".git" not in copied
