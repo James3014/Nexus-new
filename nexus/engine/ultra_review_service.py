@@ -437,6 +437,10 @@ _write_no_follow = _as_review_error(write_no_follow)
 # Swap bookkeeping that stays out of the report.
 _SWAP_PRIVATE_KEYS = ("original", "restored_result", "checkout_identity")
 
+# Sandbox directories every lane profile names. Before each lane's profile is built, each must
+# still be the directory recorded when the sandbox was bound (#3142).
+_SANDBOX_ROOT_KEYS = ("sandbox_path", "execution_root", "home", "tmp")
+
 
 def _dir_identity(path: Path) -> tuple[int, int] | None:
     """(st_dev, st_ino) of the directory ``path`` names, without following a final link;
@@ -1137,6 +1141,8 @@ class UltraReviewService:
             "home": Path(sbpl_path(home.resolve())),
             "tmp": Path(sbpl_path(tmp.resolve())),
         }
+        for key in _SANDBOX_ROOT_KEYS:
+            self._remember_dir(self._sandbox_ctx[key])
 
     def _sandbox_env(self) -> dict[str, str]:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
@@ -1175,6 +1181,7 @@ class UltraReviewService:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
         if not ctx.get("execution_root") or not ctx.get("sandbox_path"):
             raise UltraReviewError("sandbox_not_bound")
+        self._check_sandbox_roots(ctx)
         writable = self._sandbox_writable()
         # Writes only in the mirror, the sandbox home/tmp and (during a witnessed run) its report
         # dir and cwd; never the sandbox dir itself, which holds the reviewer's own files. None
@@ -1185,6 +1192,23 @@ class UltraReviewService:
             read_roots=self._sandbox_read_roots(),
             fixed_entries=[*writable, str(ctx["sandbox_path"])],
         )
+
+    def _check_sandbox_roots(self, ctx: dict[str, Any]) -> None:
+        """Fail closed unless every directory this lane's profile names is still the one
+        recorded for it (#3142). The profile resolves each root again, so a root replaced after
+        an earlier lane (by a link or another directory) would otherwise hand this lane whatever
+        the path names now. The replacement is recorded, so the review cannot pass even where a
+        caller counts the refusal as a failed lane."""
+        roots: list[tuple[str, str, tuple[int, int] | None]] = [
+            (key, str(ctx[key]), None) for key in _SANDBOX_ROOT_KEYS if ctx.get(key)
+        ]
+        roots += [
+            (label, root, identity)
+            for root, (label, identity) in (ctx.get("lane_identities") or {}).items()
+        ]
+        for label, root, identity in roots:
+            if not self._dir_still_ours(Path(root), label, identity):
+                raise UltraReviewError(f"sandbox_root_replaced:{label}")
 
     def _sandbox_writable(self) -> list[str]:
         ctx = getattr(self, "_sandbox_ctx", None) or {}
@@ -2444,10 +2468,15 @@ class UltraReviewService:
         ctx = getattr(self, "_sandbox_ctx", None)
         if ctx is not None:
             # This run alone may write its report dir and its checkout (the base checkout too).
-            ctx["lane_writable"] = [
-                sbpl_path(Path(report["dir"]).resolve()),
-                sbpl_path(Path(cwd).resolve()),
-            ]
+            report_dir = sbpl_path(Path(report["dir"]).resolve())
+            lane_cwd = sbpl_path(Path(cwd).resolve())
+            ctx["lane_writable"] = [report_dir, lane_cwd]
+            # What each must still be when the profile is built (#3142).
+            recorded = self.__dict__.get("_dir_identities") or {}
+            ctx["lane_identities"] = {
+                report_dir: ("ghost_report_dir", report.get("dir_identity")),
+                lane_cwd: ("lane_cwd", recorded.get(str(cwd))),
+            }
         try:
             # The ghost re-run is the lane whose stalled descendants outlived a timeout (#2650).
             return self._sandboxed_run(
@@ -2460,6 +2489,7 @@ class UltraReviewService:
         finally:
             if ctx is not None:
                 ctx.pop("lane_writable", None)
+                ctx.pop("lane_identities", None)
 
     @staticmethod
     def _verify_ghost_report(report: dict[str, Any], returncode: int) -> dict[str, Any]:
