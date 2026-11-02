@@ -743,3 +743,57 @@ def test_competition_integration_requires_admitted_verifier(tmp_path):
         )
 
     assert _git(repo, "rev-parse", "nexus/integration") == base
+
+
+def test_controlled_integration_refuses_a_verifier_that_writes_a_replacement_ref(tmp_path):
+    """The compatibility path runs every git call sanitised and refuses a replacement ref
+    left by a verifier, as the authorized path does (#3226)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration/test", base)
+    _git(repo, "branch", "nexus/task/integration-task", base)
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
+    (target / "change.txt").write_text("candidate\n")
+    _git(target, "add", "change.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    state = _candidate_state(repo, base, candidate, tree)
+    script = tmp_path / "replace_head.py"
+    script.write_text(
+        "import subprocess\n"
+        "def g(*a, inp=None):\n"
+        "    return subprocess.run(['git', *a], check=True, capture_output=True, text=True,"
+        " input=inp).stdout.strip()\n"
+        "head = g('rev-parse', 'HEAD')\n"
+        "blob = g('hash-object', '-w', '--stdin', inp='other\\n')\n"
+        "tree = g('mktree', inp='100644 blob ' + blob + '\\tREADME\\n')\n"
+        "g('replace', head, g('commit-tree', tree, '-m', 'other', inp=''))\n",
+        encoding="utf-8",
+    )
+    executable = Path(sys.executable)
+    command = f"{executable} {script}"
+    state["contract"]["verifier_commands"] = [command]
+    state["verified_receipt"]["verifier_evidence"] = [
+        _verifier_evidence(executable, command, [str(script)])
+    ]
+    state["integration_verifier_manifest"] = list(
+        ControlledIntegrationManager._admitted_manifest(state, state["contract"])
+    )
+    _bind_verified_receipt(state)
+
+    with pytest.raises(RuntimeError, match="carries replacement refs"):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state, integration_branch="nexus/integration/test"
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration/test") == base
+    assert not (tmp_path / "integrations" / "integration-task").exists()

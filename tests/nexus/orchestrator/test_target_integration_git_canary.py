@@ -509,3 +509,33 @@ def test_controller_git_calls_read_objects_as_recorded(
     git(root, "replace", base, git(root, "rev-parse", "HEAD"))
     assert git(root, "show", f"{base}:value.txt") == "other"
     assert ControlledIntegrationManager._git(["show", f"{base}:value.txt"], root) == "base"
+
+
+# A post-apply command that writes a replacement ref for the applied commit (#3226).
+_REPLACE_AFTER_APPLY = (
+    "import subprocess; "
+    "g = lambda *a, inp=None: subprocess.run(['git', *a], check=True, capture_output=True, "
+    "text=True, input=inp).stdout.strip(); "
+    "head = g('rev-parse', 'HEAD'); "
+    "blob = g('hash-object', '-w', '--stdin', inp='other content\\n'); "
+    "tree = g('mktree', inp='100644 blob ' + blob + '\\tvalue.txt\\n'); "
+    "other = g('commit-tree', tree, '-m', 'other', inp=''); "
+    "g('replace', head, other)"
+)
+
+
+def test_a_post_apply_command_that_writes_a_replacement_ref_is_refused(tmp_path: Path):
+    """The post-apply worktree shares the Controller's ref store: a replacement ref written
+    there is caught before the receipt, not only one written during staging."""
+    root, base, candidate = make_repo(tmp_path)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    with pytest.raises(RuntimeError, match="carries replacement refs after post-apply"):
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            post_apply_commands=((sys.executable, "-c", _REPLACE_AFTER_APPLY),),
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert git(root, "for-each-ref", "refs/replace/")  # what the command left behind

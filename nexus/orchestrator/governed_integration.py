@@ -788,12 +788,9 @@ class ControlledIntegrationManager:
         reuse_controller_worktree = controller_branch == integration_branch
         if integration_path.exists():
             raise RuntimeError("integration worktree path already exists")
-        branch_exists = subprocess.run(
-            ["git", "rev-parse", "--verify", integration_branch],
-            cwd=controller_root,
-            capture_output=True,
-            text=True,
-        ).returncode == 0
+        branch_exists = (
+            self._git_status(["rev-parse", "--verify", integration_branch], controller_root) == 0
+        )
         if not branch_exists:
             raise RuntimeError("governed integration branch must already exist")
         if reuse_controller_worktree:
@@ -806,10 +803,12 @@ class ControlledIntegrationManager:
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
+            if self._git(["for-each-ref", "refs/replace/"], controller_root):
+                raise RuntimeError("repository carries replacement refs; integration refused")
             integration_sha = self._git(["rev-parse", "HEAD"], integration_path)
         except Exception:
-            subprocess.run(["git", "merge", "--abort"], cwd=integration_path, capture_output=True, text=True)
-            subprocess.run(["git", "reset", "--merge", integration_base_sha], cwd=integration_path, capture_output=True, text=True)
+            self._git_status(["merge", "--abort"], integration_path)
+            self._git_status(["reset", "--merge", integration_base_sha], integration_path)
             if not reuse_controller_worktree:
                 self._git(["worktree", "remove", str(integration_path)], controller_root)
             raise
@@ -1101,6 +1100,13 @@ class ControlledIntegrationManager:
                     != exact_head
                 ):
                     raise RuntimeError("integration branch moved during post-apply verification")
+                # The post-apply worktree shares the ref store too: a command there must
+                # not leave a replacement ref behind the receipt (#3226).
+                if self._git(["for-each-ref", "refs/replace/"], controller_root):
+                    raise RuntimeError(
+                        "repository carries replacement refs after post-apply verification; "
+                        "integration refused"
+                    )
                 post_apply_verified = True
         except Exception as exc:
             failure = exc
