@@ -1712,7 +1712,8 @@ def _r1_materialize_worktree(manifest: DeploymentManifest) -> Path:
             str(temporary), str(target),
         )
         os.chmod(target, 0o700)
-    except Exception:
+    except BaseException:
+        # Interrupts too, or the hidden temporary worktree stays registered (#3203).
         with contextlib.suppress(Exception):
             _r1_run(
                 "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree",

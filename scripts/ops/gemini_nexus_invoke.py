@@ -12,6 +12,7 @@ Features:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -47,22 +48,49 @@ def _gemini_subprocess_env() -> dict[str, str]:
     return env
 
 
+_LOCK_FDS: dict[Path, int] = {}
+
+
 def _acquire_lock(lock_path: Path) -> bool:
-    try:
-        # O_EXCL gives us an atomic single-flight lock
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    """Single-flight lock held with flock, so the kernel drops it when the holder dies (#3203).
+
+    A lock file left behind by a killed run no longer blocks later runs. The
+    descriptor stays open until ``_release_lock``; the file still names the holder pid.
+    """
+    while True:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return False
+        except BaseException:
+            os.close(fd)
+            raise
+        try:
+            current = os.stat(lock_path)
+        except FileNotFoundError:
+            current = None
+        if current is None or not os.path.samestat(os.fstat(fd), current):
+            # The previous holder unlinked this file while we waited for it: retry on the new one.
+            os.close(fd)
+            continue
+        os.ftruncate(fd, 0)
         os.write(fd, str(os.getpid()).encode("utf-8"))
-        os.close(fd)
+        _LOCK_FDS[lock_path] = fd
         return True
-    except FileExistsError:
-        return False
 
 
 def _release_lock(lock_path: Path) -> None:
+    fd = _LOCK_FDS.pop(lock_path, None)
+    if fd is None:
+        return
     try:
         lock_path.unlink(missing_ok=True)
     except Exception:
         pass
+    finally:
+        os.close(fd)
 
 
 def _run_once(
