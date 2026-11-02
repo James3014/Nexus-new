@@ -1488,6 +1488,23 @@ _SETTLED_WRITES = [
         False,
         id="same-outcome-lease-release-kept",
     ),
+    pytest.param(
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": True},
+        _SETTLED_BY_RECONCILE,
+        False,
+        id="same-outcome-lease-release-kept-without-field",
+    ),
+    pytest.param(
+        {
+            "status": "COMPLETED",
+            "blocker": None,
+            "reconciliation_required": False,
+            "account_lease_released": True,
+        },
+        {**_SETTLED_BY_CANCEL, "account_lease_released": True},
+        False,
+        id="completed-not-replaced-by-later-cancel",
+    ),
     pytest.param(_UNSETTLED, _SETTLED_BY_RECONCILE, True, id="unsettled-settled"),
     pytest.param(
         {**_SETTLED_BY_CANCEL, "reconciliation_required": True},
