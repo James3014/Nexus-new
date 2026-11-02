@@ -2437,7 +2437,9 @@ class AdaptiveWorkerFanoutRuntime:
         try:
             git_dir = _worker_git_dir(root, workspace.controller_root)
             head = _run_git(root, "rev-parse", "HEAD", git_dir=git_dir)
-            dirty = _run_git(root, "status", "--porcelain=v1", git_dir=git_dir)
+            dirty = _run_git(
+                root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
+            )
             tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir)
             origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
         except FanoutError as exc:
@@ -2850,7 +2852,13 @@ class AdaptiveWorkerFanoutRuntime:
             != workspace.expected_base_sha
         ):
             raise FanoutError("REPAIR_WORKSPACE_HEAD_MISMATCH")
-        if _run_git(repair_root, "status", "--porcelain=v1", git_dir=repair_git_dir):
+        if _run_git(
+            repair_root,
+            "status",
+            _WORKTREE_SUBMODULE_POINTERS,
+            "--porcelain=v1",
+            git_dir=repair_git_dir,
+        ):
             raise FanoutError("REPAIR_WORKSPACE_DIRTY")
         self.store.assert_session_owner(
             str(previous_receipt.get("session_id") or ""),

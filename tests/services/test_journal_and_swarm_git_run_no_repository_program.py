@@ -362,3 +362,19 @@ def test_swarm_worker_git_calls_stay_bound_to_the_git_dir_resolved_at_setup(env,
     assert (other / ".git" / "index").read_bytes() == other_index
     assert _git(other, "rev-parse", "HEAD") == other_head
     assert [w["worker_status"] for w in report["workers"]] == ["commit_failed"]
+
+
+def test_journal_baseline_lists_a_submodule_checked_out_at_another_commit(env):
+    repo = _repo(env)
+    other = _other_repo(env, env / "markers", names_a_program=False)
+    first = _git(other, "rev-parse", "HEAD")
+    (other / "o.txt").write_text("2\n", encoding="utf-8")
+    _git(other, "commit", "-qam", "two")
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{first},sub")
+    _git(repo, "commit", "-qm", "pointer")
+    _git(env, "clone", "-q", str(other), str(repo / "sub"))
+
+    baseline = journal.capture_source_baseline(str(repo))
+
+    assert baseline is not None
+    assert baseline["entries"]["sub"]["status"] == " M"

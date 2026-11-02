@@ -150,6 +150,8 @@ def _path_matches(path: str, boundary: str) -> bool:
 # Commit-to-commit diffs read only the two trees, so a submodule pointer change is listed
 # and hashed like any other path (the shared runner hides submodules by default).
 _SUBMODULE_POINTERS_SHOWN = "--ignore-submodules=none"
+# Work-tree status compares a submodule's checked-out commit only, so no git runs inside it.
+_WORKTREE_SUBMODULE_POINTERS = "--ignore-submodules=dirty"
 
 
 def _run_git(
@@ -919,7 +921,9 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
     git_dir = _workspace_git_dir(workspace_path)
     if _run_git(workspace_path, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit:
         raise ClosureError("UNIT_WORKSPACE_HEAD_MISMATCH")
-    if _run_git(workspace_path, "status", "--porcelain=v1", git_dir=git_dir):
+    if _run_git(
+        workspace_path, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
+    ):
         raise ClosureError("UNIT_WORKSPACE_DIRTY")
     if _run_git(workspace_path, "rev-parse", "HEAD^{tree}", git_dir=git_dir) != candidate_tree:
         raise ClosureError("UNIT_CANDIDATE_TREE_MISMATCH")
@@ -2949,7 +2953,7 @@ def _run_verifier_specs(
     git_dir = _workspace_git_dir(root)
     if _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit:
         raise ClosureError("VERIFIER_HEAD_MISMATCH")
-    if _run_git(root, "status", "--porcelain=v1", git_dir=git_dir):
+    if _run_git(root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir):
         raise ClosureError("VERIFIER_WORKSPACE_DIRTY")
     parsed = [VerifierSpec.from_value(spec) for spec in specs]
     if not parsed:
@@ -2996,7 +3000,9 @@ def _run_verifier_specs(
         if (
             not same_git_dir
             or _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit
-            or _run_git(root, "status", "--porcelain=v1", git_dir=git_dir)
+            or _run_git(
+                root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
+            )
         ):
             raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
 

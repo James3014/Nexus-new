@@ -75,16 +75,14 @@ def _controller(env: Path) -> tuple[Path, str]:
 
 
 def _unit(base: str, paths: list[str]) -> ExecutionUnit:
-    return ExecutionUnit.from_mapping(
-        {
-            "task_id": "task-1",
-            "unit_id": "u1",
-            "envelope_ref": "/envelope.json",
-            "envelope_sha256": "a" * 64,
-            "expected_base_sha": base,
-            "mutation_paths": paths,
-        }
-    )
+    return ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": "/envelope.json",
+        "envelope_sha256": "a" * 64,
+        "expected_base_sha": base,
+        "mutation_paths": paths,
+    })
 
 
 def _plant_hooks_and_fsmonitor(git_dir: Path, markers: Path) -> None:
@@ -526,3 +524,36 @@ def test_closure_rechecks_the_workspace_before_reading_a_pytest_verifier_result(
         _verify(receipt, base, [sys.executable, "-m", "pytest", "-q", "test_a.py"])
     assert read_after_run == []
     assert _fired(markers) == []
+
+
+def test_closure_verifier_that_moves_a_submodule_checkout_is_a_workspace_mutation(env, monkeypatch):
+    repo, _base = make_closure_repo(env)
+    other, first, second = _other_commits(env)
+    base = _set_pointer(repo, first, "pointer")
+    receipt = make_receipt(repo, env, base, "u1", "a.py", "A = 1\n")
+    worktree = Path(receipt["workspace_path"])
+    runs: list[str] = []
+
+    def verifier_run(argv, **_kwargs):
+        runs.append(argv[-1])
+        if len(runs) == 1:
+            (worktree / "sub").rmdir()
+            _git(env, "clone", "-q", str(other), str(worktree / "sub"))
+            _git(worktree / "sub", "checkout", "-q", second)
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setattr(closure, "run_reaping_process_group", verifier_run)
+    with pytest.raises(closure.ClosureError, match="^VERIFIER_MUTATED_WORKSPACE$"):
+        closure._run_verifier_specs(
+            task_id="task-1",
+            unit_id="u1",
+            workspace_path=receipt["workspace_path"],
+            candidate_commit=receipt["candidate_commit"],
+            specs=[{"id": "v1", "argv": ["true", "1"]}, {"id": "v2", "argv": ["true", "2"]}],
+            schema=closure.UNIT_VERIFICATION_SCHEMA,
+            scope="UNIT",
+            base_sha=base,
+            authorized_paths=["a.py"],
+            deletable_paths=[],
+        )
+    assert runs == ["1"]

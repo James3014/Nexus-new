@@ -413,6 +413,8 @@ def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
         proc = run_hardened_git(
             repository,
             "status",
+            # A submodule's checked-out commit is compared; no git runs inside it.
+            "--ignore-submodules=dirty",
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
