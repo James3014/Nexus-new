@@ -186,7 +186,7 @@ def run_macos_sandbox_probe(
         isolation_reason = "sandbox_outcome_unknown_timeout"
     elif sandbox_apply_failed:
         isolation_reason = (
-            "sandbox_apply_failed" if "sandbox_apply" in stderr else "sandbox_launch_failed"
+            "sandbox_apply_failed" if "sandbox_apply" in str(stderr) else "sandbox_launch_failed"
         )
     elif not writes_confined:
         isolation_reason = "profile_write_scope_unconfined"
