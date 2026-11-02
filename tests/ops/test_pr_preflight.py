@@ -1007,3 +1007,57 @@ def test_static_worktrees_leave_a_non_python_hangup_handler_in_place(tmp_path, m
 
     assert [r.status for r in results] == [pf.PASS]
     assert replaced == []
+
+
+def test_static_worktrees_off_the_main_thread_install_no_handler_and_still_clean_up(
+    tmp_path, monkeypatch
+):
+    """#3203: run from a worker thread, no handler is installed (signal.signal would raise
+    there) and both temporary worktrees are still removed."""
+    import signal as signal_module
+    import threading
+    import types
+
+    before = {s: signal_module.getsignal(s) for s in (signal_module.SIGTERM, signal_module.SIGHUP)}
+    added: list[Path] = []
+    removed: list[str] = []
+    seen: list[dict] = []
+    errors: list[BaseException] = []
+
+    def fake_add(repo, rev, parent, label):
+        path = parent / label
+        path.mkdir()
+        added.append(path)
+        return path
+
+    def fake_git(repo, *args, check=True):
+        if args[:2] == ("worktree", "remove"):
+            removed.append(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_static(ctx, tool, worktrees):
+        seen.append({s: signal_module.getsignal(s) for s in before})
+        return pf.CheckResult("static_ruff", pf.PASS)
+
+    monkeypatch.setattr(pf, "_add_worktree", fake_add)
+    monkeypatch.setattr(pf, "_git", fake_git)
+    monkeypatch.setattr(pf, "check_static", fake_static)
+    ctx = types.SimpleNamespace(repo=tmp_path, base_sha="b" * 40, head_sha="h" * 40)
+    results: list = []
+
+    def body():
+        try:
+            results.extend(pf.run_checks(ctx, ["static_ruff"]))
+        except BaseException as exc:  # noqa: BLE001 - reported to the main thread
+            errors.append(exc)
+
+    worker = threading.Thread(target=body)
+    worker.start()
+    worker.join(timeout=30)
+
+    assert errors == []
+    assert [r.status for r in results] == [pf.PASS]
+    assert seen == [before]
+    assert len(added) == 2
+    assert sorted(removed) == sorted(str(path) for path in added)
+    assert not added[0].parent.exists()
