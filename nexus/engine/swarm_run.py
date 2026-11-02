@@ -34,6 +34,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from nexus.core.contained_write import _is_host_run_name
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    run_hardened_git,
+)
+
 SCHEMA = "nexus.swarm_run.v1"
 NOT_EXECUTED_NO_BARRIER = "not_executed:no_os_barrier"
 VERIFY_TIMEOUT_SEC = 60
@@ -44,10 +51,14 @@ AUTHORITY = (
 )
 
 
-def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # nosec B603 B607 - fixed git argv
-        ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60, check=False
-    )
+def _git(
+    args: list[str], cwd: Path, git_dir: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    """``git <args>`` in ``cwd`` (the workspace root or a worker worktree) through the shared
+    hardened runner: no hooks, fsmonitor, signing or external diff program the repository
+    names. A worker worktree passes the git dir resolved when it was set up, so every call
+    stays bound to it."""
+    return run_hardened_git(cwd, *args, git_dir=git_dir, timeout=60)
 
 
 def _safe(value: str) -> str:
@@ -55,7 +66,8 @@ def _safe(value: str) -> str:
 
 
 def _unsafe_relpath(value: str) -> bool:
-    """A request path that could become a flag, escape the worktree or name its git dir."""
+    """A request path that could become a flag, escape the worktree or name its git dir (or
+    another directory the host runs from)."""
 
     path = Path(str(value or ""))
     return (
@@ -64,7 +76,8 @@ def _unsafe_relpath(value: str) -> bool:
         or "\x00" in str(value)
         or path.is_absolute()
         or ".." in path.parts
-        or any(part.lower() == ".git" for part in path.parts)
+        # Folded the way the filesystem compares names, as contained writes do.
+        or any(_is_host_run_name(part) for part in path.parts)
     )
 
 
@@ -73,6 +86,8 @@ def _scoped_file(worktree: Path, rel: str) -> Path | None:
 
     from nexus.engine.sandboxed_lane import scoped_path
 
+    if _unsafe_relpath(rel):
+        return None
     target = scoped_path(worktree, rel)
     if target is None or target.is_symlink() or not target.is_file():
         return None
@@ -117,6 +132,9 @@ def run_bounded_swarm(
         report.update(status="BLOCKED", reason="WORKSPACE_NOT_GIT_REPOSITORY")
         return report
     report["base_commit"] = head.stdout.strip()
+    if repository_config_can_start_a_program(root):
+        report.update(status="BLOCKED", reason="WORKSPACE_GIT_CONFIG_NAMES_A_PROGRAM")
+        return report
 
     lock_file = root / ".nexus" / "multi_agent" / "locks" / "file_locks.json"
     registry = FileLockRegistry(lock_file=str(lock_file))
@@ -138,6 +156,15 @@ def run_bounded_swarm(
     ) -> dict[str, Any]:
         wt = Path(worktree)
         record: dict[str, Any] = {"strategy": strategy["name"], "worktree": str(wt)}
+        # Resolved once, before any model output lands in the worktree; every later git call
+        # in it is bound to this git dir.
+        git_dir = linked_worktree_git_dir(wt, root)
+        if git_dir is None:
+            record.update(
+                worker_status="worktree_git_untrusted",
+                verify_result="not_executed:worktree_git_untrusted",
+            )
+            return {**record, "passed": False, "score": 0.0}
         target = _scoped_file(wt, target_file)
         script = _scoped_file(wt, verify_script)
         if target is None or script is None:
@@ -178,7 +205,7 @@ def run_bounded_swarm(
             record.update(worker_status="unsafe_path", verify_result="not_executed:unsafe_path")
             return {**record, "passed": False, "score": 0.0}
         lane.write_no_follow(target, code.encode("utf-8"))
-        _git(["add", target_file], wt)
+        _git(["add", "--", target_file], wt, git_dir)
         commit = _git(
             [
                 "-c",
@@ -192,12 +219,13 @@ def run_bounded_swarm(
                 f"swarm {safe_task} {strategy['name']}",
             ],
             wt,
+            git_dir,
         )
         if commit.returncode != 0:
             record.update(worker_status="commit_failed", worker_error=(commit.stderr or "")[-200:])
             return {**record, "passed": False, "score": 0.0}
-        record["commit"] = _git(["rev-parse", "HEAD"], wt).stdout.strip()
-        record["tree"] = _git(["rev-parse", "HEAD^{tree}"], wt).stdout.strip()
+        record["commit"] = _git(["rev-parse", "HEAD"], wt, git_dir).stdout.strip()
+        record["tree"] = _git(["rev-parse", "HEAD^{tree}"], wt, git_dir).stdout.strip()
         script = _scoped_file(wt, verify_script)
         if script is None:
             record.update(verify_result="not_executed:unsafe_path")

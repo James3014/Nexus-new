@@ -692,6 +692,8 @@
 | .github/workflows/review-record-present.yml | tests/ops/test_review_record_check.py, tests/ops/test_pr_workflow_concurrency.py, tests/ops/test_review_record_pending_3084.py | active | high | review_record_workflow_contract |
 | tests/ops/test_review_record_pending_3084.py | tests/ops/test_review_record_pending_3084.py | active | high | test_contract |
 | .github/workflows/pr-bindings-preflight.yml | tests/ops/test_pr_bindings_preflight_workflow.py, tests/ops/test_pr_workflow_concurrency.py | active | high | bindings_preflight_workflow_contract |
+| .github/workflows/nexus-core-issue-completion.yml | tests/ops/test_pr_workflow_concurrency.py, tests/ops/test_nexus_core_trusted_pin_policy.py, tests/ops/test_pr_preflight.py, tests/ops/test_pr_preflight_core_pin_source.py, tests/ops/test_nexus_core_issue_check_local.py, tests/ops/test_nexus_core_issue_check_local_trusted_config.py, tests/ops/test_issue_check_local_receipt_parity.py, tests/nexus/orchestrator/test_canonical_core_transport.py | active | high | core_issue_completion_workflow_contract |
+| tests/ops/test_pr_workflow_concurrency.py | tests/ops/test_pr_workflow_concurrency.py | active | high | test_contract |
 | .github/workflows/sibling-merge-checks.yml | tests/ops/test_sibling_merge_checks.py, tests/ops/test_review_record_pending_3084.py | active | high | sibling_merge_checks_contract |
 | .github/workflows/benchmark-ci.yml | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | benchmark_ci_dispatch_only_contract |
 | tests/ops/test_benchmark_ci_dispatch_only_2964.py | tests/ops/test_benchmark_ci_dispatch_only_2964.py | active | medium | test_contract |

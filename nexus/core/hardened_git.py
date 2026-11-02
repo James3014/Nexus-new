@@ -121,10 +121,12 @@ def run_hardened_git(
     text: bool = True,
     index_file: Optional[Path] = None,
     separate_git_dir: bool = False,
+    timeout: float = GIT_TIMEOUT_S,
 ) -> subprocess.CompletedProcess[Any]:
     """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given, on the index
     file ``index_file`` when given; output is bytes when ``text`` is False); raises
-    ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped.
+    ``subprocess.TimeoutExpired`` once the timed-out git (``timeout`` seconds) has been
+    killed and reaped.
 
     ``separate_git_dir`` marks ``git_dir`` as one the caller created outside ``repo_dir``
     (``git init --separate-git-dir``) at a path it chose itself, never one read from a
@@ -174,7 +176,7 @@ def run_hardened_git(
             env=env,
             capture_output=True,
             text=text,
-            timeout=GIT_TIMEOUT_S,
+            timeout=timeout,
             check=False,
         )
     finally:

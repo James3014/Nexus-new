@@ -1,5 +1,5 @@
 # pyright: strict, reportUnnecessaryIsInstance=false, reportUnnecessaryComparison=false
-"""TEST FIXTURE: nexus-core 67427c58 ``product/protocol/build_identity.py`` (ruff-formatted).
+"""TEST FIXTURE: nexus-core a161b34c ``product/protocol/build_identity.py`` (ruff-formatted).
 
 Nexus-new tests place this module into fake Core trees, because the in-tree
 ``product`` package shadows nexus-core inside the pytest process. It is proven
