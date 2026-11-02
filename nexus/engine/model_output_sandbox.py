@@ -15,9 +15,12 @@ sandbox, so these runs go through ``sandbox-exec`` with the default-deny policy 
 
 Each writable root is bound when the call starts: a ``PinnedRoot`` work dir (a path with the
 identity recorded for it) must still be that very directory at that path, checked in one
-``lstat`` and again once the profile is built, so the grant names exactly the checked directory
-(#3197). The profile also keeps each root's own ACL unchangeable, and after the run the host puts
-the root's own flags and mode back as they were at the start; a root that is no longer the
+``lstat``. Once the profile is built, its write grants must name only the bound paths and each
+root must still be the bound directory (#3197). Seatbelt grants by path, so a short window stays
+between that last check and the start of the sandboxed process, and read grants are not checked
+against the bound paths. The profile also keeps each
+root's own ACL unchangeable, and after the run the host puts the root's own flags and mode back
+as they were at the start (extended attributes are not restored); a root that is no longer the
 bound directory then voids the run (``SandboxError``).
 
 There is no unconfined fallback: without an OS barrier (non-macOS, or
@@ -26,11 +29,14 @@ There is no unconfined fallback: without an OS barrier (non-macOS, or
 
 from __future__ import annotations
 
+import ctypes
 import errno
+import functools
 import os
 import re
 import shutil
 import stat
+import struct
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
 import tempfile
@@ -279,49 +285,158 @@ def _restore_root_metadata(path: Path, recorded: os.stat_result) -> bool:
     return _same_dir(_root_entry(path), recorded)
 
 
-_CHMOD = "/bin/chmod"
+# setattrlistat(2) on macOS: set one attribute of the entry ``name`` in an open directory,
+# never following a link there (FSOPT_NOFOLLOW).
+_ATTR_BIT_MAP_COUNT = 5
+_ATTR_CMN_FLAGS = 0x00040000
+_ATTR_CMN_EXTENDED_SECURITY = 0x00400000
+_FSOPT_NOFOLLOW = 0x1
+_KAUTH_FILESEC_MAGIC = 0x012CC16D
+_KAUTH_FILESEC_NOACL = 0xFFFFFFFF
+_DIR_NOFOLLOW = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
-def _make_removable(entry: str, *, is_dir: bool) -> None:
-    """Undo what a confined command may have set on an entry it owned so the host can delete
-    it: user flags (``uchg``…) first, since they block the rest, then the mode, then any ACL
-    (``deny delete``). Never follows a link: callers skip links, and ``chmod -h`` acts on a
-    link itself."""
+@functools.cache
+def _libc() -> ctypes.CDLL:
+    return ctypes.CDLL(None, use_errno=True)
 
+
+def _setattr_at(dir_fd: int, name: str, attribute: int, payload: bytes) -> None:
+    attrlist = struct.pack("=HHIIIII", _ATTR_BIT_MAP_COUNT, 0, attribute, 0, 0, 0, 0)
+    _libc().setattrlistat(  # result ignored: removal is retried and raises if still refused
+        ctypes.c_int(dir_fd),
+        os.fsencode(name),
+        ctypes.create_string_buffer(attrlist, len(attrlist)),
+        ctypes.create_string_buffer(payload, len(payload)),
+        ctypes.c_size_t(len(payload)),
+        ctypes.c_uint32(_FSOPT_NOFOLLOW),
+    )
+
+
+def _chmod_at_by_handle(dir_fd: int, name: str, mode: int) -> None:
+    """chmod the entry itself through an ``O_PATH | O_NOFOLLOW`` handle (Linux); a link there
+    is left alone."""
+
+    o_path = getattr(os, "O_PATH", 0)
+    if not o_path or not os.path.isdir("/proc/self/fd"):
+        return
     try:
-        if hasattr(os, "chflags"):
-            os.chflags(entry, 0, follow_symlinks=False)
-        os.chmod(entry, 0o700 if is_dir else 0o600, follow_symlinks=False)
-    except (OSError, NotImplementedError):
+        fd = os.open(name, o_path | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError:
+        return
+    try:
+        if not stat.S_ISLNK(os.fstat(fd).st_mode):
+            os.chmod(f"/proc/self/fd/{fd}", mode)
+    except OSError:
         pass
-    if sys.platform == "darwin" and os.path.isfile(_CHMOD):
-        subprocess.run(  # nosec B603 - fixed system binary, argv list
-            [_CHMOD, "-h", "-N", entry], capture_output=True, check=False, timeout=30
+    finally:
+        os.close(fd)
+
+
+def _make_removable_at(dir_fd: int, name: str, *, is_dir: bool) -> None:
+    """Undo what a confined command may have set on the entry ``name`` of the open directory
+    ``dir_fd`` so the host can delete it: user flags first (they block the rest), then the
+    mode, then any ACL. Every change names the entry relative to ``dir_fd`` and never follows a
+    link there: a link swapped in after the caller looked is changed itself, not its target."""
+
+    if sys.platform == "darwin":
+        _setattr_at(dir_fd, name, _ATTR_CMN_FLAGS, struct.pack("=I", 0))
+    mode = 0o700 if is_dir else 0o600
+    try:
+        os.chmod(name, mode, dir_fd=dir_fd, follow_symlinks=False)
+    except NotImplementedError:
+        _chmod_at_by_handle(dir_fd, name, mode)  # Linux: no fchmodat without following
+    except OSError:
+        pass
+    if sys.platform == "darwin":
+        no_acl = struct.pack(
+            "=I16s16sII", _KAUTH_FILESEC_MAGIC, bytes(16), bytes(16), _KAUTH_FILESEC_NOACL, 0
         )
+        # attrreference_t (data right after it), then a filesec that says "no ACL".
+        _setattr_at(
+            dir_fd,
+            name,
+            _ATTR_CMN_EXTENDED_SECURITY,
+            struct.pack("=iI", 8, len(no_acl)) + no_acl,
+        )
+
+
+def _make_tree_removable(dir_fd: int) -> None:
+    """``_make_removable_at`` for every entry below the open directory ``dir_fd``, top down.
+    Directories are entered only by ``O_NOFOLLOW`` opens relative to their parent's descriptor,
+    so no path through a component swapped in during the walk is ever used (#3197)."""
+
+    with os.scandir(dir_fd) as entries:
+        names = [entry.name for entry in entries]
+    for name in names:
+        try:
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            continue
+        is_dir = stat.S_ISDIR(info.st_mode)
+        _make_removable_at(dir_fd, name, is_dir=is_dir)
+        if not is_dir:
+            continue
+        try:
+            child = os.open(name, _DIR_NOFOLLOW, dir_fd=dir_fd)
+        except OSError:
+            continue  # now a link, or still unreadable: removal below reports it
+        try:
+            _make_tree_removable(child)
+        finally:
+            os.close(child)
 
 
 def _remove_private_dir(private: str) -> None:
     """Remove the run's private ``home``/``tmp``. Model code wrote there and may have left
-    entries the plain removal refuses (flags, a 000 mode, a ``deny delete`` ACL); those are
-    made removable entry by entry, top down, without following any link, and removal is tried
-    again. A dir that still cannot be removed raises."""
+    entries the plain removal refuses (flags, mode or ACL entries); those are made removable
+    entry by entry, top down, by directory descriptor and without following any link, and
+    removal is tried again. A dir that still cannot be removed raises."""
 
     try:
         shutil.rmtree(private)
         return
     except OSError:
         pass
-    _make_removable(private, is_dir=True)
-    for dirpath, dirnames, filenames in os.walk(private, followlinks=False):
-        for name in dirnames:
-            entry = os.path.join(dirpath, name)
-            if not os.path.islink(entry):
-                _make_removable(entry, is_dir=True)
-        for name in filenames:
-            entry = os.path.join(dirpath, name)
-            if not os.path.islink(entry):
-                _make_removable(entry, is_dir=False)
+    parent = os.open(os.path.dirname(private), _DIR_NOFOLLOW)
+    try:
+        _make_removable_at(parent, os.path.basename(private), is_dir=True)
+        root = os.open(os.path.basename(private), _DIR_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+    try:
+        _make_tree_removable(root)
+    finally:
+        os.close(root)
     shutil.rmtree(private)
+
+
+# The device files every profile lets a command write besides its roots.
+_DEVICE_WRITES = frozenset({"/dev/null", "/dev/tty", "/dev/dtracehelper"})
+_WRITE_GRANT = re.compile(r'\(allow file-write\S*((?: \((?:subpath|literal) "[^"]*"\))+)\)')
+_PINNED_ENTRY = re.compile(r'\(deny file-write-unlink file-write-create \(literal "([^"]*)"\)\)')
+
+
+def _writes_stay_bound(profile: str, bound: Iterable[Path]) -> bool:
+    """True when every write grant in ``profile`` and every pinned entry names only a bound
+    root (or a device file). The profile resolves the roots once more while it is built: a
+    link swapped in only then would name its target here (#3197)."""
+
+    roots = {str(path) for path in bound}
+    for line in profile.splitlines():
+        if line.startswith("(allow file-write"):
+            grant = _WRITE_GRANT.fullmatch(line)
+            if grant is None:
+                return False
+            if not set(re.findall(r'"([^"]*)"', grant.group(1))) <= roots | _DEVICE_WRITES:
+                return False
+        elif line.startswith("(deny file-write-unlink"):
+            pinned = _PINNED_ENTRY.fullmatch(line)
+            if pinned is None or pinned.group(1) not in roots:
+                return False
+    return True
 
 
 def _granted_work_dir(work_dir: Path | str | PinnedRoot) -> Path:
@@ -346,9 +461,9 @@ def model_sandbox(
     directories the caller created for the run (e.g. a result-record dir); they get the same
     root checks as ``work_dir``. A ``PinnedRoot`` work dir must still be its recorded directory
     (``SandboxError("work_dir_replaced")`` otherwise). When the block ends, each root's own flags
-    and mode are put back; a root that is no longer the bound directory raises
-    ``SandboxError(…_replaced)``. Raises SandboxError when no OS barrier exists or a root is
-    unsafe (fail closed)."""
+    and mode are put back (its extended attributes are not); a root that is no longer the bound
+    directory raises ``SandboxError(…_replaced)``. Raises SandboxError when no OS barrier exists
+    or a root is unsafe (fail closed)."""
 
     work, work_info = _bind_root(work_dir, "work_dir")
     bound_extra = [_bind_root(path, "writable_dir") for path in writable]
@@ -378,15 +493,18 @@ def model_sandbox(
             # Gateway venv sits under a denied subtree, so granting it refused every run (#2956).
             host_interpreter_readable=False,
         )
-        # The profile resolved each root again: it must grant exactly the bound paths, and each
-        # must still be the bound directory now, after the last resolve (#3197).
+        # confinement() and its profile resolved each root again: both must name only the bound
+        # paths, and each root must still be the bound directory after that (#3197).
         if tuple(bound.roots[1:]) != (work, *extra):
+            raise SandboxError("work_dir_replaced")
+        if not _writes_stay_bound(bound.profile, (bound.roots[0], work, *extra)):
             raise SandboxError("work_dir_replaced")
         for path, info, reason in roots:
             if not _same_dir(_root_entry(path), info):
                 raise SandboxError(f"{reason}_replaced")
         # A root's ACL is the one part of its own metadata the host cannot easily read back:
-        # it stays as it is (each path is the one the profile grants, so it is SBPL-safe). cp -p and archives extracting ./ into the root still work (#3197).
+        # it stays as it is (each path is a granted one, so SBPL-safe). cp -p and archives
+        # extracting ./ into the root still work (#3197).
         profile = "\n".join([
             bound.profile,
             *(f'(deny file-write-acl (literal "{path}"))' for path, _, _ in roots),
@@ -404,7 +522,7 @@ def model_sandbox(
 def run_model_argv(
     argv: list[str] | tuple[str, ...],
     *,
-    work_dir: Path | str,
+    work_dir: Path | str | PinnedRoot,
     timeout: float,
     extra_env: Mapping[str, str] | None = None,
     readable: Iterable[Path | str] = (),

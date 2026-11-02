@@ -426,3 +426,114 @@ def test_removing_the_private_dir_undoes_modes_and_never_follows_a_link(tmp_path
     assert not private.exists()
     assert stat.S_IMODE(os.stat(outside).st_mode) == 0o500
     os.chmod(outside, 0o700)
+
+
+# --- review follow-ups: swaps during the profile build and during cleanup ----------------------
+
+
+def test_a_root_swapped_only_while_the_profile_text_is_built_is_refused(tmp_path, monkeypatch):
+    # confinement() records its roots first and builds the profile text after, resolving each
+    # root again: a link swapped in only for that step would make the text grant its target.
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    sandbox, outside = _layout(tmp_path)
+    pinned = cw.PinnedRoot(sandbox, root_identity(sandbox))
+    real = lane.build_sandbox_profile
+    calls: list[str] = []
+
+    def swapping(**kwargs):
+        moved = _swap_in(sandbox, outside, "symlink")
+        try:
+            calls.append(real(**kwargs))
+            return calls[-1]
+        finally:
+            _swap_back(sandbox, outside, moved, "symlink")
+
+    monkeypatch.setattr(lane, "build_sandbox_profile", swapping)
+
+    with pytest.raises(mos.SandboxError, match="work_dir_replaced"):
+        with mos.model_sandbox(pinned):
+            pytest.fail("a profile granting the swapped-in target was handed out")
+    assert len(calls) == 1 and str(outside.resolve()) in calls[0]  # the swap did reach the text
+    _assert_outside_untouched(outside)
+
+
+def _outside_state(path: Path) -> tuple:
+    info = os.stat(path, follow_symlinks=False)
+    acl = _acl_lines(path) if sys.platform == "darwin" else None
+    return stat.S_IMODE(info.st_mode), getattr(info, "st_flags", None), acl
+
+
+def _guarded_outside(tmp_path: Path) -> tuple[Path, Path]:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "victim.txt"
+    victim.write_text(_SENTINEL, encoding="utf-8")
+    os.chmod(victim, 0o640)
+    os.chmod(outside, 0o750)
+    if sys.platform == "darwin":
+        subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(victim)], check=True)
+        subprocess.run(["/usr/bin/chflags", "hidden", str(victim)], check=True)
+    return outside, victim
+
+
+def _release_outside(outside: Path, victim: Path) -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["/usr/bin/chflags", "0", str(victim)], check=True)
+        subprocess.run(["/bin/chmod", "-N", str(victim)], check=True)
+    os.chmod(outside, 0o700)
+
+
+@pytest.mark.parametrize("swapped", ["directory", "file"])
+def test_cleanup_never_acts_through_an_entry_swapped_for_a_link_during_the_walk(
+    tmp_path, monkeypatch, swapped
+):
+    # Deterministic form of a cooperating process: the moment the walk has looked at an entry,
+    # it is renamed away and a link to an outside directory or file is put at its name.
+    outside, victim = _guarded_outside(tmp_path)
+    before = (_outside_state(outside), _outside_state(victim))
+    private = tmp_path / "private"
+    blocked = private / "blk"
+    (blocked / "d1").mkdir(parents=True)
+    (blocked / "d1" / "x").write_text("x", encoding="utf-8")
+    (blocked / "f").write_text("x", encoding="utf-8")
+    os.chmod(blocked, 0o500)  # the first plain removal fails here, so the walk runs
+    target, link_to = ("d1", outside) if swapped == "directory" else ("f", victim)
+    real = mos._make_removable_at
+    swaps: list[str] = []
+
+    def swap_after_look(dir_fd, name, *, is_dir):
+        if name == target and not swaps:
+            os.rename(name, name + ".away", src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+            os.symlink(link_to, name, dir_fd=dir_fd)
+            swaps.append(name)
+        return real(dir_fd, name, is_dir=is_dir)
+
+    monkeypatch.setattr(mos, "_make_removable_at", swap_after_look)
+
+    mos._remove_private_dir(str(private))
+
+    assert swaps == [target]
+    assert not private.exists()
+    assert (_outside_state(outside), _outside_state(victim)) == before
+    assert victim.read_text(encoding="utf-8") == _SENTINEL
+    _release_outside(outside, victim)
+
+
+def _profile_for(write: list[str], pinned: list[str]) -> str:
+    return lane.build_sandbox_profile(writable=write, read_roots=write, pinned_entries=pinned)
+
+
+def test_the_write_grant_check_accepts_only_bound_paths(tmp_path):
+    bound = [tmp_path / "private", tmp_path / "work"]
+    other = tmp_path / "other"
+    for path in (*bound, other):
+        path.mkdir()
+    names = [str(path) for path in bound]
+
+    assert mos._writes_stay_bound(_profile_for(names, names), bound)
+    # A write grant, or a pinned entry, that names anything else is refused.
+    assert not mos._writes_stay_bound(_profile_for([*names, str(other)], names), bound)
+    assert not mos._writes_stay_bound(_profile_for(names, [names[0], str(other)]), bound)
+    # So is a write grant in a form the check does not read.
+    odd = _profile_for(names, names) + '\n(allow file-write* (regex #"^/"))'
+    assert not mos._writes_stay_bound(odd, bound)
