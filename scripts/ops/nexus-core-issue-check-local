@@ -94,6 +94,8 @@ def _run(
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
             )
         except OSError as exc:
@@ -117,20 +119,37 @@ def _stop_group(proc: subprocess.Popen[Any]) -> None:
     proc.wait()
 
 
-def _raise_on_sigterm() -> Any:
-    """Turn SIGTERM into SystemExit while a group runs so the cleanup above executes."""
+# Signals whose default action ends the run without running any cleanup: a closed
+# terminal or dropped ssh (SIGHUP), SIGQUIT and SIGTERM (#3166, #3189).
+_TERMINATING_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGQUIT") if hasattr(signal, name)
+)
+
+
+def _raise_on_signals() -> dict[int, Any]:
+    """Turn the terminating signals into SystemExit so the callers' cleanup executes.
+
+    Returns the previous handlers to pass to ``_restore_signals``; empty off the main
+    thread, where handlers cannot be installed."""
     if threading.current_thread() is not threading.main_thread():
-        return None
+        return {}
 
     def handler(signum: int, frame: Any) -> None:
         raise SystemExit(128 + signum)
 
-    return signal.signal(signal.SIGTERM, handler)
+    previous: dict[int, Any] = {}
+    try:
+        for signum in _TERMINATING_SIGNALS:
+            previous[signum] = signal.signal(signum, handler)
+    except BaseException:
+        _restore_signals(previous)
+        raise
+    return previous
 
 
-def _restore_sigterm(previous: Any) -> None:
-    if previous is not None:
-        signal.signal(signal.SIGTERM, previous)
+def _restore_signals(previous: dict[int, Any]) -> None:
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
 
 
 def _run_with_timeout(
@@ -139,7 +158,7 @@ def _run_with_timeout(
     cwd: Path | None,
     env: dict[str, str] | None,
     code: str,
-    timeout: float,
+    timeout: float | None,
 ) -> subprocess.CompletedProcess[str]:
     """Run in a new process group; on timeout kill the whole group and fail closed.
 
@@ -147,33 +166,40 @@ def _run_with_timeout(
     group cannot keep the wait open after the group is killed.
     """
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        # Handlers go in before the child exists, so no signal can land between the
+        # spawn and the cleanup; the restore is protected by its own try/finally.
+        previous = _raise_on_signals()
         try:
-            proc = subprocess.Popen(
-                list(cmd),
-                cwd=cwd,
-                env=env,
-                stdout=out,
-                stderr=err,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
-        previous_term = _raise_on_sigterm()
-        try:
+            proc: subprocess.Popen[Any] | None = None
             try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _stop_group(proc)
-                raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+                try:
+                    proc = subprocess.Popen(
+                        list(cmd),
+                        cwd=cwd,
+                        env=env,
+                        stdout=out,
+                        stderr=err,
+                        start_new_session=True,
+                    )
+                except OSError as exc:
+                    raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    _stop_group(proc)
+                    raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+            finally:
+                # Any exit path (interrupt, terminating signal, other exception) stops a
+                # still-running group, so it never outlives the lock or worktree guarding it.
+                if proc is not None:
+                    _stop_group(proc)
         finally:
-            # Any exit path (interrupt, SIGTERM, other exception) stops a still-running
-            # group, so the install never outlives the lock that guards it (#3166).
-            _stop_group(proc)
-            _restore_sigterm(previous_term)
+            _restore_signals(previous)
         out.seek(0)
         err.seek(0)
         stdout = out.read().decode("utf-8", "replace")
         stderr = err.read().decode("utf-8", "replace")
+    assert proc is not None
     return subprocess.CompletedProcess(list(cmd), proc.returncode, stdout, stderr)
 
 
@@ -254,7 +280,7 @@ def reported_receipt(pointer: Path, worktree: Path) -> Path | None:
     """
     if not pointer.is_file():
         return None
-    text = pointer.read_text(encoding="utf-8").strip()
+    text = pointer.read_text(encoding="utf-8", errors="replace").strip()
     if not text:
         return None
 
@@ -335,7 +361,12 @@ def resolve_token() -> str:
         return token
     try:
         result = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, check=False
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except OSError as exc:
         raise LocalCheckError("GITHUB_TOKEN_UNAVAILABLE", str(exc)) from exc
@@ -430,17 +461,15 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         rc = 0
         check_ran = False
         for sub, trust_args in core_calls:
-            try:
-                proc = subprocess.run(
-                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
-                    cwd=worktree,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            except OSError as exc:
-                raise LocalCheckError("CORE_EXEC_FAILED", str(exc)) from exc
+            # Core runs in its own process group that dies with this run, so a terminating
+            # signal (turned into SystemExit by main) cannot leave it unsupervised (#3189).
+            proc = _run_with_timeout(
+                [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
+                cwd=worktree,
+                env=env,
+                code="CORE_EXEC_FAILED",
+                timeout=None,
+            )
             check_ran = sub == "issue-check"
             log_parts.append(f"$ {sub} (exit {proc.returncode})\n{proc.stdout}{proc.stderr}")
             if proc.returncode != 0:
@@ -529,14 +558,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="install_timeout",
         type=float,
         default=INSTALL_TIMEOUT_SECONDS,
-        help="seconds allowed for the Core tool install (default %(default)s); "
-        "--materials-timeout is the older name",
+        help="seconds allowed for the Core tool install, and for waiting on another run's "
+        "install of the same pin (default %(default)s); on expiry the install is killed and "
+        "the run exits 2; --materials-timeout is the older name",
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Held for the whole run: a terminating signal unwinds through run_check's cleanup
+    # (worktree removal, child process groups) instead of killing the run outright.
+    previous_signals = _raise_on_signals()
     try:
         summary, code = run_check(args)
     except LocalCheckError as exc:
@@ -558,6 +591,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             "error": str(exc),
         }
         code = EXIT_ERROR
+    except Exception as exc:  # noqa: BLE001 - any other local failure is exit 2, never a verdict
+        summary = {
+            "schema": SCHEMA,
+            "issue": args.issue,
+            "status": "ERROR",
+            "error_code": "LOCAL_UNEXPECTED_ERROR",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        code = EXIT_ERROR
+    finally:
+        _restore_signals(previous_signals)
     text = json.dumps(summary, indent=2, sort_keys=True)
     print(text)
     if args.json_out:
