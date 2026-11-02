@@ -407,10 +407,12 @@ _PATCH = "diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-a\
 
 
 class _Claim:
-    """An Agy account claim stand-in that counts its releases; no real lease behind it."""
+    """An Agy account claim stand-in that counts its releases; no real lease behind it. Its
+    ``lease_id_hash`` is the lease of the #3160 tests below."""
 
-    def __init__(self) -> None:
+    def __init__(self, lease_id_hash: str = "lease-3160") -> None:
         self.releases = 0
+        self.lease_id_hash = lease_id_hash
 
     def release(self) -> None:
         self.releases += 1
@@ -854,18 +856,303 @@ def test_second_release_waits_for_a_release_in_progress(box):
     )
     releasing.start()
     assert entered.wait(5), "the first release never started"
+    # The second call's lock entry first tries the lock without waiting (#3180): the attempt
+    # failing while the first release is held at ``proceed`` proves the second call blocked.
+    lock = gateway._assist_lock
+    attempted = threading.Event()
+    blocked: list[bool] = []
+
+    class _ProbingLock:
+        def __enter__(self):
+            if threading.current_thread() is racing and not attempted.is_set():
+                got = lock.acquire(blocking=False)
+                blocked.append(not got)
+                attempted.set()
+                if got:
+                    return True
+            return lock.__enter__()
+
+        def __exit__(self, *exc):
+            return lock.__exit__(*exc)
+
+    gateway._assist_lock = _ProbingLock()
     racing = threading.Thread(
         target=lambda: outcome.setdefault(
             "second", gateway._release_assist_account_claim(TASK, second)
         )
     )
     racing.start()
-    racing.join(0.3)
+    assert attempted.wait(5), "the second call never reached the lock"
     raced_early = "second" in outcome
     proceed.set()
     releasing.join(5)
     racing.join(5)
+    gateway._assist_lock = lock
+    assert blocked == [True], f"the second call found the lock free during the release: {second}"
     assert not raced_early, f"the second call did not wait for the release: {second}"
     assert outcome == {"first": True, "second": True}, (outcome, second)
     assert second["account_lease_cleanup_status"] == "RELEASED", second
     assert claim.releases == 1
+
+
+# ---------------------------------------------------------------------------
+# #3180: a real lease release that fails is recorded as failed; the released-lease note is
+# keyed by the claim's own lease and dropped once the job settles; abandon, then release.
+# ---------------------------------------------------------------------------
+
+
+class _LeaseManager:
+    """The pool manager behind a real ``AccountLeaseClaim``; no pool, nothing leased."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.released: list = []
+
+    def release(self, lease) -> None:
+        self.released.append(lease)
+        if self.fail:
+            raise RuntimeError("pool lease release failed")
+
+
+class _BrokenLockFile:
+    """A lock file object whose descriptor is gone."""
+
+    closed = False
+
+    def fileno(self) -> int:
+        raise OSError("bad file descriptor")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _real_claim(tmp: Path, *, lease_id_hash: str = LEASE, manager=None, lock_file=None):
+    """A real ``AccountLeaseClaim`` on a lock file and a receipt under ``tmp``: its flock is
+    held by this test, and its manager is a stand-in."""
+    import fcntl
+
+    from nexus.services.agy_account_pool import AccountLeaseClaim
+
+    tmp.mkdir(parents=True, exist_ok=True)
+    lock_path = tmp / "alias-3180.lock"
+    receipt_path = tmp / "alias-3180.receipt.json"
+    receipt_path.write_text("{}\n", encoding="utf-8")
+    if lock_file is None:
+        lock_file = lock_path.open("a+")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return AccountLeaseClaim(
+        lease=SimpleNamespace(lease_id="lease-3180"),
+        lock_file_obj=lock_file,
+        lock_path=lock_path,
+        receipt_path=receipt_path,
+        account_alias_hash="alias-3180",
+        lease_id_hash=lease_id_hash,
+        manager=manager if manager is not None else _LeaseManager(),
+        internal_id="internal-3180",
+    )
+
+
+def _flock_is_free(path: Path) -> bool:
+    import fcntl
+
+    with path.open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return True
+
+
+def test_lease_claim_release_that_succeeds_records_no_error(tmp_path):
+    manager = _LeaseManager()
+    claim = _real_claim(tmp_path / "lease", manager=manager)
+    assert claim.release() is None
+    assert claim.release_errors == ()
+    assert not claim.receipt_path.exists()
+    assert _flock_is_free(claim.lock_path)
+    assert len(manager.released) == 1
+
+
+def test_lease_claim_release_keeps_every_failed_step_and_never_raises(tmp_path):
+    """Each step still runs after an earlier one failed; release() itself does not raise, so
+    the callers that ignore the outcome keep their behaviour."""
+    manager = _LeaseManager(fail=True)
+    claim = _real_claim(tmp_path / "lease", manager=manager, lock_file=_BrokenLockFile())
+    claim.receipt_path.unlink()
+    claim.receipt_path.mkdir()  # exists, and unlink() refuses a directory
+    assert claim.release() is None
+    assert [error.split(":")[0] for error in claim.release_errors] == [
+        "receipt_unlink",
+        "lock_release",
+        "manager_release",
+    ], claim.release_errors
+    assert claim.release_errors[2] == "manager_release:RuntimeError"
+    assert claim.released is True
+    # A repeated release does nothing and keeps the failure.
+    claim.release()
+    assert len(claim.release_errors) == 3
+    assert len(manager.released) == 1
+
+
+def test_failed_real_lease_release_is_recorded_as_failed(box):
+    gateway = box.gateway
+    manager = _LeaseManager(fail=True)
+    claim = _real_claim(box.tmp / "lease", manager=manager)
+    gateway._assist_account_claims[TASK] = claim
+    first: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, first) is False
+    assert (
+        first["account_lease_released"],
+        first["account_lease_cleanup_status"],
+        first["reconciliation_required"],
+    ) == (False, "RELEASE_FAILED", True), first
+    assert TASK not in gateway._assist_account_claims
+    assert TASK not in (getattr(gateway, "_assist_released_leases", None) or {})
+    again: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, again) is False
+    assert again["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED", again
+    assert len(manager.released) == 1
+
+
+def test_lease_probe_whose_real_release_fails_is_held_then_reconciled(box, monkeypatch):
+    """The finishing query's release fails in a real claim: the job is held for
+    reconciliation (no RELEASED anywhere), and the reconcile checks the receipt of that lease
+    before it settles the job."""
+    from nexus.orchestrator import unified_mcp_gateway
+
+    receipts: list = []
+
+    class _Coordinator:
+        def __init__(self, manager) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **kwargs):
+            receipts.append(kwargs)
+            return {"result": "LEASE_RECEIPT_REMOVED"}
+
+    monkeypatch.setattr(unified_mcp_gateway, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(unified_mcp_gateway, "get_account_pool_manager", lambda: object())
+    workspace, _ = _lease_probe_finishing(box, monkeypatch)
+    manager = _LeaseManager(fail=True)
+    box.gateway._assist_account_claims[TASK] = _real_claim(box.tmp / "lease", manager=manager)
+    held = box.gateway._assist_refresh(TASK)
+    assert held is not None
+    _assert_held(held, "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED")
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    _assert_held(record, "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED")
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        False,
+        "RELEASE_FAILED",
+    ), record
+    assert receipts == []
+    settled = box.gateway._task_reconcile({"task_id": TASK})
+    assert settled["status"] == "FAILED", settled
+    assert [r["lease_id_hash"] for r in receipts] == [LEASE]
+    assert len(manager.released) == 1
+    assert not workspace.exists()
+
+
+def test_release_notes_the_claims_own_lease(box):
+    """A caller whose record names another lease (a stale record) releases the claim, but the
+    note names the lease that was released."""
+    gateway = box.gateway
+    gateway._assist_account_claims[TASK] = _Claim(lease_id_hash=LEASE)
+    stale: dict = {"account_lease_id_hash": "lease-3180-stale"}
+    assert gateway._release_assist_account_claim(TASK, stale) is True
+    again_stale: dict = {"account_lease_id_hash": "lease-3180-stale"}
+    assert gateway._release_assist_account_claim(TASK, again_stale) is False
+    assert again_stale["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    own: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, own) is True
+    assert own["account_lease_cleanup_status"] == "RELEASED"
+
+
+def test_released_lease_note_is_kept_until_the_job_settles(box):
+    gateway = box.gateway
+    _running_job(box)
+    gateway._assist_account_claims[TASK] = _Claim()
+    assert gateway._release_assist_account_claim(TASK, {"account_lease_id_hash": LEASE})
+    record = gateway._assist_read(TASK)
+    assert record is not None
+    # A running or held record of the job keeps the note: a call of the job may still need it.
+    gateway._assist_write({**record, "status": "RUNNING"})
+    gateway._assist_write({
+        **record,
+        "status": "UNKNOWN_REQUIRES_RECONCILE",
+        "reconciliation_required": True,
+    })
+    gateway._assist_write({**record, "status": "CANCELLED", "reconciliation_required": True})
+    assert gateway._assist_released_leases == {TASK: LEASE}
+    gateway._assist_write({**record, "status": "COMPLETED", "reconciliation_required": False})
+    assert gateway._assist_released_leases == {}
+
+
+def test_finished_lease_probe_leaves_no_released_lease_note(box, monkeypatch):
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+    result = box.gateway._assist_refresh(TASK)
+    assert result is not None
+    _assert_probe_completed(result)
+    assert claim.releases == 1
+    assert TASK not in box.gateway._assist_released_leases
+    assert not workspace.exists()
+
+
+def test_wait_in_the_window_settles_the_job_and_drops_the_note(box, monkeypatch):
+    """The wait in the window settles the job with the release recorded, which drops the note;
+    the query's final write still lands, and a later cancel releases nothing."""
+    workspace, claim = _lease_probe_finishing(box, monkeypatch)
+
+    def wait_then_look() -> dict:
+        noted = dict(box.gateway._assist_released_leases)
+        answer = box.gateway._assist_wait(TASK, timeout_seconds=0.0)
+        return {
+            "noted": noted,
+            "answer": answer,
+            "after": dict(box.gateway._assist_released_leases),
+        }
+
+    state = _before_final_write(box, monkeypatch, wait_then_look)
+    result = box.gateway._assist_refresh(TASK)
+    assert state.get("other") is not None, "the wait never ran before the final write"
+    assert state["other"]["noted"] == {TASK: LEASE}
+    assert state["other"]["answer"]["status"] == "COMPLETED", state["other"]["answer"]
+    assert state["other"]["after"] == {}
+    assert result is not None
+    _assert_probe_completed(result)
+    box.gateway._assist_cancel(TASK)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    _assert_probe_completed(record)
+    assert claim.releases == 1
+    assert not workspace.exists()
+
+
+class _AbandonedClaim(_Claim):
+    def __init__(self, lease_id_hash: str = LEASE) -> None:
+        super().__init__(lease_id_hash)
+        self.abandoned = 0
+
+    def abandon_parent_reference(self) -> None:
+        self.abandoned += 1
+
+
+def test_abandoned_claim_then_release_of_the_same_task_is_a_lost_claim(box):
+    """A claim abandoned (its provider may still run on the account) and then released for
+    the same task: the release finds no claim and no note, so the lease still needs
+    reconciliation; nothing is released."""
+    gateway = box.gateway
+    claim = _AbandonedClaim()
+    gateway._assist_account_claims[TASK] = claim
+    abandoned: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._abandon_assist_account_claim(TASK, abandoned) is None
+    assert abandoned["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    later: dict = {"account_lease_id_hash": LEASE}
+    assert gateway._release_assist_account_claim(TASK, later) is False
+    assert (
+        later["account_lease_released"],
+        later["account_lease_cleanup_status"],
+    ) == (False, "RECONCILIATION_REQUIRED"), later
+    assert (claim.abandoned, claim.releases) == (1, 0)
+    assert TASK not in (getattr(gateway, "_assist_released_leases", None) or {})

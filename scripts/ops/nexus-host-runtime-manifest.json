@@ -132,6 +132,10 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/core/hardened_git.py",
+      "mode": "0644"
+    },
+    {
       "path": "nexus/executors/__init__.py",
       "mode": "0644"
     },

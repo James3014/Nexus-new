@@ -11,6 +11,10 @@ name: Bindings preflight
 # The check fails when `Closes #N`, the NEXUS_ISSUE_INTENT_V1 block and the
 # final merge fields (commit messages) disagree (#1247 option A), or when the
 # PR cannot be read.
+# As in #3084, the run first marks the status pending on the live PR head (before
+# the checkout), checks that same head, and marks the status error if it does not
+# publish a result, so a run that times out, is cancelled or fails never leaves an
+# earlier run's success in place.
 
 on:
   pull_request_target:
@@ -34,34 +38,44 @@ jobs:
       pull-requests: read
       statuses: write
     steps:
+      - name: Mark the status pending before anything can fail
+        id: pending
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONTEXT: Bindings preflight (default branch)
+        run: |
+          set -euo pipefail
+          # A re-run (e.g. a body edit) must never leave an earlier success standing
+          # if a later step fails: the status goes pending first, before the checkout.
+          # The run checks the live PR head (pulls/N head.sha), the head the PR body
+          # read through the REST API belongs to; every later step uses this head.
+          head="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "PR head sha unavailable" >&2; exit 1; }
+          echo "head_sha=${head}" >> "$GITHUB_OUTPUT"
+          gh api -X POST "repos/${REPO}/statuses/${head}" \
+            -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="bindings preflight running" > /dev/null
+
       - name: Checkout default branch (never PR code)
+        # Below the job timeout, so a slow checkout fails this step and the error step still runs.
+        timeout-minutes: 4
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Mark the status pending before anything can fail
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          CONTEXT: Bindings preflight (default branch)
-        run: |
-          set -euo pipefail
-          # A re-run (e.g. a body edit) must never leave an earlier success standing
-          # if a later step fails: the status goes pending first.
-          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -f state=pending -f context="$CONTEXT" -f target_url="$RUN_URL" \
-            -f description="bindings preflight running" > /dev/null
-
       - name: Fetch the PR head as git objects only
+        timeout-minutes: 1
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
         run: |
           set -euo pipefail
           # No checkout of the PR tree: the script only needs the commits for
@@ -76,11 +90,13 @@ jobs:
           test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
 
       - name: Run the bindings preflight and publish the status
+        id: publish
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CONTEXT: Bindings preflight (default branch)
         run: |
@@ -112,4 +128,27 @@ jobs:
           gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
             -f state="$state" -f context="$CONTEXT" -f target_url="$RUN_URL" \
             -f description="${description:0:140}" > /dev/null || exit 1
+          # The error step below must not overwrite the result this step published.
+          echo "published=true" >> "$GITHUB_OUTPUT"
           exit "$rc"
+
+      - name: Mark the status error when the run did not finish
+        if: (failure() || cancelled()) && steps.publish.outputs.published != 'true'
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CONTEXT: Bindings preflight (default branch)
+        run: |
+          set -euo pipefail
+          head="$HEAD_SHA"
+          if ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+            head="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
+          fi
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "PR head sha unavailable" >&2; exit 1; }
+          gh api -X POST "repos/${REPO}/statuses/${head}" \
+            -f state=error -f context="$CONTEXT" -f target_url="$RUN_URL" \
+            -f description="bindings preflight did not finish; see the run" > /dev/null

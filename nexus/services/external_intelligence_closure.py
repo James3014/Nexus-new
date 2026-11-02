@@ -18,6 +18,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Collection, Mapping, Sequence
 
 from nexus.core.argv_command import run_reaping_process_group
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     validate_selected_worker,
@@ -141,19 +147,56 @@ def _path_matches(path: str, boundary: str) -> bool:
     return p == b or p.startswith(b + "/")
 
 
-def _run_git(root: Path, *args: str, timeout: float = 30.0) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+# Commit-to-commit diffs read only the two trees, so a submodule pointer change is listed
+# and hashed like any other path (the shared runner hides submodules by default).
+_SUBMODULE_POINTERS_SHOWN = "--ignore-submodules=none"
+# Work-tree status compares a submodule's checked-out commit only, so no git runs inside it.
+_WORKTREE_SUBMODULE_POINTERS = "--ignore-submodules=dirty"
+
+
+def _run_git(
+    root: Path,
+    *args: str,
+    timeout: float = 30.0,
+    git_dir: Path | None = None,
+    hardened: bool = False,
+) -> str:
+    """``git <args>`` in ``root``; with ``git_dir`` (from ``_workspace_git_dir``) or
+    ``hardened`` the call runs through the shared hardened runner, pinned to ``git_dir``
+    when given."""
+    if git_dir is not None or hardened:
+        result = run_hardened_git(root, *args, git_dir=git_dir, timeout=timeout)
+    else:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:1200]
         raise ClosureError(f"GIT_COMMAND_FAILED:{args[0]}:{detail}")
     return result.stdout.strip()
+
+
+def _workspace_git_dir(root: Path) -> Path:
+    """The git dir to pin for git calls in a worker's (or verifier's) workspace.
+
+    A worker or verifier could rewrite the workspace's ``.git`` pointer or anything under
+    it, so the workspace must be a linked worktree whose registration lies outside it, or
+    a repository whose ``.git`` directory sits in ``root``; its config must name no program
+    the command line cannot switch off."""
+    dotgit = root / ".git"
+    git_dir = linked_worktree_git_dir(root) or (
+        repository_git_dir(root) if dotgit.is_dir() and not dotgit.is_symlink() else None
+    )
+    if git_dir is None:
+        raise ClosureError("WORKSPACE_GIT_DIR_UNTRUSTED")
+    if repository_config_can_start_a_program(root, git_dir):
+        raise ClosureError("WORKSPACE_GIT_CONFIG_NAMES_A_PROGRAM")
+    return git_dir
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
@@ -176,15 +219,37 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
     return _sha256(payload)
 
 
-def _changed_paths(root: Path, base: str, head: str) -> list[str]:
+def _changed_paths(root: Path, base: str, head: str, git_dir: Path | None = None) -> list[str]:
     # ``--no-renames``: a rename must surface as delete + add so its source path is
     # scope- and deletion-checked (rename detection would hide the deleted source).
-    output = _run_git(root, "diff", "--no-renames", "--name-only", base, head, "--")
+    output = _run_git(
+        root,
+        "diff",
+        _SUBMODULE_POINTERS_SHOWN,
+        "--no-renames",
+        "--name-only",
+        base,
+        head,
+        "--",
+        git_dir=git_dir,
+        hardened=True,
+    )
     return sorted(line.strip() for line in output.splitlines() if line.strip())
 
 
-def _deleted_paths(root: Path, base: str, head: str) -> list[str]:
-    output = _run_git(root, "diff", "--no-renames", "--name-status", base, head, "--")
+def _deleted_paths(root: Path, base: str, head: str, git_dir: Path | None = None) -> list[str]:
+    output = _run_git(
+        root,
+        "diff",
+        _SUBMODULE_POINTERS_SHOWN,
+        "--no-renames",
+        "--name-status",
+        base,
+        head,
+        "--",
+        git_dir=git_dir,
+        hardened=True,
+    )
     deleted: list[str] = []
     for line in output.splitlines():
         parts = line.split("\t")
@@ -193,18 +258,25 @@ def _deleted_paths(root: Path, base: str, head: str) -> list[str]:
     return sorted(deleted)
 
 
-def _diff_sha(root: Path, base: str, head: str) -> str:
-    return _sha256(_run_git(root, "diff", "--binary", base, head))
+def _diff_sha(root: Path, base: str, head: str, git_dir: Path | None = None) -> str:
+    return _sha256(
+        _run_git(
+            root,
+            "diff",
+            _SUBMODULE_POINTERS_SHOWN,
+            "--binary",
+            base,
+            head,
+            git_dir=git_dir,
+            hardened=True,
+        )
+    )
 
 
 def _raw_diff_patch(root: Path, base: str, head: str) -> str:
-    result = subprocess.run(
-        ["git", "diff", "--binary", base, head],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # The hardened runner adds ``--no-ext-diff --no-textconv``: the patch is what
+    # composition applies, never a driver's rendering of it.
+    result = run_hardened_git(root, "diff", _SUBMODULE_POINTERS_SHOWN, "--binary", base, head)
     if result.returncode != 0:
         raise ClosureError(f"GIT_DIFF_FAILED:{(result.stderr or result.stdout).strip()[:1200]}")
     return result.stdout
@@ -846,28 +918,31 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         raise ClosureError("INVALID_CANDIDATE_HASH_IDENTITY")
     if _receipt_identity(receipt) != receipt_id:
         raise ClosureError("WORKER_RECEIPT_IDENTITY_MISMATCH")
-    if _run_git(workspace_path, "rev-parse", "HEAD") != candidate_commit:
+    git_dir = _workspace_git_dir(workspace_path)
+    if _run_git(workspace_path, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit:
         raise ClosureError("UNIT_WORKSPACE_HEAD_MISMATCH")
-    if _run_git(workspace_path, "status", "--porcelain=v1"):
+    if _run_git(
+        workspace_path, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
+    ):
         raise ClosureError("UNIT_WORKSPACE_DIRTY")
-    if _run_git(workspace_path, "rev-parse", "HEAD^{tree}") != candidate_tree:
+    if _run_git(workspace_path, "rev-parse", "HEAD^{tree}", git_dir=git_dir) != candidate_tree:
         raise ClosureError("UNIT_CANDIDATE_TREE_MISMATCH")
     parent_commit = str(receipt.get("parent_commit") or base_sha).lower()
     if not _is_hex(parent_commit, 40):
         raise ClosureError("INVALID_PARENT_COMMIT")
-    if _diff_sha(workspace_path, parent_commit, candidate_commit) != candidate_diff_sha256:
+    if _diff_sha(workspace_path, parent_commit, candidate_commit, git_dir) != candidate_diff_sha256:
         raise ClosureError("UNIT_CANDIDATE_DIFF_HASH_MISMATCH")
     mutation_paths_raw = receipt.get("mutation_paths")
     if not isinstance(mutation_paths_raw, list) or not mutation_paths_raw:
         raise ClosureError("UNIT_MUTATION_SCOPE_MISSING")
     mutation_paths = [_safe_relative_path(path) for path in mutation_paths_raw]
-    cumulative_changed = _changed_paths(workspace_path, base_sha, candidate_commit)
+    cumulative_changed = _changed_paths(workspace_path, base_sha, candidate_commit, git_dir)
     if not cumulative_changed:
         raise ClosureError("EMPTY_UNIT_CANDIDATE")
     for path in cumulative_changed:
         if not any(_path_matches(path, boundary) for boundary in mutation_paths):
             raise ClosureError(f"UNIT_SCOPE_WIDENING:{path}")
-    cumulative_deleted = _deleted_paths(workspace_path, base_sha, candidate_commit)
+    cumulative_deleted = _deleted_paths(workspace_path, base_sha, candidate_commit, git_dir)
     if cumulative_deleted and not bool(receipt.get("allow_deletions", False)):
         raise ClosureError("UNIT_DELETION_NOT_AUTHORIZED")
     return {
@@ -2298,8 +2373,12 @@ def _run_pytest_verifier(
     changed_paths: Sequence[str],
     base_skipped: Collection[str] | None,
     root_writable: bool = True,
+    after_run: Callable[[], None] | None = None,
 ) -> _PytestRun:
-    """One pytest verifier run with the witness (and the sandbox where available)."""
+    """One pytest verifier run with the witness (and the sandbox where available).
+
+    ``after_run`` is called as soon as the verifier process has ended, before anything
+    else reads the work tree."""
     from nexus.engine.sandboxed_lane import SandboxError, os_sandbox_available
 
     child_dir = run_dir / "child"
@@ -2414,6 +2493,8 @@ def _run_pytest_verifier(
                 os.close(fd)
             except OSError:
                 pass
+    if after_run is not None:
+        after_run()
     out, err, returncode = spawned["stdout"], spawned["stderr"], spawned["returncode"]
     if spawned["timed_out"]:
         return result("VERIFIER_TIMEOUT", None, out, err)
@@ -2700,8 +2781,13 @@ def _run_one_verifier(
     refused_shadow: Sequence[str],
     authorized_shadow: Sequence[str],
     base_state: tuple[tuple[dict[str, Any], str] | None, Path | None, str],
+    after_candidate_run: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
-    """Run one verifier spec and return its result row (plus ``_base_state``)."""
+    """Run one verifier spec and return its result row (plus ``_base_state``).
+
+    ``after_candidate_run`` is called as soon as a pytest run against the candidate work
+    tree has ended, before its result is read (a plain verifier is followed by no git read
+    here; the caller re-checks after every spec)."""
     base_pytest_config, base_tree_parent, base_tree_error = base_state
     started = time.monotonic()
     sandbox = Path(tempfile.mkdtemp(prefix="nexus-verifier-")).resolve()
@@ -2747,6 +2833,7 @@ def _run_one_verifier(
                 timeout=spec.timeout,
                 changed_paths=changed_paths or (),
                 base_skipped=None,
+                after_run=after_candidate_run,
             )
             executed_argv = run.executed_argv
             returncode, stdout, stderr, error = run.returncode, run.stdout, run.stderr, run.error
@@ -2863,9 +2950,10 @@ def _run_verifier_specs(
     shadow_authorized_paths: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     root = Path(workspace_path).expanduser().resolve()
-    if _run_git(root, "rev-parse", "HEAD") != candidate_commit:
+    git_dir = _workspace_git_dir(root)
+    if _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit:
         raise ClosureError("VERIFIER_HEAD_MISMATCH")
-    if _run_git(root, "status", "--porcelain=v1"):
+    if _run_git(root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir):
         raise ClosureError("VERIFIER_WORKSPACE_DIRTY")
     parsed = [VerifierSpec.from_value(spec) for spec in specs]
     if not parsed:
@@ -2901,6 +2989,23 @@ def _run_verifier_specs(
     # comparison (#2795).
     base_tree_parent: Path | None = None
     base_tree_error = ""
+
+    def workspace_unchanged() -> None:
+        # The verifier ran candidate code: a git dir it re-pointed, a moved HEAD or a dirty
+        # work tree counts as a mutation, checked before any later git read in ``root``.
+        try:
+            same_git_dir = _workspace_git_dir(root) == git_dir
+        except ClosureError:
+            same_git_dir = False
+        if (
+            not same_git_dir
+            or _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit
+            or _run_git(
+                root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
+            )
+        ):
+            raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+
     try:
         for spec in parsed:
             results.append(
@@ -2914,13 +3019,11 @@ def _run_verifier_specs(
                     refused_shadow=refused_shadow,
                     authorized_shadow=authorized_shadow,
                     base_state=(base_pytest_config, base_tree_parent, base_tree_error),
+                    after_candidate_run=workspace_unchanged,
                 )
             )
             base_pytest_config, base_tree_parent, base_tree_error = results[-1].pop("_base_state")
-            if _run_git(root, "rev-parse", "HEAD") != candidate_commit or _run_git(
-                root, "status", "--porcelain=v1"
-            ):
-                raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+            workspace_unchanged()
     finally:
         if base_tree_parent is not None:
             shutil.rmtree(base_tree_parent, ignore_errors=True)

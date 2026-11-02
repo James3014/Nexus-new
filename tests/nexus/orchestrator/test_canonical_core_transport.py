@@ -269,7 +269,7 @@ def test_transport_import_uses_configured_core_root_when_set(tmp_path: Path):
 
 
 # --- NN-1 phase 2: installed-package identity from PEP 610 direct_url.json ---
-EXPECTED_CORE_REVISION = "67427c5840cd41cd1cf11fff63b710c81a813755"
+EXPECTED_CORE_REVISION = "a161b34c334777eced7349cd38f67836bebe85bc"
 
 
 _BUILD_IDENTITY_FIXTURE = Path(__file__).with_name("_core_build_identity_fixture.py")
