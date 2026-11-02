@@ -147,6 +147,11 @@ def _path_matches(path: str, boundary: str) -> bool:
     return p == b or p.startswith(b + "/")
 
 
+# Commit-to-commit diffs read only the two trees, so a submodule pointer change is listed
+# and hashed like any other path (the shared runner hides submodules by default).
+_SUBMODULE_POINTERS_SHOWN = "--ignore-submodules=none"
+
+
 def _run_git(
     root: Path,
     *args: str,
@@ -218,6 +223,7 @@ def _changed_paths(root: Path, base: str, head: str, git_dir: Path | None = None
     output = _run_git(
         root,
         "diff",
+        _SUBMODULE_POINTERS_SHOWN,
         "--no-renames",
         "--name-only",
         base,
@@ -233,6 +239,7 @@ def _deleted_paths(root: Path, base: str, head: str, git_dir: Path | None = None
     output = _run_git(
         root,
         "diff",
+        _SUBMODULE_POINTERS_SHOWN,
         "--no-renames",
         "--name-status",
         base,
@@ -250,13 +257,24 @@ def _deleted_paths(root: Path, base: str, head: str, git_dir: Path | None = None
 
 
 def _diff_sha(root: Path, base: str, head: str, git_dir: Path | None = None) -> str:
-    return _sha256(_run_git(root, "diff", "--binary", base, head, git_dir=git_dir, hardened=True))
+    return _sha256(
+        _run_git(
+            root,
+            "diff",
+            _SUBMODULE_POINTERS_SHOWN,
+            "--binary",
+            base,
+            head,
+            git_dir=git_dir,
+            hardened=True,
+        )
+    )
 
 
 def _raw_diff_patch(root: Path, base: str, head: str) -> str:
     # The hardened runner adds ``--no-ext-diff --no-textconv``: the patch is what
     # composition applies, never a driver's rendering of it.
-    result = run_hardened_git(root, "diff", "--binary", base, head)
+    result = run_hardened_git(root, "diff", _SUBMODULE_POINTERS_SHOWN, "--binary", base, head)
     if result.returncode != 0:
         raise ClosureError(f"GIT_DIFF_FAILED:{(result.stderr or result.stdout).strip()[:1200]}")
     return result.stdout
@@ -2351,8 +2369,12 @@ def _run_pytest_verifier(
     changed_paths: Sequence[str],
     base_skipped: Collection[str] | None,
     root_writable: bool = True,
+    after_run: Callable[[], None] | None = None,
 ) -> _PytestRun:
-    """One pytest verifier run with the witness (and the sandbox where available)."""
+    """One pytest verifier run with the witness (and the sandbox where available).
+
+    ``after_run`` is called as soon as the verifier process has ended, before anything
+    else reads the work tree."""
     from nexus.engine.sandboxed_lane import SandboxError, os_sandbox_available
 
     child_dir = run_dir / "child"
@@ -2467,6 +2489,8 @@ def _run_pytest_verifier(
                 os.close(fd)
             except OSError:
                 pass
+    if after_run is not None:
+        after_run()
     out, err, returncode = spawned["stdout"], spawned["stderr"], spawned["returncode"]
     if spawned["timed_out"]:
         return result("VERIFIER_TIMEOUT", None, out, err)
@@ -2753,8 +2777,13 @@ def _run_one_verifier(
     refused_shadow: Sequence[str],
     authorized_shadow: Sequence[str],
     base_state: tuple[tuple[dict[str, Any], str] | None, Path | None, str],
+    after_candidate_run: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
-    """Run one verifier spec and return its result row (plus ``_base_state``)."""
+    """Run one verifier spec and return its result row (plus ``_base_state``).
+
+    ``after_candidate_run`` is called as soon as a pytest run against the candidate work
+    tree has ended, before its result is read (a plain verifier is followed by no git read
+    here; the caller re-checks after every spec)."""
     base_pytest_config, base_tree_parent, base_tree_error = base_state
     started = time.monotonic()
     sandbox = Path(tempfile.mkdtemp(prefix="nexus-verifier-")).resolve()
@@ -2800,6 +2829,7 @@ def _run_one_verifier(
                 timeout=spec.timeout,
                 changed_paths=changed_paths or (),
                 base_skipped=None,
+                after_run=after_candidate_run,
             )
             executed_argv = run.executed_argv
             returncode, stdout, stderr, error = run.returncode, run.stdout, run.stderr, run.error
@@ -2955,6 +2985,21 @@ def _run_verifier_specs(
     # comparison (#2795).
     base_tree_parent: Path | None = None
     base_tree_error = ""
+
+    def workspace_unchanged() -> None:
+        # The verifier ran candidate code: a git dir it re-pointed, a moved HEAD or a dirty
+        # work tree counts as a mutation, checked before any later git read in ``root``.
+        try:
+            same_git_dir = _workspace_git_dir(root) == git_dir
+        except ClosureError:
+            same_git_dir = False
+        if (
+            not same_git_dir
+            or _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit
+            or _run_git(root, "status", "--porcelain=v1", git_dir=git_dir)
+        ):
+            raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+
     try:
         for spec in parsed:
             results.append(
@@ -2968,20 +3013,11 @@ def _run_verifier_specs(
                     refused_shadow=refused_shadow,
                     authorized_shadow=authorized_shadow,
                     base_state=(base_pytest_config, base_tree_parent, base_tree_error),
+                    after_candidate_run=workspace_unchanged,
                 )
             )
             base_pytest_config, base_tree_parent, base_tree_error = results[-1].pop("_base_state")
-            # The verifier ran candidate code: a git dir it re-pointed counts as a mutation.
-            try:
-                same_git_dir = _workspace_git_dir(root) == git_dir
-            except ClosureError:
-                same_git_dir = False
-            if (
-                not same_git_dir
-                or _run_git(root, "rev-parse", "HEAD", git_dir=git_dir) != candidate_commit
-                or _run_git(root, "status", "--porcelain=v1", git_dir=git_dir)
-            ):
-                raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
+            workspace_unchanged()
     finally:
         if base_tree_parent is not None:
             shutil.rmtree(base_tree_parent, ignore_errors=True)

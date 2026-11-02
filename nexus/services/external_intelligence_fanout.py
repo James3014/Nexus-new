@@ -1850,15 +1850,38 @@ def parse_worker_result(text: str, *, task_id: str, unit_id: str) -> dict[str, s
     return value
 
 
+# A submodule pointer change is listed like any other path. Against the work tree only the
+# checked-out commit of a submodule is compared (``dirty``), so no git runs inside it; the
+# index and commit-to-commit diffs read only stored trees (``none``).
+_WORKTREE_SUBMODULE_POINTERS = "--ignore-submodules=dirty"
+_STORED_SUBMODULE_POINTERS = "--ignore-submodules=none"
+
+
 def _changed_paths(workspace: Path, base_sha: str, git_dir: Path) -> list[str]:
-    tracked = _run_git(workspace, "diff", "--name-only", base_sha, "--", git_dir=git_dir)
+    tracked = _run_git(
+        workspace,
+        "diff",
+        _WORKTREE_SUBMODULE_POINTERS,
+        "--name-only",
+        base_sha,
+        "--",
+        git_dir=git_dir,
+    )
     untracked = _run_git(workspace, "ls-files", "--others", "--exclude-standard", git_dir=git_dir)
     paths = [line.strip() for line in (tracked + "\n" + untracked).splitlines() if line.strip()]
     return sorted(dict.fromkeys(paths))
 
 
 def _deleted_paths(workspace: Path, base_sha: str, git_dir: Path) -> list[str]:
-    output = _run_git(workspace, "diff", "--name-status", base_sha, "--", git_dir=git_dir)
+    output = _run_git(
+        workspace,
+        "diff",
+        _WORKTREE_SUBMODULE_POINTERS,
+        "--name-status",
+        base_sha,
+        "--",
+        git_dir=git_dir,
+    )
     deleted: list[str] = []
     for line in output.splitlines():
         parts = line.split("\t")
@@ -1898,7 +1921,9 @@ def _capture_candidate(
         )
     staged = [
         line
-        for line in _run_git(root, "diff", "--cached", "--name-only", git_dir=git_dir).splitlines()
+        for line in _run_git(
+            root, "diff", _STORED_SUBMODULE_POINTERS, "--cached", "--name-only", git_dir=git_dir
+        ).splitlines()
         if line
     ]
     if sorted(staged) != sorted(changed):
@@ -1927,7 +1952,15 @@ def _capture_candidate(
         )
     candidate_commit = _run_git(root, "rev-parse", "HEAD", git_dir=git_dir)
     candidate_tree = _run_git(root, "rev-parse", "HEAD^{tree}", git_dir=git_dir)
-    diff = _run_git(root, "diff", "--binary", expected_head, candidate_commit, git_dir=git_dir)
+    diff = _run_git(
+        root,
+        "diff",
+        _STORED_SUBMODULE_POINTERS,
+        "--binary",
+        expected_head,
+        candidate_commit,
+        git_dir=git_dir,
+    )
     return {
         "candidate_commit": candidate_commit,
         "candidate_tree": candidate_tree,

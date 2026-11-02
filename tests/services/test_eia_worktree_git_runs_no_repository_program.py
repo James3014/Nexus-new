@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -74,14 +75,16 @@ def _controller(env: Path) -> tuple[Path, str]:
 
 
 def _unit(base: str, paths: list[str]) -> ExecutionUnit:
-    return ExecutionUnit.from_mapping({
-        "task_id": "task-1",
-        "unit_id": "u1",
-        "envelope_ref": "/envelope.json",
-        "envelope_sha256": "a" * 64,
-        "expected_base_sha": base,
-        "mutation_paths": paths,
-    })
+    return ExecutionUnit.from_mapping(
+        {
+            "task_id": "task-1",
+            "unit_id": "u1",
+            "envelope_ref": "/envelope.json",
+            "envelope_sha256": "a" * 64,
+            "expected_base_sha": base,
+            "mutation_paths": paths,
+        }
+    )
 
 
 def _plant_hooks_and_fsmonitor(git_dir: Path, markers: Path) -> None:
@@ -378,3 +381,148 @@ def test_closure_composition_patch_is_the_raw_patch_not_a_diff_driver_rendering(
         hashlib.sha256(patch.strip().encode("utf-8")).hexdigest()
         == (receipt["candidate_diff_sha256"])
     )
+
+
+# --- submodule pointers ---------------------------------------------------------------
+
+
+def _other_commits(env: Path) -> tuple[Path, str, str]:
+    """A separate repository with two commits a submodule pointer can name."""
+    other = env / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    _git(other, "config", "user.name", "t")
+    _git(other, "config", "user.email", "t@example.invalid")
+    (other / "o.txt").write_text("1\n", encoding="utf-8")
+    _git(other, "add", "o.txt")
+    _git(other, "commit", "-qm", "one")
+    first = _git(other, "rev-parse", "HEAD")
+    (other / "o.txt").write_text("2\n", encoding="utf-8")
+    _git(other, "commit", "-qam", "two")
+    return other, first, _git(other, "rev-parse", "HEAD")
+
+
+def _set_pointer(repo: Path, commit: str | None, message: str) -> str:
+    if commit is None:
+        _git(repo, "update-index", "--force-remove", "sub")
+    else:
+        _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{commit},sub")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_closure_lists_and_hashes_a_submodule_pointer_change(env):
+    repo, _base = make_closure_repo(env)
+    _other, first, second = _other_commits(env)
+    base = _set_pointer(repo, first, "pointer")
+    moved = _set_pointer(repo, second, "move pointer")
+    removed = _set_pointer(repo, None, "drop pointer")
+
+    assert closure._changed_paths(repo, base, moved) == ["sub"]
+    assert closure._deleted_paths(repo, moved, removed) == ["sub"]
+    assert closure._diff_sha(repo, base, moved) == _plain_diff_sha(repo, base, moved)
+    assert f"+Subproject commit {second}" in closure._raw_diff_patch(repo, base, moved)
+
+
+def _allocated_with_pointer(
+    env: Path, paths: list[str]
+) -> tuple[Path, WorkspaceLease, ExecutionUnit, str]:
+    repo, _base = _controller(env)
+    other, first, second = _other_commits(env)
+    base = _set_pointer(repo, first, "pointer")
+    unit = _unit(base, paths)
+    lease = GitWorktreeAllocator(repo, env / "workspaces").allocate(unit)
+    worktree = Path(lease.path)
+    (worktree / "sub").rmdir()
+    _git(env, "clone", "-q", str(other), str(worktree / "sub"))
+    _git(worktree / "sub", "checkout", "-q", second)
+    (worktree / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+    return repo, lease, unit, second
+
+
+def test_fanout_capture_scope_checks_a_submodule_pointer_change(env):
+    _repo, lease, unit, _second = _allocated_with_pointer(env, ["a.py"])
+
+    with pytest.raises(FanoutError, match="OUT_OF_SCOPE_MUTATION:sub"):
+        fanout._capture_candidate(unit, lease, expected_head=unit.expected_base_sha)
+
+
+def test_fanout_capture_commits_and_hashes_an_authorized_submodule_pointer_change(env):
+    _repo, lease, unit, second = _allocated_with_pointer(env, ["a.py", "sub"])
+    worktree = Path(lease.path)
+
+    candidate = fanout._capture_candidate(unit, lease, expected_head=unit.expected_base_sha)
+
+    assert candidate["changed_paths"] == ["a.py", "sub"]
+    assert _git(worktree, "rev-parse", f"{candidate['candidate_commit']}:sub") == second
+    assert candidate["candidate_diff_sha256"] == _plain_diff_sha(
+        worktree, unit.expected_base_sha, candidate["candidate_commit"]
+    )
+
+
+# --- verifier re-check ----------------------------------------------------------------
+
+
+def _verify(receipt: dict, base: str, argv: list[str]) -> dict:
+    return closure._run_verifier_specs(
+        task_id="task-1",
+        unit_id="u1",
+        workspace_path=receipt["workspace_path"],
+        candidate_commit=receipt["candidate_commit"],
+        specs=[{"id": "v", "argv": argv}],
+        schema=closure.UNIT_VERIFICATION_SCHEMA,
+        scope="UNIT",
+        base_sha=base,
+        authorized_paths=["a.py"],
+        deletable_paths=[],
+    )
+
+
+def test_closure_verifier_that_repoints_the_git_dir_is_a_workspace_mutation(env, monkeypatch):
+    repo, base = make_closure_repo(env)
+    receipt = make_receipt(repo, env, base, "u1", "a.py", "A = 1\n")
+    worktree = Path(receipt["workspace_path"])
+    markers = env / "markers"
+
+    def verifier_run(argv, **_kwargs):
+        _plant_git_dir_inside(worktree, repo, markers)
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setattr(closure, "run_reaping_process_group", verifier_run)
+    with pytest.raises(closure.ClosureError, match="^VERIFIER_MUTATED_WORKSPACE$"):
+        _verify(receipt, base, ["true"])
+    assert _fired(markers) == []
+
+
+def test_closure_rechecks_the_workspace_before_reading_a_pytest_verifier_result(env, monkeypatch):
+    repo, base = make_closure_repo(env)
+    receipt = make_receipt(repo, env, base, "u1", "a.py", "A = 1\n")
+    worktree = Path(receipt["workspace_path"])
+    markers = env / "markers"
+    read_after_run: list[str] = []
+    monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
+
+    def verifier_run(argv, **kwargs):
+        _plant_git_dir_inside(worktree, repo, markers)
+        return {
+            "stdout": "",
+            "stderr": "",
+            "returncode": 0,
+            "timed_out": False,
+            "witness": b"",
+            "witness_overflow": False,
+        }
+
+    def witness_read(*_args, **_kwargs):
+        read_after_run.append("witness")
+        return "", []
+
+    monkeypatch.setattr(closure, "_spawn_verifier", verifier_run)
+    monkeypatch.setattr(closure, "_parse_witness", witness_read)
+    monkeypatch.setattr(
+        closure, "_base_unchanged_predicate", lambda *_a: read_after_run.append("base")
+    )
+    with pytest.raises(closure.ClosureError, match="^VERIFIER_MUTATED_WORKSPACE$"):
+        _verify(receipt, base, [sys.executable, "-m", "pytest", "-q", "test_a.py"])
+    assert read_after_run == []
+    assert _fired(markers) == []

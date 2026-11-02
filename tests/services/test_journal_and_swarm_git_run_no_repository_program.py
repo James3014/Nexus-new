@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from nexus.engine import swarm_run
 from nexus.engine.battle_swarm import BattleSwarm
 from nexus.engine.swarm_run import _git as swarm_git
 from nexus.engine.swarm_run import run_bounded_swarm
@@ -138,6 +141,92 @@ def test_journal_does_not_search_into_a_ceiling_directory(env, monkeypatch):
     assert journal._git_identity(str(deeper)) == (None, None)
 
 
+def _other_repo(env: Path, markers: Path, *, names_a_program: bool = True) -> Path:
+    other = env / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    _git(other, "config", "user.name", "t")
+    _git(other, "config", "user.email", "t@example.invalid")
+    (other / "o.txt").write_text("o\n", encoding="utf-8")
+    _git(other, "add", ".")
+    _git(other, "commit", "-qm", "other")
+    if names_a_program:
+        _plant_config_hook(other, markers, "post-index-change")
+    return other
+
+
+def test_journal_identity_in_a_linked_worktree_is_its_root_and_head(env):
+    repo = _repo(env)
+    worktree = env / "linked"
+    _git(repo, "worktree", "add", "-q", "-b", "side", str(worktree))
+    (worktree / "calc.py").write_text("changed\n", encoding="utf-8")
+
+    root, head = journal._git_identity(str(worktree / "pkg"))
+
+    assert Path(str(root)).resolve() == worktree.resolve()
+    assert head == _git(repo, "rev-parse", "side")
+    entries = journal._status_entries(str(worktree))
+    assert entries is not None and entries["calc.py"]["status"] == " M"
+
+
+@pytest.mark.parametrize("shape", ["link", "foreign_file"])
+def test_journal_treats_a_git_entry_of_an_unchecked_shape_as_unattributable(env, shape):
+    repo = _repo(env)
+    other = _other_repo(env, env / "markers", names_a_program=False)
+    moved = env / "moved.git"
+    (repo / ".git").rename(moved)
+    if shape == "link":
+        (repo / ".git").symlink_to(moved, target_is_directory=True)
+    else:
+        (repo / ".git").write_text(f"gitdir: {other / '.git'}\n", encoding="utf-8")
+
+    assert journal._checked_git_dir(repo) is None
+    assert journal._git_identity(str(repo)) == (None, None)
+    assert journal.capture_source_baseline(str(repo)) is None
+
+
+@pytest.mark.parametrize("after", ["config", "--show-toplevel", "HEAD"])
+def test_journal_git_calls_stay_bound_to_the_checked_git_dir(env, monkeypatch, after):
+    repo = _repo(env)
+    markers = env / "markers"
+    other = _other_repo(env, markers)
+    other_head = _git(other, "rev-parse", "HEAD")
+    swapped: list[bool] = []
+
+    def replace_git_entry() -> None:
+        if not swapped:
+            swapped.append(True)
+            (repo / ".git").rename(env / "moved.git")
+            (repo / ".git").write_text(f"gitdir: {other / '.git'}\n", encoding="utf-8")
+
+    checked = journal.repository_config_can_start_a_program
+    runner = journal.run_hardened_git
+
+    def check_then(*args: Any, **kwargs: Any) -> bool:
+        refused = checked(*args, **kwargs)
+        if after == "config":
+            replace_git_entry()
+        return refused
+
+    def run_then(repo_dir: Path, *args: str, **kwargs: Any) -> Any:
+        result = runner(repo_dir, *args, **kwargs)
+        if after in args:
+            replace_git_entry()
+        return result
+
+    monkeypatch.setattr(journal, "repository_config_can_start_a_program", check_then)
+    monkeypatch.setattr(journal, "run_hardened_git", run_then)
+    if after == "HEAD":
+        # Replaced between the identity reads and the status read of one baseline.
+        assert journal.capture_source_baseline(str(repo)) is None
+    else:
+        root, head = journal._git_identity(str(repo))
+        assert head is None and head != other_head
+        assert root is None if after == "config" else Path(str(root)) == repo.resolve()
+    assert swapped
+    assert _fired(markers) == []
+
+
 # --- bounded swarm --------------------------------------------------------------------
 
 
@@ -196,3 +285,80 @@ def test_bounded_swarm_blocks_a_workspace_whose_config_names_a_program(env):
     )
     assert _fired(markers) == []
     assert not (root / ".nexus").exists()
+
+
+@pytest.fixture
+def stub_model(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Stands in for the local-model worker (no model call, no verify run); ``steps`` run
+    on the worker's worktree while the model is writing."""
+    import nexus.research.sprint_service as sprint
+
+    worktrees: list[Path] = []
+    on_generate: list[Any] = []
+
+    class _Stub:
+        def __init__(self, project_root: Path, **_kw: Any) -> None:
+            self.root = Path(project_root)
+
+        def generate(self, *, source_code: str, **_kw: Any) -> tuple[str, dict[str, Any]]:
+            worktrees.append(self.root)
+            for step in on_generate:
+                step(self.root)
+            return source_code.replace("a - b", "a + b"), {"model_calls": 0}
+
+    monkeypatch.setattr(sprint, "LocalArmorCandidateGenerator", _Stub)
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(Path("missing-state")))
+    monkeypatch.setenv("NEXUS_DISABLE_OS_SANDBOX", "1")
+    return SimpleNamespace(worktrees=worktrees, steps=on_generate)
+
+
+@pytest.mark.parametrize("name", [".git", ".GIT", ".g\u200cit", "\u200b.Git"])
+def test_swarm_never_scopes_a_path_through_the_git_entry(env, name):
+    root = _repo(env)
+    (root / "repro.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+    swarm = BattleSwarm(project_root=str(root), default_workers=1, run_dir=str(env / "runs"))
+    swarm.run_dir.mkdir(parents=True)
+    worktree = swarm._create_worktree("conservative", "battle_t_conservative_0")
+    assert worktree is not None
+    try:
+        assert swarm_run._scoped_file(worktree, ".git") is None
+        report = run_bounded_swarm(
+            workspace_root=root,
+            task_id="t1",
+            task="fix",
+            target_file=name,
+            verify_script="repro.py",
+        )
+        assert (report["status"], report["reason"]) == ("BLOCKED", "UNSAFE_PATH:target_file")
+    finally:
+        swarm._cleanup_worktrees([worktree], ["battle_t_conservative_0"])
+
+
+def test_swarm_worker_git_calls_stay_bound_to_the_git_dir_resolved_at_setup(env, stub_model):
+    root = _repo(env)
+    (root / "repro.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+    _git(root, "add", "repro.py")
+    _git(root, "commit", "-qm", "repro")
+    markers = env / "markers"
+    other = _other_repo(env, markers)
+    other_head = _git(other, "rev-parse", "HEAD")
+    other_index = (other / ".git" / "index").read_bytes()
+
+    def repoint(worktree: Path) -> None:
+        (worktree / ".git").write_text(f"gitdir: {other / '.git'}\n", encoding="utf-8")
+
+    stub_model.steps.append(repoint)
+    report = run_bounded_swarm(
+        workspace_root=root,
+        task_id="t1",
+        task="fix",
+        target_file="calc.py",
+        verify_script="repro.py",
+        workers=1,
+    )
+
+    assert stub_model.worktrees, report
+    assert _fired(markers) == []
+    assert (other / ".git" / "index").read_bytes() == other_index
+    assert _git(other, "rev-parse", "HEAD") == other_head
+    assert [w["worker_status"] for w in report["workers"]] == ["commit_failed"]
