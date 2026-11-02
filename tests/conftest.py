@@ -564,6 +564,17 @@ def _agy_model_catalog_check_off_unless_requested(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _assist_default_lane_on_for_existing_tests(monkeypatch):
+    """#3164: the Gateway refuses the implicit assist/probe default lane by default.
+
+    Tests that drive assist or model-probe mechanics through the implicit default
+    lane keep running with it switched on; the default-deny tests ``delenv`` it
+    themselves, which runs after this fixture.
+    """
+    monkeypatch.setenv("NEXUS_ASSIST_DEFAULT_LANE_ENABLED", "1")
+
+
+@pytest.fixture(autouse=True)
 def _restore_event_bus_binding():
     bus = _event_bus_class()
     saved = (
