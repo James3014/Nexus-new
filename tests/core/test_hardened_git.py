@@ -846,3 +846,39 @@ def test_the_runner_refuses_caller_options_its_hardening_does_not_cover(env, mon
     assert str(script) not in result.stderr
     assert not marker.exists()
     assert hardened_git.run_hardened_git(repo, "rev-parse", "HEAD").stdout == head
+
+
+def test_hardened_git_env_ignores_replacement_refs(tmp_path):
+    assert hardened_git.hardened_git_env(tmp_path)["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp_path):
+    """A replacement ref (writable by anyone who can write the ref store) does not change
+    what the hardened runner reads under a recorded sha (#3226)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **hardened_git.hardened_git_env(repo),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@x",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@x",
+    }
+    plain_env = {k: v for k, v in env.items() if k != "GIT_NO_REPLACE_OBJECTS"}
+
+    def plain(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True, env=plain_env
+        ).stdout.strip()
+
+    plain("init", "-q")
+    (repo / "f").write_text("recorded\n")
+    plain("add", "f")
+    plain("commit", "-qm", "base")
+    base = plain("rev-parse", "HEAD")
+    (repo / "f").write_text("other\n")
+    plain("commit", "-aqm", "other")
+    plain("replace", base, plain("rev-parse", "HEAD"))
+    assert plain("show", f"{base}:f") == "other"
+    shown = hardened_git.run_hardened_git(repo, "show", f"{base}:f")
+    assert shown.returncode == 0 and shown.stdout.strip() == "recorded"

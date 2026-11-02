@@ -113,6 +113,10 @@ class ControlledIntegrationManager:
         git_env = os.environ.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        # Objects are read as recorded: a replacement ref written into the shared ref
+        # store (the staging verifier runs unsandboxed) must not change what any
+        # Controller call reads or checks out (#3226).
+        git_env["GIT_NO_REPLACE_OBJECTS"] = "1"
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
         return subprocess.run(
@@ -986,6 +990,10 @@ class ControlledIntegrationManager:
                     "staging merge result is not the expected head merged with the candidate"
                 )
             self._execute_manifest(admitted_verifiers, staging_path)
+            # A replacement ref in the shared ref store would make a later git call that
+            # does not disable replacement read other content under the verified sha (#3226).
+            if self._git(["for-each-ref", "refs/replace/"], controller_root):
+                raise RuntimeError("repository carries replacement refs; integration refused")
             if self._git(["rev-parse", "HEAD"], staging_path) != staging_sha:
                 raise RuntimeError("staging HEAD moved during verification")
             # Untracked verifier output (reports, markers) is allowed; a change to

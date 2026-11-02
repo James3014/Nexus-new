@@ -4,6 +4,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,6 +14,7 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.executors.cli_worker import bounded_environment_receipt
+from nexus.orchestrator import governed_integration as governed_integration_module
 from nexus.orchestrator.governed_integration import (
     ControlledIntegrationManager,
     IntegrationExecutionError,
@@ -434,3 +436,76 @@ def test_a_candidate_already_on_the_branch_is_refused_as_producing_no_merge_resu
             auth=auth,
         )
     assert _integration_head(root) == candidate
+
+
+# A verifier that writes a replacement ref for the staging commit: every sha the
+# integration records stays the same while a git call that honours replacement reads
+# another tree under it (#3226).  With ``reset`` the staging tree is loaded from the
+# replacement as well.
+_REPLACE_DURING_VERIFICATION = (
+    "import subprocess; "
+    "g = lambda *a, inp=None: subprocess.run(['git', *a], check=True, capture_output=True, "
+    "text=True, input=inp).stdout.strip(); "
+    "head = g('rev-parse', 'HEAD'); "
+    "parents = g('rev-list', '--parents', '-n', '1', head).split()[1:]; "
+    "blob = g('hash-object', '-w', '--stdin', inp='other content\\n'); "
+    "tree = g('mktree', inp='100644 blob ' + blob + '\\tvalue.txt\\n'); "
+    "other = g('commit-tree', tree, '-p', parents[0], '-p', parents[1], '-m', 'other', inp=''); "
+    "g('replace', head, other)"
+)
+_REPLACE_AND_RESET_DURING_VERIFICATION = (
+    _REPLACE_DURING_VERIFICATION + "; g('reset', '--hard', 'HEAD')"
+)
+
+
+@pytest.mark.parametrize("shape", ["ff-only", "ref-update"])
+@pytest.mark.parametrize(
+    "expression",
+    [_REPLACE_DURING_VERIFICATION, _REPLACE_AND_RESET_DURING_VERIFICATION],
+    ids=["replace", "replace-and-reset"],
+)
+def test_a_staging_step_that_writes_a_replacement_ref_is_refused_without_changing_the_branch(
+    tmp_path: Path, shape: str, expression: str
+):
+    root, base, candidate = _shape_repo(tmp_path, shape)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    argv, state = _spaced_verifier_state(tmp_path / "ev", expression)
+    with pytest.raises(RuntimeError, match="carries replacement refs") as refused:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            verifier_commands=(argv,),
+            lifecycle_state=state,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert refused.value.merge_performed is False
+    assert _integration_head(root) == base
+    assert git(root, "show", f"{base}:value.txt") == "base"
+    assert not (tmp_path / "stage" / "task-1").exists()
+
+
+def test_controller_git_calls_read_objects_as_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The Controller's git environment ignores replacement refs, so a sha names one tree."""
+    root, base, _candidate = make_repo(tmp_path)
+    seen: dict[str, Any] = {}
+    real_run = subprocess.run
+
+    def recording_run(cmd, **kwargs):
+        seen["env"] = kwargs["env"]
+        return real_run(cmd, **kwargs)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(governed_integration_module.subprocess, "run", recording_run)
+        assert ControlledIntegrationManager._git(["rev-parse", "HEAD"], root)
+    assert seen["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+    # Behaviour, not just the variable: a replacement for the base commit is not followed.
+    git(root, "checkout", "-q", "--detach", base)
+    (root / "value.txt").write_text("other\n")
+    git(root, "commit", "-aqm", "other")
+    git(root, "replace", base, git(root, "rev-parse", "HEAD"))
+    assert git(root, "show", f"{base}:value.txt") == "other"
+    assert ControlledIntegrationManager._git(["show", f"{base}:value.txt"], root) == "base"

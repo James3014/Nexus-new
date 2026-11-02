@@ -63,7 +63,8 @@ def hardened_git_env(
 ) -> dict[str, str]:
     """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
     GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
-    are never fetched, and discovery stops at ``repo_dir``. With ``git_dir`` (a probed git
+    are never fetched, replacement refs are ignored (#3226), and discovery stops at
+    ``repo_dir``. With ``git_dir`` (a probed git
     dir) GIT_DIR and GIT_WORK_TREE are pinned to it and ``repo_dir``, so a rewritten ``.git``
     pointer cannot redirect the call; ``common_dir`` (a verified linked worktree's) pins
     GIT_COMMON_DIR too."""
@@ -73,6 +74,7 @@ def hardened_git_env(
         GIT_CONFIG_GLOBAL=os.devnull,
         GIT_ATTR_NOSYSTEM="1",
         GIT_NO_LAZY_FETCH="1",
+        GIT_NO_REPLACE_OBJECTS="1",
         GIT_TERMINAL_PROMPT="0",
         GIT_CEILING_DIRECTORIES=str(repo_dir.parent),
     )
