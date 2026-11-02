@@ -33,6 +33,8 @@ DEFAULT_LOCK = Path("/tmp/nexus_gemini_invoke.lock")
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from nexus.core import argv_command  # noqa: E402 - needs REPO_ROOT on sys.path
+
 # We keep this for context but don't strictly require it if it's missing
 try:
     from nexus.core.decorators import nexus_metabolize
@@ -60,7 +62,9 @@ def _acquire_lock(lock_path: Path) -> bool:
     """Single-flight lock held with flock, so the kernel drops it when the holder dies (#3203).
 
     A lock file left behind by a killed run no longer blocks later runs. The
-    descriptor stays open until ``_release_lock``; the file still names the holder pid.
+    descriptor stays open until ``_release_lock``; the file names the last holder pid.
+    The Gemini child and its descendants inherit the descriptor, so the lock is held
+    until the last of them exits too.
     The path is shared (``/tmp`` by default), so a symlink, a hard link or another
     user's file there raises ``OSError`` instead of being opened and truncated.
     """
@@ -82,7 +86,8 @@ def _acquire_lock(lock_path: Path) -> bool:
         except FileNotFoundError:
             current = None
         if current is None or not os.path.samestat(os.fstat(fd), current):
-            # The previous holder unlinked this file while we waited for it: retry on the new one.
+            # The file was unlinked or replaced while we waited for it (an older invoker
+            # unlinked it on release): retry on the file now at the path.
             os.close(fd)
             continue
         os.ftruncate(fd, 0)
@@ -92,15 +97,44 @@ def _acquire_lock(lock_path: Path) -> bool:
 
 
 def _release_lock(lock_path: Path) -> None:
+    """Close our descriptor; the lock file stays (#3203).
+
+    Not unlinked: a descendant that left the Gemini group (``setsid``) or survived its
+    SIGKILL may still hold the lock through the inherited descriptor. Unlinking would let
+    the next run lock a new file at the same path beside it; keeping the file makes the
+    next run wait for that holder.
+    """
     fd = _LOCK_FDS.pop(lock_path, None)
-    if fd is None:
-        return
-    try:
-        lock_path.unlink(missing_ok=True)
-    except Exception:
-        pass
-    finally:
+    if fd is not None:
         os.close(fd)
+
+
+_held_depth = 0
+_held_signal: int | None = None
+
+
+def _on_terminating_signal(signum: int, _frame: Any) -> None:
+    global _held_signal
+    if _held_depth:
+        if _held_signal is None:
+            _held_signal = signum
+        return
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_held() -> Iterator[None]:
+    """Hold SIGTERM/SIGHUP for the block (as #3220 does); a held one then exits with
+    128 + its number. For the reap and the group stop, which end on their own."""
+    global _held_depth, _held_signal
+    _held_depth += 1
+    try:
+        yield
+    finally:
+        _held_depth -= 1
+        if _held_depth == 0 and _held_signal is not None:
+            signum, _held_signal = _held_signal, None
+            raise SystemExit(128 + signum)
 
 
 @contextlib.contextmanager
@@ -115,34 +149,50 @@ def _termination_signals_raise() -> Iterator[None]:
         yield
         return
 
-    def _raise(signum: int, _frame: Any) -> None:
-        raise SystemExit(128 + signum)
-
     previous: dict[int, Any] = {}
     try:
         for signum in (signal.SIGTERM, signal.SIGHUP):
             current = signal.getsignal(signum)
             if current is not None and current is not signal.SIG_IGN:
-                previous[signum] = signal.signal(signum, _raise)
+                previous[signum] = signal.signal(signum, _on_terminating_signal)
         yield
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
 
 
-def _stop_child_group(proc: subprocess.Popen) -> None:
-    """SIGKILL the Gemini child's own group and reap it, while its leader is unreaped.
+GROUP_POLL_SECONDS = 0.05
+GROUP_STOP_SETTLE_SECONDS = 5.0
 
-    An unreaped leader keeps the group id from being reused, so the kill cannot hit
-    an unrelated group.
+
+def _group_stopped_if_exited(proc: subprocess.Popen) -> bool:
+    """Non-blocking: False while the Gemini child runs. Once it has exited, SIGKILL what
+    it left in its group, then reap it (``argv_command.kill_group_if_exited``), so a
+    descendant does not outlive the run. The only place the child is reaped; the
+    terminating signals are held, so none lands between the reap and ``returncode``."""
+    with _signals_held():
+        return bool(argv_command.kill_group_if_exited(proc))
+
+
+def _stop_child_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the Gemini child's own group and reap it, unless it is already reaped.
+
+    The child is reaped only by ``_group_stopped_if_exited``, after its group is killed,
+    so while it is unreaped its pid still names its group and ``killpg`` cannot reach an
+    unrelated one; once reaped, nothing is signalled.
     """
-    if proc.returncode is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    proc.wait()
+    with _signals_held():
+        if proc.returncode is not None or not argv_command._leader_unreaped(proc.pid):
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass  # nothing left, or (macOS) only the exited, unreaped child is left
+        deadline = time.monotonic() + GROUP_STOP_SETTLE_SECONDS
+        while not _group_stopped_if_exited(proc):
+            if time.monotonic() >= deadline:
+                raise ChildProcessError(f"Gemini child {proc.pid} still runs after SIGKILL")
+            time.sleep(GROUP_POLL_SECONDS)
 
 
 def _run_once(
@@ -170,20 +220,24 @@ def _run_once(
 
     proc = None
     try:
+        # Only _group_stopped_if_exited may reap the child (SIGCHLD at its default).
+        argv_command.require_child_stays_unreaped()
         # Own session, so the whole Gemini group can be stopped. The child also inherits
         # the single-flight lock descriptor: if the invoker is SIGKILLed, the lock stays
-        # held until the orphaned Gemini group is gone too (#3203).
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=_gemini_subprocess_env(),
-            bufsize=1,
-            start_new_session=True,
-            pass_fds=tuple(_LOCK_FDS.values()),
-        )
+        # held until the orphaned Gemini group is gone too (#3203). Signals are held so
+        # none lands between the spawn and ``proc`` being set (``finally`` needs it).
+        with _signals_held():
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=_gemini_subprocess_env(),
+                bufsize=1,
+                start_new_session=True,
+                pass_fds=tuple(_LOCK_FDS.values()),
+            )
 
         last_activity_time = time.time()
         
@@ -221,7 +275,7 @@ def _run_once(
                     # EOF
                     break
             
-            if proc.poll() is not None:
+            if _group_stopped_if_exited(proc):
                 # Process finished but might still have data in pipe
                 remaining = proc.stdout.read()
                 if remaining:
@@ -229,7 +283,7 @@ def _run_once(
                     print(remaining, end="", flush=True)
                 break
 
-        if proc.poll() is None:
+        if proc.returncode is None and not _group_stopped_if_exited(proc):
             _stop_child_group(proc)
         elif classification == "OK":
             # A timeout already reaped the group above; keep its 124.
@@ -318,6 +372,7 @@ def main() -> int:
             "status": "blocked",
             "reason": "single_flight_lock_active",
             "lock_file": str(lock_path),
+            "hint": "The holder may be a descendant of an earlier invoker; `lsof <lock_file>` names it.",
         }
         print(json.dumps(report, ensure_ascii=False))
         return 3

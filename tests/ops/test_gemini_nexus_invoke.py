@@ -34,7 +34,8 @@ def test_lock_file_left_by_a_killed_run_does_not_block_the_next_run(tmp_path):
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
     finally:
         gemini_nexus_invoke._release_lock(lock)
-    assert not lock.exists()
+    # #3203: release keeps the file (a descendant may still hold it) but frees the lock.
+    assert lock.exists() and _lock_is_free(lock)
 
 
 def test_lock_held_by_a_live_holder_still_blocks(tmp_path):
@@ -77,7 +78,8 @@ def test_lock_released_by_holder_is_reacquired_on_the_new_file(tmp_path, monkeyp
     finally:
         gemini_nexus_invoke._release_lock(lock)
     gemini_nexus_invoke._release_lock(lock)
-    assert not lock.exists()
+    # #3203: release keeps the file (a descendant may still hold it) but frees the lock.
+    assert lock.exists() and _lock_is_free(lock)
 
 
 @pytest.mark.parametrize("target_exists", [True, False])
@@ -179,11 +181,19 @@ def _wait_for(predicate, timeout: float = 15.0) -> bool:
     return predicate()
 
 
-def _heartbeat_stopped(fake: Path) -> bool:
-    beat = fake.parent / "heartbeat"
+def _heartbeat_stopped(fake: Path, name: str = "heartbeat") -> bool:
+    """No new beat in 2 s (a beat is due every 0.05 s)."""
+    beat = fake.parent / name
     first = beat.read_text(encoding="utf-8")
-    time.sleep(0.6)
+    time.sleep(2.0)
     return beat.read_text(encoding="utf-8") == first
+
+
+def _heartbeat_advancing(fake: Path, name: str = "heartbeat") -> bool:
+    """A new beat within 15 s, so a slow host (nice 19) does not read as stopped."""
+    beat = fake.parent / name
+    first = beat.read_text(encoding="utf-8")
+    return _wait_for(lambda: beat.read_text(encoding="utf-8") != first, timeout=15)
 
 
 def _start_invoker(tmp_path: Path, fake: Path, lock: Path) -> subprocess.Popen:
@@ -248,7 +258,7 @@ def test_killed_invoker_leaves_the_lock_held_until_its_gemini_child_exits(tmp_pa
         assert _wait_for(lambda: (fake.parent / "heartbeat").exists()), "fake Gemini never ran"
         invoker.kill()
         invoker.wait(timeout=15)
-        assert not _heartbeat_stopped(fake), "precondition: the orphan is still working"
+        assert _heartbeat_advancing(fake), "precondition: the orphan is still working"
         assert gemini_nexus_invoke._acquire_lock(lock) is False, "a second run would overlap"
 
         (fake.parent / "stop").write_text("1")
@@ -339,3 +349,220 @@ def test_termination_signals_install_nothing_off_the_main_thread():
     worker.join(timeout=10)
     assert errors == []
     assert seen == [before]
+
+
+def _lock_is_free(lock: Path) -> bool:
+    import fcntl
+
+    fd = os.open(str(lock), os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    finally:
+        os.close(fd)
+
+
+_FAKE_GEMINI_FORKS = """\
+import os, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent
+leave_group = {leave_group!r}
+detach_stdio = {detach_stdio!r}
+leader_runs = {leader_runs!r}
+print("OK", flush=True)
+if os.fork() == 0:
+    # A long-lived descendant: in the group unless it leaves it; on the invoker's pipe
+    # unless detached.
+    if detach_stdio:
+        devnull = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(devnull, fd)
+    if leave_group:
+        os.setsid()
+    (here / "desc.pid").write_text(str(os.getpid()))
+    deadline = time.monotonic() + 30
+    n = 0
+    while not (here / "stop").exists() and time.monotonic() < deadline:
+        n += 1
+        (here / "heartbeat").write_text(str(n))
+        time.sleep(0.05)
+    (here / "exited").write_text("1")
+    os._exit(0)
+while not (here / "desc.pid").exists():
+    time.sleep(0.01)
+deadline = time.monotonic() + 30
+while leader_runs and not (here / "stop").exists() and time.monotonic() < deadline:
+    (here / "leader_heartbeat").write_text(str(time.monotonic()))
+    time.sleep(0.05)
+sys.exit(0)
+"""
+
+
+def _fake_gemini_that_forks(
+    tmp_path: Path, *, leave_group: bool, detach_stdio: bool = True, leader_runs: bool = False
+) -> Path:
+    """A fake Gemini CLI that prints OK and forks a heartbeating descendant, then exits 0
+    (or, with *leader_runs*, keeps working until ``stop`` appears)."""
+    home = tmp_path / "fake"
+    home.mkdir()
+    fake = home / "gemini"
+    body = _FAKE_GEMINI_FORKS.format(
+        leave_group=leave_group, detach_stdio=detach_stdio, leader_runs=leader_runs
+    )
+    fake.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
+    fake.chmod(0o755)
+    return fake
+
+
+@pytest.mark.parametrize("detach_stdio", [True, False], ids=["stdio-detached", "on-the-pipe"])
+def test_descendant_left_by_a_finished_gemini_run_is_stopped_with_it(tmp_path, detach_stdio):
+    """#3203: on a normal exit the child's group is killed before the child is reaped, so a
+    descendant it left does not run on holding the lock beside the next run."""
+    fake = _fake_gemini_that_forks(tmp_path, leave_group=False, detach_stdio=detach_stdio)
+    lock = tmp_path / "gemini.lock"
+    invoker = _start_invoker(tmp_path, fake, lock)
+    try:
+        assert invoker.wait(timeout=30) == 0
+        assert (fake.parent / "heartbeat").exists(), "fake descendant never ran"
+        assert _heartbeat_stopped(fake), "the descendant outlived the run"
+        assert not (fake.parent / "exited").exists()
+        assert gemini_nexus_invoke._acquire_lock(lock) is True
+    finally:
+        (fake.parent / "stop").write_text("1")
+        if invoker.poll() is None:
+            invoker.kill()
+            invoker.wait()
+        gemini_nexus_invoke._release_lock(lock)
+
+
+def test_descendant_that_left_the_group_keeps_the_next_run_out_until_it_exits(tmp_path):
+    """#3203: a descendant out of reach (setsid) still holds the inherited lock descriptor,
+    and release does not unlink the file, so the next run waits for it."""
+    fake = _fake_gemini_that_forks(tmp_path, leave_group=True)
+    lock = tmp_path / "gemini.lock"
+    invoker = _start_invoker(tmp_path, fake, lock)
+    try:
+        assert invoker.wait(timeout=30) == 0
+        assert _heartbeat_advancing(fake), "precondition: the descendant still runs"
+        assert gemini_nexus_invoke._acquire_lock(lock) is False, "a second run would overlap"
+
+        (fake.parent / "stop").write_text("1")
+        assert _wait_for(lambda: (fake.parent / "exited").exists())
+
+        def acquired() -> bool:
+            return gemini_nexus_invoke._acquire_lock(lock)
+
+        assert _wait_for(acquired, timeout=10)
+    finally:
+        (fake.parent / "stop").write_text("1")
+        if invoker.poll() is None:
+            invoker.kill()
+            invoker.wait()
+        gemini_nexus_invoke._release_lock(lock)
+
+
+def test_terminating_signal_held_during_the_reap_exits_only_after_it():
+    """#3203: a TERM landing while the reap is held is deferred, then exits with 143."""
+    reached: list[str] = []
+    with pytest.raises(SystemExit) as raised:
+        with gemini_nexus_invoke._signals_held():
+            gemini_nexus_invoke._on_terminating_signal(signal.SIGTERM, None)
+            reached.append("after the signal")
+    assert reached == ["after the signal"]
+    assert raised.value.code == 128 + signal.SIGTERM
+    assert gemini_nexus_invoke._held_signal is None
+
+
+def test_run_refuses_to_spawn_when_the_child_could_be_reaped_elsewhere(tmp_path, monkeypatch):
+    """#3203: with SIGCHLD ignored the kernel would reap the child before its group is
+    killed, so nothing is spawned and the attempt is an ERROR."""
+    fake = _fake_gemini(tmp_path)
+    monkeypatch.setattr(gemini_nexus_invoke, "GEMINI_BIN", fake)
+    previous = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    try:
+        _code, _out, _elapsed, cls = gemini_nexus_invoke._run_once(
+            model="m", prompt="p", cwd=tmp_path, timeout_sec=2
+        )
+    finally:
+        signal.signal(signal.SIGCHLD, previous)
+        (fake.parent / "stop").write_text("1")
+    assert cls == "ERROR"
+    assert not (fake.parent / "heartbeat").exists()
+
+
+def test_terminated_invoker_keeps_the_next_run_out_while_an_escaped_descendant_lives(tmp_path):
+    """#3203: on TERM the Gemini group is stopped; a descendant that left it (setsid) is out
+    of reach but still holds the inherited lock, so the next run waits until it exits."""
+    fake = _fake_gemini_that_forks(tmp_path, leave_group=True, leader_runs=True)
+    lock = tmp_path / "gemini.lock"
+    invoker = _start_invoker(tmp_path, fake, lock)
+    try:
+        assert _wait_for(lambda: (fake.parent / "leader_heartbeat").exists()), "fake never ran"
+        invoker.send_signal(signal.SIGTERM)
+        exit_code = invoker.wait(timeout=30)
+        assert _heartbeat_stopped(fake, "leader_heartbeat"), "the Gemini child outlived the invoker"
+        assert exit_code == 128 + signal.SIGTERM
+        assert _heartbeat_advancing(fake), "precondition: the escaped descendant still runs"
+        assert gemini_nexus_invoke._acquire_lock(lock) is False, "a second run would overlap"
+
+        (fake.parent / "stop").write_text("1")
+        assert _wait_for(lambda: (fake.parent / "exited").exists())
+
+        def acquired() -> bool:
+            return gemini_nexus_invoke._acquire_lock(lock)
+
+        assert _wait_for(acquired, timeout=10)
+    finally:
+        (fake.parent / "stop").write_text("1")
+        if invoker.poll() is None:
+            invoker.kill()
+            invoker.wait()
+        gemini_nexus_invoke._release_lock(lock)
+
+
+def test_blocked_report_points_at_a_descendant_holder(tmp_path, monkeypatch, capsys):
+    """#3203: the lock-active report says the holder may be a descendant and how to find it."""
+    import fcntl
+    import json
+
+    fake = tmp_path / "gemini"
+    fake.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    lock = tmp_path / "gemini.lock"
+    holder = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        monkeypatch.setattr(gemini_nexus_invoke, "GEMINI_BIN", fake)
+        monkeypatch.setattr(
+            sys, "argv", ["gemini_nexus_invoke.py", "--prompt", "hi", "--lock-file", str(lock)]
+        )
+        code = gemini_nexus_invoke.main.__wrapped__()
+    finally:
+        os.close(holder)
+    report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert (code, report["reason"]) == (3, "single_flight_lock_active")
+    assert "descendant" in report["hint"] and "lsof" in report["hint"]
+
+
+def test_terminating_signal_right_after_the_spawn_still_stops_the_child(tmp_path, monkeypatch):
+    """#3203: a TERM landing as Popen returns, before ``proc`` is bound, is held until it is,
+    so ``finally`` still stops the child. No signal is sent: the handler is called directly."""
+    fake = _fake_gemini(tmp_path)
+    monkeypatch.setattr(gemini_nexus_invoke, "GEMINI_BIN", fake)
+    real_popen = subprocess.Popen
+
+    def popen_then_terminate(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        assert _wait_for(lambda: (fake.parent / "heartbeat").exists()), "fake never ran"
+        gemini_nexus_invoke._on_terminating_signal(signal.SIGTERM, None)
+        return proc
+
+    monkeypatch.setattr(gemini_nexus_invoke.subprocess, "Popen", popen_then_terminate)
+    try:
+        with pytest.raises(SystemExit) as raised:
+            gemini_nexus_invoke._run_once(model="m", prompt="p", cwd=tmp_path, timeout_sec=60)
+        assert raised.value.code == 128 + signal.SIGTERM
+        assert _heartbeat_stopped(fake), "the Gemini child outlived the interrupted spawn"
+    finally:
+        (fake.parent / "stop").write_text("1")
