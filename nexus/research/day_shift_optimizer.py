@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
 
 from nexus.core.argv_command import run_reaping_process_group
+from nexus.research.swarm_broker import replace_text_in_dir
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,12 @@ class DayShiftOptimizer:
             )
         self.unified_runtime_receipts = finalized_receipts
 
+    def _replace_target(self, text: str) -> None:
+        """Write the target as a new file renamed into place inside the swarm, so a target
+        that shares its data with a path outside the swarm (a hard link) is not written
+        through and no link on the way is followed."""
+        replace_text_in_dir(self.swarm_dir, self.target_file, text)
+
     def optimize(self) -> Dict[str, Any]:
         target_path = self.swarm_dir / self.target_file
         if not target_path.exists():
@@ -298,14 +305,14 @@ class DayShiftOptimizer:
                 return {"status": "FAILED", "reason": "interface_or_audit_error"}
 
             # Apply candidate physically to swarm
-            target_path.write_text(candidate_code, encoding="utf-8")
+            self._replace_target(candidate_code)
             
             # Run Validation
             rc, output = self._run_tests()
             
             if rc != 0:
                 logger.info(f"❌ [DayShift] Candidate failed tests (rc={rc}). Rolling back.")
-                target_path.write_text(current_code, encoding="utf-8") # Rollback
+                self._replace_target(current_code)  # Rollback
                 self.no_improve_streak += 1
             else:
                 if self.use_llm_scoring:
@@ -332,7 +339,7 @@ class DayShiftOptimizer:
                     self.no_improve_streak = 0
                 else:
                     logger.info(f"⚠️ [DayShift] CONVERGED or Score too low ({score}). Rolling back.")
-                    target_path.write_text(current_code, encoding="utf-8")
+                    self._replace_target(current_code)
                     self.no_improve_streak += 1
 
             if self.no_improve_streak >= self.convergence_patience:

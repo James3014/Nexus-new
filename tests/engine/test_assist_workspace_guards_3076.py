@@ -1482,6 +1482,29 @@ _SETTLED_WRITES = [
         True,
         id="same-outcome-updated",
     ),
+    pytest.param(
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": True},
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": False},
+        False,
+        id="same-outcome-lease-release-kept",
+    ),
+    pytest.param(
+        {**_SETTLED_BY_RECONCILE, "account_lease_released": True},
+        _SETTLED_BY_RECONCILE,
+        False,
+        id="same-outcome-lease-release-kept-without-field",
+    ),
+    pytest.param(
+        {
+            "status": "COMPLETED",
+            "blocker": None,
+            "reconciliation_required": False,
+            "account_lease_released": True,
+        },
+        {**_SETTLED_BY_CANCEL, "account_lease_released": True},
+        False,
+        id="completed-not-replaced-by-later-cancel",
+    ),
     pytest.param(_UNSETTLED, _SETTLED_BY_RECONCILE, True, id="unsettled-settled"),
     pytest.param(
         {**_SETTLED_BY_CANCEL, "reconciliation_required": True},
@@ -1504,3 +1527,174 @@ def test_record_write_of_the_same_job_keeps_a_settled_record(box, on_disk, writt
     for key in ("status", "blocker", "reconciliation_required", "account_lease_released"):
         assert record.get(key) == expected.get(key), (key, record)
     assert result.get("status") == expected.get("status"), result
+
+
+# ---------------------------------------------------------------------------
+# A lease release recorded once stays recorded: a later write of the same job by a call that
+# found the account claim already gone does not record it as unreleased (#3144)
+# ---------------------------------------------------------------------------
+
+
+class _Claim:
+    """An Agy account claim stand-in that counts its releases; no real lease behind it."""
+
+    def __init__(self) -> None:
+        self.releases = 0
+
+    def release(self) -> None:
+        self.releases += 1
+
+    def abandon_parent_reference(self) -> None:
+        raise AssertionError("the claim was abandoned instead of released")
+
+
+def _hold_a_lease(box, claim: _Claim) -> None:
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    record.update({"account_lease_id_hash": "lease-3144", "account_lease_released": False})
+    box.gateway._assist_write(record)
+    box.gateway._assist_account_claims[TASK] = claim
+
+
+def _assert_lease_recorded_released_and_retry_allowed(box, claim: _Claim, job_id: str) -> None:
+    assert claim.releases == 1, claim.releases
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["job_id"] == job_id, record
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record
+    assert not record.get("reconciliation_required"), record
+    retry = box.gateway._assist_retry(TASK)
+    assert retry["status"] == "RUNNING", retry
+
+
+def test_second_cancel_of_a_finished_job_keeps_the_lease_release_of_the_first(box, monkeypatch):
+    """Two cancels read the same FAILED job with an unreleased lease; the first releases the
+    claim and records it while the second is between its read and its claim lookup."""
+    failed = _failed_submit(box, monkeypatch)
+    claim = _Claim()
+    _hold_a_lease(box, claim)
+    monkeypatch.setattr(assist_jobs.subprocess, "Popen", lambda *a, **k: _FakeProvider())
+    state: dict = {}
+
+    def hook(caller: str) -> None:
+        if caller == "_release_assist_account_claim" and "first" not in state:
+            state["first"] = {}
+            state["first"] = box.gateway._assist_cancel(TASK)
+
+    monkeypatch.setattr(
+        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
+    )
+    second = box.gateway._assist_cancel(TASK)
+    assert state.get("first"), "the first cancel never ran inside the second"
+    for result in (state["first"], second):
+        assert (result["status"], result["account_lease_released"]) == ("FAILED", True), result
+    _assert_lease_recorded_released_and_retry_allowed(box, claim, failed["job_id"])
+
+
+def test_query_outcome_written_after_a_cancel_released_the_lease_records_the_release(
+    box, monkeypatch
+):
+    """A query finishing the job and a cancel of it run together: the cancel releases the
+    claim, the query (finding no claim) records FAILED first, then the cancel's CANCELLED write
+    is refused. The query's outcome is kept and the cancel's lease release is recorded."""
+    old_job_id, old_provider, _, terminated, _ = _launch_old_job(box, monkeypatch)
+    claim = _Claim()
+    _hold_a_lease(box, claim)
+    # The query (this thread) sees the provider exit; the cancel's own query does not.
+    monkeypatch.setattr(
+        assist_response,
+        "kill_group_if_exited",
+        lambda process: threading.current_thread() is threading.main_thread(),
+    )
+    cancel_terminating = threading.Event()
+    query_settled = threading.Event()
+    cancel_writing = threading.Event()
+    query_done = threading.Event()
+
+    def terminate(process) -> bool:
+        terminated.append(process)
+        cancel_terminating.set()
+        assert query_settled.wait(10), "the query never reached its lease release"
+        return True
+
+    monkeypatch.setattr(assist_jobs, "_terminate_provider_group", terminate)
+
+    def hook(caller: str) -> None:
+        on_main = threading.current_thread() is threading.main_thread()
+        if on_main and caller == "_release_assist_account_claim":
+            query_settled.set()
+            assert cancel_writing.wait(10), "the cancel never reached its record write"
+        elif not on_main and caller == "_assist_write_current":
+            if sys._getframe(3).f_code.co_name == "_assist_cancel":
+                cancel_writing.set()
+                assert query_done.wait(10), "the query never finished"
+
+    monkeypatch.setattr(
+        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
+    )
+    results: dict = {}
+
+    def cancel_job() -> None:
+        results["cancel"] = box.gateway._assist_cancel(TASK)
+
+    cancel = threading.Thread(target=cancel_job)
+    cancel.start()
+    assert cancel_terminating.wait(10), "the cancel never reached the provider termination"
+    old_provider.returncode = 1
+    query = box.gateway._assist_refresh(TASK)
+    query_done.set()
+    cancel.join(20)
+    assert not cancel.is_alive()
+    assert query is not None and query["status"] == "FAILED", query
+    assert terminated == [old_provider]
+    assert (results["cancel"]["job_id"], results["cancel"]["status"]) == (old_job_id, "FAILED")
+    assert results["cancel"]["account_lease_released"] is True, results["cancel"]
+    record = box.gateway._assist_read(TASK)
+    assert record is not None and record["status"] == "FAILED", record
+    _assert_lease_recorded_released_and_retry_allowed(box, claim, old_job_id)
+
+
+def test_refused_write_of_a_released_lease_keeps_the_settled_outcome(box):
+    stored = box.gateway._assist_write(
+        _job(box, "", account_lease_released=False, **_SETTLED_BY_CANCEL)
+    )
+    job = _job(
+        box,
+        "",
+        account_lease_released=True,
+        account_lease_cleanup_status="RELEASED",
+        **_SETTLED_BY_RECONCILE,
+    )
+    result = box.gateway._assist_write_current(TASK, job)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    for key in ("status", "blocker", "reconciliation_required"):
+        assert record.get(key) == stored.get(key), (key, record)
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record
+    assert result == record
+
+
+def test_refused_write_of_a_released_lease_is_recorded_when_the_kept_record_has_no_lease_field(box):
+    stored = box.gateway._assist_write(_job(box, "", **_SETTLED_BY_CANCEL))
+    assert "account_lease_released" not in stored
+    job = _job(
+        box,
+        "",
+        account_lease_released=True,
+        account_lease_cleanup_status="RELEASED",
+        **_SETTLED_BY_RECONCILE,
+    )
+    box.gateway._assist_write_current(TASK, job)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["status"] == stored["status"], record
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record

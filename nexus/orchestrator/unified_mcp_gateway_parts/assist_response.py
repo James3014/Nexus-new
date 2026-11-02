@@ -236,10 +236,36 @@ def _assist_settled_is_replaced(current: Mapping[str, Any], job: Mapping[str, An
     """Whether writing ``job`` would reopen the settled record ``current`` of the same job, or
     replace its outcome: no call settles a job and later unsettles it or changes its status, so
     such a write comes from a read made before another reconcile, cancel or query settled the
-    job. A write with the same settled status (a cancel recording a lease release) still lands."""
+    job. A write with the same settled status (a cancel recording a lease release) still lands,
+    unless it records a lease the record shows as released as not released: the claim is
+    released once, so that write comes from a call that found the claim already gone (#3144)."""
     return _assist_settled(current) and not (
-        _assist_settled(job) and job.get("status") == current.get("status")
+        _assist_settled(job)
+        and job.get("status") == current.get("status")
+        and not (
+            current.get("account_lease_released") is True
+            and job.get("account_lease_released") is not True
+        )
     )
+
+
+_ASSIST_LIVE_STATUSES = frozenset({"SUBMITTED", "RUNNING"})
+
+
+def _assist_held(job: Mapping[str, Any]) -> bool:
+    """Whether ``job`` is recorded as needing reconciliation."""
+    return job.get("status") == "UNKNOWN_REQUIRES_RECONCILE" or bool(
+        job.get("reconciliation_required")
+    )
+
+
+def _assist_held_is_reopened(current: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    """Whether writing ``job`` would put the record ``current`` of the same job, held for
+    reconciliation, back to SUBMITTED or RUNNING: once a cancel, query or reconcile held the
+    job, it leaves that state only by settling (reconcile, cancel, or a query that finishes
+    it), so such a write is a query's heartbeat from a read made before the job was held. A
+    held or settling write still lands (#3144)."""
+    return _assist_held(current) and job.get("status") in _ASSIST_LIVE_STATUSES
 
 
 def _terminate_provider_group(process: subprocess.Popen[str]) -> bool:
@@ -290,13 +316,27 @@ class _AssistResponseMixin(_ResponseBase):
         """Write ``job`` (with ``drop_process``, also unregister the task's provider) in one step
         under the lock, only while the record still belongs to ``job``; otherwise leave the
         record and the registered provider alone and return ``job``. A record of ``job`` that
-        another call settled since ``job`` was read is kept, and returned (#3076)."""
+        another call settled since ``job`` was read is kept, and returned (#3076); so is one
+        another call held for reconciliation, against a SUBMITTED or RUNNING write (#3144)."""
         with self._assist_lock:
             if self._assist_job_is_current(task_id, job):
                 if drop_process:
                     self._assist_processes.pop(task_id, None)
                 current = self._assist_read(task_id)
                 if current is not None and _assist_settled_is_replaced(current, job):
+                    if (
+                        job.get("account_lease_released") is True
+                        and current.get("account_lease_released") is not True
+                    ):
+                        # The caller released the job's lease after another call settled the
+                        # record without it: keep the outcome, record the release (#3144).
+                        current.update({
+                            "account_lease_released": True,
+                            "account_lease_cleanup_status": "RELEASED",
+                        })
+                        return self._assist_write(current)
+                    return current
+                if current is not None and _assist_held_is_reopened(current, job):
                     return current
                 return self._assist_write(job)
         return dict(job)
