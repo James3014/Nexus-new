@@ -64,6 +64,25 @@ def _gateway():
 # after SIGKILL, to show no live member before the cleanup counts as incomplete (#3076).
 _UNOWNED_GROUP_SETTLE_SECONDS = 2.0
 
+# #3164: the implicit default lane (cline, glm-5.2) of an assist submit or model probe
+# failed every launch once its authorisation expired, and it is not being renewed.  A
+# submit that names neither provider nor model is refused before any job record,
+# workspace or process unless this switch is exactly "1"; a caller that names a provider
+# or a model keeps its current behaviour.
+ASSIST_DEFAULT_LANE_ENABLED_ENV = "NEXUS_ASSIST_DEFAULT_LANE_ENABLED"
+ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT = (
+    "the default lane (cline, glm-5.2) is off because its authorisation has expired; "
+    "name a provider and model explicitly, or restore the lane and set "
+    f"{ASSIST_DEFAULT_LANE_ENABLED_ENV}=1 on the Gateway"
+)
+
+
+def assist_default_lane_refused(arguments: Mapping[str, Any], *keys: str) -> bool:
+    """True when every one of ``keys`` falls through to the default and the lane is off."""
+    if any(arguments.get(key) for key in keys):
+        return False
+    return os.environ.get(ASSIST_DEFAULT_LANE_ENABLED_ENV) != "1"
+
 
 class _AssistJobsMixin(_JobsBase):
     """Mixin base of ``UnifiedMCPGateway``; never instantiated on its own."""
@@ -101,6 +120,8 @@ class _AssistJobsMixin(_JobsBase):
         existing = self._assist_read(task_id)
         if existing is not None:
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        if assist_default_lane_refused(arguments, "provider", "preferred_worker", "model", "preferred_model"):
+            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         provider = str(arguments.get("provider") or arguments.get("preferred_worker") or "cline").strip().lower()
         model = str(arguments.get("model") or arguments.get("preferred_model") or "glm-5.2").strip()
         if provider != "cline":
