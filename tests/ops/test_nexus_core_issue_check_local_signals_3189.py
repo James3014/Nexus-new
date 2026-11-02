@@ -11,6 +11,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -42,11 +43,11 @@ def _load_module():
 
 class FakeProc:
     pid = 424243
-    returncode = 0
 
     def __init__(self, wait_action=None, running=True):
         self._wait_action = wait_action
         self._running = running
+        self.returncode = None if running else 0
 
     def poll(self):
         return None if self._running else 0
@@ -56,12 +57,16 @@ class FakeProc:
             action, self._wait_action = self._wait_action, None
             action()
         self._running = False
+        self.returncode = 0
         return 0
 
 
 def _stub(module, monkeypatch, popen):
     kills: list[tuple[int, int]] = []
     monkeypatch.setattr(module.subprocess, "Popen", popen)
+    # Stands in for argv_command.kill_group_if_exited: the child's exit, then its group's kill
+    # and reap (the kill there is not recorded here).
+    monkeypatch.setattr(module, "_group_stopped_if_exited", lambda proc: proc.wait() == 0)
     monkeypatch.setattr(module.os, "killpg", lambda pid, sig: kills.append((pid, sig)))
     return kills
 
@@ -258,7 +263,7 @@ def _kill_recorded(pids_file: Path, tmp: Path) -> None:
     for text in pids_file.read_text().split():
         pid = int(text)
         command = _command_of(pid)
-        if command and (str(tmp) in command or command.startswith("sleep ")):
+        if command and (str(tmp) in command or command == f"sleep {BOUND}"):
             try:
                 os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
@@ -470,6 +475,187 @@ def test_a_signal_inherited_as_ignored_stays_ignored(sandbox):
         stdout, _ = proc.communicate(timeout=30)
         assert proc.returncode == 2
         assert json.loads(stdout)["error_code"] == "RECEIPT_MISSING"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        _kill_recorded(sandbox["pids"], sandbox["tmp"])
+
+
+# --- residuals from the verification of #3211: cleanup under signals, group left by Core ---
+
+
+def test_a_signal_during_cleanup_is_held_until_the_cleanup_is_done(sentinel_handlers):
+    module = _load_module()
+    previous = module._raise_on_signals()
+    reached: list[str] = []
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            with module._signals_held():
+                os.kill(os.getpid(), signal.SIGTERM)
+                os.kill(os.getpid(), signal.SIGHUP)  # a second one: still held, first kept
+                reached.append("cleanup finished")
+        assert exit_info.value.code == 128 + signal.SIGTERM
+        assert reached == ["cleanup finished"]
+        # Nothing stays held: the next signal outside a held block raises at once.
+        with pytest.raises(SystemExit) as again:
+            os.kill(os.getpid(), signal.SIGQUIT)
+        assert again.value.code == 128 + signal.SIGQUIT
+    finally:
+        module._restore_signals(previous)
+    assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
+def test_a_handler_not_installed_from_python_is_left_in_place(monkeypatch, sentinel_handlers):
+    """getsignal() returns None for it, which signal.signal() could not restore (#3189)."""
+    module = _load_module()
+    real = signal.getsignal
+    monkeypatch.setattr(
+        module.signal, "getsignal", lambda s: None if s == signal.SIGHUP else real(s)
+    )
+    previous = module._raise_on_signals()
+    try:
+        assert signal.SIGHUP not in previous
+        assert real(signal.SIGHUP) == sentinel_handlers
+        assert real(signal.SIGTERM) != sentinel_handlers
+    finally:
+        module._restore_signals(previous)
+    assert all(real(s) == sentinel_handlers for s in SIGNALS)
+
+
+def test_a_failed_install_of_a_later_handler_restores_the_earlier_ones(
+    monkeypatch, sentinel_handlers
+):
+    module = _load_module()
+    real = signal.signal
+    failed: list[int] = []
+
+    def flaky(signum, handler):
+        if signum == signal.SIGHUP and not failed:
+            failed.append(signum)
+            raise ValueError("cannot install")
+        return real(signum, handler)
+
+    monkeypatch.setattr(module.signal, "signal", flaky)
+    with pytest.raises(ValueError):
+        module._raise_on_signals()
+    assert failed == [signal.SIGHUP]
+    assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
+FAKE_CERTIFY_LEAVES_GROUP_MEMBER = f"""#!/usr/bin/env python3
+import os, subprocess, sys
+from pathlib import Path
+
+if sys.argv[1] == "issue-init":
+    child = subprocess.Popen(["sleep", "{BOUND}"])
+    Path(os.environ["FAKE_PIDS"]).write_text(f"{{os.getpid()}} {{child.pid}}")
+sys.exit(1)
+"""
+
+FAKE_CERTIFY_FAILS = """#!/usr/bin/env python3
+import sys
+sys.exit(1)
+"""
+
+
+def _git_shim(sandbox, action: str) -> None:
+    """A ``git`` first on PATH that runs *action* before a ``worktree remove``."""
+    real_git = shutil.which("git")
+    assert real_git
+    marker = sandbox["tmp"] / "cleanup-started"
+    _executable(
+        sandbox["fakebin"] / "git",
+        f'#!/bin/sh\ncase "$*" in *"worktree remove"*) echo started > "{marker}"; {action};; esac\n'
+        f'exec "{real_git}" "$@"\n',
+    )
+
+
+def _registered_worktrees(sandbox) -> int:
+    return len(_git(sandbox["repo"], "worktree", "list").splitlines())
+
+
+def test_a_member_left_in_cores_group_is_stopped_when_core_exits(sandbox):
+    """Core exits first and leaves a process in its group: it does not run on (#3189)."""
+    certify = _executable(sandbox["tmp"] / "fake-certify", FAKE_CERTIFY_LEAVES_GROUP_MEMBER)
+    proc = _start(sandbox, "--certify-bin", str(certify))
+    try:
+        proc.communicate(timeout=30)
+        assert proc.returncode == 1
+        _assert_all_dead(_pids(sandbox))
+        assert _registered_worktrees(sandbox) == 1
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        _kill_recorded(sandbox["pids"], sandbox["tmp"])
+
+
+@pytest.mark.parametrize("twice", [False, True], ids=["one-signal", "second-signal"])
+@pytest.mark.parametrize("sig", SIGNALS)
+def test_a_signal_during_the_normal_cleanup_still_removes_the_worktree(sandbox, sig, twice):
+    certify = _executable(sandbox["tmp"] / "fake-certify", FAKE_CERTIFY_FAILS)
+    _git_shim(sandbox, "sleep 2")
+    proc = _start(sandbox, "--certify-bin", str(certify))
+    try:
+        _wait_for(sandbox["tmp"] / "cleanup-started")
+        os.kill(proc.pid, sig)
+        if twice:
+            time.sleep(0.2)
+            os.kill(proc.pid, signal.SIGTERM if sig != signal.SIGTERM else signal.SIGHUP)
+        stdout, _ = proc.communicate(timeout=30)
+        assert proc.returncode == 128 + sig
+        assert stdout == ""  # interrupted: no summary, as for any signal exit
+        assert _registered_worktrees(sandbox) == 1
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+
+def test_a_worktree_remove_that_did_not_finish_is_still_pruned(sandbox):
+    """Its git killed (a hangup to the whole terminal group): the entry is still pruned."""
+    certify = _executable(sandbox["tmp"] / "fake-certify", FAKE_CERTIFY_FAILS)
+    _git_shim(sandbox, "exit 129")
+    proc = _start(sandbox, "--certify-bin", str(certify))
+    proc.communicate(timeout=60)
+    assert proc.returncode == 1
+    assert _registered_worktrees(sandbox) == 1
+
+
+def test_sigterm_still_cleans_up_when_sighup_is_inherited_as_ignored(sandbox):
+    certify = _executable(sandbox["tmp"] / "fake-certify", FAKE_CERTIFY_SLOW)
+    cmd = [
+        sys.executable,
+        str(SCRIPT),
+        "--issue",
+        "7",
+        "--repo-root",
+        str(sandbox["repo"]),
+        "--cache-root",
+        str(sandbox["tmp"] / "cache"),
+        "--output-dir",
+        str(sandbox["tmp"] / "out"),
+        "--no-fetch",
+        "--certify-bin",
+        str(certify),
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        env=sandbox["env"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN),
+    )
+    try:
+        _wait_for(sandbox["pids"])
+        os.kill(proc.pid, signal.SIGTERM)
+        proc.communicate(timeout=30)
+        assert proc.returncode == 128 + signal.SIGTERM
+        _assert_all_dead(_pids(sandbox))
+        assert _registered_worktrees(sandbox) == 1
     finally:
         if proc.poll() is None:
             proc.kill()
