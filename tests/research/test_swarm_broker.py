@@ -2010,6 +2010,8 @@ def test_recovery_leaves_a_young_or_linked_registration_lock_alone(tmp_path: Pat
     outside.write_text("", encoding="utf-8")
     _age(outside)
     (git_dir / "HEAD.lock").symlink_to(outside)
+    # The link itself is old too: only the regular-file check leaves it alone.
+    os.utime(git_dir / "HEAD.lock", (1, 1), follow_symlinks=False)
     _age(index_lock)
     broker = SwarmBroker(controller)
 
