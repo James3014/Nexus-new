@@ -1560,21 +1560,44 @@ def _update_manifest_status(project_root: Path, task_name: str, commit_sha: str)
 
 
 def _cleanup_stale_swarm_locks(project_root: Path, ttl_minutes: int) -> int:
+    """Clear swarm locks older than `ttl_minutes`; returns how many were cleared.
+
+    A link is never followed. A `.nexus-swarm-*` lock is not removed here: the swarm is handed
+    to the broker's recovery, which resets it first and unlocks it only once that succeeds.
+    """
+    import fnmatch
+    import stat
     import time
 
-    lock_dir = project_root / ".nexus" / "locks"
-    # Tests also use .nexus-swarm-* directories directly
+    from nexus.research.swarm_broker import SwarmBroker
+
+    max_age_sec = ttl_minutes * 60
     count = 0
     # Pattern 1: .nexus/locks/swarm_*.lock
-    if lock_dir.exists():
-        for lock_file in lock_dir.glob("swarm_*.lock"):
-            if (time.time() - lock_file.stat().st_mtime) > (ttl_minutes * 60):
-                lock_file.unlink()
-                count += 1
-    # Pattern 2: .nexus-swarm-*/.swarm_lock (Used by some tests)
-    for swarm_dir in project_root.glob(".nexus-swarm-*"):
-        lock = swarm_dir / ".swarm_lock"
-        if lock.exists() and (time.time() - lock.stat().st_mtime) > (ttl_minutes * 60):
-            lock.unlink()
-            count += 1
+    no_follow_dir = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    lock_dir_fd = None
+    try:
+        nexus_fd = os.open(project_root / ".nexus", no_follow_dir)
+        try:
+            lock_dir_fd = os.open("locks", no_follow_dir, dir_fd=nexus_fd)
+        finally:
+            os.close(nexus_fd)
+    except OSError:
+        pass
+    if lock_dir_fd is not None:
+        try:
+            for name in os.listdir(lock_dir_fd):
+                if not fnmatch.fnmatchcase(name, "swarm_*.lock"):
+                    continue
+                info = os.stat(name, dir_fd=lock_dir_fd, follow_symlinks=False)
+                if stat.S_ISREG(info.st_mode) and time.time() - info.st_mtime > max_age_sec:
+                    os.unlink(name, dir_fd=lock_dir_fd)
+                    count += 1
+        finally:
+            os.close(lock_dir_fd)
+    # Pattern 2: .nexus-swarm-*/.swarm_lock, real swarm directories only
+    broker = SwarmBroker(project_root)
+    for swarm_dir in broker.swarm_dirs:
+        broker.mark_stale_lease(swarm_dir, max_age_sec)
+    count += len(broker.recover_failed_releases())
     return count
