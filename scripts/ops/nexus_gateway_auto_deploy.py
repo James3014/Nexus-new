@@ -95,6 +95,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -600,6 +601,11 @@ class Config:
         return self.state_dir / "probe-state"
 
     @property
+    def probe_candidate_file(self) -> Path:
+        """pid, start time and entrypoint of the running spare-probe candidate (#3199)."""
+        return self.state_dir / "probe-candidate.json"
+
+    @property
     def deferrals(self) -> Path:
         """Deferral episode log (#2227); kept out of receipts.jsonl so backoff,
         give-up counting and the drift checker only ever see real attempts."""
@@ -627,6 +633,99 @@ class Config:
 
 
 # --------------------------------------------------------------------------- host
+
+# Signals that stop the deployer from outside: launchd stopping the job, a
+# closed terminal or a dropped ssh session (#3199).
+TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+
+class DeployerTerminated(BaseException):
+    """SIGTERM/SIGHUP arrived while a child process group was running (#3199).
+
+    A ``BaseException`` like ``KeyboardInterrupt``: no ``except Exception``
+    turns it into an ordinary failed attempt, but every ``finally`` that stops
+    a child group still runs before the deployer exits.
+    """
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"terminated by signal {signum}")
+        self.signum = signum
+
+
+@contextlib.contextmanager
+def termination_raises() -> Iterator[None]:
+    """Turn SIGTERM/SIGHUP into ``DeployerTerminated`` inside the body (#3199).
+
+    Entered before a child starts, so the child's cleanup runs on a signal
+    too; the previous handlers come back on exit whatever happens.  Only the
+    first signal raises: a second one during that cleanup is absorbed so it
+    cannot cut the cleanup short.  Off the main thread no handler can be
+    installed; the body still runs, and its own cleanup still covers every
+    exception.  A signal inherited as ignored (``nohup``) or held by a
+    non-Python handler (``getsignal()`` is None) is left alone: no handler is
+    installed for it and nothing is restored.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    fired: List[int] = []
+
+    def _raise(signum: int, _frame: Any) -> None:
+        if fired:
+            return
+        fired.append(signum)
+        raise DeployerTerminated(signum)
+
+    previous: Dict[int, Any] = {}
+    try:
+        for signum in TERMINATION_SIGNALS:
+            current = signal.getsignal(signum)
+            if current is signal.SIG_IGN or current is None:
+                continue
+            previous[signum] = signal.signal(signum, _raise)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+class _CandidateProcess:
+    """A started candidate Gateway; calling it stops its whole process group."""
+
+    def __init__(self, proc: "subprocess.Popen[bytes]", log: Any) -> None:
+        self.proc, self.log = proc, log
+        self.pid = proc.pid
+
+    def __call__(self) -> None:
+        try:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.pid, signal.SIGTERM)
+            try:
+                self.proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(self.pid, signal.SIGKILL)
+                self.proc.wait(timeout=15)
+        except BaseException:
+            # Interrupted while waiting (e.g. a signal, #3199): never leave the group running.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(self.pid, signal.SIGKILL)
+            raise
+        finally:
+            self.log.close()
+
+
+def _kill_bounded_group(proc: "subprocess.Popen[str]") -> None:
+    """Kill a ``run_bounded`` group and abandon its pipes after a short grace."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(subprocess.TimeoutExpired, OSError, ValueError):
+        proc.communicate(timeout=2)
+    if proc.stdout is not None:
+        with contextlib.suppress(OSError):
+            proc.stdout.close()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=2)
 
 
 class Host:
@@ -659,30 +758,30 @@ class Host:
             check=False,
         )
 
+    # The wrapper is zsh syntax (``source``); tests run a plain command under /bin/sh.
+    shell = "/bin/zsh"
+
     def start(self, command: str, log_path: Path) -> Callable[[], None]:
-        """Start a candidate Gateway; return a function that stops it."""
+        """Start a candidate Gateway; return a callable (with ``pid``) that stops it."""
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log = open(log_path, "ab")  # noqa: SIM115 - closed by the returned stop()
-        proc = subprocess.Popen(  # noqa: S603 - fixed /bin/zsh wrapper, quoted paths
-            ["/bin/zsh", "-c", command],
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-        )
-
-        def stop() -> None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGTERM)
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait(timeout=15)
-            log.close()
-
-        return stop
+        proc: "Optional[subprocess.Popen[bytes]]" = None
+        try:
+            proc = subprocess.Popen(  # noqa: S603 - fixed /bin/zsh wrapper, quoted paths
+                [self.shell, "-c", command],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=log,
+                start_new_session=True,
+            )
+            return _CandidateProcess(proc, log)
+        except BaseException:
+            # Interrupted right after the start (#3199): stop the group before leaving.
+            if proc is None:
+                log.close()
+            else:
+                _CandidateProcess(proc, log)()
+            raise
 
     def reload_service(self, plist: Path, label: str) -> None:
         # The durable manager stays the single Gateway launchd effect owner.
@@ -714,30 +813,27 @@ class Host:
         waits for EOF, which a grandchild holding stdout can withhold forever.
         Here the whole group is killed and the pipes are abandoned after a
         short grace, raising ``TimeoutExpired``.  stderr is discarded.
+        A SIGTERM/SIGHUP while it runs (#3199) kills the group the same way and
+        raises ``DeployerTerminated``.
         """
-        proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-            text=True,
-            start_new_session=True,
-        )
-        try:
-            stdout, _ = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.communicate(timeout=2)
-            if proc.stdout is not None:
-                with contextlib.suppress(OSError):
-                    proc.stdout.close()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=2)
-            raise
-        return proc.returncode, stdout or ""
+        with termination_raises():
+            proc: "Optional[subprocess.Popen[str]]" = None
+            try:
+                proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
+                    argv,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                    text=True,
+                    start_new_session=True,
+                )
+                stdout, _ = proc.communicate(timeout=timeout)
+                return proc.returncode, stdout or ""
+            except BaseException:
+                if proc is not None:
+                    _kill_bounded_group(proc)
+                raise
 
     def tasks_in_flight(self, cfg: Config, live_plist: bytes) -> Dict[str, Any]:
         """Classify the live self-hosted tasks with the live deployment's own code (#2227).
@@ -931,6 +1027,43 @@ class Host:
             yield
         finally:
             lock.__exit__(None, None, None)
+
+    def process_identity(self, pid: int) -> Optional[Dict[str, Any]]:
+        """``{"pgid", "started", "command"}`` of a running process, else None (#3199)."""
+        try:
+            result = subprocess.run(  # noqa: S603 - fixed argv
+                ["ps", "-ww", "-o", "pgid=", "-o", "lstart=", "-o", "command=", "-p", str(pid)],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                env={**os.environ, "LC_ALL": "C"},
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        lines = result.stdout.strip().splitlines() if result.returncode == 0 else []
+        # pgid, then lstart as five words ("Mon Nov  2 13:05:12 2026"), then argv.
+        parts = lines[0].split(None, 6) if lines else []
+        if len(parts) < 7 or not parts[0].isdigit():
+            return None
+        return {"pgid": int(parts[0]), "started": " ".join(parts[1:6]), "command": parts[6]}
+
+    def stop_process_group(self, pgid: int) -> bool:
+        """SIGTERM a leftover group, then SIGKILL; True once it is gone (#3199)."""
+        for signum, grace in ((signal.SIGTERM, 10.0), (signal.SIGKILL, 5.0)):
+            try:
+                os.killpg(pgid, signum)
+            except ProcessLookupError:
+                return True
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline:
+                try:
+                    os.killpg(pgid, 0)
+                except ProcessLookupError:
+                    return True
+                time.sleep(0.1)
+        return False
 
     def free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -3441,6 +3574,71 @@ def remember_plist(cfg: Config, data: bytes) -> None:
     _atomic_write(cfg.known_plists, json.dumps({"sha256": hashes}).encode(), 0o600)
 
 
+def _remove_probe_state(cfg: Config, value: Any) -> None:
+    """Remove one recorded probe state dir, only a direct child of the probe root."""
+    if not isinstance(value, str) or not value:
+        return
+    path = Path(value)
+    if path.parent != cfg.probe_state_root or path.name in ("", ".", ".."):
+        return
+    if path.is_symlink():
+        return
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def sweep_probe_candidate(cfg: Config, host: Host) -> Optional[Dict[str, Any]]:
+    """Stop a spare-probe candidate an earlier, killed cycle left running (#3199).
+
+    Runs under the cycle lock, so no probe of this deployer is live.  The
+    record names the pid, its start time and the deployment entrypoint; the
+    group is signalled only when that pid still leads its own process group,
+    started at the recorded time and runs that entrypoint, so a reused pid or
+    the live Gateway is never touched (a port alone is never trusted).  When
+    the group is stopped, the process is gone or the identity does not match
+    (``NOT_OURS``: nothing is signalled, and a candidate whose identity cannot
+    be confirmed is left unattended, as before this sweep existed), the
+    recorded probe state dir and the record are removed.  Never raises: a
+    group that survives or a failure keeps the record for the next cycle.
+    """
+    path = cfg.probe_candidate_file
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        record = None if path.is_symlink() else _read_json_object(path)
+        record = record or {}
+        pid, started = record.get("pid"), record.get("started")
+        entrypoint = record.get("entrypoint")
+        if (
+            not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid <= 1
+            or not isinstance(started, str)
+            or not started
+            or not isinstance(entrypoint, str)
+            or not entrypoint.endswith(ENTRYPOINT)
+        ):
+            action = "RECORD_INVALID"
+        else:
+            identity = host.process_identity(pid)
+            if identity is None:
+                action = "GONE"
+            elif (
+                identity["pgid"] != pid
+                or identity["started"] != started
+                or entrypoint not in identity["command"]
+            ):
+                action = "NOT_OURS"
+            elif host.stop_process_group(pid):
+                action = "STOPPED"
+            else:
+                return {"action": "SURVIVED", "pid": pid}
+        _remove_probe_state(cfg, record.get("probe_state"))
+        path.unlink()
+    except Exception as exc:  # noqa: BLE001 - the sweep must never stop a cycle
+        return {"action": "SWEEP_FAILED", "reason": f"{type(exc).__name__}:{exc}"[:300]}
+    return {"action": action, "pid": pid if isinstance(pid, int) else None}
+
+
 @contextlib.contextmanager
 def _cycle_lock(cfg: Config) -> Iterator[bool]:
     import fcntl
@@ -3480,6 +3678,11 @@ def run_cycle(
     with _cycle_lock(cfg) as acquired:
         if not acquired:
             return {**status, "status": "BUSY"}
+        if not dry_run:
+            # Safety work like the journal below: runs even under HOLD.
+            swept = sweep_probe_candidate(cfg, host)
+            if swept is not None:
+                status["probe_sweep"] = swept
         ctx = _Cycle(cfg, host, prober, api_get, environ, tool_python or Path(sys.executable))
         ctx.fetch = fetch
         ctx.allow_in_flight = allow_in_flight
@@ -4277,21 +4480,59 @@ class _Cycle:
             core_digest=_core_digest_arg(core),
             rie=_rie_arg(receipt),
         )
-        stop = host.start(command, cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log")
-        try:
-            result = self.prober.probe(
-                port=port,
-                token=read_env_token(cfg.env_file),
-                commit=commit,
-                root=root,
-                python=python,
-                timeout=cfg.probe_timeout_seconds,
-                core=core if isinstance(core, dict) else {},
-            )
-        finally:
-            stop()
-            shutil.rmtree(probe_state, ignore_errors=True)
+        log = cfg.state_dir / "logs" / f"{receipt['attempt_id']}.probe.log"
+        # A SIGTERM/SIGHUP during the probe stops the candidate too (#3199).
+        with termination_raises():
+            stop = host.start(command, log)
+            recorded = False
+            try:
+                recorded = self.record_probe_candidate(stop, root, probe_state)
+                result = self.prober.probe(
+                    port=port,
+                    token=read_env_token(cfg.env_file),
+                    commit=commit,
+                    root=root,
+                    python=python,
+                    timeout=cfg.probe_timeout_seconds,
+                    core=core if isinstance(core, dict) else {},
+                )
+            finally:
+                stop()
+                shutil.rmtree(probe_state, ignore_errors=True)
+                if recorded:
+                    with contextlib.suppress(FileNotFoundError):
+                        cfg.probe_candidate_file.unlink()
         return {"port": port, "state_dir": str(probe_state), **result}
+
+    def record_probe_candidate(
+        self, stop: Callable[[], None], root: Path, probe_state: Path
+    ) -> bool:
+        """Record who the candidate is, for the next cycle's sweep (#3199).
+
+        Best effort, True when written: a test fake's bare ``stop`` has no
+        ``pid``, and an unreadable ``ps`` or a failed write leaves no record
+        (the signal path still cleans up).  A record the startup sweep kept
+        (a group that survived it) is never overwritten.
+        """
+        pid = getattr(stop, "pid", None)
+        if not isinstance(pid, int) or isinstance(pid, bool):
+            return False
+        if self.cfg.probe_candidate_file.exists() or self.cfg.probe_candidate_file.is_symlink():
+            return False
+        identity = self.host.process_identity(pid)
+        if identity is None:
+            return False
+        record = {
+            "pid": pid,
+            "started": identity["started"],
+            "entrypoint": str(root / ENTRYPOINT),
+            "probe_state": str(probe_state),
+        }
+        try:
+            _atomic_write(self.cfg.probe_candidate_file, json.dumps(record).encode(), 0o600)
+        except OSError:
+            return False
+        return True
 
     def attempt_effects(
         self, candidate: str, previous_plist: bytes, receipt: Dict[str, Any]
@@ -4996,4 +5237,8 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except DeployerTerminated as exc:
+        # Children are already stopped; exit like the default handler would ask.
+        raise SystemExit(128 + exc.signum) from None
