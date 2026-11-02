@@ -1569,15 +1569,23 @@ def _is_python_script(repo: Path, rel: str) -> bool:
     return first.startswith(b"#!") and b"python" in first
 
 
+def _ruff_env() -> dict[str, str]:
+    """Environment for ``python -m ruff`` in the candidate repository: no bytecode, and the
+    working directory kept off ``sys.path`` (``-m`` would otherwise import candidate content
+    named like the linter, #3234)."""
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONSAFEPATH"] = "1"
+    return env
+
+
 def _run_ruff(
     repo: Path, python: str, args: list[str], paths: list[str], timeout: float
 ) -> dict[str, Any]:
     argv = [python, "-m", "ruff", *args, *paths]
     out: dict[str, Any] = {"command": argv, "exit_code": None, "output": "", "status": "ok"}
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        proc = _run_reaping(argv, cwd=repo, env=env, timeout=timeout)
+        proc = _run_reaping(argv, cwd=repo, env=_ruff_env(), timeout=timeout)
     except subprocess.TimeoutExpired:
         out["status"] = "timeout"
         return out
@@ -1630,10 +1638,8 @@ def _materialize_base_tree(repo: Path, base: str, paths: list[str], dest: Path) 
 
 def _ruff_json(cwd: Path, python: str, paths: list[str], timeout: float) -> tuple[Any, str]:
     argv = [python, "-m", "ruff", "check", "--no-cache", "--output-format", "json", *paths]
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        proc = _run_reaping(argv, cwd=cwd, env=env, timeout=timeout)
+        proc = _run_reaping(argv, cwd=cwd, env=_ruff_env(), timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, "timeout"
     except (OSError, CandidateProcessSurvived):
@@ -1765,9 +1771,16 @@ def _run_green_lint(
     if not _python_available(python):
         codes.add("ENVIRONMENT_FAILURE")
         return report
-    probe = subprocess.run(
-        [python, "-m", "ruff", "--version"], cwd=str(repo), capture_output=True, check=False
-    )
+    # The availability probe runs in the candidate repository like the ruff calls below, so
+    # it goes through the same reaping runner and timeout, and the working directory stays
+    # off the module path so candidate content is not imported by it (#3234).
+    try:
+        probe = _run_reaping(
+            [python, "-m", "ruff", "--version"], cwd=repo, env=_ruff_env(), timeout=timeout
+        )
+    except (subprocess.TimeoutExpired, OSError, CandidateProcessSurvived):
+        codes.add("ENVIRONMENT_FAILURE")
+        return report
     if probe.returncode != 0:
         codes.add("ENVIRONMENT_FAILURE")
         return report
