@@ -2412,8 +2412,11 @@ def record_failed_turn(
     pre: dict[str, Any] | None,
     exit_code: int,
     force_dirty_reason: str | None = None,
+    interrupted_by: str | None = None,
 ) -> dict[str, Any]:
-    """Persist quarantine receipt + turn state for a non-zero DSH exit. Never reverts files."""
+    """Persist quarantine receipt + turn state for a non-zero DSH exit. Never reverts files.
+
+    ``interrupted_by`` names the signal that stopped the turn (#3202); it is recorded in both."""
     session_id = str(binding["session_id"])
     repo = Path(str(binding["repo_root"]))
     post = _worktree_snapshot(repo, pre["head"] if pre else None)
@@ -2467,6 +2470,8 @@ def record_failed_turn(
         "automatic_revert": False,
         "generated_at": generated_at,
     }
+    interrupted = {"interrupted_by_signal": interrupted_by} if interrupted_by else {}
+    body.update(interrupted)
     receipt = {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
     receipt_path = qdir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
     _atomic_write_json(receipt_path, receipt)
@@ -2480,6 +2485,7 @@ def record_failed_turn(
         dsh_exit_code=exit_code,
         repository=binding["repository"],
         issue_number=binding["issue_number"],
+        **interrupted,
     )
 
 
@@ -3947,6 +3953,89 @@ def _kill_dsh_group_and_reap(proc: subprocess.Popen, failures: list[str]) -> Non
         time.sleep(DSH_OUTPUT_POLL_SECONDS)
 
 
+# Signals that stop a start-phase turn (#3202). Python's default SIGTERM/SIGHUP action ends the
+# interpreter without running ``finally``: DSH's group (its own session) kept running and
+# writing to the operator's repository, and the turn was never recorded.
+DSH_TURN_STOP_SIGNALS = tuple(
+    sig
+    for sig in (
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+        getattr(signal, "SIGINT", None),
+    )
+    if sig is not None
+)
+DSH_TURN_INTERRUPTED = "DSH_TURN_INTERRUPTED"
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return str(signum)
+
+
+class DshTurnInterrupted(BaseException):
+    """Raised by ``_TurnSignals`` so the DSH group is killed and the turn recorded (#3202)."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+class _TurnSignals:
+    """Turn SIGTERM, SIGHUP and SIGINT into ``DshTurnInterrupted`` during a turn (#3202).
+
+    Installed before DSH is spawned and kept until the turn is recorded; the previous handlers
+    are restored on exit. A signal is only raised while armed (``arm``: DSH runs and is being
+    supervised); otherwise, while DSH is being spawned, its group killed or the turn recorded,
+    it is remembered in ``received`` and raised by the next ``arm``, so neither the spawn nor
+    the cleanup is cut short. Only the first signal counts; later ones are ignored. A signal
+    already ignored (``nohup``) stays ignored. Off the main thread nothing is installed."""
+
+    def __init__(self) -> None:
+        self.received: int | None = None
+        self._armed = False
+        self._raised = False
+        self._prior: dict[int, Any] = {}
+
+    def __enter__(self) -> "_TurnSignals":
+        for sig in DSH_TURN_STOP_SIGNALS:
+            previous = signal.getsignal(sig)
+            if previous == signal.SIG_IGN:
+                continue
+            try:
+                signal.signal(sig, self._handle)
+            except ValueError:  # not the main thread
+                break
+            self._prior[sig] = previous
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        for sig, previous in self._prior.items():
+            signal.signal(sig, previous)
+        self._prior.clear()
+
+    def _handle(self, signum: int, _frame: object) -> None:
+        if self.received is None:
+            self.received = signum
+        if self._armed:
+            self.disarm()
+            self._raised = True
+            raise DshTurnInterrupted(signum)
+
+    def arm(self) -> None:
+        """Raise a signal already received, else raise the next one when it comes."""
+        if self.received is None:
+            self._armed = True
+        elif not self._raised:
+            self._raised = True
+            raise DshTurnInterrupted(self.received)
+
+    def disarm(self) -> None:
+        self._armed = False
+
+
 def _run_dsh_supervised(
     argv: Sequence[str],
     *,
@@ -3956,6 +4045,7 @@ def _run_dsh_supervised(
     watchdog: NoProgressWatchdog | None,
     wall_clock_seconds: float | None = None,
     cleanup_failures: list[str] | None = None,
+    signals: _TurnSignals | None = None,
 ) -> tuple[int, list[str]]:
     """Run DSH writing its merged output to ``log_path``; stop it on no progress or past the
     wall clock.
@@ -3973,8 +4063,25 @@ def _run_dsh_supervised(
     held open ``DSH_OUTPUT_DRAIN_SECONDS`` after the kill by a process that left the group) is
     appended to ``cleanup_failures`` as a reason code, and a DSH exit code of 0 becomes
     ``DSH_TURN_CLEANUP_FAILED_EXIT``.
+    A SIGTERM, SIGHUP or SIGINT while DSH runs (``signals``, installed here for this call when
+    not given) kills and confirms the group the same way, then raises ``DshTurnInterrupted``
+    (#3202).
     Returns (exit code, no-progress reason codes); reasons are empty when not stopped for that.
     """
+    if signals is None:
+        with _TurnSignals() as own:
+            result = _run_dsh_supervised(
+                argv,
+                cwd=cwd,
+                env=env,
+                log_path=log_path,
+                watchdog=watchdog,
+                wall_clock_seconds=wall_clock_seconds,
+                cleanup_failures=cleanup_failures,
+                signals=own,
+            )
+            own.arm()  # a signal received during the cleanup is raised once it is done
+            return result
     refusal = _dsh_reaping_refusal()
     if refusal is not None:
         raise DshWorkflowError(DSH_REAPING_UNAVAILABLE, f"DSH was not started: {refusal}")
@@ -3982,6 +4089,8 @@ def _run_dsh_supervised(
     limit = DSH_TURN_WALL_CLOCK_SECONDS if wall_clock_seconds is None else wall_clock_seconds
     deadline = time.monotonic() + limit
     with log_path.open("wb") as sink:
+        # Not armed yet: a signal during the spawn is held until the try below, which has
+        # ``proc`` to clean up, arms ``signals``.
         proc = subprocess.Popen(
             list(argv),
             cwd=cwd,
@@ -3998,6 +4107,7 @@ def _run_dsh_supervised(
         eof = False
 
         def consume(data: bytes) -> None:
+
             nonlocal pending, reasons
             sink.write(data)
             sink.flush()
@@ -4038,6 +4148,7 @@ def _run_dsh_supervised(
         timed_out = False
         cleaned = False
         try:
+            signals.arm()  # from here a stop signal kills the group (finally) and is raised
             with selectors.DefaultSelector() as selector:
                 selector.register(fd, selectors.EVENT_READ)
                 outcome = pump(deadline, stop_on_exit=True, stop_on_no_progress=True)
@@ -4050,6 +4161,8 @@ def _run_dsh_supervised(
                         _signal_dsh_group(proc, signal.SIGKILL)  # DSH still runs: unreaped
                 # DSH has exited (or was sent SIGKILL): kill its group and confirm it empty,
                 # then reap DSH; then drain what is left: EOF comes once nothing holds the pipe.
+                # A stop signal from here on is held, not raised, so the cleanup runs whole.
+                signals.disarm()
                 cleaned = True
                 _kill_dsh_group_and_reap(proc, failures)
                 if pump(time.monotonic() + DSH_OUTPUT_DRAIN_SECONDS, stop_on_exit=False) == (
@@ -4057,6 +4170,7 @@ def _run_dsh_supervised(
                 ):
                     failures.append(DSH_OUTPUT_DRAIN_TIMEOUT)
         finally:
+            signals.disarm()
             if not cleaned:
                 # Interrupted before the group was killed. DSH still running is unreaped, so
                 # its group id is its own; one reaped elsewhere (ChildProcessError) is never
@@ -4214,70 +4328,80 @@ def _run_phase_turn(
         else None
     )
     cleanup_failures: list[str] = []
-    dsh_exit, no_progress_reasons = _run_dsh_supervised(
-        dsh_argv,
-        cwd=str(repo_root),
-        env=env,
-        log_path=log_path,
-        watchdog=watchdog,
-        cleanup_failures=cleanup_failures,
-    )
-    proc = argparse.Namespace(returncode=dsh_exit)
-    phase_wall_ms = int((time.monotonic() - phase_started) * 1000)
-
-    session_id: str | None = None
-    try:
-        session_id = _parse_created_goal_log(log_path, require_goal=False)["session_id"]
-    except DshWorkflowError:
-        session_id = None
-    # Canonical operation evidence is read for the observed session only, never for the
-    # synthetic unobserved fallback id assigned below.
-    canonical_agy_operations = (
-        read_canonical_agy_operations(log_path, session_id) if session_id is not None else None
-    )
-    binding: dict[str, Any] | None = None
-    binding_error: str | None = None
-    if session_id is not None:
+    # Held until the turn is recorded: a stop signal kills DSH's group, is recorded as an
+    # interrupted turn and ends the phase (#3202), and cannot cut the recording short.
+    with _TurnSignals() as signals:
+        interrupted: int | None = None
         try:
-            binding = build_binding_from_log(
+            dsh_exit, no_progress_reasons = _run_dsh_supervised(
+                dsh_argv,
+                cwd=str(repo_root),
+                env=env,
                 log_path=log_path,
-                repository=repository,
-                issue_number=args.issue,
-                repo_root=repo_root,
-                dsh_home=dsh_home,
-                phase=phase,
-                parent_session_id=parent,
-                goal_objective=args.goal_objective,
-                required_round_cap=1 if phase == "red" and not parent_has_goal else None,
+                watchdog=watchdog,
+                cleanup_failures=cleanup_failures,
+                signals=signals,
             )
-            # A red turn under a goal-bearing parent is told not to create a goal.
-            if phase == "red" and not parent_has_goal and binding["goal_id"] is None:
-                raise DshWorkflowError(
-                    "DSH_TRACKING_GOAL_NOT_OBSERVED", "red phase did not create a durable goal"
+        except DshTurnInterrupted as exc:
+            interrupted = exc.signum
+            dsh_exit, no_progress_reasons = 128 + exc.signum, []
+        proc = argparse.Namespace(returncode=dsh_exit)
+        phase_wall_ms = int((time.monotonic() - phase_started) * 1000)
+
+        session_id: str | None = None
+        try:
+            session_id = _parse_created_goal_log(log_path, require_goal=False)["session_id"]
+        except DshWorkflowError:
+            session_id = None
+        # Canonical operation evidence is read for the observed session only, never for the
+        # synthetic unobserved fallback id assigned below.
+        canonical_agy_operations = (
+            read_canonical_agy_operations(log_path, session_id) if session_id is not None else None
+        )
+        binding: dict[str, Any] | None = None
+        binding_error: str | None = None
+        if session_id is not None:
+            try:
+                binding = build_binding_from_log(
+                    log_path=log_path,
+                    repository=repository,
+                    issue_number=args.issue,
+                    repo_root=repo_root,
+                    dsh_home=dsh_home,
+                    phase=phase,
+                    parent_session_id=parent,
+                    goal_objective=args.goal_objective,
+                    required_round_cap=1 if phase == "red" and not parent_has_goal else None,
                 )
-            store_binding(root, binding)
-        except DshWorkflowError as exc:
-            binding_error = f"{exc.code}: {exc}"
-            binding = None
-    turn_subject = binding or {**subject, "session_id": session_id or ""}
-    forced: str | None = None
-    if session_id is None:
-        session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
-        turn_subject = {**subject, "session_id": session_id}
-        forced = "SESSION_NOT_OBSERVED"
-    if proc.returncode != 0 or forced or no_progress_reasons or cleanup_failures:
-        turn = record_failed_turn(
-            root,
-            turn_subject,
-            pre=pre_turn,
-            exit_code=EXIT_NO_PROGRESS if no_progress_reasons else proc.returncode,
-            # A process of the turn may still be running and writing (#3076).
-            force_dirty_reason=forced or (cleanup_failures[0] if cleanup_failures else None),
-        )
-    else:
-        turn = _write_turn_state(
-            root, session_id, TURN_OK, repository=repository, issue_number=args.issue
-        )
+                # A red turn under a goal-bearing parent is told not to create a goal.
+                if phase == "red" and not parent_has_goal and binding["goal_id"] is None:
+                    raise DshWorkflowError(
+                        "DSH_TRACKING_GOAL_NOT_OBSERVED", "red phase did not create a durable goal"
+                    )
+                store_binding(root, binding)
+            except DshWorkflowError as exc:
+                binding_error = f"{exc.code}: {exc}"
+                binding = None
+        turn_subject = binding or {**subject, "session_id": session_id or ""}
+        forced: str | None = None
+        if session_id is None:
+            session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
+            turn_subject = {**subject, "session_id": session_id}
+            forced = "SESSION_NOT_OBSERVED"
+        if proc.returncode != 0 or forced or no_progress_reasons or cleanup_failures:
+            turn = record_failed_turn(
+                root,
+                turn_subject,
+                pre=pre_turn,
+                exit_code=EXIT_NO_PROGRESS if no_progress_reasons else proc.returncode,
+                # A process of the turn may still be running and writing (#3076).
+                force_dirty_reason=forced or (cleanup_failures[0] if cleanup_failures else None),
+                interrupted_by=_signal_name(interrupted) if interrupted is not None else None,
+            )
+        else:
+            turn = _write_turn_state(
+                root, session_id, TURN_OK, repository=repository, issue_number=args.issue
+            )
     summary = {
         "schema": PHASE_RUN_SCHEMA,
         "session_id": session_id,
@@ -4297,6 +4421,13 @@ def _run_phase_turn(
         summary["binding_error"] = binding_error
     if cleanup_failures:
         summary["cleanup_reason_codes"] = cleanup_failures
+    if signals.received is not None:
+        # Stopped by a signal (#3202): while DSH ran (its turn recorded as failed with exit
+        # 128 + signal), or while it was cleaned up or recorded. No further phase runs.
+        summary["decision"] = "INTERRUPTED"
+        summary["reason_codes"] = [DSH_TURN_INTERRUPTED]
+        summary["interrupted_by_signal"] = _signal_name(signals.received)
+        return 128 + signals.received, summary
     if no_progress_reasons:
         summary["decision"] = "NO_PROGRESS"
         summary["reason_codes"] = no_progress_reasons
@@ -4468,6 +4599,8 @@ def _run_internal_red_gate(
 def _turn_stop_reason(code: int, run: dict[str, Any]) -> str | None:
     if run.get("schema") != PHASE_RUN_SCHEMA:
         return "PHASE_PREFLIGHT_BLOCKED"
+    if run.get("decision") == "INTERRUPTED":
+        return DSH_TURN_INTERRUPTED
     if run.get("decision") == "NO_PROGRESS":
         # The watchdog stopped DSH; DSH may have exited 0 on SIGTERM, so check this first.
         return "DSH_NO_PROGRESS"
