@@ -9,6 +9,8 @@ source lines are verbatim, except that ``_git``, ``get_account_pool_manager``,
 the gateway module by tests) and ``GatewayInputError``, ``TOOL_MANIFEST_REVISION``, ``_text``
 and ``AGY_MODEL_PROBE_PRINT_TIMEOUT`` (defined by the gateway) are resolved at call time
 through ``_gateway()``. Lease, lock and process state stays on the gateway instance.
+``_assist_write`` wraps the assist record write to drop a settled job's released-lease note
+(#3180).
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_jobs import (
     assist_default_lane_refused,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_settled,
     _terminate_provider_group,
     assist_workspace_parent,
 )
@@ -275,15 +278,36 @@ class _ModelProbeMixin(_ModelProbeBase):
                 return True
             try:
                 claim.release()
+                # AccountLeaseClaim.release() never raises; the steps that failed are kept on
+                # the claim (#3180). A failed release holds the job for reconciliation, which
+                # removes the receipt only once its flock is free; it is never noted here.
+                release_ok = not getattr(claim, "release_errors", ())
             except Exception:
+                release_ok = False
+            if not release_ok:
                 job["account_lease_released"] = False
                 job["account_lease_cleanup_status"] = "RELEASE_FAILED"
+                job["reconciliation_required"] = True
                 return False
-            if lease_hash:
-                released[task_id] = lease_hash
+            # Noted by the claim's own lease, not the caller's record (#3180).
+            claim_hash = getattr(claim, "lease_id_hash", None)
+            if claim_hash:
+                released[task_id] = claim_hash
         job["account_lease_released"] = True
         job["account_lease_cleanup_status"] = "RELEASED"
         return True
+
+    def _assist_write(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Every assist record write; a record written settled drops its task's released-lease
+        note, which a call of the job needs only until then: a later write of an unsettled
+        record of the job is refused (``_assist_write_current``) (#3180)."""
+        written = super()._assist_write(value)
+        if _assist_settled(written):
+            with self._assist_lock:
+                released = getattr(self, "_assist_released_leases", None)
+                if released:
+                    released.pop(str(written.get("task_id")), None)
+        return written
 
     def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None:
         with self._assist_lock:

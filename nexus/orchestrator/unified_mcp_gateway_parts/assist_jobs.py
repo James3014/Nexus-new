@@ -69,7 +69,9 @@ _UNOWNED_GROUP_SETTLE_SECONDS = 2.0
 # submit whose provider and model both resolve to empty (absent, or blank after the strip
 # the launch path applies) is refused before any job record, workspace or process unless
 # this switch is exactly "1"; a caller that names a provider or a model keeps its
-# current behaviour.
+# current behaviour.  #3171: while the switch is off, a request that names exactly the
+# default lane (provider cline and model glm-5.2, after the launch path's normalisation)
+# is refused the same way, and so is a retry of a stored job on that lane.
 ASSIST_DEFAULT_LANE_ENABLED_ENV = "NEXUS_ASSIST_DEFAULT_LANE_ENABLED"
 ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT = (
     "the default lane (cline, glm-5.2) is off because its authorisation has expired; "
@@ -78,13 +80,21 @@ ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT = (
 )
 
 
+# The model names that launch the default lane: the cline command prefixes a bare name.
+_ASSIST_DEFAULT_LANE_MODELS = frozenset({"glm-5.2", "cline-pass/glm-5.2"})
+
+
 def assist_default_lane_refused(provider: Any, model: Any) -> bool:
-    """True when the requested provider and model (each the value the launch path reads
-    before its default, so ``a or b`` chains included) are both empty after its strip,
-    and the default lane is off."""
-    if str(provider or "").strip() or str(model or "").strip():
+    """True when the default lane is off and the requested provider and model (each the
+    value the launch path reads before its default, so ``a or b`` chains included) are
+    either both empty after its strip, or exactly the default lane (#3171)."""
+    if os.environ.get(ASSIST_DEFAULT_LANE_ENABLED_ENV) == "1":
         return False
-    return os.environ.get(ASSIST_DEFAULT_LANE_ENABLED_ENV) != "1"
+    provider_name = str(provider or "").strip().lower()
+    model_name = str(model or "").strip()
+    if not provider_name and not model_name:
+        return True
+    return provider_name == "cline" and model_name in _ASSIST_DEFAULT_LANE_MODELS
 
 
 class _AssistJobsMixin(_JobsBase):
@@ -554,6 +564,9 @@ class _AssistJobsMixin(_JobsBase):
 
         provider = str(job.get("provider") or "cline").strip().lower()
         model = str(job.get("model") or "glm-5.2").strip()
+        if assist_default_lane_refused(provider, model):
+            # #3171: a stored job on the disabled default lane is not relaunched on it.
+            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider != "cline":
             raise _gateway().GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
         metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)

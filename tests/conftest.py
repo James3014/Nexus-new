@@ -570,6 +570,10 @@ def _assist_default_lane_on_for_existing_tests(monkeypatch):
     Tests that drive assist or model-probe mechanics through the implicit default
     lane keep running with it switched on; the default-deny tests ``delenv`` it
     themselves, which runs after this fixture.
+
+    #3171: so a new assist, model-probe or assist-retry test that expects the
+    default-off behaviour must ``monkeypatch.delenv`` the switch itself; without
+    that it silently runs with the default lane on.
     """
     monkeypatch.setenv("NEXUS_ASSIST_DEFAULT_LANE_ENABLED", "1")
 
