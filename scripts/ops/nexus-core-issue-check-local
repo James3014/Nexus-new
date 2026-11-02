@@ -130,7 +130,8 @@ def _raise_on_signals() -> dict[int, Any]:
     """Turn the terminating signals into SystemExit so the callers' cleanup executes.
 
     Returns the previous handlers to pass to ``_restore_signals``; empty off the main
-    thread, where handlers cannot be installed."""
+    thread, where handlers cannot be installed. A signal inherited as SIG_IGN (nohup, a
+    parent that ignores hangup) is left ignored and not returned, so nothing is restored."""
     if threading.current_thread() is not threading.main_thread():
         return {}
 
@@ -140,6 +141,8 @@ def _raise_on_signals() -> dict[int, Any]:
     previous: dict[int, Any] = {}
     try:
         for signum in _TERMINATING_SIGNALS:
+            if signal.getsignal(signum) == signal.SIG_IGN:
+                continue
             previous[signum] = signal.signal(signum, handler)
     except BaseException:
         _restore_signals(previous)
@@ -166,8 +169,9 @@ def _run_with_timeout(
     group cannot keep the wait open after the group is killed.
     """
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        # Handlers go in before the child exists, so no signal can land between the
-        # spawn and the cleanup; the restore is protected by its own try/finally.
+        # Handlers go in before the child exists, so a signal cannot land between Popen
+        # returning and the cleanup (a tiny window between Popen's fork and exec remains);
+        # the restore is protected by its own try/finally.
         previous = _raise_on_signals()
         try:
             proc: subprocess.Popen[Any] | None = None

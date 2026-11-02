@@ -290,6 +290,15 @@ if sys.argv[1] == "issue-init":
     time.sleep({BOUND})
 """
 
+FAKE_CERTIFY_BRIEF = """#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+
+if sys.argv[1] == "issue-init":
+    Path(os.environ["FAKE_PIDS"]).write_text(str(os.getpid()))
+    time.sleep(2)
+"""
+
 FAKE_CERTIFY_BINARY_OUTPUT = """#!/usr/bin/env python3
 import sys
 sys.stdout.buffer.write(b"caf\\xe9 \\xff\\xfe not utf-8\\n")
@@ -426,3 +435,43 @@ def test_non_utf8_core_output_is_a_local_error_not_a_verdict(sandbox):
     assert out["error_code"] == "RECEIPT_MISSING"
     log = (sandbox["tmp"] / "out" / "issue-7-check.log").read_text(encoding="utf-8")
     assert "not utf-8" in log
+
+
+def test_a_signal_inherited_as_ignored_stays_ignored(sandbox):
+    """Under nohup a hangup must not end a run that would have finished (exit 2 here)."""
+    certify = _executable(sandbox["tmp"] / "fake-certify", FAKE_CERTIFY_BRIEF)
+    cmd = [
+        sys.executable,
+        str(SCRIPT),
+        "--issue",
+        "7",
+        "--repo-root",
+        str(sandbox["repo"]),
+        "--cache-root",
+        str(sandbox["tmp"] / "cache"),
+        "--output-dir",
+        str(sandbox["tmp"] / "out"),
+        "--no-fetch",
+        "--certify-bin",
+        str(certify),
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        env=sandbox["env"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN),
+    )
+    try:
+        _wait_for(sandbox["pids"])
+        os.kill(proc.pid, signal.SIGHUP)
+        stdout, _ = proc.communicate(timeout=30)
+        assert proc.returncode == 2
+        assert json.loads(stdout)["error_code"] == "RECEIPT_MISSING"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        _kill_recorded(sandbox["pids"], sandbox["tmp"])
