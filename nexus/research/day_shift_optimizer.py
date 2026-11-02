@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
 
 from nexus.core.argv_command import run_reaping_process_group
-from nexus.research.swarm_broker import replace_text_in_dir
+from nexus.research.swarm_broker import read_text_in_dir, replace_text_in_dir
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,11 @@ class DayShiftOptimizer:
         if not target_path.exists():
             return {"status": "FAILED", "reason": "target_file_not_found"}
 
-        current_code = target_path.read_text(encoding="utf-8")
+        # Read through the opened swarm dirs and refused unless a regular file: a FIFO there
+        # would otherwise block the read.
+        current_code = read_text_in_dir(self.swarm_dir, self.target_file)
+        if current_code is None:
+            return {"status": "FAILED", "reason": "target_file_not_regular"}
         
         logger.info(f"☀️ [DayShift] Starting micro-optimization for {self.target_file} in {self.swarm_dir.name}")
         
