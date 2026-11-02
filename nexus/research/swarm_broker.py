@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _LOCK_NAME = ".swarm_lock"
 _SHARED_CACHE_DIRS = (".venv", "node_modules", ".ruff_cache")
 _DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+_SOURCE_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
 _NEW_FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 
 
@@ -111,10 +112,15 @@ def _write_fresh_entry(
 
 
 def _copy_file_into(src: Path, parent_fd: int, name: str) -> None:
-    with open(
-        os.open(src, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)), "rb"
-    ) as fsrc:
+    # O_NONBLOCK: opening a FIFO with no writer would otherwise block; the type is checked on
+    # the opened file, so an entry swapped after the directory scan is caught too.
+    with open(os.open(src, _SOURCE_FILE_FLAGS), "rb") as fsrc:
         info = os.fstat(fsrc.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            logger.warning(
+                "⚠️ [SwarmBroker] Refused scope source that is not a regular file: %s", src
+            )
+            return
         _write_fresh_entry(
             parent_fd,
             name,

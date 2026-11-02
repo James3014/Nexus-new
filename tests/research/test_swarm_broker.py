@@ -1101,3 +1101,66 @@ def test_sync_scope_removes_temporary_file_when_copy_fails(tmp_path: Path, monke
     leftovers = [p for p in swarm.rglob("*") if p.is_file()]
     assert leftovers == []
     assert (sandbox / "SENTINEL").exists()
+
+
+def _sync_in_thread(broker: SwarmBroker, swarm: Path, scope: list[str], fifo: Path, real_open):
+    import threading
+
+    errors: list[BaseException] = []
+
+    def run():
+        try:
+            broker.sync_scope(swarm, scope, required_configs=[])
+        except BaseException as exc:  # reported to the test thread
+            errors.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    finished = not worker.is_alive()
+    if not finished:
+        # Release the reader blocked on the FIFO so the thread ends.
+        os.close(real_open(fifo, os.O_WRONLY))
+        worker.join(timeout=5)
+    return finished, errors
+
+
+def test_sync_scope_refuses_a_fifo_named_in_the_scope(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    fifo = workspace / "pkg" / "pipe"
+    os.mkfifo(fifo)
+
+    finished, errors = _sync_in_thread(
+        SwarmBroker(workspace), swarm, ["pkg/pipe", "pkg/mod.py"], fifo, os.open
+    )
+
+    assert finished
+    assert errors == []
+    assert not (swarm / "pkg" / "pipe").exists()
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_refuses_a_file_swapped_for_a_fifo_after_the_scan(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    source = workspace / "pkg" / "mod.py"
+    real_open = os.open
+    swapped: list[bool] = []
+
+    def swap_then_open(path, *args, **kwargs):
+        if Path(os.fspath(path)) == source and not swapped:
+            source.unlink()
+            os.mkfifo(source)
+            swapped.append(True)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    finished, errors = _sync_in_thread(SwarmBroker(workspace), swarm, ["pkg"], source, real_open)
+    monkeypatch.setattr(os, "open", real_open)
+
+    assert swapped
+    assert finished
+    assert errors == []
+    assert not (swarm / "pkg" / "mod.py").exists()
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert (sandbox / "SENTINEL").exists()
