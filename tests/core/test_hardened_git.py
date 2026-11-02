@@ -759,3 +759,37 @@ def test_a_git_dir_is_self_contained_only_without_links_to_another_repository(en
         (git_dir / named).unlink()
     (git_dir / "refs" / "heads" / "linked").symlink_to(git_dir / "HEAD")
     assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def _separate_git_dir_repo(root: Path) -> tuple[Path, Path]:
+    work, git_dir = root / "work", root / "work.git"
+    work.mkdir()
+    _git(work, "init", "-q", f"--separate-git-dir={git_dir}")
+    (work / "notes.py").write_text("x = 1\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "base")
+    return work, git_dir
+
+
+def test_a_git_dir_outside_the_work_tree_runs_only_when_the_caller_made_it(env):
+    work, git_dir = _separate_git_dir_repo(env)
+
+    refused = hardened_git.run_hardened_git(work, "rev-parse", "HEAD", git_dir=git_dir)
+    accepted = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert accepted.returncode == 0
+
+
+def test_a_separate_git_dir_is_its_own_common_dir(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    elsewhere = env / "elsewhere.git"
+    _git(env, "init", "-q", "--bare", str(elsewhere))
+    _git(env, "--git-dir", str(elsewhere), "config", "hook.planted.command", "true")
+    (git_dir / "commondir").write_text(f"{elsewhere}\n", encoding="utf-8")
+
+    assert not hardened_git.repository_config_can_start_a_program(
+        work, git_dir=git_dir, separate_git_dir=True
+    )

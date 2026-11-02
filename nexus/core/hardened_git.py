@@ -86,10 +86,15 @@ def run_hardened_git(
     git_dir: Optional[Path] = None,
     text: bool = True,
     index_file: Optional[Path] = None,
+    separate_git_dir: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given, on the index
     file ``index_file`` when given; output is bytes when ``text`` is False); raises
-    ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped."""
+    ``subprocess.TimeoutExpired`` once the timed-out git has been killed and reaped.
+
+    ``separate_git_dir`` marks ``git_dir`` as one the caller created outside ``repo_dir``
+    (``git init --separate-git-dir``) at a path it chose itself, never one read from a
+    ``.git`` pointer; it is then pinned as its own common dir."""
     args = _with_subcommand_flags(args)
     empty = "" if text else b""
     common_dir = None
@@ -102,7 +107,9 @@ def run_hardened_git(
     if git_dir is not None and not git_dir.resolve().is_relative_to(Path(repo_dir).resolve()):
         # A linked worktree's admin dir: its registration is checked again and its common
         # dir pinned.
-        if linked_worktree_git_dir(repo_dir) == git_dir.resolve():
+        if separate_git_dir:
+            common_dir = git_dir.resolve()
+        elif linked_worktree_git_dir(repo_dir) == git_dir.resolve():
             try:
                 common_dir = _common_dir(git_dir.resolve())
             except (OSError, UnicodeDecodeError):
@@ -173,12 +180,20 @@ def config_names_a_repository_program(names: List[str]) -> bool:
     return False
 
 
-def repository_config_can_start_a_program(repo_dir: Path, git_dir: Optional[Path] = None) -> bool:
+def repository_config_can_start_a_program(
+    repo_dir: Path, git_dir: Optional[Path] = None, separate_git_dir: bool = False
+) -> bool:
     """True when the config of the repository at ``repo_dir`` names such a program, or cannot
     be read."""
     try:
         config = run_hardened_git(
-            repo_dir, "config", "--list", "--name-only", "--includes", git_dir=git_dir
+            repo_dir,
+            "config",
+            "--list",
+            "--name-only",
+            "--includes",
+            git_dir=git_dir,
+            separate_git_dir=separate_git_dir,
         )
     except subprocess.TimeoutExpired:
         return True

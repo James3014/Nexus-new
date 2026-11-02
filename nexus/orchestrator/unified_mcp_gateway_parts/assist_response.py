@@ -555,6 +555,13 @@ class _AssistResponseMixin(_ResponseBase):
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
+        # The lease release, the workspace removal and the probe evidence below happen before
+        # the final write, which is refused when another call settled the job meanwhile (#3144).
+        # They stay first: the release decides what is written (a probe whose release failed is
+        # held for reconciliation, and a settled record cannot be reopened later), and the claim
+        # is taken once, by whichever call reaches it first; a refused write that released it
+        # still records the release on the kept record (_assist_write_current). The removal and
+        # the evidence describe this provider, which has exited with its group gone.
         lease_cleanup_ok = self._release_assist_account_claim(task_id, job)
         if is_model_probe and job.get("account_lease_id_hash") and not lease_cleanup_ok:
             job.update({
@@ -565,9 +572,6 @@ class _AssistResponseMixin(_ResponseBase):
             })
         # The one removal path, which refuses an empty or foreign workspace_root (#3076).
         _remove_assist_workspace(job, lambda root: self._snapshot_workspace(root))
-        with self._assist_lock:
-            if self._assist_job_is_current(task_id, job):
-                self._assist_processes.pop(task_id, None)
         evidence = self._write_probe_evidence(job)
         if evidence is not None:
             job["probe_evidence_hash"] = evidence["evidence_hash"]
@@ -575,7 +579,14 @@ class _AssistResponseMixin(_ResponseBase):
             job["authentication_evidence"] = evidence["authentication_evidence"]
             identity = self._probe_evidence_identity(evidence)
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
-        return self._assist_write_current(task_id, job)
+        # The provider stays registered until its outcome is on disk, in the same locked step:
+        # unregistered earlier, a concurrent query or cancel would find no provider and a gone
+        # pid, record the job as PROCESS_LOST, and a cancel would settle it CANCELLED over the
+        # provider's own outcome (#3144). It is unregistered even when the write is refused:
+        # the provider has exited and its group is gone. A retry launched before this step owns
+        # the record and the registered provider, and both are left alone (#3076).
+        with self._assist_lock:
+            return self._assist_write_current(task_id, job, drop_process=True)
 
     _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d{1,9}(?:,(\d{1,9}))? \+\d{1,9}(?:,(\d{1,9}))? @@")
 
