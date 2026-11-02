@@ -71,7 +71,8 @@ def test_protected_workflows_keep_their_owner_signed_policies() -> None:
     assert _load("nexus-core-issue-completion.yml")["concurrency"] == {
         "group": (
             "nexus-core-issue-completion-${{ github.event.pull_request.number || "
-            "format('precheck-{0}', github.event.client_payload.head_sha) }}"
+            "format('precheck-{0}-{1}', github.event.client_payload.head_sha, "
+            "github.event.client_payload.issue_number) }}"
         ),
         "cancel-in-progress": True,
     }
@@ -103,3 +104,44 @@ def test_every_pr_workflow_is_classified() -> None:
         if isinstance(triggers, dict) and {"pull_request", "pull_request_target"} & set(triggers):
             pr_workflows.add(path.name)
     assert pr_workflows <= set(CHANGED) | set(UNTOUCHED)
+
+
+def _render_core_group(event: dict[str, Any]) -> str:
+    """Render the Core gate's group for one event: `number || format(...)` only."""
+    import re
+
+    group = _load("nexus-core-issue-completion.yml")["concurrency"]["group"]
+    match = re.fullmatch(
+        r"nexus-core-issue-completion-\$\{\{ github\.event\.pull_request\.number \|\| "
+        r"format\('([^']*)', ([^)]*)\) \}\}",
+        group,
+    )
+    assert match, group
+    number = (event.get("pull_request") or {}).get("number")
+    if number:
+        return f"nexus-core-issue-completion-{number}"
+    values = []
+    for arg in match.group(2).split(", "):
+        node: Any = event
+        assert arg.startswith("github.event."), arg
+        for key in arg.removeprefix("github.event.").split("."):
+            node = (node or {}).get(key)
+        values.append("" if node is None else str(node))
+    return "nexus-core-issue-completion-" + match.group(1).format(*values)
+
+
+def test_core_precheck_group_is_per_head_and_issue() -> None:
+    head = "a" * 40
+    issue_5 = _render_core_group({"client_payload": {"head_sha": head, "issue_number": 5}})
+    issue_7 = _render_core_group({"client_payload": {"head_sha": head, "issue_number": 7}})
+    again_5 = _render_core_group({"client_payload": {"head_sha": head, "issue_number": 5}})
+    other_head = _render_core_group({"client_payload": {"head_sha": "b" * 40, "issue_number": 5}})
+    # Two Issues on the same head never cancel each other; a repeat for the same
+    # head and Issue still supersedes the older run.
+    assert issue_5 != issue_7
+    assert issue_5 == again_5
+    assert issue_5 != other_head
+    assert issue_5 == f"nexus-core-issue-completion-precheck-{head}-5"
+    # The pull_request path is unchanged: one group per PR number.
+    pr = {"pull_request": {"number": 42}, "client_payload": {}}
+    assert _render_core_group(pr) == "nexus-core-issue-completion-42"

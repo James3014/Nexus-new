@@ -24,7 +24,8 @@ run-name: "${{ github.event_name == 'repository_dispatch' && format('Core preche
 # scripts/ops/nexus-core-precheck when an agent reports completion, runs the same
 # signed check early on main. issue-gate refuses a head that is not the tip of a
 # branch of this repository. Pull requests are still checked in full, exactly as
-# before; no receipt is reused. Each precheck head gets its own concurrency group.
+# before; no receipt is reused. Each precheck head and Issue gets its own concurrency
+# group, so prechecks of two Issues on the same head do not cancel each other.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -37,7 +38,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: nexus-core-issue-completion-${{ github.event.pull_request.number || format('precheck-{0}', github.event.client_payload.head_sha) }}
+  group: nexus-core-issue-completion-${{ github.event.pull_request.number || format('precheck-{0}-{1}', github.event.client_payload.head_sha, github.event.client_payload.issue_number) }}
   cancel-in-progress: true
 
 jobs:
@@ -66,9 +67,9 @@ jobs:
       head-sha: ${{ steps.gate.outputs.head-sha }}
     steps:
       - id: gate
-        uses: James3014/nexus-core/.github/actions/issue-gate@67427c5840cd41cd1cf11fff63b710c81a813755
+        uses: James3014/nexus-core/.github/actions/issue-gate@a161b34c334777eced7349cd38f67836bebe85bc
         with:
-          nexus-certify-ref: "67427c5840cd41cd1cf11fff63b710c81a813755"
+          nexus-certify-ref: "a161b34c334777eced7349cd38f67836bebe85bc"
           evidence-universe: trusted-config
           # Empty on pull requests (the action then uses the PR head and body marker).
           head-sha: ${{ github.event.client_payload.head_sha }}
@@ -93,7 +94,7 @@ jobs:
       # PR_ALREADY_CLOSED_SKIPPED: receipt-verify re-reads the live PR.
       pull-requests: read
     steps:
-      - uses: James3014/nexus-core/.github/actions/receipt-verify@67427c5840cd41cd1cf11fff63b710c81a813755
+      - uses: James3014/nexus-core/.github/actions/receipt-verify@a161b34c334777eced7349cd38f67836bebe85bc
         with:
           artifact-name: ${{ needs.run.outputs.artifact-name }}
           artifact-id: ${{ needs.run.outputs.artifact-id }}
@@ -103,4 +104,4 @@ jobs:
           base-sha: ${{ github.event.pull_request.base.sha || github.sha }}
           issue-number: ${{ needs.run.outputs.issue-number }}
           gate-outcome: ${{ needs.run.outputs.outcome }}
-          nexus-certify-ref: "67427c5840cd41cd1cf11fff63b710c81a813755"
+          nexus-certify-ref: "a161b34c334777eced7349cd38f67836bebe85bc"
