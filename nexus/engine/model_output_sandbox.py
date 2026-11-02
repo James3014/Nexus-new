@@ -271,12 +271,15 @@ def _restore_root_metadata(path: Path, recorded: os.stat_result) -> bool:
     git calls or cleanup of the root fail."""
 
     info = _root_entry(path)
-    if not _same_dir(info, recorded):
+    if info is None or not _same_dir(info, recorded):
         return False
     try:
         flags = getattr(recorded, "st_flags", None)
         if flags is not None and getattr(info, "st_flags", flags) != flags:
-            os.chflags(path, flags, follow_symlinks=False)  # first: uchg also blocks chmod
+            chflags = getattr(os, "chflags", None)  # BSD/macOS only
+            if chflags is None:
+                return False
+            chflags(path, flags, follow_symlinks=False)  # first: uchg also blocks chmod
         if stat.S_IMODE(info.st_mode) != stat.S_IMODE(recorded.st_mode):
             no_follow = os.chmod in os.supports_follow_symlinks
             os.chmod(path, stat.S_IMODE(recorded.st_mode), follow_symlinks=not no_follow)
