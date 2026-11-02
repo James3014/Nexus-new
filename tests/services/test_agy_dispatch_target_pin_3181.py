@@ -409,3 +409,115 @@ def test_retry_after_the_target_changed_between_attempts_is_refused(
     assert metas[-1]["status"] == "invalid_contract"
     assert metas[-1]["failure_kind"].endswith(":target_replaced")
     assert not marker.exists()
+
+
+# ---------------------------------------------------------------------------
+# host reads are observed directly (the fsmonitor marker above cannot fire:
+# the journal runs git through the hardened runner)
+# ---------------------------------------------------------------------------
+
+
+def _watch_host_reads(monkeypatch: pytest.MonkeyPatch, original: Path) -> list[str]:
+    """Record every journal git entry point called outside the original directory."""
+    journal = dispatch.direct_operation_journal
+    original_identity = _identity(original)
+    seen: list[str] = []
+
+    def wrap(name: str):
+        real = getattr(journal, name)
+
+        def inner(cwd, *args, **kwargs):
+            try:
+                same = _identity(Path(os.path.realpath(cwd))) == original_identity
+            except OSError:
+                same = False
+            if not same:
+                seen.append(name)
+            return real(cwd, *args, **kwargs)
+
+        return inner
+
+    for name in ("capture_source_baseline", "observed_changed_paths_since"):
+        monkeypatch.setattr(journal, name, wrap(name))
+    return seen
+
+
+@pytest.mark.parametrize("kind", ["replaced", "link"])
+def test_no_host_read_runs_in_a_target_replaced_during_the_attempt(
+    tmp_path, monkeypatch, seatbelt_on, capsys, kind
+):
+    coordinator, target = _dispatch_env(tmp_path, monkeypatch)
+    marker = tmp_path / "unused-marker"
+    seen = _watch_host_reads(monkeypatch, target)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        _replace_with_planted(target, marker, kind)
+        return 1, "", _QUOTA_STDERR, False, 1
+
+    dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    capsys.readouterr()
+    assert seen == []
+
+
+@pytest.mark.parametrize("kind", ["replaced", "link"])
+def test_no_host_read_runs_before_an_attempt_on_a_target_replaced_between_attempts(
+    tmp_path, monkeypatch, seatbelt_on, capsys, kind
+):
+    coordinator, target = _dispatch_env(tmp_path, monkeypatch)
+    marker = tmp_path / "unused-marker"
+    seen = _watch_host_reads(monkeypatch, target)
+
+    def hook(event):
+        if event.get("phase") == "EXECUTING" and event.get("attempts") == 2:
+            _replace_with_planted(target, marker, kind)
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        return 1, "", _QUOTA_STDERR, False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=hook,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code == 64
+    assert metas[-1]["failure_kind"].endswith(":target_replaced")
+    assert seen == []
+
+
+@pytest.mark.parametrize("kind", ["replaced", "link"])
+def test_successful_provider_exit_over_a_replaced_target_is_not_completed(
+    tmp_path, monkeypatch, seatbelt_on, capsys, kind
+):
+    coordinator, target = _dispatch_env(tmp_path, monkeypatch)
+    marker = tmp_path / "unused-marker"
+
+    def runner(*, env, prompt, cwd, mode, model, effort, timeout, write_boundary):
+        _replace_with_planted(target, marker, kind)
+        return 0, "done\n", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+    metas = _metas(capsys.readouterr().err)
+    assert code != 0
+    assert metas[-1]["status"] != "completed"
+    assert metas[-1]["status"] == "failed"
+    assert metas[-1]["failure_kind"] == dispatch.AGY_TARGET_REPLACED
+    assert metas[-1]["reconciliation_required"] is True
