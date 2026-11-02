@@ -1177,6 +1177,7 @@ def test_sandbox_read_roots_exclude_home_users_tmp_and_repo_root(tmp_path, monke
         "/usr/lib",
         "/usr/share/zoneinfo",
         "/usr/share/i18n",  # #2665: system iconv tables, read-only
+        "/usr/share/locale",  # #3157: system locale data for setlocale, read-only
         "/System/Library",
         # #2650: one Perl tool file and the system developer toolchain (xcrun git shim)
         "/usr/bin/shasum",
