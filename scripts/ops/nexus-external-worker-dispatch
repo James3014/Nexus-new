@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from importlib import import_module
 from pathlib import Path
@@ -165,6 +166,57 @@ def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
         proc.wait(timeout=5)
     except (subprocess.TimeoutExpired, OSError):
         pass
+
+
+class _SupervisorSignalError(BaseException):
+    """Raised by the background supervisor's signal handler (#3201)."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signum)
+
+
+_SUPERVISOR_SIGNALS = tuple(
+    sig for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if sig
+)
+# "received" is the first termination signal; "deferred" is set while the
+# supervisor settles an outcome, so the signal is recorded but not raised there.
+_supervisor_signal_state: dict[str, Any] = {"received": None, "deferred": False}
+
+
+def _supervisor_signal_handler(signum: int, _frame: Any) -> None:
+    if _supervisor_signal_state["received"] is not None:
+        return  # one-shot: a repeated signal must not interrupt the cleanup
+    _supervisor_signal_state["received"] = signum
+    if not _supervisor_signal_state["deferred"]:
+        raise _SupervisorSignalError(signum)
+
+
+def _defer_supervisor_signals() -> None:
+    _supervisor_signal_state["deferred"] = True
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return str(signum)
+
+
+def _process_group_alive(pgid: int, *, settle_seconds: float = 2.0) -> bool:
+    """Bounded check that a provider group we just killed has no members left."""
+
+    deadline = time.monotonic() + settle_seconds
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # a group exists that we cannot inspect: never call it gone
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.05)
 
 
 class _TrackedPopen(subprocess.Popen):
@@ -363,6 +415,63 @@ def _run_operation(
         return code
 
 
+def _run_operation_with_signal_cleanup(**kwargs: Any) -> int:
+    """Run the background supervisor with SIGTERM/SIGHUP turned into exceptions (#3201).
+
+    Installed before any provider starts and restored afterwards. A signal that
+    escapes before a provider exists still leaves a terminal journal record.
+    """
+
+    if threading.current_thread() is not threading.main_thread():
+        return _run_operation(**kwargs)
+    _supervisor_signal_state.update(received=None, deferred=False)
+    prior: dict[int, Any] = {}
+    try:
+        for sig in _SUPERVISOR_SIGNALS:
+            prior[sig] = signal.getsignal(sig)
+            signal.signal(sig, _supervisor_signal_handler)
+        return _run_operation(**kwargs)
+    except _SupervisorSignalError as exc:
+        _defer_supervisor_signals()
+        _terminalize_signal_before_provider(
+            str(kwargs["operation_id"]),
+            provider=str(kwargs["provider"]),
+            operation_root=Path(kwargs["operation_root"]),
+            signum=exc.signum,
+        )
+        return 128 + int(exc.signum)
+    finally:
+        for sig, handler in prior.items():
+            try:
+                signal.signal(sig, handler)
+            except (OSError, ValueError, TypeError):
+                pass
+
+
+def _terminalize_signal_before_provider(
+    operation_id: str, *, provider: str, operation_root: Path, signum: int
+) -> None:
+    """Record a pre-provider signal; leave anything that may have launched to reconcile."""
+
+    journal = _journal(provider, operation_root)
+    record = journal.read(operation_id)
+    if record.get("status") in _journal_module.TERMINAL_STATES:
+        return
+    if record.get("provider_pid") or record.get("phase") not in {None, "QUEUED", "STARTING"}:
+        return
+    journal.mark_terminal(
+        operation_id,
+        status="FAILED",
+        exit_code=None,
+        failure_kind=f"SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:{_signal_name(signum)}",
+        reconciliation={
+            "at": utc_now(),
+            "result": "NO_PROVIDER_PROCESS_STARTED",
+            "retry_permitted": False,
+        },
+    )
+
+
 def _canonical_path(value: str) -> str:
     """Real on-disk spelling of a directory (macOS volumes are case-insensitive)."""
     path = Path(value).expanduser().resolve()
@@ -506,6 +615,31 @@ def _run_operation_inner(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
 
     while True:
+        _supervisor_signal_state["deferred"] = False
+        pending_signal = _supervisor_signal_state["received"]
+        if pending_signal is not None:
+            # #3201: a signal recorded while the previous attempt settled stops
+            # the supervisor before it starts another provider.
+            try:
+                account_adapter.release(binding)
+            finally:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=None,
+                    failure_kind=(
+                        f"SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:{_signal_name(pending_signal)}"
+                    ),
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "NO_PROVIDER_PROCESS_STARTED",
+                        "retry_permitted": False,
+                    },
+                )
+            return 128 + int(pending_signal)
         attempts += 1
         try:
             command = adapter.compile(request, binding=binding)
@@ -602,6 +736,7 @@ def _run_operation_inner(
         def _fail_closed_after_start(exc: BaseException) -> int:
             """Kill the provider group, then record an unknown outcome; never release."""
 
+            _defer_supervisor_signals()
             hold = getattr(account_adapter, "hold_unknown_outcome", None)
             if proc is not None:
                 _kill_and_reap(proc)
@@ -635,6 +770,80 @@ def _run_operation_inner(
                     file=sys.stderr,
                 )
             return 1
+
+        def _settle_supervisor_signal(
+            sig_exc: _SupervisorSignalError, child: subprocess.Popen[bytes]
+        ) -> int:
+            """#3201: stop the provider group, then settle the lease like a wall timeout.
+
+            Python's default SIGTERM/SIGHUP action ends the supervisor without any
+            cleanup, which left the provider (own session) running with no time
+            limit and the journal non-terminal. Every wait here is bounded.
+            """
+
+            sig_name = _signal_name(sig_exc.signum)
+            if child.returncode is None:
+                _kill_and_reap(child)
+            provider_alive_after = _process_group_alive(child.pid)
+            hold = getattr(account_adapter, "hold_unknown_outcome", None)
+            hold_failed = False
+            if hold is not None:
+                try:
+                    hold(binding)
+                except BaseException as hold_exc:
+                    hold_failed = True
+                    print(
+                        f"ERROR UNKNOWN_OUTCOME_HOLD_FAILED:{type(hold_exc).__name__}",
+                        file=sys.stderr,
+                    )
+            failure = f"SUPERVISOR_SIGNAL_AFTER_PROVIDER_START:{sig_name}"
+            if provider_alive_after:
+                # Never terminal and never released while the group may still run.
+                journal.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    failure_kind=failure,
+                    provider_process_state="RUNNING",
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "SUPERVISOR_SIGNAL_PROVIDER_STILL_RUNNING",
+                        "provider_alive_after": True,
+                        "retry_permitted": False,
+                    },
+                )
+                return 128 + int(sig_exc.signum)
+            if hold is not None:
+                account_release = (
+                    "LEASE_HOLD_FAILED" if hold_failed else "HELD_UNKNOWN_OUTCOME_PROVIDER_STOPPED"
+                )
+            else:
+                account_release = "RELEASED"
+            if not hold_failed:
+                try:
+                    account_adapter.release(binding)
+                except BaseException:
+                    account_release = "RELEASE_FAILED"
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN",
+                exit_code=None,
+                failure_kind=failure,
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                account_alias_hash=binding.account_alias_hash,
+                lease_id_hash=binding.lease_id_hash,
+                provider_process_state="EXITED",
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "PROVIDER_STOPPED_ON_SUPERVISOR_SIGNAL",
+                    "provider_alive_after": False,
+                    "retry_permitted": False,
+                    "account_release": account_release,
+                },
+            )
+            return 128 + int(sig_exc.signum)
 
         started_children: list[subprocess.Popen[bytes]] = []
         run_tag = secrets.token_hex(16) if codex_home is not None else None
@@ -736,7 +945,20 @@ def _run_operation_inner(
                         last_sizes = sizes
                         last_heartbeat = now
                     time.sleep(0.25)
+                # The provider exited or was stopped: settle without interruption.
+                _defer_supervisor_signals()
         except BaseException as exc:
+            _defer_supervisor_signals()
+            if isinstance(exc, _SupervisorSignalError):
+                signalled = proc
+                if (
+                    signalled is None
+                    and started_children
+                    and started_children[0].returncode is None
+                ):
+                    signalled = started_children[0]
+                if signalled is not None:
+                    return _settle_supervisor_signal(exc, signalled)
             if proc is None and started_children and started_children[0].returncode is None:
                 # #2389 item 4: Popen raised after the fork and the child was not
                 # reaped, so it may be running. For every adapter: kill its group,
@@ -1035,7 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
     require_free = bool(args.require_free or not args.allow_paid_model)
 
     if args.operation_run:
-        return _run_operation(
+        return _run_operation_with_signal_cleanup(
             operation_id=args.operation_run,
             provider=provider,
             model=model,
