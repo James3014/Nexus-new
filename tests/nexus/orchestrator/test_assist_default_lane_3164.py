@@ -291,3 +291,49 @@ def test_switch_off_still_replays_a_stored_model_probe(box, monkeypatch) -> None
     assert replay["structuredContent"]["status"] == "FAILED"
     assert gateway._assist_read("lane-probe-8")["job_id"] == stored["job_id"]
     assert len(versions) == 2 and launches == []
+
+
+@pytest.mark.parametrize("blank", [{"provider": "  "}, {"provider": "\t", "model": " "}])
+def test_a_blank_probe_provider_without_model_is_the_default_lane(box, blank) -> None:
+    gateway, state, launches = box
+    assert _error(gateway, "nexus_model_probe", _probe("lane-probe-9", **blank)).startswith(
+        PROBE_BLOCKER
+    )
+    assert launches == []
+    assert _no_job_written(state)
+
+
+def test_a_blank_probe_provider_with_a_model_keeps_not_registered(box) -> None:
+    gateway, state, launches = box
+    assert (
+        _error(gateway, "nexus_model_probe", _probe("lane-probe-10", provider="  ", model="m1"))
+        == "ASSIST_PROVIDER_NOT_REGISTERED"
+    )
+    assert launches == []
+    assert _no_job_written(state)
+
+
+def _no_cline_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def resolve(provider: str, **_: Any) -> str:
+        raise ValueError("provider_binary_not_found")
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", resolve)
+
+
+def test_an_implicit_probe_without_executable_reports_the_default_lane(box, monkeypatch) -> None:
+    gateway, state, launches = box
+    _no_cline_executable(monkeypatch)
+    assert _error(gateway, "nexus_model_probe", _probe("lane-probe-11")).startswith(PROBE_BLOCKER)
+    assert launches == []
+    assert _no_job_written(state)
+
+
+def test_switch_on_an_implicit_probe_without_executable_stays_unavailable(box, monkeypatch) -> None:
+    gateway, _state, launches = box
+    _no_cline_executable(monkeypatch)
+    monkeypatch.setenv(SWITCH, "1")
+    assert (
+        _error(gateway, "nexus_model_probe", _probe("lane-probe-12"))
+        == "ASSIST_PROVIDER_UNAVAILABLE"
+    )
+    assert launches == []

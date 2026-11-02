@@ -295,10 +295,13 @@ class _ModelProbeMixin(_ModelProbeBase):
 
     def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[tuple[str, str]]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
+        # #3164: decided before the provider lookup, so the default lane reports its own
+        # reason; the refusal itself is raised after the replay of an existing job below.
+        default_lane_refused = assist_default_lane_refused(arguments.get("provider"), arguments.get("model"))
         metadata, executable = self._provider_executable(provider)
-        if not metadata:
+        if not metadata and not default_lane_refused:
             raise _gateway().GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
-        if not executable:
+        if not executable and not default_lane_refused:
             raise _gateway().GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
         model = str(arguments.get("model") or metadata.get("default_model") or "").strip()
         requested_model = model
@@ -317,8 +320,9 @@ class _ModelProbeMixin(_ModelProbeBase):
             if existing.get("probe_semantics_hash") != semantics:
                 raise _gateway().GatewayInputError("MODEL_PROBE_TASK_ID_CONFLICT")
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
-        if assist_default_lane_refused(arguments.get("provider"), arguments.get("model")):
-            # #3164: refuse the implicit default lane before the version preflight and the job record.
+        if default_lane_refused or not executable:
+            # #3164: refuse the implicit default lane before the version preflight and the job
+            # record (a missing executable was refused above unless the default lane was).
             raise _gateway().GatewayInputError(f"MODEL_PROBE_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider == "agy" and agy_pool_stopped():
             # #2998: refuse before the version preflight, the job record and the lease.
