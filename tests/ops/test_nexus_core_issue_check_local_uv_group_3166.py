@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import os
 import signal
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,12 +27,13 @@ def _load_module():
 
 class FakeProc:
     pid = 424242
-    returncode = 0
 
     def __init__(self, wait_action, running=True):
         self._wait_action = wait_action
         self._running = running
         self.reaped = False
+        self.hung = False
+        self.returncode = None if running else 0
 
     def poll(self):
         return None if self._running else 0
@@ -42,13 +44,33 @@ class FakeProc:
             action()
         self._running = False
         self.reaped = True
+        self.returncode = 0
         return 0
+
+    def exited(self):
+        """One poll of the run's wait loop, standing in for argv_command.kill_group_if_exited:
+        True once the child has exited (its group killed, then reaped). A TimeoutExpired wait
+        action makes the child hang until its group is killed."""
+        if self.hung:
+            return False
+        try:
+            self.wait()
+        except subprocess.TimeoutExpired:
+            self.hung = True
+            return False
+        return True
 
 
 def _stub(module, monkeypatch, proc):
     kills: list[tuple[int, int]] = []
+
+    def killpg(pid, sig):
+        kills.append((pid, sig))
+        proc.hung = False
+
     monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **k: proc)
-    monkeypatch.setattr(module.os, "killpg", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(module.os, "killpg", killpg)
+    monkeypatch.setattr(module, "_group_stopped_if_exited", lambda p: p.exited())
     return kills
 
 
@@ -105,8 +127,6 @@ def test_a_finished_child_group_is_not_signalled(tmp_path, monkeypatch):
 
 def test_timeout_still_kills_once_and_fails_closed(tmp_path, monkeypatch):
     module = _load_module()
-    import subprocess
-
     proc = FakeProc(_raiser(subprocess.TimeoutExpired("uv", 5)))
     kills = _stub(module, monkeypatch, proc)
     with pytest.raises(module.LocalCheckError) as err:

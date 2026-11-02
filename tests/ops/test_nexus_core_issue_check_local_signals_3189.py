@@ -506,6 +506,26 @@ def test_a_signal_during_cleanup_is_held_until_the_cleanup_is_done(sentinel_hand
     assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
 
 
+def test_a_signal_while_the_group_is_stopped_is_held_until_the_child_is_reaped(
+    tmp_path, monkeypatch, sentinel_handlers
+):
+    module = _load_module()
+    proc = FakeProc(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    kills = _stub(module, monkeypatch, lambda *a, **k: proc)
+
+    def killpg_then_signal(pid, sig):
+        kills.append((pid, sig))
+        os.kill(os.getpid(), signal.SIGTERM)  # arrives while the group is being stopped
+
+    monkeypatch.setattr(module.os, "killpg", killpg_then_signal)
+    with pytest.raises(SystemExit) as exit_info:
+        _run(module, tmp_path)
+    assert exit_info.value.code == 128 + signal.SIGTERM
+    assert kills == [(proc.pid, signal.SIGKILL)]
+    assert proc.returncode == 0  # the stop ran to the reap before the signal was raised
+    assert all(signal.getsignal(s) == sentinel_handlers for s in SIGNALS)
+
+
 def test_a_handler_not_installed_from_python_is_left_in_place(monkeypatch, sentinel_handlers):
     """getsignal() returns None for it, which signal.signal() could not restore (#3189)."""
     module = _load_module()
