@@ -24,6 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from nexus.core.contained_write import PathContainmentError, read_bytes_in_root
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
     repository_git_dir,
@@ -1092,6 +1093,7 @@ def _run_codex_candidate(
             sealing = seal_shadow_candidate(source, git_dir=_shadow_git_dir(source))
             changed_files = sealing["changed_files"]
             oversized_untracked = sealing["oversized_untracked_files"]
+            refused_untracked = sealing["refused_untracked_files"]
 
             commands = _codex_command_strings(cp.stdout)
             forbidden = sorted({
@@ -1100,7 +1102,11 @@ def _run_codex_candidate(
                 if any(pattern.search(command) for pattern in _FORBIDDEN_SHADOW_COMMANDS)
             })
             protocol_valid = (
-                cp.returncode == 0 and bool(result) and not forbidden and not oversized_untracked
+                cp.returncode == 0
+                and bool(result)
+                and not forbidden
+                and not oversized_untracked
+                and not refused_untracked
             )
             return (
                 {
@@ -1123,6 +1129,7 @@ def _run_codex_candidate(
                     "diff_gzip_base64": sealing["diff_gzip_base64"],
                     "untracked_files": sealing["untracked_files"],
                     "oversized_untracked_files": oversized_untracked,
+                    "refused_untracked_files": refused_untracked,
                     "observed_commands": list(commands),
                     "forbidden_commands": forbidden,
                     "protocol_valid": protocol_valid,
@@ -1428,11 +1435,22 @@ def seal_shadow_candidate(
 
     untracked_rows: list[dict[str, Any]] = []
     oversized_untracked: list[str] = []
+    refused_untracked: list[str] = []
     for rel in untracked_paths:
         file_path = source / rel
-        if not file_path.is_file():
+        if file_path.is_symlink() and file_path.is_dir():
+            # A link to a directory carries no bytes and is never read: skipped, as before.
             continue
-        data = file_path.read_bytes()
+        if not (file_path.is_symlink() or file_path.is_file()):
+            continue
+        try:
+            # Never through a link, at the file or on the way to it, and never a hard link:
+            # bytes from outside the copy must not be sealed into the receipt (#3130). A file
+            # link, a dangling link and a hard link are refused.
+            data = read_bytes_in_root(source, rel)
+        except PathContainmentError:
+            refused_untracked.append(rel)
+            continue
         row: dict[str, Any] = {
             "path": rel,
             "sha256": _sha256_bytes(data),
@@ -1463,8 +1481,9 @@ def seal_shadow_candidate(
         "diff_gzip_base64": base64.b64encode(gzip.compress(diff_bytes, mtime=0)).decode("ascii"),
         "untracked_files": untracked_rows,
         "oversized_untracked_files": oversized_untracked,
+        "refused_untracked_files": sorted(refused_untracked),
         "out_of_scope_paths": sorted(out_of_scope),
-        "scope_valid": not out_of_scope and not oversized_untracked,
+        "scope_valid": not out_of_scope and not oversized_untracked and not refused_untracked,
     }
 
 
@@ -1899,11 +1918,12 @@ def _run_agy_candidate(
             )
             extra_checks = None
             if not sealing["scope_valid"]:
-                reason = (
-                    "SCOPE_REJECTED"
-                    if sealing["out_of_scope_paths"]
-                    else "OVERSIZED_ARTIFACT_REJECTED"
-                )
+                if sealing["out_of_scope_paths"]:
+                    reason = "SCOPE_REJECTED"
+                elif sealing["refused_untracked_files"]:
+                    reason = "LINKED_ARTIFACT_REJECTED"
+                else:
+                    reason = "OVERSIZED_ARTIFACT_REJECTED"
                 extra_checks = {"valid": False, "reason": reason}
             elif record is not None and isinstance(record.get("observed_changed_paths"), list):
                 journal_paths = sorted(str(path) for path in record["observed_changed_paths"])
