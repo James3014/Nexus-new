@@ -7,6 +7,7 @@ marker file under tmp_path.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -194,6 +195,84 @@ def test_seal_reads_a_repository_whose_remaining_programs_are_switched_off(sandb
 
     assert sealing["changed_files"] == ["f.txt", "new.txt"]
     assert _fired(markers) == []
+
+
+def test_seal_does_not_read_untracked_links_into_the_receipt(sandbox: Path) -> None:
+    # #3130 item 4: an untracked link (or hard link) in the shadow checkout is refused,
+    # never read, so bytes from outside the checkout are not sealed into the receipt.
+    outside = sandbox / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_bytes(b"host-secret-bytes")
+    source = sandbox / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    (source / "f.txt").write_text("a\n", encoding="utf-8")
+    _git(source, "add", "f.txt")
+    _git(source, "commit", "-qm", "base")
+    (source / "new.py").write_text("print('ok')\n", encoding="utf-8")
+    (source / "leak.txt").symlink_to(secret)
+    os.link(secret, source / "hard.txt")
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert [row["path"] for row in sealing["untracked_files"]] == ["new.py"]
+    assert sealing["refused_untracked_files"] == ["hard.txt", "leak.txt"]
+    assert sealing["scope_valid"] is False
+    secret_sha = hashlib.sha256(b"host-secret-bytes").hexdigest()
+    assert all(row["sha256"] != secret_sha for row in sealing["untracked_files"])
+
+
+def test_seal_skips_untracked_directory_links(sandbox: Path) -> None:
+    # A link to a directory carries no bytes: it is skipped as before #3130 item 4, keeps the
+    # scope valid, and nothing under its target is sealed (test-tool temp-dir links and
+    # agent-made virtualenv links are real producers).
+    outside = sandbox / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_bytes(b"host-secret-bytes")
+    source = sandbox / "source"
+    (source / "pkg").mkdir(parents=True)
+    _git(source, "init", "-q")
+    (source / "pkg" / "f.txt").write_text("a\n", encoding="utf-8")
+    _git(source, "add", "pkg/f.txt")
+    _git(source, "commit", "-qm", "base")
+    (source / "new.py").write_text("print('ok')\n", encoding="utf-8")
+    (source / "outdir-current").symlink_to(outside, target_is_directory=True)
+    (source / "pkgdir").symlink_to("pkg", target_is_directory=True)
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert sorted(sealing["changed_files"]) == ["new.py", "outdir-current", "pkgdir"]
+    assert [row["path"] for row in sealing["untracked_files"]] == ["new.py"]
+    assert sealing["refused_untracked_files"] == []
+    assert sealing["scope_valid"] is True
+    secret_sha = hashlib.sha256(b"host-secret-bytes").hexdigest()
+    assert all(row["sha256"] != secret_sha for row in sealing["untracked_files"])
+
+
+def _plant_outside_file_link(sandbox: Path, cwd: Path) -> None:
+    outside = sandbox / "outside"
+    outside.mkdir(exist_ok=True)
+    (outside / "secret.txt").write_bytes(b"host-secret-bytes")
+    (cwd / "leak.txt").symlink_to(outside / "secret.txt")
+
+
+def test_accept_edits_candidate_with_an_untracked_file_link_is_linked_artifact_rejected(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+        _plant_outside_file_link(sandbox, cwd)
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    assert receipt["refused_untracked_files"] == ["leak.txt"]
+    assert receipt["status"] == "LINKED_ARTIFACT_REJECTED"
+    assert receipt["valid"] is False
 
 
 def test_shadow_git_dir_lies_outside_the_agent_write_root(sandbox: Path) -> None:
@@ -440,3 +519,46 @@ def test_codex_candidate_seal_ignores_a_rewritten_git_pointer(
 
     assert _fired(markers) == []
     assert receipt["changed_files"] == ["f.txt", "planted/"]
+
+
+def test_codex_candidate_with_an_untracked_file_link_is_protocol_invalid(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    codex = sandbox / "codex"
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    binding = {
+        "strong_online": {
+            "codex_binary": str(codex),
+            "codex_cli": "codex-cli 0.0.0",
+            "codex_executable_path": str(codex),
+            "codex_executable_sha256": live.CODEX_EXECUTABLE_SHA256,
+            "requested_model": "model",
+        }
+    }
+    real_run = live._run
+
+    def fake_run(argv: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        if argv[0] != str(codex):
+            return real_run(argv, **kwargs)
+        if argv[1:] == ["--version"]:
+            return subprocess.CompletedProcess(argv, 0, "codex-cli 0.0.0\n", "")
+        source = Path(argv[argv.index("-C") + 1])
+        (source / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+        _plant_outside_file_link(sandbox, source)
+        Path(argv[argv.index("-o") + 1]).write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(live, "_run", fake_run)
+    monkeypatch.setattr(live, "_sha256_file", lambda _path: live.CODEX_EXECUTABLE_SHA256)
+
+    receipt, _ = live._run_codex_candidate(
+        repo=repo, revision=revision, prompt="edit", schema={}, binding=binding
+    )
+
+    assert receipt["refused_untracked_files"] == ["leak.txt"]
+    assert receipt["oversized_untracked_files"] == []
+    assert receipt["forbidden_commands"] == []
+    assert receipt["protocol_valid"] is False
+    assert receipt["status"] == "INVALID"

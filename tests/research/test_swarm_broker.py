@@ -1164,3 +1164,470 @@ def test_sync_scope_refuses_a_file_swapped_for_a_fifo_after_the_scan(tmp_path: P
     assert not (swarm / "pkg" / "mod.py").exists()
     assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
     assert (sandbox / "SENTINEL").exists()
+
+
+# --- #3153: double acquire, recovery after a failed release, fallback cleanup, special files --
+
+
+def _locked_registered_swarm(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A registered swarm left locked by a failed release: a fresh `index.lock` in its own
+    registration makes the checkout fail, so the lock is marked and the candidate's file kept."""
+    controller, swarm = _registered_swarm(tmp_path)
+    index_lock = Path(_git(swarm, "rev-parse", "--absolute-git-dir")) / "index.lock"
+    index_lock.write_text("", encoding="utf-8")
+    broker = SwarmBroker(controller)
+    broker.release(swarm)
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    return controller, swarm, index_lock
+
+
+def _age(path: Path, seconds: float = 3600) -> None:
+    import time
+
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+def test_acquire_does_not_take_a_swarm_whose_lock_already_exists(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+
+    first = SwarmBroker(controller).acquire(timeout_sec=0.05)
+    second = SwarmBroker(controller).acquire(timeout_sec=0.05)
+
+    assert first is not None and first.resolve() == swarm.resolve()
+    assert second is None
+    assert (swarm / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_resets_then_unlocks_a_swarm_left_locked_by_a_failed_release(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    _age(index_lock)
+    broker = SwarmBroker(controller)
+
+    assert broker.recover_failed_releases() == [swarm]
+
+    assert not index_lock.exists()
+    assert not (swarm / "candidate.txt").exists()
+    assert not (swarm / ".swarm_lock").exists()
+    assert broker.locked_swarms() == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_keeps_swarm_locked_while_its_registration_lock_is_recent(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    broker = SwarmBroker(controller)
+
+    assert broker.recover_failed_releases() == []
+
+    assert index_lock.exists()
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_keeps_swarm_locked_when_its_reset_still_fails(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    _age(index_lock)
+    real_run = subprocess.run
+
+    def failing_clean(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "clean" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "error: clean refused\n")
+        return real_run(cmd, *args, **kwargs)
+
+    broker = SwarmBroker(controller)
+    monkeypatch.setattr(subprocess, "run", failing_clean)
+    recovered = broker.recover_failed_releases()
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert recovered == []
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_never_touches_a_swarm_that_is_still_held(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)  # locked by a holder, no failed release
+    index_lock = Path(_git(swarm, "rev-parse", "--absolute-git-dir")) / "index.lock"
+    index_lock.write_text("", encoding="utf-8")
+    _age(index_lock)
+    broker = SwarmBroker(controller)
+
+    assert broker.recover_failed_releases() == []
+
+    assert index_lock.exists()
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "held")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_skips_a_swarm_whose_release_is_running(tmp_path: Path, monkeypatch):
+    import fcntl
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    _age(index_lock)
+    broker = SwarmBroker(controller)
+    other = os.open(swarm / ".swarm_lock", os.O_RDWR)
+    try:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another release holds it
+        recovered = broker.recover_failed_releases()
+    finally:
+        os.close(other)
+
+    assert recovered == []
+    assert index_lock.exists()
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_acquire_takes_back_a_swarm_once_its_failed_release_is_recovered(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    _age(index_lock)
+
+    acquired = SwarmBroker(controller).acquire(timeout_sec=0.05)
+
+    assert acquired is not None and acquired.resolve() == swarm.resolve()
+    assert not (swarm / "candidate.txt").exists()
+    assert SwarmBroker(controller).locked_swarms() == [(swarm, "held")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_fallback_removes_entries_only_in_the_opened_swarm(tmp_path: Path, monkeypatch):
+    import nexus.research.swarm_broker as swarm_broker
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    (swarm / "a.txt").write_text("swarm\n", encoding="utf-8")
+    (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    for name in ("tracked.txt", "a.txt"):  # the same names as the swarm's entries
+        (victim / name).write_text("victim\n", encoding="utf-8")
+    moved = tmp_path / "moved-swarm"
+    broker = SwarmBroker(controller)
+    real_check = broker.is_independently_registered_worktree
+    real_names_dir = swarm_broker._names_dir
+
+    def check_then_drop_gitfile(path):
+        result = real_check(path)
+        (swarm / ".git").unlink()  # forces the non-git fallback cleanup
+        return result
+
+    def check_then_swap(path, fd):
+        result = real_names_dir(path, fd)
+        if not swarm.is_symlink():
+            _swap_for_link(swarm, victim, moved)
+        return result
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_drop_gitfile)
+    monkeypatch.setattr(swarm_broker, "_names_dir", check_then_swap)
+    broker.release(swarm)
+    monkeypatch.setattr(swarm_broker, "_names_dir", real_names_dir)
+
+    assert all(
+        (victim / name).read_text(encoding="utf-8") == "victim\n"
+        for name in ("tracked.txt", "a.txt")
+    )
+    assert len([p for p in moved.iterdir() if p.name != ".swarm_lock"]) == 1  # one removed there
+    assert (moved / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_skips_a_file_swapped_for_a_directory_after_the_scan(
+    tmp_path: Path, monkeypatch
+):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    source = workspace / "pkg" / "mod.py"
+    real_open = os.open
+    opened: list[int] = []
+
+    def swap_then_open(path, *args, **kwargs):
+        if Path(os.fspath(path)) == source and not opened:
+            source.unlink()
+            source.mkdir()
+            opened.append(real_open(path, *args, **kwargs))
+            return opened[-1]
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    try:
+        SwarmBroker(workspace).sync_scope(swarm, ["pkg"], required_configs=[])
+    finally:
+        monkeypatch.setattr(os, "open", real_open)
+
+    assert opened
+    try:
+        still_open = os.fstat(opened[0])
+    except OSError:
+        still_open = None
+    source_dir = os.stat(source)
+    assert still_open is None or (still_open.st_dev, still_open.st_ino) != (
+        source_dir.st_dev,
+        source_dir.st_ino,
+    )
+    assert not (swarm / "pkg" / "mod.py").exists()
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_skips_a_socket_named_in_the_scope(tmp_path: Path, monkeypatch):
+    import socket
+
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    # Bound by a relative name: tmp_path can be longer than a socket path may be.
+    monkeypatch.chdir(workspace / "pkg")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind("sock")
+        monkeypatch.chdir(sandbox)
+        SwarmBroker(workspace).sync_scope(swarm, ["pkg/sock", "pkg/mod.py"], required_configs=[])
+    finally:
+        server.close()
+
+    assert not (swarm / "pkg" / "sock").exists()
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_refuses_special_files_without_opening_them(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    fifo = workspace / "pkg" / "pipe"
+    os.mkfifo(fifo)
+    real_open = os.open
+    opened: list[Path] = []
+
+    def recording_open(path, *args, **kwargs):
+        opened.append(Path(os.fspath(path)))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    finished, errors = _sync_in_thread(
+        SwarmBroker(workspace), swarm, ["pkg/pipe", "pkg/mod.py"], fifo, real_open
+    )
+    monkeypatch.setattr(os, "open", real_open)
+
+    assert finished
+    assert errors == []
+    assert fifo not in opened
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_removes_the_earlier_copy_of_a_refused_source(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    source = workspace / "pkg" / "mod.py"
+    broker = SwarmBroker(workspace)
+    broker.sync_scope(swarm, ["pkg/mod.py"], required_configs=[])
+    assert (swarm / "pkg" / "mod.py").exists()
+    source.unlink()
+    os.mkfifo(source)
+
+    finished, errors = _sync_in_thread(broker, swarm, ["pkg/mod.py"], source, os.open)
+
+    assert finished
+    assert errors == []
+    assert not (swarm / "pkg" / "mod.py").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_skips_a_file_swapped_for_a_socket_after_the_scan(tmp_path: Path, monkeypatch):
+    import socket
+
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    source = workspace / "pkg" / "mod.py"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    real_open = os.open
+    swapped: list[bool] = []
+
+    def swap_then_open(path, *args, **kwargs):
+        if Path(os.fspath(path)) == source and not swapped:
+            source.unlink()
+            os.chdir(source.parent)  # bound by a relative name: tmp_path can be too long
+            try:
+                server.bind(source.name)
+            finally:
+                os.chdir(sandbox)
+            swapped.append(True)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    try:
+        SwarmBroker(workspace).sync_scope(swarm, ["pkg"], required_configs=[])
+    finally:
+        monkeypatch.setattr(os, "open", real_open)
+        server.close()
+
+    assert swapped
+    assert not (swarm / "pkg" / "mod.py").exists()
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_leaves_a_lock_taken_by_a_new_holder_alone(tmp_path: Path, monkeypatch):
+    import nexus.research.swarm_broker as swarm_broker
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    _age(index_lock)
+    real_flock = swarm_broker.fcntl.flock
+    taken: list[bool] = []
+
+    def new_holder_then_flock(fd, operation):
+        if not taken:
+            # Between recovery opening the marked lock and locking it, the marked lock goes
+            # and a new holder takes the swarm with a fresh exclusive-create lock.
+            (swarm / ".swarm_lock").unlink()
+            os.close(os.open(swarm / ".swarm_lock", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            (swarm / "holder.txt").write_text("new holder\n", encoding="utf-8")
+            taken.append(True)
+        return real_flock(fd, operation)
+
+    monkeypatch.setattr(swarm_broker.fcntl, "flock", new_holder_then_flock)
+    recovered = SwarmBroker(controller).recover_failed_releases()
+    monkeypatch.setattr(swarm_broker.fcntl, "flock", real_flock)
+
+    assert taken
+    assert recovered == []
+    assert (swarm / ".swarm_lock").read_text(encoding="utf-8") == ""
+    assert (swarm / "holder.txt").read_text(encoding="utf-8") == "new holder\n"
+    assert (swarm / "candidate.txt").exists()
+    assert index_lock.exists()
+    assert SwarmBroker(controller).locked_swarms() == [(swarm, "held")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_does_not_mark_a_swarm_whose_path_was_swapped(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    victim = _victim_repo(tmp_path)
+    moved = tmp_path / "moved-swarm"
+    real_run = subprocess.run
+
+    def run_then_swap(cmd, *args, **kwargs):
+        result = real_run(cmd, *args, **kwargs)
+        if cmd[0] == "git" and "clean" in cmd and not swarm.is_symlink():
+            _swap_for_link(swarm, victim, moved)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", run_then_swap)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert _victim_repo_intact(victim)
+    assert (moved / ".swarm_lock").read_text(encoding="utf-8") == ""  # left for a person
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_waits_for_a_recovery_holding_the_lock(tmp_path: Path, monkeypatch):
+    import fcntl
+    import threading
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    broker = SwarmBroker(controller)
+    other = os.open(swarm / ".swarm_lock", os.O_RDWR)
+    worker = threading.Thread(target=broker.release, args=(swarm,), daemon=True)
+    try:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        worker.start()
+        worker.join(timeout=0.5)
+        waited = worker.is_alive()
+    finally:
+        os.close(other)  # lets the release go on
+    worker.join(timeout=5)
+
+    assert waited
+    assert not worker.is_alive()
+    assert not (swarm / ".swarm_lock").exists()
+    assert not (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_stays_quiet_and_locked_when_the_mark_cannot_be_written(
+    tmp_path: Path, monkeypatch
+):
+    import errno
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    real_run = subprocess.run
+
+    def failing_checkout(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "checkout" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "error: checkout refused\n")
+        return real_run(cmd, *args, **kwargs)
+
+    def failing_pwrite(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "no space left")
+
+    real_pwrite = os.pwrite
+    monkeypatch.setattr(subprocess, "run", failing_checkout)
+    monkeypatch.setattr(os, "pwrite", failing_pwrite)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(os, "pwrite", real_pwrite)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_keeps_a_directory_where_a_refused_source_was_copied(
+    tmp_path: Path, monkeypatch
+):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    fifo = workspace / "pkg" / "pipe"
+    os.mkfifo(fifo)
+    (swarm / "pkg" / "pipe").mkdir(parents=True)
+    (swarm / "pkg" / "pipe" / "kept.txt").write_text("swarm\n", encoding="utf-8")
+
+    finished, errors = _sync_in_thread(
+        SwarmBroker(workspace), swarm, ["pkg/pipe", "pkg/mod.py"], fifo, os.open
+    )
+
+    assert finished
+    assert errors == []
+    assert (swarm / "pkg" / "pipe" / "kept.txt").read_text(encoding="utf-8") == "swarm\n"
+    assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_removes_the_earlier_copy_of_a_source_that_became_a_link(
+    tmp_path: Path, monkeypatch
+):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    source = workspace / "pkg" / "mod.py"
+    broker = SwarmBroker(workspace)
+    broker.sync_scope(swarm, ["pkg"], required_configs=[])
+    assert (swarm / "pkg" / "mod.py").exists()
+    source.unlink()
+    source.symlink_to(workspace / "pkg" / "sub" / "deep.py")
+
+    broker.sync_scope(swarm, ["pkg"], required_configs=[])
+
+    assert not (swarm / "pkg" / "mod.py").exists()
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert (sandbox / "SENTINEL").exists()
