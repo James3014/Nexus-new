@@ -3975,6 +3975,11 @@ def _signal_name(signum: int) -> str:
         return str(signum)
 
 
+def _signal_number(name: str) -> int:
+    """The number of a signal named by ``_signal_name``."""
+    return int(signal.Signals[name]) if name in signal.Signals.__members__ else int(name)
+
+
 class DshTurnInterrupted(BaseException):
     """Raised by ``_TurnSignals`` so the DSH group is killed and the turn recorded (#3202)."""
 
@@ -4012,6 +4017,7 @@ class _TurnSignals:
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        self.disarm()  # a signal during the restore must not raise from here
         for sig, previous in self._prior.items():
             signal.signal(sig, previous)
         self._prior.clear()
@@ -4024,13 +4030,17 @@ class _TurnSignals:
             self._raised = True
             raise DshTurnInterrupted(signum)
 
-    def arm(self) -> None:
-        """Raise a signal already received, else raise the next one when it comes."""
-        if self.received is None:
-            self._armed = True
-        elif not self._raised:
+    def raise_held(self) -> None:
+        """Raise a signal received while not armed, once."""
+        if self.received is not None and not self._raised:
             self._raised = True
             raise DshTurnInterrupted(self.received)
+
+    def arm(self) -> None:
+        """Raise a signal already received, else raise the next one when it comes."""
+        self.raise_held()
+        if self.received is None:
+            self._armed = True
 
     def disarm(self) -> None:
         self._armed = False
@@ -4080,7 +4090,7 @@ def _run_dsh_supervised(
                 cleanup_failures=cleanup_failures,
                 signals=own,
             )
-            own.arm()  # a signal received during the cleanup is raised once it is done
+            own.raise_held()  # a signal received during the cleanup is raised once it is done
             return result
     refusal = _dsh_reaping_refusal()
     if refusal is not None:
@@ -4107,7 +4117,6 @@ def _run_dsh_supervised(
         eof = False
 
         def consume(data: bytes) -> None:
-
             nonlocal pending, reasons
             sink.write(data)
             sink.flush()
@@ -5037,6 +5046,8 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         return int(chain["phases"][-1]["dsh_exit_code"])
     if chain["stop_reason"] == "DSH_NO_PROGRESS":
         return EXIT_NO_PROGRESS
+    if chain["stop_reason"] == DSH_TURN_INTERRUPTED:
+        return 128 + _signal_number(chain["phases"][-1]["run"]["interrupted_by_signal"])
     return EXIT_BLOCKED
 
 

@@ -240,3 +240,103 @@ def test_turn_signals_raise_while_armed_and_leave_an_ignored_signal_ignored() ->
         assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, hup_before)
+
+
+def test_stop_signal_during_the_group_cleanup_is_held_until_the_cleanup_is_done(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A stop signal landing while the group is killed and DSH reaped (the handler is called
+    # directly: no signal is sent) must not cut that cleanup short.
+    exe = tmp_path / "dshquick3202"
+    exe.write_text(f"#!{sys.executable}\nprint('done', flush=True)\n", "utf-8")
+    exe.chmod(0o755)
+    real_cleanup = guard._kill_dsh_group_and_reap
+    signals = guard._TurnSignals()
+    finished: list[int] = []
+
+    def cleanup_hit_by_a_signal(proc, failures):
+        signals._handle(signal.SIGTERM, None)
+        real_cleanup(proc, failures)
+        finished.append(proc.pid)
+
+    monkeypatch.setattr(guard, "_kill_dsh_group_and_reap", cleanup_hit_by_a_signal)
+    failures: list[str] = []
+    with signals:
+        code, reasons = guard._run_dsh_supervised(
+            [str(exe)],
+            cwd=str(tmp_path),
+            env=dict(os.environ),
+            log_path=tmp_path / "log",
+            watchdog=None,
+            cleanup_failures=failures,
+            signals=signals,
+        )
+    assert (code, reasons, failures) == (0, [], [])
+    assert len(finished) == 1  # the cleanup ran to the end, once
+    assert signals.received == signal.SIGTERM  # held for the caller to record
+
+
+def _green_contract(path: Path, issue: int) -> Path:
+    path.write_text(
+        json.dumps({
+            "schema": guard.GREEN_CONTRACT_SCHEMA,
+            "repository": "James3014/Nexus-new",
+            "issue_number": issue,
+            "target_test_nodes": ["test_mod.py::test_value"],
+            "regression_pytest_targets": [],
+            "allowed_change_globs": ["mod.py"],
+            "lint": {"ruff_check_paths_from_changes": False, "ruff_format_preview": False},
+        }),
+        "utf-8",
+    )
+    return path
+
+
+def test_interrupted_chained_turn_exits_128_plus_signal(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    repo = _git_repo(tmp_path)
+    contract = tmp_path / "contract.md"
+    contract.write_text("CONTRACT allowed: mod.py\n", "utf-8")
+    green = _green_contract(tmp_path / "green.json", 3202)
+    turns: list[str] = []
+
+    def interrupted_turn(args, root, **kwargs):
+        turns.append(kwargs["phase"])
+        return 130, {
+            "schema": guard.PHASE_RUN_SCHEMA,
+            "session_id": "sess-3202-chain",
+            "phase": kwargs["phase"],
+            "dsh_exit_code": 130,
+            "turn_state": guard.TURN_FAILED_CLEAN,
+            "decision": "INTERRUPTED",
+            "reason_codes": [guard.DSH_TURN_INTERRUPTED],
+            "interrupted_by_signal": "SIGINT",
+        }
+
+    monkeypatch.setattr(guard, "_run_phase_turn", interrupted_turn)
+    code = guard.main([
+        "start-phase",
+        "--repository",
+        "James3014/Nexus-new",
+        "--issue",
+        "3202",
+        "--phase",
+        "green",
+        "--repo-root",
+        str(repo),
+        "--dsh-home",
+        str(tmp_path / "home"),
+        "--phase-contract",
+        str(contract),
+        "--state-root",
+        str(tmp_path / "state"),
+        "--green-contract",
+        str(green),
+        "--auto-repair",
+        "2",
+    ])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["stop_reason"] == guard.DSH_TURN_INTERRUPTED, out
+    assert turns == ["green"]  # no gate, no repair turn after the interruption
+    assert code == 130
