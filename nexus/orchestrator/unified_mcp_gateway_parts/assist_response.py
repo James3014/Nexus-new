@@ -236,9 +236,16 @@ def _assist_settled_is_replaced(current: Mapping[str, Any], job: Mapping[str, An
     """Whether writing ``job`` would reopen the settled record ``current`` of the same job, or
     replace its outcome: no call settles a job and later unsettles it or changes its status, so
     such a write comes from a read made before another reconcile, cancel or query settled the
-    job. A write with the same settled status (a cancel recording a lease release) still lands."""
+    job. A write with the same settled status (a cancel recording a lease release) still lands,
+    unless it records a lease the record shows as released as not released: the claim is
+    released once, so that write comes from a call that found the claim already gone (#3144)."""
     return _assist_settled(current) and not (
-        _assist_settled(job) and job.get("status") == current.get("status")
+        _assist_settled(job)
+        and job.get("status") == current.get("status")
+        and not (
+            current.get("account_lease_released") is True
+            and job.get("account_lease_released") is not True
+        )
     )
 
 
@@ -297,6 +304,17 @@ class _AssistResponseMixin(_ResponseBase):
                     self._assist_processes.pop(task_id, None)
                 current = self._assist_read(task_id)
                 if current is not None and _assist_settled_is_replaced(current, job):
+                    if (
+                        job.get("account_lease_released") is True
+                        and current.get("account_lease_released") is not True
+                    ):
+                        # The caller released the job's lease after another call settled the
+                        # record without it: keep the outcome, record the release (#3144).
+                        current.update({
+                            "account_lease_released": True,
+                            "account_lease_cleanup_status": "RELEASED",
+                        })
+                        return self._assist_write(current)
                     return current
                 return self._assist_write(job)
         return dict(job)
