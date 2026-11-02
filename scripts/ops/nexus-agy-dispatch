@@ -2730,6 +2730,16 @@ def _agy_dispatch_boundary() -> Any:
     return import_module("nexus.executors.agy_dispatch_boundary")
 
 
+# #3181: the accept-edits target no longer names the directory the first
+# boundary bound (moved away, replaced, or a link left at the path).
+AGY_TARGET_REPLACED = "AGY_TARGET_REPLACED"
+
+
+def _target_pin_intact(pin: Any) -> bool:
+    """True without a pin, else whether the pinned target directory is still in place."""
+    return pin is None or bool(_agy_dispatch_boundary().target_pin_intact(pin))
+
+
 def _agy_worker_account() -> Any:
     """The #2884 worker-account boundary module, loaded from the snapshot on first use."""
     return import_module("nexus.executors.agy_worker_account")
@@ -4949,6 +4959,10 @@ def dispatch_run(
     attempted_accounts: set[str] = set()
     # #2905: the orphan run-root GC runs at most once per dispatch, not per attempt.
     worker_gc_attempted = False
+    # #3181: the accept-edits target directory bound by the first boundary.
+    # Later attempts and the host's post-attempt steps use that directory or
+    # refuse; they never resolve ``cwd`` again.
+    accept_edits_target_pin: Any = None
     last_kind = None
     total_wall_ms = 0
     active_provider_pid: int | None = None
@@ -5358,6 +5372,10 @@ def dispatch_run(
             env = dict(claim.lease.execution_env)
             attempt_baseline = None
             try:
+                if not _target_pin_intact(accept_edits_target_pin):
+                    # #3181: no host git step in a replaced target; the
+                    # boundary below refuses the attempt.
+                    raise RuntimeError("TARGET_REPLACED")
                 attempt_baseline = direct_operation_journal.capture_source_baseline(cwd)
                 if attempt_baseline is None:
                     raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
@@ -5425,10 +5443,21 @@ def dispatch_run(
                                 "attempt": attempts,
                             }
                         else:
+                            # #3181: a retry binds the target the first attempt bound.
+                            pin_kwargs = (
+                                {"pinned_target": accept_edits_target_pin}
+                                if accept_edits_target_pin is not None
+                                else {}
+                            )
                             write_boundary = boundary_module.prepare_accept_edits_boundary(
                                 source_env=env,
                                 target=cwd,
+                                **pin_kwargs,
                             )
+                            if accept_edits_target_pin is None:
+                                accept_edits_target_pin = getattr(
+                                    write_boundary, "target_pin", None
+                                )
                     except boundary_module.AgyWriteBoundaryError as exc:
                         # Typed, non-rotating contract rejection; the boundary
                         # already removed its run root and the outer finally
@@ -5793,7 +5822,10 @@ def dispatch_run(
                 or semantic_permission_refusal
             )
             attempt_changed_paths = None
-            if attempt_baseline is not None:
+            # #3181: an attempt that left another directory at the target path
+            # ends here for reconciliation; the host runs nothing there.
+            target_replaced = not _target_pin_intact(accept_edits_target_pin)
+            if attempt_baseline is not None and not target_replaced:
                 try:
                     attempt_changed_paths = direct_operation_journal.observed_changed_paths_since(
                         cwd, attempt_baseline
@@ -5848,6 +5880,7 @@ def dispatch_run(
                 and not scope_blocked
                 and not no_tool_violation
                 and not provider_terminal_quota
+                and not target_replaced
             ):
                 sys.stdout.write(out)
                 if err:
@@ -5881,7 +5914,11 @@ def dispatch_run(
             reconciliation_required = False
 
             denial_fields: dict[str, Any] = {}
-            if no_tool_violation:
+            if target_replaced:
+                last_kind = AGY_TARGET_REPLACED
+                provider_effect_observed = None
+                reconciliation_required = True
+            elif no_tool_violation:
                 # Quarantine: a no-tool packet must not report success after tool use.
                 last_kind = NO_TOOL_PROFILE_VIOLATION
                 provider_effect_observed = True if attempt_changed_paths else None

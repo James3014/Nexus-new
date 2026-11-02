@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from nexus.core.contained_write import PathContainmentError, root_identity
 from nexus.executors import cli_worker
 from nexus.executors.agy_write_admission import (
     KEYCHAIN_ISOLATED,
@@ -72,6 +73,29 @@ WORKER_RUNS_DIR = Path("/Users/Shared/cairnwork-worker/worker-runs")
 
 class AgyWriteBoundaryError(RuntimeError):
     """The boundary could not be prepared; the run must not start."""
+
+
+@dataclass(frozen=True)
+class TargetPin:
+    """The target directory an accept-edits dispatch bound at its first attempt (#3181).
+
+    ``path`` is the real path; ``identity`` is ``(st_dev, st_ino)`` of the
+    directory there.  Later attempts and host steps use this directory or
+    refuse; they never resolve the requested path again.
+    """
+
+    path: Path
+    identity: tuple[int, int]
+
+
+def target_pin_intact(pin: TargetPin) -> bool:
+    """True when ``pin.path`` still names, without any link, the pinned directory."""
+    try:
+        if os.path.realpath(pin.path) != str(pin.path):
+            return False
+        return root_identity(pin.path) == pin.identity
+    except (OSError, ValueError):
+        return False
 
 
 def boundary_available() -> bool:
@@ -187,6 +211,7 @@ class AgyDispatchBoundary:
     run_tag: str
     home_profile_sha256: str
     keychain_state: str = KEYCHAIN_NOT_APPLICABLE
+    target_pin: Optional[TargetPin] = None
     _baseline: Any = field(default=None, repr=False)
     _tracker: Any = field(default=None, repr=False)
     _launched: bool = field(default=False, repr=False)
@@ -299,6 +324,7 @@ def prepare_accept_edits_boundary(
     target: str | Path,
     extra_writable_files: Iterable[str | Path] = (),
     extra_writable_roots: Iterable[str | Path] = (),
+    pinned_target: Optional[TargetPin] = None,
 ) -> AgyDispatchBoundary:
     """Build the disposable HOME, exact env and Seatbelt profile for one run.
 
@@ -307,10 +333,26 @@ def prepare_accept_edits_boundary(
     ``extra_writable_files`` (the dispatcher's ``--log-file``) are honoured only
     inside one of ``extra_writable_roots`` (the operations state dir); see
     ``_admit_extra_writable_file``.
+
+    The boundary records the target's identity (``target_pin``).  A retry
+    passes that pin as ``pinned_target``: the run then binds the pinned
+    directory and refuses (``target_replaced``) when ``target`` no longer
+    names it, instead of resolving ``target`` again (#3181).
     """
     if not boundary_available():
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:seatbelt_unavailable")
-    target_real = Path(os.path.realpath(Path(target).expanduser()))
+    if pinned_target is not None:
+        requested = Path(os.path.realpath(Path(target).expanduser()))
+        if requested != pinned_target.path or not target_pin_intact(pinned_target):
+            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_replaced")
+        target_real = pinned_target.path
+        target_pin = pinned_target
+    else:
+        target_real = Path(os.path.realpath(Path(target).expanduser()))
+        try:
+            target_pin = TargetPin(target_real, root_identity(target_real))
+        except PathContainmentError as exc:
+            raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_missing") from exc
     if not target_real.is_dir():
         raise AgyWriteBoundaryError(f"{AGY_WRITE_BOUNDARY_UNAVAILABLE}:target_missing")
     # #2888: the profile denies worker-runs first and then allows writes to the
@@ -374,6 +416,7 @@ def prepare_accept_edits_boundary(
         raise
     return AgyDispatchBoundary(
         target=target_real,
+        target_pin=target_pin,
         run_root=run_root,
         run_home=run_home,
         run_tmp=run_tmp,
