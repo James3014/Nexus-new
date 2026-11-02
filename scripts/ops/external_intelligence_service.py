@@ -19,6 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.core.argv_command import ProcessGroupShutdown, request_process_group_shutdown
 from nexus.core.exit_codes import NexusExitCode
 from nexus.services.external_intelligence import (
     OBSERVED_MODEL_REVISION_RE,
@@ -72,6 +73,13 @@ class ServiceReadiness(str, Enum):
 
 class ServiceError(RuntimeError):
     pass
+
+
+class ServiceInterrupted(BaseException):
+    """A terminate, interrupt or hangup signal arrived while a poll was running (#3200).
+
+    A BaseException, so no ``except Exception`` on the way out records the poll as an ordinary
+    failure; ``finally`` blocks still run."""
 
 
 @dataclass(frozen=True)
@@ -1471,30 +1479,68 @@ def daemon(config: ServiceConfig, config_path: Path | None = None) -> None:
             },
         )
 
-    def halt(_sig, _frame):
-        nonlocal stopping
-        stopping = True
+    polling = False
+    interrupt_raised = False
 
-    signal.signal(signal.SIGTERM, halt)
-    signal.signal(signal.SIGINT, halt)
-    write_status(ServiceReadiness.STARTING)
-    while not stopping:
-        try:
-            value = run_once(config)
-            successful_polls += 1
+    def halt(signum, _frame):
+        nonlocal stopping, interrupt_raised
+        stopping = True
+        # The fanout runs the OpenCode and open-swe helpers from worker threads, which a signal
+        # handler (main thread only) cannot reach: each of them now kills its helper's process
+        # group and reaps it within a fraction of a second, and nothing new is spawned, well
+        # inside the 20 s launchd waits after SIGTERM before SIGKILL (#3200).
+        request_process_group_shutdown()
+        if polling and not interrupt_raised:
+            # Only once: a second signal must not interrupt the cleanup the first one started.
+            interrupt_raised = True
+            raise ServiceInterrupted(signum)
+
+    previous_handlers = {
+        sig: signal.signal(sig, halt) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    }
+    interrupted: BaseException | None = None
+    try:
+        write_status(ServiceReadiness.STARTING)
+        while not stopping:
+            try:
+                polling = True
+                try:
+                    value = run_once(config)
+                finally:
+                    polling = False
+                successful_polls += 1
+                write_status(
+                    ServiceReadiness.READY
+                    if successful_polls >= READINESS_SUCCESS_THRESHOLD
+                    else ServiceReadiness.STARTING,
+                    error=transient_status_error(value),
+                )
+            except (ServiceInterrupted, ProcessGroupShutdown) as exc:
+                interrupted = exc
+                break
+            except Exception as exc:
+                if interrupt_raised:
+                    # The cleanup the interrupt started raised (a helper group member that
+                    # survived SIGKILL, say): still an interrupted poll, never a plain failure.
+                    interrupted = exc
+                    break
+                successful_polls = 0
+                write_status(ServiceReadiness.DEGRADED, error=_safe_error(exc))
+            deadline = time.monotonic() + config.poll_interval_seconds
+            while not stopping and time.monotonic() < deadline:
+                time.sleep(min(1.0, deadline - time.monotonic()))
+        if interrupted is not None:
+            # Attempts the poll had in flight keep their recorded state (DISPATCHING, ...) for
+            # the next start to reconcile, as after a crash; their helper groups are stopped.
             write_status(
-                ServiceReadiness.READY
-                if successful_polls >= READINESS_SUCCESS_THRESHOLD
-                else ServiceReadiness.STARTING,
-                error=transient_status_error(value),
+                ServiceReadiness.STOPPED,
+                error={"type": type(interrupted).__name__, "code": "SERVICE_INTERRUPTED"},
             )
-        except Exception as exc:
-            successful_polls = 0
-            write_status(ServiceReadiness.DEGRADED, error=_safe_error(exc))
-        deadline = time.monotonic() + config.poll_interval_seconds
-        while not stopping and time.monotonic() < deadline:
-            time.sleep(min(1.0, deadline - time.monotonic()))
-    write_status(ServiceReadiness.STOPPED)
+        else:
+            write_status(ServiceReadiness.STOPPED)
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
 
 def main(argv: list[str] | None = None) -> int:

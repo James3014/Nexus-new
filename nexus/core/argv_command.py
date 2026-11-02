@@ -171,6 +171,44 @@ class ProcessGroupReapingUnavailable(OSError):
     process group has been killed (#3017)."""
 
 
+class ProcessGroupShutdown(BaseException):
+    """This process is shutting down (``request_process_group_shutdown``): raised from every
+    wait on a child's process group and before any new spawn (#3200).
+
+    A BaseException, as KeyboardInterrupt is, so an ``except Exception`` in a caller does not
+    record it as an ordinary command failure: the outcome of an interrupted command is unknown.
+    """
+
+
+# Set once, from a terminate-signal handler, never cleared: a plain bool, so setting it in a
+# handler takes no lock and any thread reads it without one (#3200).
+_shutdown_requested = False
+# The longest a wait on a child's process group goes without checking for a shutdown request.
+_SHUTDOWN_POLL_SECONDS = 0.25
+
+
+def request_process_group_shutdown() -> None:
+    """Make every wait on a reaped child group in this process stop (#3200).
+
+    Safe to call from a signal handler. Within ``_SHUTDOWN_POLL_SECONDS`` each waiting thread
+    raises ProcessGroupShutdown, so the thread that owns the child SIGKILLs its group and reaps
+    it on the way out, as on any other exception; no other thread signals a group. Nothing new
+    is spawned afterwards. Signal handlers run only on the main thread, so a service that runs
+    helpers from worker threads calls this from its handler to reach them."""
+    global _shutdown_requested
+    _shutdown_requested = True
+
+
+def _raise_if_shutdown() -> None:
+    if _shutdown_requested:
+        raise ProcessGroupShutdown("process shutdown requested")
+
+
+def _shutdown_poll(remaining: float | None) -> float:
+    """How long one wait step may block: *remaining*, but never past the next shutdown check."""
+    return _SHUTDOWN_POLL_SECONDS if remaining is None else min(remaining, _SHUTDOWN_POLL_SECONDS)
+
+
 _PROC_PGRP_ONLY = 2  # proc_listpids type, <libproc.h>
 _PROC_PIDTBSDINFO = 3  # proc_pidinfo flavor, <sys/proc_info.h>
 _SZOMB = 5  # pbi_status of an exited, unreaped process
@@ -392,7 +430,9 @@ def _kqueue_available() -> bool:
 
 def _refuse_unless_child_stays_unreaped() -> None:
     """Raise ProcessGroupReapingUnavailable, before anything is spawned, when the child cannot be
-    waited for without being reaped, or SIGCHLD lets someone else reap it."""
+    waited for without being reaped, or SIGCHLD lets someone else reap it. Raises
+    ProcessGroupShutdown instead once this process is shutting down (#3200)."""
+    _raise_if_shutdown()
     if not (_waitid_available() or _kqueue_available()):
         raise ProcessGroupReapingUnavailable(
             errno.ENOSYS,
@@ -467,7 +507,7 @@ def _kqueue_wait_exit(pid: int, deadline: float | None) -> bool:
             return True
         while True:
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
-            for event in kq.control(None, 1, remaining):
+            for event in kq.control(None, 1, _shutdown_poll(remaining)):
                 if event.flags & select.KQ_EV_ERROR:  # pyright: ignore[reportAttributeAccessIssue]
                     raise OSError(event.data, os.strerror(event.data))
                 if event.ident == pid and event.fflags & select.KQ_NOTE_EXIT:  # pyright: ignore[reportAttributeAccessIssue]
@@ -475,6 +515,7 @@ def _kqueue_wait_exit(pid: int, deadline: float | None) -> bool:
                     return True
             if deadline is not None and time.monotonic() >= deadline:
                 return False
+            _raise_if_shutdown()
     finally:
         kq.close()
 
@@ -484,18 +525,17 @@ def _wait_leader_unreaped(pid: int, deadline: float | None) -> bool:
 
     ``waitid(WNOWAIT)``, polled like ``Popen.wait(timeout)`` when there is a deadline, where it
     exists; kqueue on macOS before Python 3.13. ChildProcessError means something else reaped
-    it."""
+    it. Polled without a deadline too, so a shutdown request raises ProcessGroupShutdown
+    (#3200)."""
     if not _waitid_available():
         return _kqueue_wait_exit(pid, deadline)
-    if deadline is None:
-        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
-        return True
     delay = 0.0005
     while os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(delay, remaining))
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            return False  # a passed deadline (kill_group_if_exited's poll) answers, not raises
+        _raise_if_shutdown()
+        time.sleep(delay if remaining is None else min(delay, remaining))
         delay = min(delay * 2, 0.05)
     return True
 
@@ -503,7 +543,8 @@ def _wait_leader_unreaped(pid: int, deadline: float | None) -> bool:
 def _read_pipes(process: subprocess.Popen, deadline: float | None) -> tuple[dict[int, bytes], bool]:
     """Read stdout and stderr to EOF, as ``communicate`` does, without waiting for the child.
 
-    Returns the bytes read per fd and whether *deadline* passed first."""
+    Returns the bytes read per fd and whether *deadline* passed first. Raises
+    ProcessGroupShutdown once this process is shutting down (#3200)."""
     pipes = [stream.fileno() for stream in (process.stdout, process.stderr) if stream]
     chunks: dict[int, list[bytes]] = {fd: [] for fd in pipes}
     selector_type = getattr(selectors, "PollSelector", selectors.SelectSelector)
@@ -512,11 +553,12 @@ def _read_pipes(process: subprocess.Popen, deadline: float | None) -> tuple[dict
         for fd in pipes:
             selector.register(fd, selectors.EVENT_READ)
         while selector.get_map():
+            _raise_if_shutdown()
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 timed_out = True
                 break
-            for key, _events in selector.select(remaining):
+            for key, _events in selector.select(_shutdown_poll(remaining)):
                 data = os.read(key.fd, 32768)
                 if data:
                     chunks[key.fd].append(data)
@@ -667,11 +709,25 @@ def communicate_then_kill_group(
     timeout handling. ``before_kill``, if given, runs once the child has exited and its output is
     read, before the group is signalled (the group is still killed if it raises). A group member
     alive after SIGKILL raises PermissionError once the child is reaped; a reap that already
-    happened elsewhere raises ChildProcessError."""
+    happened elsewhere raises ChildProcessError.
+
+    Any exception while waiting (ProcessGroupShutdown after a shutdown request, or a signal
+    handler raising) SIGKILLs the group and reaps the child before it propagates, as
+    ``run_reaping_process_group`` does, so an interrupted caller leaves nothing running
+    (#3200)."""
     deadline = None if timeout is None else time.monotonic() + timeout
     streams = (process.stdout, process.stderr)
-    output, timed_out = _read_pipes(process, deadline)
-    timed_out = timed_out or not _wait_leader_unreaped(process.pid, deadline)
+    try:
+        output, timed_out = _read_pipes(process, deadline)
+        timed_out = timed_out or not _wait_leader_unreaped(process.pid, deadline)
+    except BaseException:
+        try:
+            _kill_group_then_reap(process)
+        finally:
+            for stream in streams:
+                if stream is not None:
+                    stream.close()
+        raise
     captured = [b"" if s is None else output.get(s.fileno(), b"") for s in streams]
     if timed_out:
         raise subprocess.TimeoutExpired(
