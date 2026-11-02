@@ -286,8 +286,9 @@ def _run_once(
         if proc.returncode is None and not _group_stopped_if_exited(proc):
             _stop_child_group(proc)
         elif classification == "OK":
-            # A timeout already reaped the group above; keep its 124.
-            return_code = proc.returncode
+            # A timeout already reaped the group above; keep its 124. The child is reaped
+            # here, so returncode is set; an unknown one would count as a failure.
+            return_code = proc.returncode if proc.returncode is not None else 1
 
     except Exception as exc:
         output_chunks.append(str(exc))
