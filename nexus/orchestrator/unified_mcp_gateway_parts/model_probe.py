@@ -37,6 +37,10 @@ from nexus.executors.claude_measurement_worker import (
     measurement_claude_enabled,
     measurement_claude_preflight,
 )
+from nexus.orchestrator.unified_mcp_gateway_parts.assist_jobs import (
+    ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT,
+    assist_default_lane_refused,
+)
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
     _terminate_provider_group,
     assist_workspace_parent,
@@ -313,6 +317,9 @@ class _ModelProbeMixin(_ModelProbeBase):
             if existing.get("probe_semantics_hash") != semantics:
                 raise _gateway().GatewayInputError("MODEL_PROBE_TASK_ID_CONFLICT")
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        if assist_default_lane_refused(arguments, "provider", "model"):
+            # #3164: refuse the implicit default lane before the version preflight and the job record.
+            raise _gateway().GatewayInputError(f"MODEL_PROBE_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider == "agy" and agy_pool_stopped():
             # #2998: refuse before the version preflight, the job record and the lease.
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED")
