@@ -77,14 +77,10 @@ def _parts(relative: PurePath | str) -> tuple[str, ...]:
     return parts
 
 
-def folded_name(name: str) -> str:
-    """``name`` as a case-insensitive filesystem compares it: APFS and HFS+ match names
-    without case, and HFS+ also skips format characters (U+200C…)."""
-    return "".join(c for c in name if unicodedata.category(c) != "Cf").casefold()
-
-
 def _is_host_run_name(name: str) -> bool:
-    return folded_name(name) in HOST_RUN_SUBTREES
+    # APFS and HFS+ match names without case, and HFS+ also skips format characters (U+200C…).
+    folded = "".join(c for c in name if unicodedata.category(c) != "Cf").casefold()
+    return folded in HOST_RUN_SUBTREES
 
 
 def root_identity(root: Path | str) -> tuple[int, int]:

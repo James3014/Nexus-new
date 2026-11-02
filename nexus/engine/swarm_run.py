@@ -34,7 +34,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from nexus.core.contained_write import folded_name
+from nexus.core.contained_write import _is_host_run_name
 from nexus.core.hardened_git import (
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
@@ -66,7 +66,8 @@ def _safe(value: str) -> str:
 
 
 def _unsafe_relpath(value: str) -> bool:
-    """A request path that could become a flag, escape the worktree or name its git dir."""
+    """A request path that could become a flag, escape the worktree or name its git dir (or
+    another directory the host runs from)."""
 
     path = Path(str(value or ""))
     return (
@@ -75,7 +76,8 @@ def _unsafe_relpath(value: str) -> bool:
         or "\x00" in str(value)
         or path.is_absolute()
         or ".." in path.parts
-        or any(folded_name(part) == ".git" for part in path.parts)
+        # Folded the way the filesystem compares names, as contained writes do.
+        or any(_is_host_run_name(part) for part in path.parts)
     )
 
 
