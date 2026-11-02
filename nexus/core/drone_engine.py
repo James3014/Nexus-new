@@ -6,11 +6,18 @@
 import os
 import json
 import logging
+import re
 import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from nexus.core.contained_write import PathContainmentError, root_identity, write_text_in_root
+from nexus.core.contained_write import (
+    PathContainmentError,
+    PinnedRoot,
+    make_dirs_in_root,
+    root_identity,
+    write_text_in_root,
+)
 from nexus.core.layer_ports import resolve_port
 from nexus.core.drone_protocol import DroneProtocol
 
@@ -19,6 +26,9 @@ logger = logging.getLogger("nexus.drone")
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 # Admitted local model per docs/arch/MODEL_WORKFORCE_POLICY.md (local_qwen35_9b, L1 ceiling).
 DRONE_ADMITTED_MODEL = "qwen3.5:9b"
+# A drone id names one directory under .nexus/tmp and one crystal file: the same pattern the
+# CLI checks (`nexus drone run --drone-id`), so no id can add or climb a path level (#3198).
+DRONE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 _ACTION_SCHEMA: Dict[str, Any] = {
     "type": "object",
@@ -98,6 +108,11 @@ class DroneToolBox:
         if not self._root_unchanged():
             raise PathContainmentError(f"root_replaced:{sandbox_dir}")
 
+    @property
+    def root_path(self) -> Path:
+        """The resolved root path every round checks and hands to the sandbox."""
+        return self._root_path
+
     def _root_unchanged(self) -> bool:
         """The recorded path still resolves to itself and is still the recorded directory."""
         root = str(self._root_path)
@@ -114,7 +129,12 @@ class DroneToolBox:
             if not self._root_unchanged():
                 return {"exit_code": -1, "stderr": "sandbox_root_replaced"}
             run_model_command_string = resolve_port("model_output.run_model_command_string")
-            res = run_model_command_string(command, work_dir=self._root_path, timeout=30)
+            # The path carries the identity recorded at setup: the sandbox call checks it again
+            # itself and grants only that directory, so a root swapped after the check above
+            # (and restored before the one below) gets no grant (#3197).
+            res = run_model_command_string(
+                command, work_dir=PinnedRoot(self._root_path, self._root_identity), timeout=30
+            )
             # Checked again on the same path: a root changed while the round ran (only possible
             # from outside the sandbox) voids the round's result.
             if not self._root_unchanged():
@@ -206,10 +226,19 @@ class TacticalDrone(DroneProtocol):
         self.started_at = start_time
         self.task_intent = task_intent
         
-        sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
+        if not DRONE_ID_PATTERN.fullmatch(str(self.drone_id)):
+            # Refused before any path is built from it (#3198).
+            return self.abort_unavailable(f"drone_id_invalid: {self.drone_id!r}")
+        temp_area = self.project_root / ".nexus/tmp"
+        sandbox_dir = temp_area / self.drone_id
         try:
-            sandbox_dir.mkdir(parents=True, exist_ok=True)
+            temp_area.mkdir(parents=True, exist_ok=True)
+            # Created without following a link below the temp area, and the root must resolve
+            # to exactly <temp area>/<drone id> (#3198).
+            make_dirs_in_root(temp_area, self.drone_id)
             toolbox = DroneToolBox(sandbox_dir)
+            if toolbox.root_path != Path(os.path.realpath(temp_area)) / self.drone_id:
+                raise PathContainmentError(f"root_outside_temp_area:{sandbox_dir}")
         except OSError as exc:
             # A drone dir that is not a plain directory (e.g. a link left behind) is refused
             # before any model call, as a FAIL outcome rather than an exception (#3177).
@@ -387,6 +416,8 @@ class TacticalDrone(DroneProtocol):
         return {"drone_id": self.drone_id, "outcome": outcome, "belief_final": self.belief_score, "traces": self.tracelog, "metrics": metrics}
 
     def crystal_path(self) -> Path:
+        if not DRONE_ID_PATTERN.fullmatch(str(self.drone_id)):
+            raise ValueError(f"drone_id_invalid: {self.drone_id!r}")
         return self.project_root / ".nexus" / "reports" / "drones" / f"{self.drone_id}_crystal.json"
 
     def _finish_mission(self) -> None:
