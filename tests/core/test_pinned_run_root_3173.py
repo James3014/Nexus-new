@@ -11,7 +11,13 @@ import os
 
 import pytest
 
-from nexus.core.contained_write import PathContainmentError, root_identity, write_text_in_root
+from nexus.core.contained_write import (
+    PathContainmentError,
+    read_bytes_in_root,
+    read_text_in_root,
+    root_identity,
+    write_text_in_root,
+)
 
 
 @pytest.fixture
@@ -81,3 +87,40 @@ def test_a_host_write_after_the_root_was_swapped_for_another_directory_writes_no
         write_text_in_root(root, "a.txt", "changed", pinned_root=pinned)
     assert os.listdir(root) == []
     assert os.listdir(moved) == []
+
+
+# --- #3177: the read helpers take the same opt-in pin ------------------------------------------
+
+
+def test_a_read_with_the_recorded_identity_reads_from_the_root(layout):
+    root, _ = layout
+    (root / "a.txt").write_text("ok", encoding="utf-8")
+    pinned = root_identity(root)
+    assert read_bytes_in_root(root, "a.txt", pinned_root=pinned) == b"ok"
+    assert read_text_in_root(root, "a.txt", pinned_root=pinned, strict=True) == "ok"
+
+
+@pytest.mark.parametrize("kind", ["link", "directory"])
+def test_a_pinned_read_after_the_root_was_replaced_reads_nothing(layout, tmp_path, kind):
+    root, outside = layout
+    pinned = root_identity(root)
+    root.rename(tmp_path / "moved")
+    if kind == "link":
+        root.symlink_to(outside)
+    else:
+        root.mkdir()
+        (root / "f.txt").write_text("other", encoding="utf-8")
+
+    with pytest.raises(PathContainmentError, match="root_replaced"):
+        read_bytes_in_root(root, "f.txt", pinned_root=pinned)
+    with pytest.raises(PathContainmentError, match="root_replaced"):
+        read_text_in_root(root, "f.txt", pinned_root=pinned)
+
+
+def test_an_unpinned_read_keeps_reading_through_a_root_given_as_a_link(layout, tmp_path):
+    # Opt-in: without pinned_root a root passed through a link still works, as before.
+    root, _ = layout
+    (root / "a.txt").write_text("ok", encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(root)
+    assert read_text_in_root(alias, "a.txt") == "ok"

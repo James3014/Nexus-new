@@ -566,3 +566,51 @@ def test_declared_names_cover_pep621_groups_poetry_requirements_and_namespaces()
     assert _declared_names_from_requirements(
         "# c\n-r other.txt\nreq-a==1 ; python_version>'3'\n\n"
     ) == {"req_a"}
+
+
+# --- #3157: the system locale data is readable inside the review sandbox --------------------
+
+
+def _bound_service(tmp_path):
+    svc = UltraReviewService(tmp_path / "project")
+    (tmp_path / "project").mkdir()
+    sandbox = tmp_path / "sb"
+    mirror = sandbox / "worktree"
+    mirror.mkdir(parents=True)
+    svc._bind_sandbox(sandbox_path=sandbox, execution_root=mirror)
+    return svc, mirror
+
+
+def test_review_sandbox_reads_the_system_locale_data_but_never_writes_it(tmp_path, monkeypatch):
+    import nexus.engine.ultra_review_service as service
+
+    svc, _ = _bound_service(tmp_path)
+    has_locale = os.path.isdir("/usr/share/locale")
+    assert ("/usr/share/locale" in svc._sandbox_read_roots()) == has_locale
+    profile = svc._sandbox_profile()
+    assert ('(subpath "/usr/share/locale")' in profile) == has_locale
+    write_rule = profile.split("(allow file-write*", 1)[1].split("\n", 1)[0]
+    assert "/usr/share" not in write_rule
+    # only an existing directory is added
+    monkeypatch.setattr(
+        service, "ULTRA_REVIEW_LOCALE_READ_ROOTS", (str(tmp_path / "no-such-locale-dir"),)
+    )
+    assert not any("no-such-locale-dir" in root for root in svc._sandbox_read_roots())
+
+
+def test_shasum_with_a_utf8_locale_runs_in_the_review_sandbox(tmp_path, monkeypatch):
+    """#3157: with ``LANG=C.UTF-8`` Perl's ``setlocale`` must find its locale data inside the
+    deny-default profile (on macOS the real sandbox-exec barrier; unconfined on Linux CI)."""
+    monkeypatch.setenv("LANG", "C.UTF-8")
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LC_CTYPE", raising=False)
+    svc, mirror = _bound_service(tmp_path)
+    (mirror / "f").write_text("hi", encoding="utf-8")
+    assert svc._sandbox_env()["LANG"] == "C.UTF-8"
+    shasum = shutil.which("shasum")
+    if shasum is None:  # nothing to run; the profile test above still covers the grant
+        return
+    done = svc._sandboxed_run([shasum, "f"], cwd=mirror, timeout=30)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split()[0] == "c22b5f9178342609428d6f51b2c5af4c0bde6a42"
+    assert "locale" not in done.stderr

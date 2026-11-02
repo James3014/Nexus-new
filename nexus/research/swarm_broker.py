@@ -31,6 +31,15 @@ _STATE_RELEASE_FAILED = "release_failed"
 # An index.lock this old cannot belong to a git started by the hardened runner (killed after
 # GIT_TIMEOUT_S).
 _STALE_INDEX_LOCK_SEC = 2 * GIT_TIMEOUT_S
+# Per-worktree ref (kept in the swarm's registration, outside its work tree) naming the commit a
+# lease started from; release puts the swarm back there. It undoes HEAD moved during a lease, not
+# a deliberate rewrite: any process running git as the same user during the lease can change it.
+_LEASE_BASE_REF = "refs/worktree/nexus-swarm-base"
+# A swarm whose recovery failed is not tried again for this long (in this process), so an
+# acquire does not wait on the same failing git calls each time.
+_RECOVERY_BACKOFF_SEC = 10 * 60
+# Swarm (path, st_dev, st_ino) -> time.monotonic() of its last failed recovery.
+_RECOVERY_FAILED_AT: dict[tuple[str, int, int], float] = {}
 
 
 class _SwarmDirSwapped(Exception):
@@ -317,6 +326,15 @@ def replace_text_in_dir(root: Path, rel_path: str, text: str, encoding: str = "u
             os.close(fd)
 
 
+def _recovery_key(swarm_dir: Path, pinned: int) -> tuple[str, int, int]:
+    return (str(swarm_dir), *_fd_identity(pinned))
+
+
+def _write_release_failed_mark(lock_fd: int) -> None:
+    os.ftruncate(lock_fd, 0)
+    os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
+
+
 class SwarmBroker:
     """
     🐝 蜂群空間調度器 (Swarm Workspace Broker)
@@ -449,6 +467,9 @@ class SwarmBroker:
             for entry in list(eligible_dirs):
                 swarm_dir, identity = entry
                 outcome = self._try_lock(swarm_dir, identity)
+                if outcome and not self._start_lease(swarm_dir, identity):
+                    self._mark_unstarted_lease(swarm_dir, identity)
+                    outcome = None
                 if outcome is None:
                     eligible_dirs.remove(entry)
                 elif outcome:
@@ -491,6 +512,65 @@ class SwarmBroker:
                 )
                 return None
             return True
+        finally:
+            os.close(pinned)
+
+    def _start_lease(self, swarm_dir: Path, identity: tuple[int, int]) -> bool:
+        """Check the swarm again now that it is locked and record the commit its lease starts
+        from; False keeps it locked (`acquire` then marks it for recovery).
+
+        A swarm validated before this acquire waited may have been released meanwhile by a
+        holder that left it unregistered, and such a release unlocks without resetting.
+        """
+        controller = self._controller_git_top_level()
+        git_dir = linked_worktree_git_dir(swarm_dir, controller) if controller else None
+        if git_dir is None or _real_dir_identity(swarm_dir) != identity:
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarm is no longer the registered worktree that was validated; "
+                "left locked: %s",
+                swarm_dir,
+            )
+            return False
+        # The runner's overrides do not switch off a hook defined in the repository config.
+        if repository_config_can_start_a_program(swarm_dir, git_dir=git_dir):
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarm repository config names a program; left locked: %s",
+                swarm_dir,
+            )
+            return False
+        try:
+            result = run_hardened_git(
+                swarm_dir, "update-ref", _LEASE_BASE_REF, "HEAD", git_dir=git_dir
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        if result is None or result.returncode != 0:
+            logger.warning(
+                "⚠️ [SwarmBroker] Could not record the lease base; left locked: %s", swarm_dir
+            )
+            return False
+        return True
+
+    def _mark_unstarted_lease(self, swarm_dir: Path, identity: tuple[int, int]) -> None:
+        """Mark the lock this acquire took in the validated directory `release_failed`, so
+        `recover_failed_releases` takes the swarm up; a path that names another directory by
+        now is left alone."""
+        try:
+            pinned = _open_real_dir(swarm_dir)
+        except OSError:
+            return
+        try:
+            if _fd_identity(pinned) != identity:
+                return
+            lock_fd = _open_lock(pinned)
+            if lock_fd is None:
+                return
+            try:
+                _write_release_failed_mark(lock_fd)
+            finally:
+                os.close(lock_fd)
+        except OSError as e:
+            logger.error(f"❌ [SwarmBroker] Could not mark swarm {swarm_dir.name}: {e}")
         finally:
             os.close(pinned)
 
@@ -652,7 +732,8 @@ class SwarmBroker:
         touched. Before the release, an `index.lock` older than `stale_index_lock_after_sec`
         is removed from the swarm's own registration (a git killed mid-reset leaves one, and
         it fails every later reset). The swarm goes back to the pool only once its reset has
-        succeeded, exactly as with `release`.
+        succeeded, exactly as with `release`. A swarm whose recovery failed less than
+        `_RECOVERY_BACKOFF_SEC` ago in this process is skipped.
         """
         recovered = []
         for swarm_dir, state in self.locked_swarms():
@@ -663,6 +744,9 @@ class SwarmBroker:
             except OSError:
                 continue
             try:
+                failed_at = _RECOVERY_FAILED_AT.get(_recovery_key(swarm_dir, pinned))
+                if failed_at is not None and time.monotonic() - failed_at < _RECOVERY_BACKOFF_SEC:
+                    continue
                 if self._release_holding_lock(
                     swarm_dir, pinned, recovering=True, stale_after=stale_index_lock_after_sec
                 ):
@@ -677,6 +761,34 @@ class SwarmBroker:
                 "⚠️ [SwarmBroker] Swarms left locked by a failed release: %s", ", ".join(stuck)
             )
         return recovered
+
+    def mark_stale_lease(self, swarm_dir: Path, older_than_sec: float) -> bool:
+        """Mark a lock left unchanged for more than `older_than_sec` as a failed release, so
+        `recover_failed_releases` resets the swarm before it goes back to the pool; True when
+        marked.
+
+        For an operator who knows the holder is gone: the lock is never removed here, and a
+        link standing at the swarm path or at its lock is not followed.
+        """
+        if not self._is_swarm_child_dir(swarm_dir):
+            return False
+        try:
+            pinned = _open_real_dir(swarm_dir)
+        except OSError:
+            return False
+        try:
+            lock_fd = _open_lock(pinned)
+            if lock_fd is None:
+                return False
+            try:
+                if time.time() - os.fstat(lock_fd).st_mtime <= older_than_sec:
+                    return False
+                _write_release_failed_mark(lock_fd)
+                return True
+            finally:
+                os.close(lock_fd)
+        finally:
+            os.close(pinned)
 
     def _release_holding_lock(
         self,
@@ -714,9 +826,14 @@ class SwarmBroker:
                     return False
                 self._clear_stale_registration_lock(swarm_dir, stale_after)
             released = self._release_guarded(swarm_dir, pinned)
+            if recovering:
+                key = _recovery_key(swarm_dir, pinned)
+                if released is True:
+                    _RECOVERY_FAILED_AT.pop(key, None)
+                else:
+                    _RECOVERY_FAILED_AT[key] = time.monotonic()
             if released is False:
-                os.ftruncate(lock_fd, 0)
-                os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
+                _write_release_failed_mark(lock_fd)
             return released is True
         except OSError as e:
             # Reading the mark, clearing the registration lock or writing the mark failed:
@@ -814,8 +931,14 @@ class SwarmBroker:
         return True
 
     def _reset_worktree(self, swarm_dir: Path, pinned: int) -> bool:
-        """`git checkout` and `git clean` through the hardened runner, with the git dir pinned
-        to the swarm's own registration under the controller; False leaves the swarm locked."""
+        """Put the swarm back at the commit its lease started from (`_LEASE_BASE_REF`, else
+        its HEAD) and remove every untracked file, ignored ones included, through the hardened
+        runner with the git dir pinned to the swarm's own registration under the controller;
+        False leaves the swarm locked.
+
+        `checkout --force --detach` drops staged and unstaged changes and commits made on top
+        of the base like `reset --hard`, without moving a branch the lease checked out.
+        """
         controller = self._controller_git_top_level()
         git_dir = linked_worktree_git_dir(swarm_dir, controller) if controller else None
         if git_dir is None:
@@ -831,7 +954,21 @@ class SwarmBroker:
             )
             return False
         # 快速重設 git 狀態; the lock stays until the reset has finished.
-        for args in (("checkout", "--", "."), ("clean", "-f", "-d", "-e", f"/{_LOCK_NAME}")):
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        base_commit = f"{_LEASE_BASE_REF}^{{commit}}"
+        base = run_hardened_git(
+            swarm_dir, "rev-parse", "--verify", "--quiet", base_commit, git_dir=git_dir
+        )
+        target = base.stdout.strip() if base.returncode == 0 else "HEAD"
+        if target == "HEAD":
+            logger.warning(
+                "⚠️ [SwarmBroker] No lease base recorded; resetting to HEAD: %s", swarm_dir
+            )
+        for args in (
+            ("checkout", "--force", "--detach", target),
+            ("clean", "-f", "-d", "-x", "-e", f"/{_LOCK_NAME}"),
+        ):
             if not _names_dir(swarm_dir, pinned):
                 raise _SwarmDirSwapped(swarm_dir)
             result = run_hardened_git(swarm_dir, *args, git_dir=git_dir)
