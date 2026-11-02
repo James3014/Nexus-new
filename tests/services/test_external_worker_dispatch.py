@@ -1344,3 +1344,384 @@ def test_cline_exception_inside_popen_after_fork_is_unknown_not_released(
     (child_pid,) = forked
     with pytest.raises(ProcessLookupError):
         os.killpg(child_pid, 0)
+
+
+# --- #3201: a terminated background supervisor stops its provider and settles ---
+
+
+def _fake_provider_with_grandchild(path: Path, pids: Path, version: str) -> None:
+    """A provider that starts a same-group grandchild, records both pids, then waits."""
+
+    path.write_text(
+        f"""#!/bin/sh
+case "$1" in
+  --version) echo "{version}"; exit 0;;
+  auth) echo '{{"loggedIn":true,"authMethod":"claude.ai","configDirectory":"'"$CLAUDE_CONFIG_DIR"'","accountUuid":"acct-1","organizationUuid":"org-1"}}'; exit 0;;
+esac
+sleep 60 &
+echo "$$ $!" > "{pids}.tmp"
+mv "{pids}.tmp" "{pids}"
+wait
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _group_gone(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def _pid_gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def _signal_background_supervisor(
+    journal, operation_id: str, pids: Path, signum: int
+) -> tuple[int, int, int, int]:
+    """Signal the supervisor this test spawned once its provider runs; reap it."""
+
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if pids.exists() and journal.read(operation_id).get("provider_pid"):
+            break
+        time.sleep(0.05)
+    record = journal.read(operation_id)
+    assert record.get("phase") == "PROVIDER_RUNNING", record
+    supervisor_pid = int(record["pid"])
+    provider_pid, grandchild_pid = (int(part) for part in pids.read_text().split())
+    assert int(record["provider_pid"]) == provider_pid
+    try:
+        os.kill(supervisor_pid, signum)
+        _, status = os.waitpid(supervisor_pid, 0)
+    finally:
+        # Never leave a child of this test behind, even when the fix regresses.
+        for pgid in (provider_pid,):
+            if not _group_gone(pgid):
+                os.killpg(pgid, signal.SIGKILL)
+    return supervisor_pid, status, provider_pid, grandchild_pid
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP])
+def test_signalled_claude_supervisor_stops_provider_group_and_marks_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signum: int
+) -> None:
+    import json
+
+    from nexus.services.claude_account_pool import (
+        ClaudeAccountPoolManager,
+        identity_fingerprint,
+        set_claude_account_pool_manager,
+    )
+
+    pids = tmp_path / "provider.pids"
+    fake = tmp_path / "claude"
+    _fake_provider_with_grandchild(fake, pids, "2.1.296 (Claude Code)")
+    monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
+    pool_root = tmp_path / "claude-pool"
+    monkeypatch.setenv("NEXUS_CLAUDE_ACCOUNT_POOL_DIR", str(pool_root))
+    home = tmp_path / "cfg-a"
+    home.mkdir(mode=0o700)
+    ClaudeAccountPoolManager(pool_root).register_local_profile(
+        alias="claude-a",
+        config_dir=home,
+        approved_identity_fingerprint=identity_fingerprint("acct-1", "org-1"),
+    )
+    set_claude_account_pool_manager(None)
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="claude",
+        model="sonnet",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=300,
+        require_free=False,
+        thinking="none",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+    journal = dispatch._journal("claude", root)
+    _, status, provider_pid, grandchild_pid = _signal_background_supervisor(
+        journal, operation_id, pids, signum
+    )
+
+    # The supervisor ran its cleanup instead of dying on the default action.
+    assert os.WIFEXITED(status), status
+    assert os.WEXITSTATUS(status) == 128 + signum
+    assert _group_gone(provider_pid)
+    assert _pid_gone(grandchild_pid)
+    current = journal.read(operation_id)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["phase"] == "TERMINAL"
+    assert current["failure_kind"] == (
+        f"SUPERVISOR_SIGNAL_AFTER_PROVIDER_START:{signal.Signals(signum).name}"
+    )
+    assert current["reconciliation"]["result"] == "PROVIDER_STOPPED_ON_SUPERVISOR_SIGNAL"
+    assert current["reconciliation"]["provider_alive_after"] is False
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert current["reconciliation"]["account_release"] == "HELD_UNKNOWN_OUTCOME_PROVIDER_STOPPED"
+    # Reconcile no longer finds a running provider to wait on.
+    assert journal.reconcile(operation_id)["status"] == "OUTCOME_UNKNOWN"
+    # The lease is explicitly marked for operator release, and release frees it.
+    manager = ClaudeAccountPoolManager(pool_root)
+    (lease_id,) = manager.unknown_outcome_leases()
+    assert current["lease_id_hash"] == dispatch._runtime_module.ClaudeAccountAdapter._lease_hash(
+        lease_id
+    )
+    manager.reconcile_release(lease_id)
+    assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+    set_claude_account_pool_manager(None)
+
+
+def test_signalled_cline_supervisor_stops_provider_group_and_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pids = tmp_path / "provider.pids"
+    fake = tmp_path / "cline"
+    _fake_provider_with_grandchild(fake, pids, "cline 1.0")
+    monkeypatch.setenv("NEXUS_CLINE_BIN", str(fake))
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="cline",
+        model="cline-free/mimo-v2.6-flash",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=300,
+        require_free=True,
+        thinking="none",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+    journal = dispatch._journal("cline", root)
+    _, status, provider_pid, grandchild_pid = _signal_background_supervisor(
+        journal, operation_id, pids, signal.SIGTERM
+    )
+
+    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 128 + signal.SIGTERM
+    assert _group_gone(provider_pid)
+    assert _pid_gone(grandchild_pid)
+    current = journal.read(operation_id)
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["failure_kind"] == "SUPERVISOR_SIGNAL_AFTER_PROVIDER_START:SIGTERM"
+    assert current["reconciliation"]["account_release"] == "RELEASED"
+
+
+def test_signal_recorded_while_settling_stops_before_next_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.grok_account_pool import (
+        GrokAccountPoolManager,
+        set_grok_account_pool_manager,
+    )
+
+    fake = tmp_path / "grok"
+    _fake_grok_with_profile_failover(fake)
+    monkeypatch.setenv("NEXUS_GROK_BIN", str(fake))
+    pool_root = tmp_path / "grok-pool"
+    first_home = tmp_path / "profile-a"
+    second_home = tmp_path / "profile-b"
+    first_home.mkdir()
+    second_home.mkdir()
+    (first_home / "fail-auth").write_text("1", encoding="utf-8")
+    pool_root.mkdir()
+    account = {
+        "enabled": True,
+        "cooldown_until": 0.0,
+        "last_failure_reason": "",
+        "last_failure_timestamp": 0.0,
+    }
+    (pool_root / "state.json").write_text(
+        json.dumps({
+            "accounts": {
+                "a-first": {"home_path": str(first_home), **account},
+                "b-second": {"home_path": str(second_home), **account},
+            },
+            "active_alias": "a-first",
+            "updated_at": 0.0,
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_GROK_ACCOUNT_POOL_ROOT", str(pool_root))
+    GrokAccountPoolManager(pool_root).bind_host(confirm_existing_pool=True)
+    set_grok_account_pool_manager(None)
+
+    original_report = runtime.GrokAccountAdapter.report_failure
+
+    def report_then_signal(self, binding, failure_kind):
+        replacement = original_report(self, binding, failure_kind)
+        # A SIGTERM arriving while the first attempt settles is deferred.
+        dispatch._supervisor_signal_handler(signal.SIGTERM, None)
+        return replacement
+
+    monkeypatch.setattr(runtime.GrokAccountAdapter, "report_failure", report_then_signal)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "received", None)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "deferred", False)
+    root = tmp_path / "ops"
+    journal = dispatch._journal("grok", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="grok",
+        model="grok-4.5",
+        effort="none",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+        initial_fields={"mode": "plan", "auto_approve": False, "require_free": False},
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "hello")
+    try:
+        code = dispatch._run_operation(
+            operation_id=operation_id,
+            provider="grok",
+            model="grok-4.5",
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            auto_approve=False,
+            timeout_seconds=10,
+            require_free=False,
+            thinking="none",
+            operation_root=root,
+            heartbeat_interval=1.0,
+            outer_grace_seconds=1.0,
+        )
+    finally:
+        set_grok_account_pool_manager(None)
+    assert code == 128 + signal.SIGTERM
+    current = journal.read(operation_id)
+    assert current["status"] == "FAILED"
+    assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGTERM"
+    assert current["attempts"] == 2
+    assert current["reconciliation"]["result"] == "NO_CONFIRMED_PROVIDER_PROCESS"
+    assert json.loads((pool_root / "state.json").read_text()).get("leases", {}) == {}
+
+
+def test_signal_escaping_before_provider_leaves_terminal_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch._journal("cline", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="cline",
+        model="cline-free/mimo-v2.6-flash",
+        effort="none",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+        initial_fields={"mode": "plan", "auto_approve": False, "require_free": True},
+    )
+    installed: list[object] = []
+
+    def signalled_before_provider(**kwargs):
+        installed.append(signal.getsignal(signal.SIGTERM))
+        journal.mark_started(operation_id, pid=os.getpid())
+        raise dispatch._SupervisorSignalError(signal.SIGHUP)
+
+    monkeypatch.setattr(dispatch, "_run_operation", signalled_before_provider)
+    prior = signal.getsignal(signal.SIGTERM)
+    code = dispatch._run_operation_with_signal_cleanup(
+        operation_id=operation_id, provider="cline", operation_root=root
+    )
+    assert installed == [dispatch._supervisor_signal_handler]
+    assert signal.getsignal(signal.SIGTERM) is prior
+    assert code == 128 + signal.SIGHUP
+    current = journal.read(operation_id)
+    assert current["status"] == "FAILED"
+    assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGHUP"
+    assert current["reconciliation"]["result"] == "NO_PROVIDER_PROCESS_STARTED"
+
+
+def test_claude_signal_after_lease_before_launch_settles_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    started = tmp_path / "provider-started"
+    original_pending = runtime.ClaudeAccountAdapter.mark_launch_pending
+
+    def pending_then_signal(self, binding):
+        original_pending(self, binding)
+        # A SIGTERM between the durable launch_pending write and Popen.
+        dispatch._supervisor_signal_handler(signal.SIGTERM, None)
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "mark_launch_pending", pending_then_signal)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "received", None)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "deferred", False)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, f"touch {started}"
+    )
+    try:
+        code = _run_claude_inproc(tmp_path, operation_id, prompt_path, root)
+    finally:
+        set_claude_account_pool_manager(None)
+    assert code == 128 + signal.SIGTERM
+    assert not started.exists()
+    current = journal.read(operation_id)
+    assert current["status"] == "FAILED"
+    assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGTERM"
+    assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+
+
+def _eperm_killpg(pgid: int, sig: int) -> None:
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_group_probe_eperm_on_reaped_group_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # macOS answers EPERM to killpg(pgid, 0) when only zombies are left in the group; that is
+    # not "alive" once a listing finds no live member (#3204 review).
+    proc = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
+    proc.wait(timeout=10)
+    monkeypatch.setattr(dispatch.os, "killpg", _eperm_killpg)
+
+    assert dispatch._process_group_alive(proc.pid, settle_seconds=2.0) is False
+
+
+def test_group_probe_eperm_with_live_member_stays_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(dispatch.os, "killpg", _eperm_killpg)
+            assert dispatch._process_group_alive(proc.pid, settle_seconds=0.3) is True
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
+
+
+def test_group_probe_eperm_without_listing_helper_stays_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An older snapshot without the listing helper cannot tell: never call the group gone.
+    proc = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
+    proc.wait(timeout=10)
+    monkeypatch.setattr(dispatch.os, "killpg", _eperm_killpg)
+
+    def _missing(name: str):
+        raise ImportError(name)
+
+    monkeypatch.setattr(dispatch, "import_module", _missing)
+
+    assert dispatch._process_group_alive(proc.pid, settle_seconds=0.2) is True

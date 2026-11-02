@@ -457,3 +457,47 @@ def test_authority_registered_provider_without_model_binding_makes_zero_physical
         registered.assert_called_once()
         assert registered.call_args.kwargs["provider"] == provider
         assert raw == "registered-raw"
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit, RuntimeError])
+def test_cli_group_is_killed_when_polling_is_interrupted(tmp_path, monkeypatch, interrupt):
+    """#3203: any exception or signal-raised exit while polling also kills the CLI group.
+
+    The CLI process is a stub: nothing is spawned and no signal reaches a real pid.
+    """
+    import signal
+
+    from nexus.services import gateway as gateway_module
+
+    killed: list[tuple[int, int]] = []
+
+    class FakeCli:
+        pid = 2**22 + 11
+
+        def __init__(self, *args, **kwargs):
+            assert kwargs.get("start_new_session") is True
+            self.alive = True
+
+        def poll(self):
+            return None if self.alive else -9
+
+        def wait(self, timeout=None):
+            self.alive = False
+            return -9
+
+    def fake_killpg(pgid, signum):
+        killed.append((pgid, signum))
+
+    def interrupted_sleep(_seconds):
+        raise interrupt()
+
+    monkeypatch.setattr(gateway_module.subprocess, "Popen", FakeCli)
+    monkeypatch.setattr(gateway_module.os, "killpg", fake_killpg)
+    monkeypatch.setattr(gateway_module.time, "sleep", interrupted_sleep)
+
+    with pytest.raises(interrupt):
+        gateway_module._run_cli_with_hard_timeout(
+            ["unused-cli"], stdin_path=None, env={}, cwd=tmp_path, timeout_sec=60
+        )
+
+    assert killed == [(FakeCli.pid, signal.SIGKILL)]

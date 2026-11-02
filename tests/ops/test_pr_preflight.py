@@ -897,3 +897,113 @@ def test_git_identity_fails_closed_on_unverifiable_main_corpus(repo, tmp_path, c
     identity = _check(report, "git_identity")
     assert (identity["status"], identity["code"]) == ("FAIL", pf.GOLDEN_CORPUS_UNVERIFIABLE)
     assert "GOLDEN_CORPUS_UNVERIFIABLE" in identity["detail"]
+
+
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
+def test_static_worktrees_removed_when_terminate_or_hangup_arrives(tmp_path, monkeypatch, signame):
+    """#3203: TERM/HUP during the static checks still removes both temporary worktrees.
+
+    No signal is sent: the stub calls whatever handler is installed for the signal,
+    which is what the interpreter would do when it arrives.
+    """
+    import signal as signal_module
+    import types
+
+    signum = getattr(signal_module, signame)
+    before = signal_module.getsignal(signum)
+    added: list[Path] = []
+    removed: list[str] = []
+
+    def fake_add(repo, rev, parent, label):
+        path = parent / label
+        path.mkdir()
+        added.append(path)
+        return path
+
+    def fake_git(repo, *args, check=True):
+        if args[:2] == ("worktree", "remove"):
+            removed.append(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_static(ctx, tool, worktrees):
+        handler = signal_module.getsignal(signum)
+        assert callable(handler), f"{signame} would kill the process before cleanup"
+        handler(signum, None)
+        raise AssertionError("handler returned instead of raising")
+
+    monkeypatch.setattr(pf, "_add_worktree", fake_add)
+    monkeypatch.setattr(pf, "_git", fake_git)
+    monkeypatch.setattr(pf, "check_static", fake_static)
+    ctx = types.SimpleNamespace(repo=tmp_path, base_sha="b" * 40, head_sha="h" * 40)
+
+    with pytest.raises(SystemExit) as raised:
+        pf.run_checks(ctx, ["static_ruff"])
+
+    assert raised.value.code == 128 + signum
+    assert sorted(removed) == sorted(str(path) for path in added)
+    assert len(added) == 2
+    assert not added[0].parent.exists()
+    assert signal_module.getsignal(signum) == before
+
+
+def test_static_worktrees_keep_an_ignored_hangup_ignored(tmp_path, monkeypatch):
+    """#3203: under nohup the hangup signal stays ignored during the static checks."""
+    import signal as signal_module
+    import types
+
+    previous = signal_module.signal(signal_module.SIGHUP, signal_module.SIG_IGN)
+    seen: list[object] = []
+    try:
+        monkeypatch.setattr(pf, "_add_worktree", lambda repo, rev, parent, label: parent / label)
+        monkeypatch.setattr(
+            pf, "_git", lambda repo, *a, check=True: subprocess.CompletedProcess(a, 0, "", "")
+        )
+
+        def fake_static(ctx, tool, worktrees):
+            seen.append(signal_module.getsignal(signal_module.SIGHUP))
+            return pf.CheckResult("static_ruff", pf.PASS)
+
+        monkeypatch.setattr(pf, "check_static", fake_static)
+        ctx = types.SimpleNamespace(repo=tmp_path, base_sha="b" * 40, head_sha="h" * 40)
+        pf.run_checks(ctx, ["static_ruff"])
+        assert seen == [signal_module.SIG_IGN]
+        assert signal_module.getsignal(signal_module.SIGHUP) is signal_module.SIG_IGN
+    finally:
+        signal_module.signal(signal_module.SIGHUP, previous)
+
+
+def test_static_worktrees_leave_a_non_python_hangup_handler_in_place(tmp_path, monkeypatch):
+    """#3203 review: a handler getsignal reports as None is neither replaced nor "restored"."""
+    import signal as signal_module
+    import types
+
+    real_getsignal = signal_module.getsignal
+    real_signal = signal_module.signal
+    replaced: list[object] = []
+
+    def getsignal(signum):
+        return None if signum == signal_module.SIGHUP else real_getsignal(signum)
+
+    def fake_signal(signum, handler):
+        if signum != signal_module.SIGHUP:
+            return real_signal(signum, handler)
+        if handler is None:
+            return real_signal(signum, handler)  # what restoring None really does: TypeError
+        replaced.append(handler)
+        return None  # a handler installed outside Python reads back as None
+
+    monkeypatch.setattr(signal_module, "getsignal", getsignal)
+    monkeypatch.setattr(signal_module, "signal", fake_signal)
+    monkeypatch.setattr(pf, "_add_worktree", lambda repo, rev, parent, label: parent / label)
+    monkeypatch.setattr(
+        pf, "_git", lambda repo, *a, check=True: subprocess.CompletedProcess(a, 0, "", "")
+    )
+    monkeypatch.setattr(
+        pf, "check_static", lambda ctx, tool, wt: pf.CheckResult("static_ruff", pf.PASS)
+    )
+    ctx = types.SimpleNamespace(repo=tmp_path, base_sha="b" * 40, head_sha="h" * 40)
+
+    results = pf.run_checks(ctx, ["static_ruff"])
+
+    assert [r.status for r in results] == [pf.PASS]
+    assert replaced == []

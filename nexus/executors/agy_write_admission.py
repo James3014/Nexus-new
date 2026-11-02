@@ -565,7 +565,7 @@ def build_seatbelt_profile(
     must be real paths (Seatbelt matches resolved vnodes).
     """
     allow = [run_root]
-    # Each writable root keeps its own entry (#3181, as ``confinement()`` does
+    # Each writable root keeps its own entry (#3181, as the sandboxed lane does
     # since #3173): ``(subpath root)`` also matches the root itself, so without
     # this a worker could move the root out, write the path-keyed denied
     # entries below (``.git``) under the new name and move it back, or leave

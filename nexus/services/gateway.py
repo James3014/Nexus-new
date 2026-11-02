@@ -64,6 +64,7 @@ def _run_cli_with_hard_timeout(
         stderr_path = Path(tmp) / "stderr.txt"
         with stdout_path.open("w+", encoding="utf-8") as stdout_file, stderr_path.open("w+", encoding="utf-8") as stderr_file:
             f_in = open(stdin_path, "rb") if stdin_path is not None else None
+            proc: subprocess.Popen[str] | None = None
             try:
                 proc = subprocess.Popen(
                     command,
@@ -105,6 +106,18 @@ def _run_cli_with_hard_timeout(
                             stderr=stderr_path.read_text(encoding="utf-8", errors="replace"),
                         )
                     time.sleep(0.1)
+            except BaseException:
+                # Any exception or signal-raised exit while polling stops the CLI group too (#3203).
+                if proc is not None and proc.poll() is None:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                raise
             finally:
                 if f_in is not None:
                     f_in.close()

@@ -26,6 +26,8 @@ the original exit code is kept.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
 import fcntl
 import hashlib
 import json
@@ -39,7 +41,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 SCHEMA = "nexus.core_issue_check_local.v1"
 WORKFLOW_PATH = ".github/workflows/nexus-core-issue-completion.yml"
@@ -70,6 +72,11 @@ CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
 EXIT_OK = 0
 EXIT_CORE_FAILED = 1
 EXIT_ERROR = 2
+# How often a child is polled for exit, and how long a SIGKILLed group gets to die.
+GROUP_POLL_SECONDS = 0.05
+GROUP_STOP_SETTLE_SECONDS = 5.0
+# Bound on each git call of the cleanup, which runs with the terminating signals held.
+GIT_CLEANUP_TIMEOUT_SECONDS = 300.0
 
 
 class LocalCheckError(RuntimeError):
@@ -94,6 +101,8 @@ def _run(
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
             )
         except OSError as exc:
@@ -106,31 +115,141 @@ def _run(
     return result
 
 
+_argv_command_module: Any = None
+
+
+def _argv_command() -> Any:
+    """``nexus/core/argv_command.py`` from this script's own tree (the repo, or the host runtime
+    snapshot, which ships it), loaded by file path as ``nexus-dsh-workflow`` does, so that a
+    ``nexus`` package installed for the running python cannot stand in for it. It holds the
+    group stop used here: SIGKILL a child's process group while the child is still unreaped,
+    then reap it. Not loadable: OSError."""
+    global _argv_command_module
+    if _argv_command_module is None:
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[2] / "nexus" / "core" / "argv_command.py"
+        digest = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        name = f"nexus_issue_check_argv_command_{digest}"
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"no loader for {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
+        except Exception as exc:
+            raise OSError(errno.ENOENT, f"{path} unavailable: {exc}") from exc
+        _argv_command_module = module
+    return _argv_command_module
+
+
+def _group_stopped_if_exited(proc: subprocess.Popen[Any]) -> bool:
+    """Non-blocking: False while the child runs. Once it has exited, SIGKILL whatever it left in
+    its process group, reap it and return True (``argv_command.kill_group_if_exited``), so a
+    member that outlives the child is stopped too instead of running on after this run (#3189).
+    A member alive after SIGKILL raises PermissionError; a child reaped elsewhere,
+    ChildProcessError. A terminating signal is held meanwhile, so it cannot land between the
+    reap and ``returncode`` being set."""
+    with _signals_held():
+        return bool(_argv_command().kill_group_if_exited(proc))
+
+
+def _leader_unreaped(proc: subprocess.Popen[Any]) -> bool:
+    """Whether the child is still unreaped, so its pid still names its group: not if
+    ``returncode`` is set, nor if an interrupt (SIGINT, which is not held) landed between the
+    reap and ``returncode`` being set. Asked through ``argv_command`` (``waitid`` with
+    ``WNOWAIT``, or libproc on macOS), from the same tree as ``kill_group_if_exited``."""
+    return proc.returncode is None and bool(_argv_command()._leader_unreaped(proc.pid))
+
+
 def _stop_group(proc: subprocess.Popen[Any]) -> None:
-    """Kill the child's process group and reap it, only while the child is still running."""
-    if proc.poll() is not None:
-        return
+    """Kill the child's process group and reap the child, unless that is already done.
+
+    The child is reaped only by ``_group_stopped_if_exited``, after its group is killed, so
+    while it is unreaped its pid still names its group and ``killpg`` cannot reach another
+    group; once reaped, nothing is signalled."""
+    if not _leader_unreaped(proc):
+        return  # reaped by _group_stopped_if_exited, after its group was killed
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    proc.wait()
+    except (ProcessLookupError, PermissionError):
+        pass  # nothing left, or (macOS) only the exited, unreaped child is left
+    deadline = time.monotonic() + GROUP_STOP_SETTLE_SECONDS
+    while not _group_stopped_if_exited(proc):
+        if time.monotonic() >= deadline:
+            raise ChildProcessError(f"child {proc.pid} still runs after SIGKILL; left unreaped")
+        time.sleep(GROUP_POLL_SECONDS)
 
 
-def _raise_on_sigterm() -> Any:
-    """Turn SIGTERM into SystemExit while a group runs so the cleanup above executes."""
+# Signals whose default action ends the run without running any cleanup: a closed
+# terminal or dropped ssh (SIGHUP), SIGQUIT and SIGTERM (#3166, #3189).
+_TERMINATING_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGQUIT") if hasattr(signal, name)
+)
+
+
+# While cleanup runs, a terminating signal is held: recorded, not raised, and raised once the
+# cleanup is done, so a signal never cuts the cleanup short (#3189, #3203).
+_held_depth = 0
+_held_signal: int | None = None
+
+
+def _on_terminating_signal(signum: int, frame: Any) -> None:
+    global _held_signal
+    if _held_depth:
+        if _held_signal is None:
+            _held_signal = signum
+        return
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_held() -> Iterator[None]:
+    """Hold the terminating signals for the block; once it ends, a held one exits with
+    128 + its number. Only for cleanup that ends on its own: no signal can stop it."""
+    global _held_depth, _held_signal
+    _held_depth += 1
+    try:
+        yield
+    finally:
+        _held_depth -= 1
+        if _held_depth == 0 and _held_signal is not None:
+            signum, _held_signal = _held_signal, None
+            raise SystemExit(128 + signum)
+
+
+def _raise_on_signals() -> dict[int, Any]:
+    """Turn the terminating signals into SystemExit so the callers' cleanup executes.
+
+    Returns the previous handlers to pass to ``_restore_signals``; empty off the main
+    thread, where handlers cannot be installed. A signal inherited as SIG_IGN (nohup, a
+    parent that ignores hangup) is left ignored and not returned, so nothing is restored.
+    A handler not installed from Python (``getsignal`` returns None, so it could not be
+    restored) is left in place in the same way (as in #3208)."""
     if threading.current_thread() is not threading.main_thread():
-        return None
+        return {}
 
-    def handler(signum: int, frame: Any) -> None:
-        raise SystemExit(128 + signum)
+    previous: dict[int, Any] = {}
+    try:
+        for signum in _TERMINATING_SIGNALS:
+            current = signal.getsignal(signum)
+            if current is None or current == signal.SIG_IGN:
+                continue
+            previous[signum] = signal.signal(signum, _on_terminating_signal)
+    except BaseException:
+        _restore_signals(previous)
+        raise
+    return previous
 
-    return signal.signal(signal.SIGTERM, handler)
 
-
-def _restore_sigterm(previous: Any) -> None:
-    if previous is not None:
-        signal.signal(signal.SIGTERM, previous)
+def _restore_signals(previous: dict[int, Any]) -> None:
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
 
 
 def _run_with_timeout(
@@ -139,41 +258,65 @@ def _run_with_timeout(
     cwd: Path | None,
     env: dict[str, str] | None,
     code: str,
-    timeout: float,
+    timeout: float | None,
 ) -> subprocess.CompletedProcess[str]:
     """Run in a new process group; on timeout kill the whole group and fail closed.
 
     Output goes to temporary files, not pipes, so a descendant that left the
-    group cannot keep the wait open after the group is killed.
+    group cannot keep the wait open after the group is killed. The group is killed
+    on every exit path, also when the child exits first and leaves members behind (#3189).
     """
+    try:
+        _argv_command().require_child_stays_unreaped()
+    except OSError as exc:
+        raise LocalCheckError(code, f"cannot supervise {cmd[0]}'s process group: {exc}") from exc
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        # Handlers go in before the child exists, so a signal cannot land between Popen
+        # returning and the cleanup. A tiny window remains between Popen's fork and its
+        # return, while ``proc`` is still None and nothing would stop the new child. The
+        # restore is protected by its own try/finally.
+        previous = _raise_on_signals()
         try:
-            proc = subprocess.Popen(
-                list(cmd),
-                cwd=cwd,
-                env=env,
-                stdout=out,
-                stderr=err,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
-        previous_term = _raise_on_sigterm()
-        try:
+            proc: subprocess.Popen[Any] | None = None
             try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _stop_group(proc)
-                raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+                try:
+                    proc = subprocess.Popen(
+                        list(cmd),
+                        cwd=cwd,
+                        env=env,
+                        stdout=out,
+                        stderr=err,
+                        start_new_session=True,
+                    )
+                except OSError as exc:
+                    raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+                deadline = None if timeout is None else time.monotonic() + timeout
+                # Polled without reaping: the child's pid names its group until the group
+                # is killed, which happens before the reap.
+                while not _group_stopped_if_exited(proc):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise LocalCheckError(
+                            code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s"
+                        )
+                    time.sleep(GROUP_POLL_SECONDS)
+            except (PermissionError, ChildProcessError) as exc:
+                raise LocalCheckError(
+                    code, f"process group of {cmd[0]} not stopped: {exc}"
+                ) from exc
+            finally:
+                # Any exit path (interrupt, terminating signal, timeout, other exception)
+                # stops a still-running group, so it never outlives the lock or worktree
+                # guarding it; a signal arriving meanwhile is held until it is done.
+                if proc is not None:
+                    with _signals_held():
+                        _stop_group(proc)
         finally:
-            # Any exit path (interrupt, SIGTERM, other exception) stops a still-running
-            # group, so the install never outlives the lock that guards it (#3166).
-            _stop_group(proc)
-            _restore_sigterm(previous_term)
+            _restore_signals(previous)
         out.seek(0)
         err.seek(0)
         stdout = out.read().decode("utf-8", "replace")
         stderr = err.read().decode("utf-8", "replace")
+    assert proc is not None
     return subprocess.CompletedProcess(list(cmd), proc.returncode, stdout, stderr)
 
 
@@ -254,7 +397,7 @@ def reported_receipt(pointer: Path, worktree: Path) -> Path | None:
     """
     if not pointer.is_file():
         return None
-    text = pointer.read_text(encoding="utf-8").strip()
+    text = pointer.read_text(encoding="utf-8", errors="replace").strip()
     if not text:
         return None
 
@@ -335,7 +478,12 @@ def resolve_token() -> str:
         return token
     try:
         result = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, check=False
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except OSError as exc:
         raise LocalCheckError("GITHUB_TOKEN_UNAVAILABLE", str(exc)) from exc
@@ -430,17 +578,15 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         rc = 0
         check_ran = False
         for sub, trust_args in core_calls:
-            try:
-                proc = subprocess.run(
-                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
-                    cwd=worktree,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            except OSError as exc:
-                raise LocalCheckError("CORE_EXEC_FAILED", str(exc)) from exc
+            # Core runs in its own process group that dies with this run, so a terminating
+            # signal (turned into SystemExit by main) cannot leave it unsupervised (#3189).
+            proc = _run_with_timeout(
+                [str(certify), sub, "--repo", ".", "--issue", str(args.issue), *trust_args],
+                cwd=worktree,
+                env=env,
+                code="CORE_EXEC_FAILED",
+                timeout=None,
+            )
             check_ran = sub == "issue-check"
             log_parts.append(f"$ {sub} (exit {proc.returncode})\n{proc.stdout}{proc.stderr}")
             if proc.returncode != 0:
@@ -496,16 +642,30 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         ok = rc == 0 and status == "VERIFIED"
         return summary, EXIT_OK if ok else EXIT_CORE_FAILED
     finally:
-        if added:
-            subprocess.run(
-                ["git", "-C", str(repo), "worktree", "remove", "--force", str(worktree)],
-                capture_output=True,
-                check=False,
-            )
-            subprocess.run(
-                ["git", "-C", str(repo), "worktree", "prune"], capture_output=True, check=False
-            )
-        shutil.rmtree(tmp_parent, ignore_errors=True)
+        # A terminating signal arriving now is held until the cleanup is done, so the
+        # temporary worktree is never left registered (#3189, #3203). The directory goes
+        # before the prune: a ``worktree remove`` that did not finish (its git killed by
+        # a hangup sent to the whole terminal group) is then still pruned.
+        with _signals_held():
+            if added:
+                _git_cleanup(repo, "worktree", "remove", "--force", str(worktree))
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+            if added:
+                _git_cleanup(repo, "worktree", "prune")
+
+
+def _git_cleanup(repo: Path, *args: str) -> None:
+    """One git call of the cleanup, bounded: the cleanup runs with the terminating signals
+    held, so nothing else would stop a git that hangs. Its result is not checked."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+            timeout=GIT_CLEANUP_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -529,14 +689,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="install_timeout",
         type=float,
         default=INSTALL_TIMEOUT_SECONDS,
-        help="seconds allowed for the Core tool install (default %(default)s); "
-        "--materials-timeout is the older name",
+        help="seconds allowed for the Core tool install, and for waiting on another run's "
+        "install of the same pin (default %(default)s); on expiry the install is killed and "
+        "the run exits 2; --materials-timeout is the older name",
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Held for the whole run: a terminating signal unwinds through run_check's cleanup
+    # (worktree removal, child process groups) instead of killing the run outright.
+    previous_signals = _raise_on_signals()
     try:
         summary, code = run_check(args)
     except LocalCheckError as exc:
@@ -558,6 +722,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             "error": str(exc),
         }
         code = EXIT_ERROR
+    except Exception as exc:  # noqa: BLE001 - any other local failure is exit 2, never a verdict
+        summary = {
+            "schema": SCHEMA,
+            "issue": args.issue,
+            "status": "ERROR",
+            "error_code": "LOCAL_UNEXPECTED_ERROR",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        code = EXIT_ERROR
+    finally:
+        _restore_signals(previous_signals)
     text = json.dumps(summary, indent=2, sort_keys=True)
     print(text)
     if args.json_out:

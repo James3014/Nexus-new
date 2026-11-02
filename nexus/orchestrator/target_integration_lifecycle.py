@@ -56,6 +56,40 @@ def _render_command(argv: Sequence[str]) -> str:
     )
 
 
+def canonical_post_apply_commands(
+    commands: Sequence[Sequence[str]],
+) -> tuple[tuple[str, ...], ...]:
+    """Return the one canonical form of post-apply commands: a tuple of argv tuples.
+
+    The authorization issuer hashes this form, and the integration path hashes
+    it again from the exact commands it is about to run, so a command list that
+    differs from the authorized one is refused before anything runs (#3185).  A
+    bare string is refused rather than split or iterated character by character.
+    """
+    if isinstance(commands, (str, bytes)):
+        raise ValueError("post-apply commands must be a sequence of argv lists")
+    canonical: list[tuple[str, ...]] = []
+    for argv in commands:
+        if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
+            raise ValueError("each post-apply command must be an argv list, not a string")
+        tokens = tuple(argv)
+        if not tokens or not all(isinstance(token, str) for token in tokens):
+            raise ValueError("each post-apply command must be a non-empty list of strings")
+        canonical.append(tokens)
+    return tuple(canonical)
+
+
+def post_apply_commands_hash(commands: Sequence[Sequence[str]]) -> str:
+    """Hash of the canonical post-apply commands, as bound into the authorization.
+
+    Authorizations issued before #3185 hashed a list of command strings.  For no
+    commands that is the same value as this hash, so they stay valid for running
+    nothing; for any non-empty list it can never equal an argv-list hash, so such
+    an authorization is refused and has to be issued again.
+    """
+    return _hash([list(argv) for argv in canonical_post_apply_commands(commands)])
+
+
 class TargetIntegrationLifecycle:
     """Stateless validation/delegation adapter; existing services own mutations."""
 
@@ -212,7 +246,7 @@ class TargetIntegrationLifecycle:
         attempt_id: str = "", candidate_tree_sha: str = "0" * 40,
         candidate_state_hash: str = "0" * 64, reviewer_id: str = "",
         verifier_artifact_hash: str = "", require_clean: bool = True,
-        post_apply_commands: Sequence[str] = (),
+        post_apply_commands: Sequence[Sequence[str]] = (),
     ) -> IntegrationAuthorizationEnvelope:
         actions = tuple(action_set or cls._REQUIRED_ACTIONS)
         if tuple(actions) != cls._REQUIRED_ACTIONS:
@@ -235,7 +269,7 @@ class TargetIntegrationLifecycle:
             verifier_artifact_hash=verifier_artifact_hash, require_clean=require_clean,
             strategy=preview.strategy,
             verification_commands_hash=_hash(list(preview.verification_commands)),
-            post_apply_commands_hash=_hash(list(post_apply_commands)),
+            post_apply_commands_hash=post_apply_commands_hash(post_apply_commands),
             cleanup_requested=True, approval_scope="ALLOW_ACTION_ONCE",
         )
 
