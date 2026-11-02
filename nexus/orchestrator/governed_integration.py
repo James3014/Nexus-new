@@ -420,11 +420,11 @@ class ControlledIntegrationManager:
                 continue
             try:
                 cls._git(["worktree", "remove", "--force", str(path)], controller_root)
-            except RuntimeError as exc:
+            except Exception as exc:
                 failures.append(f"{path.name}: {exc}")
         try:
             cls._git(["worktree", "prune"], controller_root)
-        except RuntimeError as exc:
+        except Exception as exc:
             failures.append(f"prune: {exc}")
         return failures
 
@@ -958,8 +958,23 @@ class ControlledIntegrationManager:
         failure: Exception | None = None
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
-            self._execute_manifest(admitted_verifiers, staging_path)
+            # The applied commit is the merge result recorded here, before any
+            # admitted verifier runs in the staging worktree (#3174).
             staging_sha = self._git(["rev-parse", "HEAD"], staging_path)
+            merge_parents = self._git(
+                ["rev-list", "--parents", "-n", "1", staging_sha], staging_path
+            )
+            if merge_parents.split()[1:] != [expected_head, candidate_sha]:
+                raise RuntimeError(
+                    "staging merge result is not the expected head merged with the candidate"
+                )
+            self._execute_manifest(admitted_verifiers, staging_path)
+            if self._git(["rev-parse", "HEAD"], staging_path) != staging_sha:
+                raise RuntimeError("staging HEAD moved during verification")
+            # Untracked verifier output (reports, markers) is allowed; a change to
+            # tracked content means the verified tree is not the merge result.
+            if self._git(["status", "--porcelain=v1", "-z", "--untracked-files=no"], staging_path):
+                raise RuntimeError("staging worktree is dirty after verification")
             if apply:
                 if self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root) != expected_head:
                     raise RuntimeError("integration branch HEAD drift before apply")
@@ -1001,6 +1016,18 @@ class ControlledIntegrationManager:
                         raise RuntimeError(f"{refused}: {exc}") from exc
                     if live_head != expected_head:
                         raise RuntimeError(f"{refused}: shape or head drift")
+                    # The old-value check refuses a concurrent move; ancestry is
+                    # required too, so the ref update only adds history (#3174).
+                    if (
+                        self._git_status(
+                            ["merge-base", "--is-ancestor", expected_head, staging_sha],
+                            controller_root,
+                        )
+                        != 0
+                    ):
+                        raise RuntimeError(
+                            f"{refused}: staging merge result does not descend from the head"
+                        )
                     self._git(
                         ["update-ref", "--no-deref", branch_ref, staging_sha, expected_head],
                         controller_root,
@@ -1059,8 +1086,8 @@ class ControlledIntegrationManager:
                 raise failure
             try:
                 branch_head_after = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
-            except RuntimeError:
-                branch_head_after = expected_head
+            except Exception:
+                pass  # keep the last head this run observed
             if failure is not None:
                 stage = "POST_APPLY_VERIFICATION" if applied else "PRE_APPLY"
                 reason = str(failure)
@@ -1078,7 +1105,20 @@ class ControlledIntegrationManager:
                 failure_reason=reason,
                 cleanup_failure=cleanup_failure,
             ) from failure
-        final_head = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
+        try:
+            final_head = self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
+        except Exception as exc:
+            # The branch may already have moved: report it as applied (#3174).
+            raise IntegrationExecutionError(
+                stage="POST_APPLY_VERIFICATION" if applied else "PRE_APPLY",
+                branch_head_before=expected_head,
+                branch_head_after=branch_head_after,
+                staging_commit_sha=staging_sha or None,
+                candidate_commit_sha=candidate_sha,
+                merge_performed=applied,
+                post_apply_verified=post_apply_verified,
+                failure_reason=f"integration branch unreadable after integration: {exc}",
+            ) from exc
         return IntegrationReceipt(
             schema="nexus.integration_receipt.v1", task_id=task_id,
             integration_branch=integration_branch,
