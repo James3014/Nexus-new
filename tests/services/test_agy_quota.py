@@ -9,6 +9,8 @@ import subprocess
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 QUOTA_PATH = ROOT / "scripts" / "ops" / "nexus-agy-quota"
 INSTALLER_PATH = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
@@ -371,3 +373,144 @@ def test_wrapper_sigterm_reaps_active_usage_process(tmp_path: Path) -> None:
         if wrapper.poll() is None:
             wrapper.kill()
             wrapper.wait()
+
+
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
+def test_query_terminate_or_hangup_stops_usage_group_installed_before_spawn(
+    tmp_path: Path, monkeypatch, signame: str
+) -> None:
+    """#3203: TERM and HUP raise before the usage group starts, and the group is stopped.
+
+    The usage process is a stub and no signal is sent: the stub calls the handler
+    the interpreter would run when the signal arrives.
+    """
+    import signal
+
+    signum = getattr(signal, signame)
+    before = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+    at_spawn: dict[int, object] = {}
+    stopped: list[object] = []
+
+    class FakeUsage:
+        pid = 2**22 + 7
+        returncode = None
+
+        def __init__(self, *args, **kwargs) -> None:
+            assert kwargs.get("start_new_session") is True
+            at_spawn.update({s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)})
+            self.calls = 0
+
+        def communicate(self, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                handler = signal.getsignal(signum)
+                assert callable(handler), f"{signame} would kill the wrapper and orphan the group"
+                handler(signum, None)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(quota.subprocess, "Popen", FakeUsage)
+    monkeypatch.setattr(quota, "_stop_usage_process", lambda proc, **_: stopped.append(proc))
+    account_home = tmp_path / "account"
+    account_home.mkdir()
+
+    with pytest.raises(SystemExit) as raised:
+        quota.query_account(
+            account_home=account_home,
+            account_name="one",
+            email=None,
+            agy_binary="unused-agy",
+            timeout=5.0,
+            checked_at="2026-11-02T00:00:00+00:00",
+        )
+
+    assert raised.value.code == 128 + signum
+    assert all(callable(at_spawn[s]) for s in (signal.SIGTERM, signal.SIGHUP)), at_spawn
+    assert len(stopped) == 1 and isinstance(stopped[0], FakeUsage)
+    assert {s: signal.getsignal(s) for s in before} == before
+
+
+def test_query_keeps_an_ignored_hangup_ignored(tmp_path: Path, monkeypatch) -> None:
+    """#3203: under nohup the hangup signal stays ignored while the usage group runs."""
+    import signal
+
+    seen: list[object] = []
+
+    class FakeUsage:
+        pid = 2**22 + 9
+        returncode = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            seen.append(signal.getsignal(signal.SIGHUP))
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        monkeypatch.setattr(quota.subprocess, "Popen", FakeUsage)
+        account_home = tmp_path / "account"
+        account_home.mkdir()
+        row = quota.query_account(
+            account_home=account_home,
+            account_name="one",
+            email=None,
+            agy_binary="unused-agy",
+            timeout=5.0,
+            checked_at="2026-11-02T00:00:00+00:00",
+        )
+        assert row["ok"] is False
+        assert seen == [signal.SIG_IGN]
+        assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+
+
+def test_query_leaves_a_non_python_hangup_handler_in_place(tmp_path: Path, monkeypatch) -> None:
+    """#3203 review: a handler getsignal reports as None is neither replaced nor "restored"."""
+    import signal
+
+    real_getsignal = signal.getsignal
+    real_signal = signal.signal
+    replaced: list[object] = []
+
+    def getsignal(signum):
+        return None if signum == signal.SIGHUP else real_getsignal(signum)
+
+    def fake_signal(signum, handler):
+        if signum != signal.SIGHUP:
+            return real_signal(signum, handler)
+        if handler is None:
+            return real_signal(signum, handler)  # what restoring None really does: TypeError
+        replaced.append(handler)
+        return None  # a handler installed outside Python reads back as None
+
+    class FakeUsage:
+        pid = 2**22 + 13
+        returncode = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    monkeypatch.setattr(signal, "getsignal", getsignal)
+    monkeypatch.setattr(signal, "signal", fake_signal)
+    monkeypatch.setattr(quota.subprocess, "Popen", FakeUsage)
+    account_home = tmp_path / "account"
+    account_home.mkdir()
+
+    row = quota.query_account(
+        account_home=account_home,
+        account_name="one",
+        email=None,
+        agy_binary="unused-agy",
+        timeout=5.0,
+        checked_at="2026-11-02T00:00:00+00:00",
+    )
+
+    assert row["ok"] is False
+    assert replaced == []

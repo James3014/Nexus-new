@@ -12,8 +12,10 @@ Features:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -47,22 +49,54 @@ def _gemini_subprocess_env() -> dict[str, str]:
     return env
 
 
+_LOCK_FDS: dict[Path, int] = {}
+
+
 def _acquire_lock(lock_path: Path) -> bool:
-    try:
-        # O_EXCL gives us an atomic single-flight lock
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    """Single-flight lock held with flock, so the kernel drops it when the holder dies (#3203).
+
+    A lock file left behind by a killed run no longer blocks later runs. The
+    descriptor stays open until ``_release_lock``; the file still names the holder pid.
+    The path is shared (``/tmp`` by default), so a symlink, a hard link or another
+    user's file there raises ``OSError`` instead of being opened and truncated.
+    """
+    while True:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
+                raise OSError(f"unsafe lock file (not a private regular file): {lock_path}")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return False
+        except BaseException:
+            os.close(fd)
+            raise
+        try:
+            current = os.stat(lock_path)
+        except FileNotFoundError:
+            current = None
+        if current is None or not os.path.samestat(os.fstat(fd), current):
+            # The previous holder unlinked this file while we waited for it: retry on the new one.
+            os.close(fd)
+            continue
+        os.ftruncate(fd, 0)
         os.write(fd, str(os.getpid()).encode("utf-8"))
-        os.close(fd)
+        _LOCK_FDS[lock_path] = fd
         return True
-    except FileExistsError:
-        return False
 
 
 def _release_lock(lock_path: Path) -> None:
+    fd = _LOCK_FDS.pop(lock_path, None)
+    if fd is None:
+        return
     try:
         lock_path.unlink(missing_ok=True)
     except Exception:
         pass
+    finally:
+        os.close(fd)
 
 
 def _run_once(
@@ -206,11 +240,23 @@ def main() -> int:
         return 2
 
     cwd = Path(args.cwd).resolve()
-    lock_path = Path(args.lock_file).resolve()
+    # Not resolve(): a symlink planted at the lock path must reach O_NOFOLLOW, not be followed.
+    lock_path = Path(os.path.abspath(args.lock_file))
     prompt = _read_prompt(args.prompt, args.prompt_file)
     inact_timeout = args.inactivity_timeout_sec if args.inactivity_timeout_sec > 0 else None
 
-    if not _acquire_lock(lock_path):
+    try:
+        acquired = _acquire_lock(lock_path)
+    except OSError as exc:
+        report = {
+            "status": "blocked",
+            "reason": "single_flight_lock_unusable",
+            "lock_file": str(lock_path),
+            "detail": str(exc),
+        }
+        print(json.dumps(report, ensure_ascii=False))
+        return 3
+    if not acquired:
         report = {
             "status": "blocked",
             "reason": "single_flight_lock_active",

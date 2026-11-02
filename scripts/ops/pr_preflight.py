@@ -34,16 +34,19 @@ This tool holds no authority. A PASS here predicts CI; it is not a verdict.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -1036,6 +1039,33 @@ CHECK_ORDER = (
 )
 
 
+@contextlib.contextmanager
+def _termination_signals_raise() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into SystemExit so ``finally`` cleanup runs (#3203).
+
+    Only on the main thread. An ignored signal (``nohup``) stays ignored, and a handler
+    not installed from Python (``getsignal`` returns None, so it could not be restored)
+    is left in place. The previous handlers are restored on the way out.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _raise(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    previous: dict[int, Any] = {}
+    try:
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            current = signal.getsignal(signum)
+            if current is not None and current is not signal.SIG_IGN:
+                previous[signum] = signal.signal(signum, _raise)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
 def _add_worktree(repo: Path, rev: str, parent: Path, label: str) -> Path:
     path = parent / label
     _git(repo, "worktree", "add", "--detach", "--quiet", str(path), rev)
@@ -1060,17 +1090,18 @@ def run_checks(ctx: Context, selected: Sequence[str]) -> list[CheckResult]:
                 results.append(CheckResult(name, SKIP, detail=str(exc)))
     static = [n for n in selected if n.startswith("static_")]
     if static:
-        parent = Path(tempfile.mkdtemp(prefix="nexus-pr-preflight-wt-"))
-        worktrees: dict[str, Path] = {}
-        try:
-            worktrees["base"] = _add_worktree(ctx.repo, ctx.base_sha, parent, "base")
-            worktrees["head"] = _add_worktree(ctx.repo, ctx.head_sha, parent, "head")
-            for name in static:
-                results.append(check_static(ctx, name.removeprefix("static_"), worktrees))
-        finally:
-            for path in worktrees.values():
-                _git(ctx.repo, "worktree", "remove", "--force", str(path), check=False)
-            shutil.rmtree(parent, ignore_errors=True)
+        with _termination_signals_raise():
+            parent = Path(tempfile.mkdtemp(prefix="nexus-pr-preflight-wt-"))
+            worktrees: dict[str, Path] = {}
+            try:
+                worktrees["base"] = _add_worktree(ctx.repo, ctx.base_sha, parent, "base")
+                worktrees["head"] = _add_worktree(ctx.repo, ctx.head_sha, parent, "head")
+                for name in static:
+                    results.append(check_static(ctx, name.removeprefix("static_"), worktrees))
+            finally:
+                for path in worktrees.values():
+                    _git(ctx.repo, "worktree", "remove", "--force", str(path), check=False)
+                shutil.rmtree(parent, ignore_errors=True)
     order = {name: index for index, name in enumerate(CHECK_ORDER)}
     return sorted(results, key=lambda r: order.get(r.check, 99))
 
