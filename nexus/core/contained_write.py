@@ -12,8 +12,8 @@ directory entry and leaves whatever inode was there untouched (a hard link to a 
 or unlinked at any moment, is never written through). An existing entry that is not a regular
 single-link file is refused up front, and reads accept only such a file. A write into a
 directory the host itself runs from later (``HOST_RUN_SUBTREES``) is refused too. A caller that
-recorded ``root_identity(root)`` before model code ran there can pass it to a write, which then
-refuses a root that is no longer that directory. A refusal raises ``PathContainmentError`` (an
+recorded ``root_identity(root)`` before model code ran there can pass it to a write or a read
+(``pinned_root``), which then refuses a root that is no longer that directory. A refusal raises ``PathContainmentError`` (an
 ``OSError``) and nothing is written.
 """
 
@@ -207,15 +207,20 @@ def write_text_in_root(
 
 
 def read_bytes_in_root(
-    root: Path | str, relative: PurePath | str, *, max_bytes: int | None = None
+    root: Path | str,
+    relative: PurePath | str,
+    *,
+    max_bytes: int | None = None,
+    pinned_root: tuple[int, int] | None = None,
 ) -> bytes:
     """Read the bytes of ``root/relative``, never through a link.
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
-    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
+    beyond ``max_bytes + 1`` bytes (it may still be growing). With ``pinned_root`` (from
+    ``root_identity``), ``root`` must still be that directory, as for ``write_text_in_root``."""
 
     parts = _parts(relative)
-    parent = _open_parent(root, parts, create_parents=False)
+    parent = _open_parent(root, parts, create_parents=False, identity=pinned_root)
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
@@ -244,6 +249,7 @@ def read_text_in_root(
     *,
     max_bytes: int | None = None,
     strict: bool = False,
+    pinned_root: tuple[int, int] | None = None,
 ) -> str:
     """Read ``root/relative`` as UTF-8 (undecodable bytes replaced), never through a link.
 
@@ -253,9 +259,10 @@ def read_text_in_root(
     whatever is there and look for U+FFFD themselves (#3099).
 
     With ``max_bytes``, a file larger than that raises ``PathContainmentError`` and is not read
-    beyond ``max_bytes + 1`` bytes (it may still be growing)."""
+    beyond ``max_bytes + 1`` bytes (it may still be growing). ``pinned_root`` is passed on to
+    ``read_bytes_in_root``."""
 
-    data = read_bytes_in_root(root, relative, max_bytes=max_bytes)
+    data = read_bytes_in_root(root, relative, max_bytes=max_bytes, pinned_root=pinned_root)
     if not strict:
         return data.decode("utf-8", errors="replace")
     try:
