@@ -253,20 +253,34 @@ class _ModelProbeMixin(_ModelProbeBase):
             raise _gateway().GatewayInputError("AGY_ACCOUNT_POOL_STOPPED") from exc
 
     def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool:
+        lease_hash = job.get("account_lease_id_hash")
+        # The claim is taken, released and noted as released by its lease in one locked step
+        # (the release is local: receipt, flock, pool lease). A second call of the same job,
+        # such as a query or cancel while another query finishes the job, then finds the
+        # release done, not a lost claim that would hold the job for reconciliation (#3160).
         with self._assist_lock:
+            released = getattr(self, "_assist_released_leases", None)
+            if released is None:
+                released = self._assist_released_leases = {}
             claim = self._assist_account_claims.pop(task_id, None)
-        if claim is None:
-            if job.get("account_lease_id_hash"):
+            if claim is None:
+                if lease_hash and released.get(task_id) == lease_hash:
+                    job["account_lease_released"] = True
+                    job["account_lease_cleanup_status"] = "RELEASED"
+                    return True
+                if lease_hash:
+                    job["account_lease_released"] = False
+                    job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                    return False
+                return True
+            try:
+                claim.release()
+            except Exception:
                 job["account_lease_released"] = False
-                job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                job["account_lease_cleanup_status"] = "RELEASE_FAILED"
                 return False
-            return True
-        try:
-            claim.release()
-        except Exception:
-            job["account_lease_released"] = False
-            job["account_lease_cleanup_status"] = "RELEASE_FAILED"
-            return False
+            if lease_hash:
+                released[task_id] = lease_hash
         job["account_lease_released"] = True
         job["account_lease_cleanup_status"] = "RELEASED"
         return True
