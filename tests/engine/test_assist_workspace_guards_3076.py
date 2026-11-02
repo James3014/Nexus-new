@@ -1729,11 +1729,16 @@ def test_cancel_on_a_restarted_gateway_without_the_claim_holds_the_job_for_recon
     box, monkeypatch
 ):
     workspace = _workspace(box.root)
-    box.gateway._assist_write(_job(
-        box, str(workspace), job_kind="model_probe",
-        account_lease_id_hash="lease-3233", account_lease_released=False,
-        account_lease_cleanup_status="HELD",
-    ))
+    box.gateway._assist_write(
+        _job(
+            box,
+            str(workspace),
+            job_kind="model_probe",
+            account_lease_id_hash="lease-3233",
+            account_lease_released=False,
+            account_lease_cleanup_status="HELD",
+        )
+    )
     assert TASK not in box.gateway._assist_account_claims
     group = _LiveLeaderGroup(member_alive=False)
     monkeypatch.setattr(os, "kill", group.kill)
