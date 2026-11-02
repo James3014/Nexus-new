@@ -560,15 +560,22 @@ def build_seatbelt_profile(
     (``~/.gemini`` config, projects, OAuth token, memory) and
     ``~/Library/Keychains`` stay read-only; probes showed agy needs neither.
     The target's ``.git`` entry stays read-only too, so a worker cannot
-    repoint the worktree at an attacker-controlled gitdir.  Paths must be
-    real paths (Seatbelt matches resolved vnodes).
+    repoint the worktree at an attacker-controlled gitdir.  The target and the
+    run root themselves cannot be renamed, removed or replaced (#3181).  Paths
+    must be real paths (Seatbelt matches resolved vnodes).
     """
     allow = [run_root]
-    deny: list[str] = []
+    # Each writable root keeps its own entry (#3181, as ``confinement()`` does
+    # since #3173): ``(subpath root)`` also matches the root itself, so without
+    # this a worker could move the root out, write the path-keyed denied
+    # entries below (``.git``) under the new name and move it back, or leave
+    # another directory at the path for a later attempt and host step.
+    deny: list[str] = [f'  (literal "{_sbpl_path(run_root)}")']
     if writable_target is not None:
         allow.insert(0, writable_target)
+        deny.insert(0, f'  (literal "{_sbpl_path(writable_target)}")')
         git_entry = _sbpl_path(writable_target / ".git")
-        deny = [f'  (literal "{git_entry}")', f'  (subpath "{git_entry}")']
+        deny += [f'  (literal "{git_entry}")', f'  (subpath "{git_entry}")']
         # Workspace customizations agy loads on a later run in this target
         # (hooks, plugins, MCP servers) must not be plantable by a worker.
         for name in TARGET_AGY_CUSTOMIZATION_PATHS:
@@ -600,7 +607,9 @@ def build_seatbelt_profile(
         for parent in _run_home_protected_ancestors(
             run_root, run_home, (run_home / AGY_RUN_HOME_SETTINGS, run_home / ".gemini" / "config")
         ):
-            deny.append(f'  (literal "{_sbpl_path(parent)}")')
+            rule = f'  (literal "{_sbpl_path(parent)}")'
+            if rule not in deny:
+                deny.append(rule)
         reallow.append(f'  (subpath "{_sbpl_path(run_home / AGY_RUN_HOME_PROJECTS)}")')
     credential_denies: list[str] = []
     for home in _credential_homes(source_home):
