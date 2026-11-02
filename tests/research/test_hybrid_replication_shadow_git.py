@@ -7,6 +7,7 @@ marker file under tmp_path.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -194,6 +195,32 @@ def test_seal_reads_a_repository_whose_remaining_programs_are_switched_off(sandb
 
     assert sealing["changed_files"] == ["f.txt", "new.txt"]
     assert _fired(markers) == []
+
+
+def test_seal_does_not_read_untracked_links_into_the_receipt(sandbox: Path) -> None:
+    # #3130 item 4: an untracked link (or hard link) in the shadow checkout is refused,
+    # never read, so bytes from outside the checkout are not sealed into the receipt.
+    outside = sandbox / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_bytes(b"host-secret-bytes")
+    source = sandbox / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    (source / "f.txt").write_text("a\n", encoding="utf-8")
+    _git(source, "add", "f.txt")
+    _git(source, "commit", "-qm", "base")
+    (source / "new.py").write_text("print('ok')\n", encoding="utf-8")
+    (source / "leak.txt").symlink_to(secret)
+    os.link(secret, source / "hard.txt")
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert [row["path"] for row in sealing["untracked_files"]] == ["new.py"]
+    assert sealing["refused_untracked_files"] == ["hard.txt", "leak.txt"]
+    assert sealing["scope_valid"] is False
+    secret_sha = hashlib.sha256(b"host-secret-bytes").hexdigest()
+    assert all(row["sha256"] != secret_sha for row in sealing["untracked_files"])
 
 
 def test_shadow_git_dir_lies_outside_the_agent_write_root(sandbox: Path) -> None:

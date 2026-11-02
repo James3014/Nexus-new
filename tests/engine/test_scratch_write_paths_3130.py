@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -23,10 +24,12 @@ from nexus.engine import cli_pregate
 from nexus.engine import sandbox_runner as sandbox_runner_mod
 from nexus.engine.model_output_sandbox import SANDBOX_EXEC
 from nexus.engine.sandbox_runner import (
+    RUN_DIR_ENTRY_REFUSED,
     RUN_DIR_REPLACED,
     RunDirUnsafe,
     SandboxRunner,
     _capture_run_dir_identity,
+    _write_in_run_dir,
 )
 from nexus.health import sandbox as health_sandbox
 from nexus.health.sandbox import SpeculativeSandbox
@@ -108,8 +111,11 @@ def test_health_sandbox_copy_drops_dangling_links_that_leave_it(tmp_path):
         (copy / "inner.py").read_text(encoding="utf-8")
         assert not (outside / "escaped.txt").exists()
         assert (copy / "escape.txt").is_file() and not (copy / "escape.txt").is_symlink()
-        # Links to existing targets outside are kept (tests/health/test_sandbox_safety.py).
-        assert (copy / "pkg" / "outdir").is_symlink()
+        # Links to existing targets outside go too (#3162); inside links stay.
+        assert not os.path.lexists(copy / "pkg" / "outdir")
+        (copy / "pkg" / "outdir").mkdir()
+        (copy / "pkg" / "outdir" / "planted.txt").write_text("x", encoding="utf-8")
+        assert list(outside.iterdir()) == []
         assert (copy / "inner.py").is_symlink() and (copy / "pkgdir").is_symlink()
     finally:
         sandbox.cleanup()
@@ -227,6 +233,64 @@ def test_network_guard_is_written_into_a_fresh_run_dir(tmp_path):
     assert "_guarded_create_connection" in guard.read_text(encoding="utf-8")
 
 
+def test_network_guard_refuses_an_entry_already_at_its_name_without_blocking(tmp_path):
+    run_dir = tmp_path / "runs" / "run_1"
+    (run_dir / "python_network_guard").mkdir(parents=True)
+    fifo = run_dir / "python_network_guard" / "sitecustomize.py"
+    os.mkfifo(fifo)
+    identity = _capture_run_dir_identity(run_dir)
+    runner = SandboxRunner(tmp_path)
+    outcome: list[BaseException | None] = []
+
+    def write_guard():
+        try:
+            runner._write_python_network_guard(run_dir, identity)
+            outcome.append(None)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            outcome.append(exc)
+
+    worker = threading.Thread(target=write_guard, daemon=True)
+    worker.start()
+    worker.join(10)
+    blocked = worker.is_alive()
+    if blocked:
+        # Release a write-open waiting on the FIFO so the thread can end.
+        reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+        worker.join(10)
+        os.close(reader)
+    assert not blocked, "the guard write blocked on an entry already at its name"
+    assert outcome and isinstance(outcome[0], RunDirUnsafe), outcome
+
+
+def test_write_in_run_dir_rechecks_the_identity_of_the_directory_it_opened(tmp_path):
+    run_dir = tmp_path / "runs" / "run_1"
+    run_dir.mkdir(parents=True)
+    identity = _capture_run_dir_identity(run_dir)
+    run_dir.rename(tmp_path / "runs" / "run_1.recorded")
+    run_dir.mkdir()
+
+    with pytest.raises(RunDirUnsafe, match="device/inode changed"):
+        _write_in_run_dir(run_dir, identity, ("record.json",), b"{}")
+
+    assert list(run_dir.iterdir()) == []
+
+
+def test_write_in_run_dir_final_open_does_not_follow_a_link(tmp_path):
+    outside = _outside(tmp_path)
+    target = outside / "host.txt"
+    target.write_text("keep", encoding="utf-8")
+    run_dir = tmp_path / "runs" / "run_1"
+    (run_dir / "sub").mkdir(parents=True)
+    (run_dir / "sub" / "record.json").symlink_to(target)
+    identity = _capture_run_dir_identity(run_dir)
+
+    with pytest.raises(RunDirUnsafe, match="without following links"):
+        _write_in_run_dir(run_dir, identity, ("sub", "record.json"), b"{}", exclusive=False)
+
+    assert target.read_text(encoding="utf-8") == "keep"
+    assert sorted(p.name for p in outside.iterdir()) == ["host.txt"]
+
+
 def test_output_replaced_by_link_is_not_copied_into_the_run_record(tmp_path, monkeypatch):
     outside = _outside(tmp_path)
     secret = outside / "secret.txt"
@@ -269,9 +333,46 @@ def test_artifact_is_not_written_through_a_linked_artifacts_dir(tmp_path, monkey
     )
 
     assert result["success"] is False
-    assert result["error"] == RUN_DIR_REPLACED
+    # run_dir itself is unchanged; the link under it has its own reason (#3162).
+    assert result["error"] == RUN_DIR_ENTRY_REFUSED
     assert "artifacts" in result["run_dir_mismatch"]
+    assert result["stdout"] == "child-stdout"
     assert list(outside.iterdir()) == []
+
+
+def test_artifact_write_refusal_keeps_the_child_result(tmp_path, monkeypatch):
+    outside = _outside(tmp_path)
+    runner = SandboxRunner(_project(tmp_path))
+
+    class _FailingProc:
+        returncode = 7
+        stdout = "child-stdout"
+        stderr = "child-stderr"
+
+    def fake_run(cmd, **kwargs):
+        workspace = Path(kwargs["env"]["NEXUS_SANDBOX_WORKSPACE"])
+        (workspace / "out.txt").write_text("result", encoding="utf-8")
+        (_run_dir_from_env(kwargs["env"]) / "artifacts").symlink_to(
+            outside, target_is_directory=True
+        )
+        return _FailingProc()
+
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)
+    result = runner.run_task(
+        "link-dir", command=[sys.executable, "probe.py"], output_file="out.txt"
+    )
+
+    assert result["success"] is False
+    assert result["error"] == RUN_DIR_ENTRY_REFUSED != RUN_DIR_REPLACED
+    assert (result["exit_code"], result["stdout"], result["stderr"]) == (
+        7,
+        "child-stdout",
+        "child-stderr",
+    )
+    assert result["output_artifact_path"] is None
+    assert list(outside.iterdir()) == []
+    # The run record itself is still written: run_dir is the recorded directory.
+    assert result["report_path"] is not None
 
 
 def test_artifact_still_recorded_for_a_plain_output(tmp_path, monkeypatch):
