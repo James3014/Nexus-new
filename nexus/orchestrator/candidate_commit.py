@@ -13,11 +13,7 @@ from typing import Any, Optional
 
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import (
-    TargetWorktreeLease,
-    WorktreeManager,
-    get_canonical_git_hooks_dir,
-)
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 
 
 @dataclass(frozen=True)
@@ -250,15 +246,14 @@ class CandidateCommitter:
             # The hardened Target runner reads no global config, so no Git HOME is passed;
             # an unresolvable one still fails the commit closed.
             self._resolve_git_home()
-            hooks_dir = get_canonical_git_hooks_dir(target)
+            # No hooks path is passed: the hardened Target runner runs no hook, and the
+            # unbound path supplies its own.
             self.worktree_manager._run_git(
                 [
                     "-c",
                     f"user.name={self.AUTHOR_NAME}",
                     "-c",
                     f"user.email={self.AUTHOR_EMAIL}",
-                    "-c",
-                    f"core.hooksPath={hooks_dir}",
                     "commit",
                     "-m",
                     f"candidate({contract.task_id}): governed worker result",
