@@ -590,6 +590,9 @@ def _run_operation_inner(
         thinking=thinking,
     )
 
+    # #3201: from here until the provider launch, a SIGTERM/SIGHUP is recorded
+    # and acted on right before Popen, so the lease is always settled.
+    _defer_supervisor_signals()
     try:
         binding = account_adapter.acquire(operation_id)
     except BaseException as exc:
@@ -615,31 +618,6 @@ def _run_operation_inner(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
 
     while True:
-        _supervisor_signal_state["deferred"] = False
-        pending_signal = _supervisor_signal_state["received"]
-        if pending_signal is not None:
-            # #3201: a signal recorded while the previous attempt settled stops
-            # the supervisor before it starts another provider.
-            try:
-                account_adapter.release(binding)
-            finally:
-                journal.mark_terminal(
-                    operation_id,
-                    status="FAILED",
-                    exit_code=None,
-                    failure_kind=(
-                        f"SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:{_signal_name(pending_signal)}"
-                    ),
-                    cwd=cwd,
-                    attempts=attempts,
-                    rotations=rotations,
-                    reconciliation={
-                        "at": utc_now(),
-                        "result": "NO_PROVIDER_PROCESS_STARTED",
-                        "retry_permitted": False,
-                    },
-                )
-            return 128 + int(pending_signal)
         attempts += 1
         try:
             command = adapter.compile(request, binding=binding)
@@ -892,6 +870,12 @@ def _run_operation_inner(
                 _cli_worker.release_run(run_tag)
 
         try:
+            # #3201: signals raise again only while a provider may run; one that
+            # was recorded since acquire stops here, before anything launches.
+            _supervisor_signal_state["deferred"] = False
+            pending_signal = _supervisor_signal_state["received"]
+            if pending_signal is not None:
+                raise _SupervisorSignalError(pending_signal)
             with (
                 stdout_path.open("ab", buffering=0) as out_fh,
                 stderr_path.open("ab", buffering=0) as err_fh,
@@ -980,7 +964,11 @@ def _run_operation_inner(
                 operation_id,
                 status="FAILED",
                 exit_code=None,
-                failure_kind=f"PROVIDER_START_FAILED:{type(exc).__name__}",
+                failure_kind=(
+                    f"SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:{_signal_name(exc.signum)}"
+                    if isinstance(exc, _SupervisorSignalError)
+                    else f"PROVIDER_START_FAILED:{type(exc).__name__}"
+                ),
                 cwd=cwd,
                 attempts=attempts,
                 rotations=rotations,
@@ -990,7 +978,7 @@ def _run_operation_inner(
                     "retry_permitted": False,
                 },
             )
-            return 1
+            return 128 + int(exc.signum) if isinstance(exc, _SupervisorSignalError) else 1
         finally:
             codex_sweep_clean = sweep_codex()
 

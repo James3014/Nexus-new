@@ -1609,7 +1609,8 @@ def test_signal_recorded_while_settling_stops_before_next_attempt(
     current = journal.read(operation_id)
     assert current["status"] == "FAILED"
     assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGTERM"
-    assert current["attempts"] == 1
+    assert current["attempts"] == 2
+    assert current["reconciliation"]["result"] == "NO_CONFIRMED_PROVIDER_PROCESS"
     assert json.loads((pool_root / "state.json").read_text()).get("leases", {}) == {}
 
 
@@ -1649,3 +1650,37 @@ def test_signal_escaping_before_provider_leaves_terminal_record(
     assert current["status"] == "FAILED"
     assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGHUP"
     assert current["reconciliation"]["result"] == "NO_PROVIDER_PROCESS_STARTED"
+
+
+def test_claude_signal_after_lease_before_launch_settles_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from nexus.services import external_worker_runtime as runtime
+    from nexus.services.claude_account_pool import set_claude_account_pool_manager
+
+    started = tmp_path / "provider-started"
+    original_pending = runtime.ClaudeAccountAdapter.mark_launch_pending
+
+    def pending_then_signal(self, binding):
+        original_pending(self, binding)
+        # A SIGTERM between the durable launch_pending write and Popen.
+        dispatch._supervisor_signal_handler(signal.SIGTERM, None)
+
+    monkeypatch.setattr(runtime.ClaudeAccountAdapter, "mark_launch_pending", pending_then_signal)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "received", None)
+    monkeypatch.setitem(dispatch._supervisor_signal_state, "deferred", False)
+    journal, operation_id, prompt_path, root, pool_root = _claude_inproc_setup(
+        tmp_path, monkeypatch, f"touch {started}"
+    )
+    try:
+        code = _run_claude_inproc(tmp_path, operation_id, prompt_path, root)
+    finally:
+        set_claude_account_pool_manager(None)
+    assert code == 128 + signal.SIGTERM
+    assert not started.exists()
+    current = journal.read(operation_id)
+    assert current["status"] == "FAILED"
+    assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGTERM"
+    assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
