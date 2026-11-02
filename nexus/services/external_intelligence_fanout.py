@@ -16,6 +16,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from nexus.core.argv_command import ProcessGroupReapingUnavailable, run_reaping_process_group
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.services.external_intelligence import (
     ENVELOPE_SCHEMA,
     OBSERVED_MODEL_ATTESTATION_MISMATCH,
@@ -114,19 +120,50 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
             pass
 
 
-def _run_git(root: Path, *args: str, timeout: float = 30.0) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+def _run_git(root: Path, *args: str, timeout: float = 30.0, git_dir: Path | None = None) -> str:
+    """``git <args>`` in ``root``; with ``git_dir`` (from ``_worker_git_dir``) the call runs
+    through the shared hardened runner, pinned to that git dir."""
+    if git_dir is not None:
+        result = run_hardened_git(root, *args, git_dir=git_dir, timeout=timeout)
+    else:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:1000]
         raise FanoutError(f"GIT_COMMAND_FAILED:{args[0]}:{detail}")
     return result.stdout.strip()
+
+
+def _worker_git_dir(root: Path, controller_root: str = "") -> Path:
+    """The git dir to pin for git calls in a worker's worktree.
+
+    The worker could rewrite the worktree's ``.git`` pointer or anything under it, so the
+    worktree must be a linked worktree registered in the Controller's git dir
+    (``controller_root``), and the repository config must name no program the command line
+    cannot switch off.  Only a lease whose allocator names no Controller may instead be a
+    repository whose ``.git`` directory sits in ``root``."""
+    if controller_root:
+        git_dir = linked_worktree_git_dir(root, Path(controller_root))
+    else:
+        git_dir = linked_worktree_git_dir(root) or _rooted_git_dir(root)
+    if git_dir is None:
+        raise FanoutError("WORKSPACE_GIT_DIR_UNTRUSTED")
+    if repository_config_can_start_a_program(root, git_dir):
+        raise FanoutError("WORKSPACE_GIT_CONFIG_NAMES_A_PROGRAM")
+    return git_dir
+
+
+def _rooted_git_dir(root: Path) -> Path | None:
+    dotgit = root / ".git"
+    if dotgit.is_symlink() or not dotgit.is_dir():
+        return None  # a ``.git`` file the worker could have re-pointed
+    return repository_git_dir(root)
 
 
 EIA_COMMIT_EMAIL_DOMAIN = "nexus.invalid"
@@ -180,37 +217,34 @@ def eia_git_commit(
     email: str,
     trailers: Sequence[tuple[str, str]],
     timeout: float = 60.0,
+    git_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """``git commit`` with an explicit, command-scoped identity.
 
-    Author and committer come from ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` set only on
-    this subprocess (they take precedence over every git config level), so the
-    host's global/system/repo ``user.*`` is never consulted and nothing is
-    written to any git config.  Signing is disabled for the same reason: a host
-    signing key would attest the wrong producer.
+    Author and committer come from ``author.*``/``committer.*`` set on this command
+    line (it outranks every config file, and the hardened runner reads no global or
+    system config), so the host's ``user.*`` is never consulted and nothing is written
+    to any git config.  Signing is disabled for the same reason: a host signing key
+    would attest the wrong producer.  The commit runs through the shared hardened
+    runner (no hooks, no signing program), pinned to ``git_dir`` (checked by
+    ``_worker_git_dir`` when not given).
     """
-    env = dict(os.environ)
-    env.update({
-        "GIT_AUTHOR_NAME": name,
-        "GIT_AUTHOR_EMAIL": email,
-        "GIT_COMMITTER_NAME": name,
-        "GIT_COMMITTER_EMAIL": email,
-    })
     trailer_block = "\n".join(
         f"{key}: {_identity_text(value, 'unknown')}" for key, value in trailers
     )
-    argv = ["git", "-c", "commit.gpgsign=false", "commit", "-m", subject]
+    args = [
+        *("-c", f"author.name={name}", "-c", f"author.email={email}"),
+        *("-c", f"committer.name={name}", "-c", f"committer.email={email}"),
+        *("commit", "--no-verify", "-m", subject),
+    ]
     if trailer_block:
-        argv.extend(["-m", trailer_block])
-    return subprocess.run(
-        argv,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=timeout,
-    )
+        args.extend(["-m", trailer_block])
+    if git_dir is None:
+        try:
+            git_dir = _worker_git_dir(root)
+        except FanoutError as exc:
+            return subprocess.CompletedProcess(["git", *args], 128, "", f"{exc}\n")
+    return run_hardened_git(root, *args, git_dir=git_dir, timeout=timeout)
 
 
 def _safe_slug(value: Any, field: str) -> str:
@@ -432,6 +466,8 @@ class WorkspaceLease:
     workspace_id: str
     path: str
     expected_base_sha: str
+    # The repository whose git dir registered this worktree ("" when unknown).
+    controller_root: str = ""
 
 
 @dataclass(frozen=True)
@@ -596,7 +632,12 @@ class GitWorktreeAllocator:
         if observed != unit.expected_base_sha or dirty:
             raise FanoutError("WORKSPACE_FRESHNESS_FAILED")
         _verify_excerpt_base_hashes(path, unit)
-        return WorkspaceLease(workspace_id=workspace_id, path=str(path), expected_base_sha=observed)
+        return WorkspaceLease(
+            workspace_id=workspace_id,
+            path=str(path),
+            expected_base_sha=observed,
+            controller_root=str(self.repository_root),
+        )
 
 
 _REPAIR_TERMINAL_STATES = frozenset({"COMPLETED", "TERMINAL_BLOCKED", "FAILED"})
@@ -1809,15 +1850,15 @@ def parse_worker_result(text: str, *, task_id: str, unit_id: str) -> dict[str, s
     return value
 
 
-def _changed_paths(workspace: Path, base_sha: str) -> list[str]:
-    tracked = _run_git(workspace, "diff", "--name-only", base_sha, "--")
-    untracked = _run_git(workspace, "ls-files", "--others", "--exclude-standard")
+def _changed_paths(workspace: Path, base_sha: str, git_dir: Path) -> list[str]:
+    tracked = _run_git(workspace, "diff", "--name-only", base_sha, "--", git_dir=git_dir)
+    untracked = _run_git(workspace, "ls-files", "--others", "--exclude-standard", git_dir=git_dir)
     paths = [line.strip() for line in (tracked + "\n" + untracked).splitlines() if line.strip()]
     return sorted(dict.fromkeys(paths))
 
 
-def _deleted_paths(workspace: Path, base_sha: str) -> list[str]:
-    output = _run_git(workspace, "diff", "--name-status", base_sha, "--")
+def _deleted_paths(workspace: Path, base_sha: str, git_dir: Path) -> list[str]:
+    output = _run_git(workspace, "diff", "--name-status", base_sha, "--", git_dir=git_dir)
     deleted: list[str] = []
     for line in output.splitlines():
         parts = line.split("\t")
@@ -1834,36 +1875,31 @@ def _capture_candidate(
     worker_backend: str = "",
 ) -> dict[str, Any]:
     root = Path(workspace.path)
-    observed_head = _run_git(root, "rev-parse", "HEAD")
+    git_dir = _worker_git_dir(root, workspace.controller_root)
+    observed_head = _run_git(root, "rev-parse", "HEAD", git_dir=git_dir)
     if observed_head != expected_head:
         raise FanoutError("WORKER_COMMIT_FORBIDDEN")
     _verify_excerpt_base_hashes(root, unit)
-    changed = _changed_paths(root, expected_head)
+    changed = _changed_paths(root, expected_head, git_dir)
     if not changed:
         raise FanoutError("EMPTY_IMPLEMENTATION_RESULT")
     for path in changed:
         if not any(_path_matches(path, boundary) for boundary in unit.mutation_paths):
             raise FanoutError(f"OUT_OF_SCOPE_MUTATION:{path}")
-    deleted = _deleted_paths(root, expected_head)
+    deleted = _deleted_paths(root, expected_head, git_dir)
     if deleted and not unit.allow_deletions:
         raise FanoutError("DELETION_NOT_AUTHORIZED")
 
-    subprocess.run(
-        ["git", "add", "--", *changed], cwd=root, check=True, capture_output=True, text=True
-    )
-    check = subprocess.run(
-        ["git", "diff", "--cached", "--check"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    run_hardened_git(root, "add", "--", *changed, git_dir=git_dir).check_returncode()
+    check = run_hardened_git(root, "diff", "--cached", "--check", git_dir=git_dir)
     if check.returncode != 0:
         raise FanoutError(
             f"CANDIDATE_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:1000]}"
         )
     staged = [
-        line for line in _run_git(root, "diff", "--cached", "--name-only").splitlines() if line
+        line
+        for line in _run_git(root, "diff", "--cached", "--name-only", git_dir=git_dir).splitlines()
+        if line
     ]
     if sorted(staged) != sorted(changed):
         raise FanoutError("CANDIDATE_STAGED_SCOPE_MISMATCH")
@@ -1883,14 +1919,15 @@ def _capture_candidate(
             (EIA_TRAILER_MODEL, identity["model"]),
             (EIA_TRAILER_BACKEND, identity["backend"]),
         ),
+        git_dir=git_dir,
     )
     if commit.returncode != 0:
         raise FanoutError(
             f"CANDIDATE_COMMIT_FAILED:{(commit.stderr or commit.stdout).strip()[:1000]}"
         )
-    candidate_commit = _run_git(root, "rev-parse", "HEAD")
-    candidate_tree = _run_git(root, "rev-parse", "HEAD^{tree}")
-    diff = _run_git(root, "diff", "--binary", expected_head, candidate_commit)
+    candidate_commit = _run_git(root, "rev-parse", "HEAD", git_dir=git_dir)
+    candidate_tree = _run_git(root, "rev-parse", "HEAD^{tree}", git_dir=git_dir)
+    diff = _run_git(root, "diff", "--binary", expected_head, candidate_commit, git_dir=git_dir)
     return {
         "candidate_commit": candidate_commit,
         "candidate_tree": candidate_tree,
@@ -2046,6 +2083,11 @@ class AdaptiveWorkerFanoutRuntime:
         # The closure's per-unit repair budget; it sizes the Core binding's lifetime.
         self.max_repairs_per_unit = max_repairs_per_unit
 
+    def _controller_root(self) -> str:
+        """The repository the allocator registers worktrees in ("" for an allocator that
+        names none)."""
+        return str(getattr(self.allocator, "repository_root", "") or "")
+
     def _transport_for_unit(self, unit_or_receipt: ExecutionUnit | Mapping[str, Any]) -> Any:
         selected_worker = (
             unit_or_receipt.selected_worker
@@ -2120,6 +2162,7 @@ class AdaptiveWorkerFanoutRuntime:
                         workspace_id=str(existing_attempt.get("workspace_id") or ""),
                         path=str(existing_attempt.get("workspace_path") or ""),
                         expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
+                        controller_root=self._controller_root(),
                     )
                 if (
                     not workspace.workspace_id
@@ -2359,10 +2402,11 @@ class AdaptiveWorkerFanoutRuntime:
         root = Path(workspace.path)
         base = unit.expected_base_sha
         try:
-            head = _run_git(root, "rev-parse", "HEAD")
-            dirty = _run_git(root, "status", "--porcelain=v1")
-            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
-            origin = _run_git(root, "remote", "get-url", "origin")
+            git_dir = _worker_git_dir(root, workspace.controller_root)
+            head = _run_git(root, "rev-parse", "HEAD", git_dir=git_dir)
+            dirty = _run_git(root, "status", "--porcelain=v1", git_dir=git_dir)
+            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir)
+            origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
         except FanoutError as exc:
             raise CoreBindingError("workspace_observation") from exc
         if head != base:
@@ -2409,8 +2453,9 @@ class AdaptiveWorkerFanoutRuntime:
         root = Path(workspace.path)
         base = str(previous_receipt.get("base_sha") or "")
         try:
-            origin = _run_git(root, "remote", "get-url", "origin")
-            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+            git_dir = _worker_git_dir(root, workspace.controller_root)
+            origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
+            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir)
         except FanoutError as exc:
             raise CoreBindingError("workspace_observation") from exc
         try:
@@ -2763,10 +2808,16 @@ class AdaptiveWorkerFanoutRuntime:
             workspace_id=str(previous_receipt.get("workspace_id") or ""),
             path=str(previous_receipt.get("workspace_path") or ""),
             expected_base_sha=str(previous_receipt.get("candidate_commit") or ""),
+            controller_root=self._controller_root(),
         )
-        if _run_git(Path(workspace.path), "rev-parse", "HEAD") != workspace.expected_base_sha:
+        repair_root = Path(workspace.path)
+        repair_git_dir = _worker_git_dir(repair_root, workspace.controller_root)
+        if (
+            _run_git(repair_root, "rev-parse", "HEAD", git_dir=repair_git_dir)
+            != workspace.expected_base_sha
+        ):
             raise FanoutError("REPAIR_WORKSPACE_HEAD_MISMATCH")
-        if _run_git(Path(workspace.path), "status", "--porcelain=v1"):
+        if _run_git(repair_root, "status", "--porcelain=v1", git_dir=repair_git_dir):
             raise FanoutError("REPAIR_WORKSPACE_DIRTY")
         self.store.assert_session_owner(
             str(previous_receipt.get("session_id") or ""),
@@ -2908,6 +2959,7 @@ class AdaptiveWorkerFanoutRuntime:
             workspace_id=str(attempt["workspace_id"]),
             path=str(attempt["workspace_path"]),
             expected_base_sha=str(attempt["expected_head"]),
+            controller_root=self._controller_root(),
         )
         self.store.assert_session_owner(
             str(attempt["session_id"]),
