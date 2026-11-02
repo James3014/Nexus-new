@@ -14,7 +14,8 @@ single-link file is refused up front, and reads accept only such a file. A write
 directory the host itself runs from later (``HOST_RUN_SUBTREES``) is refused too. A caller that
 recorded ``root_identity(root)`` before model code ran there can pass it to a write or a read
 (``pinned_root``), which then refuses a root that is no longer that directory. A refusal raises ``PathContainmentError`` (an
-``OSError``) and nothing is written.
+``OSError``) and nothing is written. ``PinnedRoot`` carries such a recorded identity together
+with its path, so a sandbox call handed the path can bind its grant to that directory (#3197).
 """
 
 from __future__ import annotations
@@ -30,10 +31,12 @@ from pathlib import Path, PurePath
 __all__ = [
     "HOST_RUN_SUBTREES",
     "PathContainmentError",
+    "PinnedRoot",
     "contained_relative_path",
     "copy_file_in_root",
     "copy_tree_in_root",
     "drop_escaping_links",
+    "make_dirs_in_root",
     "read_bytes_in_root",
     "read_text_in_root",
     "root_identity",
@@ -95,6 +98,41 @@ def root_identity(root: Path | str) -> tuple[int, int]:
     if not stat.S_ISDIR(info.st_mode):
         raise PathContainmentError(f"root_not_a_directory:{root}")
     return info.st_dev, info.st_ino
+
+
+class PinnedRoot(os.PathLike):
+    """A directory path together with the ``root_identity`` recorded for it (#3197).
+
+    Used wherever a plain path is (``os.fspath`` and ``str`` give the path). A consumer that
+    knows the type, such as the model sandbox, refuses the path unless it still names that
+    directory itself, and grants exactly that directory."""
+
+    __slots__ = ("identity", "path")
+
+    def __init__(self, path: Path | str, identity: tuple[int, int]) -> None:
+        self.path = os.fspath(path)
+        self.identity = identity
+
+    def __fspath__(self) -> str:
+        return self.path
+
+    def __str__(self) -> str:
+        return self.path
+
+    def __repr__(self) -> str:
+        return f"PinnedRoot({self.path!r}, {self.identity!r})"
+
+
+def make_dirs_in_root(root: Path | str, relative: PurePath | str) -> None:
+    """Create the directories ``root/relative`` (existing ones are kept), never through a link.
+
+    Each component below ``root`` is created and then opened with ``O_NOFOLLOW``, so a link
+    anywhere below ``root`` (or a non-directory) raises ``PathContainmentError`` and nothing is
+    created beyond it (#3198). ``root`` itself is followed, as for the other helpers."""
+
+    parts = _parts(relative)
+    fd = _open_parent(root, (*parts, "."), create_parents=True)
+    os.close(fd)
 
 
 def _open_root(root: Path | str, identity: tuple[int, int] | None) -> int:

@@ -307,6 +307,7 @@ def test_model_sandbox_keeps_the_same_subtrees_read_only(tmp_path, monkeypatch):
     # writer refuses.
     from nexus.core.contained_write import HOST_RUN_SUBTREES
     from nexus.engine import model_output_sandbox
+    from nexus.engine.sandboxed_lane import sbpl_path
 
     assert {".git", ".venv"} <= set(HOST_RUN_SUBTREES)
     seen: dict = {}
@@ -314,10 +315,16 @@ def test_model_sandbox_keeps_the_same_subtrees_read_only(tmp_path, monkeypatch):
     class _Bound:
         profile = "(version 1)"
         env: dict = {}
+        roots: tuple = ()
 
     def fake_confinement(**kwargs):
         seen.update(kwargs)
-        return _Bound()
+        bound = _Bound()
+        # The roots the real Confinement grants: the sandbox, then each extra writable root.
+        bound.roots = tuple(
+            Path(sbpl_path(p)) for p in (kwargs["sandbox"], *kwargs.get("extra_writable", ()))
+        )
+        return bound
 
     monkeypatch.setattr(model_output_sandbox, "confinement", fake_confinement)
     monkeypatch.setattr(model_output_sandbox, "developer_toolchain_read_roots", lambda: ())

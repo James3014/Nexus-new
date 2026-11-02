@@ -13,16 +13,30 @@ sandbox, so these runs go through ``sandbox-exec`` with the default-deny policy 
 * an allowlisted environment (no tokens or provider keys) with ``HOME``/``TMPDIR`` in the
   private dir; ``extra_env`` is added on top by the caller.
 
+Each writable root is bound when the call starts: a ``PinnedRoot`` work dir (a path with the
+identity recorded for it) must still be that very directory at that path, checked in one
+``lstat``. Once the profile is built, its write grants must name only the bound paths and each
+root must still be the bound directory (#3197). Seatbelt grants by path, so a short window stays
+between that last check and the start of the sandboxed process, and read grants are not checked
+against the bound paths. The profile also keeps each
+root's own ACL unchangeable, and after the run the host puts the root's own flags and mode back
+as they were at the start (extended attributes are not restored); a root that is no longer the
+bound directory then voids the run (``SandboxError``).
+
 There is no unconfined fallback: without an OS barrier (non-macOS, or
 ``NEXUS_DISABLE_OS_SANDBOX=1``) ``SandboxError("no_os_barrier")`` is raised and nothing runs.
 """
 
 from __future__ import annotations
 
+import ctypes
 import errno
+import functools
 import os
 import re
 import shutil
+import stat
+import struct
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
 import tempfile
@@ -36,7 +50,7 @@ from nexus.core.argv_command import (
     run_reaping_process_group,
     split_command_chain,
 )
-from nexus.core.contained_write import HOST_RUN_SUBTREES
+from nexus.core.contained_write import HOST_RUN_SUBTREES, PinnedRoot
 from nexus.engine.sandboxed_lane import (
     SANDBOX_EXEC,
     SBPL_SAFE_PATH,
@@ -214,9 +228,233 @@ def _command_readable_roots(command: str, work_dir: Path) -> list[Path]:
     return list(dict.fromkeys(roots))
 
 
+def _root_entry(path: Path) -> os.stat_result | None:
+    """``lstat`` of ``path`` when it names a directory itself and resolves to itself."""
+
+    try:
+        if os.path.realpath(path) != str(path):
+            return None
+        info = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    return info if stat.S_ISDIR(info.st_mode) else None
+
+
+def _same_dir(info: os.stat_result | None, recorded: os.stat_result) -> bool:
+    return info is not None and (info.st_dev, info.st_ino) == (recorded.st_dev, recorded.st_ino)
+
+
+def _bind_root(root: Path | str | PinnedRoot, reason: str) -> tuple[Path, os.stat_result]:
+    """The path to grant for ``root`` and the root's entry as it is now.
+
+    A ``PinnedRoot`` is taken as given (it must already resolve to itself) and must still be
+    the directory recorded for it: path and identity are checked in one ``lstat``, never by
+    resolving the path first and checking whatever that names (#3197)."""
+
+    if isinstance(root, PinnedRoot):
+        path = Path(os.fspath(root))
+        info = _root_entry(path) if path.is_absolute() else None
+        if info is None or (info.st_dev, info.st_ino) != tuple(root.identity):
+            raise SandboxError(f"{reason}_replaced")
+        return path, info
+    path = Path(root).resolve()
+    info = _root_entry(path)
+    if info is None:
+        raise SandboxError(f"{reason}_missing")
+    return path, info
+
+
+def _restore_root_metadata(path: Path, recorded: os.stat_result) -> bool:
+    """Put the root's own flags and mode back as recorded; False when ``path`` is no
+    longer that directory or they cannot be restored. A confined command may change them (the
+    profile only keeps the entry itself in place, #3177), which would make later host reads,
+    git calls or cleanup of the root fail."""
+
+    info = _root_entry(path)
+    if info is None or not _same_dir(info, recorded):
+        return False
+    try:
+        flags = getattr(recorded, "st_flags", None)
+        if flags is not None and getattr(info, "st_flags", flags) != flags:
+            chflags = getattr(os, "chflags", None)  # BSD/macOS only
+            if chflags is None:
+                return False
+            chflags(path, flags, follow_symlinks=False)  # first: uchg also blocks chmod
+        if stat.S_IMODE(info.st_mode) != stat.S_IMODE(recorded.st_mode):
+            no_follow = os.chmod in os.supports_follow_symlinks
+            os.chmod(path, stat.S_IMODE(recorded.st_mode), follow_symlinks=not no_follow)
+    except OSError:
+        return False
+    return _same_dir(_root_entry(path), recorded)
+
+
+# setattrlistat(2) on macOS: set one attribute of the entry ``name`` in an open directory,
+# never following a link there (FSOPT_NOFOLLOW).
+_ATTR_BIT_MAP_COUNT = 5
+_ATTR_CMN_FLAGS = 0x00040000
+_ATTR_CMN_EXTENDED_SECURITY = 0x00400000
+_FSOPT_NOFOLLOW = 0x1
+_KAUTH_FILESEC_MAGIC = 0x012CC16D
+_KAUTH_FILESEC_NOACL = 0xFFFFFFFF
+_DIR_NOFOLLOW = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+@functools.cache
+def _libc() -> ctypes.CDLL:
+    return ctypes.CDLL(None, use_errno=True)
+
+
+def _setattr_at(dir_fd: int, name: str, attribute: int, payload: bytes) -> None:
+    attrlist = struct.pack("=HHIIIII", _ATTR_BIT_MAP_COUNT, 0, attribute, 0, 0, 0, 0)
+    _libc().setattrlistat(  # result ignored: removal is retried and raises if still refused
+        ctypes.c_int(dir_fd),
+        os.fsencode(name),
+        ctypes.create_string_buffer(attrlist, len(attrlist)),
+        ctypes.create_string_buffer(payload, len(payload)),
+        ctypes.c_size_t(len(payload)),
+        ctypes.c_uint32(_FSOPT_NOFOLLOW),
+    )
+
+
+def _chmod_at_by_handle(dir_fd: int, name: str, mode: int) -> None:
+    """chmod the entry itself through an ``O_PATH | O_NOFOLLOW`` handle (Linux); a link there
+    is left alone."""
+
+    o_path = getattr(os, "O_PATH", 0)
+    if not o_path or not os.path.isdir("/proc/self/fd"):
+        return
+    try:
+        fd = os.open(name, o_path | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError:
+        return
+    try:
+        if not stat.S_ISLNK(os.fstat(fd).st_mode):
+            os.chmod(f"/proc/self/fd/{fd}", mode)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _make_removable_at(dir_fd: int, name: str, *, is_dir: bool) -> None:
+    """Undo what a confined command may have set on the entry ``name`` of the open directory
+    ``dir_fd`` so the host can delete it: user flags first (they block the rest), then the
+    mode, then any ACL. Every change names the entry relative to ``dir_fd`` and never follows a
+    link there: a link swapped in after the caller looked is changed itself, not its target."""
+
+    if sys.platform == "darwin":
+        _setattr_at(dir_fd, name, _ATTR_CMN_FLAGS, struct.pack("=I", 0))
+    mode = 0o700 if is_dir else 0o600
+    try:
+        os.chmod(name, mode, dir_fd=dir_fd, follow_symlinks=False)
+    except (NotImplementedError, ValueError):
+        # Linux: no fchmodat without following; CPython raises one or the other.
+        _chmod_at_by_handle(dir_fd, name, mode)
+    except OSError:
+        pass
+    if sys.platform == "darwin":
+        no_acl = struct.pack(
+            "=I16s16sII", _KAUTH_FILESEC_MAGIC, bytes(16), bytes(16), _KAUTH_FILESEC_NOACL, 0
+        )
+        # attrreference_t (data right after it), then a filesec that says "no ACL".
+        _setattr_at(
+            dir_fd,
+            name,
+            _ATTR_CMN_EXTENDED_SECURITY,
+            struct.pack("=iI", 8, len(no_acl)) + no_acl,
+        )
+
+
+def _make_tree_removable(dir_fd: int) -> None:
+    """``_make_removable_at`` for every entry below the open directory ``dir_fd``, top down.
+    Directories are entered only by ``O_NOFOLLOW`` opens relative to their parent's descriptor,
+    so no path through a component swapped in during the walk is ever used (#3197)."""
+
+    with os.scandir(dir_fd) as entries:
+        names = [entry.name for entry in entries]
+    for name in names:
+        try:
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            continue
+        is_dir = stat.S_ISDIR(info.st_mode)
+        _make_removable_at(dir_fd, name, is_dir=is_dir)
+        if not is_dir:
+            continue
+        try:
+            child = os.open(name, _DIR_NOFOLLOW, dir_fd=dir_fd)
+        except OSError:
+            continue  # now a link, or still unreadable: removal below reports it
+        try:
+            _make_tree_removable(child)
+        finally:
+            os.close(child)
+
+
+def _remove_private_dir(private: str) -> None:
+    """Remove the run's private ``home``/``tmp``. Model code wrote there and may have left
+    entries the plain removal refuses (flags, mode or ACL entries); those are made removable
+    entry by entry, top down, by directory descriptor and without following any link, and
+    removal is tried again. A dir that still cannot be removed raises."""
+
+    try:
+        shutil.rmtree(private)
+        return
+    except OSError:
+        pass
+    parent = os.open(os.path.dirname(private), _DIR_NOFOLLOW)
+    try:
+        _make_removable_at(parent, os.path.basename(private), is_dir=True)
+        root = os.open(os.path.basename(private), _DIR_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+    try:
+        _make_tree_removable(root)
+    finally:
+        os.close(root)
+    shutil.rmtree(private)
+
+
+# The device files every profile lets a command write besides its roots.
+_DEVICE_WRITES = frozenset({"/dev/null", "/dev/tty", "/dev/dtracehelper"})
+_WRITE_GRANT = re.compile(r'\(allow file-write\S*((?: \((?:subpath|literal) "[^"]*"\))+)\)')
+_PINNED_ENTRY = re.compile(r'\(deny file-write-unlink file-write-create \(literal "([^"]*)"\)\)')
+
+
+def _writes_stay_bound(profile: str, bound: Iterable[Path]) -> bool:
+    """True when every write grant in ``profile`` and every pinned entry names only a bound
+    root (or a device file). The profile resolves the roots once more while it is built: a
+    link swapped in only then would name its target here (#3197)."""
+
+    roots = {str(path) for path in bound}
+    for line in profile.splitlines():
+        if line.startswith("(allow file-write"):
+            grant = _WRITE_GRANT.fullmatch(line)
+            if grant is None:
+                return False
+            if not set(re.findall(r'"([^"]*)"', grant.group(1))) <= roots | _DEVICE_WRITES:
+                return False
+        elif line.startswith("(deny file-write-unlink"):
+            pinned = _PINNED_ENTRY.fullmatch(line)
+            if pinned is None or pinned.group(1) not in roots:
+                return False
+    return True
+
+
+def _granted_work_dir(work_dir: Path | str | PinnedRoot) -> Path:
+    """The work dir path ``model_sandbox`` grants: a ``PinnedRoot`` as given (it checks that the
+    path resolves to itself and is the recorded directory), any other path resolved."""
+
+    if isinstance(work_dir, PinnedRoot):
+        return Path(os.fspath(work_dir))
+    return Path(work_dir).resolve()
+
+
 @contextmanager
 def model_sandbox(
-    work_dir: Path | str,
+    work_dir: Path | str | PinnedRoot,
     *,
     readable: Iterable[Path | str] = (),
     writable: Iterable[Path | str] = (),
@@ -225,15 +463,15 @@ def model_sandbox(
 
     Prepend ``argv_prefix`` to each argv and run it with ``env``. ``writable`` adds existing
     directories the caller created for the run (e.g. a result-record dir); they get the same
-    root checks as ``work_dir``. Raises SandboxError when no OS barrier exists or a root is
-    unsafe (fail closed)."""
+    root checks as ``work_dir``. A ``PinnedRoot`` work dir must still be its recorded directory
+    (``SandboxError("work_dir_replaced")`` otherwise). When the block ends, each root's own flags
+    and mode are put back (its extended attributes are not); a root that is no longer the bound
+    directory raises ``SandboxError(…_replaced)``. Raises SandboxError when no OS barrier exists
+    or a root is unsafe (fail closed)."""
 
-    work = Path(work_dir).resolve()
-    if not work.is_dir():
-        raise SandboxError("work_dir_missing")
-    extra = tuple(Path(path).resolve() for path in writable)
-    if not all(path.is_dir() for path in extra):
-        raise SandboxError("writable_dir_missing")
+    work, work_info = _bind_root(work_dir, "work_dir")
+    bound_extra = [_bind_root(path, "writable_dir") for path in writable]
+    extra = tuple(path for path, _ in bound_extra)
     # Checked before the barrier, so it fails the same way on every host.
     if any(holds_host_code(path) for path in (work, *extra)):
         raise SandboxError("work_dir_holds_host_code")
@@ -245,7 +483,9 @@ def model_sandbox(
     })
     if not all(SBPL_SAFE_PATH.fullmatch(path) for path in read_only):
         raise SandboxError("sandbox_path_unsafe")
-    with tempfile.TemporaryDirectory(prefix="nexus-model-exec-") as private:
+    roots = [(work, work_info, "work_dir"), *((p, i, "writable_dir") for p, i in bound_extra)]
+    private = tempfile.mkdtemp(prefix="nexus-model-exec-")
+    try:
         bound = confinement(
             sandbox=Path(private).resolve(),
             extra_writable=(work, *extra),
@@ -257,13 +497,36 @@ def model_sandbox(
             # Gateway venv sits under a denied subtree, so granting it refused every run (#2956).
             host_interpreter_readable=False,
         )
-        yield [SANDBOX_EXEC, "-p", bound.profile], dict(bound.env)
+        # confinement() and its profile resolved each root again: both must name only the bound
+        # paths, and each root must still be the bound directory after that (#3197).
+        if tuple(bound.roots[1:]) != (work, *extra):
+            raise SandboxError("work_dir_replaced")
+        if not _writes_stay_bound(bound.profile, (bound.roots[0], work, *extra)):
+            raise SandboxError("work_dir_replaced")
+        for path, info, reason in roots:
+            if not _same_dir(_root_entry(path), info):
+                raise SandboxError(f"{reason}_replaced")
+        # A root's ACL is the one part of its own metadata the host cannot easily read back:
+        # it stays as it is (each path is a granted one, so SBPL-safe). cp -p and archives
+        # extracting ./ into the root still work (#3197).
+        profile = "\n".join([
+            bound.profile,
+            *(f'(deny file-write-acl (literal "{path}"))' for path, _, _ in roots),
+        ])
+        try:
+            yield [SANDBOX_EXEC, "-p", profile], dict(bound.env)
+        finally:
+            unbound = [r for path, info, r in roots if not _restore_root_metadata(path, info)]
+        if unbound:
+            raise SandboxError(f"{unbound[0]}_replaced")
+    finally:
+        _remove_private_dir(private)
 
 
 def run_model_argv(
     argv: list[str] | tuple[str, ...],
     *,
-    work_dir: Path | str,
+    work_dir: Path | str | PinnedRoot,
     timeout: float,
     extra_env: Mapping[str, str] | None = None,
     readable: Iterable[Path | str] = (),
@@ -300,7 +563,7 @@ def run_model_argv(
         # Nothing the command started outlives it in its process group (#3017).
         return run_reaping_process_group(
             [*prefix, *command],
-            cwd=str(Path(work_dir).resolve()),
+            cwd=str(_granted_work_dir(work_dir)),
             env=run_env,
             capture_output=True,
             text=text,
@@ -309,15 +572,16 @@ def run_model_argv(
 
 
 def run_model_command_string(
-    command: str, *, work_dir: Path | str, timeout: float
+    command: str, *, work_dir: Path | str | PinnedRoot, timeout: float
 ) -> subprocess.CompletedProcess[str]:
-    """``run_command_string`` (no shell, ``&&`` chains only) with every segment confined."""
+    """``run_command_string`` (no shell, ``&&`` chains only) with every segment confined, in
+    the work dir path the sandbox granted."""
 
     readable = _command_readable_roots(command, Path(work_dir).resolve())
     with model_sandbox(work_dir, readable=readable) as (prefix, env):
         return run_command_string(
             command,
-            cwd=Path(work_dir).resolve(),
+            cwd=_granted_work_dir(work_dir),
             env=env,
             timeout=timeout,
             argv_prefix=prefix,
