@@ -1576,6 +1576,9 @@ def _ruff_env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONSAFEPATH"] = "1"
+    # An inherited PYTHONPATH with a relative entry would be resolved in the candidate
+    # repository and put it back on sys.path behind PYTHONSAFEPATH.
+    env.pop("PYTHONPATH", None)
     return env
 
 

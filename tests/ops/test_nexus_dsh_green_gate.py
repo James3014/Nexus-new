@@ -541,3 +541,13 @@ def test_lint_probe_honours_the_gate_timeout(
     code, receipt = _gate(repo, tmp_path, python=stalling_python, timeout=3)
     assert time.monotonic() - started < 60, "the gate waited on the probe past its timeout"
     assert code != 0 and "ENVIRONMENT_FAILURE" in receipt["reason_codes"], receipt
+
+
+def test_ruff_env_keeps_the_candidate_repository_off_the_module_path(monkeypatch) -> None:
+    """#3234: no bytecode, the working directory off sys.path, and no inherited PYTHONPATH
+    (a relative entry there would resolve inside the candidate repository)."""
+    monkeypatch.setenv("PYTHONPATH", ".:/somewhere/else")
+    env = guard._ruff_env()
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONPATH" not in env
