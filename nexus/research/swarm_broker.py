@@ -226,10 +226,9 @@ def _copy_dir_into(src_dir: Path, dst_fd: int) -> None:
                 _copy_dir_into(Path(entry.path), child_fd)
             finally:
                 os.close(child_fd)
-        elif entry.is_symlink():
-            logger.info("[SwarmBroker] Skipped scope entry that is a link: %s", entry.path)
         else:
-            # Files, and FIFOs, sockets or devices, which are refused without being opened.
+            # Files; links, FIFOs, sockets and devices are refused there without being opened,
+            # and an earlier copy of them is removed.
             _copy_file_into(Path(entry.path), dst_fd, entry.name)
 
 
@@ -430,6 +429,9 @@ class SwarmBroker:
         """
         if not self.swarm_dirs:
             return None
+        # The timeout counts from here, so recovery and validation are part of it; every
+        # eligible swarm is still tried once.
+        start_time = time.time()
         self.recover_failed_releases()
 
         eligible_dirs = []
@@ -443,8 +445,7 @@ class SwarmBroker:
             logger.warning("⚠️ [SwarmBroker] No independently registered swarm worktrees available.")
             return None
 
-        start_time = time.time()
-        while eligible_dirs and time.time() - start_time < timeout_sec:
+        while eligible_dirs:
             for entry in list(eligible_dirs):
                 swarm_dir, identity = entry
                 outcome = self._try_lock(swarm_dir, identity)
@@ -453,8 +454,9 @@ class SwarmBroker:
                 elif outcome:
                     logger.debug(f"🐝 [SwarmBroker] Acquired swarm sandbox: {swarm_dir.name}")
                     return swarm_dir
-            if eligible_dirs:
-                time.sleep(0.5)
+            if not eligible_dirs or time.time() - start_time >= timeout_sec:
+                break
+            time.sleep(0.5)
 
         logger.error("❌ [SwarmBroker] Timeout waiting for an available Swarm directory.")
         return None
@@ -716,6 +718,11 @@ class SwarmBroker:
                 os.ftruncate(lock_fd, 0)
                 os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
             return released is True
+        except OSError as e:
+            # Reading the mark, clearing the registration lock or writing the mark failed:
+            # the swarm stays locked, as with any other failed release.
+            logger.error(f"❌ [SwarmBroker] Lock handling failed for swarm {swarm_dir.name}: {e}")
+            return False
         finally:
             os.close(lock_fd)
 
