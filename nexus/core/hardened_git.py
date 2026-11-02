@@ -27,6 +27,20 @@ _GIT_OVERRIDES = (
     "-c",
     "commit.gpgSign=false",
 )
+# Caller-supplied git settings never take precedence over the runner's hardening: a caller
+# may put ``-c`` pairs ahead of the subcommand only for the commit identity or for a setting
+# pinned above (whose pinned value comes after the caller's and so wins). Any other key, and
+# any other option ahead of the subcommand (``--config-env``, ``-C``, ``--exec-path`` ...),
+# is refused. Keys are matched as git does, ignoring case.
+_PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in _GIT_OVERRIDES[1::2])
+_CALLER_CONFIG_KEYS = frozenset({
+    "user.name",
+    "user.email",
+    "author.name",
+    "author.email",
+    "committer.name",
+    "committer.email",
+})
 # Subcommand options that keep repository-named programs from running even if the config
 # check below missed them: no external diff or textconv driver, no signature verification
 # (log.showSignature runs gpg.program), no commit hooks, and no descent into a populated
@@ -69,12 +83,32 @@ def hardened_git_env(
     return env
 
 
-def _with_subcommand_flags(args: Tuple[str, ...]) -> Tuple[str, ...]:
-    """``args`` with the subcommand's flags inserted right after it, past any leading
-    ``-c <name>=<value>`` pairs."""
+def _caller_config_end(args: Tuple[str, ...]) -> int:
+    """Where the leading ``-c <name>=<value>`` pairs of ``args`` end."""
     at = 0
     while at + 1 < len(args) and args[at] == "-c":
         at += 2
+    return at
+
+
+def _refused_caller_option(args: Tuple[str, ...]) -> Optional[str]:
+    """The first option ahead of the subcommand the caller may not pass (see
+    ``_CALLER_CONFIG_KEYS``), named without its value; None when there is none."""
+    at = 0
+    while at < len(args) and args[at].startswith("-"):
+        if args[at] != "-c" or at + 1 >= len(args):
+            return args[at].split("=", 1)[0]
+        key = args[at + 1].split("=", 1)[0].lower()
+        if key not in _CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
+            return f"-c {key}"
+        at += 2
+    return None
+
+
+def _with_subcommand_flags(args: Tuple[str, ...]) -> Tuple[str, ...]:
+    """``args`` with the subcommand's flags inserted right after it, past any leading
+    ``-c <name>=<value>`` pairs."""
+    at = _caller_config_end(args)
     if at < len(args) and args[at] in _SUBCOMMAND_FLAGS:
         return (*args[: at + 1], *_SUBCOMMAND_FLAGS[args[at]], *args[at + 1 :])
     return args
@@ -95,8 +129,15 @@ def run_hardened_git(
     ``separate_git_dir`` marks ``git_dir`` as one the caller created outside ``repo_dir``
     (``git init --separate-git-dir``) at a path it chose itself, never one read from a
     ``.git`` pointer; it is then pinned as its own common dir."""
-    args = _with_subcommand_flags(args)
     empty = "" if text else b""
+    refused = _refused_caller_option(args)
+    if refused is not None:
+        message = f"fatal: caller git option not allowed: {refused}\n"
+        return subprocess.CompletedProcess(
+            ["git", *args], 128, empty, message if text else message.encode()
+        )
+    args = _with_subcommand_flags(args)
+    caller_end = _caller_config_end(args)
     common_dir = None
     if git_dir is not None and (git_dir.is_symlink() or not git_dir.is_dir()):
         # Git follows a gitdir file even at a pinned GIT_DIR, so a replaced git dir fails here.
@@ -126,8 +167,9 @@ def run_hardened_git(
     with _RUNNING_GUARD:
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
     try:
+        # The pinned settings come after the caller's -c pairs, so the pinned values win.
         return subprocess.run(
-            ["git", *_GIT_OVERRIDES, *args],
+            ["git", *args[:caller_end], *_GIT_OVERRIDES, *args[caller_end:]],
             cwd=str(repo_dir),
             env=env,
             capture_output=True,

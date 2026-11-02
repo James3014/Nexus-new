@@ -551,3 +551,32 @@ def test_candidate_commit_rejects_multi_verifier_contract_with_partial_unrelated
     with pytest.raises(RuntimeError):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, forged)
     _assert_not_committed(lease, head)
+
+
+def test_candidate_commit_runs_no_post_commit_hook_from_the_canonical_hooks_dir(
+    tmp_path, monkeypatch
+):
+    """The candidate commit runs through the hardened Target runner, which runs no hook:
+    ``--no-verify`` does not cover post-commit, so no hooks path may reach that commit."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "SENTINEL").write_text("cwd\n", encoding="utf-8")
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    contract, lease, verified, manager = _scenario(tmp_path)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+    marker = tmp_path / "post-commit-ran"
+    hooks = tmp_path / "canonical-hooks"
+    hooks.mkdir(mode=0o700)
+    hooks.chmod(0o700)
+    hook = hooks / "post-commit"
+    hook.write_text(f'#!/bin/sh\ntouch "{marker}"\n', encoding="utf-8")
+    hook.chmod(0o700)
+    monkeypatch.setenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", str(hooks))
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert packet.candidate_commit_sha != head
+    assert not marker.exists()
+    assert (cwd / "SENTINEL").read_text(encoding="utf-8") == "cwd\n"
