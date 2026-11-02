@@ -16,6 +16,10 @@ from nexus.learning.zero_trust_v2_receipts import canonical_json_hash
 DEFAULT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "PYTHONPATH")
 DEFAULT_TIMEOUT_SEC = 3
 DEFAULT_MEMORY_MB = 512
+# Writes the child may need to start or run ordinary shell commands, beyond its own dirs.
+SANDBOX_DEVICE_WRITE_ALLOWLIST = ("/dev/null",)
+# sandbox-exec's own exit codes: EX_USAGE, EX_DATAERR (profile parse), EX_OSERR (apply/exec).
+SANDBOX_EXEC_FAILURE_RETURNCODES = frozenset({64, 65, 71})
 
 
 def _env_allowlist_hash(env: dict[str, str]) -> str:
@@ -31,18 +35,63 @@ def _sandbox_signature(*, attestation_body: dict[str, Any], signing_secret: str)
     return hmac.new(signing_secret.encode("utf-8"), digest.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def _sbpl_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _write_allow_rule(workspace_dir: Path, tmp_dir: Path) -> str:
+    # Paths are resolved because the sandbox matches real paths (/var -> /private/var).
+    filters = [
+        f'(subpath "{_sbpl_string(str(workspace_dir.resolve()))}")',
+        f'(subpath "{_sbpl_string(str(tmp_dir.resolve()))}")',
+        *(f'(literal "{_sbpl_string(path)}")' for path in SANDBOX_DEVICE_WRITE_ALLOWLIST),
+    ]
+    return f"(allow file-write* {' '.join(filters)})"
+
+
 def _macos_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
-    workspace = str(workspace_dir).replace("\\", "\\\\").replace('"', '\\"')
-    tmp = str(tmp_dir).replace("\\", "\\\\").replace('"', '\\"')
+    workspace = _sbpl_string(str(workspace_dir.resolve()))
+    tmp = _sbpl_string(str(tmp_dir.resolve()))
+    # Reads stay allowed (the attestation claims no read isolation); writes are
+    # denied everywhere except the workspace, its tmp dir and the device allowlist.
     return f"""
 (version 1)
 (allow default)
 (deny network*)
+(deny file-write*)
 (allow file-read* (subpath "{workspace}"))
-(allow file-write* (subpath "{workspace}"))
 (allow file-read* (subpath "{tmp}"))
-(allow file-write* (subpath "{tmp}"))
+{_write_allow_rule(workspace_dir, tmp_dir)}
 """
+
+
+def _profile_confines_writes(profile: str, *, workspace_dir: Path, tmp_dir: Path) -> bool:
+    """True when the profile denies writes and re-allows only workspace, tmp and devices."""
+
+    rules = [line.strip() for line in profile.splitlines() if line.strip()]
+    if "(deny file-write*)" not in rules:
+        return False
+    expected = _write_allow_rule(workspace_dir, tmp_dir)
+    after_deny = rules[rules.index("(deny file-write*)") + 1 :]
+    if not all(rule == expected or rule.startswith("(allow file-read* ") for rule in after_deny):
+        return False
+    return all(rule in ("(deny file-write*)", expected) for rule in rules if "file-write" in rule)
+
+
+def _sandbox_launch_failed(*, returncode: int, stderr: str) -> bool:
+    """True when sandbox-exec itself failed, so the profile was not demonstrably applied.
+
+    sandbox-exec exits 64/65/71 with a ``sandbox-exec:`` diagnostic when it cannot
+    parse or apply the profile or exec the command. Those codes are treated as a
+    launch failure even when the child could have produced them (fail closed). A
+    negative code means a signal, which may have arrived before the profile applied.
+    """
+
+    if returncode == 0:
+        return False
+    if returncode < 0 or returncode in SANDBOX_EXEC_FAILURE_RETURNCODES:
+        return True
+    return "sandbox-exec:" in stderr or "sandbox_apply" in stderr
 
 
 def run_macos_sandbox_probe(
@@ -87,7 +136,11 @@ def run_macos_sandbox_probe(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     profile_path = root_path / "sandbox.sb"
-    profile_path.write_text(_macos_sandbox_profile(workspace_dir, tmp_dir), encoding="utf-8")
+    profile = _macos_sandbox_profile(workspace_dir, tmp_dir)
+    profile_path.write_text(profile, encoding="utf-8")
+    writes_confined = _profile_confines_writes(
+        profile, workspace_dir=workspace_dir, tmp_dir=tmp_dir
+    )
     child_env["TMPDIR"] = str(tmp_dir)
 
     if sandbox_available:
@@ -118,13 +171,25 @@ def run_macos_sandbox_probe(
     finally:
         shutil.rmtree(root_path, ignore_errors=True)
 
-    sandbox_apply_failed = sandbox_available and returncode == 71 and "sandbox_apply" in stderr
+    sandbox_apply_failed = (
+        sandbox_available
+        and not timed_out
+        and _sandbox_launch_failed(returncode=returncode, stderr=stderr)
+    )
     command_passed = returncode == 0 and not timed_out and not sandbox_apply_failed
-    sandbox_ran = sandbox_available and not sandbox_apply_failed
+    # A timeout leaves no exit status, so the profile is not demonstrably applied.
+    sandbox_ran = sandbox_available and not timed_out and not sandbox_apply_failed
+    isolated = sandbox_ran and writes_confined
     if not sandbox_available:
         isolation_reason = "sandbox_exec_unavailable"
+    elif timed_out:
+        isolation_reason = "sandbox_outcome_unknown_timeout"
     elif sandbox_apply_failed:
-        isolation_reason = "sandbox_apply_failed"
+        isolation_reason = (
+            "sandbox_apply_failed" if "sandbox_apply" in stderr else "sandbox_launch_failed"
+        )
+    elif not writes_confined:
+        isolation_reason = "profile_write_scope_unconfined"
     else:
         isolation_reason = None
     raw_observation = {
@@ -134,6 +199,7 @@ def run_macos_sandbox_probe(
         "timed_out": timed_out,
         "sandbox_available": sandbox_available,
         "sandbox_apply_failed": sandbox_apply_failed,
+        "write_scope_confined": writes_confined,
     }
     artifact_hash = _artifact_hash(raw_observation)
     teardown_status = "PASS" if not root_path.exists() else "FAIL"
@@ -142,9 +208,9 @@ def run_macos_sandbox_probe(
         "sandbox_mode": "macos_sandbox",
         "status": "PASS" if command_passed and teardown_status == "PASS" else "BLOCKED",
         "network_disabled": sandbox_ran,
-        "workspace_isolated": sandbox_ran,
+        "workspace_isolated": isolated,
         "workspace_isolation_reason": isolation_reason,
-        "tmp_isolated": True,
+        "tmp_isolated": isolated,
         "env_allowlist_hash": _env_allowlist_hash(child_env),
         "resource_limits": {"cpu": "process_timeout", "memory_mb": memory_mb, "timeout_sec": timeout_sec},
         "teardown_status": teardown_status,
@@ -156,7 +222,7 @@ def run_macos_sandbox_probe(
         **attestation_body,
         "signature": _sandbox_signature(attestation_body=attestation_body, signing_secret=signing_secret),
     }
-    promotion_eligible = command_passed and sandbox_ran and teardown_status == "PASS"
+    promotion_eligible = command_passed and isolated and teardown_status == "PASS"
     return {
         "schema": "nexus.zero_trust_v2.physical_sandbox_probe.v1",
         "status": "PASS" if promotion_eligible else "BLOCKED",
