@@ -347,8 +347,9 @@ def _make_removable_at(dir_fd: int, name: str, *, is_dir: bool) -> None:
     mode = 0o700 if is_dir else 0o600
     try:
         os.chmod(name, mode, dir_fd=dir_fd, follow_symlinks=False)
-    except NotImplementedError:
-        _chmod_at_by_handle(dir_fd, name, mode)  # Linux: no fchmodat without following
+    except (NotImplementedError, ValueError):
+        # Linux: no fchmodat without following; CPython raises one or the other.
+        _chmod_at_by_handle(dir_fd, name, mode)
     except OSError:
         pass
     if sys.platform == "darwin":
