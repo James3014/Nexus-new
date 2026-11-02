@@ -24,6 +24,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.research.hybrid_replication_pipeline import (
     FrozenStackOutcome,
     RawRouteResult,
@@ -1084,44 +1089,9 @@ def _run_codex_candidate(
                 result = {}
                 parse_error = f"{type(exc).__name__}:{exc}"
 
-            tracked = _run(
-                ["git", "diff", "--name-only", "-z", "HEAD"],
-                cwd=source,
-                timeout=30,
-            )
-            untracked = _run(
-                ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-                cwd=source,
-                timeout=30,
-            )
-            if tracked.returncode != 0 or untracked.returncode != 0:
-                raise RuntimeError("shadow_candidate_status_failed")
-            changed_files = sorted({
-                item for item in (tracked.stdout + untracked.stdout).split("\0") if item
-            })
-            diff = _run(["git", "diff", "--binary", "HEAD"], cwd=source, timeout=30)
-            if diff.returncode != 0:
-                raise RuntimeError("shadow_candidate_diff_failed")
-            diff_bytes = diff.stdout.encode("utf-8")
-            untracked_rows: list[dict[str, Any]] = []
-            oversized_untracked: list[str] = []
-            for rel in [item for item in untracked.stdout.split("\0") if item]:
-                file_path = source / rel
-                if not file_path.is_file():
-                    continue
-                data = file_path.read_bytes()
-                row = {
-                    "path": rel,
-                    "sha256": _sha256_bytes(data),
-                    "size": len(data),
-                }
-                if len(data) <= 5_000_000:
-                    row["gzip_base64"] = base64.b64encode(gzip.compress(data, mtime=0)).decode(
-                        "ascii"
-                    )
-                else:
-                    oversized_untracked.append(rel)
-                untracked_rows.append(row)
+            sealing = seal_shadow_candidate(source, git_dir=_shadow_git_dir(source))
+            changed_files = sealing["changed_files"]
+            oversized_untracked = sealing["oversized_untracked_files"]
 
             commands = _codex_command_strings(cp.stdout)
             forbidden = sorted({
@@ -1149,11 +1119,9 @@ def _run_codex_candidate(
                     "parse_error": parse_error,
                     "final_response": result,
                     "changed_files": changed_files,
-                    "diff_sha256": _sha256_bytes(diff_bytes),
-                    "diff_gzip_base64": base64.b64encode(gzip.compress(diff_bytes, mtime=0)).decode(
-                        "ascii"
-                    ),
-                    "untracked_files": untracked_rows,
+                    "diff_sha256": sealing["diff_sha256"],
+                    "diff_gzip_base64": sealing["diff_gzip_base64"],
+                    "untracked_files": sealing["untracked_files"],
                     "oversized_untracked_files": oversized_untracked,
                     "observed_commands": list(commands),
                     "forbidden_commands": forbidden,
@@ -1430,15 +1398,22 @@ def evaluate_agy_receipt(
 def seal_shadow_candidate(
     source: Path,
     *,
+    git_dir: Path | None = None,
     allowed_paths: Sequence[str] | None = None,
     max_file_size: int = 5_000_000,
 ) -> dict[str, Any]:
-    tracked = _run(["git", "diff", "--name-only", "-z", "HEAD"], cwd=source, timeout=30)
-    untracked = _run(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-        cwd=source,
-        timeout=30,
-    )
+    """Seal the agent's changes in ``source``. Git is pinned to ``git_dir`` (a shadow git dir
+    the harness created beside ``source``; default: the git dir inside ``source``) and runs
+    only while that repository names no program to start."""
+    separate = git_dir is not None
+    git_dir = git_dir or repository_git_dir(source)
+    if git_dir is None:
+        raise RuntimeError("shadow_candidate_status_failed")
+    pin: dict[str, Any] = {"git_dir": git_dir, "separate_git_dir": separate}
+    if repository_config_can_start_a_program(source, **pin):
+        raise RuntimeError("shadow_candidate_config_refused")
+    tracked = run_hardened_git(source, "diff", "--name-only", "-z", "HEAD", **pin)
+    untracked = run_hardened_git(source, "ls-files", "--others", "--exclude-standard", "-z", **pin)
     if tracked.returncode != 0 or untracked.returncode != 0:
         raise RuntimeError("shadow_candidate_status_failed")
 
@@ -1446,7 +1421,7 @@ def seal_shadow_candidate(
     untracked_paths = [item for item in untracked.stdout.split("\0") if item]
     changed_files = sorted(set(tracked_paths + untracked_paths))
 
-    diff = _run(["git", "diff", "--binary", "HEAD"], cwd=source, timeout=30)
+    diff = run_hardened_git(source, "diff", "--binary", "HEAD", **pin)
     if diff.returncode != 0:
         raise RuntimeError("shadow_candidate_diff_failed")
     diff_bytes = diff.stdout.encode("utf-8")
@@ -1706,6 +1681,12 @@ def _run_agy_dispatch(
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
 
 
+def _shadow_git_dir(source: Path) -> Path:
+    """The shadow checkout's git dir. It sits beside ``source``, outside the agent's
+    ``write_file({root}/**)`` grant, so nothing the agent writes is read as git metadata."""
+    return source.parent / f"{source.name}.git"
+
+
 def _prepare_shadow_checkout(
     *,
     repo: Path,
@@ -1722,8 +1703,13 @@ def _prepare_shadow_checkout(
     (local or remote-tracking) can be fetched by id.
     """
     del default_branch
+    git_dir = _shadow_git_dir(source)
+    if git_dir.exists() or git_dir.is_symlink():
+        raise RuntimeError("shadow_git_dir_exists")
     source.mkdir(parents=True, exist_ok=False)
-    initialized = _run(["git", "init", "-q"], cwd=source, timeout=60)
+    initialized = _run(
+        ["git", "init", "-q", f"--separate-git-dir={git_dir}"], cwd=source, timeout=60
+    )
     if initialized.returncode != 0:
         raise RuntimeError(f"shadow_init_failed:{initialized.stderr.strip()}")
     fetched = _run(
@@ -1740,13 +1726,37 @@ def _prepare_shadow_checkout(
     )
     if checked.returncode != 0:
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
-    git_dir = Path(_git(source, "rev-parse", "--absolute-git-dir").strip())
+    if Path(_git(source, "rev-parse", "--absolute-git-dir").strip()).resolve() != (
+        git_dir.resolve()
+    ):
+        raise RuntimeError("shadow_git_dir_mismatch")
     (git_dir / "FETCH_HEAD").unlink(missing_ok=True)
     head = _git(source, "rev-parse", "HEAD").strip()
     if head != revision:
         raise RuntimeError("shadow_isolation_head_mismatch")
     if _git(source, "for-each-ref").strip() or _git(source, "remote").strip():
         raise RuntimeError("shadow_isolation_refs_remain")
+
+
+def _verified_persistent_shadow_git_dir(source: Path, revision: str) -> Path:
+    """The git dir of a persistent shadow checkout, once it is still the one
+    _prepare_shadow_checkout made: beside ``source``, pointed to by ``source/.git``, at
+    ``revision``, and naming no program to start."""
+    git_dir = _shadow_git_dir(source)
+    gitfile = source / ".git"
+    if gitfile.is_symlink() or not gitfile.is_file():
+        raise RuntimeError("persistent_shadow_gitfile_invalid")
+    pointer = gitfile.read_text(encoding="utf-8", errors="replace").strip()
+    if not pointer.startswith("gitdir:") or (
+        Path(pointer.removeprefix("gitdir:").strip()).resolve() != git_dir.resolve()
+    ):
+        raise RuntimeError("persistent_shadow_gitfile_invalid")
+    if repository_config_can_start_a_program(source, git_dir=git_dir, separate_git_dir=True):
+        raise RuntimeError("persistent_shadow_config_refused")
+    head = run_hardened_git(source, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True)
+    if head.returncode != 0 or head.stdout.strip() != revision:
+        raise RuntimeError("persistent_shadow_revision_mismatch")
+    return git_dir
 
 
 @contextmanager
@@ -1772,9 +1782,7 @@ def _agy_shadow_checkout(
 
     source = prospective_guard.shadow_source(effect_slot)
     if source.exists():
-        head = _run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
-        if head.returncode != 0 or head.stdout.strip() != revision:
-            raise RuntimeError("persistent_shadow_revision_mismatch")
+        _verified_persistent_shadow_git_dir(source, revision)
     else:
         source.parent.mkdir(parents=True, exist_ok=True)
         _prepare_shadow_checkout(
@@ -1819,8 +1827,16 @@ def _run_agy_b_fallback(
                     effect_slot="b-fallback",
                 )
             )
-            status_check = _run(["git", "status", "--porcelain=v1"], cwd=source, timeout=30)
-            mutated = bool(status_check.stdout.strip())
+            git_dir = _shadow_git_dir(source)
+            # A git dir that now names a program, or a status that fails, counts as mutated.
+            mutated = repository_config_can_start_a_program(
+                source, git_dir=git_dir, separate_git_dir=True
+            )
+            if not mutated:
+                status_check = run_hardened_git(
+                    source, "status", "--porcelain=v1", git_dir=git_dir, separate_git_dir=True
+                )
+                mutated = status_check.returncode != 0 or bool(status_check.stdout.strip())
             extra_checks = None
             if mutated:
                 extra_checks = {"valid": False, "reason": "REPOSITORY_MUTATION_REJECTED"}
@@ -1878,7 +1894,9 @@ def _run_agy_candidate(
                     effect_slot="c",
                 )
             )
-            sealing = seal_shadow_candidate(source, allowed_paths=allowed_paths)
+            sealing = seal_shadow_candidate(
+                source, git_dir=_shadow_git_dir(source), allowed_paths=allowed_paths
+            )
             extra_checks = None
             if not sealing["scope_valid"]:
                 reason = (
