@@ -77,10 +77,21 @@ def _run_dir_write_deny_rule(run_dir: Path) -> str:
 
 # Reason code when run_dir is no longer the directory the parent created (#2785).
 RUN_DIR_REPLACED = "run_dir_replaced_during_run"
+# Reason code when run_dir is still the recorded directory but an entry under it is a link,
+# not a directory or regular file, or already exists where a new file is written (#3162).
+RUN_DIR_ENTRY_REFUSED = "run_dir_entry_refused"
 
 
 class RunDirUnsafe(RuntimeError):
     """run_dir is a symlink, not a directory, or not the directory recorded before the run."""
+
+
+class RunDirEntryRefused(RunDirUnsafe):
+    """run_dir is the recorded directory, but an entry under it cannot be written safely."""
+
+
+def _run_dir_refusal_reason(exc: RunDirUnsafe) -> str:
+    return RUN_DIR_ENTRY_REFUSED if isinstance(exc, RunDirEntryRefused) else RUN_DIR_REPLACED
 
 
 @dataclass(frozen=True)
@@ -135,7 +146,8 @@ def _write_in_run_dir(
     ``run_dir`` is opened with ``O_NOFOLLOW`` and must still be the recorded directory; each
     subdirectory is created if missing and opened with ``O_NOFOLLOW``, and the file is opened
     with ``O_NOFOLLOW`` relative to it, so no link planted on the way is followed.  With
-    ``exclusive`` the file must not exist yet.  Any refusal raises ``RunDirUnsafe``.
+    ``exclusive`` the file must not exist yet.  Any refusal raises ``RunDirUnsafe``; one about
+    an entry under the still recorded ``run_dir`` raises its subclass ``RunDirEntryRefused``.
     """
     if not parts or any(part in ("", ".", "..") or os.sep in part for part in parts):
         raise RunDirUnsafe(f"invalid run record path: {parts!r}")
@@ -156,7 +168,7 @@ def _write_in_run_dir(
             try:
                 next_fd = os.open(name, dir_flags, dir_fd=dir_fd)
             except OSError as exc:
-                raise RunDirUnsafe(f"{name} is not a real directory: {exc}") from exc
+                raise RunDirEntryRefused(f"{name} is not a real directory: {exc}") from exc
             os.close(dir_fd)
             dir_fd = next_fd
         flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -164,12 +176,12 @@ def _write_in_run_dir(
         try:
             fd = os.open(parts[-1], flags, 0o644, dir_fd=dir_fd)
         except OSError as exc:
-            raise RunDirUnsafe(
+            raise RunDirEntryRefused(
                 f"{parts[-1]} cannot be opened without following links: {exc}"
             ) from exc
         with os.fdopen(fd, "wb") as handle:
             if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                raise RunDirUnsafe(f"{parts[-1]} is not a regular file")
+                raise RunDirEntryRefused(f"{parts[-1]} is not a regular file")
             handle.write(data)
     finally:
         os.close(dir_fd)
@@ -354,7 +366,10 @@ class SandboxRunner:
     def _write_python_network_guard(
         self, run_dir: Path, identity: RunDirIdentity | None = None
     ) -> Path:
-        """Write the guard's ``sitecustomize.py`` under run_dir, never through a link (#3130)."""
+        """Write the guard's ``sitecustomize.py`` under run_dir, never through a link (#3130).
+
+        The file is created exclusively: whatever is already at that name (a FIFO that would
+        block the open, a planted file) is refused, never opened (#3130 review)."""
         if identity is None:
             identity = _capture_run_dir_identity(run_dir)
         guard_dir = run_dir / "python_network_guard"
@@ -412,6 +427,7 @@ def _guarded_socket_connect(self, address):
 socket.create_connection = _guarded_create_connection
 socket.socket.connect = _guarded_socket_connect
 """.lstrip().encode("utf-8"),
+            exclusive=True,
         )
         return guard_dir
 
@@ -659,13 +675,33 @@ socket.socket.connect = _guarded_socket_connect
                         output_refused = str(exc)
                 if artifact_bytes is not None:
                     artifact_path = run_dir / "artifacts" / output_relative
-                    _write_in_run_dir(
-                        run_dir,
-                        run_dir_identity,
-                        ("artifacts", *output_relative.parts),
-                        artifact_bytes,
-                        exclusive=True,
-                    )
+                    try:
+                        _write_in_run_dir(
+                            run_dir,
+                            run_dir_identity,
+                            ("artifacts", *output_relative.parts),
+                            artifact_bytes,
+                            exclusive=True,
+                        )
+                    except RunDirUnsafe as exc:
+                        # The child has run: keep what it printed and its exit code (#3162).
+                        result_payload = self._failure_result(
+                            task=task,
+                            command=command_list,
+                            run_id=run_id,
+                            run_dir=run_dir,
+                            workspace_path=workspace_path,
+                            cwd=cwd,
+                            output_file=output_file,
+                            cleanup=cleanup,
+                            error=_run_dir_refusal_reason(exc),
+                            exit_code=proc.returncode,
+                            stdout=proc.stdout,
+                            stderr=proc.stderr,
+                            duration_sec=duration_sec,
+                        )
+                        result_payload["run_dir_mismatch"] = str(exc)
+                        return self._write_result(run_dir, result_payload, run_dir_identity)
                     output_artifact_path = str(artifact_path)
                     output_artifact = {
                         "sandbox_relative_path": str(output_path.relative_to(workspace_path)),
@@ -723,7 +759,7 @@ socket.socket.connect = _guarded_socket_connect
                 cwd=cwd,
                 output_file=output_file,
                 cleanup=cleanup,
-                error=RUN_DIR_REPLACED,
+                error=_run_dir_refusal_reason(exc),
                 duration_sec=time.time() - start_time,
             )
             result_payload["run_dir_mismatch"] = str(exc)

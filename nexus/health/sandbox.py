@@ -233,12 +233,13 @@ class SpeculativeSandbox:
             symlinks=True,
             ignore=_ignored,
         )
-        # Links are copied as links. One that dangles towards a path outside the copy would
-        # let a write by path in the copy (Dockerfile.nexus below, or the runner) create a
-        # file outside it (#3130). Links to existing targets outside stay, as before.
-        dropped = drop_escaping_links(self.sandbox_root, dangling_only=True)
+        # Links are copied as links. One that points outside the copy, or dangles towards a
+        # path outside it, would let a write by path in the copy (Dockerfile.nexus below, a
+        # repair command, the runner) change or create a file outside it (#3130, #3162), so
+        # every such link is left out, as cli_pregate does. Links inside the copy stay.
+        dropped = drop_escaping_links(self.sandbox_root)
         if dropped:
-            logger.warning("Sandbox copy left out %d dangling link(s) to outside it", len(dropped))
+            logger.warning("Sandbox copy left out %d link(s) to outside it", len(dropped))
         return self.sandbox_root
 
     def _fork_tmpdir(self) -> Path:
