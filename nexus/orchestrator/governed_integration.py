@@ -31,6 +31,10 @@ from nexus.orchestrator.canonical_source_root import (
     _bind_path_problem,
 )
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, require_bound_approval_grant
+from nexus.orchestrator.target_integration_lifecycle import (
+    canonical_post_apply_commands,
+    post_apply_commands_hash,
+)
 from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -933,6 +937,19 @@ class ControlledIntegrationManager:
             auth_obj.validate_current(current_universe)
         except ValueError as exc:
             raise RuntimeError(f"authorization validation failed: {exc}") from exc
+        # The commands that run are bound to the authorization (#3185): hash the
+        # canonical form of exactly what will run and compare it with the
+        # authorized hash before anything runs.  No commands under an
+        # authorization that carries no hash is the only other accepted case.
+        try:
+            post_apply_commands = canonical_post_apply_commands(post_apply_commands)
+        except ValueError as exc:
+            raise RuntimeError(f"post-apply commands are not canonical: {exc}") from exc
+        authorized_post_apply = str(auth_obj.post_apply_commands_hash or "")
+        if post_apply_commands_hash(post_apply_commands) != authorized_post_apply and (
+            post_apply_commands or authorized_post_apply
+        ):
+            raise RuntimeError("post-apply commands do not match the authorization")
 
         admitted_verifiers = self._bound_manifest(state, contract)
 
@@ -1069,6 +1086,13 @@ class ControlledIntegrationManager:
                             raise RuntimeError(
                                 f"post-apply verification failed: {' '.join(command)}"
                             )
+                # Post-apply commands run in a worktree that shares the
+                # Controller's refs: the branch must still be the applied commit.
+                if (
+                    self._git(["rev-parse", f"{branch_ref}^{{commit}}"], controller_root)
+                    != exact_head
+                ):
+                    raise RuntimeError("integration branch moved during post-apply verification")
                 post_apply_verified = True
         except Exception as exc:
             failure = exc
