@@ -369,3 +369,136 @@ def test_cleanup_stale_swarm_locks(tmp_path):
     assert removed == 1
     assert not stale.exists()
     assert fresh.exists()
+
+
+# --- stale swarm locks go to the broker's recovery, and no link is followed -----------------------
+
+
+def _swarm_git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def _age(path: Path, seconds: float = 4 * 60 * 60) -> None:
+    import os
+
+    old = time.time() - seconds
+    os.utime(path, (old, old), follow_symlinks=False)
+
+
+def _swarm_controller(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    """A controller repo with one registered swarm worktree; git stops at `tmp_path`."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    controller = tmp_path / "controller"
+    controller.mkdir(parents=True)
+    _swarm_git(controller, "init", "-q")
+    _swarm_git(controller, "config", "user.email", "nexus@example.test")
+    _swarm_git(controller, "config", "user.name", "Nexus Test")
+    _swarm_git(controller, "config", "core.hooksPath", "/dev/null")
+    (controller / "tracked.txt").write_text("controller\n", encoding="utf-8")
+    _swarm_git(controller, "add", "tracked.txt")
+    _swarm_git(controller, "commit", "-q", "-m", "initial")
+    swarm = controller / ".nexus-swarm-001"
+    _swarm_git(controller, "worktree", "add", "-q", "--detach", str(swarm))
+    return controller, swarm
+
+
+def _swarm_left_locked_by_a_failed_release(tmp_path: Path, monkeypatch):
+    from nexus.research.swarm_broker import SwarmBroker
+
+    controller, swarm = _swarm_controller(tmp_path, monkeypatch)
+    broker = SwarmBroker(controller)
+    acquired = broker.acquire(timeout_sec=0.05)
+    assert acquired is not None
+    (swarm / "leftover.py").write_text("LEFT = 1\n", encoding="utf-8")
+    index_lock = Path(_swarm_git(swarm, "rev-parse", "--absolute-git-dir")) / "index.lock"
+    index_lock.write_text("", encoding="utf-8")
+    broker.release(acquired)
+    assert broker.locked_swarms() == [(acquired, "release_failed")]
+    _age(swarm / ".swarm_lock")
+    return controller, swarm, index_lock
+
+
+def test_cleanup_keeps_the_lock_of_a_swarm_its_recovery_cannot_reset(tmp_path, monkeypatch):
+    controller, swarm, _index_lock = _swarm_left_locked_by_a_failed_release(tmp_path, monkeypatch)
+
+    assert _cleanup_stale_swarm_locks(controller, ttl_minutes=180) == 0
+
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "leftover.py").exists()
+
+
+def test_cleanup_resets_a_swarm_left_by_a_failed_release_before_unlocking_it(tmp_path, monkeypatch):
+    controller, swarm, index_lock = _swarm_left_locked_by_a_failed_release(tmp_path, monkeypatch)
+    _age(index_lock)
+
+    assert _cleanup_stale_swarm_locks(controller, ttl_minutes=180) == 1
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert not (swarm / "leftover.py").exists()
+
+
+def test_cleanup_resets_a_swarm_whose_holder_is_gone_before_unlocking_it(tmp_path, monkeypatch):
+    from nexus.research.swarm_broker import SwarmBroker
+
+    controller, swarm = _swarm_controller(tmp_path, monkeypatch)
+    assert SwarmBroker(controller).acquire(timeout_sec=0.05) is not None
+    (swarm / "leftover.py").write_text("LEFT = 1\n", encoding="utf-8")
+    _age(swarm / ".swarm_lock")  # the holder died without releasing
+
+    assert _cleanup_stale_swarm_locks(controller, ttl_minutes=180) == 1
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert not (swarm / "leftover.py").exists()
+
+
+def test_cleanup_does_not_follow_a_linked_swarm(tmp_path, monkeypatch):
+    other_controller, other_swarm = _swarm_controller(tmp_path / "other", monkeypatch)
+    (other_swarm / ".swarm_lock").write_text("", encoding="utf-8")
+    _age(other_swarm / ".swarm_lock")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".nexus-swarm-001").symlink_to(other_swarm)
+
+    assert _cleanup_stale_swarm_locks(project, ttl_minutes=180) == 0
+
+    assert (other_swarm / ".swarm_lock").read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("linked", [".nexus", "locks"])
+def test_cleanup_does_not_follow_a_linked_lock_directory(tmp_path, linked):
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "locks").mkdir(parents=True)
+    lock = elsewhere / "locks" / "swarm_1.lock"
+    lock.write_text("", encoding="utf-8")
+    _age(lock)
+    project = tmp_path / "project"
+    project.mkdir()
+    if linked == ".nexus":
+        (project / ".nexus").symlink_to(elsewhere)
+    else:
+        (project / ".nexus").mkdir()
+        (project / ".nexus" / "locks").symlink_to(elsewhere / "locks")
+
+    assert _cleanup_stale_swarm_locks(project, ttl_minutes=180) == 0
+
+    assert lock.exists()
+
+
+def test_cleanup_keeps_a_lock_file_that_is_a_link(tmp_path):
+    target = tmp_path / "target.lock"
+    target.write_text("", encoding="utf-8")
+    _age(target)
+    lock_dir = tmp_path / "project" / ".nexus" / "locks"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "swarm_1.lock").symlink_to(target)
+    _age(lock_dir / "swarm_1.lock")
+    stale = lock_dir / "swarm_2.lock"
+    stale.write_text("", encoding="utf-8")
+    _age(stale)
+
+    assert _cleanup_stale_swarm_locks(tmp_path / "project", ttl_minutes=180) == 1
+
+    assert (lock_dir / "swarm_1.lock").is_symlink()
+    assert target.exists()
+    assert not stale.exists()
