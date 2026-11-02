@@ -661,7 +661,9 @@ def termination_raises() -> Iterator[None]:
     first signal raises: a second one during that cleanup is absorbed so it
     cannot cut the cleanup short.  Off the main thread no handler can be
     installed; the body still runs, and its own cleanup still covers every
-    exception.
+    exception.  A signal inherited as ignored (``nohup``) or held by a
+    non-Python handler (``getsignal()`` is None) is left alone: no handler is
+    installed for it and nothing is restored.
     """
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -677,11 +679,14 @@ def termination_raises() -> Iterator[None]:
     previous: Dict[int, Any] = {}
     try:
         for signum in TERMINATION_SIGNALS:
+            current = signal.getsignal(signum)
+            if current is signal.SIG_IGN or current is None:
+                continue
             previous[signum] = signal.signal(signum, _raise)
         yield
     finally:
         for signum, handler in previous.items():
-            signal.signal(signum, signal.SIG_DFL if handler is None else handler)
+            signal.signal(signum, handler)
 
 
 class _CandidateProcess:
@@ -3588,10 +3593,12 @@ def sweep_probe_candidate(cfg: Config, host: Host) -> Optional[Dict[str, Any]]:
     record names the pid, its start time and the deployment entrypoint; the
     group is signalled only when that pid still leads its own process group,
     started at the recorded time and runs that entrypoint, so a reused pid or
-    the live Gateway is never touched (a port alone is never trusted).  The
-    recorded probe state dir goes too, and the record is dropped once nothing
-    of it can still run.  Never raises: a failure keeps the record for the
-    next cycle.
+    the live Gateway is never touched (a port alone is never trusted).  When
+    the group is stopped, the process is gone or the identity does not match
+    (``NOT_OURS``: nothing is signalled, and a candidate whose identity cannot
+    be confirmed is left unattended, as before this sweep existed), the
+    recorded probe state dir and the record are removed.  Never raises: a
+    group that survives or a failure keeps the record for the next cycle.
     """
     path = cfg.probe_candidate_file
     if not path.exists() and not path.is_symlink():
@@ -4477,8 +4484,9 @@ class _Cycle:
         # A SIGTERM/SIGHUP during the probe stops the candidate too (#3199).
         with termination_raises():
             stop = host.start(command, log)
+            recorded = False
             try:
-                self.record_probe_candidate(stop, root, probe_state)
+                recorded = self.record_probe_candidate(stop, root, probe_state)
                 result = self.prober.probe(
                     port=port,
                     token=read_env_token(cfg.env_file),
@@ -4491,31 +4499,40 @@ class _Cycle:
             finally:
                 stop()
                 shutil.rmtree(probe_state, ignore_errors=True)
-                with contextlib.suppress(FileNotFoundError):
-                    cfg.probe_candidate_file.unlink()
+                if recorded:
+                    with contextlib.suppress(FileNotFoundError):
+                        cfg.probe_candidate_file.unlink()
         return {"port": port, "state_dir": str(probe_state), **result}
 
     def record_probe_candidate(
         self, stop: Callable[[], None], root: Path, probe_state: Path
-    ) -> None:
+    ) -> bool:
         """Record who the candidate is, for the next cycle's sweep (#3199).
 
-        Best effort: a test fake's bare ``stop`` has no ``pid``, and an
-        unreadable ``ps`` leaves no record (the signal path still cleans up).
+        Best effort, True when written: a test fake's bare ``stop`` has no
+        ``pid``, and an unreadable ``ps`` or a failed write leaves no record
+        (the signal path still cleans up).  A record the startup sweep kept
+        (a group that survived it) is never overwritten.
         """
         pid = getattr(stop, "pid", None)
         if not isinstance(pid, int) or isinstance(pid, bool):
-            return
+            return False
+        if self.cfg.probe_candidate_file.exists() or self.cfg.probe_candidate_file.is_symlink():
+            return False
         identity = self.host.process_identity(pid)
         if identity is None:
-            return
+            return False
         record = {
             "pid": pid,
             "started": identity["started"],
             "entrypoint": str(root / ENTRYPOINT),
             "probe_state": str(probe_state),
         }
-        _atomic_write(self.cfg.probe_candidate_file, json.dumps(record).encode(), 0o600)
+        try:
+            _atomic_write(self.cfg.probe_candidate_file, json.dumps(record).encode(), 0o600)
+        except OSError:
+            return False
+        return True
 
     def attempt_effects(
         self, candidate: str, previous_plist: bytes, receipt: Dict[str, Any]

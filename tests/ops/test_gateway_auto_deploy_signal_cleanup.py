@@ -155,6 +155,57 @@ def test_signal_during_probe_stops_candidate_and_cleans_probe_state(
     assert not cfg.probe_candidate_file.exists()
 
 
+def test_probe_leaves_an_ignored_sighup_ignored(
+    cfg: ad.Config,  # noqa: F811 - pytest fixture
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deployer started under nohup keeps ignoring SIGHUP during and after the probe."""
+    pidfile = tmp_path / "candidate.pid"
+    script = _candidate_script(tmp_path)
+    _spare_only_wrapper(monkeypatch, f'exec "{sys.executable}" "{script}" "{pidfile}"')
+    seen: dict[str, Any] = {}
+
+    def hook(call: dict[str, Any]) -> None:
+        seen["pid"] = int(_wait_file(pidfile))
+        seen["during"] = signal.getsignal(signal.SIGHUP)
+        os.kill(os.getpid(), signal.SIGHUP)  # ignored: the probe goes on
+        time.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(2)  # the handler raises here
+
+    with _sentinel_handlers() as delivered:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        with pytest.raises(ad.DeployerTerminated) as info:
+            cycle(cfg, _RealStartHost(), FakeProber(hook=hook))
+        after = signal.getsignal(signal.SIGHUP)
+    assert info.value.signum == signal.SIGTERM
+    assert seen["during"] is signal.SIG_IGN
+    assert after is signal.SIG_IGN
+    assert delivered == []
+    assert not _alive(seen["pid"])
+
+
+def test_non_python_handler_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``getsignal()`` None means a handler Python did not install: never replace it."""
+    real_getsignal = signal.getsignal
+
+    def getsignal(signum: int) -> Any:
+        return None if signum == signal.SIGHUP else real_getsignal(signum)
+
+    with _sentinel_handlers():
+        before = real_getsignal(signal.SIGHUP)
+        monkeypatch.setattr(ad.signal, "getsignal", getsignal)
+        with ad.termination_raises():
+            during = real_getsignal(signal.SIGHUP)
+            term_during = real_getsignal(signal.SIGTERM)
+        monkeypatch.undo()
+        after = real_getsignal(signal.SIGHUP)
+    assert during is before
+    assert after is before
+    assert getattr(term_during, "__name__", "") == "_raise"
+
+
 def test_signal_while_stopping_a_stubborn_candidate_kills_its_group(
     tmp_path: Path,
 ) -> None:
@@ -370,3 +421,111 @@ def test_startup_sweep_is_skipped_on_a_dry_run(
     assert "probe_sweep" not in result
     assert cfg.probe_candidate_file.exists()
     assert probe_state.exists()
+
+
+def test_startup_sweep_keeps_a_probe_state_path_outside_the_probe_root(
+    cfg: ad.Config,  # noqa: F811 - pytest fixture
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside-probe-root"
+    (outside / "keep").mkdir(parents=True)
+    nested = cfg.probe_state_root / "a" / "b"
+    nested.mkdir(parents=True)
+    for probe_state in (outside, nested):
+        cfg.probe_candidate_file.write_text(
+            json.dumps({"pid": "not-a-pid", "probe_state": str(probe_state)})
+        )
+        assert ad.sweep_probe_candidate(cfg, FakeHost()) == {
+            "action": "RECORD_INVALID",
+            "pid": None,
+        }
+        assert probe_state.is_dir(), probe_state
+        assert not cfg.probe_candidate_file.exists()
+
+
+class _NoPsHost(FakeHost):
+    def process_identity(self, pid: int) -> dict[str, Any] | None:  # type: ignore[override]
+        raise AssertionError(f"ps must not run for pid {pid}")
+
+
+@pytest.mark.parametrize("pid", [1, 0, -1])
+def test_startup_sweep_refuses_pid_one_and_below_without_ps(
+    cfg: ad.Config,  # noqa: F811 - pytest fixture
+    tmp_path: Path,
+    pid: int,
+) -> None:
+    _write_record(
+        cfg,
+        pid=pid,
+        started="Thu Jan 1 00:00:00 1970",
+        entrypoint=str(tmp_path / ad.ENTRYPOINT),
+    )
+    assert ad.sweep_probe_candidate(cfg, _NoPsHost()) == {"action": "RECORD_INVALID", "pid": pid}
+    assert not cfg.probe_candidate_file.exists()
+
+
+class _PidStop:
+    """A stop callable with a pid, for a candidate that is never really started."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.stopped = 0
+
+    def __call__(self) -> None:
+        self.stopped += 1
+
+
+class _SurvivorHost(FakeHost):
+    """Every pid matches its record, but no group can be stopped."""
+
+    def __init__(self, entrypoint: str) -> None:
+        super().__init__()
+        self.entrypoint = entrypoint
+        self.identity_calls: list[int] = []
+
+    def start(self, command, log_path):  # type: ignore[override]
+        self.started.append(command)
+        return _PidStop(4242)
+
+    def process_identity(self, pid: int) -> dict[str, Any] | None:  # type: ignore[override]
+        self.identity_calls.append(pid)
+        return {"pgid": pid, "started": "Mon Nov 2 13:00:00 2026", "command": self.entrypoint}
+
+    def stop_process_group(self, pgid: int) -> bool:  # type: ignore[override]
+        return False
+
+
+def test_a_record_the_sweep_kept_is_not_overwritten_by_the_next_probe(
+    cfg: ad.Config,  # noqa: F811 - pytest fixture
+    tmp_path: Path,
+) -> None:
+    entrypoint = str(tmp_path / "old" / ad.ENTRYPOINT)
+    record = {"pid": 777, "started": "Mon Nov 2 13:00:00 2026", "entrypoint": entrypoint}
+    _write_record(cfg, **record)
+    kept = cfg.probe_candidate_file.read_text()
+    host = _SurvivorHost(entrypoint)
+    result = cycle(cfg, host, FakeProber())
+    assert result["probe_sweep"] == {"action": "SURVIVED", "pid": 777}
+    assert host.started  # the cycle still probed its own candidate
+    assert cfg.probe_candidate_file.read_text() == kept
+    assert 4242 not in host.identity_calls
+
+
+def test_a_failed_record_write_does_not_fail_the_attempt(
+    cfg: ad.Config,  # noqa: F811 - pytest fixture
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_write = ad._atomic_write
+
+    def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
+        if path == cfg.probe_candidate_file:
+            raise OSError(28, "No space left on device")
+        real_write(path, data, mode)
+
+    monkeypatch.setattr(ad, "_atomic_write", atomic_write)
+    host = _SurvivorHost(str(tmp_path / ad.ENTRYPOINT))
+    result = cycle(cfg, host, FakeProber())
+    assert result["status"] == "DEPLOYED"
+    assert host.identity_calls == [4242]
+    assert not cfg.probe_candidate_file.exists()
