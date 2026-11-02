@@ -94,6 +94,22 @@ def test_a_symlinked_pointer_or_a_plain_repository_is_not_a_linked_worktree(env)
     assert hardened_git.linked_worktree_git_dir(worktree, repo) is None
 
 
+def test_the_runner_honours_a_caller_timeout(env, monkeypatch):
+    _repo, worktree = _controller_and_worktree(env)
+    seen: dict[str, object] = {}
+    real_run = subprocess.run
+
+    def recording_run(*args, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(hardened_git.subprocess, "run", recording_run)
+    hardened_git.run_hardened_git(worktree, "rev-parse", "HEAD", timeout=7.5)
+    assert seen["timeout"] == 7.5
+    hardened_git.run_hardened_git(worktree, "rev-parse", "HEAD")
+    assert seen["timeout"] == hardened_git.GIT_TIMEOUT_S
+
+
 @pytest.mark.parametrize(
     ("name", "refused"),
     [

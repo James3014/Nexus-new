@@ -167,6 +167,8 @@ def _make_source_repo(tmp_path: Path) -> Path:
         # #3052: cli_worker kills its process group through nexus.core.argv_command
         (ROOT / "nexus/core/__init__.py", "nexus/core/__init__.py"),
         (ROOT / "nexus/core/argv_command.py", "nexus/core/argv_command.py"),
+        # the operation journal runs git through nexus.core.hardened_git
+        (ROOT / "nexus/core/hardened_git.py", "nexus/core/hardened_git.py"),
         (ROOT / "nexus/executors/codex_run_boundary.py", "nexus/executors/codex_run_boundary.py"),
         # #2884: the --run-as-user boundary, its wrapper and the manual installer
         (ROOT / "nexus/executors/agy_worker_account.py", "nexus/executors/agy_worker_account.py"),

@@ -21,6 +21,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    run_hardened_git,
+)
+
 TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "CANCELLED", "OUTCOME_UNKNOWN"})
 ACTIVE_STATES = frozenset({"QUEUED", "RUNNING", "WAITING_INPUT"})
 _ALLOWED_STATES = TERMINAL_STATES | ACTIVE_STATES
@@ -294,22 +300,66 @@ def process_alive(pid: object) -> bool:
 _process_alive = process_alive
 
 
+def _checked_git_dir(work_tree: Path) -> Path | None:
+    """The git dir of ``work_tree``: its own ``.git`` directory, or the admin dir of a
+    linked worktree whose registration holds; None for any other ``.git`` (a link, or a
+    file that is not such a registration)."""
+    dotgit = work_tree / ".git"
+    if dotgit.is_symlink():
+        return None
+    if dotgit.is_dir():
+        return dotgit
+    return linked_worktree_git_dir(work_tree)
+
+
+def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
+    """The nearest directory at or above ``cwd`` holding a ``.git`` entry, found the way
+    git searches (stopping below any ``GIT_CEILING_DIRECTORIES`` entry), with its checked
+    git dir, when that repository's config names no program the command line cannot switch
+    off.
+
+    The delegated agent ran and wrote in ``cwd``, so every git call below runs through the
+    shared hardened runner bound to this work tree and git dir, never searching for them."""
+    ceilings = {
+        Path(entry).resolve()
+        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
+        if entry
+    }
+    try:
+        start = Path(cwd).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not start.is_dir():
+        return None
+    for candidate in (start, *start.parents):
+        if os.path.lexists(candidate / ".git"):
+            git_dir = _checked_git_dir(candidate)
+            if git_dir is None:
+                return None
+            try:
+                refused = repository_config_can_start_a_program(candidate, git_dir=git_dir)
+            except OSError:
+                return None
+            return None if refused else (candidate, git_dir)
+        if candidate.parent in ceilings:
+            return None
+    return None
+
+
 def _git_identity(cwd: str) -> tuple[str | None, str | None]:
-    root = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if root.returncode != 0:
+    repository = _enclosing_repository(cwd)
+    return (None, None) if repository is None else _git_identity_in(*repository)
+
+
+def _git_identity_in(repository: Path, git_dir: Path) -> tuple[str | None, str | None]:
+    try:
+        root = run_hardened_git(repository, "rev-parse", "--show-toplevel", git_dir=git_dir)
+        if root.returncode != 0:
+            return None, None
+        repo_root = root.stdout.strip() or None
+        head = run_hardened_git(repository, "rev-parse", "HEAD", git_dir=git_dir)
+    except (OSError, subprocess.TimeoutExpired):
         return None, None
-    repo_root = root.stdout.strip() or None
-    head = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     return repo_root, head.stdout.strip() if head.returncode == 0 else None
 
 
@@ -351,23 +401,28 @@ def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
 
 
 def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
-    root_text, _head = _git_identity(cwd)
+    bound = _enclosing_repository(cwd)
+    if bound is None:
+        return None
+    repository, git_dir = bound
+    root_text = _git_identity_in(repository, git_dir)[0]
     if not root_text:
         return None
     root = Path(root_text)
-    proc = subprocess.run(
-        [
-            "git",
-            "-C",
-            cwd,
+    try:
+        proc = run_hardened_git(
+            repository,
             "status",
+            # A submodule's checked-out commit is compared; no git runs inside it.
+            "--ignore-submodules=dirty",
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
-        ],
-        capture_output=True,
-        check=False,
-    )
+            git_dir=git_dir,
+            text=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if proc.returncode != 0:
         return None
 
