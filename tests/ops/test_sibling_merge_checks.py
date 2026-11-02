@@ -251,3 +251,34 @@ def test_sibling_publish_step_under_bash_e(tmp_path: Path) -> None:
 def test_sibling_publish_step_fails_when_status_post_fails(tmp_path: Path) -> None:
     rc, posted, _ = _run_sibling_publish(tmp_path, "PASS  bindings: intents=[]", 0, gh_rc=1)
     assert "state=success" in posted and rc == 1
+
+
+def test_reusable_review_record_job_serializes_per_caller_repo_and_pr() -> None:
+    """The caller's group is split by event_name, so a pull_request_target run and an
+    issue_comment run on the same PR could overlap and the older snapshot could post
+    last. The job-level group joins them per caller repository and PR (in a called
+    workflow, github.repository is the caller's repository)."""
+    doc = _yaml(REUSABLE)
+    assert "pr" in _triggers(doc)["workflow_call"]["inputs"]
+    job = doc["jobs"]["review-record"]
+    assert job["concurrency"] == {
+        "group": "review-record-${{ github.repository }}-${{ inputs.pr }}",
+        "cancel-in-progress": True,
+    }
+    group = job["concurrency"]["group"]
+    assert "event_name" not in group and "run_id" not in group
+    # GitHub cancels the caller when the called and caller groups are equal.
+    caller_group = _yaml(CALLER)["concurrency"]["group"]
+    assert group != caller_group and not group.startswith("sibling-merge-checks-")
+    # The bindings job needs no job-level group: only pull_request_target runs it,
+    # and the caller already serializes those per PR with cancel-in-progress.
+    bindings = doc["jobs"]["bindings"]
+    assert bindings["if"] == "inputs.run_bindings"
+    assert "concurrency" not in bindings
+    caller = _yaml(CALLER)
+    assert caller["jobs"]["checks"]["with"]["run_bindings"] == (
+        "${{ github.event_name == 'pull_request_target' }}"
+    )
+    assert caller["concurrency"]["cancel-in-progress"] is True
+    assert "${{ github.event_name }}" in caller_group
+    assert "github.event.pull_request.number" in caller_group
