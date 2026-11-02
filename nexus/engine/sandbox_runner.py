@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from nexus.core.argv_command import run_reaping_process_group
+from nexus.core.contained_write import PathContainmentError, read_bytes_in_root
 from nexus.core.state_root import persistent_state_root
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,59 @@ def _run_dir_mismatch(run_dir: Path, identity: RunDirIdentity) -> str | None:
 SANDBOX_DEVICE_WRITE_RULE = (
     '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))'
 )
+
+
+def _write_in_run_dir(
+    run_dir: Path,
+    identity: RunDirIdentity,
+    parts: tuple[str, ...],
+    data: bytes,
+    *,
+    exclusive: bool = False,
+) -> None:
+    """Write ``data`` to ``run_dir/<parts>`` through checked directory descriptors (#3130).
+
+    ``run_dir`` is opened with ``O_NOFOLLOW`` and must still be the recorded directory; each
+    subdirectory is created if missing and opened with ``O_NOFOLLOW``, and the file is opened
+    with ``O_NOFOLLOW`` relative to it, so no link planted on the way is followed.  With
+    ``exclusive`` the file must not exist yet.  Any refusal raises ``RunDirUnsafe``.
+    """
+    if not parts or any(part in ("", ".", "..") or os.sep in part for part in parts):
+        raise RunDirUnsafe(f"invalid run record path: {parts!r}")
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        dir_fd = os.open(run_dir, dir_flags)
+    except OSError as exc:
+        raise RunDirUnsafe(f"run_dir cannot be opened without following links: {exc}") from exc
+    try:
+        info = os.fstat(dir_fd)
+        if (info.st_dev, info.st_ino) != (identity.st_dev, identity.st_ino):
+            raise RunDirUnsafe("run_dir device/inode changed before the write")
+        for name in parts[:-1]:
+            try:
+                os.mkdir(name, 0o777, dir_fd=dir_fd)
+            except FileExistsError:
+                pass
+            try:
+                next_fd = os.open(name, dir_flags, dir_fd=dir_fd)
+            except OSError as exc:
+                raise RunDirUnsafe(f"{name} is not a real directory: {exc}") from exc
+            os.close(dir_fd)
+            dir_fd = next_fd
+        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+        flags |= os.O_EXCL if exclusive else os.O_TRUNC
+        try:
+            fd = os.open(parts[-1], flags, 0o644, dir_fd=dir_fd)
+        except OSError as exc:
+            raise RunDirUnsafe(
+                f"{parts[-1]} cannot be opened without following links: {exc}"
+            ) from exc
+        with os.fdopen(fd, "wb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise RunDirUnsafe(f"{parts[-1]} is not a regular file")
+            handle.write(data)
+    finally:
+        os.close(dir_fd)
 
 
 class SandboxRunner:
@@ -297,10 +351,17 @@ class SandboxRunner:
         finally:
             os.close(dir_fd)
 
-    def _write_python_network_guard(self, run_dir: Path) -> Path:
+    def _write_python_network_guard(
+        self, run_dir: Path, identity: RunDirIdentity | None = None
+    ) -> Path:
+        """Write the guard's ``sitecustomize.py`` under run_dir, never through a link (#3130)."""
+        if identity is None:
+            identity = _capture_run_dir_identity(run_dir)
         guard_dir = run_dir / "python_network_guard"
-        guard_dir.mkdir(parents=True, exist_ok=True)
-        (guard_dir / "sitecustomize.py").write_text(
+        _write_in_run_dir(
+            run_dir,
+            identity,
+            (guard_dir.name, "sitecustomize.py"),
             """
 from __future__ import annotations
 
@@ -350,8 +411,7 @@ def _guarded_socket_connect(self, address):
 
 socket.create_connection = _guarded_create_connection
 socket.socket.connect = _guarded_socket_connect
-""".lstrip(),
-            encoding="utf-8",
+""".lstrip().encode("utf-8"),
         )
         return guard_dir
 
@@ -471,7 +531,7 @@ socket.socket.connect = _guarded_socket_connect
                     return self._write_result(run_dir, result_payload, run_dir_identity)
 
             env = os.environ.copy()
-            guard_dir = self._write_python_network_guard(run_dir)
+            guard_dir = self._write_python_network_guard(run_dir, run_dir_identity)
             env["NEXUS_SANDBOX_NO_NETWORK"] = "1"
             env["NEXUS_SANDBOX_WORKSPACE"] = str(workspace_path)
             env["PYTHONPATH"] = os.pathsep.join(
@@ -586,13 +646,27 @@ socket.socket.connect = _guarded_socket_connect
             output_artifact_path = None
             output_artifact = None
             output_missing = False
+            output_refused = None
             if output_path is not None:
-                if output_path.exists() and output_path.is_file():
-                    artifact_path = run_dir / "artifacts" / output_path.relative_to(workspace_path)
-                    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(output_path, artifact_path)
+                output_relative = output_path.relative_to(workspace_path)
+                try:
+                    # The child may have replaced the output with a link: read it without
+                    # following one, and write the copy by descriptor under run_dir (#3130).
+                    artifact_bytes = read_bytes_in_root(workspace_path, output_relative)
+                except PathContainmentError as exc:
+                    artifact_bytes = None
+                    if os.path.lexists(output_path):
+                        output_refused = str(exc)
+                if artifact_bytes is not None:
+                    artifact_path = run_dir / "artifacts" / output_relative
+                    _write_in_run_dir(
+                        run_dir,
+                        run_dir_identity,
+                        ("artifacts", *output_relative.parts),
+                        artifact_bytes,
+                        exclusive=True,
+                    )
                     output_artifact_path = str(artifact_path)
-                    artifact_bytes = artifact_path.read_bytes()
                     output_artifact = {
                         "sandbox_relative_path": str(output_path.relative_to(workspace_path)),
                         "artifact_path": output_artifact_path,
@@ -624,6 +698,7 @@ socket.socket.connect = _guarded_socket_connect
                 "output_artifact": output_artifact,
                 "cleanup": cleanup,
                 "error": "output_file_missing" if output_missing else None,
+                **({"output_file_refused": output_refused} if output_refused else {}),
                 "network_allowed": False,
                 "hook_policy": {
                     "source_git_metadata_copied": False,
@@ -636,6 +711,22 @@ socket.socket.connect = _guarded_socket_connect
                     "external_allowed": False,
                 },
             }
+            return self._write_result(run_dir, result_payload, run_dir_identity)
+        except RunDirUnsafe as exc:
+            # A write under run_dir met a link or a replaced directory (#3130).
+            result_payload = self._failure_result(
+                task=task,
+                command=command_list,
+                run_id=run_id,
+                run_dir=run_dir,
+                workspace_path=workspace_path,
+                cwd=cwd,
+                output_file=output_file,
+                cleanup=cleanup,
+                error=RUN_DIR_REPLACED,
+                duration_sec=time.time() - start_time,
+            )
+            result_payload["run_dir_mismatch"] = str(exc)
             return self._write_result(run_dir, result_payload, run_dir_identity)
         except subprocess.TimeoutExpired as exc:
             result_payload = self._failure_result(
