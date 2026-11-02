@@ -148,6 +148,174 @@ def test_confinement_keeps_every_writable_root_entry_fixed(tmp_path, monkeypatch
     bound = lane.confinement(sandbox=sandbox, extra_writable=(work,))
 
     for root in (sandbox, work):
-        assert f'(deny file-write* (literal "{sbpl_path(root)}"))' in bound.profile
+        assert (
+            f'(deny file-write-unlink file-write-create (literal "{sbpl_path(root)}"))'
+            in bound.profile
+        )
     # What is inside each root stays writable.
     assert f'(allow file-write* (subpath "{sbpl_path(sandbox)}")' in bound.profile
+
+
+# --- #3177 follow-ups -------------------------------------------------------------------------
+
+
+def test_confinement_leaves_each_root_entrys_own_metadata_writable(tmp_path, monkeypatch):
+    # Profile text, so it holds without sandbox-exec too: only removal/rename/re-creation of the
+    # root entry is denied, not every write to it.
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+
+    bound = lane.confinement(sandbox=sandbox, extra_writable=(work,))
+
+    for root in (sandbox, work):
+        assert f'(deny file-write* (literal "{sbpl_path(root)}"))' not in bound.profile
+
+
+_METADATA_COMMANDS = {
+    "times": "import os;os.utime('.')",
+    "mode": "import os;os.chmod('.',0o750)",
+    "copy_preserving": (
+        "import os,subprocess,sys;os.mkdir(os.environ['TMPDIR']+'/s');"
+        "open(os.environ['TMPDIR']+'/s/f','w').write('x');"
+        "sys.exit(subprocess.run(['/bin/cp','-pR',os.environ['TMPDIR']+'/s/.','.']).returncode)"
+    ),
+    "archive_dot": (
+        "import os,subprocess,sys;t=os.environ['TMPDIR'];os.mkdir(t+'/a');"
+        "open(t+'/a/f','w').write('x');"
+        "subprocess.run(['/usr/bin/tar','-cf',t+'/a.tar','-C',t+'/a','.'],check=True);"
+        "sys.exit(subprocess.run(['/usr/bin/tar','-xpf',t+'/a.tar','-C','.']).returncode)"
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_METADATA_COMMANDS))
+def test_a_confined_command_can_set_the_roots_own_metadata(tmp_path, kind):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    before = _identity(work)
+    if not os_sandbox_available():
+        with pytest.raises(lane.SandboxError, match="no_os_barrier"):
+            lane.confinement(sandbox=sandbox, extra_writable=(work,))
+        return
+    bound = lane.confinement(sandbox=sandbox, extra_writable=(work,))
+
+    out = bound.run([sys.executable, "-I", "-c", _METADATA_COMMANDS[kind]], cwd=work, timeout=60)
+
+    assert out.returncode == 0, out.stderr
+    assert _identity(work) == before and not work.is_symlink()
+
+
+class _FakeRun:
+    returncode = 0
+    stdout = "ok"
+    stderr = ""
+
+
+def test_a_bash_round_hands_the_sandbox_the_path_it_checked(tmp_path, monkeypatch):
+    # The drone dir is reached through a linked parent: the round checks, and the sandbox gets,
+    # one already resolved path, so the two cannot name different entries.
+    sandbox, _ = _layout(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(sandbox.parent)
+    box = DroneToolBox(alias / sandbox.name)
+    seen: list[object] = []
+
+    def run(command, *, work_dir, timeout):
+        seen.append(work_dir)
+        return _FakeRun()
+
+    monkeypatch.setattr(drone_engine, "resolve_port", lambda name: run)
+
+    out = box.bash_exec("true")
+
+    assert out["exit_code"] == 0
+    assert [str(path) for path in seen] == [os.path.realpath(sandbox)]
+
+
+def test_a_bash_round_whose_root_changed_during_the_call_is_refused(tmp_path, monkeypatch):
+    # Something outside the sandbox replaces the root while the round runs: the round's result
+    # is not reported as a success.
+    sandbox, outside = _layout(tmp_path)
+    box = DroneToolBox(sandbox)
+
+    def run(command, *, work_dir, timeout):
+        _replace_root(sandbox, outside, "symlink")
+        return _FakeRun()
+
+    monkeypatch.setattr(drone_engine, "resolve_port", lambda name: run)
+
+    out = box.bash_exec("true")
+
+    assert out == {"exit_code": -1, "stderr": "sandbox_root_replaced"}
+    _assert_outside_untouched(outside)
+
+
+class _NoModel:
+    def ask_structured(self, messages):  # pragma: no cover - must never be reached
+        raise AssertionError("model called for a refused drone root")
+
+
+@pytest.mark.parametrize("kind", ["link_to_dir", "dangling_link"])
+def test_a_drone_run_whose_root_is_a_link_at_setup_returns_a_refusal(tmp_path, monkeypatch, kind):
+    monkeypatch.setattr(
+        drone_engine.TacticalDrone, "save_evolution_crystal", lambda self, path: None
+    )
+    project = tmp_path / "project"
+    (project / ".nexus" / "tmp").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "victim.txt").write_text(_SENTINEL, encoding="utf-8")
+    target = outside if kind == "link_to_dir" else tmp_path / "missing"
+    (project / ".nexus" / "tmp" / "drone-x").symlink_to(target)
+    drone = drone_engine.TacticalDrone("drone-x", project)
+    drone.local_brain = _NoModel()
+
+    result = drone.sense_think_act("edit victim.txt")
+
+    assert result["outcome"] == "FAIL"
+    assert "drone_sandbox_root_refused" in result["error"]
+    _assert_outside_untouched(outside)
+
+
+def test_a_bash_round_is_not_started_when_the_checked_path_no_longer_resolves_to_itself(
+    tmp_path, monkeypatch
+):
+    # A parent became a link: the root is still the same directory, but the sandbox would
+    # resolve the path to a different one than the check saw, so the round does not start.
+    sandbox, outside = _layout(tmp_path)
+    box = DroneToolBox(sandbox)
+    started: list[str] = []
+    monkeypatch.setattr(
+        drone_engine, "resolve_port", lambda name: lambda *a, **k: started.append(name)
+    )
+    parent = sandbox.parent
+    parent.rename(parent.with_name("tmp-real"))
+    parent.symlink_to(parent.with_name("tmp-real"))
+    assert _identity(sandbox) == _identity(parent.with_name("tmp-real") / sandbox.name)
+
+    out = box.bash_exec("true")
+
+    assert out == {"exit_code": -1, "stderr": "sandbox_root_replaced"}
+    assert started == []
+    _assert_outside_untouched(outside)
+
+
+def test_setup_refuses_a_root_that_changed_while_it_was_recorded(tmp_path, monkeypatch):
+    sandbox, _ = _layout(tmp_path)
+    real = drone_engine.root_identity
+    calls: list[str] = []
+
+    def changing(root):
+        calls.append(str(root))
+        dev, ino = real(root)
+        return (dev, ino + len(calls) - 1)
+
+    monkeypatch.setattr(drone_engine, "root_identity", changing)
+
+    with pytest.raises(OSError, match="root_replaced"):
+        DroneToolBox(sandbox)
