@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 from uuid import uuid4
 
+from nexus.core import hardened_git as target_git
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.measure_external_target import (
     FILTER_DRIVER_PRESENT,
@@ -997,6 +998,33 @@ class _ControllerGitScope:
 _GIT_SCOPE: contextvars.ContextVar[Optional[_ControllerGitScope]] = contextvars.ContextVar(
     "nexus_worktree_git_scope", default=None
 )
+# The contract's Controller while a live (non-measurement) call is bound to it: every other
+# directory a git call then runs in is a Target and must verify against it.
+_LIVE_CONTROLLER: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
+    "nexus_worktree_live_controller", default=None
+)
+
+
+@contextmanager
+def _bind_live_controller(raw_root: Any):
+    """Bind live git calls to the contract's Controller (a no-op in measurement mode)."""
+    if measurement_mode_at_start() or not raw_root or not isinstance(raw_root, (str, os.PathLike)):
+        yield
+        return
+    token = _LIVE_CONTROLLER.set(Path(raw_root).resolve())
+    try:
+        yield
+    finally:
+        _LIVE_CONTROLLER.reset(token)
+
+
+@dataclass(frozen=True)
+class _LiveTarget:
+    """A worker-written Target a live git call runs in; ``git_dir`` is its verified
+    Controller registration (pinned), or None when no Controller is bound."""
+
+    worktree: Path
+    git_dir: Optional[Path]
 
 
 def _controller_scoped(method: Callable[..., Any]) -> Callable[..., Any]:
@@ -1039,7 +1067,11 @@ class WorktreeManager:
         from a Target's worker-writable ``.git``.
         """
         raw_root = getattr(contract, "controller_repo_root", None)
-        if not measurement_mode_at_start() or not raw_root:
+        if not measurement_mode_at_start():
+            with _bind_live_controller(raw_root):
+                yield
+            return
+        if not raw_root:
             yield
             return
         controller_root = Path(raw_root).resolve()
@@ -1099,6 +1131,66 @@ class WorktreeManager:
             "attr_source": scope.base_revision,
         }
 
+    def _live_target(self, cwd: Optional[str | Path]) -> Optional[_LiveTarget]:
+        """The Target a live git call in ``cwd`` runs in, or None for a Controller call.
+
+        Bound to a contract, every directory but its Controller is a Target, which must be a
+        linked worktree registered with that Controller. Unbound, a directory under this
+        manager's Target root is a Target: a ``.git`` file must be a registration nobody
+        writing the Target alone could have made, and a ``.git`` directory must be rooted at
+        the Target and must not reach another repository (symlinks, ``commondir``,
+        alternates).
+        """
+        if cwd is None:
+            return None
+        start = Path(cwd).resolve()
+        if not start.is_dir():
+            return None
+        controller = _LIVE_CONTROLLER.get()
+        if controller is None:
+            if self.root_dir.resolve() not in start.parents:
+                return None
+            dotgit = start / ".git"
+            if dotgit.is_symlink():
+                raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
+            if not dotgit.is_file():
+                # A repository rooted here whose git dir lies inside it (no ``core.worktree``
+                # pointing elsewhere) and holds its own refs, objects and index; its git dir
+                # is pinned.
+                git_dir = target_git.repository_git_dir(start)
+                if git_dir is None or not target_git.git_dir_is_self_contained(git_dir):
+                    raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
+                return _LiveTarget(worktree=start, git_dir=git_dir)
+        elif start == controller:
+            return None
+        git_dir = target_git.linked_worktree_git_dir(start, controller)
+        if git_dir is None:
+            raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
+        return _LiveTarget(worktree=start, git_dir=git_dir)
+
+    @staticmethod
+    def _run_target_git(
+        args: list[str], target: _LiveTarget, *, text: bool
+    ) -> subprocess.CompletedProcess[Any]:
+        """Run git in a Target without any program its repository could name."""
+        command = " ".join(args)
+        if target_git.repository_config_can_start_a_program(target.worktree, target.git_dir):
+            raise RuntimeError(
+                f"Git command refused: git {command}\nError: TARGET_GIT_CONFIG_NAMES_A_PROGRAM"
+            )
+        try:
+            result = target_git.run_hardened_git(
+                target.worktree, *args, git_dir=target.git_dir, text=text
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Git command failed: git {command}\nError: timed out") from exc
+        if result.returncode != 0:
+            stderr = (
+                result.stderr if text else result.stderr.decode("utf-8", errors="replace")
+            )
+            raise RuntimeError(f"Git command failed: git {command}\nError: {stderr.strip()}")
+        return result
+
     def _run_git(
         self,
         args: list[str],
@@ -1124,6 +1216,9 @@ class WorktreeManager:
                     f"Git command failed: git {' '.join(args)}\nError: {hardened.stderr.strip()}"
                 )
             return hardened.stdout.strip()
+        target = self._live_target(cwd)
+        if target is not None:
+            return self._run_target_git(args, target, text=True).stdout.strip()
         git_env = os.environ.copy() if env is None else env.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
@@ -1172,6 +1267,9 @@ class WorktreeManager:
                 stderr = hardened.stderr.decode("utf-8", errors="replace").strip()
                 raise RuntimeError(f"Git command failed: git {' '.join(args)}\nError: {stderr}")
             return hardened.stdout
+        target = self._live_target(cwd)
+        if target is not None:
+            return self._run_target_git(args, target, text=False).stdout
         git_env = os.environ.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
@@ -4182,6 +4280,17 @@ class WorktreeManager:
         campaign_id: str = "default",
         slot_index: int = 0,
         task_states: Optional[Dict[str, dict]] = None,
+    ) -> ReusableSlotLease:
+        # Slot git calls verify the slot against the contract's Controller first.
+        with _bind_live_controller(getattr(contract, "controller_repo_root", None)):
+            return self._prepare_reusable_slot(contract, campaign_id, slot_index, task_states)
+
+    def _prepare_reusable_slot(
+        self,
+        contract: SelfHostedTaskContract,
+        campaign_id: str,
+        slot_index: int,
+        task_states: Optional[Dict[str, dict]],
     ) -> ReusableSlotLease:
         status_lease = self.get_reusable_slot_status(
             campaign_id,
