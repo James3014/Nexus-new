@@ -203,6 +203,21 @@ def _signal_name(signum: int) -> str:
         return str(signum)
 
 
+def _group_listed_empty(pgid: int) -> bool:
+    """Whether a listing finds no live (non-zombie) member in *pgid*; False when unknown."""
+
+    try:
+        probe = getattr(import_module("nexus.core.argv_command"), "process_group_empty", None)
+    except Exception:  # noqa: BLE001 - an older snapshot without the helper counts as unknown
+        return False
+    if probe is None:
+        return False
+    try:
+        return bool(probe(pgid))
+    except Exception:  # noqa: BLE001 - a listing that fails is unknown, never empty
+        return False
+
+
 def _process_group_alive(pgid: int, *, settle_seconds: float = 2.0) -> bool:
     """Bounded check that a provider group we just killed has no members left."""
 
@@ -213,7 +228,11 @@ def _process_group_alive(pgid: int, *, settle_seconds: float = 2.0) -> bool:
         except ProcessLookupError:
             return False
         except PermissionError:
-            return True  # a group exists that we cannot inspect: never call it gone
+            # macOS answers EPERM for a group whose only members are zombies (an orphaned
+            # grandchild launchd has not reaped yet), so EPERM alone is not "alive": gone only
+            # when a listing finds no live member; a group we cannot inspect is never gone.
+            if _group_listed_empty(pgid):
+                return False
         if time.monotonic() >= deadline:
             return True
         time.sleep(0.05)

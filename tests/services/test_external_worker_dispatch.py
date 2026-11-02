@@ -1684,3 +1684,44 @@ def test_claude_signal_after_lease_before_launch_settles_lease(
     assert current["status"] == "FAILED"
     assert current["failure_kind"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER_START:SIGTERM"
     assert json.loads((pool_root / "state.json").read_text())["leases"] == {}
+
+
+def _eperm_killpg(pgid: int, sig: int) -> None:
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_group_probe_eperm_on_reaped_group_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # macOS answers EPERM to killpg(pgid, 0) when only zombies are left in the group; that is
+    # not "alive" once a listing finds no live member (#3204 review).
+    proc = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
+    proc.wait(timeout=10)
+    monkeypatch.setattr(dispatch.os, "killpg", _eperm_killpg)
+
+    assert dispatch._process_group_alive(proc.pid, settle_seconds=2.0) is False
+
+
+def test_group_probe_eperm_with_live_member_stays_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(dispatch.os, "killpg", _eperm_killpg)
+            assert dispatch._process_group_alive(proc.pid, settle_seconds=0.3) is True
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
+
+
+def test_group_probe_eperm_without_listing_helper_stays_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An older snapshot without the listing helper cannot tell: never call the group gone.
+    proc = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
+    proc.wait(timeout=10)
+    monkeypatch.setattr(dispatch.os, "killpg", _eperm_killpg)
+
+    def _missing(name: str):
+        raise ImportError(name)
+
+    monkeypatch.setattr(dispatch, "import_module", _missing)
+
+    assert dispatch._process_group_alive(proc.pid, settle_seconds=0.2) is True
