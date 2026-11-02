@@ -1661,3 +1661,23 @@ def test_refused_write_of_a_released_lease_keeps_the_settled_outcome(box):
         "RELEASED",
     ), record
     assert result == record
+
+
+def test_refused_write_of_a_released_lease_is_recorded_when_the_kept_record_has_no_lease_field(box):
+    stored = box.gateway._assist_write(_job(box, "", **_SETTLED_BY_CANCEL))
+    assert "account_lease_released" not in stored
+    job = _job(
+        box,
+        "",
+        account_lease_released=True,
+        account_lease_cleanup_status="RELEASED",
+        **_SETTLED_BY_RECONCILE,
+    )
+    box.gateway._assist_write_current(TASK, job)
+    record = box.gateway._assist_read(TASK)
+    assert record is not None
+    assert record["status"] == stored["status"], record
+    assert (record["account_lease_released"], record["account_lease_cleanup_status"]) == (
+        True,
+        "RELEASED",
+    ), record

@@ -310,12 +310,10 @@ class _AssistResponseMixin(_ResponseBase):
                     ):
                         # The caller released the job's lease after another call settled the
                         # record without it: keep the outcome, record the release (#3144).
-                        current.update(
-                            {
-                                "account_lease_released": True,
-                                "account_lease_cleanup_status": "RELEASED",
-                            }
-                        )
+                        current.update({
+                            "account_lease_released": True,
+                            "account_lease_cleanup_status": "RELEASED",
+                        })
                         return self._assist_write(current)
                     return current
                 return self._assist_write(job)
