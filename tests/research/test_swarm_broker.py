@@ -537,7 +537,7 @@ def test_release_skips_clean_when_swarm_is_swapped_after_checkout(tmp_path: Path
 
     def run_then_swap(cmd, *args, **kwargs):
         result = real_run(cmd, *args, **kwargs)
-        if list(cmd[:2]) == ["git", "checkout"] and not swarm.is_symlink():
+        if cmd[0] == "git" and "checkout" in cmd and not swarm.is_symlink():
             _swap_for_link(swarm, victim, moved)
         return result
 
@@ -710,4 +710,394 @@ def test_sync_scope_replaces_hard_linked_swarm_files_without_touching_the_shared
     assert (swarm / "pkg" / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
     assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
     assert sorted(p.name for p in (swarm / "pkg").iterdir()) == ["mod.py", "sub"]
+    assert (sandbox / "SENTINEL").exists()
+
+
+# --- release: git through the hardened runner, pinned to the swarm's own registration -------
+
+
+def _registered_swarm(tmp_path: Path) -> tuple[Path, Path]:
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+    (swarm / "candidate.txt").write_text("candidate scratch\n", encoding="utf-8")
+    return controller, swarm
+
+
+def _rewrite_gitfile_after_check(broker: SwarmBroker, monkeypatch, swarm: Path, text: str) -> None:
+    real_check = broker.is_independently_registered_worktree
+
+    def check_then_rewrite(path):
+        result = real_check(path)
+        (swarm / ".git").write_text(text, encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_rewrite)
+
+
+def test_release_keeps_repo_named_by_gitfile_rewritten_after_check(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    victim = _victim_repo(tmp_path)
+    planted = swarm / "planted"
+    _git(swarm, "init", "-q", str(planted))
+    _git(planted, "config", "core.worktree", str(victim))
+    broker = SwarmBroker(controller)
+    _rewrite_gitfile_after_check(broker, monkeypatch, swarm, f"gitdir: {planted / '.git'}\n")
+
+    broker.release(swarm)
+
+    assert _victim_repo_intact(victim)
+    assert (swarm / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_keeps_swarm_locked_when_gitfile_names_another_repos_registration(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    other = tmp_path / "other"
+    other_base = _init_repo(other)
+    other_wt = tmp_path / "other-wt"
+    _git(other, "worktree", "add", "--detach", str(other_wt), other_base)
+    other_admin = Path(_git(other_wt, "rev-parse", "--absolute-git-dir"))
+    (other_admin / "gitdir").write_text(f"{swarm.resolve() / '.git'}\n", encoding="utf-8")
+    broker = SwarmBroker(controller)
+    _rewrite_gitfile_after_check(broker, monkeypatch, swarm, f"gitdir: {other_admin}\n")
+
+    broker.release(swarm)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_keeps_swarm_locked_when_repository_config_names_a_filter(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    marker = tmp_path / "filter-ran"
+    _git(controller, "config", "filter.mark.smudge", f"touch '{marker}'; cat")
+    (swarm / ".gitattributes").write_text("tracked.txt filter=mark\n", encoding="utf-8")
+    (swarm / "tracked.txt").write_text("candidate edit\n", encoding="utf-8")
+
+    SwarmBroker(controller).release(swarm)
+
+    assert not marker.exists()
+    assert (swarm / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_keeps_swarm_locked_when_git_reset_fails(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    real_run = subprocess.run
+
+    def failing_checkout(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "checkout" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "error: checkout refused\n")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", failing_checkout)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("after", ["config", "checkout"])
+def test_release_leaves_replacement_with_copied_gitfile_untouched(
+    tmp_path: Path, monkeypatch, after
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    moved = tmp_path / "moved-swarm"
+    real_run = subprocess.run
+    swapped: list[bool] = []
+
+    def run_then_replace(cmd, *args, **kwargs):
+        result = real_run(cmd, *args, **kwargs)
+        if cmd[0] == "git" and after in cmd and not swapped:
+            gitfile = (swarm / ".git").read_text(encoding="utf-8")
+            swarm.rename(moved)
+            swarm.mkdir()
+            (swarm / ".git").write_text(gitfile, encoding="utf-8")
+            (swarm / "replacement_wip.txt").write_text("not validated\n", encoding="utf-8")
+            (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+            swapped.append(True)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", run_then_replace)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert swapped
+    assert (swarm / "replacement_wip.txt").exists()
+    assert (swarm / ".swarm_lock").exists()
+    assert (moved / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_keeps_lock_when_swarm_is_swapped_after_clean(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    victim = _victim_repo(tmp_path)
+    moved = tmp_path / "moved-swarm"
+    real_run = subprocess.run
+
+    def run_then_swap(cmd, *args, **kwargs):
+        result = real_run(cmd, *args, **kwargs)
+        if cmd[0] == "git" and "clean" in cmd and not swarm.is_symlink():
+            _swap_for_link(swarm, victim, moved)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", run_then_swap)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert swarm.is_symlink()
+    assert _victim_repo_intact(victim)
+    assert (moved / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("entry", [".venv", ".swarm_lock"])
+def test_release_removes_links_and_lock_only_in_the_opened_swarm(
+    tmp_path: Path, monkeypatch, entry
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    (controller / ".venv").mkdir()
+    SwarmBroker(controller)._mount_shared_cache(swarm)
+    assert (swarm / ".venv").is_symlink()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / ".venv").symlink_to(controller / ".venv", target_is_directory=True)
+    (victim / ".swarm_lock").write_text("", encoding="utf-8")
+    moved = tmp_path / "moved-swarm"
+    real_unlink = os.unlink
+
+    def swap_then_unlink(path, *args, **kwargs):
+        if os.path.basename(os.fspath(path)) == entry and not swarm.is_symlink():
+            _swap_for_link(swarm, victim, moved)
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", swap_then_unlink)
+    SwarmBroker(controller).release(swarm)
+    monkeypatch.setattr(os, "unlink", real_unlink)
+
+    assert swarm.is_symlink()
+    assert (victim / ".venv").is_symlink()
+    assert (victim / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+# --- acquire: lock and cache links only in the directory that was validated -----------------
+
+
+def _two_registered_swarms(tmp_path: Path) -> tuple[Path, Path, Path]:
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    first = controller / ".nexus-swarm-001"
+    second = controller / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "--detach", str(first), base)
+    _git(controller, "worktree", "add", "--detach", str(second), base)
+    return controller, first, second
+
+
+def _replace_with_plain_dir(swarm: Path, moved: Path) -> None:
+    swarm.rename(moved)
+    swarm.mkdir()
+    (swarm / "replacement_wip.txt").write_text("not validated\n", encoding="utf-8")
+
+
+def test_acquire_skips_swarm_replaced_while_being_validated(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, first, _second = _two_registered_swarms(tmp_path)
+    (tmp_path / "keep").mkdir()
+    broker = SwarmBroker(controller)
+    broker.swarm_dirs = [first]
+    real_check = broker.is_independently_registered_worktree
+
+    def check_then_replace(path):
+        result = real_check(path)
+        _replace_with_plain_dir(first, tmp_path / "moved-first")
+        return result
+
+    monkeypatch.setattr(broker, "is_independently_registered_worktree", check_then_replace)
+
+    assert broker.acquire(timeout_sec=0.05) is None
+    assert not (first / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_acquire_skips_swarm_replaced_after_validation(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, first, second = _two_registered_swarms(tmp_path)
+    broker = SwarmBroker(controller)
+    real_check = broker.is_independently_registered_worktree
+
+    def check_second_then_replace_first(path):
+        result = real_check(path)
+        if Path(path).name == second.name and not (tmp_path / "moved-first").exists():
+            _replace_with_plain_dir(first, tmp_path / "moved-first")
+        return result
+
+    monkeypatch.setattr(
+        broker, "is_independently_registered_worktree", check_second_then_replace_first
+    )
+
+    acquired = broker.acquire(timeout_sec=0.05)
+
+    assert acquired is not None and acquired.name == second.name
+    assert not (first / ".swarm_lock").exists()
+    assert (second / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("call", ["open", "symlink"])
+def test_acquire_writes_lock_and_cache_links_only_in_the_validated_swarm(
+    tmp_path: Path, monkeypatch, call
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, first, _second = _two_registered_swarms(tmp_path)
+    (controller / ".venv").mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    moved = tmp_path / "moved-first"
+    broker = SwarmBroker(controller)
+    broker.swarm_dirs = [first]
+    real_call = getattr(os, call)
+
+    def swap_then_call(*args, **kwargs):
+        name = os.path.basename(os.fspath(args[1] if call == "symlink" else args[0]))
+        if name in (".swarm_lock", ".venv") and not first.is_symlink():
+            _swap_for_link(first, victim, moved)
+        return real_call(*args, **kwargs)
+
+    monkeypatch.setattr(os, call, swap_then_call)
+    acquired = broker.acquire(timeout_sec=0.05)
+    monkeypatch.setattr(os, call, real_call)
+
+    assert first.is_symlink()
+    assert acquired is None
+    assert list(victim.iterdir()) == []
+    assert (moved / ".swarm_lock").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+# --- sync_scope: only into a swarm directory of this workspace, bound to the opened dirs ------
+
+
+@pytest.mark.parametrize("where", ["outside", "plain_child", "nested_swarm_name"])
+def test_sync_scope_writes_only_into_swarm_children_of_the_workspace(
+    tmp_path: Path, monkeypatch, where
+):
+    sandbox, workspace, _swarm = _scope_layout(tmp_path, monkeypatch)
+    target = {
+        "outside": tmp_path / "elsewhere",
+        "plain_child": workspace / "plain",
+        "nested_swarm_name": workspace / "pkg" / ".nexus-swarm-009",
+    }[where]
+    target.mkdir()
+
+    SwarmBroker(workspace).sync_scope(target, ["pkg/mod.py"], required_configs=[])
+
+    assert list(target.iterdir()) == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_does_not_follow_swarm_swapped_for_link_after_check(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    broker = SwarmBroker(workspace)
+    real_check = broker._is_swarm_child_dir
+    swapped: list[bool] = []
+
+    def check_then_swap(path):
+        result = real_check(path)
+        _swap_for_link(swarm, outside, tmp_path / "moved-swarm")
+        swapped.append(True)
+        return result
+
+    monkeypatch.setattr(broker, "_is_swarm_child_dir", check_then_swap)
+    broker.sync_scope(swarm, ["pkg/mod.py"], required_configs=[])
+
+    assert swapped
+    assert list(outside.iterdir()) == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_refuses_the_workspace_root_as_scope(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+
+    SwarmBroker(workspace).sync_scope(swarm, ["."], required_configs=[])
+
+    assert list(swarm.iterdir()) == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("scope", ["pkg/mod.py", "pkg"])
+def test_sync_scope_renames_into_the_opened_parent_when_it_is_swapped(
+    tmp_path: Path, monkeypatch, scope
+):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    (swarm / "pkg").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    moved = tmp_path / "moved-pkg"
+    real_replace = os.replace
+
+    def swap_parent_then_replace(src, dst, *args, **kwargs):
+        if not (swarm / "pkg").is_symlink():
+            _swap_for_link(swarm / "pkg", outside, moved)
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", swap_parent_then_replace)
+    SwarmBroker(workspace).sync_scope(swarm, [scope], required_configs=[])
+    monkeypatch.setattr(os, "replace", real_replace)
+
+    assert (swarm / "pkg").is_symlink()
+    assert list(outside.iterdir()) == []
+    assert (moved / "mod.py").read_text(encoding="utf-8") == "workspace mod\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_sync_scope_skips_links_inside_copied_source_dirs(tmp_path: Path, monkeypatch):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+    secret_dir = tmp_path / "secret-dir"
+    secret_dir.mkdir()
+    (secret_dir / "key.txt").write_text("SECRET\n", encoding="utf-8")
+    (workspace / "pkg" / "file_link.txt").symlink_to(secret_dir / "key.txt")
+    (workspace / "pkg" / "dir_link").symlink_to(secret_dir, target_is_directory=True)
+    (workspace / "pkg" / "inside_link.py").symlink_to(workspace / "pkg" / "mod.py")
+
+    SwarmBroker(workspace).sync_scope(swarm, ["pkg"], required_configs=[])
+
+    assert sorted(p.name for p in (swarm / "pkg").iterdir()) == ["mod.py", "sub"]
+    assert (swarm / "pkg" / "sub" / "deep.py").read_text(encoding="utf-8") == "workspace deep\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize("scope", ["pkg/mod.py", "pkg"])
+def test_sync_scope_removes_temporary_file_when_copy_fails(tmp_path: Path, monkeypatch, scope):
+    sandbox, workspace, swarm = _scope_layout(tmp_path, monkeypatch)
+
+    def failing_replace(*_args, **_kwargs):
+        raise OSError("injected rename failure")
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+    with pytest.raises(OSError, match="injected rename failure"):
+        SwarmBroker(workspace).sync_scope(swarm, [scope], required_configs=[])
+    monkeypatch.undo()
+
+    leftovers = [p for p in swarm.rglob("*") if p.is_file()]
+    assert leftovers == []
     assert (sandbox / "SENTINEL").exists()
