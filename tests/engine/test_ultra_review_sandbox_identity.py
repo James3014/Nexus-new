@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import nexus.engine.sandboxed_lane as lane
 import nexus.engine.ultra_review_service as ultra_mod
 from nexus.engine.ultra_review_service import ULTRA_SKIP_GHOST_ENV, UltraReviewService
 
@@ -404,3 +405,169 @@ def test_report_is_written_at_a_relative_and_an_absolute_path_inside_the_project
     ):
         assert payload["report_path"] == str(path.resolve())
         assert ultra_mod.json.loads(path.read_text(encoding="utf-8"))["run_id"] == payload["run_id"]
+
+
+# --- each lane's profile (#3142) --------------------------------------------------------------
+
+
+def _replace_dir(entry: Path, outside: Path, kind: str) -> None:
+    """Replace the directory ``entry`` names: by a link to ``outside``, or by a new directory."""
+
+    if kind == "symlink":
+        _swap_for_link(entry, outside)
+    else:
+        os.rename(entry, entry.with_name(entry.name + ".moved"))
+        entry.mkdir()
+
+
+def _confined_lanes(monkeypatch, on_lane=None) -> tuple[list[str], list[list[str]]]:
+    """Run lanes through the real ``run_confined`` as if the OS barrier were there, without
+    starting any process: each lane's profile is built, then ``on_lane(n)`` stands in for what
+    code under review could do while lane ``n`` runs."""
+
+    built: list[str] = []
+    started: list[list[str]] = []
+    real_build = ultra_mod.build_sandbox_profile
+
+    def counting_build(**kwargs):
+        built.append(real_build(**kwargs))
+        return built[-1]
+
+    def fake_run(command, **_kwargs):
+        started.append(list(command))
+        if on_lane is not None:
+            on_lane(len(started))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(ultra_mod, "build_sandbox_profile", counting_build)
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+    monkeypatch.setattr(lane, "_run_in_own_process_group", fake_run)
+    monkeypatch.setitem(lane._DEVELOPER_DIR_PROBE, "developer_dir", [])
+    monkeypatch.setattr(
+        lane,
+        "subprocess",
+        type(
+            "NoProcess",
+            (),
+            {
+                "run": staticmethod(fake_run),
+                "CompletedProcess": subprocess.CompletedProcess,
+                "SubprocessError": subprocess.SubprocessError,
+                "TimeoutExpired": subprocess.TimeoutExpired,
+            },
+        ),
+    )
+    return built, started
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+@pytest.mark.parametrize("root", ["execution_root", "home", "tmp"])
+def test_next_lane_profile_is_not_built_once_a_writable_root_was_replaced(
+    tmp_path, monkeypatch, root, kind
+):
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    outside = _outside_repo(tmp_path)
+    target = {"execution_root": execution_root, "home": sandbox / "home", "tmp": sandbox / "tmp"}
+    built, started = _confined_lanes(
+        monkeypatch, lambda n: _replace_dir(target[root], outside, kind) if n == 1 else None
+    )
+
+    service._sandboxed_run(["true"], cwd=execution_root, timeout=5)
+    assert len(built) == 1
+    with pytest.raises(ultra_mod.UltraReviewError, match=f"sandbox_root_replaced:{root}"):
+        service._sandboxed_run(["true"], cwd=execution_root, timeout=5)
+
+    # The second lane got no profile and never started; no profile ever named the outside dir.
+    assert len(built) == 1 and len(started) == 1
+    assert all(str(outside.resolve()) not in profile for profile in built)
+    assert root in service._integrity_violations
+    _assert_outside_intact(outside)
+
+
+def test_lane_profile_checks_every_lane_not_only_the_first(tmp_path, monkeypatch):
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    outside = _outside_repo(tmp_path)
+    built, started = _confined_lanes(
+        monkeypatch, lambda n: _replace_dir(execution_root, outside, "symlink") if n == 2 else None
+    )
+
+    service._sandboxed_run(["true"], cwd=execution_root, timeout=5)
+    service._sandboxed_run(["true"], cwd=execution_root, timeout=5)
+    with pytest.raises(ultra_mod.UltraReviewError, match="sandbox_root_replaced:execution_root"):
+        service._sandboxed_run(["true"], cwd=execution_root, timeout=5)
+
+    assert len(built) == 2 and len(started) == 2
+    _assert_outside_intact(outside)
+
+
+def test_witnessed_run_profile_is_not_built_once_its_report_dir_was_replaced(tmp_path, monkeypatch):
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    outside = _outside_repo(tmp_path)
+    built, started = _confined_lanes(monkeypatch)
+    report = UltraReviewService._new_ghost_report(sandbox, "head")
+    _swap_for_link(Path(report["dir"]), outside)
+
+    with pytest.raises(ultra_mod.UltraReviewError, match="sandbox_root_replaced:ghost_report_dir"):
+        service._run_witnessed(["true"], report, cwd=execution_root, timeout=5)
+
+    assert built == [] and started == []
+    assert "ghost_report_dir" in service._integrity_violations
+    # The lane's own grants are gone once the refused run is over.
+    assert "lane_writable" not in service._sandbox_ctx
+    assert "lane_identities" not in service._sandbox_ctx
+    _assert_outside_intact(outside)
+
+
+def test_witnessed_run_profile_is_not_built_once_its_base_checkout_was_replaced(
+    tmp_path, monkeypatch
+):
+    service, sandbox, execution_root = _bound_service(tmp_path)
+    base_root = sandbox / "base"
+    base_root.mkdir()
+    service._remember_dir(base_root)
+    built, started = _confined_lanes(monkeypatch)
+    first = UltraReviewService._new_ghost_report(sandbox, "base")
+    service._run_witnessed(["true"], first, cwd=base_root, timeout=5)
+    assert len(built) == 1
+    _replace_dir(base_root, tmp_path, "directory")
+
+    second = UltraReviewService._new_ghost_report(sandbox, "base-retry")
+    with pytest.raises(ultra_mod.UltraReviewError, match="sandbox_root_replaced:lane_cwd"):
+        service._run_witnessed(["true"], second, cwd=base_root, timeout=5)
+
+    assert len(built) == 1 and len(started) == 1
+    assert "lane_cwd" in service._integrity_violations
+
+
+def test_review_whose_mirror_is_replaced_by_a_lane_builds_no_later_profile_and_is_blocked(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(ULTRA_SKIP_GHOST_ENV, "1")
+    project = tmp_path / "project"
+    _init_app_repo(project)
+    outside = _outside_repo(tmp_path)
+    mirrors: list[Path] = []
+
+    def replace_mirror(n: int) -> None:
+        if n == 1:
+            _swap_for_link(mirrors[0], outside)
+
+    built, started = _confined_lanes(monkeypatch, replace_mirror)
+    real_bind = UltraReviewService._bind_sandbox
+
+    def recording_bind(self, *, sandbox_path, execution_root):
+        mirrors.append(Path(execution_root))
+        return real_bind(self, sandbox_path=sandbox_path, execution_root=execution_root)
+
+    monkeypatch.setattr(UltraReviewService, "_bind_sandbox", recording_bind)
+    payload = UltraReviewService(project).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    # One lane ran (confined), replaced the mirror, and no later lane got a profile.
+    assert len(started) == 1 and started[0][:2] == [lane.SANDBOX_EXEC, "-p"]
+    assert len(built) == 1
+    assert payload["status"] == "BLOCKED"
+    assert payload["gate_passed"] is False
+    assert "execution_root" in payload["blocked_reason"]
+    _assert_outside_intact(outside)
