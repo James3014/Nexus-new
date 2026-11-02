@@ -444,11 +444,13 @@ def test_attestation_signature_is_verified_when_the_secret_is_known(tmp_path: Pa
     attestation = _probe_attestation(tmp_path)
     assert validate_sandbox_attestation(attestation, signing_secret="test-secret")["reasons"] == []
     tampered = {**attestation, "artifact_hash": "another-artifact"}
-    assert "invalid_sandbox_signature" in validate_sandbox_attestation(
-        tampered, signing_secret="test-secret"
-    )["reasons"]
-    assert "invalid_sandbox_signature" in validate_sandbox_attestation(
-        attestation, signing_secret="other-secret"
-    )["reasons"]
+    assert (
+        "invalid_sandbox_signature"
+        in validate_sandbox_attestation(tampered, signing_secret="test-secret")["reasons"]
+    )
+    assert (
+        "invalid_sandbox_signature"
+        in validate_sandbox_attestation(attestation, signing_secret="other-secret")["reasons"]
+    )
     # Without the secret the field checks stand alone, as before.
     assert validate_sandbox_attestation(tampered)["reasons"] == []
