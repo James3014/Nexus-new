@@ -158,7 +158,9 @@ def test_switch_on_keeps_the_previous_implicit_assist_behaviour(box, monkeypatch
 
 @pytest.mark.parametrize(
     "named",
-    [{"provider": "cline"}, {"model": "glm-5.2"}, {"provider": "cline", "model": "glm-5.2"}],
+    # #3171: naming exactly (cline, glm-5.2) is now the default lane, so the third case
+    # names another cline model.
+    [{"provider": "cline"}, {"model": "glm-5.2"}, {"provider": "cline", "model": "glm-5.3"}],
 )
 def test_a_probe_that_names_provider_or_model_keeps_its_behaviour(box, named) -> None:
     gateway, _state, launches = box
@@ -337,3 +339,118 @@ def test_switch_on_an_implicit_probe_without_executable_stays_unavailable(box, m
         == "ASSIST_PROVIDER_UNAVAILABLE"
     )
     assert launches == []
+
+
+# --- #3171: an explicit request for exactly the default lane, the schema, and retry ---
+
+EXPLICIT_DEFAULT_LANE = [
+    {"provider": "cline", "model": "glm-5.2"},
+    {"provider": " CLINE ", "model": " glm-5.2\n"},
+    {"provider": "cline", "model": "cline-pass/glm-5.2"},
+]
+
+
+@pytest.mark.parametrize("named", EXPLICIT_DEFAULT_LANE)
+def test_an_assist_naming_exactly_the_default_lane_is_refused(box, named) -> None:
+    gateway, state, launches = box
+    message = _error(gateway, "nexus_assist_submit", _assist("lane-assist-31", **named))
+    assert message.startswith(ASSIST_BLOCKER)
+    assert launches == []
+    assert gateway._assist_read("lane-assist-31") is None
+    assert _no_job_written(state)
+
+
+def test_an_assist_naming_the_default_lane_through_preferred_fields_is_refused(box) -> None:
+    gateway, state, launches = box
+    named = {"preferred_worker": "cline", "preferred_model": "glm-5.2"}
+    message = _error(gateway, "nexus_assist_submit", _assist("lane-assist-32", **named))
+    assert message.startswith(ASSIST_BLOCKER)
+    assert launches == []
+    assert _no_job_written(state)
+
+
+@pytest.mark.parametrize("named", EXPLICIT_DEFAULT_LANE)
+def test_a_probe_naming_exactly_the_default_lane_is_refused(box, named) -> None:
+    gateway, state, launches = box
+    message = _error(gateway, "nexus_model_probe", _probe("lane-probe-31", **named))
+    assert message.startswith(PROBE_BLOCKER)
+    assert launches == []
+    assert gateway._assist_read("lane-probe-31") is None
+    assert _no_job_written(state)
+
+
+def test_switch_on_an_explicit_default_lane_keeps_its_behaviour(box, monkeypatch, tmp_path) -> None:
+    gateway, _state, launches = box
+    monkeypatch.setenv(SWITCH, "1")
+    named = {"provider": "cline", "model": "glm-5.2"}
+    assert (
+        _error(gateway, "nexus_model_probe", _probe("lane-probe-33", **named))
+        == "ASSIST_PROVIDER_VERSION_FAILED"
+    )
+    monkeypatch.setenv("NEXUS_CLINE_BIN", str(tmp_path / "missing-cline"))
+    assert (
+        _error(gateway, "nexus_assist_submit", _assist("lane-assist-33", **named))
+        == "ASSIST_PROVIDER_UNAVAILABLE"
+    )
+    assert [kind for kind, _ in launches] == ["run"]
+
+
+def test_an_assist_naming_another_cline_model_keeps_its_behaviour(
+    box, monkeypatch, tmp_path
+) -> None:
+    gateway, _state, launches = box
+    monkeypatch.setenv("NEXUS_CLINE_BIN", str(tmp_path / "missing-cline"))
+    named = {"provider": "cline", "model": "glm-5.3"}
+    assert (
+        _error(gateway, "nexus_assist_submit", _assist("lane-assist-34", **named))
+        == "ASSIST_PROVIDER_UNAVAILABLE"
+    )
+    assert launches == []
+
+
+@pytest.mark.parametrize("tool", ["nexus_assist_submit", "nexus_model_probe"])
+def test_the_schema_advertises_no_default_lane(tool) -> None:
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    properties = specs[tool]["inputSchema"]["properties"]
+    for field in ("provider", "model"):
+        assert "default" not in properties[field], (tool, field)
+    assert "glm-5.2" not in str(specs[tool])
+
+
+def _stored_failed_assist(gateway, monkeypatch, task_id: str, **named: Any) -> dict[str, Any]:
+    monkeypatch.setenv(SWITCH, "1")
+    first = _call(gateway, "nexus_assist_submit", _assist(task_id, **named))
+    assert not first.get("isError"), first
+    stored = gateway._assist_read(task_id)
+    assert stored is not None and stored["status"] == "FAILED"
+    monkeypatch.delenv(SWITCH)
+    return stored
+
+
+@pytest.mark.parametrize("named", [{}, {"provider": "cline", "model": "glm-5.2"}])
+def test_switch_off_refuses_a_retry_on_the_default_lane(box, monkeypatch, named) -> None:
+    gateway, _state, launches = box
+    stored = _stored_failed_assist(gateway, monkeypatch, "lane-assist-35", **named)
+    assert [kind for kind, _ in launches] == ["Popen"]
+    with pytest.raises(gateway_module.GatewayInputError) as refused:
+        gateway._assist_retry("lane-assist-35")
+    assert str(refused.value).startswith(ASSIST_BLOCKER)
+    assert [kind for kind, _ in launches] == ["Popen"]
+    assert gateway._assist_read("lane-assist-35") == stored
+
+
+def test_switch_on_a_retry_on_the_default_lane_launches_again(box, monkeypatch) -> None:
+    gateway, _state, launches = box
+    _stored_failed_assist(gateway, monkeypatch, "lane-assist-36")
+    monkeypatch.setenv(SWITCH, "1")
+    retried = gateway._assist_retry("lane-assist-36")
+    assert retried["status"] == "FAILED"
+    assert [kind for kind, _ in launches] == ["Popen", "Popen"]
+
+
+def test_switch_off_a_retry_on_another_cline_model_launches_again(box, monkeypatch) -> None:
+    gateway, _state, launches = box
+    _stored_failed_assist(gateway, monkeypatch, "lane-assist-37", provider="cline", model="glm-5.3")
+    retried = gateway._assist_retry("lane-assist-37")
+    assert retried["status"] == "FAILED"
+    assert [kind for kind, _ in launches] == ["Popen", "Popen"]
