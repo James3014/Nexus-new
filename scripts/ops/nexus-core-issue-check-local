@@ -36,6 +36,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -104,6 +106,33 @@ def _run(
     return result
 
 
+def _stop_group(proc: subprocess.Popen[Any]) -> None:
+    """Kill the child's process group and reap it, only while the child is still running."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait()
+
+
+def _raise_on_sigterm() -> Any:
+    """Turn SIGTERM into SystemExit while a group runs so the cleanup above executes."""
+    if threading.current_thread() is not threading.main_thread():
+        return None
+
+    def handler(signum: int, frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    return signal.signal(signal.SIGTERM, handler)
+
+
+def _restore_sigterm(previous: Any) -> None:
+    if previous is not None:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _run_with_timeout(
     cmd: Sequence[str],
     *,
@@ -129,15 +158,18 @@ def _run_with_timeout(
             )
         except OSError as exc:
             raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+        previous_term = _raise_on_sigterm()
         try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait()
-            raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _stop_group(proc)
+                raise LocalCheckError(code, f"{' '.join(cmd[:3])} timed out after {timeout:g}s")
+        finally:
+            # Any exit path (interrupt, SIGTERM, other exception) stops a still-running
+            # group, so the install never outlives the lock that guards it (#3166).
+            _stop_group(proc)
+            _restore_sigterm(previous_term)
         out.seek(0)
         err.seek(0)
         stdout = out.read().decode("utf-8", "replace")
@@ -247,10 +279,29 @@ def ensure_tool(cache_root: Path, pin: str, timeout: float = INSTALL_TIMEOUT_SEC
     Concurrent runs on one host serialise on a per-pin lock file beside the install
     directory, so one run never removes or marks another run's unfinished install (#3080)."""
     tools = cache_root / "tools"
-    tools.mkdir(parents=True, exist_ok=True)
-    with open(tools / f"{pin}.lock", "a", encoding="utf-8") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        return _ensure_tool_locked(tools / pin, pin, timeout)
+    try:
+        tools.mkdir(parents=True, exist_ok=True)
+        with open(tools / f"{pin}.lock", "a", encoding="utf-8") as lock:
+            _acquire_lock(lock, timeout)
+            return _ensure_tool_locked(tools / pin, pin, timeout)
+    except OSError as exc:
+        raise LocalCheckError("CORE_INSTALL_FAILED", f"tool install I/O error: {exc}") from exc
+
+
+def _acquire_lock(lock: Any, timeout: float) -> None:
+    """Take the lock, waiting at most this run's own install timeout, then fail closed."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise LocalCheckError(
+                    "CORE_INSTALL_FAILED",
+                    f"tool install lock still held after {timeout:g}s",
+                ) from None
+            time.sleep(0.05)
 
 
 def _ensure_tool_locked(base: Path, pin: str, timeout: float) -> Path:
@@ -494,6 +545,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "issue": args.issue,
             "status": "ERROR",
             "error_code": exc.code,
+            "error": str(exc),
+        }
+        code = EXIT_ERROR
+    except OSError as exc:
+        # Local I/O trouble is a tooling problem (exit 2), never a Core verdict (exit 1).
+        summary = {
+            "schema": SCHEMA,
+            "issue": args.issue,
+            "status": "ERROR",
+            "error_code": "LOCAL_IO_ERROR",
             "error": str(exc),
         }
         code = EXIT_ERROR
