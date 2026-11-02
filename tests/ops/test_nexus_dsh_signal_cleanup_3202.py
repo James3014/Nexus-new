@@ -101,9 +101,23 @@ def _git_repo(base: Path) -> Path:
 
 
 def _ps(pid: int, field: str) -> str:
+    # -ww: unlimited width. Without it procps (Linux) cuts the line at 80 columns when it has
+    # no terminal (under pytest, COLUMNS unset or not), and the interpreter path plus this
+    # test's tmp path is longer than that: the tmp path was cut off, so no process matched.
     return subprocess.run(
-        ["ps", "-o", f"{field}=", "-p", str(pid)], capture_output=True, text=True, check=False
+        ["ps", "-ww", "-o", f"{field}=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
+
+
+def _command(pid: int) -> str:
+    """The full command line of *pid*: /proc where there is one (Linux), else ``ps``."""
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
+    except OSError:
+        return _ps(pid, "command")
 
 
 def _ours_alive(pid: int, marker: Path) -> bool:
@@ -112,7 +126,7 @@ def _ours_alive(pid: int, marker: Path) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return str(marker) in _ps(pid, "command") and not _ps(pid, "stat").startswith("Z")
+    return str(marker) in _command(pid) and not _ps(pid, "stat").startswith("Z")
 
 
 def _wait_for(predicate, seconds: float) -> bool:
@@ -179,7 +193,11 @@ def test_stop_signal_kills_the_dsh_group_and_records_an_interrupted_turn(
     assert _wait_for(ready, 20), "fake DSH never reported ready"
     leader = int((tmp_path / "leader.pid").read_text())
     grandchild = int((tmp_path / "gc.pid").read_text())
-    assert _ours_alive(grandchild, tmp_path)
+    assert _ours_alive(grandchild, tmp_path), (
+        grandchild,
+        _command(grandchild),
+        _ps(grandchild, "stat"),
+    )
 
     proc.send_signal(signum)
     stdout, stderr = proc.communicate(timeout=30)
