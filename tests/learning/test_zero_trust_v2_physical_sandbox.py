@@ -78,3 +78,65 @@ def test_macos_physical_sandbox_probe_blocks_timeout(tmp_path: Path) -> None:
     assert result["status"] == "BLOCKED"
     assert result["sandbox_attestation"]["raw_observation"]["timed_out"] is True
     assert validate_sandbox_attestation(result["sandbox_attestation"])["status"] == "BLOCKED"
+
+
+def test_probe_reports_workspace_not_isolated_when_sandbox_exec_unavailable(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr("nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name: None)
+    seen: list[list[str]] = []
+
+    def record(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        subprocess_run=record,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+
+    assert seen == [["/bin/echo", "ok"]]
+    attestation = result["sandbox_attestation"]
+    assert attestation["workspace_isolated"] is False
+    assert attestation["workspace_isolation_reason"] == "sandbox_exec_unavailable"
+    assert attestation["network_disabled"] is False
+    assert result["promotion_eligible"] is False
+    assert result["status"] == "BLOCKED"
+    verdict = validate_sandbox_attestation(attestation)
+    assert verdict["status"] == "BLOCKED"
+    assert "workspace_not_isolated" in verdict["reasons"]
+
+
+def test_probe_reports_workspace_isolated_when_sandbox_exec_available(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name: "/usr/bin/sandbox-exec"
+    )
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        subprocess_run=_completed,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+    attestation = result["sandbox_attestation"]
+    assert attestation["workspace_isolated"] is True
+    assert attestation["workspace_isolation_reason"] is None
+    assert result["promotion_eligible"] is True
+
+
+def test_probe_reports_workspace_not_isolated_when_sandbox_apply_fails(tmp_path: Path) -> None:
+    def failure(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 71, stdout="", stderr="sandbox_apply: denied")
+
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        sandbox_exec_path="/usr/bin/sandbox-exec",
+        subprocess_run=failure,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+    attestation = result["sandbox_attestation"]
+    assert attestation["workspace_isolated"] is False
+    assert attestation["workspace_isolation_reason"] == "sandbox_apply_failed"
