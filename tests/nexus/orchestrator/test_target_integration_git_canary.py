@@ -12,7 +12,10 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.executors.cli_worker import bounded_environment_receipt
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager
+from nexus.orchestrator.governed_integration import (
+    ControlledIntegrationManager,
+    IntegrationExecutionError,
+)
 from nexus.orchestrator.target_integration_lifecycle import (
     TargetIntegrationLifecycle,
     _render_command,
@@ -260,3 +263,162 @@ def test_rendered_verifier_command_round_trips_through_the_downstream_lexer(toke
         _render_command(("python3", *argv))
     )
     assert parsed == argv
+
+
+# The applied commit is the staging merge result, recorded before any admitted
+# verifier runs; the ref-update path only moves the branch forward (#3174).
+_COMMIT_DURING_VERIFICATION = (
+    "import subprocess; subprocess.run(['git', 'commit', '-q', '--allow-empty', "
+    "'-m', 'made during verification'], check=True)"
+)
+_EDIT_DURING_VERIFICATION = "open('value.txt', 'a').write('changed during verification')"
+
+
+def _shape_repo(tmp_path: Path, shape: str) -> tuple[Path, str, str]:
+    """``ff-only``: Controller on the integration branch; ``ref-update``: on another branch."""
+    root, base, candidate = make_repo(tmp_path)
+    if shape == "ref-update":
+        git(root, "checkout", "main")
+    return root, base, candidate
+
+
+def _integration_head(root: Path) -> str:
+    return git(root, "rev-parse", "refs/heads/nexus/integration/canary")
+
+
+@pytest.mark.parametrize("shape", ["ff-only", "ref-update"])
+def test_a_staging_step_that_moves_head_is_refused_without_changing_the_branch(
+    tmp_path: Path, shape: str
+):
+    root, base, candidate = _shape_repo(tmp_path, shape)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    argv, state = _spaced_verifier_state(tmp_path / "ev", _COMMIT_DURING_VERIFICATION)
+    with pytest.raises(RuntimeError, match="staging HEAD moved during verification") as refused:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            verifier_commands=(argv,),
+            lifecycle_state=state,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert refused.value.merge_performed is False
+    assert _integration_head(root) == base
+    assert not (tmp_path / "stage" / "task-1").exists()
+
+
+@pytest.mark.parametrize("shape", ["ff-only", "ref-update"])
+def test_a_staging_step_that_leaves_the_tree_dirty_is_refused(tmp_path: Path, shape: str):
+    root, base, candidate = _shape_repo(tmp_path, shape)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    argv, state = _spaced_verifier_state(tmp_path / "ev", _EDIT_DURING_VERIFICATION)
+    with pytest.raises(
+        RuntimeError, match="staging worktree is dirty after verification"
+    ) as refused:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            verifier_commands=(argv,),
+            lifecycle_state=state,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert refused.value.merge_performed is False
+    assert _integration_head(root) == base
+
+
+@pytest.mark.parametrize("shape", ["ff-only", "ref-update"])
+def test_a_clean_staging_run_applies_the_recorded_merge_result(tmp_path: Path, shape: str):
+    root, base, candidate = _shape_repo(tmp_path, shape)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    argv, state = _spaced_verifier_state(tmp_path / "ev", "assert 1 + 1 == 2")
+    applied = integrate(
+        staging_root=str(tmp_path / "stage"),
+        apply=True,
+        verifier_commands=(argv,),
+        lifecycle_state=state,
+        acceptance_receipt=receipt,
+        auth=auth,
+    )
+    head = _integration_head(root)
+    assert applied.merge_performed is True
+    assert applied.staging_commit_sha == applied.integration_commit_sha == head
+    assert git(root, "rev-list", "--parents", "-n", "1", head).split()[1:] == [base, candidate]
+
+
+def test_the_ref_update_apply_only_moves_the_branch_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, _base, candidate = make_repo(tmp_path)
+    (root / "earlier.txt").write_text("earlier integrated work\n")
+    git(root, "add", "earlier.txt")
+    git(root, "commit", "-m", "earlier")
+    head = _integration_head(root)
+    git(root, "checkout", "main")
+    receipt = acceptance(candidate)
+    auth = authorization(root, head, candidate, receipt)
+    real_git = ControlledIntegrationManager._git.__func__
+
+    # Fault injection: the staging step yields a commit that is not a
+    # descendant of the head, while the merge-shape probe still agrees.
+    def git_without_descendant(cls, args, cwd):
+        if list(args[:2]) == ["merge", "--no-ff"]:
+            return real_git(cls, ["checkout", "-q", "--detach", candidate], cwd)
+        if list(args[:2]) == ["rev-list", "--parents"]:
+            return f"{args[-1]} {head} {candidate}"
+        return real_git(cls, args, cwd)
+
+    monkeypatch.setattr(ControlledIntegrationManager, "_git", classmethod(git_without_descendant))
+    with pytest.raises(RuntimeError, match="does not descend from the head") as refused:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert refused.value.merge_performed is False
+    assert _integration_head(root) == head
+
+
+def test_an_unexpected_cleanup_error_after_apply_is_reported_as_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, base, candidate = make_repo(tmp_path)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    real_git = ControlledIntegrationManager._git.__func__
+
+    def git_with_cleanup_error(cls, args, cwd):
+        if list(args[:2]) == ["worktree", "remove"]:
+            raise OSError("cleanup unavailable")
+        return real_git(cls, args, cwd)
+
+    monkeypatch.setattr(ControlledIntegrationManager, "_git", classmethod(git_with_cleanup_error))
+    with pytest.raises(IntegrationExecutionError) as reported:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert reported.value.merge_performed is True
+    assert reported.value.stage == "POST_APPLY_CLEANUP"
+    assert reported.value.integration_result_sha == _integration_head(root) != base
+
+
+def test_a_candidate_already_on_the_branch_is_refused_as_producing_no_merge_result(tmp_path: Path):
+    root, _base, candidate = make_repo(tmp_path)
+    git(root, "merge", "--ff-only", candidate)
+    receipt = acceptance(candidate)
+    auth = authorization(root, candidate, candidate, receipt)
+    with pytest.raises(RuntimeError, match="not the expected head merged with the candidate"):
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert _integration_head(root) == candidate
