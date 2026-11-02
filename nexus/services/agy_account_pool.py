@@ -166,29 +166,38 @@ class AccountLeaseClaim:
     manager: Any
     internal_id: str
     released: bool = False
+    # Steps of the release that failed, as "<step>:<exception class>" (#3180). release()
+    # still never raises, so its many callers keep their behaviour; a caller that records
+    # the outcome (the Gateway's model probe) reads this and records a failed release.
+    release_errors: tuple[str, ...] = ()
 
     def release(self) -> None:
-        """Release the per-account exclusive lock, durable receipt, and manager lease."""
+        """Release the per-account exclusive lock, durable receipt, and manager lease.
+
+        Every step runs even when an earlier one fails. Failed steps are kept in
+        ``release_errors``; a repeated call changes nothing and keeps them."""
         if self.released:
             return
         self.released = True
+        errors: list[str] = []
         try:
             if self.receipt_path.exists():
                 self.receipt_path.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            errors.append(f"receipt_unlink:{type(exc).__name__}")
         try:
             if self.lock_file_obj:
                 import fcntl
 
                 fcntl.flock(self.lock_file_obj.fileno(), fcntl.LOCK_UN)
                 self.lock_file_obj.close()
-        except OSError:
-            pass
+        except OSError as exc:
+            errors.append(f"lock_release:{type(exc).__name__}")
         try:
             self.manager.release(self.lease)
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append(f"manager_release:{type(exc).__name__}")
+        self.release_errors = tuple(errors)
 
     def mark_worker_run(
         self,
