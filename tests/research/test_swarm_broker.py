@@ -1985,7 +1985,10 @@ def test_recovery_clears_the_lease_base_and_reflog_locks_so_the_next_lease_can_s
     sandbox = _sentinel_cwd(tmp_path, monkeypatch)
     controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
     git_dir = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
-    extra = [git_dir / "refs" / "worktree" / "nexus-swarm-base.lock", git_dir / "logs" / "HEAD.lock"]
+    extra = [
+        git_dir / "refs" / "worktree" / "nexus-swarm-base.lock",
+        git_dir / "logs" / "HEAD.lock",
+    ]
     for lock in (index_lock, *extra):
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("", encoding="utf-8")
