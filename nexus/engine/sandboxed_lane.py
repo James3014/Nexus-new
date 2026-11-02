@@ -733,11 +733,14 @@ def confinement(
         extra_forbidden=extra_forbidden,
         forbidden_subtrees=subtrees,
     )
+    # The writable roots keep their own entries: a command cannot remove, rename or replace one,
+    # so every later run and host step on that path still meets the directory bound here.
     profile = build_sandbox_profile(
         writable=[str(p) for p in writable],
         read_roots=read_roots,
         deny_subtrees=subtrees,
         read_only_paths=read_only_paths,
+        fixed_entries=[str(p) for p in writable],
     )
     env = scrubbed_env(
         home=sbpl_path(home), tmp=sbpl_path(tmp), untrusted_roots=(*untrusted_roots, *writable)

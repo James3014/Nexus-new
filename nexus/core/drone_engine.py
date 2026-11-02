@@ -10,7 +10,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from nexus.core.contained_write import write_text_in_root
+from nexus.core.contained_write import root_identity, write_text_in_root
 from nexus.core.layer_ports import resolve_port
 from nexus.core.drone_protocol import DroneProtocol
 
@@ -89,12 +89,17 @@ class LocalBonsaiBrain:
 class DroneToolBox:
     def __init__(self, sandbox_dir: Path):
         self.sandbox_dir = sandbox_dir
+        # Pinned before any model command runs: later rounds use the directory recorded here,
+        # never whatever the path names by then.
+        self._root_identity = root_identity(sandbox_dir)
 
     def bash_exec(self, command: str) -> Dict[str, Any]:
         # The command is local-model output: run it under the OS sandbox (no network, writes
         # only in sandbox_dir, allowlisted env). Without a barrier, or with the port unbound,
         # nothing runs (#2936).
         try:
+            if root_identity(self.sandbox_dir) != self._root_identity:
+                return {"exit_code": -1, "stderr": "sandbox_root_replaced"}
             run_model_command_string = resolve_port("model_output.run_model_command_string")
             res = run_model_command_string(command, work_dir=self.sandbox_dir, timeout=30)
             return {"exit_code": res.returncode, "stdout": res.stdout, "stderr": res.stderr}
@@ -108,12 +113,14 @@ class DroneToolBox:
             if not path.is_relative_to(self.sandbox_dir.resolve()):
                 return {"status": "FAIL", "error": "Path traversal blocked"}
             # Sandboxed BASH runs may still be changing sandbox_dir: the write walks the checked
-            # path again without following any link, and only into a regular single-link file.
+            # path again without following any link, and only into a regular single-link file,
+            # from the root pinned at setup.
             write_text_in_root(
                 self.sandbox_dir,
                 path.relative_to(self.sandbox_dir.resolve()),
                 content,
                 create_parents=True,
+                pinned_root=self._root_identity,
             )
             return {"status": "SUCCESS"}
         except Exception as e:
