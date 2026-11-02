@@ -31,6 +31,7 @@ __all__ = [
     "contained_relative_path",
     "copy_file_in_root",
     "copy_tree_in_root",
+    "drop_escaping_links",
     "read_bytes_in_root",
     "read_text_in_root",
     "write_text_in_root",
@@ -371,3 +372,33 @@ def copy_tree_in_root(
             link.unlink()
             dropped.append(os.fspath(child))
     return tuple(dropped)
+
+
+def drop_escaping_links(root: Path | str, *, dangling_only: bool = False) -> tuple[str, ...]:
+    """Remove every symlink under ``root`` that does not resolve inside ``root`` (#3130).
+
+    For a fresh copy made with links kept as links (``shutil.copytree(symlinks=True)``): a link
+    that points outside the copy, or dangles towards a path outside it, would let a later write
+    by path in the copy change or create a file outside it. Links that resolve inside ``root``
+    are kept, the same rule ``copy_tree_in_root`` applies. With ``dangling_only`` an escaping
+    link whose target exists is kept too, and only one that would create a new file outside
+    goes. Directories are walked without following links. Returns the relative paths of the
+    links removed."""
+
+    root_path = Path(root)
+    root_real = root_path.resolve()
+    dropped: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
+        for name in (*dirnames, *filenames):
+            entry = os.path.join(dirpath, name)
+            if not os.path.islink(entry):
+                continue
+            real = Path(os.path.realpath(entry))
+            if real == root_real or real.is_relative_to(root_real):
+                continue
+            if dangling_only and os.path.exists(entry):
+                continue
+            os.unlink(entry)
+            dropped.append(os.path.relpath(entry, root_path))
+        dirnames[:] = [name for name in dirnames if not os.path.islink(os.path.join(dirpath, name))]
+    return tuple(sorted(dropped))

@@ -20,6 +20,7 @@ from nexus.research.hybrid_replication_live import (
     _run_agy_b_fallback,
     _run_agy_candidate,
     _sha256_file,
+    _shadow_git_dir,
     _valid_probability_distribution,
     audit_post_terminal_revisions,
     build_agy_identity_preflight_receipt,
@@ -712,7 +713,8 @@ def test_c_shadow_worktree_cleanup_always_performed(
 
     def failing_dispatch(**kwargs: object) -> tuple:
         source = Path(str(kwargs["cwd"]))
-        assert (source / ".git").is_dir()
+        assert (source / ".git").is_file()
+        assert _shadow_git_dir(source).is_dir()
         assert (
             subprocess.run(
                 ["git", "rev-parse", "HEAD"],

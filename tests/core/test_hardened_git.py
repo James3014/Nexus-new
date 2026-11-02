@@ -759,3 +759,90 @@ def test_a_git_dir_is_self_contained_only_without_links_to_another_repository(en
         (git_dir / named).unlink()
     (git_dir / "refs" / "heads" / "linked").symlink_to(git_dir / "HEAD")
     assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def _separate_git_dir_repo(root: Path) -> tuple[Path, Path]:
+    work, git_dir = root / "work", root / "work.git"
+    work.mkdir()
+    _git(work, "init", "-q", f"--separate-git-dir={git_dir}")
+    (work / "notes.py").write_text("x = 1\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-qm", "base")
+    return work, git_dir
+
+
+def test_a_git_dir_outside_the_work_tree_runs_only_when_the_caller_made_it(env):
+    work, git_dir = _separate_git_dir_repo(env)
+
+    refused = hardened_git.run_hardened_git(work, "rev-parse", "HEAD", git_dir=git_dir)
+    accepted = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert accepted.returncode == 0
+
+
+def test_a_separate_git_dir_is_its_own_common_dir(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    elsewhere = env / "elsewhere.git"
+    _git(env, "init", "-q", "--bare", str(elsewhere))
+    _git(env, "--git-dir", str(elsewhere), "config", "hook.planted.command", "true")
+    (git_dir / "commondir").write_text(f"{elsewhere}\n", encoding="utf-8")
+
+    assert not hardened_git.repository_config_can_start_a_program(
+        work, git_dir=git_dir, separate_git_dir=True
+    )
+
+
+@pytest.mark.parametrize("key", ["core.hooksPath", "CORE.HOOKSPATH"])
+def test_a_caller_supplied_hooks_path_runs_no_post_commit_hook(env, key):
+    """Caller-supplied git settings do not take precedence over the runner's hardening:
+    ``--no-verify`` skips only pre-commit and commit-msg, so a hooks path the caller passes
+    must lose to the pinned one or its post-commit hook would run."""
+    repo = _repo_with_local_work(env / "repo")
+    marker = env / "post-commit-ran"
+    hooks = env / "caller-hooks"
+    hooks.mkdir()
+    (hooks / "post-commit").symlink_to(_marker_script(env, "program.sh", marker))
+
+    result = hardened_git.run_hardened_git(
+        repo, "-c", "user.name=n", "-c", f"{key}={hooks}", "commit", "-qam", "edit"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    log = hardened_git.run_hardened_git(repo, "log", "-1", "--format=%an %s")
+    assert log.stdout.strip() == "n edit"
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        ("-c", "core.sshCommand={script}"),
+        ("-c", "Core.SshCommand={script}"),
+        ("-c", "alias.commit=!{script}"),
+        ("-c", "core.pager={script}"),
+        ("--config-env=core.hooksPath=NEXUS_TEST_CALLER_HOOKS",),
+        ("-C", "{hooks}"),
+    ],
+)
+def test_the_runner_refuses_caller_options_its_hardening_does_not_cover(env, monkeypatch, option):
+    repo = _repo_with_local_work(env / "repo")
+    head = hardened_git.run_hardened_git(repo, "rev-parse", "HEAD").stdout
+    marker = env / "program-ran"
+    script = _marker_script(env, "program.sh", marker)
+    hooks = env / "caller-hooks"
+    hooks.mkdir()
+    for name in ("pre-commit", "post-commit"):
+        (hooks / name).symlink_to(script)
+    monkeypatch.setenv("NEXUS_TEST_CALLER_HOOKS", str(hooks))
+    caller = tuple(part.format(script=script, hooks=hooks) for part in option)
+
+    result = hardened_git.run_hardened_git(repo, *caller, "commit", "-qam", "edit")
+
+    assert result.returncode == 128
+    assert "caller git option not allowed" in result.stderr
+    assert str(script) not in result.stderr
+    assert not marker.exists()
+    assert hardened_git.run_hardened_git(repo, "rev-parse", "HEAD").stdout == head
