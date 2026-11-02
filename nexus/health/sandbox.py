@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
+from nexus.core.contained_write import drop_escaping_links
+
 logger = logging.getLogger(__name__)
 
 # Names that never enter a sandbox copy, at any depth.
@@ -231,6 +233,12 @@ class SpeculativeSandbox:
             symlinks=True,
             ignore=_ignored,
         )
+        # Links are copied as links. One that dangles towards a path outside the copy would
+        # let a write by path in the copy (Dockerfile.nexus below, or the runner) create a
+        # file outside it (#3130). Links to existing targets outside stay, as before.
+        dropped = drop_escaping_links(self.sandbox_root, dangling_only=True)
+        if dropped:
+            logger.warning("Sandbox copy left out %d dangling link(s) to outside it", len(dropped))
         return self.sandbox_root
 
     def _fork_tmpdir(self) -> Path:
