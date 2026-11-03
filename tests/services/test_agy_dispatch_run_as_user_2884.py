@@ -228,6 +228,32 @@ def test_worker_argv_is_the_exact_sudo_wrapper_form(tmp_path):
     ]
 
 
+def test_ps_start_time_environment_pins_utc_on_both_sweep_sides_3300():
+    # Producer side: the env every lstart/pid ps call in agy_worker_account uses.
+    assert worker_mod._PS_ENV["TZ"] == "UTC"
+    assert worker_mod._PS_ENV["LC_ALL"] == "C"
+    # Comparer side: the wrapper exports TZ=UTC before its first ps lstart call.
+    text = WRAPPER.read_text(encoding="utf-8")
+    sweep = text[text.index('if [ "$1" = "--sweep" ]') :]
+    tz_at = sweep.index("TZ=UTC")
+    assert re.search(r"^\s*export LC_ALL TZ$", sweep, re.M)
+    assert tz_at < sweep.index("-o lstart=")
+
+
+def test_pid_start_tokens_read_pinned_utc_lstart_as_utc_3300(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Taipei")
+    time.tzset()
+    try:
+        done = SimpleNamespace(stdout="4242 Tue Nov  3 12:00:00 2026\n", stderr="", returncode=0)
+        monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: done)
+        epoch = 1793707200.0  # 2026-11-03 12:00:00 UTC
+        assert worker_mod.pid_start_tokens([4242], since=epoch) == ["4242:Tue_Nov_3_12:00:00_2026"]
+        assert worker_mod.pid_start_tokens([4242], since=epoch + 5) == []
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_sweep_argv_lists_sorted_unique_pid_tokens():
     run_root = Path("/Users/Shared/cairnwork-worker/worker-runs/" + "b" * 32)
     tokens = ["7:Thu_Oct_22_21:17:38_2026", "42:Thu_Oct_22_21:17:39_2026"]
