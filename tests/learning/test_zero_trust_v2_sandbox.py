@@ -60,3 +60,11 @@ def test_approved_sandbox_mode_can_pass() -> None:
     verdict = validate_sandbox_attestation(attestation)
 
     assert verdict == {"status": "PASS", "reasons": [], "sandbox_mode": "linux_cgroup"}
+
+
+def test_mock_attestation_is_not_signature_checked_even_with_a_secret() -> None:
+    attestation = build_mock_sandbox_attestation(artifact_hash="artifact")
+    verdict = validate_sandbox_attestation(
+        attestation, allow_mock_for_promotion=True, signing_secret="secret"
+    )
+    assert "invalid_sandbox_signature" not in verdict["reasons"]

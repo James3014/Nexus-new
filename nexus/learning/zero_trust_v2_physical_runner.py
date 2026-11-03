@@ -52,7 +52,7 @@ def run_zero_trust_v2_physical_row(
     if baseline_command:
         baseline_after = sandbox_probe(baseline_command, signing_secret=signing_secret, workspace_files=workspace_files)
     sandbox_attestation = probe["sandbox_attestation"]
-    sandbox_verdict = validate_sandbox_attestation(sandbox_attestation)
+    sandbox_verdict = validate_sandbox_attestation(sandbox_attestation, signing_secret=signing_secret)
     baseline_before_hash = (
         baseline_before["sandbox_attestation"]["artifact_hash"] if baseline_before else sandbox_attestation["artifact_hash"]
     )
