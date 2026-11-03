@@ -251,7 +251,6 @@ def run_bounded_swarm(
             all_passed = run.returncode == 0
         except subprocess.TimeoutExpired:
             record["verify_exit_codes"] = [None]
-            record["isolation"] = confined.describe()
         except lane.SandboxError as exc:
             record.update(verify_result=f"not_executed:sandbox_error:{exc}"[:120])
             return {**record, "passed": False, "score": 0.0}
