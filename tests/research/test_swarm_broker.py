@@ -2448,10 +2448,6 @@ def test_release_restores_the_full_tree_after_a_lease_enabled_sparse_checkout(
     assert (sandbox / "SENTINEL").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3284 candidate reproduced: swarm git dir modules/ survives release; fix is a follow-up",
-)
 def test_release_leaves_nothing_of_a_lease_in_the_swarm_git_dir_modules(
     tmp_path: Path, monkeypatch
 ):
@@ -2470,3 +2466,28 @@ def test_release_leaves_nothing_of_a_lease_in_the_swarm_git_dir_modules(
 
     assert not (swarm / ".swarm_lock").exists()  # the release itself succeeded
     assert not marker.exists()
+
+
+def test_release_does_not_remove_modules_of_a_git_dir_the_lease_pointed_the_swarm_at(
+    tmp_path: Path, monkeypatch
+):
+    # The lease rewrites the swarm's `.git` file to another registration; release must refuse
+    # and leave the swarm locked instead of deleting `modules/` there (#3284).
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    sibling = controller / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(controller, "worktree", "add", "--detach", str(sibling), base)
+    (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+    broker = SwarmBroker(controller)
+    victim = Path(_git(sibling, "rev-parse", "--absolute-git-dir")) / "modules" / "keep"
+    victim.parent.mkdir()
+    victim.write_text("not the lease's\n", encoding="utf-8")
+    (swarm / ".git").write_text(f"gitdir: {victim.parent.parent}\n", encoding="utf-8")
+
+    broker.release(swarm)
+
+    assert victim.exists()
+    assert (swarm / ".swarm_lock").exists()

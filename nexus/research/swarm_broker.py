@@ -17,6 +17,7 @@ from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
     run_hardened_git,
 )
+from nexus.engine.untrusted_tree_cleanup import UntrustedTreeNotRemoved, remove_untrusted_tree
 
 logger = logging.getLogger(__name__)
 
@@ -1242,7 +1243,28 @@ class SwarmBroker:
                     result.stderr.strip(),
                 )
                 return False
-        return self._submodules_are_uninitialised(swarm_dir, git_dir, pinned)
+        if not self._submodules_are_uninitialised(swarm_dir, git_dir, pinned):
+            return False
+        return self._remove_submodule_repositories(swarm_dir, git_dir, pinned)
+
+    def _remove_submodule_repositories(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
+        """Remove `<git dir>/modules` of the swarm's own registration (#3284). A submodule
+        initialised during a lease keeps its repository there after `deinit`, and the next
+        lease's `submodule update --init` would reuse it. The swarm is created without any, so
+        what is there is the lease's. `git_dir` is the registration `linked_worktree_git_dir`
+        validated; the tree is removed by descriptor without following links and no git runs
+        inside it. False leaves the swarm locked."""
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        try:
+            remove_untrusted_tree(git_dir / "modules")
+        except (UntrustedTreeNotRemoved, OSError, RecursionError):
+            logger.warning(
+                "⚠️ [SwarmBroker] Swarm git dir modules/ could not be removed; left locked: %s",
+                swarm_dir,
+            )
+            return False
+        return True
 
     def _disable_sparse_checkout(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
         """Turn off a sparse-checkout and restore the full tree; False leaves the swarm locked
