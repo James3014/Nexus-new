@@ -326,3 +326,112 @@ def test_fail_to_pass_probe_records_a_checkout_that_cannot_be_removed(tmp_path, 
     assert probe["status"] == "BASE_NOT_PHYSICAL_FAIL"
     assert probe["cleanup_error"] == _STUCK
     os.chmod(scratch / "base" / "t", 0o700)
+
+
+def _fake_pytest_run():
+    return SimpleNamespace(
+        returncode=0,
+        witness={"complete": True},
+        sandbox={"sandboxed": True},
+        skipped_names=[],
+        selected_node_ids=[],
+        option_arity={},
+        error=None,
+    )
+
+
+def _base_run(tmp_path, monkeypatch, *, stuck: bool, which: str):
+    import nexus.services.external_intelligence_closure as closure
+
+    made = {}
+
+    def fake_run(_inv, *, run_dir, **_k):
+        made["run_dir"] = run_dir
+        return _fake_pytest_run()
+
+    monkeypatch.setattr(closure, "_run_pytest_verifier", fake_run)
+    if stuck:
+        monkeypatch.setattr(closure, "remove_untrusted_tree_quietly", lambda _p: _STUCK)
+    invocation = closure._PytestInvocation(
+        interpreter="python", interpreter_args=(), pytest_args=("tests",), declared_node_ids=()
+    )
+    common = {
+        "root": tmp_path,
+        "base_sha": "0" * 40,
+        "base_config": {},
+        "base_tree": tmp_path / "tree",
+        "candidate_commit": "1" * 40,
+        "timeout": 5.0,
+    }
+    if which == "skipped":
+        _nodes, info = closure._base_skipped_nodes(invocation, **common)
+    else:
+        (tmp_path / "tree" / "tests").mkdir(parents=True)
+        _nodes, info = closure._base_declared_nodes_missing(
+            invocation, [], changed_paths=(), **common
+        )
+    return info, made["run_dir"]
+
+
+def test_base_skipped_nodes_run_dir_is_removed_and_stuck_one_is_recorded(tmp_path, monkeypatch):
+    info, run_dir = _base_run(tmp_path, monkeypatch, stuck=False, which="skipped")
+    assert not run_dir.exists()
+    assert "cleanup_error" not in info
+    info, run_dir = _base_run(tmp_path / "b", monkeypatch, stuck=True, which="skipped")
+    assert info["cleanup_error"] == _STUCK
+
+
+def test_base_declared_nodes_run_dir_is_removed_and_stuck_one_is_logged(
+    tmp_path, monkeypatch, caplog
+):
+    _info, run_dir = _base_run(tmp_path, monkeypatch, stuck=False, which="declared")
+    assert not run_dir.exists()
+    with caplog.at_level("WARNING"):
+        _base_run(tmp_path / "b", monkeypatch, stuck=True, which="declared")
+    assert _STUCK in caplog.text
+
+
+def test_zt_v2_runner_marks_cleanup_attestation_fail_when_a_probe_root_stays(tmp_path, monkeypatch):
+    import nexus.learning.zero_trust_v2_physical_sandbox as ztv2
+    from nexus.learning.zero_trust_v2_physical_runner import run_zero_trust_v2_physical_row
+
+    monkeypatch.setattr(ztv2, "remove_untrusted_tree_quietly", lambda _p: _STUCK)
+    row = run_zero_trust_v2_physical_row(
+        {"row_id": "r", "arm_type": "skill_v2"},
+        command=["true"],
+        signing_secret="s",
+        run_id="run",
+        sandbox_probe=lambda cmd, **k: ztv2.run_macos_sandbox_probe(
+            cmd,
+            sandbox_exec_path=None,
+            subprocess_run=lambda c, **_k: subprocess.CompletedProcess(c, 0, "", ""),
+            base_tmp_dir=tmp_path,
+            **k,
+        ),
+    )
+    assert row["cleanup_attestation"]["teardown_status"] == "FAIL"
+    assert row["cleanup_attestation"]["runner_quarantine_status"] == "QUARANTINED"
+    assert row["execution_status"] == "BLOCKED_BY_POLICY"
+
+
+def test_quietly_turns_any_exception_into_text_but_not_base_exceptions(monkeypatch):
+    import nexus.engine.untrusted_tree_cleanup as cleanup
+
+    def boom(exc):
+        def raiser(_p):
+            raise exc
+
+        return raiser
+
+    monkeypatch.setattr(cleanup, "remove_untrusted_tree", boom(ValueError("embedded null byte")))
+    assert cleanup.remove_untrusted_tree_quietly("x") == "tree_not_removed:ValueError"
+    monkeypatch.setattr(cleanup, "remove_untrusted_tree", boom(TypeError("bad")))
+    assert cleanup.remove_untrusted_tree_quietly("x") == "tree_not_removed:TypeError"
+    for exc in (KeyboardInterrupt(), SystemExit(1)):
+        monkeypatch.setattr(cleanup, "remove_untrusted_tree", boom(exc))
+        try:
+            cleanup.remove_untrusted_tree_quietly("x")
+        except type(exc):
+            pass
+        else:
+            raise AssertionError("BaseException must propagate")
