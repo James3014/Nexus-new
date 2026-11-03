@@ -6,7 +6,9 @@ sentinel directory first.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -123,3 +125,67 @@ def test_the_runner_honours_a_caller_timeout(env, monkeypatch):
 )
 def test_only_diff_keys_that_name_a_program_are_refused(name, refused):
     assert hardened_git.config_names_a_repository_program([name]) is refused
+
+
+def _replace_with_prefilled_fifo(path: Path) -> int:
+    """Swap ``path`` for a named pipe holding its old text; the returned fd keeps it open."""
+    text = path.read_bytes()
+    path.unlink()
+    os.mkfifo(path)
+    fd = os.open(path, os.O_RDWR)
+    os.write(fd, text)
+    return fd
+
+
+def _returns_within(seconds: float, call):
+    box: list = []
+    thread = threading.Thread(target=lambda: box.append(call()), daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), "pointer read blocked on a non-regular file"
+    return box[0]
+
+
+def test_a_commondir_replaced_by_a_named_pipe_fails_closed_promptly(env):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    fd = _replace_with_prefilled_fifo(registration / "commondir")
+    try:
+        assert _returns_within(5, lambda: hardened_git.linked_worktree_git_dir(worktree)) is None
+        result = _returns_within(
+            5, lambda: hardened_git.run_hardened_git(worktree, "status", git_dir=registration)
+        )
+        assert result.returncode != 0
+    finally:
+        os.close(fd)
+
+
+def test_a_gitdir_pointer_replaced_by_a_named_pipe_fails_closed_promptly(env):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    fd = _replace_with_prefilled_fifo(registration / "gitdir")
+    try:
+        assert _returns_within(5, lambda: hardened_git.linked_worktree_git_dir(worktree)) is None
+    finally:
+        os.close(fd)
+
+
+def test_a_dot_git_pointer_replaced_by_a_named_pipe_fails_closed_promptly(env):
+    _, worktree = _controller_and_worktree(env)
+    fd = _replace_with_prefilled_fifo(worktree / ".git")
+    try:
+        assert _returns_within(5, lambda: hardened_git.linked_worktree_git_dir(worktree)) is None
+        with pytest.raises(OSError):
+            _returns_within(5, lambda: hardened_git._read_pointer_file(worktree / ".git"))
+    finally:
+        os.close(fd)
+
+
+def test_an_oversized_pointer_file_is_refused_not_read(env):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    pointer = registration / "commondir"
+    pointer.write_text(pointer.read_text(encoding="utf-8") + " " * 5000, encoding="utf-8")
+    with pytest.raises(OSError):
+        hardened_git._read_pointer_file(pointer)
+    assert hardened_git.linked_worktree_git_dir(worktree) is None

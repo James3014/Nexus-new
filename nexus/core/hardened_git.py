@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import subprocess
 import threading
 from pathlib import Path
@@ -370,8 +371,27 @@ def linked_worktree_git_dir(
         return None
 
 
+_POINTER_MAX_BYTES = 4096
+
+
+def _read_pointer_file(path: Path) -> str:
+    """Text of a git pointer file. Only a regular file (a link is not followed) of at most
+    ``_POINTER_MAX_BYTES`` is read, never blocking on a pipe; anything else raises OSError,
+    which every caller treats as an invalid pointer."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"git pointer is not a regular file: {path}")
+        data = os.read(fd, _POINTER_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(data) > _POINTER_MAX_BYTES:
+        raise OSError(f"git pointer file is too large: {path}")
+    return data.decode("utf-8")
+
+
 def _gitdir_pointer(path: Path, prefix: str = "gitdir:") -> Optional[Path]:
-    text = path.read_text(encoding="utf-8").strip()
+    text = _read_pointer_file(path).strip()
     if not text.startswith(prefix) or not text[len(prefix) :].strip():
         return None
     return (path.parent / text[len(prefix) :].strip()).resolve()
@@ -379,7 +399,7 @@ def _gitdir_pointer(path: Path, prefix: str = "gitdir:") -> Optional[Path]:
 
 def _common_dir(git_dir: Path) -> Path:
     try:
-        text = (git_dir / "commondir").read_text(encoding="utf-8").strip()
+        text = _read_pointer_file(git_dir / "commondir").strip()
     except FileNotFoundError:
         return git_dir
     return (git_dir / text).resolve()
