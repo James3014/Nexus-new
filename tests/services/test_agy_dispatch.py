@@ -7314,14 +7314,14 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
     tmp_path: Path, pass_through_boundary
 ) -> None:
     """#3335: with cwd in a subdirectory, the foreground write scope is resolved against
-    the repository top level, so an absolute path under it is in scope."""
+    the repository top level, so a declared path under cwd matches the observed change."""
     home = tmp_path / "home"
     home.mkdir()
     root = tmp_path / "root"
     sub = _init_repo_with_sub(root)
 
     def runner(**_kwargs):
-        (root / "outside.txt").write_text("changed by worker\n", encoding="utf-8")
+        (sub / "x").write_text("changed by worker\n", encoding="utf-8")
         return 0, "done", "", False, 10
 
     events: list[dict[str, object]] = []
@@ -7329,7 +7329,8 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
         prompt="bounded edit",
         cwd=str(sub),
         mode="accept-edits",
-        write_paths=[str(root / "outside.txt")],
+        write_paths=[str(sub / "x")],
+        temp_command_permissions=False,
         coordinator=_WriteScopeCoordinator(home),
         run_agy_fn=runner,
         operation_hook=events.append,
