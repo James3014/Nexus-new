@@ -9,6 +9,7 @@ receives the host's own writes (the applied patch, the repro script).
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import stat
@@ -20,6 +21,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from nexus.core.contained_write import HOST_RUN_SUBTREES, PathContainmentError
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["copy_repo_entries", "disposable_repo_copy"]
 
@@ -107,4 +111,7 @@ def disposable_repo_copy(repo_dir: Path | str, *, prefix: str) -> Iterator[Path]
         copy_repo_entries(repo_path, scratch_dir)
         yield scratch_dir
     finally:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+        # Candidate tests ran in this copy: a command may have locked entries (#3281).
+        cleanup_error = remove_untrusted_tree_quietly(scratch_dir)
+        if cleanup_error is not None:
+            logger.warning("disposable repo copy not removed: %s", cleanup_error)

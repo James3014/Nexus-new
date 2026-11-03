@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess  # nosec B404 - fixed git argv, never a shell
@@ -38,6 +39,10 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
+
+logger = logging.getLogger(__name__)
 
 POST_CANDIDATE_SEAM_SOURCE = "post_candidate_seam"
 POST_CANDIDATE_RECEIPT_KIND = "post_candidate_seam"
@@ -121,10 +126,15 @@ class CandidateScratch:
     forbidden_paths: tuple[Path, ...] = ()
     cleanup_dir: Path | None = None
     files: tuple[str, ...] = field(default_factory=tuple)
+    cleanup_error: str | None = None
 
     def cleanup(self) -> None:
         if self.cleanup_dir is not None:
-            shutil.rmtree(self.cleanup_dir, ignore_errors=True)
+            # Candidate and hidden tests ran here: a command may have locked entries (#3281).
+            error = remove_untrusted_tree_quietly(self.cleanup_dir)
+            if error is not None:
+                self.cleanup_error = error
+                logger.warning("post-candidate scratch not removed: %s", error)
 
 
 def _git(root: Path, *args: str) -> None:

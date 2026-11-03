@@ -9,9 +9,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.learning.zero_trust_v2_receipts import canonical_json_hash
 from nexus.learning.zero_trust_v2_sandbox import sandbox_attestation_signature
-
 
 DEFAULT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "PYTHONPATH")
 DEFAULT_TIMEOUT_SEC = 3
@@ -187,7 +187,7 @@ def run_macos_sandbox_probe(
             stderr = exc.stderr if isinstance(exc.stderr, str) else "timeout"
             timed_out = True
     finally:
-        shutil.rmtree(root_path, ignore_errors=True)
+        cleanup_error = remove_untrusted_tree_quietly(root_path)
 
     sandbox_apply_failed = (
         sandbox_available
@@ -229,7 +229,7 @@ def run_macos_sandbox_probe(
         "write_scope_confined": writes_confined,
     }
     artifact_hash = _artifact_hash(raw_observation)
-    teardown_status = "PASS" if not root_path.exists() else "FAIL"
+    teardown_status = "PASS" if cleanup_error is None and not root_path.exists() else "FAIL"
     attestation_body = {
         "issuer": "nexus.runner",
         "sandbox_mode": "macos_sandbox",

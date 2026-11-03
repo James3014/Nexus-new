@@ -24,6 +24,7 @@ from nexus.core.hardened_git import (
     repository_git_dir,
     run_hardened_git,
 )
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     validate_selected_worker,
@@ -2903,7 +2904,10 @@ def _run_one_verifier(
                 stderr = str(exc.stderr or "")
                 error = "VERIFIER_TIMEOUT"
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        # The verifier ran against the candidate: it may have locked entries (#3281).
+        cleanup_error = remove_untrusted_tree_quietly(sandbox)
+        if cleanup_error is not None:
+            sandbox_info["cleanup_error"] = cleanup_error
     wall_ms = max(0, int((time.monotonic() - started) * 1000))
     sandbox_text = str(sandbox)
     return {

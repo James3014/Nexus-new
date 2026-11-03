@@ -50,6 +50,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
+
 if TYPE_CHECKING:
     from nexus.executors.worker_contract import WorkerExecutionReceipt
     from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
@@ -267,7 +269,10 @@ class _FinalizeRuntimeMixin:
                 except Exception as exc:  # noqa: BLE001 - cleanup failure fails closed
                     probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
                     probe["cleanup_error"] = str(exc)[:500]
-            _service_module().shutil.rmtree(scratch, ignore_errors=True)
+            # Base verifier commands ran in this checkout: they may have locked entries (#3281).
+            if (leftover := remove_untrusted_tree_quietly(scratch)) is not None:
+                probe["status"] = "BASE_NOT_PHYSICAL_FAIL"
+                probe["cleanup_error"] = leftover
             if added:
                 try:
                     manager._run_git(
