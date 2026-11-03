@@ -5943,8 +5943,8 @@ def test_exit_zero_empty_output_with_current_terminal_quota_log_is_not_completed
     original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
     observed: list[object] = []
 
-    def record_observation(cwd: str, baseline: dict[str, object]):
-        paths = original_observe(cwd, baseline)
+    def record_observation(cwd: str, baseline: dict[str, object], **kwargs):
+        paths = original_observe(cwd, baseline, **kwargs)
         observed.append(paths)
         return paths
 
