@@ -654,3 +654,27 @@ def test_fanout_core_binding_preflight_refuses_a_git_pointer_the_worker_rewrote(
 
     with pytest.raises(FanoutError, match="CORE_BINDING_WORKSPACE_IDENTITY_UNAVAILABLE"):
         _preflight(unit, lease)
+
+
+def test_fanout_core_binding_preflight_ignores_a_replaced_base_commit(env):
+    repo, lease, unit = _bound_lease(env)
+    genuine = _preflight(unit, lease)
+    base = unit.expected_base_sha
+    git_dir = repo / ".git"
+    tree = _git(git_dir, "--git-dir", str(git_dir), "rev-parse", f"{base}^{{tree}}")
+    empty = (
+        subprocess
+        .run(
+            ["git", "--git-dir", str(git_dir), "hash-object", "-t", "tree", "-w", "--stdin"],
+            input=b"",
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    other = _git(git_dir, "--git-dir", str(git_dir), "commit-tree", empty, "-p", base, "-m", "w")
+    _git(git_dir, "--git-dir", str(git_dir), "update-ref", f"refs/replace/{base}", other)
+
+    assert _git(Path(lease.path), "rev-parse", f"{base}^{{tree}}") != tree
+    assert _preflight(unit, lease) == genuine
