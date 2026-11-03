@@ -147,6 +147,34 @@ def test_ztv2_probe_reports_teardown_fail_when_root_cannot_be_removed(tmp_path, 
     os.chmod(root / "workspace" / "t", 0o700)
 
 
+def test_ztv2_probe_teardown_fails_when_root_is_set_aside_but_an_error_is_reported(
+    tmp_path, monkeypatch
+):
+    import nexus.learning.zero_trust_v2_physical_sandbox as ztv2
+
+    seen = {}
+
+    def run(cmd, cwd, **_k):
+        seen["root"] = Path(cwd).parent
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def set_aside(path):  # moved away (root no longer exists) yet reported as not removed
+        os.rename(path, f"{path}.stale-1")
+        return _STUCK
+
+    monkeypatch.setattr(ztv2, "remove_untrusted_tree_quietly", set_aside)
+    out = ztv2.run_macos_sandbox_probe(
+        ["true"],
+        signing_secret="s",
+        sandbox_exec_path=None,
+        subprocess_run=run,
+        base_tmp_dir=tmp_path,
+    )
+    assert not seen["root"].exists()
+    assert _teardown(out) == "FAIL"
+    assert out["promotion_eligible"] is False
+
+
 def test_disposable_repo_copy_removes_deep_locked_tree(tmp_path):
     from nexus.services.local_heal.scratch_copy import disposable_repo_copy
 
