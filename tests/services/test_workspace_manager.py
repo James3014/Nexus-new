@@ -214,6 +214,7 @@ def test_sync_staged_to_sandbox_runs_git_hardened(tmp_path, monkeypatch):
     (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
     _git(main, "add", "tracked.txt")
     monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    marker.unlink(missing_ok=True)  # the plain git calls above already ran the hook
 
     assert _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox) is True
 
