@@ -97,6 +97,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -115,6 +116,11 @@ GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 DEPLOYER = "scripts/ops/nexus_gateway_auto_deploy.py"
 LIVE_PORT = 8766
+# The public MCP connector reads the Gateway manifest once at start-up and stops
+# fail-closed when it later drifts (#3241): it is restarted after every switch.
+PUBLIC_CONNECTOR_LABEL = "com.nexus.mcp.public.connector"
+PUBLIC_CONNECTOR_PORT = 7677
+PUBLIC_CONNECTOR_HEALTH_SECONDS = 30.0
 REPOSITORY = "James3014/Nexus-new"
 ORIGIN_URLS = (
     "https://github.com/James3014/Nexus-new.git",
@@ -793,6 +799,19 @@ class Host:
             reload_gateway_launch_agent(plist)
         except Exception as exc:  # noqa: BLE001
             raise DeployError(f"GATEWAY_RELOAD_FAILED:{exc}") from exc
+
+    def service_loaded(self, label: str) -> bool:
+        """Whether launchd has ``label`` loaded in this user's GUI domain."""
+        argv = ["launchctl", "print", f"gui/{os.getuid()}/{label}"]
+        return self.run(argv, timeout=30).returncode == 0
+
+    def kickstart_service(self, label: str) -> None:
+        """Restart the LaunchAgent ``label`` in this user's GUI domain (``kickstart -k``)."""
+        argv = ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"]
+        result = self.run(argv, timeout=60)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()[-200:]
+            raise DeployError(f"KICKSTART_FAILED:{label}:{detail}")
 
     def manager_lock_path(self, cfg: Config) -> Path:
         """The #526 manager's own ``GATEWAY_LOCK``; it must manage this gateway root."""
@@ -1906,6 +1925,20 @@ class Prober:
     def live_health(self) -> Any:
         """The live Gateway's unauthenticated /health (#2230 F2); raises when unreachable."""
         return self._http(f"http://127.0.0.1:{LIVE_PORT}/health")
+
+    def public_connector_health(self) -> Any:
+        """The public connector's unauthenticated /healthz (#3241); raises when unreachable.
+
+        While the connector is drifted it answers 503 with the same JSON body, so a
+        non-2xx answer that carries JSON is returned like a 200; anything else raises.
+        """
+        try:
+            return self._http(f"http://127.0.0.1:{PUBLIC_CONNECTOR_PORT}/healthz")
+        except urllib.error.HTTPError as exc:
+            try:
+                return json.loads(exc.read(1024 * 1024).decode("utf-8"))
+            except ValueError:
+                raise exc from None
 
     def core_provenance(self, *, root: Path, python: Path, core: Any) -> Dict[str, Any]:
         """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
@@ -4713,9 +4746,63 @@ class _Cycle:
             receipt["deployer_link"] = self.move_tool_link(root)
             # Informational only (#2345): never changes the outcome or rolls back.
             self.record_worker_route_preflight(receipt)
+            self.restart_public_connector(receipt)
             return {"outcome": "DEPLOYED"}
         receipt["reason"] = "candidate failed the live probe"
         return self.guarded_rollback(previous_plist, receipt)
+
+    def restart_public_connector(self, receipt: Dict[str, Any]) -> None:
+        """Restart the public connector after a switch and record its ``/healthz`` (#3241).
+
+        The connector reads the Gateway manifest once at start-up and stops fail-closed
+        (503 on every call) when the manifest later drifts, so a switch that changed the
+        manifest took the public path down until someone restarted it by hand.
+        Informational only: a connector that is not loaded here is recorded and skipped;
+        a failed restart, or a connector that does not report ``ok`` within
+        ``PUBLIC_CONNECTOR_HEALTH_SECONDS``, adds one warning and never changes the
+        outcome or rolls back.  Never raises.  Called from ``finish_switch`` only, so a
+        crash-reconciled switch gets it too while the read-only R1 finalize does not.
+        """
+        summary: Dict[str, Any] = {"label": PUBLIC_CONNECTOR_LABEL, "restarted": False}
+        warnings = receipt.setdefault("warnings", [])
+        try:
+            if not self.host.service_loaded(PUBLIC_CONNECTOR_LABEL):
+                summary["reason"] = "NOT_LOADED"
+                receipt["public_connector"] = summary
+                return
+            self.host.kickstart_service(PUBLIC_CONNECTOR_LABEL)
+            summary["restarted"] = True
+        except Exception as exc:  # noqa: BLE001 - never fail a good deploy on the connector
+            summary["error"] = f"{type(exc).__name__}:{exc}"[:300]
+            warnings.append(f"PUBLIC_CONNECTOR_RESTART_FAILED:{summary['error']}"[:300])
+            receipt["public_connector"] = summary
+            return
+        deadline = self.host.now() + PUBLIC_CONNECTOR_HEALTH_SECONDS
+        health: Any = None
+        error: Optional[str] = None
+        while True:
+            try:
+                health = self.prober.public_connector_health()
+                error = None
+            except Exception as exc:  # noqa: BLE001 - unreachable while it restarts
+                health, error = None, f"{type(exc).__name__}:{exc}"[:200]
+            if isinstance(health, dict) and health.get("ok") is True:
+                break
+            if self.host.now() >= deadline:
+                break
+            self.host.sleep(1.0)
+        if isinstance(health, dict):
+            summary["healthz"] = {
+                key: health.get(key)
+                for key in ("ok", "manifest_status", "disposition", "required_action")
+                if key in health
+            }
+        if error is not None:
+            summary["error"] = error
+        if not (isinstance(health, dict) and health.get("ok") is True):
+            state = health.get("manifest_status") if isinstance(health, dict) else error
+            warnings.append(f"PUBLIC_CONNECTOR_NOT_OK:{state}"[:300])
+        receipt["public_connector"] = summary
 
     def record_worker_route_preflight(self, receipt: Dict[str, Any]) -> None:
         """Copy the live ``/health`` ``worker_route_preflight`` into the receipt (#2345).

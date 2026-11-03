@@ -160,6 +160,11 @@ NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
     "scripts/ops/learn_refresh_launchd.py:status",
     "scripts/ops/learn_refresh_launchd.py:uninstall",
     "scripts/ops/nexus-hermes-launchd:_launchctl",
+    # Restarts the public MCP connector (a separate LaunchAgent, not the Gateway) after a
+    # switch so it re-reads the manifest; the Gateway reload stays with the durable manager
+    # (#3241).
+    "scripts/ops/nexus_gateway_auto_deploy.py:Host.service_loaded",
+    "scripts/ops/nexus_gateway_auto_deploy.py:Host.kickstart_service",
 })
 
 DECLARED = (

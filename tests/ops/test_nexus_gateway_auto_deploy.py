@@ -8153,3 +8153,191 @@ def test_wrapper_cairnwork_export_follows_env_file_and_guard(tmp_path: Path, spa
     assert command.count(fragment) == 1
     assert command.index(ad.measurement_env_guard()) < command.index(fragment)
     assert command.index(fragment) < command.index("exec ")
+
+
+# ---- #3241: the public connector is restarted after a switch ----------------------------
+
+CONNECTOR_DOMAIN = f"gui/{os.getuid()}/{ad.PUBLIC_CONNECTOR_LABEL}"
+
+
+class ConnectorHost(FakeHost):
+    """A host whose launchd knows the public connector."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.launchctl: list[list[str]] = []
+        self.loaded = True
+        self.kickstart_fails = False
+
+    def run(self, argv, *, cwd=None, env=None, timeout=1800):  # type: ignore[override]
+        if argv[:1] == ["launchctl"]:
+            self.launchctl.append(list(argv))
+            if argv[1] == "print":
+                return _done(code=0 if self.loaded else 1, stderr="" if self.loaded else "no")
+            if argv[1] == "kickstart":
+                return _done(code=1, stderr="boom") if self.kickstart_fails else _done()
+            return _done(code=1, stderr=f"unexpected {argv}")
+        return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+
+class ConnectorProber(FakeProber):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # One value for every read, or a list consumed one read at a time (last one sticks).
+        self.connector_health: Any = {"ok": True, "manifest_status": "verified"}
+        self.connector_reads = 0
+
+    def public_connector_health(self) -> Any:
+        self.connector_reads += 1
+        value = self.connector_health
+        if isinstance(value, list):
+            value = value.pop(0) if len(value) > 1 else value[0]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+
+def test_deploy_restarts_the_public_connector_and_records_its_health(cfg: ad.Config) -> None:
+    host, prober = ConnectorHost(), ConnectorProber()
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    receipt = result["receipt"]
+    assert receipt["switched"] is True and receipt["rolled_back"] is False
+    assert host.launchctl == [
+        ["launchctl", "print", CONNECTOR_DOMAIN],
+        ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN],
+    ]
+    assert receipt["public_connector"] == {
+        "label": ad.PUBLIC_CONNECTOR_LABEL,
+        "restarted": True,
+        "healthz": {"ok": True, "manifest_status": "verified"},
+    }
+    assert [w for w in receipt["warnings"] if w.startswith("PUBLIC_CONNECTOR")] == []
+    assert (ad.last_receipt(cfg.state_dir) or {})["public_connector"]["restarted"] is True
+
+
+def test_public_connector_not_loaded_is_recorded_and_skipped(cfg: ad.Config) -> None:
+    host, prober = ConnectorHost(), ConnectorProber()
+    host.loaded = False
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    assert host.launchctl == [["launchctl", "print", CONNECTOR_DOMAIN]]
+    assert result["receipt"]["public_connector"] == {
+        "label": ad.PUBLIC_CONNECTOR_LABEL,
+        "restarted": False,
+        "reason": "NOT_LOADED",
+    }
+    assert [w for w in result["receipt"]["warnings"] if w.startswith("PUBLIC_CONNECTOR")] == []
+    assert prober.connector_reads == 0
+
+
+def test_public_connector_restart_failure_warns_but_never_changes_the_deploy(
+    cfg: ad.Config,
+) -> None:
+    host, prober = ConnectorHost(), ConnectorProber()
+    host.kickstart_fails = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    receipt = result["receipt"]
+    assert receipt["rolled_back"] is False and not cfg.hold_file.exists()
+    assert receipt["public_connector"]["restarted"] is False
+    assert receipt["public_connector"]["error"].startswith("DeployError:KICKSTART_FAILED:")
+    assert [w for w in receipt["warnings"] if w.startswith("PUBLIC_CONNECTOR")] == [
+        "PUBLIC_CONNECTOR_RESTART_FAILED:" + receipt["public_connector"]["error"]
+    ]
+    assert prober.connector_reads == 0
+
+
+def test_public_connector_that_stays_drifted_warns_after_the_health_window(
+    cfg: ad.Config,
+) -> None:
+    host, prober = ConnectorHost(), ConnectorProber()
+    prober.connector_health = [
+        ConnectionError("starting"),
+        {"ok": False, "manifest_status": "drifted", "required_action": "PROXY_RESTART_REQUIRED"},
+    ]
+    before = host.clock
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    receipt = result["receipt"]
+    assert receipt["rolled_back"] is False
+    assert receipt["public_connector"]["restarted"] is True
+    assert receipt["public_connector"]["healthz"] == {
+        "ok": False,
+        "manifest_status": "drifted",
+        "required_action": "PROXY_RESTART_REQUIRED",
+    }
+    assert [w for w in receipt["warnings"] if w.startswith("PUBLIC_CONNECTOR")] == [
+        "PUBLIC_CONNECTOR_NOT_OK:drifted"
+    ]
+    # Polled once a second until the window closed, on the host clock, without sleeping here.
+    assert host.clock - before >= ad.PUBLIC_CONNECTOR_HEALTH_SECONDS
+    assert prober.connector_reads >= 2
+
+
+def test_public_connector_becomes_ok_during_the_window(cfg: ad.Config) -> None:
+    host, prober = ConnectorHost(), ConnectorProber()
+    prober.connector_health = [
+        ConnectionError("starting"),
+        {"ok": False, "manifest_status": "pending"},
+        {"ok": True, "manifest_status": "verified"},
+    ]
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "DEPLOYED"
+    assert result["receipt"]["public_connector"]["healthz"] == {
+        "ok": True,
+        "manifest_status": "verified",
+    }
+    assert [w for w in result["receipt"]["warnings"] if w.startswith("PUBLIC_CONNECTOR")] == []
+    assert prober.connector_reads == 3
+
+
+def test_public_connector_is_left_alone_when_the_candidate_is_rolled_back(
+    cfg: ad.Config,
+) -> None:
+    host = ConnectorHost()
+    prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False})
+    result = cycle(cfg, host, prober)
+    assert result["receipt"]["rolled_back"] is True
+    assert host.launchctl == []
+    assert "public_connector" not in result["receipt"]
+
+
+def test_public_connector_health_reads_the_json_body_of_a_503(monkeypatch) -> None:
+    """A drifted connector answers 503 with the same JSON body as a healthy one."""
+    import io
+    import urllib.error
+
+    prober = ad.Prober(ad.Host())
+    body = json.dumps({"ok": False, "manifest_status": "drifted"}).encode("utf-8")
+
+    def http_503(url, **_kw):
+        raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(prober, "_http", http_503)
+    assert prober.public_connector_health() == {"ok": False, "manifest_status": "drifted"}
+
+    def http_503_html(url, **_kw):
+        raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, io.BytesIO(b"<html>"))
+
+    monkeypatch.setattr(prober, "_http", http_503_html)
+    with pytest.raises(urllib.error.HTTPError):
+        prober.public_connector_health()
+
+
+def test_reconciled_switch_restarts_the_public_connector_too(cfg: ad.Config) -> None:
+    """A switch that crashed after the plist write is finished next cycle through
+    finish_switch, so the connector restart runs there as well."""
+    host = FakeHost()
+    host.on_reload = lambda _count: (_ for _ in ()).throw(Crash())
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber())
+    assert cfg.journal.exists()
+
+    host2, prober2 = ConnectorHost(), ConnectorProber()
+    result = cycle(cfg, host2, prober2)
+    assert result["status"] == "RECONCILED_DEPLOYED"
+    receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt["reconciled"] is True
+    assert receipt["public_connector"]["restarted"] is True
+    assert host2.launchctl[-1] == ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN]
